@@ -1,6 +1,6 @@
 <h1 align="center">
   <br>
-  <a href=""><img src="https://user-images.githubusercontent.com/13212227/79071190-409c6d00-7d15-11ea-843d-f64bf147ae7b.png" alt="" width="500px;"></a>
+  <a href=""><img src="https://user-images.githubusercontent.com/13212227/79071309-ff588d00-7d15-11ea-93f5-1b56bbc1f560.png" alt="" width="500px;"></a>
   <br>
   DalFox
   <br>
