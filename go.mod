@@ -1,3 +1,3 @@
-module github.com/hahwul/XIA/core
+module github.com/hahwul/XIA
 
 go 1.13
