@@ -26,7 +26,9 @@ I talk about naming. Dal(달) is the Korean pronunciation of moon and fox was ma
   - Scanning from Raw file(Burp suite, ZAP Request)
 
 ## How to Install
-aa
+```
+$ go get -u github.com/hahwul/dalfox
+```
 
 ## Usage
 please show wiki
