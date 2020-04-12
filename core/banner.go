@@ -4,7 +4,7 @@ import (
 	"github.com/projectdiscovery/gologger"
 )
 
-// this is DalFox banner
+// Banner is DalFox banner function
 func Banner() {
 	gologger.Printf(`
  __   _   _    ___ _ __ __ |\_/|,,_____,~~
