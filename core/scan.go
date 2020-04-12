@@ -2,6 +2,6 @@ package core
 
 import "fmt"
 
-func scan() {
+func Scan() {
 	fmt.Println("vim-go")
 }
