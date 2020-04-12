@@ -10,12 +10,6 @@ import (
 	"github.com/hahwul/dalfox/core"
 )
 
-func banner() {
-	//fmt.Println(``)
-	fmt.Println("by @hahwul")
-	fmt.Println("")
-}
-
 func main() {
 	// input options
 	iL := flag.String("iL", "", "input List")
@@ -23,7 +17,7 @@ func main() {
 	var targets []string
 	flag.Parse()
 	if flag.NFlag() == 0 {
-		banner()
+		core.Banner()
 		flag.Usage()
 		return
 	}
