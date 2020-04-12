@@ -1,5 +1,6 @@
 package core
 
+//GetEventHandlers is return event handlers (array type)
 func GetEventHandlers() [139]string {
 	handlers := [...]string{
 		"onabort",
@@ -145,6 +146,7 @@ func GetEventHandlers() [139]string {
 	return handlers
 }
 
+// GetTags is return tag list (array type)
 func GetTags() [13]string {
 	tags := [...]string{
 		"script",
@@ -164,6 +166,7 @@ func GetTags() [13]string {
 	return tags
 }
 
+// GetSpecialChar is return chars (array type)
 func GetSpecialChar() [20]string {
 	chars := [...]string{
 		">",
@@ -190,6 +193,7 @@ func GetSpecialChar() [20]string {
 	return chars
 }
 
+// GetUsefulCode is return code list (array type)
 func GetUsefulCode() [15]string {
 	codes := [...]string{
 		"javascript:",
