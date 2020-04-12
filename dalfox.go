@@ -12,7 +12,9 @@ import (
 
 func main() {
 	// input options
-	iL := flag.String("iL", "", "input List")
+	url := flag.String("url", "", "target url")
+	iL := flag.String("iL", "", "target urls(file)")
+	data := flag.String("data", "", "POST data")
 	// to options
 	var targets []string
 	flag.Parse()
@@ -21,8 +23,11 @@ func main() {
 		flag.Usage()
 		return
 	}
+	if *url != "" {
+		targets = append(targets, *url)
+		_ = data
 
-	// accept domains on stdin
+	}
 	if *iL == "" {
 		sc := bufio.NewScanner(os.Stdin)
 		for sc.Scan() {
