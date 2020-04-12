@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"github.com/hahwul/dalfox/core"
 )
 
 func banner() {
@@ -45,7 +47,7 @@ func main() {
 	// Remove Deplicated value
 	targets = unique(targets)
 	fmt.Println(targets)
-	scan()
+	core.ScanXSS()
 }
 
 // a slice of strings, returning the slice and any error
