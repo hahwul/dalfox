@@ -1,3 +1,3 @@
-module github.com/hahwul/moonfox
+module github.com/hahwul/dalfox
 
 go 1.13
