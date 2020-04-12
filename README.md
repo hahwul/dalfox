@@ -15,6 +15,7 @@ Just, XSS Scanning and Parameter Analysis tool. I previously developed XSpear, a
 I talk about naming. Dal(달) is the Korean pronunciation of moon and fox was made into Fox(Finder Of XSS).
 
 ## Key features
+
 - Paramter Analysis (find refleced, bypass pattern, mining params with small fuzzing)
 - Static Analysis (detect WAF, detect CSP, mining params with response base)
 - XSS Scanning (common, bypassing pattern, polyglot)
