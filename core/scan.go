@@ -1,5 +1,5 @@
 package core
 
-func Scan() {
+func ScanXSS() {
 
 }
