@@ -40,8 +40,11 @@ func main() {
 	}
 	// Remove Deplicated value
 	targets = unique(targets)
-	fmt.Println(targets)
-	core.ScanXSS()
+	//fmt.Println(targets)
+	for i, _ := range targets {
+		core.Scan(targets[i])
+		fmt.Println(core.GetEventHandlers())
+	}
 }
 
 // a slice of strings, returning the slice and any error
