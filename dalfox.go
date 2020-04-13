@@ -3,20 +3,25 @@ package main
 import (
 	"bufio"
 	"flag"
-	"fmt"
 	"os"
 	"strings"
 
 	"github.com/hahwul/dalfox/core"
+	"github.com/projectdiscovery/gologger"
 )
 
 func main() {
+	var targets []string
+	options_str := make(map[string]string)
+	options_bool := make(map[string]bool)
+
 	// input options
 	url := flag.String("url", "", "target url")
 	iL := flag.String("iL", "", "target urls(file)")
 	data := flag.String("data", "", "POST data")
+	pipe := flag.Bool("pipe", false, "Pipeline mode (default is false)")
 	// to options
-	var targets []string
+
 	flag.Parse()
 	if flag.NFlag() == 0 {
 		core.Banner()
@@ -28,27 +33,29 @@ func main() {
 		_ = data
 
 	}
-	if *iL == "" {
-		sc := bufio.NewScanner(os.Stdin)
-		for sc.Scan() {
-			target := strings.ToLower(sc.Text())
-			targets = append(targets, target)
-		}
-	} else {
+	if *iL != "" {
 		ff, err := readLinesOrLiteral(*iL)
 		_ = err
 		for i, target := range ff {
 			_ = i
 			targets = append(targets, target)
 		}
+	}
 
+	if *pipe {
+		sc := bufio.NewScanner(os.Stdin)
+		for sc.Scan() {
+			target := strings.ToLower(sc.Text())
+			targets = append(targets, target)
+		}
 	}
 	// Remove Deplicated value
 	targets = unique(targets)
+	core.Banner()
+	gologger.Infof("Loaded %d target urls", len(targets))
 	//fmt.Println(targets)
 	for i, _ := range targets {
-		core.Scan(targets[i])
-		fmt.Println(core.GetEventHandlers())
+		core.Scan(targets[i], options_str, options_bool)
 	}
 }
 
