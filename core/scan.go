@@ -68,7 +68,6 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 	go func() {
 		defer wg.Done()
 	}()
-
 	wg.Wait()
 }
 
@@ -113,33 +112,32 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 		_ = resp
 		if strings.Contains(resbody, "DalFox") {
 			params[k] = append(params[k], "string")
-		}
+			var wg sync.WaitGroup
+			chars := GetSpecialChar()
+			for _, char := range chars {
+				wg.Add(1)
+				tdata := u.String()
+				tdata = strings.Replace(tdata, k+"="+v[0], k+"="+v[0]+char, 1)
+				turl, _ := url.Parse(tdata)
+				tq := turl.Query()
+				turl.RawQuery = tq.Encode()
+				/* turl := u
+				q := u.Query()
+				q.Set(k, v[0]+"DalFox"+string(char))
+				turl.RawQuery = q.Encode()
+				*/
 
-		var wg sync.WaitGroup
-		chars := GetSpecialChar()
-		for _, char := range chars {
-			wg.Add(1)
-			tdata := u.String()
-			tdata = strings.Replace(tdata, k+"="+v[0], k+"="+v[0]+char, 1)
-			turl, _ := url.Parse(tdata)
-			tq := turl.Query()
-			turl.RawQuery = tq.Encode()
-			/* turl := u
-			q := u.Query()
-			q.Set(k, v[0]+"DalFox"+string(char))
-			turl.RawQuery = q.Encode()
-			*/
-
-			go func() {
-				defer wg.Done()
-				resbody, resp := SendReq(turl.String(), options_string)
-				_ = resp
-				if strings.Contains(resbody, "DalFox"+string(char)) {
-					params[k] = append(params[k], string(char))
-				}
-			}()
+				go func() {
+					defer wg.Done()
+					resbody, resp := SendReq(turl.String(), options_string)
+					_ = resp
+					if strings.Contains(resbody, "DalFox"+string(char)) {
+						params[k] = append(params[k], string(char))
+					}
+				}()
+			}
+			wg.Wait()
 		}
-		wg.Wait()
 	}
 	return params
 }
