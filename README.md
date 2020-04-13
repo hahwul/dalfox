@@ -31,7 +31,11 @@ $ go get -u github.com/hahwul/dalfox
 ```
 
 ## Usage
-please show wiki
+```
+$ dalfox -url "https://www.hahwul.com/?q=1"
+```
 
-## Screenshot
-- 
+## Build
+```
+$ go build dalfox.go
+```
