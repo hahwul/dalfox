@@ -30,12 +30,12 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 	wait.Add(2)
 	go func() {
 		defer wait.Done()
-		gologger.Infof("start static analysis..")
+		gologger.Infof("start static analysis..🔍")
 		policy = StaticAnalysis(target, options_string)
 	}()
 	go func() {
 		defer wait.Done()
-		gologger.Infof("start parameter analysis..")
+		gologger.Infof("start parameter analysis..🔍")
 		params = ParameterAnalysis(target, options_string)
 	}()
 	s := spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
