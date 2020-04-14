@@ -113,7 +113,12 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 		resbody, resp := SendReq(temp_url.String(), options_string)
 		_ = resp
 		if strings.Contains(resbody, "DalFox") {
-			params[k] = append(params[k], "string")
+			pointer, _ := Abstraction(resbody)
+			var smap string
+			for _, sv := range pointer {
+				smap = smap + string(sv)
+			}
+			params[k] = append(params[k], smap)
 			var wg sync.WaitGroup
 			chars := GetSpecialChar()
 			for _, char := range chars {
