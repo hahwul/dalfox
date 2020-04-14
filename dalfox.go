@@ -2,7 +2,10 @@ package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"flag"
+	"fmt"
+	"io/ioutil"
 	"os"
 	"strings"
 
@@ -24,6 +27,7 @@ func main() {
 	cookie := flag.String("cookie", "", "Add custom cookies")
 	user_agent := flag.String("user-agent", "", "Add custom UA")
 	blind := flag.String("blind", "", "Add blind XSS payload, e.g -blind https://hahwul.xss.ht")
+	config := flag.String("config", "", "config file path")
 	helphelp := flag.Bool("help", false, "Show help message")
 	onlydiscovery := flag.Bool("only-discovery", false, "Use only discovery mode")
 	p := flag.String("p", "", "Testing only selected parameter")
@@ -62,6 +66,29 @@ func main() {
 	options_str["blind"] = *blind
 	options_str["ua"] = *user_agent
 	options_bool["only-discovery"] = *onlydiscovery
+
+	if *config != "" {
+		// Open our jsonFile
+		jsonFile, err := os.Open(*config)
+		// if we os.Open returns an error then handle it
+		if err != nil {
+			fmt.Println(err)
+		}
+		gologger.Infof("Using config options / loaded %s file", *config)
+		// defer the closing of our jsonFile so that we can parse it later on
+		defer jsonFile.Close()
+
+		byteValue, _ := ioutil.ReadAll(jsonFile)
+
+		var result map[string]interface{}
+		json.Unmarshal([]byte(byteValue), &result)
+
+		for k, v := range result {
+			if k == "blind" {
+				options_str["blind"] = v.(string)
+			}
+		}
+	}
 	// Remove Deplicated value
 	targets = unique(targets)
 	core.Banner()
