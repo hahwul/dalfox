@@ -20,6 +20,9 @@ func main() {
 	iL := flag.String("iL", "", "target urls(file)")
 	data := flag.String("data", "", "POST data")
 	pipe := flag.Bool("pipe", false, "Pipeline mode (default is false)")
+	header := flag.String("header", "", "Add custom headers")
+	cookie := flag.String("cookie", "", "Add custom cookies")
+	user_agent := flag.String("user-agent", "", "Add custom UA")
 	// to options
 
 	flag.Parse()
@@ -49,11 +52,13 @@ func main() {
 			targets = append(targets, target)
 		}
 	}
+	options_str["header"] = *header
+	options_str["cookie"] = *cookie
+	options_str["ua"] = *user_agent
 	// Remove Deplicated value
 	targets = unique(targets)
 	core.Banner()
 	gologger.Infof("Loaded %d target urls", len(targets))
-	//fmt.Println(targets)
 	for i, _ := range targets {
 		core.Scan(targets[i], options_str, options_bool)
 	}

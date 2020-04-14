@@ -154,7 +154,20 @@ func SendReq(url string, options_string map[string]string) (string, *http.Respon
 		panic(err)
 	}
 
-	req.Header.Add("User-Agent", "Crawler")
+	if options_string["header"] != "" {
+		h := strings.Split(options_string["header"], ": ")
+		if len(h) > 1 {
+			req.Header.Add(h[0], h[1])
+		}
+	}
+	if options_string["cookie"] != "" {
+		req.Header.Add("Cookie", options_string["cookie"])
+	}
+	if options_string["ua"] != "" {
+		req.Header.Add("User-Agent", options_string["ua"])
+	} else {
+		req.Header.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:75.0) Gecko/20100101 Firefox/75.0")
+	}
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
