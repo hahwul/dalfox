@@ -95,8 +95,16 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 								query[tq] = tm
 							}
 						}
+						ara := getForceSeleniumPayload()
+						for _, v := range ara {
+							tq := MakeRequestQuery(target, k, v)
+							tm := map[string]string{"param": k}
+							tm["type"] = "inJS"
+							tm["payload"] = "PloyGlot(inJS)"
+							query[tq] = tm
+						}
 					}
-					// inJS XSS
+					// inHTML XSS
 					if strings.Contains(av, "inHTML") {
 						arr := getCommonPayload()
 						for _, avv := range arr {
@@ -108,12 +116,20 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 								query[tq] = tm
 							}
 						}
+						ara := getForceSeleniumPayload()
+						for _, v := range ara {
+							tq := MakeRequestQuery(target, k, v)
+							tm := map[string]string{"param": k}
+							tm["type"] = "inJS"
+							tm["payload"] = "PloyGlot(inHTML)"
+							query[tq] = tm
+						}
 					}
 				}
 			}
 		}
 		// Static payload
-		fmt.Println(query)
+		//fmt.Println(query)
 		spu, _ := url.Parse(target)
 		spd := spu.Query()
 		for spk, _ := range spd {
@@ -123,6 +139,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 			tm["payload"] = "Blind"
 			query[tq] = tm
 		}
+
 		//fmt.Println(query)
 		gologger.Infof("Start XSS Scanning")
 
