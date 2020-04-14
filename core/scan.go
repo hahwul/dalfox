@@ -133,7 +133,7 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 			for _, char := range chars {
 				wg.Add(1)
 				tdata := u.String()
-				tdata = strings.Replace(tdata, k+"="+v[0], k+"="+v[0]+char, 1)
+				tdata = strings.Replace(tdata, k+"="+v[0], k+"="+v[0]+"DalFox"+char, 1)
 				turl, _ := url.Parse(tdata)
 				tq := turl.Query()
 				turl.RawQuery = tq.Encode()
@@ -142,13 +142,13 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 				q.Set(k, v[0]+"DalFox"+string(char))
 				turl.RawQuery = q.Encode()
 				*/
-
+				ccc := string(char)
 				go func() {
 					defer wg.Done()
 					resbody, resp := SendReq(turl.String(), options_string)
 					_ = resp
-					if strings.Contains(resbody, "DalFox"+string(char)) {
-						params[k] = append(params[k], string(char))
+					if strings.Contains(resbody, "DalFox"+ccc) {
+						params[k] = append(params[k], ccc)
 					}
 				}()
 			}
