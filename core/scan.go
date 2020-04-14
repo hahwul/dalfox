@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -57,7 +58,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 			for _, c := range v {
 				char = char + c
 			}
-			fmt.Printf("- @INFO Reflected %s param => %s\n", k, char)
+			fmt.Printf("- @INFO Reflected '%s' param => %s\n", k, char)
 		}
 	}
 
@@ -115,9 +116,17 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 		if strings.Contains(resbody, "DalFox") {
 			pointer, _ := Abstraction(resbody)
 			var smap string
+			ih := 0
+			ij := 0
 			for _, sv := range pointer {
-				smap = smap + string(sv)
+				if sv == "inHTML" {
+					ih = ih + 1
+				}
+				if sv == "inJS" {
+					ij = ij + 1
+				}
 			}
+			smap = "inHTML[" + strconv.Itoa(ih) + "], inJS[" + strconv.Itoa(ij) + "]"
 			params[k] = append(params[k], smap)
 			var wg sync.WaitGroup
 			chars := GetSpecialChar()
