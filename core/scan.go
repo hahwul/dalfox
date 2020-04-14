@@ -54,10 +54,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 
 	for k, v := range params {
 		if len(v) != 0 {
-			char := ""
-			for _, c := range v {
-				char = char + c
-			}
+			char := strings.Join(v, "  ")
 			fmt.Printf("- @INFO Reflected '%s' param => %s\n", k, char)
 		}
 	}
