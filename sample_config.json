@@ -1,3 +1,4 @@
 {
-	"blind":"https://google.com"
+	"blind":"https://google.com",
+	"discovery":true
 }

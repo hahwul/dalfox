@@ -89,7 +89,9 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 						for _, avv := range arr {
 							if Optimization(avv, badchars) {
 								tq := MakeRequestQuery(target, k, avv)
-								tm := map[string]string{k: "inJS"}
+								tm := map[string]string{"param": k}
+								tm["type"] = "inJS"
+								tm["payload"] = avv
 								query[tq] = tm
 							}
 						}
@@ -100,7 +102,9 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 						for _, avv := range arr {
 							if Optimization(avv, badchars) {
 								tq := MakeRequestQuery(target, k, avv)
-								tm := map[string]string{k: "inHTML"}
+								tm := map[string]string{"param": k}
+								tm["type"] = "inHTML"
+								tm["payload"] = avv
 								query[tq] = tm
 							}
 						}
@@ -109,22 +113,36 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 			}
 		}
 		// Static payload
+		fmt.Println(query)
 		spu, _ := url.Parse(target)
 		spd := spu.Query()
 		for spk, _ := range spd {
 			tq := MakeRequestQuery(target, spk, "\"'><script src="+options_string["blind"]+"></script>")
-			tm := map[string]string{spk: "toBlind"}
+			tm := map[string]string{"param": spk}
+			tm["type"] = "toBlind"
+			tm["payload"] = "Blind"
 			query[tq] = tm
 		}
 		//fmt.Println(query)
 		gologger.Infof("Start XSS Scanning")
-		task := 1
-		var wg sync.WaitGroup
-		wg.Add(task)
-		go func() {
-			defer wg.Done()
-		}()
-		wg.Wait()
+
+		for k, v := range query {
+			resbody, resp := SendReq(k, options_string)
+			_ = resp
+			if v["type"] != "inBlind" {
+				if v["type"] != "inJS" {
+					if VerifyReflection(resbody, v["payload"]) {
+						fmt.Println("[VULN/XSS] Reflected Payload: " + v["param"] + "=" + v["payload"])
+						fmt.Println(" + " + k)
+					}
+				} else {
+					if VerifyReflection(resbody, v["payload"]) {
+						fmt.Println("[VULN/XSS] Reflected Payload: " + v["param"] + "=" + v["payload"])
+						fmt.Println(" + " + k)
+					}
+				}
+			}
+		}
 
 		/*
 			task := 1
@@ -136,6 +154,20 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 			wg.Wait()
 		*/
 	}
+}
+
+// VerifyReflection is check reflected xss pattern
+func VerifyReflection(body, payload string) bool {
+	if strings.Contains(body, payload) {
+		return true
+	} else {
+		return false
+	}
+}
+
+// VerifySelenium is check trigger xss pattern
+func VerifySelenium() {
+
 }
 
 // StaticAnalysis is found information on original req/res
@@ -237,11 +269,6 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 		}
 	}
 	return params
-}
-
-// ScanXSS is testing XSS
-func ScanXSS() {
-	// 위 데이터 기반으로 query 생성 후 fetch
 }
 
 // SendReq is sending http request (handled GET/POST)
