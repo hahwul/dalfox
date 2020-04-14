@@ -74,28 +74,28 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 			av: reflected type, valid char
 		*/
 		for k, v := range params {
-			_ = k
-			// TODO, -p option
-			for _, av := range v {
-				if strings.Contains(av, "inJS") {
+			if (options_string["p"] == "") || (options_string["p"] == k) {
+				// TODO, -p option
+				for _, av := range v {
+					if strings.Contains(av, "inJS") {
+						// inJS XSS
+						arr := getInJsPayload()
+						for _, avv := range arr {
+							tq := MakeRequestQuery(target, k, avv)
+							tm := map[string]string{k: "inJS"}
+							query[tq] = tm
+						}
+					}
 					// inJS XSS
-					arr := getInJsPayload()
-					for _, avv := range arr {
-						tq := MakeRequestQuery(target, k, avv)
-						tm := map[string]string{k: "inJS"}
-						query[tq] = tm
+					if strings.Contains(av, "inHTML") {
+						arr := getCommonPayload()
+						for _, avv := range arr {
+							tq := MakeRequestQuery(target, k, avv)
+							tm := map[string]string{k: "inHTML"}
+							query[tq] = tm
+						}
 					}
 				}
-				// inJS XSS
-				if strings.Contains(av, "inHTML") {
-					arr := getCommonPayload()
-					for _, avv := range arr {
-						tq := MakeRequestQuery(target, k, avv)
-						tm := map[string]string{k: "inHTML"}
-						query[tq] = tm
-					}
-				}
-
 			}
 		}
 
@@ -134,6 +134,9 @@ func StaticAnalysis(target string, options_string map[string]string) map[string]
 	if resp.Header["Content-Security-Policy"] != nil {
 		policy["Content-Security-Policy"] = resp.Header["Content-Security-Policy"][0]
 	}
+	if resp.Header["X-Frame-Options"] != nil {
+		policy["X-Frame-Options"] = resp.Header["X-Frame-Options"][0]
+	}
 
 	return policy
 }
@@ -147,71 +150,73 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 	}
 	p, _ := url.ParseQuery(u.RawQuery)
 	for k, _ := range p {
-		//temp_url := u
-		//temp_q := u.Query()
-		//temp_q.Set(k, v[0]+"DalFox")
-		/*
-			data := u.String()
-			data = strings.Replace(data, k+"="+v[0], k+"="+v[0]+"DalFox", 1)
-			temp_url, _ := url.Parse(data)
-			temp_q := temp_url.Query()
-			temp_url.RawQuery = temp_q.Encode()
-		*/
-		temp_url := MakeRequestQuery(target, k, "DalFox")
+		if (options_string["p"] == "") || (options_string["p"] == k) {
+			//temp_url := u
+			//temp_q := u.Query()
+			//temp_q.Set(k, v[0]+"DalFox")
+			/*
+				data := u.String()
+				data = strings.Replace(data, k+"="+v[0], k+"="+v[0]+"DalFox", 1)
+				temp_url, _ := url.Parse(data)
+				temp_q := temp_url.Query()
+				temp_url.RawQuery = temp_q.Encode()
+			*/
+			temp_url := MakeRequestQuery(target, k, "DalFox")
 
-		//temp_url.RawQuery = temp_q.Encode()
-		resbody, resp := SendReq(temp_url, options_string)
-		_ = resp
-		if strings.Contains(resbody, "DalFox") {
-			pointer, _ := Abstraction(resbody)
-			var smap string
-			ih := 0
-			ij := 0
-			for _, sv := range pointer {
-				if sv == "inHTML" {
-					ih = ih + 1
-				}
-				if sv == "inJS" {
-					ij = ij + 1
-				}
-			}
-			if ih > 0 {
-				smap = smap + "inHTML[" + strconv.Itoa(ih) + "] "
-			}
-			if ij > 0 {
-				smap = smap + "inJS[" + strconv.Itoa(ij) + "] "
-			}
-			params[k] = append(params[k], smap)
-			var wg sync.WaitGroup
-			chars := GetSpecialChar()
-			for _, char := range chars {
-				wg.Add(1)
-				/*
-					tdata := u.String()
-					tdata = strings.Replace(tdata, k+"="+v[0], k+"="+v[0]+"DalFox"+char, 1)
-					turl, _ := url.Parse(tdata)
-					tq := turl.Query()
-					turl.RawQuery = tq.Encode()
-				*/
-
-				turl := MakeRequestQuery(target, k, "DalFox"+char)
-
-				/* turl := u
-				q := u.Query()
-				q.Set(k, v[0]+"DalFox"+string(char))
-				turl.RawQuery = q.Encode()
-				*/
-				ccc := string(char)
-				go func() {
-					defer wg.Done()
-					resbody, resp := SendReq(turl, options_string)
-					_ = resp
-					if strings.Contains(resbody, "DalFox"+ccc) {
-						params[k] = append(params[k], ccc)
+			//temp_url.RawQuery = temp_q.Encode()
+			resbody, resp := SendReq(temp_url, options_string)
+			_ = resp
+			if strings.Contains(resbody, "DalFox") {
+				pointer, _ := Abstraction(resbody)
+				var smap string
+				ih := 0
+				ij := 0
+				for _, sv := range pointer {
+					if sv == "inHTML" {
+						ih = ih + 1
 					}
-				}()
+					if sv == "inJS" {
+						ij = ij + 1
+					}
+				}
+				if ih > 0 {
+					smap = smap + "inHTML[" + strconv.Itoa(ih) + "] "
+				}
+				if ij > 0 {
+					smap = smap + "inJS[" + strconv.Itoa(ij) + "] "
+				}
+				params[k] = append(params[k], smap)
+				var wg sync.WaitGroup
+				chars := GetSpecialChar()
+				for _, char := range chars {
+					wg.Add(1)
+					/*
+						tdata := u.String()
+						tdata = strings.Replace(tdata, k+"="+v[0], k+"="+v[0]+"DalFox"+char, 1)
+						turl, _ := url.Parse(tdata)
+						tq := turl.Query()
+						turl.RawQuery = tq.Encode()
+					*/
+
+					turl := MakeRequestQuery(target, k, "DalFox"+char)
+
+					/* turl := u
+					q := u.Query()
+					q.Set(k, v[0]+"DalFox"+string(char))
+					turl.RawQuery = q.Encode()
+					*/
+					ccc := string(char)
+					go func() {
+						defer wg.Done()
+						resbody, resp := SendReq(turl, options_string)
+						_ = resp
+						if strings.Contains(resbody, "DalFox"+ccc) {
+							params[k] = append(params[k], ccc)
+						}
+					}()
+				}
+				wg.Wait()
 			}
-			wg.Wait()
 		}
 	}
 	return params

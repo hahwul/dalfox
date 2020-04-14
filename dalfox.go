@@ -25,6 +25,7 @@ func main() {
 	user_agent := flag.String("user-agent", "", "Add custom UA")
 	helphelp := flag.Bool("help", false, "Show help message")
 	onlydiscovery := flag.Bool("only-discovery", false, "Use only discovery mode")
+	p := flag.String("p", "", "Testing only selected parameter")
 	// to options
 
 	flag.Parse()
@@ -56,6 +57,7 @@ func main() {
 	}
 	options_str["header"] = *header
 	options_str["cookie"] = *cookie
+	options_str["p"] = *p
 	options_str["ua"] = *user_agent
 	options_bool["only-discovery"] = *onlydiscovery
 	// Remove Deplicated value
