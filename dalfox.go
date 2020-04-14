@@ -23,10 +23,11 @@ func main() {
 	header := flag.String("header", "", "Add custom headers")
 	cookie := flag.String("cookie", "", "Add custom cookies")
 	user_agent := flag.String("user-agent", "", "Add custom UA")
+	helphelp := flag.Bool("help", false, "Show help message")
 	// to options
 
 	flag.Parse()
-	if flag.NFlag() == 0 {
+	if (flag.NFlag() == 0) || *helphelp {
 		core.Banner()
 		flag.Usage()
 		return
