@@ -17,7 +17,11 @@ func MakeRequestQuery(target, param, payload string) string {
 	return temp_url.String()
 }
 
-func Optimization() [1]string {
-	a := getCommonPayload()
-	return a
+func Optimization(payload string, badchars []string) bool {
+	for _, v := range badchars {
+		if strings.Contains(payload, v) {
+			return false
+		}
+	}
+	return true
 }

@@ -75,30 +75,39 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 		*/
 		for k, v := range params {
 			if (options_string["p"] == "") || (options_string["p"] == k) {
-				// TODO, -p option
+				chars := GetSpecialChar()
+				var badchars []string
+				for _, av := range v {
+					if indexOf(av, chars) == -1 {
+						badchars = append(badchars, av)
+					}
+				}
 				for _, av := range v {
 					if strings.Contains(av, "inJS") {
 						// inJS XSS
 						arr := getInJsPayload()
 						for _, avv := range arr {
-							tq := MakeRequestQuery(target, k, avv)
-							tm := map[string]string{k: "inJS"}
-							query[tq] = tm
+							if Optimization(avv, badchars) {
+								tq := MakeRequestQuery(target, k, avv)
+								tm := map[string]string{k: "inJS"}
+								query[tq] = tm
+							}
 						}
 					}
 					// inJS XSS
 					if strings.Contains(av, "inHTML") {
 						arr := getCommonPayload()
 						for _, avv := range arr {
-							tq := MakeRequestQuery(target, k, avv)
-							tm := map[string]string{k: "inHTML"}
-							query[tq] = tm
+							if Optimization(avv, badchars) {
+								tq := MakeRequestQuery(target, k, avv)
+								tm := map[string]string{k: "inHTML"}
+								query[tq] = tm
+							}
 						}
 					}
 				}
 			}
 		}
-
 		// Static payload
 		spu, _ := url.Parse(target)
 		spd := spu.Query()
@@ -267,4 +276,13 @@ func SendReq(url string, options_string map[string]string) (string, *http.Respon
 	bytes, _ := ioutil.ReadAll(resp.Body)
 	str := string(bytes)
 	return str, resp
+}
+
+func indexOf(element string, data []string) int {
+	for k, v := range data {
+		if element == v {
+			return k
+		}
+	}
+	return -1 //not found.
 }

@@ -1,8 +1,8 @@
 package core
 
 //GetEventHandlers is return event handlers (array type)
-func GetEventHandlers() [139]string {
-	handlers := [...]string{
+func GetEventHandlers() []string {
+	handlers := []string{
 		"onabort",
 		"onactivate",
 		"onafterprint",
@@ -147,8 +147,8 @@ func GetEventHandlers() [139]string {
 }
 
 // GetTags is return tag list (array type)
-func GetTags() [13]string {
-	tags := [...]string{
+func GetTags() []string {
+	tags := []string{
 		"script",
 		"iframe",
 		"svg",
@@ -167,8 +167,8 @@ func GetTags() [13]string {
 }
 
 // GetSpecialChar is return chars (array type)
-func GetSpecialChar() [20]string {
-	chars := [...]string{
+func GetSpecialChar() []string {
+	chars := []string{
 		">",
 		"<",
 		"\"",
@@ -194,8 +194,8 @@ func GetSpecialChar() [20]string {
 }
 
 // GetUsefulCode is return code list (array type)
-func GetUsefulCode() [15]string {
-	codes := [...]string{
+func GetUsefulCode() []string {
+	codes := []string{
 		"javascript:",
 		"JaVasCriPt:",
 		"jaVas%0dcRipt:",
