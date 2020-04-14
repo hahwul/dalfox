@@ -2,7 +2,6 @@ package core
 
 import (
 	"bufio"
-	"fmt"
 	"sort"
 	"strings"
 )
@@ -12,7 +11,6 @@ func Abstraction(s string) (lines []string, err error) {
 	scanner := bufio.NewScanner(strings.NewReader(s))
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
-		fmt.Println(scanner.Text())
 
 		pointer := make(map[int]string)
 		sstart := strings.Index(scanner.Text(), "<script")
