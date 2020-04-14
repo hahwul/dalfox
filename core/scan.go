@@ -61,14 +61,16 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 		}
 	}
 
-	// XSS Scanning
-	task := 1
-	var wg sync.WaitGroup
-	wg.Add(task)
-	go func() {
-		defer wg.Done()
-	}()
-	wg.Wait()
+	if !options_bool["only-discovery"] {
+		// XSS Scanning
+		task := 1
+		var wg sync.WaitGroup
+		wg.Add(task)
+		go func() {
+			defer wg.Done()
+		}()
+		wg.Wait()
+	}
 }
 
 // StaticAnalysis is found information on original req/res

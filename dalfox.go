@@ -24,6 +24,7 @@ func main() {
 	cookie := flag.String("cookie", "", "Add custom cookies")
 	user_agent := flag.String("user-agent", "", "Add custom UA")
 	helphelp := flag.Bool("help", false, "Show help message")
+	onlydiscovery := flag.Bool("only-discovery", false, "Use only discovery mode")
 	// to options
 
 	flag.Parse()
@@ -56,6 +57,7 @@ func main() {
 	options_str["header"] = *header
 	options_str["cookie"] = *cookie
 	options_str["ua"] = *user_agent
+	options_bool["only-discovery"] = *onlydiscovery
 	// Remove Deplicated value
 	targets = unique(targets)
 	core.Banner()
