@@ -23,6 +23,7 @@ func main() {
 	header := flag.String("header", "", "Add custom headers")
 	cookie := flag.String("cookie", "", "Add custom cookies")
 	user_agent := flag.String("user-agent", "", "Add custom UA")
+	blind := flag.String("blind", "", "Add blind XSS payload, e.g -blind https://hahwul.xss.ht")
 	helphelp := flag.Bool("help", false, "Show help message")
 	onlydiscovery := flag.Bool("only-discovery", false, "Use only discovery mode")
 	p := flag.String("p", "", "Testing only selected parameter")
@@ -58,6 +59,7 @@ func main() {
 	options_str["header"] = *header
 	options_str["cookie"] = *cookie
 	options_str["p"] = *p
+	options_str["blind"] = *blind
 	options_str["ua"] = *user_agent
 	options_bool["only-discovery"] = *onlydiscovery
 	// Remove Deplicated value

