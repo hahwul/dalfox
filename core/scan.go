@@ -19,6 +19,9 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 	gologger.Infof("Target URL: %s", target)
 	//var params []string
 
+	// query is XSS payloads
+	query := make(map[string]map[string]string)
+
 	// params is "param name":true  (reflected?)
 	// 1: non-reflected , 2: reflected , 3: reflected-with-sc
 	params := make(map[string][]string)
@@ -61,6 +64,43 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 
 	if !options_bool["only-discovery"] {
 		// XSS Scanning
+
+		gologger.Infof("Generate XSS payload and Optimization..")
+		// Optimization..
+
+		/*
+			k: parama name
+			v: pattern [injs, inhtml, ' < > ]
+			av: reflected type, valid char
+		*/
+		for k, v := range params {
+			_ = k
+			// TODO, -p option
+			for _, av := range v {
+				if strings.Contains(av, "inJS") {
+					// inJS XSS
+					arr := getInJsPayload()
+					for _, avv := range arr {
+						tq := MakeRequestQuery(target, k, avv)
+						tm := map[string]string{k: "inJS"}
+						query[tq] = tm
+					}
+				}
+				// inJS XSS
+				if strings.Contains(av, "inHTML") {
+					arr := getCommonPayload()
+					for _, avv := range arr {
+						tq := MakeRequestQuery(target, k, avv)
+						tm := map[string]string{k: "inHTML"}
+						query[tq] = tm
+					}
+				}
+
+			}
+		}
+
+		//fmt.Println(query)
+		gologger.Infof("Start XSS Scanning")
 		task := 1
 		var wg sync.WaitGroup
 		wg.Add(task)
@@ -68,6 +108,16 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 			defer wg.Done()
 		}()
 		wg.Wait()
+
+		/*
+			task := 1
+			var wg sync.WaitGroup
+			wg.Add(task)
+			go func() {
+				defer wg.Done()
+			}()
+			wg.Wait()
+		*/
 	}
 }
 
@@ -96,19 +146,21 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 		panic(err)
 	}
 	p, _ := url.ParseQuery(u.RawQuery)
-	for k, v := range p {
+	for k, _ := range p {
 		//temp_url := u
 		//temp_q := u.Query()
 		//temp_q.Set(k, v[0]+"DalFox")
-
-		data := u.String()
-		data = strings.Replace(data, k+"="+v[0], k+"="+v[0]+"DalFox", 1)
-		temp_url, _ := url.Parse(data)
-		temp_q := temp_url.Query()
-		temp_url.RawQuery = temp_q.Encode()
+		/*
+			data := u.String()
+			data = strings.Replace(data, k+"="+v[0], k+"="+v[0]+"DalFox", 1)
+			temp_url, _ := url.Parse(data)
+			temp_q := temp_url.Query()
+			temp_url.RawQuery = temp_q.Encode()
+		*/
+		temp_url := MakeRequestQuery(target, k, "DalFox")
 
 		//temp_url.RawQuery = temp_q.Encode()
-		resbody, resp := SendReq(temp_url.String(), options_string)
+		resbody, resp := SendReq(temp_url, options_string)
 		_ = resp
 		if strings.Contains(resbody, "DalFox") {
 			pointer, _ := Abstraction(resbody)
@@ -123,17 +175,27 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 					ij = ij + 1
 				}
 			}
-			smap = "inHTML[" + strconv.Itoa(ih) + "], inJS[" + strconv.Itoa(ij) + "]"
+			if ih > 0 {
+				smap = smap + "inHTML[" + strconv.Itoa(ih) + "] "
+			}
+			if ij > 0 {
+				smap = smap + "inJS[" + strconv.Itoa(ij) + "] "
+			}
 			params[k] = append(params[k], smap)
 			var wg sync.WaitGroup
 			chars := GetSpecialChar()
 			for _, char := range chars {
 				wg.Add(1)
-				tdata := u.String()
-				tdata = strings.Replace(tdata, k+"="+v[0], k+"="+v[0]+"DalFox"+char, 1)
-				turl, _ := url.Parse(tdata)
-				tq := turl.Query()
-				turl.RawQuery = tq.Encode()
+				/*
+					tdata := u.String()
+					tdata = strings.Replace(tdata, k+"="+v[0], k+"="+v[0]+"DalFox"+char, 1)
+					turl, _ := url.Parse(tdata)
+					tq := turl.Query()
+					turl.RawQuery = tq.Encode()
+				*/
+
+				turl := MakeRequestQuery(target, k, "DalFox"+char)
+
 				/* turl := u
 				q := u.Query()
 				q.Set(k, v[0]+"DalFox"+string(char))
@@ -142,7 +204,7 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 				ccc := string(char)
 				go func() {
 					defer wg.Done()
-					resbody, resp := SendReq(turl.String(), options_string)
+					resbody, resp := SendReq(turl, options_string)
 					_ = resp
 					if strings.Contains(resbody, "DalFox"+ccc) {
 						params[k] = append(params[k], ccc)
