@@ -25,7 +25,7 @@ func main() {
 	pipe := flag.Bool("pipe", false, "Pipeline mode (default is false)")
 	header := flag.String("header", "", "Add custom headers")
 	cookie := flag.String("cookie", "", "Add custom cookies")
-	user_agent := flag.String("user-agent", "", "Add custom UA")
+	user_agent := flag.String("ua", "", "Add custom User-Agent")
 	blind := flag.String("blind", "", "Add blind XSS payload, e.g -blind https://hahwul.xss.ht")
 	config := flag.String("config", "", "config file path")
 	helphelp := flag.Bool("help", false, "Show help message")
@@ -84,8 +84,11 @@ func main() {
 		json.Unmarshal([]byte(byteValue), &result)
 
 		for k, v := range result {
-			if k == "blind" {
-				options_str["blind"] = v.(string)
+			if k == "blind" || k == "p" || k == "cookie" || k == "header" || k == "ua" {
+				options_str[k] = v.(string)
+			}
+			if k == "only-discovery" || k == "pipe" {
+				options_bool[k] = v.(bool)
 			}
 		}
 	}
