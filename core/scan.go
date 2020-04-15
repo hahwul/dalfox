@@ -33,9 +33,24 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 
 	_, err := url.Parse(target)
 	if err != nil {
-		gologger.Infof("%s from URL check logic", err)
-		gologger.Infof("Not running %s url", target)
+		gologger.Errorf("%s", err)
+		gologger.Errorf("Not running %s url", target)
 		return
+	}
+
+	treq, terr := http.NewRequest("GET", target, nil)
+	if terr != nil {
+		gologger.Infof("%s", terr)
+	} else {
+		client := &http.Client{}
+		_, err := client.Do(treq)
+		if err != nil {
+			gologger.Errorf("%s", err)
+			gologger.Errorf("Not running %s url", target)
+			return
+		} else {
+			gologger.Infof("vaild target url")
+		}
 	}
 
 	var wait sync.WaitGroup
