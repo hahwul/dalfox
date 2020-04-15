@@ -32,7 +32,40 @@ $ go get -u github.com/hahwul/dalfox
 
 ## Usage
 ```
-$ dalfox -url "https://www.hahwul.com/?q=1"
+    _..._
+  .' .::::.   __   _   _    ___ _ __ __
+ :  :::::::: |  \ / \ | |  | __/ \\ V /
+ :  :::::::: | o ) o || |_ | _( o )) (
+ '. '::::::' |__/|_n_||___||_| \_//_n_\
+   '-.::''
+Parameter Analysis and XSS Scanning tool based on golang
+Finder Of XSS and Dal is the Korean pronunciation of moon. @hahwul
+
+Usage of ./dalfox:
+  -blind string
+    	Add blind XSS payload, e.g -blind https://hahwul.xss.ht
+  -config string
+    	config file path
+  -cookie string
+    	Add custom cookies
+  -data string
+    	POST data
+  -header string
+    	Add custom headers
+  -help
+    	Show help message
+  -iL string
+    	target urls(file)
+  -only-discovery
+    	Use only discovery mode
+  -p string
+    	Testing only selected parameter
+  -pipe
+    	Pipeline mode (default is false)
+  -ua string
+    	Add custom User-Agent
+  -url string
+    	target url
 ```
 
 ## Build
