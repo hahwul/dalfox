@@ -30,6 +30,14 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 	policy := make(map[string]string)
 	_ = params
 	_ = policy
+
+	_, err := url.Parse(target)
+	if err != nil {
+		gologger.Infof("%s from URL check logic", err)
+		gologger.Infof("Not running %s url", target)
+		return
+	}
+
 	var wait sync.WaitGroup
 	wait.Add(2)
 	go func() {
@@ -212,7 +220,8 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 	u, err := url.Parse(target)
 	params := make(map[string][]string)
 	if err != nil {
-		panic(err)
+		gologger.Fatalf("Fatal error %s", err)
+		return params
 	}
 	p, _ := url.ParseQuery(u.RawQuery)
 	for k, _ := range p {
@@ -292,7 +301,7 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 func SendReq(url string, options_string map[string]string) (string, *http.Response) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		panic(err)
+		gologger.Fatalf("Fatal error %s", err)
 	}
 
 	if options_string["header"] != "" {
@@ -313,7 +322,7 @@ func SendReq(url string, options_string map[string]string) (string, *http.Respon
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		panic(err)
+		gologger.Fatalf("Fatal error %s", err)
 	}
 	defer resp.Body.Close()
 
