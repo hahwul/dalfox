@@ -12,8 +12,8 @@ var (
 	mutex = &sync.Mutex{}
 )
 
-// log is log
-func foxlog(level, text string) {
+// Dallog is log
+func Dallog(level, text string) {
 	if level == "INFO" {
 		text = aurora.Blue("[INFO] ").String() + text
 	}
