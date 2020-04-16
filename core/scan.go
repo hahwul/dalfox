@@ -205,11 +205,6 @@ func VerifyReflection(body, payload string) bool {
 	}
 }
 
-// VerifySelenium is check trigger xss pattern
-func VerifySelenium() {
-
-}
-
 // StaticAnalysis is found information on original req/res
 func StaticAnalysis(target string, options_string map[string]string) map[string]string {
 	policy := make(map[string]string)
@@ -275,6 +270,12 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 				if ij > 0 {
 					smap = smap + "inJS[" + strconv.Itoa(ij) + "] "
 				}
+				temp_url := MakeRequestQuery(target, k, "\" DalFox")
+				_, resp := SendReq(temp_url, options_string)
+				if VerifyDOM(resp.Body, "DalFox") {
+					smap = smap + "inAtt "
+				}
+
 				params[k] = append(params[k], smap)
 				var wg sync.WaitGroup
 				chars := GetSpecialChar()
