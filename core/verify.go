@@ -3,7 +3,6 @@ package core
 import (
 	"github.com/PuerkitoBio/goquery"
 	"io"
-	"log"
 )
 
 // VerifyDOM is check success inject on code
@@ -12,7 +11,7 @@ func VerifyDOM(body io.ReadCloser, pattern string) bool {
 	doc, err := goquery.NewDocumentFromReader(body)
 	check := false
 	if err != nil {
-		log.Fatal(err)
+		return false
 	}
 	// Find the review items
 	doc.Find(pattern).Each(func(i int, s *goquery.Selection) {
