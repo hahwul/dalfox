@@ -270,10 +270,29 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 				if ij > 0 {
 					smap = smap + "inJS[" + strconv.Itoa(ij) + "] "
 				}
-				temp_url := MakeRequestQuery(target, k, "\" DalFox")
+				ia := 0
+				temp_url := MakeRequestQuery(target, k, "\" id=DalFox \"")
 				_, resp := SendReq(temp_url, options_string)
 				if VerifyDOM(resp.Body, "DalFox") {
-					smap = smap + "inAtt "
+					ia = ia + 1
+				}
+				temp_url = MakeRequestQuery(target, k, "' id=DalFox '")
+				_, resp = SendReq(temp_url, options_string)
+				if VerifyDOM(resp.Body, "DalFox") {
+					ia = ia + 1
+				}
+				temp_url = MakeRequestQuery(target, k, "' class=DalFox '")
+				_, resp = SendReq(temp_url, options_string)
+				if VerifyDOM(resp.Body, ".DalFox") {
+					ia = ia + 1
+				}
+				temp_url = MakeRequestQuery(target, k, "\" class=DalFox \"")
+				_, resp = SendReq(temp_url, options_string)
+				if VerifyDOM(resp.Body, ".DalFox") {
+					ia = ia + 1
+				}
+				if ia > 0 {
+					smap = smap + "inAT[" + strconv.Itoa(ia) + "] "
 				}
 
 				params[k] = append(params[k], smap)
