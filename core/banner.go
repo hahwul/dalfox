@@ -10,7 +10,7 @@ func Banner() {
  '. '::::::' |__/|_n_||___||_| \_//_n_\                           
    '-.::''
 `)
-	DalLog("", "Parameter Analysis and XSS Scanning tool based on golang\n")
-	DalLog("", "Finder Of XSS and Dal is the Korean pronunciation of moon. @hahwul\n")
+	DalLog("", "Parameter Analysis and XSS Scanning tool based on golang")
+	DalLog("", "Finder Of XSS and Dal is the Korean pronunciation of moon. @hahwul")
 	DalLog("", "\n")
 }
