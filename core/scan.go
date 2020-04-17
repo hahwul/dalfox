@@ -118,7 +118,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 								query[tq] = tm
 							}
 						}
-						ara := getForceSeleniumPayload()
+						ara := getForceVerifyPayload()
 						for _, v := range ara {
 							tq := MakeRequestQuery(target, k, v)
 							tm := map[string]string{"param": k}
@@ -127,10 +127,83 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 							query[tq] = tm
 						}
 					}
+					if strings.Contains(av, "inAT") {
+						arr := GetEventHandlers()
+						for _, avv := range arr {
+							if Optimization("\" "+avv+"=", badchars) {
+								tq := MakeRequestQuery(target, k, "\" "+avv+"=1 id=dalfox class=dalfox \"")
+								tm := map[string]string{"param": k}
+								tm["type"] = "inAT"
+								tm["payload"] = avv
+								query[tq] = tm
+							}
+							if Optimization("' "+avv+"=", badchars) {
+								tq := MakeRequestQuery(target, k, "' "+avv+"=1 id=dalfox class=dalfox '")
+								tm := map[string]string{"param": k}
+								tm["type"] = "inAT"
+								tm["payload"] = avv
+								query[tq] = tm
+							}
+							if Optimization(" "+avv+"=", badchars) {
+								tq := MakeRequestQuery(target, k, " "+avv+"=1 id=dalfox class=dalfox ")
+								tm := map[string]string{"param": k}
+								tm["type"] = "inAT"
+								tm["payload"] = avv
+								query[tq] = tm
+							}
+							if Optimization("/"+avv+"=", badchars) {
+								tq := MakeRequestQuery(target, k, "/"+avv+"=1 id=dalfox class=dalfox")
+								tm := map[string]string{"param": k}
+								tm["type"] = "inAT"
+								tm["payload"] = avv
+								query[tq] = tm
+							}
+							if Optimization("\" "+avv+"=", badchars) {
+								tq := MakeRequestQuery(target, k, "\" "+avv+"=")
+								tm := map[string]string{"param": k}
+								tm["type"] = "inAT"
+								tm["payload"] = avv
+								query[tq] = tm
+							}
+							if Optimization("' "+avv+"=", badchars) {
+								tq := MakeRequestQuery(target, k, "' "+avv+"=1")
+								tm := map[string]string{"param": k}
+								tm["type"] = "inAT"
+								tm["payload"] = avv
+								query[tq] = tm
+							}
+							if Optimization(" "+avv+"=", badchars) {
+								tq := MakeRequestQuery(target, k, " "+avv+"=1")
+								tm := map[string]string{"param": k}
+								tm["type"] = "inAT"
+								tm["payload"] = avv
+								query[tq] = tm
+							}
+							if Optimization("/"+avv+"=", badchars) {
+								tq := MakeRequestQuery(target, k, "/"+avv+"=1")
+								tm := map[string]string{"param": k}
+								tm["type"] = "inAT"
+								tm["payload"] = avv
+								query[tq] = tm
+							}
+						}
+					}
 					// inHTML XSS
 					if strings.Contains(av, "inHTML") {
-						arr := getCommonPayload()
-						for _, avv := range arr {
+						arr := GetTags()
+						if Optimization("<", badchars) {
+							for _, avv := range arr {
+								tq := MakeRequestQuery(target, k, "/"+avv+"=1")
+								tm := map[string]string{"param": k}
+								tm["type"] = "inHTML"
+								tm["payload"] = avv
+								query[tq] = tm
+
+							}
+						}
+
+						arc := getCommonPayload()
+						for _, avv := range arc {
 							if Optimization(avv, badchars) {
 								tq := MakeRequestQuery(target, k, avv)
 								tm := map[string]string{"param": k}
@@ -139,7 +212,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 								query[tq] = tm
 							}
 						}
-						ara := getForceSeleniumPayload()
+						ara := getForceVerifyPayload()
 						for _, v := range ara {
 							tq := MakeRequestQuery(target, k, v)
 							tm := map[string]string{"param": k}
