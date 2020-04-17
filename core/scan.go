@@ -38,18 +38,20 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 		return
 	}
 
-	treq, terr := http.NewRequest("GET", target, nil)
-	if terr != nil {
-	} else {
-		client := &http.Client{}
-		_, err := client.Do(treq)
-		if err != nil {
-			DalLog("SYSTEM", "Not running "+target+" url")
-			return
+	/*
+		treq, terr := http.NewRequest("GET", target, nil)
+		if terr != nil {
 		} else {
-			DalLog("SYSTEM", "Vaild this url")
-		}
-	}
+			client := &http.Client{}
+			_, err := client.Do(treq)
+			if err != nil {
+				DalLog("SYSTEM", "Not running "+target+" url")
+				fmt.Println(err)
+				return
+			} else {
+				DalLog("SYSTEM", "Vaild this url")
+			}
+		}*/
 
 	var wait sync.WaitGroup
 	task := 2
@@ -266,7 +268,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 			query[tq] = tm
 		}
 
-		DalLog("SYSTEM", "Start XSS Scanning 🗡")
+		DalLog("SYSTEM", "Start XSS Scanning.. with "+strconv.Itoa(len(query))+" 🗡")
 		//s := spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
 
 		s.Suffix = " Waiting routines.."
