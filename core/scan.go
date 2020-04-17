@@ -11,12 +11,11 @@ import (
 	"time"
 
 	"github.com/briandowns/spinner"
-	"github.com/projectdiscovery/gologger"
 )
 
 // Scan is main scanning function
 func Scan(target string, options_string map[string]string, options_bool map[string]bool) {
-	gologger.Infof("Target URL: %s", target)
+	DalLog("SYSTEM", "Target URL: "+target)
 	//var params []string
 
 	// query is XSS payloads
@@ -25,48 +24,61 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 	// params is "param name":true  (reflected?)
 	// 1: non-reflected , 2: reflected , 3: reflected-with-sc
 	params := make(map[string][]string)
+	mparams := make(map[string][]string)
+
 	v_status := make(map[string]bool)
 	v_status["pleasedonthaveanamelikethis_plz_plz"] = false
 
 	// policy is "CSP":domain..
 	policy := make(map[string]string)
-	_ = params
-	_ = policy
 
 	_, err := url.Parse(target)
 	if err != nil {
-		gologger.Errorf("%s", err)
-		gologger.Errorf("Not running %s url", target)
+		DalLog("SYSTEM", "Not running "+target+" url")
 		return
 	}
 
 	treq, terr := http.NewRequest("GET", target, nil)
 	if terr != nil {
-		gologger.Infof("%s", terr)
 	} else {
 		client := &http.Client{}
 		_, err := client.Do(treq)
 		if err != nil {
-			gologger.Errorf("%s", err)
-			gologger.Errorf("Not running %s url", target)
+			DalLog("SYSTEM", "Not running "+target+" url")
 			return
 		} else {
-			gologger.Infof("vaild target url")
+			DalLog("SYSTEM", "Vaild this url")
 		}
 	}
 
 	var wait sync.WaitGroup
-	wait.Add(2)
+	task := 2
+	if options_string["mining"] != "" {
+		task = 3
+	}
+	wait.Add(task)
 	go func() {
 		defer wait.Done()
-		gologger.Infof("start static analysis..🔍")
+		DalLog("SYSTEM", "Start static analysis.. 🔍")
 		policy = StaticAnalysis(target, options_string)
 	}()
 	go func() {
 		defer wait.Done()
-		gologger.Infof("start parameter analysis..🔍")
+		DalLog("SYSTEM", "Start parameter analysis.. 🔍")
 		params = ParameterAnalysis(target, options_string)
 	}()
+	if options_string["mining"] != "" {
+		go func() {
+			defer wait.Done()
+			DalLog("SYSTEM", "Start "+options_string["mining"]+" mining.. 🔍")
+			if options_string["mining"] == "deep" {
+				mparams = QuickMining(target, options_string)
+			} else if options_string[""] == "quick" {
+				mparams = DeepMining(target, options_string)
+			}
+		}()
+	}
+
 	s := spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
 	s.Suffix = " Waiting routines.."
 	time.Sleep(1 * time.Second) // Waiting log
@@ -76,21 +88,21 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 	s.Stop()
 	for k, v := range policy {
 		if len(v) != 0 {
-			fmt.Printf("- @INFO %s is %s\n", k, v)
+			DalLog("INFO", k+" is "+v)
 		}
 	}
 
 	for k, v := range params {
 		if len(v) != 0 {
 			char := strings.Join(v, "  ")
-			fmt.Printf("- @INFO Reflected '%s' param => %s\n", k, char)
+			DalLog("INFO", "Reflected "+k+" param => "+char)
 		}
 	}
 
 	if !options_bool["only-discovery"] {
 		// XSS Scanning
 
-		gologger.Infof("Generate XSS payload and Optimization..")
+		DalLog("SYSTEM", "Generate XSS payload and Optimization.. 🛠")
 		// Optimization..
 
 		/*
@@ -144,62 +156,62 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 							query[tq] = tm
 						}
 					}
-					if strings.Contains(av, "inAT") {
+					if strings.Contains(av, "inATTR") {
 						arr := GetEventHandlers()
 						for _, avv := range arr {
 							if Optimization("\" "+avv+"=", badchars) {
 								tq := MakeRequestQuery(target, k, "\" "+avv+"=1 id=dalfox class=dalfox \"")
 								tm := map[string]string{"param": k}
-								tm["type"] = "inAT"
+								tm["type"] = "inATTR"
 								tm["payload"] = avv
 								query[tq] = tm
 							}
 							if Optimization("' "+avv+"=", badchars) {
 								tq := MakeRequestQuery(target, k, "' "+avv+"=1 id=dalfox class=dalfox '")
 								tm := map[string]string{"param": k}
-								tm["type"] = "inAT"
+								tm["type"] = "inATTR"
 								tm["payload"] = avv
 								query[tq] = tm
 							}
 							if Optimization(" "+avv+"=", badchars) {
 								tq := MakeRequestQuery(target, k, " "+avv+"=1 id=dalfox class=dalfox ")
 								tm := map[string]string{"param": k}
-								tm["type"] = "inAT"
+								tm["type"] = "inATTR"
 								tm["payload"] = avv
 								query[tq] = tm
 							}
 							if Optimization("/"+avv+"=", badchars) {
 								tq := MakeRequestQuery(target, k, "/"+avv+"=1 id=dalfox class=dalfox")
 								tm := map[string]string{"param": k}
-								tm["type"] = "inAT"
+								tm["type"] = "inATTR"
 								tm["payload"] = avv
 								query[tq] = tm
 							}
 							if Optimization("\" "+avv+"=", badchars) {
 								tq := MakeRequestQuery(target, k, "\" "+avv+"=")
 								tm := map[string]string{"param": k}
-								tm["type"] = "inAT"
+								tm["type"] = "inATTR"
 								tm["payload"] = avv
 								query[tq] = tm
 							}
 							if Optimization("' "+avv+"=", badchars) {
 								tq := MakeRequestQuery(target, k, "' "+avv+"=1")
 								tm := map[string]string{"param": k}
-								tm["type"] = "inAT"
+								tm["type"] = "inATTR"
 								tm["payload"] = avv
 								query[tq] = tm
 							}
 							if Optimization(" "+avv+"=", badchars) {
 								tq := MakeRequestQuery(target, k, " "+avv+"=1")
 								tm := map[string]string{"param": k}
-								tm["type"] = "inAT"
+								tm["type"] = "inATTR"
 								tm["payload"] = avv
 								query[tq] = tm
 							}
 							if Optimization("/"+avv+"=", badchars) {
 								tq := MakeRequestQuery(target, k, "/"+avv+"=1")
 								tm := map[string]string{"param": k}
-								tm["type"] = "inAT"
+								tm["type"] = "inATTR"
 								tm["payload"] = avv
 								query[tq] = tm
 							}
@@ -244,7 +256,6 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 			}
 		}
 		// Static payload
-		//fmt.Println(query)
 		spu, _ := url.Parse(target)
 		spd := spu.Query()
 		for spk, _ := range spd {
@@ -255,8 +266,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 			query[tq] = tm
 		}
 
-		//fmt.Println(query)
-		gologger.Infof("Start XSS Scanning")
+		DalLog("SYSTEM", "Start XSS Scanning 🗡")
 
 		for k, v := range query {
 			if v_status[v["param"]] == false {
@@ -265,17 +275,25 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 				if v["type"] != "inBlind" {
 					if v["type"] == "inJS" {
 						if VerifyReflection(resbody, v["payload"]) {
-							fmt.Println("[WEAK] Reflected Payload: " + v["param"] + "=" + v["payload"])
-							fmt.Println(" + " + k)
+							DalLog("WEAK", "Reflected Payload: "+v["param"]+"="+v["payload"])
+							fmt.Println(" - " + k)
 						}
+					} else if v["type"] == "inATTR" {
+						DalLog("WEAK", "Injected Attribute: "+v["param"]+"="+v["payload"])
+						if VerifyDOM(resp.Body) {
+							DalLog("VULN", "Injected Attribute with XSS Payload: "+v["param"]+"="+v["payload"])
+							v_status[v["param"]] = true
+						}
+						fmt.Println(" - " + k)
+
 					} else {
 						if VerifyReflection(resbody, v["payload"]) {
-							fmt.Println("[WEAK] Reflected Payload: " + v["param"] + "=" + v["payload"])
+							DalLog("WEAK", "Reflected Payload: "+v["param"]+"="+v["payload"])
 							if VerifyDOM(resp.Body) {
-								fmt.Println("[VULN] Injected Object from Payload: " + v["param"] + "=" + v["payload"])
+								DalLog("VULN", "Injected Object from Payload: "+v["param"]+"="+v["payload"])
 								v_status[v["param"]] = true
 							}
-							fmt.Println(" + " + k)
+							fmt.Println(" - " + k)
 						}
 					}
 				}
@@ -307,8 +325,6 @@ func VerifyReflection(body, payload string) bool {
 func StaticAnalysis(target string, options_string map[string]string) map[string]string {
 	policy := make(map[string]string)
 	resbody, resp := SendReq(target, options_string)
-	//gologger.Verbosef("<INFO>"+resp.Status, "asdf")
-	//fmt.Println(resp.Header)
 	_ = resbody
 	if resp.Header["Content-Type"] != nil {
 		policy["Content-Type"] = resp.Header["Content-Type"][0]
@@ -328,7 +344,6 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 	u, err := url.Parse(target)
 	params := make(map[string][]string)
 	if err != nil {
-		gologger.Fatalf("Fatal error %s", err)
 		return params
 	}
 	p, _ := url.ParseQuery(u.RawQuery)
@@ -390,7 +405,7 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 					ia = ia + 1
 				}
 				if ia > 0 {
-					smap = smap + "inAT[" + strconv.Itoa(ia) + "] "
+					smap = smap + "inATTR[" + strconv.Itoa(ia) + "] "
 				}
 
 				params[k] = append(params[k], smap)
@@ -434,7 +449,6 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 func SendReq(url string, options_string map[string]string) (string, *http.Response) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		gologger.Fatalf("Fatal error %s", err)
 	}
 
 	if options_string["header"] != "" {
@@ -455,7 +469,6 @@ func SendReq(url string, options_string map[string]string) (string, *http.Respon
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		gologger.Fatalf("Fatal error %s", err)
 	}
 	defer resp.Body.Close()
 

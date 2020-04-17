@@ -6,6 +6,4 @@ require (
 	github.com/PuerkitoBio/goquery v1.5.1
 	github.com/briandowns/spinner v1.10.0
 	github.com/logrusorgru/aurora v0.0.0-20200102142835-e9ef32dff381
-	github.com/projectdiscovery/gologger v1.0.0
-	github.com/tebeka/selenium v0.9.9 // indirect
 )

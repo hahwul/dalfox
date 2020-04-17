@@ -7,10 +7,10 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/hahwul/dalfox/core"
-	"github.com/projectdiscovery/gologger"
 )
 
 func main() {
@@ -29,6 +29,8 @@ func main() {
 	blind := flag.String("blind", "", "Add blind XSS payload, e.g -blind https://hahwul.xss.ht")
 	config := flag.String("config", "", "config file path")
 	helphelp := flag.Bool("help", false, "Show help message")
+	qm := flag.Bool("quick-mining", false, "Param mining (quick / optional / 100 words) ")
+	dm := flag.Bool("deep-mining", false, "Param mining (deep / optional / 10,000 words)")
 	onlydiscovery := flag.Bool("only-discovery", false, "Use only discovery mode")
 	p := flag.String("p", "", "Testing only selected parameter")
 	// to options
@@ -60,6 +62,13 @@ func main() {
 			targets = append(targets, target)
 		}
 	}
+	if *dm {
+		options_str["mining"] = "deep"
+	} else if *qm {
+		options_str["mining"] = "quick"
+	} else {
+		options_str["mining"] = ""
+	}
 	options_str["header"] = *header
 	options_str["cookie"] = *cookie
 	options_str["p"] = *p
@@ -74,7 +83,7 @@ func main() {
 		if err != nil {
 			fmt.Println(err)
 		}
-		gologger.Infof("Using config options / loaded %s file", *config)
+		core.DalLog("SYSTEM", "Using config options / loaded "+*config+" file")
 		// defer the closing of our jsonFile so that we can parse it later on
 		defer jsonFile.Close()
 
@@ -95,7 +104,7 @@ func main() {
 	// Remove Deplicated value
 	targets = unique(targets)
 	core.Banner()
-	gologger.Infof("Loaded %d target urls", len(targets))
+	core.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target urls")
 	for i, _ := range targets {
 		core.Scan(targets[i], options_str, options_bool)
 	}

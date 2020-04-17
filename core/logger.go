@@ -13,7 +13,7 @@ var (
 )
 
 // Dallog is log
-func Dallog(level, text string) {
+func DalLog(level, text string) {
 	if level == "INFO" {
 		text = aurora.Blue("[INFO] ").String() + text
 	}
