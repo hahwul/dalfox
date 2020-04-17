@@ -267,6 +267,12 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 		}
 
 		DalLog("SYSTEM", "Start XSS Scanning 🗡")
+		//s := spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
+
+		s.Suffix = " Waiting routines.."
+		time.Sleep(1 * time.Second) // Waiting log
+		s.Start()                   // Start the spinner
+		time.Sleep(3 * time.Second) // Run for some time to simulate work
 
 		for k, v := range query {
 			if v_status[v["param"]] == false {
@@ -310,6 +316,8 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 			wg.Wait()
 		*/
 	}
+	s.Stop()
+	DalLog("SYSTEM", "Finish :D")
 }
 
 // VerifyReflection is check reflected xss pattern
