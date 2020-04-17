@@ -26,9 +26,8 @@ func DalLog(level, text string) {
 	if level == "SYSTEM" {
 		text = aurora.White("[*] ").String() + text
 	}
-	text = text + "\n"
 	mutex.Lock()
-	fmt.Fprintf(os.Stderr, text)
+	fmt.Fprintln(os.Stderr, text)
 	mutex.Unlock()
 
 }
