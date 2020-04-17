@@ -17,6 +17,20 @@ func MakeRequestQuery(target, param, payload string) string {
 	return temp_url.String()
 }
 
+func MakePathQuery(target, payload string) string {
+	u, _ := url.Parse(target)
+	data := ""
+	if u.Path != "" {
+		data = u.Scheme + "://" + u.Hostname() + u.Path + ";" + payload
+	} else {
+		data = u.Scheme + "://" + u.Hostname() + "/" + u.Path + ";" + payload
+	}
+	temp_url, _ := url.Parse(data)
+	temp_q := temp_url.Query()
+	temp_url.RawQuery = temp_q.Encode()
+	return temp_url.String()
+}
+
 func Optimization(payload string, badchars []string) bool {
 	for _, v := range badchars {
 		if strings.Contains(payload, v) {

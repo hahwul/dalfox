@@ -25,6 +25,8 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 	// params is "param name":true  (reflected?)
 	// 1: non-reflected , 2: reflected , 3: reflected-with-sc
 	params := make(map[string][]string)
+	v_status := make(map[string]bool)
+	v_status["pleasedonthaveanamelikethis_plz_plz"] = false
 
 	// policy is "CSP":domain..
 	policy := make(map[string]string)
@@ -96,7 +98,22 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 			v: pattern [injs, inhtml, ' < > ]
 			av: reflected type, valid char
 		*/
+
+		// set path base xss
+
+		arr := getCommonPayload()
+		for _, avv := range arr {
+			tq := MakePathQuery(target, avv)
+			tm := map[string]string{"param": "pleasedonthaveanamelikethis_plz_plz"}
+			tm["type"] = "inPATH"
+			tm["payload"] = ";" + avv
+			query[tq] = tm
+
+		}
+
+		// set param base xss
 		for k, v := range params {
+			v_status[k] = false
 			if (options_string["p"] == "") || (options_string["p"] == k) {
 				chars := GetSpecialChar()
 				var badchars []string
@@ -190,17 +207,19 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 					}
 					// inHTML XSS
 					if strings.Contains(av, "inHTML") {
-						arr := GetTags()
-						if Optimization("<", badchars) {
-							for _, avv := range arr {
-								tq := MakeRequestQuery(target, k, "/"+avv+"=1")
-								tm := map[string]string{"param": k}
-								tm["type"] = "inHTML"
-								tm["payload"] = avv
-								query[tq] = tm
+						/*
+							arr := GetTags()
+							if Optimization("<", badchars) {
+								for _, avv := range arr {
+									tq := MakeRequestQuery(target, k, "/"+avv+"=1")
+									tm := map[string]string{"param": k}
+									tm["type"] = "inHTML"
+									tm["payload"] = avv
+									query[tq] = tm
 
+								}
 							}
-						}
+						*/
 
 						arc := getCommonPayload()
 						for _, avv := range arc {
@@ -240,18 +259,24 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 		gologger.Infof("Start XSS Scanning")
 
 		for k, v := range query {
-			resbody, resp := SendReq(k, options_string)
-			_ = resp
-			if v["type"] != "inBlind" {
-				if v["type"] != "inJS" {
-					if VerifyReflection(resbody, v["payload"]) {
-						fmt.Println("[VULN/XSS] Reflected Payload: " + v["param"] + "=" + v["payload"])
-						fmt.Println(" + " + k)
-					}
-				} else {
-					if VerifyReflection(resbody, v["payload"]) {
-						fmt.Println("[VULN/XSS] Reflected Payload: " + v["param"] + "=" + v["payload"])
-						fmt.Println(" + " + k)
+			if v_status[v["param"]] == false {
+				resbody, resp := SendReq(k, options_string)
+				_ = resp
+				if v["type"] != "inBlind" {
+					if v["type"] == "inJS" {
+						if VerifyReflection(resbody, v["payload"]) {
+							fmt.Println("[WEAK] Reflected Payload: " + v["param"] + "=" + v["payload"])
+							fmt.Println(" + " + k)
+						}
+					} else {
+						if VerifyReflection(resbody, v["payload"]) {
+							fmt.Println("[WEAK] Reflected Payload: " + v["param"] + "=" + v["payload"])
+							if VerifyDOM(resp.Body) {
+								fmt.Println("[VULN] Injected Object from Payload: " + v["param"] + "=" + v["payload"])
+								v_status[v["param"]] = true
+							}
+							fmt.Println(" + " + k)
+						}
 					}
 				}
 			}
@@ -344,24 +369,24 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 					smap = smap + "inJS[" + strconv.Itoa(ij) + "] "
 				}
 				ia := 0
-				temp_url := MakeRequestQuery(target, k, "\" id=DalFox \"")
+				temp_url := MakeRequestQuery(target, k, "\" id=dalfox \"")
 				_, resp := SendReq(temp_url, options_string)
-				if VerifyDOM(resp.Body, "DalFox") {
+				if VerifyDOM(resp.Body) {
 					ia = ia + 1
 				}
-				temp_url = MakeRequestQuery(target, k, "' id=DalFox '")
+				temp_url = MakeRequestQuery(target, k, "' id=dalfox '")
 				_, resp = SendReq(temp_url, options_string)
-				if VerifyDOM(resp.Body, "DalFox") {
+				if VerifyDOM(resp.Body) {
 					ia = ia + 1
 				}
-				temp_url = MakeRequestQuery(target, k, "' class=DalFox '")
+				temp_url = MakeRequestQuery(target, k, "' class=dalfox '")
 				_, resp = SendReq(temp_url, options_string)
-				if VerifyDOM(resp.Body, ".DalFox") {
+				if VerifyDOM(resp.Body) {
 					ia = ia + 1
 				}
-				temp_url = MakeRequestQuery(target, k, "\" class=DalFox \"")
+				temp_url = MakeRequestQuery(target, k, "\" class=dalfox \"")
 				_, resp = SendReq(temp_url, options_string)
-				if VerifyDOM(resp.Body, ".DalFox") {
+				if VerifyDOM(resp.Body) {
 					ia = ia + 1
 				}
 				if ia > 0 {

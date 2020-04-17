@@ -1,12 +1,13 @@
 package core
 
 import (
-	"github.com/PuerkitoBio/goquery"
 	"io"
+
+	"github.com/PuerkitoBio/goquery"
 )
 
 // VerifyDOM is check success inject on code
-func VerifyDOM(body io.ReadCloser, pattern string) bool {
+func VerifyDOM(body io.ReadCloser) bool {
 	// Load the HTML document
 	doc, err := goquery.NewDocumentFromReader(body)
 	check := false
@@ -14,13 +15,21 @@ func VerifyDOM(body io.ReadCloser, pattern string) bool {
 		return false
 	}
 	// Find the review items
-	doc.Find(pattern).Each(func(i int, s *goquery.Selection) {
+	doc.Find("dalfox").Each(func(i int, s *goquery.Selection) {
 		// For each item found, get the band and title
 		check = true
 	})
 	if check {
 		return true
 	} else {
-		return false
+		doc.Find(".dalfox").Each(func(i int, s *goquery.Selection) {
+			// For each item found, get the band and title
+			check = true
+		})
+		if check {
+			return true
+		} else {
+			return false
+		}
 	}
 }
