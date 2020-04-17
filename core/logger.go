@@ -18,10 +18,10 @@ func DalLog(level, text string) {
 		text = aurora.Blue("[I] ").String() + text
 	}
 	if level == "WEAK" {
-		text = aurora.Yellow("[W]").String() + text
+		text = aurora.Yellow("[W] ").String() + text
 	}
 	if level == "VULN" {
-		text = aurora.Red("[V]").String() + text
+		text = aurora.Red("[V] ").String() + text
 	}
 	if level == "SYSTEM" {
 		text = aurora.White("[*] ").String() + text
