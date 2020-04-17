@@ -278,26 +278,26 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 		//time.Sleep(3 * time.Second) // Run for some time to simulate work
 		for k, v := range query {
 			if v_status[v["param"]] == false {
-				resbody, resp := SendReq(k, options_string)
+				_, resp, vds, vrs := SendReq(k, v["payload"], options_string)
 				_ = resp
 				if v["type"] != "inBlind" {
 					if v["type"] == "inJS" {
-						if VerifyReflection(resbody, v["payload"]) {
-							DalLog("WEAK", "Reflected Payload: "+v["param"]+"="+v["payload"])
+						if vrs {
+							DalLog("VULN", "Reflected Payload in JS: "+v["param"]+"="+v["payload"])
 							fmt.Println(" - " + k)
 						}
 					} else if v["type"] == "inATTR" {
 						DalLog("WEAK", "Injected Attribute: "+v["param"]+"="+v["payload"])
-						if VerifyDOM(resp.Body) {
+						if vds {
 							DalLog("VULN", "Injected Attribute with XSS Payload: "+v["param"]+"="+v["payload"])
 							v_status[v["param"]] = true
 						}
 						fmt.Println(" - " + k)
 
 					} else {
-						if VerifyReflection(resbody, v["payload"]) {
+						if vrs {
 							DalLog("WEAK", "Reflected Payload: "+v["param"]+"="+v["payload"])
-							if VerifyDOM(resp.Body) {
+							if vds {
 								DalLog("VULN", "Injected Object from Payload: "+v["param"]+"="+v["payload"])
 								v_status[v["param"]] = true
 							}
@@ -323,7 +323,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 }
 
 // VerifyReflection is check reflected xss pattern
-func VerifyReflection(body, payload string) bool {
+func aVerifyReflection(body, payload string) bool {
 	if strings.Contains(body, payload) {
 		return true
 	} else {
@@ -334,7 +334,7 @@ func VerifyReflection(body, payload string) bool {
 // StaticAnalysis is found information on original req/res
 func StaticAnalysis(target string, options_string map[string]string) map[string]string {
 	policy := make(map[string]string)
-	resbody, resp := SendReq(target, options_string)
+	resbody, resp, _, _ := SendReq(target, "", options_string)
 	_ = resbody
 	if resp.Header["Content-Type"] != nil {
 		policy["Content-Type"] = resp.Header["Content-Type"][0]
@@ -372,9 +372,9 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 			temp_url := MakeRequestQuery(target, k, "DalFox")
 
 			//temp_url.RawQuery = temp_q.Encode()
-			resbody, resp := SendReq(temp_url, options_string)
+			resbody, resp, _, vrs := SendReq(temp_url, "DalFox", options_string)
 			_ = resp
-			if strings.Contains(resbody, "DalFox") {
+			if vrs {
 				pointer, _ := Abstraction(resbody)
 				var smap string
 				ih := 0
@@ -395,23 +395,23 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 				}
 				ia := 0
 				temp_url := MakeRequestQuery(target, k, "\" id=dalfox \"")
-				_, resp := SendReq(temp_url, options_string)
-				if VerifyDOM(resp.Body) {
+				_, _, vds, _ := SendReq(temp_url, "", options_string)
+				if vds {
 					ia = ia + 1
 				}
 				temp_url = MakeRequestQuery(target, k, "' id=dalfox '")
-				_, resp = SendReq(temp_url, options_string)
-				if VerifyDOM(resp.Body) {
+				_, _, vds, _ = SendReq(temp_url, "", options_string)
+				if vds {
 					ia = ia + 1
 				}
 				temp_url = MakeRequestQuery(target, k, "' class=dalfox '")
-				_, resp = SendReq(temp_url, options_string)
-				if VerifyDOM(resp.Body) {
+				_, _, vds, _ = SendReq(temp_url, "", options_string)
+				if vds {
 					ia = ia + 1
 				}
 				temp_url = MakeRequestQuery(target, k, "\" class=dalfox \"")
-				_, resp = SendReq(temp_url, options_string)
-				if VerifyDOM(resp.Body) {
+				_, _, vds, _ = SendReq(temp_url, "", options_string)
+				if vds {
 					ia = ia + 1
 				}
 				if ia > 0 {
@@ -431,7 +431,7 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 						turl.RawQuery = tq.Encode()
 					*/
 
-					turl := MakeRequestQuery(target, k, "DalFox"+char)
+					turl := MakeRequestQuery(target, k, "dalfox"+char)
 
 					/* turl := u
 					q := u.Query()
@@ -441,7 +441,7 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 					ccc := string(char)
 					go func() {
 						defer wg.Done()
-						resbody, resp := SendReq(turl, options_string)
+						resbody, resp, _, _ := SendReq(turl, "dalfox", options_string)
 						_ = resp
 						if strings.Contains(resbody, "DalFox"+ccc) {
 							params[k] = append(params[k], ccc)
@@ -456,7 +456,7 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 }
 
 // SendReq is sending http request (handled GET/POST)
-func SendReq(url string, options_string map[string]string) (string, *http.Response) {
+func SendReq(url, payload string, options_string map[string]string) (string, *http.Response, bool, bool) {
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 	}
@@ -480,11 +480,14 @@ func SendReq(url string, options_string map[string]string) (string, *http.Respon
 	resp, err := client.Do(req)
 	if err != nil {
 	}
-	defer resp.Body.Close()
 
 	bytes, _ := ioutil.ReadAll(resp.Body)
 	str := string(bytes)
-	return str, resp
+
+	vds := VerifyDOM(resp.Body)
+	vrs := VerifyReflection(str, payload)
+	defer resp.Body.Close()
+	return str, resp, vds, vrs
 }
 
 func indexOf(element string, data []string) int {
