@@ -96,8 +96,11 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 
 	for k, v := range params {
 		if len(v) != 0 {
-			char := strings.Join(v, "  ")
+			code, vv := v[len(v)-1], v[:len(v)-1]
+			char := strings.Join(vv, "  ")
+			//x, a = a[len(a)-1], a[:len(a)-1]
 			DalLog("INFO", "Reflected "+k+" param => "+char)
+			DalLog("CODE", code)
 		}
 	}
 
@@ -383,11 +386,29 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 				temp_url.RawQuery = temp_q.Encode()
 			*/
 			temp_url := MakeRequestQuery(target, k, "DalFox")
+			var code string
 
 			//temp_url.RawQuery = temp_q.Encode()
 			resbody, resp, _, vrs := SendReq(temp_url, "DalFox", options_string)
 			_ = resp
 			if vrs {
+				start := strings.Index(resbody, "DalFox")
+				max := len(resbody)
+				var code_start int
+				var code_end int
+				if start < 25 {
+					code_start = 0
+				} else {
+					code_start = start - 25
+				}
+				if max < 56 {
+					code_end = max
+				} else {
+					code_end = code_start + 56
+				}
+
+				code = resbody[code_start:code_end]
+
 				pointer, _ := Abstraction(resbody)
 				var smap string
 				ih := 0
@@ -461,6 +482,7 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 					}()
 				}
 				wg.Wait()
+				params[k] = append(params[k], code)
 			}
 		}
 	}
