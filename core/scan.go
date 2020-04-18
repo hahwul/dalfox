@@ -276,38 +276,45 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 		//s.Suffix = " Waiting routines.."
 		//s.Start()                   // Start the spinner
 		//time.Sleep(3 * time.Second) // Run for some time to simulate work
-		for k, v := range query {
+		var wg sync.WaitGroup
+		for a, b := range query {
+			k := a
+			v := b
+			wg.Add(1)
 			if v_status[v["param"]] == false {
-				_, resp, vds, vrs := SendReq(k, v["payload"], options_string)
-				_ = resp
-				if v["type"] != "inBlind" {
-					if v["type"] == "inJS" {
-						if vrs {
-							DalLog("VULN", "Reflected Payload in JS: "+v["param"]+"="+v["payload"])
-							fmt.Println(" - " + k)
-						}
-					} else if v["type"] == "inATTR" {
-						DalLog("WEAK", "Injected Attribute: "+v["param"]+"="+v["payload"])
-						if vds {
-							DalLog("VULN", "Injected Attribute with XSS Payload: "+v["param"]+"="+v["payload"])
-							v_status[v["param"]] = true
-						}
-						fmt.Println(" - " + k)
-
-					} else {
-						if vrs {
-							DalLog("WEAK", "Reflected Payload: "+v["param"]+"="+v["payload"])
+				go func() {
+					defer wg.Done()
+					_, resp, vds, vrs := SendReq(k, v["payload"], options_string)
+					_ = resp
+					if v["type"] != "inBlind" {
+						if v["type"] == "inJS" {
+							if vrs {
+								DalLog("VULN", "Reflected Payload in JS: "+v["param"]+"="+v["payload"])
+								fmt.Println(" - " + k)
+							}
+						} else if v["type"] == "inATTR" {
+							DalLog("WEAK", "Injected Attribute: "+v["param"]+"="+v["payload"])
 							if vds {
-								DalLog("VULN", "Injected Object from Payload: "+v["param"]+"="+v["payload"])
+								DalLog("VULN", "Injected Attribute with XSS Payload: "+v["param"]+"="+v["payload"])
 								v_status[v["param"]] = true
 							}
 							fmt.Println(" - " + k)
+
+						} else {
+							if vrs {
+								DalLog("WEAK", "Reflected Payload: "+v["param"]+"="+v["payload"])
+								if vds {
+									DalLog("VULN", "Injected Object from Payload: "+v["param"]+"="+v["payload"])
+									v_status[v["param"]] = true
+								}
+								fmt.Println(" - " + k)
+							}
 						}
 					}
-				}
+				}()
 			}
 		}
-
+		wg.Wait()
 		/*
 			task := 1
 			var wg sync.WaitGroup
