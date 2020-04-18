@@ -23,7 +23,6 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 	// params is "param name":true  (reflected?)
 	// 1: non-reflected , 2: reflected , 3: reflected-with-sc
 	params := make(map[string][]string)
-	mparams := make(map[string][]string)
 
 	v_status := make(map[string]bool)
 	v_status["pleasedonthaveanamelikethis_plz_plz"] = false
@@ -54,9 +53,6 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 
 	var wait sync.WaitGroup
 	task := 2
-	if options_string["mining"] != "" {
-		task = 3
-	}
 	wait.Add(task)
 	go func() {
 		defer wait.Done()
@@ -68,17 +64,6 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 		DalLog("SYSTEM", "Start parameter analysis.. 🔍")
 		params = ParameterAnalysis(target, options_string)
 	}()
-	if options_string["mining"] != "" {
-		go func() {
-			defer wait.Done()
-			DalLog("SYSTEM", "Start "+options_string["mining"]+" mining.. 🔍")
-			if options_string["mining"] == "deep" {
-				mparams = QuickMining(target, options_string)
-			} else if options_string[""] == "quick" {
-				mparams = DeepMining(target, options_string)
-			}
-		}()
-	}
 
 	s := spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
 	s.Suffix = " Waiting routines.."

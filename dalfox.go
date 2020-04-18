@@ -29,8 +29,6 @@ func main() {
 	blind := flag.String("blind", "", "Add blind XSS payload, e.g -blind https://hahwul.xss.ht")
 	config := flag.String("config", "", "config file path")
 	helphelp := flag.Bool("help", false, "Show help message")
-	qm := flag.Bool("quick-mining", false, "Param mining (quick / optional / 100 words) ")
-	dm := flag.Bool("deep-mining", false, "Param mining (deep / optional / 10,000 words)")
 	onlydiscovery := flag.Bool("only-discovery", false, "Use only discovery mode")
 	p := flag.String("p", "", "Testing only selected parameter")
 	// to options
@@ -61,13 +59,6 @@ func main() {
 			target := strings.ToLower(sc.Text())
 			targets = append(targets, target)
 		}
-	}
-	if *dm {
-		options_str["mining"] = "deep"
-	} else if *qm {
-		options_str["mining"] = "quick"
-	} else {
-		options_str["mining"] = ""
 	}
 	options_str["header"] = *header
 	options_str["cookie"] = *cookie
