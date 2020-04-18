@@ -270,9 +270,9 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 			}
 		}
 
-		DalLog("SYSTEM", "Start XSS Scanning.. with "+strconv.Itoa(len(query))+" 🗡")
+		DalLog("SYSTEM", "Start XSS Scanning.. with "+strconv.Itoa(len(query))+" queries 🗡")
 		//s := spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
-		//mutex = &sync.Mutex{}
+		mutex = &sync.Mutex{}
 		//s.Suffix = " Waiting routines.."
 		//s.Start()                   // Start the spinner
 		//time.Sleep(3 * time.Second) // Run for some time to simulate work
@@ -289,25 +289,31 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 					if v["type"] != "inBlind" {
 						if v["type"] == "inJS" {
 							if vrs {
+								mutex.Lock()
 								DalLog("VULN", "Reflected Payload in JS: "+v["param"]+"="+v["payload"])
 								fmt.Println(" - " + k)
+								mutex.Unlock()
 							}
 						} else if v["type"] == "inATTR" {
+							mutex.Lock()
 							DalLog("WEAK", "Injected Attribute: "+v["param"]+"="+v["payload"])
 							if vds {
 								DalLog("VULN", "Injected Attribute with XSS Payload: "+v["param"]+"="+v["payload"])
 								v_status[v["param"]] = true
 							}
 							fmt.Println(" - " + k)
+							mutex.Unlock()
 
 						} else {
 							if vrs {
+								mutex.Lock()
 								DalLog("WEAK", "Reflected Payload: "+v["param"]+"="+v["payload"])
 								if vds {
 									DalLog("VULN", "Injected Object from Payload: "+v["param"]+"="+v["payload"])
 									v_status[v["param"]] = true
 								}
 								fmt.Println(" - " + k)
+								mutex.Unlock()
 							}
 						}
 					}
@@ -324,8 +330,8 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 			}()
 			wg.Wait()
 		*/
+		//s.Stop()
 	}
-	//s.Stop()
 	DalLog("SYSTEM", "Finish :D")
 }
 
