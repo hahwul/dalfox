@@ -434,8 +434,9 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 				params[k] = append(params[k], smap)
 				var wg sync.WaitGroup
 				chars := GetSpecialChar()
-				for _, char := range chars {
+				for _, c := range chars {
 					wg.Add(1)
+					char := c
 					/*
 						tdata := u.String()
 						tdata = strings.Replace(tdata, k+"="+v[0], k+"="+v[0]+"DalFox"+char, 1)
@@ -444,20 +445,18 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 						turl.RawQuery = tq.Encode()
 					*/
 
-					turl := MakeRequestQuery(target, k, "dalfox"+char)
-
 					/* turl := u
 					q := u.Query()
 					q.Set(k, v[0]+"DalFox"+string(char))
 					turl.RawQuery = q.Encode()
 					*/
-					ccc := string(char)
 					go func() {
 						defer wg.Done()
-						resbody, resp, _, _ := SendReq(turl, "dalfox", options_string)
+						turl := MakeRequestQuery(target, k, "dalfox"+char)
+						_, _, _, vrs := SendReq(turl, "dalfox"+char, options_string)
 						_ = resp
-						if strings.Contains(resbody, "DalFox"+ccc) {
-							params[k] = append(params[k], ccc)
+						if vrs {
+							params[k] = append(params[k], char)
 						}
 					}()
 				}
