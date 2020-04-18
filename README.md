@@ -10,7 +10,7 @@
 Find Of XSS, and Dal is the Korean pronunciation of moon.
 
 ## What is DalFox
-Just, XSS Scanning and Parameter Analysis tool. I previously developed [XSpear](https://github.com/hahwul/XSpear), a Ruby-based XSS tool, and this time, a full change occurred during the process of porting with golang and created it as a new project. The basic concept is to analyze parameters, find XSS, and examine them based on Selenium.
+Just, XSS Scanning and Parameter Analysis tool. I previously developed [XSpear](https://github.com/hahwul/XSpear), a ruby-based XSS tool, and this time, a full change occurred during the process of porting with golang!!! and created it as a new project. The basic concept is to analyze parameters, find XSS, and examine them based on Selenium.
 
 I talk about naming. Dal(달) is the Korean pronunciation of moon and fox was made into Fox(Find Of XSS).
 
