@@ -1,7 +1,6 @@
 package core
 
 import (
-	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -270,6 +269,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 				tm["type"] = "toBlind"
 				tm["payload"] = "Blind"
 				query[tq] = tm
+				DalLog("SYSTEM", "Added your blind XSS ("+options_string["blind"]+")")
 			}
 		}
 
@@ -294,7 +294,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 							if vrs {
 								mutex.Lock()
 								DalLog("VULN", "Reflected Payload in JS: "+v["param"]+"="+v["payload"])
-								fmt.Println(" - " + k)
+								DalLog("PRINT", k)
 								mutex.Unlock()
 							}
 						} else if v["type"] == "inATTR" {
@@ -304,7 +304,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 								DalLog("VULN", "Injected Attribute with XSS Payload: "+v["param"]+"="+v["payload"])
 								v_status[v["param"]] = true
 							}
-							fmt.Println(" - " + k)
+							DalLog("PRINT", k)
 							mutex.Unlock()
 
 						} else {
@@ -315,7 +315,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 									DalLog("VULN", "Injected Object from Payload: "+v["param"]+"="+v["payload"])
 									v_status[v["param"]] = true
 								}
-								fmt.Println(" - " + k)
+								DalLog("PRINT", k)
 								mutex.Unlock()
 							}
 						}
