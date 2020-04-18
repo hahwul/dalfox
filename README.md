@@ -16,13 +16,12 @@ I talk about naming. Dal(달) is the Korean pronunciation of moon and fox was ma
 
 ## Key features
 
-- Paramter Analysis (find refleced, bypass pattern, mining params with small fuzzing)
-- Static Analysis (detect WAF, detect CSP, mining params with response base)
-- XSS Scanning (common, bypassing pattern, polyglot)
-  - common payload, custom payload , blind xss , etc..)
-  - WAF, CSP Bypassing
+- Paramter Analysis (find reflected parameter, find free/bad characters, Identification of injection point)
+- Static Analysis (Check Bad-header like CSP, X-Frame-optiopns, etc.. with base request/response base)
+- Optimization query of payloads
+- XSS Scanning and DOM Base Verifying
 - Support Pipeline 
-  - Sacnning from IO
+  - Scanning from IO
   - Scanning from Raw file(Burp suite, ZAP Request)
 
 ## How to Install
@@ -41,7 +40,8 @@ $ go get -u github.com/hahwul/dalfox
 Parameter Analysis and XSS Scanning tool based on golang
 Find Of XSS and Dal is the Korean pronunciation of moon. @hahwul
 
-Usage of ./dalfox:
+
+Usage of dalfox:
   -blind string
     	Add blind XSS payload, e.g -blind https://hahwul.xss.ht
   -config string
@@ -67,6 +67,7 @@ Usage of ./dalfox:
   -url string
     	target url
 ```
+
 
 ## Build
 ```
