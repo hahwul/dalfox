@@ -64,6 +64,7 @@ func main() {
 	options_str["cookie"] = *cookie
 	options_str["p"] = *p
 	options_str["blind"] = *blind
+	options_str["data"] = *data
 	options_str["ua"] = *user_agent
 	options_bool["only-discovery"] = *onlydiscovery
 

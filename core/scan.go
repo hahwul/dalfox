@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -480,8 +481,10 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 
 // SendReq is sending http request (handled GET/POST)
 func SendReq(url, payload string, options_string map[string]string) (string, *http.Response, bool, bool) {
-	req, err := http.NewRequest("GET", url, nil)
-	if err != nil {
+	req, _ := http.NewRequest("GET", url, nil)
+	if options_string["data"] != "" {
+		d := []byte(options_string["data"])
+		req, _ = http.NewRequest("POST", url, bytes.NewBuffer(d))
 	}
 
 	if options_string["header"] != "" {
