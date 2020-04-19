@@ -397,6 +397,7 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 						}
 					}
 				}
+				code = code[:len(code)-5]
 				pointer, _ := Abstraction(resbody)
 				var smap string
 				ih := 0
