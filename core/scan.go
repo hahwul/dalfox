@@ -382,9 +382,18 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 					if strings.Contains(bv, "DalFox") {
 						max := len(bv)
 						if max > 80 {
-							code = "" + strconv.Itoa(bk+1) + " line:  " + bv[:80]
+							index := strings.Index(bv, "DalFox")
+							if index < 20 {
+								code = code + strconv.Itoa(bk+1) + " line:  " + bv[:80] + "\n    "
+							} else {
+								if max < index+60 {
+									code = code + strconv.Itoa(bk+1) + " line:  " + bv[index-20:max] + "\n    "
+								} else {
+									code = code + strconv.Itoa(bk+1) + " line:  " + bv[index-20:index+60] + "\n    "
+								}
+							}
 						} else {
-							code = "" + strconv.Itoa(bk+1) + " line:  " + bv
+							code = code + strconv.Itoa(bk+1) + " line:  " + bv + "\n    "
 						}
 					}
 				}
