@@ -400,26 +400,7 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 			resbody, resp, _, vrs := SendReq(temp_url, "DalFox", options_string)
 			_ = resp
 			if vrs {
-				bodyarr := strings.Split(resbody, "\n")
-				for bk, bv := range bodyarr {
-					if strings.Contains(bv, "DalFox") {
-						max := len(bv)
-						if max > 80 {
-							index := strings.Index(bv, "DalFox")
-							if index < 20 {
-								code = code + strconv.Itoa(bk+1) + " line:  " + bv[:80] + "\n    "
-							} else {
-								if max < index+60 {
-									code = code + strconv.Itoa(bk+1) + " line:  " + bv[index-20:max] + "\n    "
-								} else {
-									code = code + strconv.Itoa(bk+1) + " line:  " + bv[index-20:index+60] + "\n    "
-								}
-							}
-						} else {
-							code = code + strconv.Itoa(bk+1) + " line:  " + bv + "\n    "
-						}
-					}
-				}
+				code = CodeView(resbody, "DalFox")
 				code = code[:len(code)-5]
 				pointer, _ := Abstraction(resbody)
 				var smap string
