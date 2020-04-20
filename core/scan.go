@@ -407,7 +407,7 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 				if vrs {
 					code = CodeView(resbody, "DalFox")
 					code = code[:len(code)-5]
-					pointer, _ := Abstraction(resbody)
+					pointer := Abstraction(resbody)
 					var smap string
 					ih := 0
 					ij := 0

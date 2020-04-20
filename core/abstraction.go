@@ -1,22 +1,26 @@
 package core
 
 import (
-	"bufio"
 	"sort"
 	"strings"
 )
 
-func Abstraction(s string) (lines []string, err error) {
+func Abstraction(s string) []string {
 	var mapdata []string
-	scanner := bufio.NewScanner(strings.NewReader(s))
-	for scanner.Scan() {
-		lines = append(lines, scanner.Text())
+
+	bodyarr := strings.Split(s, "\n")
+
+	for _, text := range bodyarr {
+
+		//	scanner := bufio.NewScanner(strings.NewReader(s))
+		//	for scanner.Scan() {
+		//		text := scanner.Text()
+		//	lines = append(lines, text)
 
 		pointer := make(map[int]string)
-		sstart := strings.Index(scanner.Text(), "<script")
-		send := strings.Index(scanner.Text(), "</script")
-		ptn := strings.Index(scanner.Text(), "DalFox")
-
+		sstart := strings.Index(text, "<script")
+		send := strings.Index(text, "</script")
+		ptn := strings.Index(text, "DalFox")
 		if sstart != -1 {
 			pointer[sstart] = "script-start"
 		}
@@ -52,6 +56,6 @@ func Abstraction(s string) (lines []string, err error) {
 		}
 
 	}
-	err = scanner.Err()
-	return mapdata, err
+	//err := error
+	return mapdata
 }
