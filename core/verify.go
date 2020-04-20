@@ -28,7 +28,6 @@ func VerifyDOM(body io.ReadCloser) bool {
 	}
 	// Find the review items
 	doc.Find(".dalfox").Each(func(i int, s *goquery.Selection) {
-		fmt.Println("zfzf")
 		check = true
 	})
 	if check {
@@ -38,10 +37,6 @@ func VerifyDOM(body io.ReadCloser) bool {
 			// For each item found, get the band and title
 			check = true
 		})
-		if check {
-			return true
-		} else {
-			return false
-		}
+		return check
 	}
 }
