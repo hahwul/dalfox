@@ -2,7 +2,7 @@ package core
 
 import (
 	"fmt"
-	"io"
+	"io/ioutil"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
@@ -18,7 +18,11 @@ func VerifyReflection(body, payload string) bool {
 }
 
 // VerifyDOM is check success inject on code
-func VerifyDOM(body io.ReadCloser) bool {
+func VerifyDOM(s string) bool { //(body io.ReadCloser) bool {
+
+	body := ioutil.NopCloser(strings.NewReader(s)) // r type is io.ReadCloser
+	defer body.Close()
+
 	// Load the HTML document
 	doc, err := goquery.NewDocumentFromReader(body)
 	check := false

@@ -520,7 +520,7 @@ func SendReq(url, payload string, options_string map[string]string) (string, *ht
 	bytes, _ := ioutil.ReadAll(resp.Body)
 	str := string(bytes)
 
-	vds := VerifyDOM(resp.Body)
+	vds := VerifyDOM(str)
 	vrs := VerifyReflection(str, payload)
 	defer resp.Body.Close()
 	return str, resp, vds, vrs
