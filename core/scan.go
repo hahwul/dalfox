@@ -381,103 +381,110 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 		return params
 	}
 	p, _ := url.ParseQuery(u.RawQuery)
-	for k, _ := range p {
-		if (options_string["p"] == "") || (options_string["p"] == k) {
-			//temp_url := u
-			//temp_q := u.Query()
-			//temp_q.Set(k, v[0]+"DalFox")
-			/*
-				data := u.String()
-				data = strings.Replace(data, k+"="+v[0], k+"="+v[0]+"DalFox", 1)
-				temp_url, _ := url.Parse(data)
-				temp_q := temp_url.Query()
-				temp_url.RawQuery = temp_q.Encode()
-			*/
-			temp_url := MakeRequestQuery(target, k, "DalFox")
-			var code string
+	var wgg sync.WaitGroup
+	for kk, _ := range p {
+		k := kk
+		wgg.Add(1)
+		go func() {
+			defer wgg.Done()
+			if (options_string["p"] == "") || (options_string["p"] == k) {
+				//temp_url := u
+				//temp_q := u.Query()
+				//temp_q.Set(k, v[0]+"DalFox")
+				/*
+					data := u.String()
+					data = strings.Replace(data, k+"="+v[0], k+"="+v[0]+"DalFox", 1)
+					temp_url, _ := url.Parse(data)
+					temp_q := temp_url.Query()
+					temp_url.RawQuery = temp_q.Encode()
+				*/
+				temp_url := MakeRequestQuery(target, k, "DalFox")
+				var code string
 
-			//temp_url.RawQuery = temp_q.Encode()
-			resbody, resp, _, vrs := SendReq(temp_url, "DalFox", options_string)
-			_ = resp
-			if vrs {
-				code = CodeView(resbody, "DalFox")
-				code = code[:len(code)-5]
-				pointer, _ := Abstraction(resbody)
-				var smap string
-				ih := 0
-				ij := 0
-				for _, sv := range pointer {
-					if sv == "inHTML" {
-						ih = ih + 1
-					}
-					if sv == "inJS" {
-						ij = ij + 1
-					}
-				}
-				if ih > 0 {
-					smap = smap + "inHTML[" + strconv.Itoa(ih) + "] "
-				}
-				if ij > 0 {
-					smap = smap + "inJS[" + strconv.Itoa(ij) + "] "
-				}
-				ia := 0
-				temp_url := MakeRequestQuery(target, k, "\" id=dalfox \"")
-				_, _, vds, _ := SendReq(temp_url, "", options_string)
-				if vds {
-					ia = ia + 1
-				}
-				temp_url = MakeRequestQuery(target, k, "' id=dalfox '")
-				_, _, vds, _ = SendReq(temp_url, "", options_string)
-				if vds {
-					ia = ia + 1
-				}
-				temp_url = MakeRequestQuery(target, k, "' class=dalfox '")
-				_, _, vds, _ = SendReq(temp_url, "", options_string)
-				if vds {
-					ia = ia + 1
-				}
-				temp_url = MakeRequestQuery(target, k, "\" class=dalfox \"")
-				_, _, vds, _ = SendReq(temp_url, "", options_string)
-				if vds {
-					ia = ia + 1
-				}
-				if ia > 0 {
-					smap = smap + "inATTR[" + strconv.Itoa(ia) + "] "
-				}
-
-				params[k] = append(params[k], smap)
-				var wg sync.WaitGroup
-				chars := GetSpecialChar()
-				for _, c := range chars {
-					wg.Add(1)
-					char := c
-					/*
-						tdata := u.String()
-						tdata = strings.Replace(tdata, k+"="+v[0], k+"="+v[0]+"DalFox"+char, 1)
-						turl, _ := url.Parse(tdata)
-						tq := turl.Query()
-						turl.RawQuery = tq.Encode()
-					*/
-
-					/* turl := u
-					q := u.Query()
-					q.Set(k, v[0]+"DalFox"+string(char))
-					turl.RawQuery = q.Encode()
-					*/
-					go func() {
-						defer wg.Done()
-						turl := MakeRequestQuery(target, k, "dalfox"+char)
-						_, _, _, vrs := SendReq(turl, "dalfox"+char, options_string)
-						_ = resp
-						if vrs {
-							params[k] = append(params[k], char)
+				//temp_url.RawQuery = temp_q.Encode()
+				resbody, resp, _, vrs := SendReq(temp_url, "DalFox", options_string)
+				_ = resp
+				if vrs {
+					code = CodeView(resbody, "DalFox")
+					code = code[:len(code)-5]
+					pointer, _ := Abstraction(resbody)
+					var smap string
+					ih := 0
+					ij := 0
+					for _, sv := range pointer {
+						if sv == "inHTML" {
+							ih = ih + 1
 						}
-					}()
+						if sv == "inJS" {
+							ij = ij + 1
+						}
+					}
+					if ih > 0 {
+						smap = smap + "inHTML[" + strconv.Itoa(ih) + "] "
+					}
+					if ij > 0 {
+						smap = smap + "inJS[" + strconv.Itoa(ij) + "] "
+					}
+					ia := 0
+					temp_url := MakeRequestQuery(target, k, "\" id=dalfox \"")
+					_, _, vds, _ := SendReq(temp_url, "", options_string)
+					if vds {
+						ia = ia + 1
+					}
+					temp_url = MakeRequestQuery(target, k, "' id=dalfox '")
+					_, _, vds, _ = SendReq(temp_url, "", options_string)
+					if vds {
+						ia = ia + 1
+					}
+					temp_url = MakeRequestQuery(target, k, "' class=dalfox '")
+					_, _, vds, _ = SendReq(temp_url, "", options_string)
+					if vds {
+						ia = ia + 1
+					}
+					temp_url = MakeRequestQuery(target, k, "\" class=dalfox \"")
+					_, _, vds, _ = SendReq(temp_url, "", options_string)
+					if vds {
+						ia = ia + 1
+					}
+					if ia > 0 {
+						smap = smap + "inATTR[" + strconv.Itoa(ia) + "] "
+					}
+
+					params[k] = append(params[k], smap)
+					var wg sync.WaitGroup
+					chars := GetSpecialChar()
+					for _, c := range chars {
+						wg.Add(1)
+						char := c
+						/*
+							tdata := u.String()
+							tdata = strings.Replace(tdata, k+"="+v[0], k+"="+v[0]+"DalFox"+char, 1)
+							turl, _ := url.Parse(tdata)
+							tq := turl.Query()
+							turl.RawQuery = tq.Encode()
+						*/
+
+						/* turl := u
+						q := u.Query()
+						q.Set(k, v[0]+"DalFox"+string(char))
+						turl.RawQuery = q.Encode()
+						*/
+						go func() {
+							defer wg.Done()
+							turl := MakeRequestQuery(target, k, "dalfox"+char)
+							_, _, _, vrs := SendReq(turl, "dalfox"+char, options_string)
+							_ = resp
+							if vrs {
+								params[k] = append(params[k], char)
+							}
+						}()
+					}
+					wg.Wait()
+					params[k] = append(params[k], code)
 				}
-				wg.Wait()
-				params[k] = append(params[k], code)
 			}
-		}
+		}()
+		wgg.Wait()
 	}
 	return params
 }
