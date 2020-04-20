@@ -273,19 +273,23 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 			if v_status[v["param"]] == false {
 				go func() {
 					defer wg.Done()
-					_, resp, vds, vrs := SendReq(k, v["payload"], options_string)
+					resbody, resp, vds, vrs := SendReq(k, v["payload"], options_string)
 					_ = resp
 					if v["type"] != "inBlind" {
 						if v["type"] == "inJS" {
 							if vrs {
+								code := CodeView(resbody, v["payload"])
 								mutex.Lock()
 								DalLog("VULN", "Reflected Payload in JS: "+v["param"]+"="+v["payload"])
+								DalLog("CODE", code)
 								DalLog("PRINT", k)
 								mutex.Unlock()
 							}
 						} else if v["type"] == "inATTR" {
 							mutex.Lock()
 							DalLog("WEAK", "Injected Attribute: "+v["param"]+"="+v["payload"])
+							code := CodeView(resbody, v["payload"])
+							DalLog("CODE", code)
 							if vds {
 								DalLog("VULN", "Injected Attribute with XSS Payload: "+v["param"]+"="+v["payload"])
 								v_status[v["param"]] = true
@@ -295,8 +299,10 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 
 						} else {
 							if vrs {
+								code := CodeView(resbody, v["payload"])
 								mutex.Lock()
 								DalLog("WEAK", "Reflected Payload: "+v["param"]+"="+v["payload"])
+								DalLog("CODE", code)
 								if vds {
 									DalLog("VULN", "Injected Object from Payload: "+v["param"]+"="+v["payload"])
 									v_status[v["param"]] = true
@@ -324,13 +330,29 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 	DalLog("SYSTEM", "Finish :D")
 }
 
-// VerifyReflection is check reflected xss pattern
-func aVerifyReflection(body, payload string) bool {
-	if strings.Contains(body, payload) {
-		return true
-	} else {
-		return false
+func CodeView(resbody, pattern string) string {
+	var code string
+	bodyarr := strings.Split(resbody, "\n")
+	for bk, bv := range bodyarr {
+		if strings.Contains(bv, pattern) {
+			max := len(bv)
+			if max > 80 {
+				index := strings.Index(bv, pattern)
+				if index < 20 {
+					code = code + strconv.Itoa(bk+1) + " line:  " + bv[:80] + "\n    "
+				} else {
+					if max < index+60 {
+						code = code + strconv.Itoa(bk+1) + " line:  " + bv[index-20:max] + "\n    "
+					} else {
+						code = code + strconv.Itoa(bk+1) + " line:  " + bv[index-20:index+60] + "\n    "
+					}
+				}
+			} else {
+				code = code + strconv.Itoa(bk+1) + " line:  " + bv + "\n    "
+			}
+		}
 	}
+	return code[:len(code)-5]
 }
 
 // StaticAnalysis is found information on original req/res
