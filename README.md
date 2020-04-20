@@ -23,8 +23,9 @@ I talk about naming. Dal(달) is the Korean pronunciation of moon and fox was ma
   - Eliminate unnecessary payloads based on badchar
 - XSS Scanning and DOM Base Verifying
 - Support Pipeline 
+  - Scanning from single url
   - Scanning from IO
-  - Scanning from Raw file(Burp suite, ZAP Request)
+  - Scanning from URLs list file
 
 ## How to Install
 ```
