@@ -255,8 +255,8 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 				tm["type"] = "toBlind"
 				tm["payload"] = "Blind"
 				query[tq] = tm
-				DalLog("SYSTEM", "Added your blind XSS ("+options_string["blind"]+")")
 			}
+			DalLog("SYSTEM", "Added your blind XSS ("+options_string["blind"]+")")
 		}
 
 		DalLog("SYSTEM", "Start XSS Scanning.. with "+strconv.Itoa(len(query))+" queries 🗡")
