@@ -19,6 +19,8 @@ I talk about naming. Dal(달) is the Korean pronunciation of moon and fox was ma
 - Paramter Analysis (find reflected parameter, find free/bad characters, Identification of injection point)
 - Static Analysis (Check Bad-header like CSP, X-Frame-optiopns, etc.. with base request/response base)
 - Optimization query of payloads
+  - Check the injection point through abstraction and generated the fit payload.
+  - Eliminate unnecessary payloads based on badchar
 - XSS Scanning and DOM Base Verifying
 - Support Pipeline 
   - Scanning from IO
