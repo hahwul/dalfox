@@ -68,8 +68,6 @@ Usage of dalfox:
     	target url
 ```
 
-
-## Build
-```
-$ go build dalfox.go
-```
+## ScreenShot
+![1414](https://user-images.githubusercontent.com/13212227/79770664-b08ba280-8368-11ea-8a45-669e1e29baa8.png)
+![1415](https://user-images.githubusercontent.com/13212227/79770859-eb8dd600-8368-11ea-9178-aaacf560e9f5.png)
