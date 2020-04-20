@@ -67,6 +67,8 @@ Usage of dalfox:
   -url string
     	target url
 ```
+See [wiki](https://github.com/hahwul/dalfox/wiki) for detailed instructions!
+
 
 ## ScreenShot
 ![1414](https://user-images.githubusercontent.com/13212227/79770664-b08ba280-8368-11ea-8a45-669e1e29baa8.png)
