@@ -70,4 +70,4 @@ Usage of dalfox:
 
 ## ScreenShot
 ![1414](https://user-images.githubusercontent.com/13212227/79770664-b08ba280-8368-11ea-8a45-669e1e29baa8.png)
-![1415](https://user-images.githubusercontent.com/13212227/79770982-1b3cde00-8369-11ea-8e28-ee410192aea7.png)
+![1415](https://user-images.githubusercontent.com/13212227/79771583-f6953600-8369-11ea-9ae9-0d23553c00a9.png)
