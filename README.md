@@ -70,7 +70,22 @@ Usage of dalfox:
   -url string
     	target url
 ```
-See [wiki](https://github.com/hahwul/dalfox/wiki) for detailed instructions!
+Running from single url
+```
+$ dalfox -url http://testphp.vulnweb.com/listproducts.php\?cat\=123\&artist\=123\&asdf\=ff
+```
+
+Running from file
+```
+$ dalfox -iL urls_file
+```
+
+Running from io(pipeline)
+```
+$ cat urls_file | dalfox -pipe
+```
+
+Other tips, See [wiki](https://github.com/hahwul/dalfox/wiki) for detailed instructions!
 
 
 ## ScreenShot
