@@ -2,6 +2,7 @@ package core
 
 import (
 	"bytes"
+	"errors"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -286,30 +287,40 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 								mutex.Unlock()
 							}
 						} else if v["type"] == "inATTR" {
-							mutex.Lock()
-							DalLog("WEAK", "Injected Attribute: "+v["param"]+"="+v["payload"])
-							code := CodeView(resbody, v["payload"])
-							DalLog("CODE", code)
 							if vds {
-								DalLog("VULN", "Injected Attribute with XSS Payload: "+v["param"]+"="+v["payload"])
 								v_status[v["param"]] = true
-							}
-							DalLog("PRINT", k)
-							mutex.Unlock()
-
-						} else {
-							if vrs {
-								code := CodeView(resbody, v["payload"])
 								mutex.Lock()
-								DalLog("WEAK", "Reflected Payload: "+v["param"]+"="+v["payload"])
+								DalLog("VULN", "Injected Attribute with XSS Payload: "+v["param"]+"="+v["payload"])
+								code := CodeView(resbody, v["payload"])
 								DalLog("CODE", code)
-								if vds {
-									DalLog("VULN", "Injected Object from Payload: "+v["param"]+"="+v["payload"])
-									v_status[v["param"]] = true
-								}
+								DalLog("PRINT", k)
+								mutex.Unlock()
+							} else if vrs {
+								mutex.Lock()
+								DalLog("WEAK", "Injected Attribute: "+v["param"]+"="+v["payload"])
+								code := CodeView(resbody, v["payload"])
+								DalLog("CODE", code)
 								DalLog("PRINT", k)
 								mutex.Unlock()
 							}
+						} else {
+							if vds {
+								v_status[v["param"]] = true
+								mutex.Lock()
+								DalLog("VULN", "Injected Object from Payload: "+v["param"]+"="+v["payload"])
+								code := CodeView(resbody, v["payload"])
+								DalLog("CODE", code)
+								DalLog("PRINT", k)
+								mutex.Unlock()
+							} else if vrs {
+								mutex.Lock()
+								DalLog("WEAK", "Reflected Payload: "+v["param"]+"="+v["payload"])
+								code := CodeView(resbody, v["payload"])
+								DalLog("CODE", code)
+								DalLog("PRINT", k)
+								mutex.Unlock()
+							}
+
 						}
 					}
 				}()
@@ -332,6 +343,9 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 
 func CodeView(resbody, pattern string) string {
 	var code string
+	if resbody == "" {
+		return ""
+	}
 	bodyarr := strings.Split(resbody, "\n")
 	for bk, bv := range bodyarr {
 		if strings.Contains(bv, pattern) {
@@ -352,7 +366,11 @@ func CodeView(resbody, pattern string) string {
 			}
 		}
 	}
-	return code[:len(code)-5]
+	if len(code) > 4 {
+		return code[:len(code)-5]
+	} else {
+		return code
+	}
 }
 
 // StaticAnalysis is found information on original req/res
@@ -512,17 +530,22 @@ func SendReq(url, payload string, options_string map[string]string) (string, *ht
 		req.Header.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:75.0) Gecko/20100101 Firefox/75.0")
 	}
 
-	client := &http.Client{}
+	client := &http.Client{
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return errors.New("something bad happened") // or maybe the error from the request
+		},
+	}
 	resp, err := client.Do(req)
 	if err != nil {
+		return "", resp, false, false
 	}
 
 	bytes, _ := ioutil.ReadAll(resp.Body)
 	str := string(bytes)
 
+	defer resp.Body.Close()
 	vds := VerifyDOM(str)
 	vrs := VerifyReflection(str, payload)
-	defer resp.Body.Close()
 	return str, resp, vds, vrs
 }
 
