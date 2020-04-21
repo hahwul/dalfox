@@ -74,5 +74,5 @@ See [wiki](https://github.com/hahwul/dalfox/wiki) for detailed instructions!
 
 
 ## ScreenShot
-![1414](https://user-images.githubusercontent.com/13212227/79770664-b08ba280-8368-11ea-8a45-669e1e29baa8.png)
-![1415](https://user-images.githubusercontent.com/13212227/79771583-f6953600-8369-11ea-9ae9-0d23553c00a9.png)
+![1414](https://user-images.githubusercontent.com/13212227/79870656-403f5880-841e-11ea-9fef-0e47be5dc3ee.png)
+![1415](https://user-images.githubusercontent.com/13212227/79870669-46cdd000-841e-11ea-919e-a2020997c3f8.png)
