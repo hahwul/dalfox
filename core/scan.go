@@ -138,69 +138,12 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 								query[tq] = tm
 							}
 						}
-						ara := getForceVerifyPayload()
-						for _, v := range ara {
-							tq := MakeRequestQuery(target, k, v)
-							tm := map[string]string{"param": k}
-							tm["type"] = "inJS"
-							tm["payload"] = "PloyGlot(inJS)"
-							query[tq] = tm
-						}
 					}
 					if strings.Contains(av, "inATTR") {
-						arr := GetEventHandlers()
+						arr := getAttrPayload()
 						for _, avv := range arr {
-							if Optimization("\" "+avv+"=", badchars) {
-								tq := MakeRequestQuery(target, k, "\" "+avv+"=1 id=dalfox class=dalfox \"")
-								tm := map[string]string{"param": k}
-								tm["type"] = "inATTR"
-								tm["payload"] = avv
-								query[tq] = tm
-							}
-							if Optimization("' "+avv+"=", badchars) {
-								tq := MakeRequestQuery(target, k, "' "+avv+"=1 id=dalfox class=dalfox '")
-								tm := map[string]string{"param": k}
-								tm["type"] = "inATTR"
-								tm["payload"] = avv
-								query[tq] = tm
-							}
-							if Optimization(" "+avv+"=", badchars) {
-								tq := MakeRequestQuery(target, k, " "+avv+"=1 id=dalfox class=dalfox ")
-								tm := map[string]string{"param": k}
-								tm["type"] = "inATTR"
-								tm["payload"] = avv
-								query[tq] = tm
-							}
-							if Optimization("/"+avv+"=", badchars) {
-								tq := MakeRequestQuery(target, k, "/"+avv+"=1 id=dalfox class=dalfox")
-								tm := map[string]string{"param": k}
-								tm["type"] = "inATTR"
-								tm["payload"] = avv
-								query[tq] = tm
-							}
-							if Optimization("\" "+avv+"=", badchars) {
-								tq := MakeRequestQuery(target, k, "\" "+avv+"=")
-								tm := map[string]string{"param": k}
-								tm["type"] = "inATTR"
-								tm["payload"] = avv
-								query[tq] = tm
-							}
-							if Optimization("' "+avv+"=", badchars) {
-								tq := MakeRequestQuery(target, k, "' "+avv+"=1")
-								tm := map[string]string{"param": k}
-								tm["type"] = "inATTR"
-								tm["payload"] = avv
-								query[tq] = tm
-							}
-							if Optimization(" "+avv+"=", badchars) {
-								tq := MakeRequestQuery(target, k, " "+avv+"=1")
-								tm := map[string]string{"param": k}
-								tm["type"] = "inATTR"
-								tm["payload"] = avv
-								query[tq] = tm
-							}
-							if Optimization("/"+avv+"=", badchars) {
-								tq := MakeRequestQuery(target, k, "/"+avv+"=1")
+							if Optimization(avv, badchars) {
+								tq := MakeRequestQuery(target, k, avv)
 								tm := map[string]string{"param": k}
 								tm["type"] = "inATTR"
 								tm["payload"] = avv
@@ -233,14 +176,6 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 								tm["payload"] = avv
 								query[tq] = tm
 							}
-						}
-						ara := getForceVerifyPayload()
-						for _, v := range ara {
-							tq := MakeRequestQuery(target, k, v)
-							tm := map[string]string{"param": k}
-							tm["type"] = "inJS"
-							tm["payload"] = "PloyGlot(inHTML)"
-							query[tq] = tm
 						}
 					}
 				}
@@ -279,45 +214,56 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 					if v["type"] != "inBlind" {
 						if v["type"] == "inJS" {
 							if vrs {
-								code := CodeView(resbody, v["payload"])
 								mutex.Lock()
-								DalLog("VULN", "Reflected Payload in JS: "+v["param"]+"="+v["payload"])
-								DalLog("CODE", code)
-								DalLog("PRINT", k)
+								if v_status[v["param"]] == false {
+									code := CodeView(resbody, v["payload"])
+									DalLog("VULN", "Reflected Payload in JS: "+v["param"]+"="+v["payload"])
+									DalLog("CODE", code)
+									DalLog("PRINT", k)
+									v_status[v["param"]] = true
+								}
 								mutex.Unlock()
 							}
 						} else if v["type"] == "inATTR" {
 							if vds {
-								v_status[v["param"]] = true
 								mutex.Lock()
-								DalLog("VULN", "Injected Attribute with XSS Payload: "+v["param"]+"="+v["payload"])
-								code := CodeView(resbody, v["payload"])
-								DalLog("CODE", code)
-								DalLog("PRINT", k)
+								if v_status[v["param"]] == false {
+									DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"])
+									code := CodeView(resbody, v["payload"])
+									DalLog("CODE", code)
+									DalLog("PRINT", k)
+									v_status[v["param"]] = true
+								}
 								mutex.Unlock()
 							} else if vrs {
 								mutex.Lock()
-								DalLog("WEAK", "Injected Attribute: "+v["param"]+"="+v["payload"])
-								code := CodeView(resbody, v["payload"])
-								DalLog("CODE", code)
-								DalLog("PRINT", k)
+								if v_status[v["param"]] == false {
+									DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"])
+									code := CodeView(resbody, v["payload"])
+									DalLog("CODE", code)
+									DalLog("PRINT", k)
+								}
 								mutex.Unlock()
 							}
 						} else {
 							if vds {
-								v_status[v["param"]] = true
 								mutex.Lock()
-								DalLog("VULN", "Injected Object from Payload: "+v["param"]+"="+v["payload"])
-								code := CodeView(resbody, v["payload"])
-								DalLog("CODE", code)
-								DalLog("PRINT", k)
+								if v_status[v["param"]] == false {
+									DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"])
+									code := CodeView(resbody, v["payload"])
+									DalLog("CODE", code)
+									DalLog("PRINT", k)
+									v_status[v["param"]] = true
+								}
 								mutex.Unlock()
 							} else if vrs {
 								mutex.Lock()
-								DalLog("WEAK", "Reflected Payload: "+v["param"]+"="+v["payload"])
-								code := CodeView(resbody, v["payload"])
-								DalLog("CODE", code)
-								DalLog("PRINT", k)
+								if v_status[v["param"]] == false {
+									DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"])
+									code := CodeView(resbody, v["payload"])
+									DalLog("CODE", code)
+									DalLog("PRINT", k)
+								}
 								mutex.Unlock()
 							}
 
