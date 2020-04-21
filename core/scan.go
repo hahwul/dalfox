@@ -228,8 +228,8 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 							if vds {
 								mutex.Lock()
 								if v_status[v["param"]] == false {
-									DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"])
 									code := CodeView(resbody, v["payload"])
+									DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"])
 									DalLog("CODE", code)
 									DalLog("PRINT", k)
 									v_status[v["param"]] = true
@@ -238,8 +238,8 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 							} else if vrs {
 								mutex.Lock()
 								if v_status[v["param"]] == false {
-									DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"])
 									code := CodeView(resbody, v["payload"])
+									DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"])
 									DalLog("CODE", code)
 									DalLog("PRINT", k)
 								}
@@ -249,8 +249,8 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 							if vds {
 								mutex.Lock()
 								if v_status[v["param"]] == false {
-									DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"])
 									code := CodeView(resbody, v["payload"])
+									DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"])
 									DalLog("CODE", code)
 									DalLog("PRINT", k)
 									v_status[v["param"]] = true
@@ -259,8 +259,8 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 							} else if vrs {
 								mutex.Lock()
 								if v_status[v["param"]] == false {
-									DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"])
 									code := CodeView(resbody, v["payload"])
+									DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"])
 									DalLog("CODE", code)
 									DalLog("PRINT", k)
 								}
