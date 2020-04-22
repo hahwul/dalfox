@@ -416,6 +416,7 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 
 					params[k] = append(params[k], smap)
 					var wg sync.WaitGroup
+					mutex = &sync.Mutex{}
 					chars := GetSpecialChar()
 					for _, c := range chars {
 						wg.Add(1)
@@ -439,7 +440,9 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 							_, _, _, vrs := SendReq(turl, "dalfox"+char, options_string)
 							_ = resp
 							if vrs {
+								mutex.Lock()
 								params[k] = append(params[k], char)
+								mutex.Unlock()
 							}
 						}()
 					}
