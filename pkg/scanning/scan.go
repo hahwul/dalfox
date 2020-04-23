@@ -198,6 +198,27 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 			printing.DalLog("SYSTEM", "Added your blind XSS ("+options_string["blind"]+")")
 		}
 
+		// Custom Payload
+		if options_string["customPayload"] != "" {
+			ff, err := readLinesOrLiteral(options_string["customPayload"])
+			if err != nil {
+				printing.DalLog("SYSTEM", "Custom XSS payload load fail..")
+			} else {
+				for _, customPayload := range ff {
+					spu, _ := url.Parse(target)
+					spd := spu.Query()
+					for spk, _ := range spd {
+						tq := optimization.MakeRequestQuery(target, spk, customPayload)
+						tm := map[string]string{"param": spk}
+						tm["type"] = "toHTML"
+						tm["payload"] = customPayload
+						query[tq] = tm
+					}
+				}
+				printing.DalLog("SYSTEM", "Added your "+strconv.Itoa(len(ff))+" custom xss payload")
+			}
+		}
+
 		printing.DalLog("SYSTEM", "Start XSS Scanning.. with "+strconv.Itoa(len(query))+" queries 🗡")
 		//s := spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
 		mutex := &sync.Mutex{}
