@@ -58,11 +58,13 @@ Usage of dalfox:
   -help
     	Show help message
   -iL string
-    	target urls(file)
+    	target urls(file path)
   -only-discovery
     	Use only discovery mode
   -p string
     	Testing only selected parameter
+  -pL string
+    	Custom payload list(file path)
   -pipe
     	Pipeline mode (default is false)
   -ua string
