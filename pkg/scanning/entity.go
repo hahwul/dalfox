@@ -1,4 +1,4 @@
-package core
+package scanning
 
 //GetEventHandlers is return event handlers (array type)
 func GetEventHandlers() []string {

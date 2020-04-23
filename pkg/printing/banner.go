@@ -1,4 +1,4 @@
-package core
+package printing
 
 // Banner is DalFox banner function
 func Banner() {

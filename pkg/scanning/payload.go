@@ -1,4 +1,4 @@
-package core
+package scanning
 
 func getCommonPayload() []string {
 	payload := []string{

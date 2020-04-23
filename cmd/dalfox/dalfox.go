@@ -10,7 +10,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/hahwul/dalfox/core"
+	"github.com/hahwul/dalfox/pkg/printing"
+	"github.com/hahwul/dalfox/pkg/scanning"
 )
 
 func main() {
@@ -35,7 +36,7 @@ func main() {
 
 	flag.Parse()
 	if (flag.NFlag() == 0) || *helphelp {
-		core.Banner()
+		printing.Banner()
 		flag.Usage()
 		return
 	}
@@ -75,7 +76,7 @@ func main() {
 		if err != nil {
 			fmt.Println(err)
 		}
-		core.DalLog("SYSTEM", "Using config options / loaded "+*config+" file")
+		printing.DalLog("SYSTEM", "Using config options / loaded "+*config+" file")
 		// defer the closing of our jsonFile so that we can parse it later on
 		defer jsonFile.Close()
 
@@ -95,10 +96,10 @@ func main() {
 	}
 	// Remove Deplicated value
 	targets = unique(targets)
-	core.Banner()
-	core.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target urls")
+	printing.Banner()
+	printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target urls")
 	for i, _ := range targets {
-		core.Scan(targets[i], options_str, options_bool)
+		scanning.Scan(targets[i], options_str, options_bool)
 	}
 }
 

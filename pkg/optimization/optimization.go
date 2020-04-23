@@ -1,4 +1,4 @@
-package core
+package optimization
 
 import (
 	"net/url"

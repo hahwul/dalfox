@@ -200,7 +200,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 
 		printing.DalLog("SYSTEM", "Start XSS Scanning.. with "+strconv.Itoa(len(query))+" queries 🗡")
 		//s := spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
-		mutex = &sync.Mutex{}
+		mutex := &sync.Mutex{}
 		//s.Suffix = " Waiting routines.."
 		//s.Start()                   // Start the spinner
 		//time.Sleep(3 * time.Second) // Run for some time to simulate work
@@ -374,7 +374,7 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 				if vrs {
 					code = CodeView(resbody, "DalFox")
 					code = code[:len(code)-5]
-					pointer := Abstraction(resbody)
+					pointer := optimization.Abstraction(resbody)
 					var smap string
 					ih := 0
 					ij := 0
@@ -419,7 +419,7 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 
 					params[k] = append(params[k], smap)
 					var wg sync.WaitGroup
-					mutex = &sync.Mutex{}
+					mutex := &sync.Mutex{}
 					chars := GetSpecialChar()
 					for _, c := range chars {
 						wg.Add(1)
