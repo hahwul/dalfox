@@ -1,4 +1,4 @@
-package core
+package scanning
 
 import (
 	"bytes"
@@ -12,11 +12,12 @@ import (
 	"time"
 
 	"github.com/briandowns/spinner"
+	"github.com/hahwul/dalfox/pkg/printing"
 )
 
 // Scan is main scanning function
 func Scan(target string, options_string map[string]string, options_bool map[string]bool) {
-	DalLog("SYSTEM", "Target URL: "+target)
+	printing.DalLog("SYSTEM", "Target URL: "+target)
 	//var params []string
 
 	// query is XSS payloads
@@ -34,7 +35,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 
 	_, err := url.Parse(target)
 	if err != nil {
-		DalLog("SYSTEM", "Not running "+target+" url")
+		printing.DalLog("SYSTEM", "Not running "+target+" url")
 		return
 	}
 
@@ -45,11 +46,11 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 			client := &http.Client{}
 			_, err := client.Do(treq)
 			if err != nil {
-				DalLog("SYSTEM", "Not running "+target+" url")
+				printing.DalLog("SYSTEM", "Not running "+target+" url")
 				fmt.Println(err)
 				return
 			} else {
-				DalLog("SYSTEM", "Vaild this url")
+				printing.DalLog("SYSTEM", "Vaild this url")
 			}
 		}*/
 
@@ -58,12 +59,12 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 	wait.Add(task)
 	go func() {
 		defer wait.Done()
-		DalLog("SYSTEM", "Start static analysis.. 🔍")
+		printing.DalLog("SYSTEM", "Start static analysis.. 🔍")
 		policy = StaticAnalysis(target, options_string)
 	}()
 	go func() {
 		defer wait.Done()
-		DalLog("SYSTEM", "Start parameter analysis.. 🔍")
+		printing.DalLog("SYSTEM", "Start parameter analysis.. 🔍")
 		params = ParameterAnalysis(target, options_string)
 	}()
 
@@ -76,7 +77,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 	s.Stop()
 	for k, v := range policy {
 		if len(v) != 0 {
-			DalLog("INFO", k+" is "+v)
+			printing.DalLog("INFO", k+" is "+v)
 		}
 	}
 
@@ -85,15 +86,15 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 			code, vv := v[len(v)-1], v[:len(v)-1]
 			char := strings.Join(vv, "  ")
 			//x, a = a[len(a)-1], a[:len(a)-1]
-			DalLog("INFO", "Reflected "+k+" param => "+char)
-			DalLog("CODE", code)
+			printing.DalLog("INFO", "Reflected "+k+" param => "+char)
+			printing.DalLog("CODE", code)
 		}
 	}
 
 	if !options_bool["only-discovery"] {
 		// XSS Scanning
 
-		DalLog("SYSTEM", "Generate XSS payload and Optimization.. 🛠")
+		printing.DalLog("SYSTEM", "Generate XSS payload and Optimization.. 🛠")
 		// Optimization..
 
 		/*
@@ -192,10 +193,10 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 				tm["payload"] = "Blind"
 				query[tq] = tm
 			}
-			DalLog("SYSTEM", "Added your blind XSS ("+options_string["blind"]+")")
+			printing.DalLog("SYSTEM", "Added your blind XSS ("+options_string["blind"]+")")
 		}
 
-		DalLog("SYSTEM", "Start XSS Scanning.. with "+strconv.Itoa(len(query))+" queries 🗡")
+		printing.DalLog("SYSTEM", "Start XSS Scanning.. with "+strconv.Itoa(len(query))+" queries 🗡")
 		//s := spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
 		mutex = &sync.Mutex{}
 		//s.Suffix = " Waiting routines.."
@@ -217,9 +218,9 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 								mutex.Lock()
 								if v_status[v["param"]] == false {
 									code := CodeView(resbody, v["payload"])
-									DalLog("VULN", "Reflected Payload in JS: "+v["param"]+"="+v["payload"])
-									DalLog("CODE", code)
-									DalLog("PRINT", k)
+									printing.DalLog("VULN", "Reflected Payload in JS: "+v["param"]+"="+v["payload"])
+									printing.DalLog("CODE", code)
+									printing.DalLog("PRINT", k)
 									v_status[v["param"]] = true
 								}
 								mutex.Unlock()
@@ -229,9 +230,9 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 								mutex.Lock()
 								if v_status[v["param"]] == false {
 									code := CodeView(resbody, v["payload"])
-									DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"])
-									DalLog("CODE", code)
-									DalLog("PRINT", k)
+									printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"])
+									printing.DalLog("CODE", code)
+									printing.DalLog("PRINT", k)
 									v_status[v["param"]] = true
 								}
 								mutex.Unlock()
@@ -239,9 +240,9 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 								mutex.Lock()
 								if v_status[v["param"]] == false {
 									code := CodeView(resbody, v["payload"])
-									DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"])
-									DalLog("CODE", code)
-									DalLog("PRINT", k)
+									printing.DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"])
+									printing.DalLog("CODE", code)
+									printing.DalLog("PRINT", k)
 								}
 								mutex.Unlock()
 							}
@@ -250,9 +251,9 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 								mutex.Lock()
 								if v_status[v["param"]] == false {
 									code := CodeView(resbody, v["payload"])
-									DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"])
-									DalLog("CODE", code)
-									DalLog("PRINT", k)
+									printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"])
+									printing.DalLog("CODE", code)
+									printing.DalLog("PRINT", k)
 									v_status[v["param"]] = true
 								}
 								mutex.Unlock()
@@ -260,9 +261,9 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 								mutex.Lock()
 								if v_status[v["param"]] == false {
 									code := CodeView(resbody, v["payload"])
-									DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"])
-									DalLog("CODE", code)
-									DalLog("PRINT", k)
+									printing.DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"])
+									printing.DalLog("CODE", code)
+									printing.DalLog("PRINT", k)
 								}
 								mutex.Unlock()
 							}
@@ -284,7 +285,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 		*/
 		//s.Stop()
 	}
-	DalLog("SYSTEM", "Finish :D")
+	printing.DalLog("SYSTEM", "Finish :D")
 }
 
 func CodeView(resbody, pattern string) string {
