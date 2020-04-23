@@ -26,6 +26,7 @@ I talk about naming. Dal(달) is the Korean pronunciation of moon and fox was ma
   - Scanning from single url
   - Scanning from IO
   - Scanning from URLs list file
+- And the various options required for the testing :D
 
 ## How to Install
 ```
