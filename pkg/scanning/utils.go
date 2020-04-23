@@ -1,4 +1,4 @@
-package utils
+package scan
 
 import (
 	"bufio"
@@ -42,6 +42,7 @@ func isFile(path string) bool {
 	return err == nil && f.Mode().IsRegular()
 }
 
+// unique is ..
 func unique(intSlice []string) []string {
 	keys := make(map[string]bool)
 	list := []string{}
