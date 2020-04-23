@@ -1,4 +1,4 @@
-package main
+package dalfox
 
 import (
 	"bufio"
@@ -14,7 +14,7 @@ import (
 	"github.com/hahwul/dalfox/pkg/scanning"
 )
 
-func main() {
+func Run() {
 	var targets []string
 	options_str := make(map[string]string)
 	options_bool := make(map[string]bool)
