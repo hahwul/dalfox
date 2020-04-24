@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -503,7 +504,16 @@ func SendReq(url, payload string, options_string map[string]string) (string, *ht
 		req.Header.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:75.0) Gecko/20100101 Firefox/75.0")
 	}
 
+	var netTransport = &http.Transport{
+		Dial: (&net.Dialer{
+			Timeout: 5 * time.Second,
+		}).Dial,
+		TLSHandshakeTimeout: 5 * time.Second,
+	}
+
 	client := &http.Client{
+		Timeout:   time.Second * 10,
+		Transport: netTransport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return errors.New("something bad happened") // or maybe the error from the request
 		},
