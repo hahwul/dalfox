@@ -100,7 +100,7 @@ func main() {
 	targets = unique(targets)
 	printing.Banner()
 	printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target urls")
-	for i, _ := range targets {
+	for i := range targets {
 		scanning.Scan(targets[i], optionsStr, optionsBool)
 	}
 }
