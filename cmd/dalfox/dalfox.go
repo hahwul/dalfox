@@ -1,4 +1,4 @@
-package dalfox
+package main
 
 import (
 	"bufio"
