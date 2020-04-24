@@ -5,6 +5,7 @@ import (
 	"strings"
 )
 
+// Abstraction is abstract for optimization
 func Abstraction(s string) []string {
 	var mapdata []string
 
