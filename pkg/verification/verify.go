@@ -34,13 +34,11 @@ func VerifyDOM(s string) bool { //(body io.ReadCloser) bool {
 	doc.Find(".dalfox").Each(func(i int, s *goquery.Selection) {
 		check = true
 	})
-	if check {
-		return true
-	} else {
+	if !check {
 		doc.Find("dalfox").Each(func(i int, s *goquery.Selection) {
 			// For each item found, get the band and title
 			check = true
 		})
-		return check
 	}
+	return check
 }
