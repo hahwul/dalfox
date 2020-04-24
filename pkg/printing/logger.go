@@ -12,7 +12,7 @@ var (
 	mutex = &sync.Mutex{}
 )
 
-// Dallog is log
+// DalLog is log fomatting for DalFox
 func DalLog(level, text string) {
 	if level == "INFO" {
 		text = aurora.Blue("[I] ").String() + text
