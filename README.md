@@ -34,7 +34,7 @@ $ go get -u github.com/hahwul/dalfox/cmd/dalfox
 ```
 
 ## Usage
-```
+```plain
     _..._
   .' .::::.   __   _   _    ___ _ __ __
  :  :::::::: |  \ / \ | |  | __/ \\ V /
@@ -74,17 +74,17 @@ Usage of dalfox:
     	target url
 ```
 Running from single url
-```
+```plain
 $ dalfox -url http://testphp.vulnweb.com/listproducts.php\?cat\=123\&artist\=123\&asdf\=ff
 ```
 
 Running from file
-```
+```plain
 $ dalfox -iL urls_file
 ```
 
 Running from io(pipeline)
-```
+```plain
 $ cat urls_file | dalfox -pipe
 ```
 
