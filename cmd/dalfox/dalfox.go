@@ -14,7 +14,7 @@ import (
 	"github.com/hahwul/dalfox/pkg/scanning"
 )
 
-func Run() {
+func main() {
 	var targets []string
 	options_str := make(map[string]string)
 	options_bool := make(map[string]bool)
