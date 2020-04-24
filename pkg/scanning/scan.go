@@ -189,7 +189,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 		if optionsStr["blind"] != "" {
 			spu, _ := url.Parse(target)
 			spd := spu.Query()
-			for spk, _ := range spd {
+			for spk := range spd {
 				tq := optimization.MakeRequestQuery(target, spk, "\"'><script src="+optionsStr["blind"]+"></script>")
 				tm := map[string]string{"param": spk}
 				tm["type"] = "toBlind"
