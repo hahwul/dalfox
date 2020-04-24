@@ -340,9 +340,8 @@ func CodeView(resbody, pattern string) string {
 	}
 	if len(code) > 4 {
 		return code[:len(code)-5]
-	} else {
-		return code
 	}
+	return code
 }
 
 // StaticAnalysis is found information on original req/res
