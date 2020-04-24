@@ -16,8 +16,8 @@ import (
 
 func main() {
 	var targets []string
-	options_str := make(map[string]string)
-	options_bool := make(map[string]bool)
+	optionsStr := make(map[string]string)
+	optionsBool := make(map[string]bool)
 
 	// input options
 	url := flag.String("url", "", "target url")
@@ -62,14 +62,14 @@ func main() {
 			targets = append(targets, target)
 		}
 	}
-	options_str["header"] = *header
-	options_str["cookie"] = *cookie
-	options_str["p"] = *p
-	options_str["blind"] = *blind
-	options_str["customPayload"] = *customPayload
-	options_str["data"] = *data
-	options_str["ua"] = *user_agent
-	options_bool["only-discovery"] = *onlydiscovery
+	optionsStr["header"] = *header
+	optionsStr["cookie"] = *cookie
+	optionsStr["p"] = *p
+	optionsStr["blind"] = *blind
+	optionsStr["customPayload"] = *customPayload
+	optionsStr["data"] = *data
+	optionsStr["ua"] = *user_agent
+	optionsBool["only-discovery"] = *onlydiscovery
 
 	if *config != "" {
 		// Open our jsonFile
@@ -89,10 +89,10 @@ func main() {
 
 		for k, v := range result {
 			if k == "blind" || k == "p" || k == "cookie" || k == "header" || k == "ua" {
-				options_str[k] = v.(string)
+				optionsStr[k] = v.(string)
 			}
 			if k == "only-discovery" || k == "pipe" {
-				options_bool[k] = v.(bool)
+				optionsBool[k] = v.(bool)
 			}
 		}
 	}
@@ -101,7 +101,7 @@ func main() {
 	printing.Banner()
 	printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target urls")
 	for i, _ := range targets {
-		scanning.Scan(targets[i], options_str, options_bool)
+		scanning.Scan(targets[i], optionsStr, optionsBool)
 	}
 }
 
