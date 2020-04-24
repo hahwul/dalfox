@@ -30,7 +30,7 @@ I talk about naming. Dal(달) is the Korean pronunciation of moon and fox was ma
 
 ## How to Install
 ```
-$ go get -u github.com/hahwul/dalfox
+$ go get -u github.com/hahwul/dalfox/cmd/dalfox
 ```
 
 ## Usage
