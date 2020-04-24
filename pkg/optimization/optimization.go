@@ -5,6 +5,7 @@ import (
 	"strings"
 )
 
+// MakeRequestQuery is generate http query with custom paramters
 func MakeRequestQuery(target, param, payload string) string {
 	u, _ := url.Parse(target)
 	data := u.String()
@@ -17,6 +18,7 @@ func MakeRequestQuery(target, param, payload string) string {
 	return temp_url.String()
 }
 
+// MakePathQuery is generate http query with path
 func MakePathQuery(target, payload string) string {
 	u, _ := url.Parse(target)
 	data := ""
@@ -31,6 +33,7 @@ func MakePathQuery(target, payload string) string {
 	return temp_url.String()
 }
 
+// Optimization is remove payload included badchar
 func Optimization(payload string, badchars []string) bool {
 	for _, v := range badchars {
 		if strings.Contains(payload, v) {
