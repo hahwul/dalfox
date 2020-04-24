@@ -178,7 +178,7 @@ func getInJsPayload() []string {
 func makeDynamicPayload(badchars, rtype string) []string {
 	payload := []string{}
 	if rtype == "inHTML" {
-		for _, _ = range badchars {
+		for _ = range badchars {
 
 		}
 	} else {
