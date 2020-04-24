@@ -26,12 +26,12 @@ func main() {
 	pipe := flag.Bool("pipe", false, "Pipeline mode (default is false)")
 	header := flag.String("header", "", "Add custom headers")
 	cookie := flag.String("cookie", "", "Add custom cookies")
-	user_agent := flag.String("ua", "", "Add custom User-Agent")
+	userAgent := flag.String("ua", "", "Add custom User-Agent")
 	blind := flag.String("blind", "", "Add blind XSS payload, e.g -blind https://hahwul.xss.ht")
 	customPayload := flag.String("pL", "", "Custom payload list(file path)")
 	config := flag.String("config", "", "config file path")
 	helphelp := flag.Bool("help", false, "Show help message")
-	onlydiscovery := flag.Bool("only-discovery", false, "Use only discovery mode")
+	onlyDiscovery := flag.Bool("only-discovery", false, "Use only discovery mode")
 	p := flag.String("p", "", "Testing only selected parameter")
 	// to options
 
@@ -68,8 +68,8 @@ func main() {
 	optionsStr["blind"] = *blind
 	optionsStr["customPayload"] = *customPayload
 	optionsStr["data"] = *data
-	optionsStr["ua"] = *user_agent
-	optionsBool["only-discovery"] = *onlydiscovery
+	optionsStr["ua"] = *userAgent
+	optionsBool["only-discovery"] = *onlyDiscovery
 
 	if *config != "" {
 		// Open our jsonFile
