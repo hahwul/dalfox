@@ -30,8 +30,8 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 	// 1: non-reflected , 2: reflected , 3: reflected-with-sc
 	params := make(map[string][]string)
 
-	v_status := make(map[string]bool)
-	v_status["pleasedonthaveanamelikethis_plz_plz"] = false
+	vStatus := make(map[string]bool)
+	vStatus["pleasedonthaveanamelikethis_plz_plz"] = false
 
 	// policy is "CSP":domain..
 	policy := make(map[string]string)
@@ -120,7 +120,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 
 		// set param base xss
 		for k, v := range params {
-			v_status[k] = false
+			vStatus[k] = false
 			if (optionsStr["p"] == "") || (optionsStr["p"] == k) {
 				chars := GetSpecialChar()
 				var badchars []string
@@ -208,7 +208,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 				for _, customPayload := range ff {
 					spu, _ := url.Parse(target)
 					spd := spu.Query()
-					for spk, _ := range spd {
+					for spk := range spd {
 						tq := optimization.MakeRequestQuery(target, spk, customPayload)
 						tm := map[string]string{"param": spk}
 						tm["type"] = "toHTML"
@@ -231,7 +231,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 			k := a
 			v := b
 			wg.Add(1)
-			if v_status[v["param"]] == false {
+			if vStatus[v["param"]] == false {
 				go func() {
 					defer wg.Done()
 					resbody, resp, vds, vrs := SendReq(k, v["payload"], optionsStr)
@@ -240,29 +240,29 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 						if v["type"] == "inJS" {
 							if vrs {
 								mutex.Lock()
-								if v_status[v["param"]] == false {
+								if vStatus[v["param"]] == false {
 									code := CodeView(resbody, v["payload"])
 									printing.DalLog("VULN", "Reflected Payload in JS: "+v["param"]+"="+v["payload"])
 									printing.DalLog("CODE", code)
 									printing.DalLog("PRINT", k)
-									v_status[v["param"]] = true
+									vStatus[v["param"]] = true
 								}
 								mutex.Unlock()
 							}
 						} else if v["type"] == "inATTR" {
 							if vds {
 								mutex.Lock()
-								if v_status[v["param"]] == false {
+								if vStatus[v["param"]] == false {
 									code := CodeView(resbody, v["payload"])
 									printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"])
 									printing.DalLog("CODE", code)
 									printing.DalLog("PRINT", k)
-									v_status[v["param"]] = true
+									vStatus[v["param"]] = true
 								}
 								mutex.Unlock()
 							} else if vrs {
 								mutex.Lock()
-								if v_status[v["param"]] == false {
+								if vStatus[v["param"]] == false {
 									code := CodeView(resbody, v["payload"])
 									printing.DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"])
 									printing.DalLog("CODE", code)
@@ -273,17 +273,17 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 						} else {
 							if vds {
 								mutex.Lock()
-								if v_status[v["param"]] == false {
+								if vStatus[v["param"]] == false {
 									code := CodeView(resbody, v["payload"])
 									printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"])
 									printing.DalLog("CODE", code)
 									printing.DalLog("PRINT", k)
-									v_status[v["param"]] = true
+									vStatus[v["param"]] = true
 								}
 								mutex.Unlock()
 							} else if vrs {
 								mutex.Lock()
-								if v_status[v["param"]] == false {
+								if vStatus[v["param"]] == false {
 									code := CodeView(resbody, v["payload"])
 									printing.DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"])
 									printing.DalLog("CODE", code)
@@ -372,27 +372,27 @@ func ParameterAnalysis(target string, optionsStr map[string]string) map[string][
 	}
 	p, _ := url.ParseQuery(u.RawQuery)
 	var wgg sync.WaitGroup
-	for kk, _ := range p {
+	for kk := range p {
 		k := kk
 		wgg.Add(1)
 		go func() {
 			defer wgg.Done()
 			if (optionsStr["p"] == "") || (optionsStr["p"] == k) {
-				//temp_url := u
+				//tempURL := u
 				//temp_q := u.Query()
 				//temp_q.Set(k, v[0]+"DalFox")
 				/*
 					data := u.String()
 					data = strings.Replace(data, k+"="+v[0], k+"="+v[0]+"DalFox", 1)
-					temp_url, _ := url.Parse(data)
-					temp_q := temp_url.Query()
-					temp_url.RawQuery = temp_q.Encode()
+					tempURL, _ := url.Parse(data)
+					temp_q := tempURL.Query()
+					tempURL.RawQuery = temp_q.Encode()
 				*/
-				temp_url := optimization.MakeRequestQuery(target, k, "DalFox")
+				tempURL := optimization.MakeRequestQuery(target, k, "DalFox")
 				var code string
 
-				//temp_url.RawQuery = temp_q.Encode()
-				resbody, resp, _, vrs := SendReq(temp_url, "DalFox", optionsStr)
+				//tempURL.RawQuery = temp_q.Encode()
+				resbody, resp, _, vrs := SendReq(tempURL, "DalFox", optionsStr)
 				_ = resp
 				if vrs {
 					code = CodeView(resbody, "DalFox")
@@ -416,23 +416,23 @@ func ParameterAnalysis(target string, optionsStr map[string]string) map[string][
 						smap = smap + "inJS[" + strconv.Itoa(ij) + "] "
 					}
 					ia := 0
-					temp_url := optimization.MakeRequestQuery(target, k, "\" id=dalfox \"")
-					_, _, vds, _ := SendReq(temp_url, "", optionsStr)
+					tempURL := optimization.MakeRequestQuery(target, k, "\" id=dalfox \"")
+					_, _, vds, _ := SendReq(tempURL, "", optionsStr)
 					if vds {
 						ia = ia + 1
 					}
-					temp_url = optimization.MakeRequestQuery(target, k, "' id=dalfox '")
-					_, _, vds, _ = SendReq(temp_url, "", optionsStr)
+					tempURL = optimization.MakeRequestQuery(target, k, "' id=dalfox '")
+					_, _, vds, _ = SendReq(tempURL, "", optionsStr)
 					if vds {
 						ia = ia + 1
 					}
-					temp_url = optimization.MakeRequestQuery(target, k, "' class=dalfox '")
-					_, _, vds, _ = SendReq(temp_url, "", optionsStr)
+					tempURL = optimization.MakeRequestQuery(target, k, "' class=dalfox '")
+					_, _, vds, _ = SendReq(tempURL, "", optionsStr)
 					if vds {
 						ia = ia + 1
 					}
-					temp_url = optimization.MakeRequestQuery(target, k, "\" class=dalfox \"")
-					_, _, vds, _ = SendReq(temp_url, "", optionsStr)
+					tempURL = optimization.MakeRequestQuery(target, k, "\" class=dalfox \"")
+					_, _, vds, _ = SendReq(tempURL, "", optionsStr)
 					if vds {
 						ia = ia + 1
 					}
