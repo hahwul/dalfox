@@ -19,7 +19,7 @@ import (
 )
 
 // Scan is main scanning function
-func Scan(target string, options_string map[string]string, options_bool map[string]bool) {
+func Scan(target string, optionsStr map[string]string, optionsBool map[string]bool) {
 	printing.DalLog("SYSTEM", "Target URL: "+target)
 	//var params []string
 
@@ -63,12 +63,12 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 	go func() {
 		defer wait.Done()
 		printing.DalLog("SYSTEM", "Start static analysis.. 🔍")
-		policy = StaticAnalysis(target, options_string)
+		policy = StaticAnalysis(target, optionsStr)
 	}()
 	go func() {
 		defer wait.Done()
 		printing.DalLog("SYSTEM", "Start parameter analysis.. 🔍")
-		params = ParameterAnalysis(target, options_string)
+		params = ParameterAnalysis(target, optionsStr)
 	}()
 
 	s := spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
@@ -94,7 +94,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 		}
 	}
 
-	if !options_bool["only-discovery"] {
+	if !optionsBool["only-discovery"] {
 		// XSS Scanning
 
 		printing.DalLog("SYSTEM", "Generate XSS payload and optimization.Optimization.. 🛠")
@@ -121,7 +121,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 		// set param base xss
 		for k, v := range params {
 			v_status[k] = false
-			if (options_string["p"] == "") || (options_string["p"] == k) {
+			if (optionsStr["p"] == "") || (optionsStr["p"] == k) {
 				chars := GetSpecialChar()
 				var badchars []string
 				for _, av := range v {
@@ -186,22 +186,22 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 			}
 		}
 		// Blind payload
-		if options_string["blind"] != "" {
+		if optionsStr["blind"] != "" {
 			spu, _ := url.Parse(target)
 			spd := spu.Query()
 			for spk, _ := range spd {
-				tq := optimization.MakeRequestQuery(target, spk, "\"'><script src="+options_string["blind"]+"></script>")
+				tq := optimization.MakeRequestQuery(target, spk, "\"'><script src="+optionsStr["blind"]+"></script>")
 				tm := map[string]string{"param": spk}
 				tm["type"] = "toBlind"
 				tm["payload"] = "Blind"
 				query[tq] = tm
 			}
-			printing.DalLog("SYSTEM", "Added your blind XSS ("+options_string["blind"]+")")
+			printing.DalLog("SYSTEM", "Added your blind XSS ("+optionsStr["blind"]+")")
 		}
 
 		// Custom Payload
-		if options_string["customPayload"] != "" {
-			ff, err := readLinesOrLiteral(options_string["customPayload"])
+		if optionsStr["customPayload"] != "" {
+			ff, err := readLinesOrLiteral(optionsStr["customPayload"])
 			if err != nil {
 				printing.DalLog("SYSTEM", "Custom XSS payload load fail..")
 			} else {
@@ -234,7 +234,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 			if v_status[v["param"]] == false {
 				go func() {
 					defer wg.Done()
-					resbody, resp, vds, vrs := SendReq(k, v["payload"], options_string)
+					resbody, resp, vds, vrs := SendReq(k, v["payload"], optionsStr)
 					_ = resp
 					if v["type"] != "inBlind" {
 						if v["type"] == "inJS" {
@@ -312,6 +312,7 @@ func Scan(target string, options_string map[string]string, options_bool map[stri
 	printing.DalLog("SYSTEM", "Finish :D")
 }
 
+//CodeView is showing reflected code function
 func CodeView(resbody, pattern string) string {
 	var code string
 	if resbody == "" {
@@ -345,9 +346,9 @@ func CodeView(resbody, pattern string) string {
 }
 
 // StaticAnalysis is found information on original req/res
-func StaticAnalysis(target string, options_string map[string]string) map[string]string {
+func StaticAnalysis(target string, optionsStr map[string]string) map[string]string {
 	policy := make(map[string]string)
-	resbody, resp, _, _ := SendReq(target, "", options_string)
+	resbody, resp, _, _ := SendReq(target, "", optionsStr)
 	_ = resbody
 	if resp.Header["Content-Type"] != nil {
 		policy["Content-Type"] = resp.Header["Content-Type"][0]
@@ -363,7 +364,7 @@ func StaticAnalysis(target string, options_string map[string]string) map[string]
 }
 
 // ParameterAnalysis is check reflected and mining params
-func ParameterAnalysis(target string, options_string map[string]string) map[string][]string {
+func ParameterAnalysis(target string, optionsStr map[string]string) map[string][]string {
 	u, err := url.Parse(target)
 	params := make(map[string][]string)
 	if err != nil {
@@ -376,7 +377,7 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 		wgg.Add(1)
 		go func() {
 			defer wgg.Done()
-			if (options_string["p"] == "") || (options_string["p"] == k) {
+			if (optionsStr["p"] == "") || (optionsStr["p"] == k) {
 				//temp_url := u
 				//temp_q := u.Query()
 				//temp_q.Set(k, v[0]+"DalFox")
@@ -391,7 +392,7 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 				var code string
 
 				//temp_url.RawQuery = temp_q.Encode()
-				resbody, resp, _, vrs := SendReq(temp_url, "DalFox", options_string)
+				resbody, resp, _, vrs := SendReq(temp_url, "DalFox", optionsStr)
 				_ = resp
 				if vrs {
 					code = CodeView(resbody, "DalFox")
@@ -416,22 +417,22 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 					}
 					ia := 0
 					temp_url := optimization.MakeRequestQuery(target, k, "\" id=dalfox \"")
-					_, _, vds, _ := SendReq(temp_url, "", options_string)
+					_, _, vds, _ := SendReq(temp_url, "", optionsStr)
 					if vds {
 						ia = ia + 1
 					}
 					temp_url = optimization.MakeRequestQuery(target, k, "' id=dalfox '")
-					_, _, vds, _ = SendReq(temp_url, "", options_string)
+					_, _, vds, _ = SendReq(temp_url, "", optionsStr)
 					if vds {
 						ia = ia + 1
 					}
 					temp_url = optimization.MakeRequestQuery(target, k, "' class=dalfox '")
-					_, _, vds, _ = SendReq(temp_url, "", options_string)
+					_, _, vds, _ = SendReq(temp_url, "", optionsStr)
 					if vds {
 						ia = ia + 1
 					}
 					temp_url = optimization.MakeRequestQuery(target, k, "\" class=dalfox \"")
-					_, _, vds, _ = SendReq(temp_url, "", options_string)
+					_, _, vds, _ = SendReq(temp_url, "", optionsStr)
 					if vds {
 						ia = ia + 1
 					}
@@ -462,7 +463,7 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 						go func() {
 							defer wg.Done()
 							turl := optimization.MakeRequestQuery(target, k, "dalfox"+char)
-							_, _, _, vrs := SendReq(turl, "dalfox"+char, options_string)
+							_, _, _, vrs := SendReq(turl, "dalfox"+char, optionsStr)
 							_ = resp
 							if vrs {
 								mutex.Lock()
@@ -482,24 +483,24 @@ func ParameterAnalysis(target string, options_string map[string]string) map[stri
 }
 
 // SendReq is sending http request (handled GET/POST)
-func SendReq(url, payload string, options_string map[string]string) (string, *http.Response, bool, bool) {
+func SendReq(url, payload string, optionsStr map[string]string) (string, *http.Response, bool, bool) {
 	req, _ := http.NewRequest("GET", url, nil)
-	if options_string["data"] != "" {
-		d := []byte(options_string["data"])
+	if optionsStr["data"] != "" {
+		d := []byte(optionsStr["data"])
 		req, _ = http.NewRequest("POST", url, bytes.NewBuffer(d))
 	}
 
-	if options_string["header"] != "" {
-		h := strings.Split(options_string["header"], ": ")
+	if optionsStr["header"] != "" {
+		h := strings.Split(optionsStr["header"], ": ")
 		if len(h) > 1 {
 			req.Header.Add(h[0], h[1])
 		}
 	}
-	if options_string["cookie"] != "" {
-		req.Header.Add("Cookie", options_string["cookie"])
+	if optionsStr["cookie"] != "" {
+		req.Header.Add("Cookie", optionsStr["cookie"])
 	}
-	if options_string["ua"] != "" {
-		req.Header.Add("User-Agent", options_string["ua"])
+	if optionsStr["ua"] != "" {
+		req.Header.Add("User-Agent", optionsStr["ua"])
 	} else {
 		req.Header.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:75.0) Gecko/20100101 Firefox/75.0")
 	}
