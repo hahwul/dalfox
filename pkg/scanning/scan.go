@@ -72,7 +72,8 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 	}()
 
 	s := spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
-	s.Suffix = " Waiting routines.."
+	s.Prefix = " "
+	s.Suffix = "  Waiting routines.."
 	time.Sleep(1 * time.Second) // Waiting log
 	s.Start()                   // Start the spinner
 	time.Sleep(3 * time.Second) // Run for some time to simulate work
@@ -229,7 +230,8 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 		s := spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
 		mutex := &sync.Mutex{}
 		queryCount := 0
-		s.Suffix = " Testing.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
+		s.Prefix = " "
+		s.Suffix = "  Testing.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
 		s.Start()                   // Start the spinner
 		time.Sleep(3 * time.Second) // Run for some time to simulate work
 		var wg sync.WaitGroup
@@ -304,7 +306,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 				mutex.Lock()
 				queryCount = queryCount + 1
 				s.Lock()
-				s.Suffix = " Testing.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
+				s.Suffix = "  Testing.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
 				//s.Suffix = " Waiting routines.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
 				s.Unlock()
 				mutex.Unlock()
