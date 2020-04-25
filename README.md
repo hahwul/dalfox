@@ -22,7 +22,10 @@ I talk about naming. Dal(달) is the Korean pronunciation of moon and fox was ma
   - Check the injection point through abstraction and generated the fit payload.
   - Eliminate unnecessary payloads based on badchar
 - XSS Scanning and DOM Base Verifying
-- Support Pipeline 
+- All test payloads(embeded payload, your custom/blind payloads) are tested in parallel with the encoder.
+  - Support to Double URL Encoder
+  - Support to HTML Hex Encoder
+- Useful for Pipeline 
   - Scanning from single url
   - Scanning from IO
   - Scanning from URLs list file
