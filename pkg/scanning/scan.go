@@ -108,82 +108,87 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 
 		// set path base xss
 
-		arr := getCommonPayload()
-		for _, avv := range arr {
-			tq := optimization.MakePathQuery(target, avv)
-			tm := map[string]string{"param": "pleasedonthaveanamelikethis_plz_plz"}
-			tm["type"] = "inPATH"
-			tm["payload"] = ";" + avv
-			query[tq] = tm
+		if policy["Content-Type"] != "application/json" {
 
-		}
+			arr := getCommonPayload()
+			for _, avv := range arr {
+				tq := optimization.MakePathQuery(target, avv)
+				tm := map[string]string{"param": "pleasedonthaveanamelikethis_plz_plz"}
+				tm["type"] = "inPATH"
+				tm["payload"] = ";" + avv
+				query[tq] = tm
 
-		// set param base xss
-		for k, v := range params {
-			vStatus[k] = false
-			if (optionsStr["p"] == "") || (optionsStr["p"] == k) {
-				chars := GetSpecialChar()
-				var badchars []string
-				for _, av := range v {
-					if indexOf(av, chars) == -1 {
-						badchars = append(badchars, av)
-					}
-				}
-				for _, av := range v {
-					if strings.Contains(av, "inJS") {
-						// inJS XSS
-						arr := getInJsPayload()
-						for _, avv := range arr {
-							if optimization.Optimization(avv, badchars) {
-								tq := optimization.MakeRequestQuery(target, k, avv)
-								tm := map[string]string{"param": k}
-								tm["type"] = "inJS"
-								tm["payload"] = avv
-								query[tq] = tm
-							}
+			}
+
+			// set param base xss
+			for k, v := range params {
+				vStatus[k] = false
+				if (optionsStr["p"] == "") || (optionsStr["p"] == k) {
+					chars := GetSpecialChar()
+					var badchars []string
+					for _, av := range v {
+						if indexOf(av, chars) == -1 {
+							badchars = append(badchars, av)
 						}
 					}
-					if strings.Contains(av, "inATTR") {
-						arr := getAttrPayload()
-						for _, avv := range arr {
-							if optimization.Optimization(avv, badchars) {
-								tq := optimization.MakeRequestQuery(target, k, avv)
-								tm := map[string]string{"param": k}
-								tm["type"] = "inATTR"
-								tm["payload"] = avv
-								query[tq] = tm
+					for _, av := range v {
+						if strings.Contains(av, "inJS") {
+							// inJS XSS
+							arr := getInJsPayload()
+							for _, avv := range arr {
+								if optimization.Optimization(avv, badchars) {
+									tq := optimization.MakeRequestQuery(target, k, avv)
+									tm := map[string]string{"param": k}
+									tm["type"] = "inJS"
+									tm["payload"] = avv
+									query[tq] = tm
+								}
 							}
 						}
-					}
-					// inHTML XSS
-					if strings.Contains(av, "inHTML") {
-						/*
-							arr := GetTags()
-							if optimization.Optimization("<", badchars) {
-								for _, avv := range arr {
-									tq := optimization.MakeRequestQuery(target, k, "/"+avv+"=1")
+						if strings.Contains(av, "inATTR") {
+							arr := getAttrPayload()
+							for _, avv := range arr {
+								if optimization.Optimization(avv, badchars) {
+									tq := optimization.MakeRequestQuery(target, k, avv)
+									tm := map[string]string{"param": k}
+									tm["type"] = "inATTR"
+									tm["payload"] = avv
+									query[tq] = tm
+								}
+							}
+						}
+						// inHTML XSS
+						if strings.Contains(av, "inHTML") {
+							/*
+								arr := GetTags()
+								if optimization.Optimization("<", badchars) {
+									for _, avv := range arr {
+										tq := optimization.MakeRequestQuery(target, k, "/"+avv+"=1")
+										tm := map[string]string{"param": k}
+										tm["type"] = "inHTML"
+										tm["payload"] = avv
+										query[tq] = tm
+
+									}
+								}
+							*/
+
+							arc := getCommonPayload()
+							for _, avv := range arc {
+								if optimization.Optimization(avv, badchars) {
+									tq := optimization.MakeRequestQuery(target, k, avv)
 									tm := map[string]string{"param": k}
 									tm["type"] = "inHTML"
 									tm["payload"] = avv
 									query[tq] = tm
-
 								}
-							}
-						*/
-
-						arc := getCommonPayload()
-						for _, avv := range arc {
-							if optimization.Optimization(avv, badchars) {
-								tq := optimization.MakeRequestQuery(target, k, avv)
-								tm := map[string]string{"param": k}
-								tm["type"] = "inHTML"
-								tm["payload"] = avv
-								query[tq] = tm
 							}
 						}
 					}
 				}
 			}
+		} else {
+			printing.DalLog("SYSTEM", "Type is 'application/json', It does not test except customized payload (custom/blind).")
 		}
 		// Blind payload
 		if optionsStr["blind"] != "" {
