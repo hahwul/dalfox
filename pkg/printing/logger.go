@@ -36,6 +36,7 @@ func DalLog(level, text string) {
 		text = "    +> " + text
 		fmt.Println(text)
 	} else {
+		text = "\r" + text
 		fmt.Fprintln(os.Stderr, text)
 	}
 	//mutex.Unlock()

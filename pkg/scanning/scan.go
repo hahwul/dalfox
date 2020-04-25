@@ -226,19 +226,20 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 		}
 
 		printing.DalLog("SYSTEM", "Start XSS Scanning.. with "+strconv.Itoa(len(query))+" queries 🗡")
-		//s := spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
+		s := spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
 		mutex := &sync.Mutex{}
-		//s.Suffix = " Waiting routines.."
-		//s.Start()                   // Start the spinner
-		//time.Sleep(3 * time.Second) // Run for some time to simulate work
+		queryCount := 0
+		s.Suffix = " Testing.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
+		s.Start()                   // Start the spinner
+		time.Sleep(3 * time.Second) // Run for some time to simulate work
 		var wg sync.WaitGroup
 		for a, b := range query {
 			k := a
 			v := b
 			wg.Add(1)
-			if vStatus[v["param"]] == false {
-				go func() {
-					defer wg.Done()
+			go func() {
+				defer wg.Done()
+				if vStatus[v["param"]] == false {
 					resbody, resp, vds, vrs := SendReq(k, v["payload"], optionsStr)
 					_ = resp
 					if v["type"] != "inBlind" {
@@ -299,10 +300,18 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 
 						}
 					}
-				}()
-			}
+				}
+				mutex.Lock()
+				queryCount = queryCount + 1
+				s.Lock()
+				s.Suffix = " Testing.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
+				//s.Suffix = " Waiting routines.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
+				s.Unlock()
+				mutex.Unlock()
+			}()
 		}
 		wg.Wait()
+		s.Stop()
 		/*
 			task := 1
 			var wg sync.WaitGroup
