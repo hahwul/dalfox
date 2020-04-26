@@ -63,6 +63,7 @@ Flags:
   -C, --cookie string           Add custom cookie
       --custom-payload string   Add custom payloads from file
   -d, --data string             Using POST Method and add Body data
+      --found-action string     if found weak/vuln, action(cmd) to next
   -H, --header string           Add custom headers
   -h, --help                    help for dalfox
       --only-discovery          Only testing parameter analysis

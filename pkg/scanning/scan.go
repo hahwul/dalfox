@@ -275,6 +275,9 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 									printing.DalLog("CODE", code, optionsStr)
 									printing.DalLog("PRINT", k, optionsStr)
 									vStatus[v["param"]] = true
+									if optionsStr["found-action"] != "" {
+										foundAction(optionsStr)
+									}
 								}
 								mutex.Unlock()
 							}
@@ -287,6 +290,9 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 									printing.DalLog("CODE", code, optionsStr)
 									printing.DalLog("PRINT", k, optionsStr)
 									vStatus[v["param"]] = true
+									if optionsStr["found-action"] != "" {
+										foundAction(optionsStr)
+									}
 								}
 								mutex.Unlock()
 							} else if vrs {
@@ -296,6 +302,9 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 									printing.DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"], optionsStr)
 									printing.DalLog("CODE", code, optionsStr)
 									printing.DalLog("PRINT", k, optionsStr)
+									if optionsStr["found-action"] != "" {
+										foundAction(optionsStr)
+									}
 								}
 								mutex.Unlock()
 							}
@@ -308,6 +317,9 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 									printing.DalLog("CODE", code, optionsStr)
 									printing.DalLog("PRINT", k, optionsStr)
 									vStatus[v["param"]] = true
+									if optionsStr["found-action"] != "" {
+										foundAction(optionsStr)
+									}
 								}
 								mutex.Unlock()
 							} else if vrs {
@@ -317,6 +329,9 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 									printing.DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"], optionsStr)
 									printing.DalLog("CODE", code, optionsStr)
 									printing.DalLog("PRINT", k, optionsStr)
+									if optionsStr["found-action"] != "" {
+										foundAction(optionsStr)
+									}
 								}
 								mutex.Unlock()
 							}

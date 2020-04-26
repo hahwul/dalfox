@@ -13,7 +13,7 @@ import (
 var cfgFile string
 var optionsStr = make(map[string]string)
 var optionsBool = make(map[string]bool)
-var config, cookie, data, header, p, customPayload, userAgent, blind, output, format string
+var config, cookie, data, header, p, customPayload, userAgent, blind, output, format, foundAction string
 var onlyDiscovery bool
 
 // rootCmd represents the base command when called without any subcommands
@@ -50,6 +50,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&blind, "blind", "b", "", "Add your blind xss")
 	rootCmd.PersistentFlags().StringVarP(&output, "output", "o", "", "Write to output file")
 	rootCmd.PersistentFlags().StringVar(&format, "output-format", "", "-o/--output 's format (txt/json/xml)")
+	rootCmd.PersistentFlags().StringVar(&foundAction, "found-action", "", "if found weak/vuln, action(cmd) to next")
 
 	rootCmd.PersistentFlags().BoolVar(&onlyDiscovery, "only-discovery", false, "Only testing parameter analysis")
 }
@@ -65,6 +66,7 @@ func initConfig() {
 	optionsStr["ua"] = userAgent
 	optionsStr["output"] = output
 	optionsStr["format"] = format
+	optionsStr["foundAction"] = foundAction
 	optionsBool["only-discovery"] = onlyDiscovery
 
 	if config != "" {
