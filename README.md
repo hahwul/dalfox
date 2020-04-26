@@ -66,6 +66,8 @@ Flags:
   -H, --header string           Add custom headers
   -h, --help                    help for dalfox
       --only-discovery          Only testing parameter analysis
+  -o, --output string           Write to output file
+      --output-format string    -o/--output 's format (txt/json/xml)
   -p, --param string            Only testing selected parameters
       --user-agent string       Add custom UserAgent
 ```
