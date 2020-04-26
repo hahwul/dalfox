@@ -275,8 +275,8 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 									printing.DalLog("CODE", code, optionsStr)
 									printing.DalLog("PRINT", k, optionsStr)
 									vStatus[v["param"]] = true
-									if optionsStr["found-action"] != "" {
-										foundAction(optionsStr)
+									if optionsStr["foundAction"] != "" {
+										foundAction(optionsStr, target, k, "VULN")
 									}
 								}
 								mutex.Unlock()
@@ -290,8 +290,8 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 									printing.DalLog("CODE", code, optionsStr)
 									printing.DalLog("PRINT", k, optionsStr)
 									vStatus[v["param"]] = true
-									if optionsStr["found-action"] != "" {
-										foundAction(optionsStr)
+									if optionsStr["foundAction"] != "" {
+										foundAction(optionsStr, target, k, "VULN")
 									}
 								}
 								mutex.Unlock()
@@ -302,8 +302,8 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 									printing.DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"], optionsStr)
 									printing.DalLog("CODE", code, optionsStr)
 									printing.DalLog("PRINT", k, optionsStr)
-									if optionsStr["found-action"] != "" {
-										foundAction(optionsStr)
+									if optionsStr["foundAction"] != "" {
+										foundAction(optionsStr, target, k, "WEAK")
 									}
 								}
 								mutex.Unlock()
@@ -317,8 +317,8 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 									printing.DalLog("CODE", code, optionsStr)
 									printing.DalLog("PRINT", k, optionsStr)
 									vStatus[v["param"]] = true
-									if optionsStr["found-action"] != "" {
-										foundAction(optionsStr)
+									if optionsStr["foundAction"] != "" {
+										foundAction(optionsStr, target, k, "VULN")
 									}
 								}
 								mutex.Unlock()
@@ -329,8 +329,8 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 									printing.DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"], optionsStr)
 									printing.DalLog("CODE", code, optionsStr)
 									printing.DalLog("PRINT", k, optionsStr)
-									if optionsStr["found-action"] != "" {
-										foundAction(optionsStr)
+									if optionsStr["foundAction"] != "" {
+										foundAction(optionsStr, target, k, "WEAK")
 									}
 								}
 								mutex.Unlock()

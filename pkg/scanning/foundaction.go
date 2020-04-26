@@ -8,9 +8,13 @@ import (
 )
 
 // foundAction is after command function.
-func foundAction(optionsStr map[string]string) {
-	tempCmd := strings.Fields(optionsStr["found-action"])
-	cmd := exec.Command(tempCmd[0], strings.Join(tempCmd[1:], " "))
+func foundAction(optionsStr map[string]string, target, query, ptype string) {
+	tempCmd := strings.Fields(optionsStr["foundAction"])
+	afterCmd := strings.Join(tempCmd[1:], " ")
+	afterCmd = strings.ReplaceAll(afterCmd, "@@query@@", query)
+	afterCmd = strings.ReplaceAll(afterCmd, "@@target@@", target)
+	afterCmd = strings.ReplaceAll(afterCmd, "@@type@@", ptype)
+	cmd := exec.Command(tempCmd[0], afterCmd)
 	err := cmd.Start()
 	if err != nil {
 		printing.DalLog("ERROR", "execution error from found-action", optionsStr)
