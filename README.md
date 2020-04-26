@@ -95,5 +95,5 @@ Other tips, See [wiki](https://github.com/hahwul/dalfox/wiki) for detailed instr
 
 
 ## ScreenShot
-![1414](https://user-images.githubusercontent.com/13212227/79870656-403f5880-841e-11ea-9fef-0e47be5dc3ee.png)
-![1415](https://user-images.githubusercontent.com/13212227/79870669-46cdd000-841e-11ea-919e-a2020997c3f8.png)
+![1414](https://user-images.githubusercontent.com/13212227/80303671-97fa0d00-87ec-11ea-814c-96d623f842ec.png)
+![1415](https://user-images.githubusercontent.com/13212227/80303674-9cbec100-87ec-11ea-8307-1eae2749a203.png)
