@@ -48,47 +48,45 @@ Parameter Analysis and XSS Scanning tool based on golang
 Finder Of XSS and Dal is the Korean pronunciation of moon. @hahwul
 
 
-Usage of dalfox:
-  -blind string
-    	Add blind XSS payload, e.g -blind https://hahwul.xss.ht
-  -config string
-    	config file path
-  -cookie string
-    	Add custom cookies
-  -data string
-    	POST data
-  -header string
-    	Add custom headers
-  -help
-    	Show help message
-  -iL string
-    	target urls(file path)
-  -only-discovery
-    	Use only discovery mode
-  -p string
-    	Testing only selected parameter
-  -pL string
-    	Custom payload list(file path)
-  -pipe
-    	Pipeline mode (default is false)
-  -ua string
-    	Add custom User-Agent
-  -url string
-    	target url
-```
-Running from single url
-```plain
-$ dalfox -url http://testphp.vulnweb.com/listproducts.php\?cat\=123\&artist\=123\&asdf\=ff
+Usage:
+  dalfox [command]
+
+Available Commands:
+  file        Use multiple targets mode from file
+  help        Help about any command
+  pipe        Use pipeline mode
+  url         Use single target mode
+
+Flags:
+  -b, --blind string            Add your blind xss
+      --config string           Using config from file
+  -C, --cookie string           Add custom cookie
+      --custom-payload string   Add custom payloads from file
+  -d, --data string             Using POST Method and add Body data
+  -H, --header string           Add custom headers
+  -h, --help                    help for dalfox
+      --only-discovery          Only testing parameter analysis
+  -p, --param string            Only testing selected parameters
+      --user-agent string       Add custom UserAgent
 ```
 
-Running from file
-```plain
-$ dalfox -iL urls_file
+```
+$ dalfox [mode] [flags]
 ```
 
-Running from io(pipeline)
+Single target mode
 ```plain
-$ cat urls_file | dalfox -pipe
+$ dalfox url http://testphp.vulnweb.com/listproducts.php\?cat\=123\&artist\=123\&asdf\=ff -b https://hahwul.xss.ht
+```
+
+Multiple target mode from file
+```plain
+$ dalfox file urls_file --custom-payload ./mypayloads.txt
+```
+
+Pipeline mode
+```plain
+$ cat urls_file | dalfox pipe -H "AuthToken: bbadsfkasdfadsf87"
 ```
 
 Other tips, See [wiki](https://github.com/hahwul/dalfox/wiki) for detailed instructions!
