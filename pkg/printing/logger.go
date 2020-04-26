@@ -31,6 +31,10 @@ func DalLog(level, text string) {
 		text = aurora.Gray(16-1, "    "+text).String()
 	}
 
+	if level == "ERROR" {
+		text = aurora.Yellow("[E] ").String() + text
+	}
+
 	//mutex.Lock()
 	if level == "PRINT" {
 		text = "    +> " + text
