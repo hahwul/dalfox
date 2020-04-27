@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/hahwul/dalfox/pkg/printing"
 	"github.com/hahwul/dalfox/pkg/scanning"
@@ -13,28 +14,71 @@ import (
 // fileCmd represents the file command
 var fileCmd = &cobra.Command{
 	Use:   "file [filePath] [flags]",
-	Short: "Use multiple targets mode from file",
+	Short: "Use file mode(targets list or rawdata)",
 	Run: func(cmd *cobra.Command, args []string) {
 		var targets []string
 		if len(args) >= 1 {
-			printing.DalLog("SYSTEM", "", optionsStr)
+			rawdata, _ := cmd.Flags().GetBool("rawdata")
+			if rawdata {
+				printing.DalLog("SYSTEM", "Using file mode(rawdata)", optionsStr)
+				ff, err := readLinesOrLiteral(args[0])
+				_ = err
+				var path, body, host, target string
+				var headers []string
+				bodyswitch := false
+				for index, line := range ff {
+					if index == 0 {
+						parse := strings.Split(line, " ")
+						path = parse[1]
+					}
+					_ = headers
+					if strings.Index(line, "Host: ") != -1 {
+						host = line[6:]
+					}
+					if strings.Index(line, "Cookie: ") != -1 {
+						optionsStr["cookie"] = line[9:]
+					}
+					if strings.Index(line, "User-Agent: ") != -1 {
+						optionsStr["ua"] = line[12:]
+					}
+					if bodyswitch {
+						body = body + line
+					}
+					if len(line) == 0 {
+						bodyswitch = true
+					}
+				}
+				optionsStr["data"] = body
+				http, _ := cmd.Flags().GetBool("http")
+				if strings.Index(path, "http") == 0 {
+					target = path
+				} else {
+					if http {
+						target = "http://" + host + path
+					} else {
+						target = "https://" + host + path
+					}
+				}
+				scanning.Scan(target, optionsStr, optionsBool)
 
-			ff, err := readLinesOrLiteral(args[0])
-			_ = err
-			for i, target := range ff {
-				_ = i
-				targets = append(targets, target)
-			}
+			} else {
+				printing.DalLog("SYSTEM", "Using file mode(targets list)", optionsStr)
+				ff, err := readLinesOrLiteral(args[0])
+				_ = err
+				for _, target := range ff {
+					targets = append(targets, target)
+				}
 
-			// Remove Deplicated value
-			targets = unique(targets)
-			printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target urls", optionsStr)
-			for i := range targets {
-				scanning.Scan(targets[i], optionsStr, optionsBool)
+				// Remove Deplicated value
+				targets = unique(targets)
+				printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target urls", optionsStr)
+				for i := range targets {
+					scanning.Scan(targets[i], optionsStr, optionsBool)
+				}
 			}
 		} else {
 			printing.DalLog("ERROR", "Input file path", optionsStr)
-			printing.DalLog("ERROR", "e.g dalfox file ./targets.txt", optionsStr)
+			printing.DalLog("ERROR", "e.g dalfox file ./targets.txt or ./rawdata.raw", optionsStr)
 		}
 	},
 }
@@ -50,7 +94,9 @@ func init() {
 
 	// Cobra supports local flags which will only run when this command
 	// is called directly, e.g.:
-	// fileCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+
+	fileCmd.Flags().Bool("rawdata", false, "Using req rawdata from Burp/ZAP")
+	fileCmd.Flags().Bool("http", false, "Using force http on rawdata mode")
 }
 
 // a slice of strings, returning the slice and any error

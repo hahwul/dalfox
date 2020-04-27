@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strconv"
 
 	"github.com/hahwul/dalfox/pkg/printing"
 	"github.com/spf13/cobra"
@@ -13,7 +14,8 @@ import (
 var cfgFile string
 var optionsStr = make(map[string]string)
 var optionsBool = make(map[string]bool)
-var config, cookie, data, header, p, customPayload, userAgent, blind, output, format, foundAction string
+var config, cookie, data, header, p, customPayload, userAgent, blind, output, format, foundAction, proxy string
+var timeout int
 var onlyDiscovery bool
 
 // rootCmd represents the base command when called without any subcommands
@@ -40,6 +42,7 @@ func init() {
 	// Cobra supports persistent flags, which, if defined here,
 	// will be global for your application.
 
+	//Str
 	rootCmd.PersistentFlags().StringVar(&config, "config", "", "Using config from file")
 	rootCmd.PersistentFlags().StringVarP(&cookie, "cookie", "C", "", "Add custom cookie")
 	rootCmd.PersistentFlags().StringVarP(&data, "data", "d", "", "Using POST Method and add Body data")
@@ -51,7 +54,12 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&output, "output", "o", "", "Write to output file")
 	rootCmd.PersistentFlags().StringVar(&format, "output-format", "", "-o/--output 's format (txt/json/xml)")
 	rootCmd.PersistentFlags().StringVar(&foundAction, "found-action", "", "if found weak/vuln, action(cmd) to next")
+	rootCmd.PersistentFlags().StringVar(&proxy, "proxy", "", "Send all request to proxy server")
 
+	//Int
+	rootCmd.PersistentFlags().IntVar(&timeout, "timout", 10, "second of timeout (default 10sec)")
+
+	//Bool
 	rootCmd.PersistentFlags().BoolVar(&onlyDiscovery, "only-discovery", false, "Only testing parameter analysis")
 }
 
@@ -67,6 +75,9 @@ func initConfig() {
 	optionsStr["output"] = output
 	optionsStr["format"] = format
 	optionsStr["foundAction"] = foundAction
+	optionsStr["proxy"] = proxy
+	optionsStr["timeout"] = strconv.Itoa(timeout)
+
 	optionsBool["only-discovery"] = onlyDiscovery
 
 	if config != "" {

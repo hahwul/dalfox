@@ -18,6 +18,7 @@ var pipeCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var targets []string
 		sc := bufio.NewScanner(os.Stdin)
+		printing.DalLog("SYSTEM", "Using pipeline mode", optionsStr)
 		for sc.Scan() {
 			target := strings.ToLower(sc.Text())
 			targets = append(targets, target)

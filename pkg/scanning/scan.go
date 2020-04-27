@@ -3,8 +3,8 @@ package scanning
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io/ioutil"
-	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -42,20 +42,25 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 		return
 	}
 
-	/*
-		treq, terr := http.NewRequest("GET", target, nil)
-		if terr != nil {
-		} else {
-			client := &http.Client{}
-			_, err := client.Do(treq)
-			if err != nil {
-				printing.DalLog("SYSTEM", "Not running "+target+" url")
-				fmt.Println(err)
-				return
-			} else {
-				printing.DalLog("SYSTEM", "Vaild this url")
-			}
-		}*/
+	treq, terr := http.NewRequest("GET", target, nil)
+	if terr != nil {
+	} else {
+		transport := getTransport(optionsStr)
+		t, _ := strconv.Atoi(optionsStr["timeout"])
+		client := &http.Client{
+			Timeout:   time.Duration(t) * time.Second,
+			Transport: transport,
+		}
+		tres, err := client.Do(treq)
+		if err != nil {
+			msg := fmt.Sprintf("not running %v", err)
+			printing.DalLog("ERROR", msg, optionsStr)
+			return
+		}
+		defer tres.Body.Close()
+		body, err := ioutil.ReadAll(tres.Body)
+		printing.DalLog("SYSTEM", "Vaild target [ code:"+strconv.Itoa(tres.StatusCode)+" / size:"+strconv.Itoa(len(body))+" ]", optionsStr)
+	}
 
 	var wait sync.WaitGroup
 	task := 2
@@ -556,15 +561,11 @@ func SendReq(url, payload string, optionsStr map[string]string) (string, *http.R
 		req.Header.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:75.0) Gecko/20100101 Firefox/75.0")
 	}
 
-	var netTransport = &http.Transport{
-		Dial: (&net.Dialer{
-			Timeout: 5 * time.Second,
-		}).Dial,
-		TLSHandshakeTimeout: 5 * time.Second,
-	}
+	netTransport := getTransport(optionsStr)
+	t, _ := strconv.Atoi(optionsStr["timeout"])
 
 	client := &http.Client{
-		Timeout:   time.Second * 10,
+		Timeout:   time.Duration(t) * time.Second,
 		Transport: netTransport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return errors.New("something bad happened") // or maybe the error from the request
