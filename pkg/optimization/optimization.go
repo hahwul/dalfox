@@ -29,16 +29,24 @@ func MakePathQuery(target, fakeparam, payload, ptype string) (string, map[string
 	tempMap["type"] = ptype
 	tempMap["payload"] = payload
 	tempMap["param"] = fakeparam
-	u, _ := url.Parse(target)
+	u, err := url.Parse(target)
+	if err != nil {
+		return target, tempMap
+	}
 	data := ""
 	if u.Path != "" {
 		data = u.Scheme + "://" + u.Hostname() + u.Path + ";" + payload
 	} else {
 		data = u.Scheme + "://" + u.Hostname() + "/" + u.Path + ";" + payload
 	}
-	tempURL, _ := url.Parse(data)
+	tempURL, err := url.Parse(data)
+	if err != nil {
+		return target, tempMap
+	}
+
 	tempQuery := tempURL.Query()
 	tempURL.RawQuery = tempQuery.Encode()
+
 	return tempURL.String(), tempMap
 }
 
