@@ -114,7 +114,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 
 		// set path base xss
 
-		if policy["Content-Type"] != "application/json" {
+		if isAllowType(policy["Content-Type"]) {
 
 			arr := getCommonPayload()
 			for _, avv := range arr {
@@ -204,7 +204,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 				}
 			}
 		} else {
-			printing.DalLog("SYSTEM", "Type is 'application/json', It does not test except customized payload (custom/blind).", optionsStr)
+			printing.DalLog("SYSTEM", "Type is '"+policy["Content-Type"]+"', It does not test except customized payload (custom/blind).", optionsStr)
 		}
 		// Blind payload
 		if optionsStr["blind"] != "" {
