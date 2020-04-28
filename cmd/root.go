@@ -57,7 +57,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&proxy, "proxy", "", "Send all request to proxy server")
 
 	//Int
-	rootCmd.PersistentFlags().IntVar(&timeout, "timout", 10, "second of timeout (default 10sec)")
+	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 10, "second of timeout (default 10sec)")
 
 	//Bool
 	rootCmd.PersistentFlags().BoolVar(&onlyDiscovery, "only-discovery", false, "Only testing parameter analysis")

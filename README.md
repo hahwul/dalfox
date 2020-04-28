@@ -71,7 +71,7 @@ Flags:
       --output-format string    -o/--output 's format (txt/json/xml)
   -p, --param string            Only testing selected parameters
       --proxy string            Send all request to proxy server
-      --timout int              second of timeout (default 10sec) (default 10)
+      --timeout int              second of timeout (default 10sec) (default 10)
       --user-agent string       Add custom UserAgent
 ```
 
