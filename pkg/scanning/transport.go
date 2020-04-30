@@ -1,14 +1,14 @@
 package scanning
 
 import (
+	"crypto/tls"
 	"fmt"
+	"github.com/hahwul/dalfox/pkg/printing"
 	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"time"
-
-	"github.com/hahwul/dalfox/pkg/printing"
 )
 
 // getTransport is setting timetout and proxy on tranport
@@ -16,8 +16,11 @@ func getTransport(optionsStr map[string]string) *http.Transport {
 	// set timeout
 	t, _ := strconv.Atoi(optionsStr["timeout"])
 	transport := &http.Transport{
+		TLSClientConfig:   &tls.Config{InsecureSkipVerify: true},
+		DisableKeepAlives: true,
 		DialContext: (&net.Dialer{
-			Timeout: time.Duration(t) * time.Second,
+			Timeout:   time.Duration(t) * time.Second,
+			DualStack: true,
 		}).DialContext,
 	}
 	// if use proxy mode , set proxy
