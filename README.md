@@ -52,10 +52,11 @@ Usage:
   dalfox [command]
 
 Available Commands:
-  file        Use multiple targets mode from file
+  file        Use file mode(targets list or rawdata)
   help        Help about any command
   pipe        Use pipeline mode
   url         Use single target mode
+  version     Show version
 
 Flags:
   -b, --blind string            Add your blind xss
