@@ -11,6 +11,6 @@ func Banner() {
  '. '::::::' |__/|_n_||___||_| \_//_n_\                           
    '-.::''
 `, fake)
-	DalLog("", "Parameter Analysis and XSS Scanning tool based on golang", fake)
+	DalLog("", "Parameter Analysis and XSS Scanning tool based on golang ["+VERSION+"]", fake)
 	DalLog("", "Finder Of XSS and Dal is the Korean pronunciation of moon. @hahwul", fake)
 }
