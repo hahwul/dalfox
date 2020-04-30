@@ -256,114 +256,124 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 		mutex := &sync.Mutex{}
 		queryCount := 0
 		s.Prefix = " "
-		s.Suffix = "  Testing.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
+		s.Suffix = "  Make " + optionsStr["concurrence"] + " workers and allocated " + strconv.Itoa(len(query)) + " queries"
 		s.Start()                   // Start the spinner
 		time.Sleep(3 * time.Second) // Run for some time to simulate work
+
+		// make waiting group
 		var wg sync.WaitGroup
-		for a, b := range query {
-			k := a
-			v := b
+		// set concurrency
+		concurrency, _ := strconv.Atoi(optionsStr["concurrence"])
+		// make reqeust channel
+		queries := make(chan Queries)
+
+		for i := 0; i < concurrency; i++ {
 			wg.Add(1)
 			go func() {
-				defer wg.Done()
-				if vStatus[v["param"]] == false {
-					resbody, resp, vds, vrs := SendReq(k, v["payload"], optionsStr)
-					_ = resp
-					if v["type"] != "inBlind" {
-						if v["type"] == "inJS" {
-							if vrs {
-								mutex.Lock()
-								if vStatus[v["param"]] == false {
-									code := CodeView(resbody, v["payload"])
-									printing.DalLog("VULN", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], optionsStr)
-									printing.DalLog("CODE", code, optionsStr)
-									printing.DalLog("PRINT", k.URL.RawQuery, optionsStr)
-									vStatus[v["param"]] = true
-									if optionsStr["foundAction"] != "" {
-										foundAction(optionsStr, target, k.URL.RawQuery, "VULN")
+				for reqJob := range queries {
+					// quires.request : http.Request
+					// queries.metadata : map[string]string
+					k := reqJob.request
+					v := reqJob.metadata
+					if vStatus[v["param"]] == false {
+						resbody, resp, vds, vrs := SendReq(k, v["payload"], optionsStr)
+						_ = resp
+						if v["type"] != "inBlind" {
+							if v["type"] == "inJS" {
+								if vrs {
+									mutex.Lock()
+									if vStatus[v["param"]] == false {
+										code := CodeView(resbody, v["payload"])
+										printing.DalLog("VULN", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], optionsStr)
+										printing.DalLog("CODE", code, optionsStr)
+										printing.DalLog("PRINT", k.URL.RawQuery, optionsStr)
+										vStatus[v["param"]] = true
+										if optionsStr["foundAction"] != "" {
+											foundAction(optionsStr, target, k.URL.RawQuery, "VULN")
+										}
 									}
+									mutex.Unlock()
 								}
-								mutex.Unlock()
-							}
-						} else if v["type"] == "inATTR" {
-							if vds {
-								mutex.Lock()
-								if vStatus[v["param"]] == false {
-									code := CodeView(resbody, v["payload"])
-									printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], optionsStr)
-									printing.DalLog("CODE", code, optionsStr)
-									printing.DalLog("PRINT", k.URL.RawQuery, optionsStr)
-									vStatus[v["param"]] = true
-									if optionsStr["foundAction"] != "" {
-										foundAction(optionsStr, target, k.URL.RawQuery, "VULN")
+							} else if v["type"] == "inATTR" {
+								if vds {
+									mutex.Lock()
+									if vStatus[v["param"]] == false {
+										code := CodeView(resbody, v["payload"])
+										printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], optionsStr)
+										printing.DalLog("CODE", code, optionsStr)
+										printing.DalLog("PRINT", k.URL.RawQuery, optionsStr)
+										vStatus[v["param"]] = true
+										if optionsStr["foundAction"] != "" {
+											foundAction(optionsStr, target, k.URL.RawQuery, "VULN")
+										}
 									}
-								}
-								mutex.Unlock()
-							} else if vrs {
-								mutex.Lock()
-								if vStatus[v["param"]] == false {
-									code := CodeView(resbody, v["payload"])
-									printing.DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"], optionsStr)
-									printing.DalLog("CODE", code, optionsStr)
-									printing.DalLog("PRINT", k.URL.RawQuery, optionsStr)
-									if optionsStr["foundAction"] != "" {
-										foundAction(optionsStr, target, k.URL.RawQuery, "WEAK")
+									mutex.Unlock()
+								} else if vrs {
+									mutex.Lock()
+									if vStatus[v["param"]] == false {
+										code := CodeView(resbody, v["payload"])
+										printing.DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"], optionsStr)
+										printing.DalLog("CODE", code, optionsStr)
+										printing.DalLog("PRINT", k.URL.RawQuery, optionsStr)
+										if optionsStr["foundAction"] != "" {
+											foundAction(optionsStr, target, k.URL.RawQuery, "WEAK")
+										}
 									}
+									mutex.Unlock()
 								}
-								mutex.Unlock()
-							}
-						} else {
-							if vds {
-								mutex.Lock()
-								if vStatus[v["param"]] == false {
-									code := CodeView(resbody, v["payload"])
-									printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], optionsStr)
-									printing.DalLog("CODE", code, optionsStr)
-									printing.DalLog("PRINT", k.URL.RawQuery, optionsStr)
-									vStatus[v["param"]] = true
-									if optionsStr["foundAction"] != "" {
-										foundAction(optionsStr, target, k.URL.RawQuery, "VULN")
+							} else {
+								if vds {
+									mutex.Lock()
+									if vStatus[v["param"]] == false {
+										code := CodeView(resbody, v["payload"])
+										printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], optionsStr)
+										printing.DalLog("CODE", code, optionsStr)
+										printing.DalLog("PRINT", k.URL.RawQuery, optionsStr)
+										vStatus[v["param"]] = true
+										if optionsStr["foundAction"] != "" {
+											foundAction(optionsStr, target, k.URL.RawQuery, "VULN")
+										}
 									}
-								}
-								mutex.Unlock()
-							} else if vrs {
-								mutex.Lock()
-								if vStatus[v["param"]] == false {
-									code := CodeView(resbody, v["payload"])
-									printing.DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"], optionsStr)
-									printing.DalLog("CODE", code, optionsStr)
-									printing.DalLog("PRINT", k.URL.RawQuery, optionsStr)
-									if optionsStr["foundAction"] != "" {
-										foundAction(optionsStr, target, k.URL.RawQuery, "WEAK")
+									mutex.Unlock()
+								} else if vrs {
+									mutex.Lock()
+									if vStatus[v["param"]] == false {
+										code := CodeView(resbody, v["payload"])
+										printing.DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"], optionsStr)
+										printing.DalLog("CODE", code, optionsStr)
+										printing.DalLog("PRINT", k.URL.RawQuery, optionsStr)
+										if optionsStr["foundAction"] != "" {
+											foundAction(optionsStr, target, k.URL.RawQuery, "WEAK")
+										}
 									}
+									mutex.Unlock()
 								}
-								mutex.Unlock()
-							}
 
+							}
 						}
 					}
+					mutex.Lock()
+					queryCount = queryCount + 1
+					s.Lock()
+					s.Suffix = "  Tested (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") queries from " + optionsStr["concurrence"] + " worker's"
+					//s.Suffix = " Waiting routines.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
+					s.Unlock()
+					mutex.Unlock()
 				}
-				mutex.Lock()
-				queryCount = queryCount + 1
-				s.Lock()
-				s.Suffix = "  Tested (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") quries"
-				//s.Suffix = " Waiting routines.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
-				s.Unlock()
-				mutex.Unlock()
+				wg.Done()
 			}()
 		}
+
+		// Send testing query to quires channel
+		for k, v := range query {
+			queries <- Queries{
+				request:  k,
+				metadata: v,
+			}
+		}
+		close(queries)
 		wg.Wait()
 		s.Stop()
-		/*
-			task := 1
-			var wg sync.WaitGroup
-			wg.Add(task)
-			go func() {
-				defer wg.Done()
-			}()
-			wg.Wait()
-		*/
-		//s.Stop()
 	}
 	printing.DalLog("SYSTEM", "Finish :D", optionsStr)
 }
