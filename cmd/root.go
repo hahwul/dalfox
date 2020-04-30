@@ -16,7 +16,7 @@ var optionsStr = make(map[string]string)
 var optionsBool = make(map[string]bool)
 var config, cookie, data, header, p, customPayload, userAgent, blind, output, format, foundAction, proxy string
 var timeout, concurrence, delay int
-var onlyDiscovery bool
+var onlyDiscovery, silence bool
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -36,7 +36,6 @@ func Execute() {
 }
 
 func init() {
-	printing.Banner()
 	cobra.OnInitialize(initConfig)
 	// Here you will define your flags and configuration settings.
 	// Cobra supports persistent flags, which, if defined here,
@@ -53,7 +52,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&blind, "blind", "b", "", "Add your blind xss")
 	rootCmd.PersistentFlags().StringVarP(&output, "output", "o", "", "Write to output file")
 	rootCmd.PersistentFlags().StringVar(&format, "output-format", "", "-o/--output 's format (txt/json/xml)")
-	rootCmd.PersistentFlags().StringVar(&foundAction, "found-action", "", "if found weak/vuln, action(cmd) to next")
+	rootCmd.PersistentFlags().StringVar(&foundAction, "found-action", "", "If found weak/vuln, action(cmd) to next")
 	rootCmd.PersistentFlags().StringVar(&proxy, "proxy", "", "Send all request to proxy server (e.g --proxy http://127.0.0.1:8080)")
 
 	//Int
@@ -63,6 +62,7 @@ func init() {
 
 	//Bool
 	rootCmd.PersistentFlags().BoolVar(&onlyDiscovery, "only-discovery", false, "Only testing parameter analysis")
+	rootCmd.PersistentFlags().BoolVar(&silence, "silence", false, "Not printing all logs")
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -83,6 +83,10 @@ func initConfig() {
 	optionsStr["delay"] = strconv.Itoa(delay)
 
 	optionsBool["only-discovery"] = onlyDiscovery
+
+	if silence {
+		optionsStr["silence"] = "yes"
+	}
 
 	if config != "" {
 		// Open our jsonFile
@@ -107,5 +111,9 @@ func initConfig() {
 				optionsStr[k] = v.(string)
 			}
 		}
+	}
+
+	if !silence {
+		printing.Banner()
 	}
 }

@@ -61,13 +61,17 @@ func DalLog(level, text string, optionsStr map[string]string) {
 	}
 
 	//mutex.Lock()
-	if level == "PRINT" {
+	if optionsStr["silence"] != "" {
 		ftext = "    +> " + text
-		text = "    +> " + text
-		fmt.Println(text)
 	} else {
-		text = "\r" + text
-		fmt.Fprintln(os.Stderr, text)
+		if level == "PRINT" {
+			ftext = "    +> " + text
+			text = "    +> " + text
+			fmt.Println(text)
+		} else {
+			text = "\r" + text
+			fmt.Fprintln(os.Stderr, text)
+		}
 	}
 
 	if optionsStr["output"] != "" {
