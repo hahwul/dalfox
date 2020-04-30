@@ -57,9 +57,9 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&proxy, "proxy", "", "Send all request to proxy server")
 
 	//Int
-	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 10, "second of timeout (default 10sec)")
-	rootCmd.PersistentFlags().IntVar(&delay, "delay", 0, "delay nano-second request (1000==1s)")
-	rootCmd.PersistentFlags().IntVar(&concurrence, "concurrence", 20, "number of concurrence")
+	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 10, "Second of timeout (1==1s)")
+	rootCmd.PersistentFlags().IntVar(&delay, "delay", 0, "Milliseconds between send to same host (1000==1s)")
+	rootCmd.PersistentFlags().IntVar(&concurrence, "concurrence", 20, "Number of concurrence")
 
 	//Bool
 	rootCmd.PersistentFlags().BoolVar(&onlyDiscovery, "only-discovery", false, "Only testing parameter analysis")
