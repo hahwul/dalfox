@@ -65,7 +65,7 @@ Flags:
       --custom-payload string   Add custom payloads from file
   -d, --data string             Using POST Method and add Body data
       --delay int               Milliseconds between send to same host (1000==1s)
-      --found-action string     if found weak/vuln, action(cmd) to next
+      --found-action string     If found weak/vuln, action(cmd) to next
   -H, --header string           Add custom headers
   -h, --help                    help for dalfox
       --only-discovery          Only testing parameter analysis
@@ -73,6 +73,7 @@ Flags:
       --output-format string    -o/--output 's format (txt/json/xml)
   -p, --param string            Only testing selected parameters
       --proxy string            Send all request to proxy server (e.g --proxy http://127.0.0.1:8080)
+      --silence                 Not printing all logs
       --timeout int             Second of timeout (default 10)
       --user-agent string       Add custom UserAgent
   -w, --worker int              Number of worker (default 40)
