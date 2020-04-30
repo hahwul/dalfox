@@ -1,4 +1,17 @@
 {
-	"blind":"https://google.com",
-	"discovery":true
+	"header":"",
+	"cookie":"",
+	"p":"",
+	"blind":"",
+	"customPayload":"",
+	"data":"",
+	"ua":"",
+	"output":"",
+	"format":"",
+	"foundAction":"",
+	"proxy":"",
+	"timeout":"",
+	"concurrence":"",
+	"delay":"",
+	"only-discovery":false
 }

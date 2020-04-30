@@ -91,7 +91,7 @@ func initConfig() {
 		if err != nil {
 			fmt.Println(err)
 		}
-		printing.DalLog("SYSTEM", "Using config options / loaded "+config+" file", optionsStr)
+		printing.DalLog("SYSTEM", "Loaded "+config+" file for config option", optionsStr)
 		// defer the closing of our jsonFile so that we can parse it later on
 		defer jsonFile.Close()
 
@@ -101,11 +101,10 @@ func initConfig() {
 		json.Unmarshal([]byte(byteValue), &result)
 
 		for k, v := range result {
-			if k == "blind" || k == "p" || k == "cookie" || k == "header" || k == "ua" {
-				optionsStr[k] = v.(string)
-			}
-			if k == "only-discovery" || k == "pipe" {
+			if k == "only-discovery" {
 				optionsBool[k] = v.(bool)
+			} else {
+				optionsStr[k] = v.(string)
 			}
 		}
 	}
