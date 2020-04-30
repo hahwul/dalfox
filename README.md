@@ -59,10 +59,12 @@ Available Commands:
 
 Flags:
   -b, --blind string            Add your blind xss
+      --concurrence int         Number of concurrence (default 20)
       --config string           Using config from file
   -C, --cookie string           Add custom cookie
       --custom-payload string   Add custom payloads from file
   -d, --data string             Using POST Method and add Body data
+      --delay int               Milliseconds between send to same host (1000==1s)
       --found-action string     if found weak/vuln, action(cmd) to next
   -H, --header string           Add custom headers
   -h, --help                    help for dalfox
@@ -71,7 +73,7 @@ Flags:
       --output-format string    -o/--output 's format (txt/json/xml)
   -p, --param string            Only testing selected parameters
       --proxy string            Send all request to proxy server
-      --timeout int              second of timeout (default 10sec) (default 10)
+      --timeout int             Second of timeout (default 10)
       --user-agent string       Add custom UserAgent
 ```
 
