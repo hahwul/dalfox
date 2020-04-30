@@ -58,7 +58,7 @@ func init() {
 
 	//Int
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 10, "second of timeout (default 10sec)")
-	rootCmd.PersistentFlags().IntVar(&delay, "delay", 100, "delay nano-second request (1000==1s)")
+	rootCmd.PersistentFlags().IntVar(&delay, "delay", 0, "delay nano-second request (1000==1s)")
 	rootCmd.PersistentFlags().IntVar(&concurrence, "concurrence", 20, "number of concurrence")
 
 	//Bool
