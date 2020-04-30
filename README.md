@@ -60,7 +60,6 @@ Available Commands:
 
 Flags:
   -b, --blind string            Add your blind xss
-      --concurrence int         Number of concurrence (default 20)
       --config string           Using config from file
   -C, --cookie string           Add custom cookie
       --custom-payload string   Add custom payloads from file
@@ -73,9 +72,10 @@ Flags:
   -o, --output string           Write to output file
       --output-format string    -o/--output 's format (txt/json/xml)
   -p, --param string            Only testing selected parameters
-      --proxy string            Send all request to proxy server
+      --proxy string            Send all request to proxy server (e.g --proxy http://127.0.0.1:8080)
       --timeout int             Second of timeout (default 10)
       --user-agent string       Add custom UserAgent
+  -w, --worker int              Number of worker (default 20)
 ```
 
 ```
