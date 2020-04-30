@@ -35,6 +35,10 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 	// policy is "CSP":domain..
 	policy := make(map[string]string)
 
+	// set up a rate limit
+	delay, _ := strconv.Atoi(optionsStr["delay"])
+	rl := newRateLimiter(time.Duration(delay * 1000000))
+
 	_, err := url.Parse(target)
 	if err != nil {
 		printing.DalLog("SYSTEM", "Not running "+target+" url", optionsStr)
@@ -276,6 +280,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 					k := reqJob.request
 					v := reqJob.metadata
 					if vStatus[v["param"]] == false {
+						rl.Block(k.Host)
 						resbody, resp, vds, vrs := SendReq(k, v["payload"], optionsStr)
 						_ = resp
 						if v["type"] != "inBlind" {
@@ -433,6 +438,9 @@ func StaticAnalysis(target string, optionsStr map[string]string) map[string]stri
 func ParameterAnalysis(target string, optionsStr map[string]string) map[string][]string {
 	u, err := url.Parse(target)
 	params := make(map[string][]string)
+	// set up a rate limit
+	delay, _ := strconv.Atoi(optionsStr["delay"])
+	rl := newRateLimiter(time.Duration(delay * 1000000))
 	if err != nil {
 		return params
 	}
@@ -463,6 +471,7 @@ func ParameterAnalysis(target string, optionsStr map[string]string) map[string][
 				var code string
 
 				//tempURL.RawQuery = temp_q.Encode()
+				rl.Block(tempURL.Host)
 				resbody, resp, _, vrs := SendReq(tempURL, "DalFox", optionsStr)
 				_ = resp
 				if vrs {
@@ -488,21 +497,25 @@ func ParameterAnalysis(target string, optionsStr map[string]string) map[string][
 					}
 					ia := 0
 					tempURL, _ := optimization.MakeRequestQuery(target, k, "\" id=dalfox \"", "PA", optionsStr)
+					rl.Block(tempURL.Host)
 					_, _, vds, _ := SendReq(tempURL, "", optionsStr)
 					if vds {
 						ia = ia + 1
 					}
 					tempURL, _ = optimization.MakeRequestQuery(target, k, "' id=dalfox '", "PA", optionsStr)
+					rl.Block(tempURL.Host)
 					_, _, vds, _ = SendReq(tempURL, "", optionsStr)
 					if vds {
 						ia = ia + 1
 					}
 					tempURL, _ = optimization.MakeRequestQuery(target, k, "' class=dalfox '", "PA", optionsStr)
+					rl.Block(tempURL.Host)
 					_, _, vds, _ = SendReq(tempURL, "", optionsStr)
 					if vds {
 						ia = ia + 1
 					}
 					tempURL, _ = optimization.MakeRequestQuery(target, k, "\" class=dalfox \"", "PA", optionsStr)
+					rl.Block(tempURL.Host)
 					_, _, vds, _ = SendReq(tempURL, "", optionsStr)
 					if vds {
 						ia = ia + 1
@@ -534,6 +547,7 @@ func ParameterAnalysis(target string, optionsStr map[string]string) map[string][
 						go func() {
 							defer wg.Done()
 							turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA", optionsStr)
+							rl.Block(tempURL.Host)
 							_, _, _, vrs := SendReq(turl, "dalfox"+char, optionsStr)
 							_ = resp
 							if vrs {
