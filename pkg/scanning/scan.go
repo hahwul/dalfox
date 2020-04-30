@@ -245,13 +245,13 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 					spd := spu.Query()
 					for spk := range spd {
 						// Add plain XSS Query
-						tq, tm := optimization.MakeRequestQuery(target, spk, customPayload, "toHTML", optionsStr)
+						tq, tm := optimization.MakeRequestQuery(target, spk, customPayload, "yourCustom", optionsStr)
 						query[tq] = tm
 						// Add URL encoded XSS Query
-						etq, etm := optimization.MakeURLEncodeRequestQuery(target, spk, customPayload, "inHTML", optionsStr)
+						etq, etm := optimization.MakeURLEncodeRequestQuery(target, spk, customPayload, "yourCustom", optionsStr)
 						query[etq] = etm
 						// Add HTML Encoded XSS Query
-						htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, spk, customPayload, "inHTML", optionsStr)
+						htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, spk, customPayload, "yourCustom", optionsStr)
 						query[htq] = htm
 					}
 				}
@@ -285,11 +285,11 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 					// queries.metadata : map[string]string
 					k := reqJob.request
 					v := reqJob.metadata
-					if vStatus[v["param"]] == false {
+					if (vStatus[v["param"]] == false) || v["type"] == "toBlind" || v["type"] == "yourCustom" {
 						rl.Block(k.Host)
 						resbody, resp, vds, vrs := SendReq(k, v["payload"], optionsStr)
 						_ = resp
-						if v["type"] != "inBlind" {
+						if v["type"] != "toBlind" {
 							if v["type"] == "inJS" {
 								if vrs {
 									mutex.Lock()
