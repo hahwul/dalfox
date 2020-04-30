@@ -75,7 +75,7 @@ Flags:
       --proxy string            Send all request to proxy server (e.g --proxy http://127.0.0.1:8080)
       --timeout int             Second of timeout (default 10)
       --user-agent string       Add custom UserAgent
-  -w, --worker int              Number of worker (default 20)
+  -w, --worker int              Number of worker (default 40)
 ```
 
 ```
