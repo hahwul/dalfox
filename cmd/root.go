@@ -15,7 +15,7 @@ var cfgFile string
 var optionsStr = make(map[string]string)
 var optionsBool = make(map[string]bool)
 var config, cookie, data, header, p, customPayload, userAgent, blind, output, format, foundAction, proxy string
-var timeout int
+var timeout, concurrence, delay int
 var onlyDiscovery bool
 
 // rootCmd represents the base command when called without any subcommands
@@ -58,6 +58,8 @@ func init() {
 
 	//Int
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 10, "second of timeout (default 10sec)")
+	rootCmd.PersistentFlags().IntVar(&delay, "delay", 100, "delay nano-second request (1000==1s)")
+	rootCmd.PersistentFlags().IntVar(&concurrence, "concurrence", 20, "number of concurrence")
 
 	//Bool
 	rootCmd.PersistentFlags().BoolVar(&onlyDiscovery, "only-discovery", false, "Only testing parameter analysis")
@@ -77,6 +79,8 @@ func initConfig() {
 	optionsStr["foundAction"] = foundAction
 	optionsStr["proxy"] = proxy
 	optionsStr["timeout"] = strconv.Itoa(timeout)
+	optionsStr["concurrence"] = strconv.Itoa(concurrence)
+	optionsStr["delay"] = strconv.Itoa(delay)
 
 	optionsBool["only-discovery"] = onlyDiscovery
 
