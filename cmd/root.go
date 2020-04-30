@@ -54,12 +54,12 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&output, "output", "o", "", "Write to output file")
 	rootCmd.PersistentFlags().StringVar(&format, "output-format", "", "-o/--output 's format (txt/json/xml)")
 	rootCmd.PersistentFlags().StringVar(&foundAction, "found-action", "", "if found weak/vuln, action(cmd) to next")
-	rootCmd.PersistentFlags().StringVar(&proxy, "proxy", "", "Send all request to proxy server (e.g --proxy http://127.0.0.1:8080")
+	rootCmd.PersistentFlags().StringVar(&proxy, "proxy", "", "Send all request to proxy server (e.g --proxy http://127.0.0.1:8080)")
 
 	//Int
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 10, "Second of timeout")
 	rootCmd.PersistentFlags().IntVar(&delay, "delay", 0, "Milliseconds between send to same host (1000==1s)")
-	rootCmd.PersistentFlags().IntVar(&concurrence, "concurrence", 20, "Number of concurrence")
+	rootCmd.PersistentFlags().IntVarP(&concurrence, "worker", "w", 20, "Number of worker")
 
 	//Bool
 	rootCmd.PersistentFlags().BoolVar(&onlyDiscovery, "only-discovery", false, "Only testing parameter analysis")

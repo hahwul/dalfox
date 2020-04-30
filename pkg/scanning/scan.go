@@ -360,7 +360,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 					mutex.Lock()
 					queryCount = queryCount + 1
 					s.Lock()
-					s.Suffix = "  Tested (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") queries from " + optionsStr["concurrence"] + " worker's"
+					s.Suffix = "  Tested (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") queries from " + optionsStr["concurrence"] + " worker"
 					//s.Suffix = " Waiting routines.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
 					s.Unlock()
 					mutex.Unlock()
