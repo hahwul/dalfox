@@ -80,9 +80,9 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 	}()
 
 	s := spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
-	s.Prefix = " "
-	s.Suffix = "  Waiting routines.."
 	if optionsStr["silence"] == "" {
+		s.Prefix = " "
+		s.Suffix = "  Waiting routines.."
 		time.Sleep(1 * time.Second) // Waiting log
 		s.Start()                   // Start the spinner
 		time.Sleep(3 * time.Second) // Run for some time to simulate work
@@ -263,10 +263,10 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 		s := spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
 		mutex := &sync.Mutex{}
 		queryCount := 0
-		s.Prefix = " "
-		s.Suffix = "  Make " + optionsStr["concurrence"] + " workers and allocated " + strconv.Itoa(len(query)) + " queries"
 
 		if optionsStr["silence"] == "" {
+			s.Prefix = " "
+			s.Suffix = "  Make " + optionsStr["concurrence"] + " workers and allocated " + strconv.Itoa(len(query)) + " queries"
 			s.Start()                   // Start the spinner
 			time.Sleep(3 * time.Second) // Run for some time to simulate work
 		}
