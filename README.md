@@ -25,11 +25,11 @@ I talk about naming. Dal(달) is the Korean pronunciation of moon and fox was ma
 - All test payloads(build-in, your custom/blind) are tested in parallel with the encoder.
   - Support to Double URL Encoder
   - Support to HTML Hex Encoder
-- Useful for Pipeline 
-  - Scanning from single url
-  - Scanning from IO
-  - Scanning from URLs list file
+- Friendly Pipeline (single url, from file, from IO)
 - And the various options required for the testing :D
+  - built-in / custom grepping for find other vulnerability
+  - if you found, after action
+  - etc..
 
 ## How to Install
 Using go install
@@ -80,13 +80,14 @@ Available Commands:
   version     Show version
 
 Flags:
-  -b, --blind string            Add your blind xss
+  -b, --blind string            Add your blind xss (e.g -b https://hahwul.xss.ht)
       --config string           Using config from file
   -C, --cookie string           Add custom cookie
       --custom-payload string   Add custom payloads from file
   -d, --data string             Using POST Method and add Body data
       --delay int               Milliseconds between send to same host (1000==1s)
       --found-action string     If found weak/vuln, action(cmd) to next
+      --grep string             Using custom grepping file (e.g --grep ./samples/sample_grep.json)
   -H, --header string           Add custom headers
   -h, --help                    help for dalfox
       --only-discovery          Only testing parameter analysis
