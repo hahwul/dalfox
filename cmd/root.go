@@ -14,7 +14,7 @@ import (
 var cfgFile string
 var optionsStr = make(map[string]string)
 var optionsBool = make(map[string]bool)
-var config, cookie, data, header, p, customPayload, userAgent, blind, output, format, foundAction, proxy string
+var config, cookie, data, header, p, customPayload, userAgent, blind, output, format, foundAction, proxy, grep string
 var timeout, concurrence, delay int
 var onlyDiscovery, silence bool
 
@@ -49,11 +49,12 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&p, "param", "p", "", "Only testing selected parameters")
 	rootCmd.PersistentFlags().StringVar(&customPayload, "custom-payload", "", "Add custom payloads from file")
 	rootCmd.PersistentFlags().StringVar(&userAgent, "user-agent", "", "Add custom UserAgent")
-	rootCmd.PersistentFlags().StringVarP(&blind, "blind", "b", "", "Add your blind xss")
+	rootCmd.PersistentFlags().StringVarP(&blind, "blind", "b", "", "Add your blind xss (e.g -b https://hahwul.xss.ht)")
 	rootCmd.PersistentFlags().StringVarP(&output, "output", "o", "", "Write to output file")
 	rootCmd.PersistentFlags().StringVar(&format, "output-format", "", "-o/--output 's format (txt/json/xml)")
 	rootCmd.PersistentFlags().StringVar(&foundAction, "found-action", "", "If found weak/vuln, action(cmd) to next")
 	rootCmd.PersistentFlags().StringVar(&proxy, "proxy", "", "Send all request to proxy server (e.g --proxy http://127.0.0.1:8080)")
+	rootCmd.PersistentFlags().StringVar(&grep, "grep", "", "Using custom grepping file (e.g --grep ./samples/sample_grep.json)")
 
 	//Int
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 10, "Second of timeout")
@@ -78,6 +79,7 @@ func initConfig() {
 	optionsStr["format"] = format
 	optionsStr["foundAction"] = foundAction
 	optionsStr["proxy"] = proxy
+	optionsStr["grep"] = grep
 	optionsStr["timeout"] = strconv.Itoa(timeout)
 	optionsStr["concurrence"] = strconv.Itoa(concurrence)
 	optionsStr["delay"] = strconv.Itoa(delay)
