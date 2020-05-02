@@ -85,7 +85,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 	if optionsStr["silence"] == "" {
 		time.Sleep(1 * time.Second) // Waiting log
 		s.Start()                   // Start the spinner
-		time.Sleep(3 * time.Second) // Run for some time to simulate work
+		//time.Sleep(3 * time.Second) // Run for some time to simulate work
 	}
 	wait.Wait()
 	if optionsStr["silence"] == "" {
@@ -267,8 +267,8 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 		s.Suffix = "  Make " + optionsStr["concurrence"] + " workers and allocated " + strconv.Itoa(len(query)) + " queries"
 
 		if optionsStr["silence"] == "" {
-			s.Start()                   // Start the spinner
-			time.Sleep(3 * time.Second) // Run for some time to simulate work
+			s.Start() // Start the spinner
+			//time.Sleep(3 * time.Second) // Run for some time to simulate work
 		}
 		// make waiting group
 		var wg sync.WaitGroup
