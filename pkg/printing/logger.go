@@ -45,6 +45,13 @@ func DalLog(level, text string, optionsStr map[string]string) {
 		text = aurora.White("[*] ").String() + text
 
 	}
+	if level == "GREP" {
+		if optionsStr["output"] != "" {
+			ftext = "[G] " + text
+		}
+		text = aurora.Green("[G] ").String() + text
+
+	}
 
 	if level == "CODE" {
 		if optionsStr["output"] != "" {
