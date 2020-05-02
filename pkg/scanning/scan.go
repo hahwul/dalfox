@@ -1,6 +1,7 @@
 package scanning
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -213,6 +214,29 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 		} else {
 			printing.DalLog("SYSTEM", "Type is '"+policy["Content-Type"]+"', It does not test except customized payload (custom/blind).", optionsStr)
 		}
+
+		// Build-in Grepping payload :: SSTI
+		// {444*6664}
+		// 2958816
+		bpu, _ := url.Parse(target)
+		bpd := bpu.Query()
+		for bpk := range bpd {
+			for _, ssti := range getSSTIPayload() {
+				// Add plain XSS Query
+				tq, tm := optimization.MakeRequestQuery(target, bpk, ssti, "toGrepping", optionsStr)
+				tm["payload"] = "toGrepping"
+				query[tq] = tm
+				// Add URL encoded XSS Query
+				etq, etm := optimization.MakeURLEncodeRequestQuery(target, bpk, ssti, "toGrepping", optionsStr)
+				etm["payload"] = "toGrepping"
+				query[etq] = etm
+				// Add HTML Encoded XSS Query
+				htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, bpk, ssti, "toGrepping", optionsStr)
+				htm["payload"] = "toGrepping"
+				query[htq] = htm
+			}
+		}
+
 		// Blind payload
 		if optionsStr["blind"] != "" {
 			spu, _ := url.Parse(target)
@@ -220,15 +244,15 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 			for spk := range spd {
 				// Add plain XSS Query
 				tq, tm := optimization.MakeRequestQuery(target, spk, "\"'><script src="+optionsStr["blind"]+"></script>", "toBlind", optionsStr)
-				tm["payload"] = "Blind"
+				tm["payload"] = "toBlind"
 				query[tq] = tm
 				// Add URL encoded XSS Query
 				etq, etm := optimization.MakeURLEncodeRequestQuery(target, spk, "\"'><script src="+optionsStr["blind"]+"></script>", "toBlind", optionsStr)
-				etm["payload"] = "Blind"
+				etm["payload"] = "toBlind"
 				query[etq] = etm
 				// Add HTML Encoded XSS Query
 				htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, spk, "\"'><script src="+optionsStr["blind"]+"></script>", "toBlind", optionsStr)
-				htm["payload"] = "Blind"
+				htm["payload"] = "toBlind"
 				query[htq] = htm
 			}
 			printing.DalLog("SYSTEM", "Added your blind XSS ("+optionsStr["blind"]+")", optionsStr)
@@ -285,11 +309,11 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 					// queries.metadata : map[string]string
 					k := reqJob.request
 					v := reqJob.metadata
-					if vStatus[v["param"]] == false {
+					if (vStatus[v["param"]] == false) || (v["type"] != "toBlind") || (v["type"] != "toGrepping") {
 						rl.Block(k.Host)
 						resbody, resp, vds, vrs := SendReq(k, v["payload"], optionsStr)
 						_ = resp
-						if v["type"] != "inBlind" {
+						if (v["type"] != "toBlind") && (v["type"] != "toGrepping") {
 							if v["type"] == "inJS" {
 								if vrs {
 									mutex.Lock()
@@ -599,6 +623,55 @@ func SendReq(req *http.Request, payload string, optionsStr map[string]string) (s
 	str := string(bytes)
 
 	defer resp.Body.Close()
+
+	//for SSTI
+	ssti := getSSTIPayload()
+
+	//grepResult := make(map[string][]string)
+	grepResult := builtinGrep(str)
+	for k, v := range grepResult {
+		if k == "dalfox-ssti" {
+			really := false
+			for _, vv := range ssti {
+				if vv == payload {
+					really = true
+				}
+			}
+
+			if really {
+				printing.DalLog("GREP", "Found SSTI via built-in grepping / payload: "+payload, optionsStr)
+				for _, vv := range v {
+					printing.DalLog("CODE", vv, optionsStr)
+				}
+				printing.DalLog("PRINT", req.URL.String(), optionsStr)
+			}
+		} else {
+			// other case
+			printing.DalLog("GREP", "Found "+k+" via built-in grepping / payload: "+payload, optionsStr)
+			for _, vv := range v {
+				printing.DalLog("CODE", vv, optionsStr)
+			}
+			printing.DalLog("PRINT", req.URL.String(), optionsStr)
+		}
+	}
+
+	if optionsStr["grep"] != "" {
+		pattern := make(map[string]string)
+		var result map[string]interface{}
+		json.Unmarshal([]byte(optionsStr["grep"]), &result)
+		for k, v := range result {
+			pattern[k] = v.(string)
+		}
+		cg := customGrep(str, pattern)
+		for k, v := range cg {
+			printing.DalLog("GREP", "Found "+k+" via custom grepping / payload: "+payload, optionsStr)
+			for _, vv := range v {
+				printing.DalLog("CODE", vv, optionsStr)
+			}
+			printing.DalLog("PRINT", req.URL.String(), optionsStr)
+		}
+	}
+
 	vds := verification.VerifyDOM(str)
 	vrs := verification.VerifyReflection(str, payload)
 	return str, resp, vds, vrs

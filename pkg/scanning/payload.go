@@ -1,5 +1,14 @@
 package scanning
 
+//getSSTIPayload is return SSTI Payloads
+func getSSTIPayload() []string {
+	payload := []string{
+		"{444*6664}",
+	}
+	return payload
+}
+
+// getCommonPayload is return xss
 func getCommonPayload() []string {
 	payload := []string{
 		// include verify payload
@@ -44,6 +53,7 @@ func getCommonPayload() []string {
 	return payload
 }
 
+// getAttrPayload is is return xss
 func getAttrPayload() []string {
 	payload := []string{
 		"' onmouseleave=confirm(45) class=dalfox '",
@@ -65,6 +75,7 @@ func getAttrPayload() []string {
 	return payload
 }
 
+// getInJsPayload is return xss
 func getInJsPayload() []string {
 	payload := []string{
 		"'+alert(45)+'",
@@ -189,6 +200,7 @@ func getInJsPayload() []string {
 	return payload
 }
 
+// makeDynamicPayload is return xss
 func makeDynamicPayload(badchars, rtype string) []string {
 	payload := []string{}
 	if rtype == "inHTML" {

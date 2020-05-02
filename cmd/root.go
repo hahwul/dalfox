@@ -90,6 +90,20 @@ func initConfig() {
 		optionsStr["silence"] = "yes"
 	}
 
+	if grep != "" {
+		// Open our jsonFile
+		jsonFile, err := os.Open(grep)
+		// if we os.Open returns an error then handle it
+		if err != nil {
+			fmt.Println(err)
+		}
+		printing.DalLog("SYSTEM", "Loaded "+grep+" file for grepping", optionsStr)
+		// defer the closing of our jsonFile so that we can parse it later on
+		defer jsonFile.Close()
+		byteValue, _ := ioutil.ReadAll(jsonFile)
+		optionsStr["grep"] = string(byteValue)
+	}
+
 	if config != "" {
 		// Open our jsonFile
 		jsonFile, err := os.Open(config)

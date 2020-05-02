@@ -22,7 +22,7 @@ func builtinGrep(data string) map[string][]string {
 	result := make(map[string][]string)
 	// "pattern name":"regex"
 	pattern := map[string]string{
-		"dalfox_ssti": "2958816",
+		"dalfox-ssti": "2958816",
 	}
 
 	for k, v := range pattern {
