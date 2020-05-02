@@ -32,8 +32,29 @@ I talk about naming. Dal(달) is the Korean pronunciation of moon and fox was ma
 - And the various options required for the testing :D
 
 ## How to Install
+Using go install
+1) clone this repo
+```
+$ git clone https://github.com/hahwul/dalfox
+```
+2) install in cloned dalfox path
+```
+$ go install
+```
+3) using dalfox
+```
+$ ~/go/bin/dalfox
+```
+
+
+Using go get 
+1) go get dalfox!
 ```
 $ go get -u github.com/hahwul/dalfox
+```
+2) using dalfox
+```
+$ ~/go/bin/dalfox
 ```
 
 ## Usage
