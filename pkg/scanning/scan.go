@@ -82,11 +82,15 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 	s := spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
 	s.Prefix = " "
 	s.Suffix = "  Waiting routines.."
-	time.Sleep(1 * time.Second) // Waiting log
-	s.Start()                   // Start the spinner
-	time.Sleep(3 * time.Second) // Run for some time to simulate work
+	if optionsStr["silence"] == "" {
+		time.Sleep(1 * time.Second) // Waiting log
+		s.Start()                   // Start the spinner
+		time.Sleep(3 * time.Second) // Run for some time to simulate work
+	}
 	wait.Wait()
-	s.Stop()
+	if optionsStr["silence"] == "" {
+		s.Stop()
+	}
 	for k, v := range policy {
 		if len(v) != 0 {
 			printing.DalLog("INFO", k+" is "+v, optionsStr)
@@ -241,13 +245,13 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 					spd := spu.Query()
 					for spk := range spd {
 						// Add plain XSS Query
-						tq, tm := optimization.MakeRequestQuery(target, spk, customPayload, "yourCustom", optionsStr)
+						tq, tm := optimization.MakeRequestQuery(target, spk, customPayload, "toHTML", optionsStr)
 						query[tq] = tm
 						// Add URL encoded XSS Query
-						etq, etm := optimization.MakeURLEncodeRequestQuery(target, spk, customPayload, "yourCustom", optionsStr)
+						etq, etm := optimization.MakeURLEncodeRequestQuery(target, spk, customPayload, "inHTML", optionsStr)
 						query[etq] = etm
 						// Add HTML Encoded XSS Query
-						htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, spk, customPayload, "yourCustom", optionsStr)
+						htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, spk, customPayload, "inHTML", optionsStr)
 						query[htq] = htm
 					}
 				}
@@ -259,11 +263,13 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 		s := spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
 		mutex := &sync.Mutex{}
 		queryCount := 0
-
 		s.Prefix = " "
 		s.Suffix = "  Make " + optionsStr["concurrence"] + " workers and allocated " + strconv.Itoa(len(query)) + " queries"
-		s.Start()                   // Start the spinner
-		time.Sleep(3 * time.Second) // Run for some time to simulate work
+
+		if optionsStr["silence"] == "" {
+			s.Start()                   // Start the spinner
+			time.Sleep(3 * time.Second) // Run for some time to simulate work
+		}
 		// make waiting group
 		var wg sync.WaitGroup
 		// set concurrency
@@ -279,11 +285,11 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 					// queries.metadata : map[string]string
 					k := reqJob.request
 					v := reqJob.metadata
-					if (vStatus[v["param"]] == false) || v["type"] == "toBlind" || v["type"] == "yourCustom" {
+					if vStatus[v["param"]] == false {
 						rl.Block(k.Host)
 						resbody, resp, vds, vrs := SendReq(k, v["payload"], optionsStr)
 						_ = resp
-						if v["type"] != "toBlind" {
+						if v["type"] != "inBlind" {
 							if v["type"] == "inJS" {
 								if vrs {
 									mutex.Lock()
@@ -291,7 +297,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 										code := CodeView(resbody, v["payload"])
 										printing.DalLog("VULN", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], optionsStr)
 										printing.DalLog("CODE", code, optionsStr)
-										printing.DalLog("PRINT", k.URL.String(), optionsStr)
+										printing.DalLog("PRINT", k.URL.RawQuery, optionsStr)
 										vStatus[v["param"]] = true
 										if optionsStr["foundAction"] != "" {
 											foundAction(optionsStr, target, k.URL.RawQuery, "VULN")
@@ -306,7 +312,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 										code := CodeView(resbody, v["payload"])
 										printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], optionsStr)
 										printing.DalLog("CODE", code, optionsStr)
-										printing.DalLog("PRINT", k.URL.String(), optionsStr)
+										printing.DalLog("PRINT", k.URL.RawQuery, optionsStr)
 										vStatus[v["param"]] = true
 										if optionsStr["foundAction"] != "" {
 											foundAction(optionsStr, target, k.URL.RawQuery, "VULN")
@@ -319,7 +325,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 										code := CodeView(resbody, v["payload"])
 										printing.DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"], optionsStr)
 										printing.DalLog("CODE", code, optionsStr)
-										printing.DalLog("PRINT", k.URL.String(), optionsStr)
+										printing.DalLog("PRINT", k.URL.RawQuery, optionsStr)
 										if optionsStr["foundAction"] != "" {
 											foundAction(optionsStr, target, k.URL.RawQuery, "WEAK")
 										}
@@ -333,7 +339,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 										code := CodeView(resbody, v["payload"])
 										printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], optionsStr)
 										printing.DalLog("CODE", code, optionsStr)
-										printing.DalLog("PRINT", k.URL.String(), optionsStr)
+										printing.DalLog("PRINT", k.URL.RawQuery, optionsStr)
 										vStatus[v["param"]] = true
 										if optionsStr["foundAction"] != "" {
 											foundAction(optionsStr, target, k.URL.RawQuery, "VULN")
@@ -346,7 +352,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 										code := CodeView(resbody, v["payload"])
 										printing.DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"], optionsStr)
 										printing.DalLog("CODE", code, optionsStr)
-										printing.DalLog("PRINT", k.URL.String(), optionsStr)
+										printing.DalLog("PRINT", k.URL.RawQuery, optionsStr)
 										if optionsStr["foundAction"] != "" {
 											foundAction(optionsStr, target, k.URL.RawQuery, "WEAK")
 										}
@@ -360,10 +366,12 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 					mutex.Lock()
 					queryCount = queryCount + 1
 
-					s.Lock()
-					s.Suffix = "  Tested (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") queries from " + optionsStr["concurrence"] + " worker"
-					//s.Suffix = " Waiting routines.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
-					s.Unlock()
+					if optionsStr["silence"] == "" {
+						s.Lock()
+						s.Suffix = "  Tested (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") queries from " + optionsStr["concurrence"] + " worker"
+						//s.Suffix = " Waiting routines.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
+						s.Unlock()
+					}
 					mutex.Unlock()
 				}
 				wg.Done()
@@ -379,8 +387,9 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 		}
 		close(queries)
 		wg.Wait()
-		s.Stop()
-
+		if optionsStr["silence"] == "" {
+			s.Stop()
+		}
 	}
 	printing.DalLog("SYSTEM", "Finish :D", optionsStr)
 }
