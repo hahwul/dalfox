@@ -80,17 +80,13 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 	}()
 
 	s := spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
-	if optionsStr["silence"] == "" {
-		s.Prefix = " "
-		s.Suffix = "  Waiting routines.."
-		time.Sleep(1 * time.Second) // Waiting log
-		s.Start()                   // Start the spinner
-		time.Sleep(3 * time.Second) // Run for some time to simulate work
-	}
+	s.Prefix = " "
+	s.Suffix = "  Waiting routines.."
+	time.Sleep(1 * time.Second) // Waiting log
+	s.Start()                   // Start the spinner
+	time.Sleep(3 * time.Second) // Run for some time to simulate work
 	wait.Wait()
-	if optionsStr["silence"] == "" {
-		s.Stop()
-	}
+	s.Stop()
 	for k, v := range policy {
 		if len(v) != 0 {
 			printing.DalLog("INFO", k+" is "+v, optionsStr)
@@ -264,12 +260,10 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 		mutex := &sync.Mutex{}
 		queryCount := 0
 
-		if optionsStr["silence"] == "" {
-			s.Prefix = " "
-			s.Suffix = "  Make " + optionsStr["concurrence"] + " workers and allocated " + strconv.Itoa(len(query)) + " queries"
-			s.Start()                   // Start the spinner
-			time.Sleep(3 * time.Second) // Run for some time to simulate work
-		}
+		s.Prefix = " "
+		s.Suffix = "  Make " + optionsStr["concurrence"] + " workers and allocated " + strconv.Itoa(len(query)) + " queries"
+		s.Start()                   // Start the spinner
+		time.Sleep(3 * time.Second) // Run for some time to simulate work
 		// make waiting group
 		var wg sync.WaitGroup
 		// set concurrency
@@ -366,12 +360,10 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 					mutex.Lock()
 					queryCount = queryCount + 1
 
-					if optionsStr["silence"] == "" {
-						s.Lock()
-						s.Suffix = "  Tested (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") queries from " + optionsStr["concurrence"] + " worker"
-						//s.Suffix = " Waiting routines.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
-						s.Unlock()
-					}
+					s.Lock()
+					s.Suffix = "  Tested (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") queries from " + optionsStr["concurrence"] + " worker"
+					//s.Suffix = " Waiting routines.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
+					s.Unlock()
 					mutex.Unlock()
 				}
 				wg.Done()
@@ -387,9 +379,8 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 		}
 		close(queries)
 		wg.Wait()
-		if optionsStr["silence"] == "" {
-			s.Stop()
-		}
+		s.Stop()
+
 	}
 	printing.DalLog("SYSTEM", "Finish :D", optionsStr)
 }
