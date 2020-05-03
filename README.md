@@ -33,7 +33,7 @@ I talk about naming. Dal(달) is the Korean pronunciation of moon and fox was ma
   - etc..
 
 ## How to Install
-Using go install
+### Using go install
 1) clone this repo
 ```
 $ git clone https://github.com/hahwul/dalfox
@@ -48,7 +48,7 @@ $ ~/go/bin/dalfox
 ```
 
 
-Using go get 
+### Using go get 
 1) go get dalfox!
 ```
 $ go get -u github.com/hahwul/dalfox
@@ -56,6 +56,20 @@ $ go get -u github.com/hahwul/dalfox
 2) using dalfox
 ```
 $ ~/go/bin/dalfox
+```
+
+### Download release file
+There are a total of three ways to Personally, I recommend go install.
+1) Open release page
+https://github.com/hahwul/dalfox/releases/latest
+
+2) Download file 
+Download and extract the file that fits your OS.
+
+3) You can put it in the execution directory and use it.
+e.g 
+```
+$ cp dalfox /usr/bin/
 ```
 
 ## Usage
