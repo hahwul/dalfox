@@ -94,7 +94,11 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 	}
 	for k, v := range policy {
 		if len(v) != 0 {
-			printing.DalLog("INFO", k+" is "+v, optionsStr)
+			if k == "BypassCSP" {
+				printing.DalLog("WEAK", k+": "+v, optionsStr)
+			} else {
+				printing.DalLog("INFO", k+" is "+v, optionsStr)
+			}
 		}
 	}
 
@@ -461,9 +465,20 @@ func StaticAnalysis(target string, optionsStr map[string]string) map[string]stri
 	}
 	if resp.Header["Content-Security-Policy"] != nil {
 		policy["Content-Security-Policy"] = resp.Header["Content-Security-Policy"][0]
+		result := checkCSP(policy["Content-Security-Policy"])
+
+		if result != "" {
+			policy["BypassCSP"] = result
+		}
 	}
 	if resp.Header["X-Frame-Options"] != nil {
 		policy["X-Frame-Options"] = resp.Header["X-Frame-Options"][0]
+	}
+	if resp.Header["Strict-Transport-Security"] != nil {
+		policy["Strict-Transport-Security"] = resp.Header["Strict-Transport-Security"][0]
+	}
+	if resp.Header["Access-Control-Allow-Origin"] != nil {
+		policy["Access-Control-Allow-Origin"] = resp.Header["Access-Control-Allow-Origin"][0]
 	}
 
 	return policy
