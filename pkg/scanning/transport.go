@@ -16,7 +16,10 @@ func getTransport(optionsStr map[string]string) *http.Transport {
 	// set timeout
 	t, _ := strconv.Atoi(optionsStr["timeout"])
 	transport := &http.Transport{
-		TLSClientConfig:   &tls.Config{InsecureSkipVerify: true},
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true,
+			Renegotiation:      tls.RenegotiateOnceAsClient,
+		},
 		DisableKeepAlives: true,
 		DialContext: (&net.Dialer{
 			Timeout:   time.Duration(t) * time.Second,
