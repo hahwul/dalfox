@@ -22,7 +22,9 @@ func builtinGrep(data string) map[string][]string {
 	result := make(map[string][]string)
 	// "pattern name":"regex"
 	pattern := map[string]string{
-		"dalfox-ssti": "2958816",
+		"dalfox-ssti":     "2958816",
+		"dalfox-rsa-key":  "-----BEGIN RSA PRIVATE KEY-----|-----END RSA PRIVATE KEY-----",
+		"dalfox-priv-key": "-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----",
 	}
 
 	for k, v := range pattern {
