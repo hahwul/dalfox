@@ -466,7 +466,6 @@ func StaticAnalysis(target string, optionsStr map[string]string) map[string]stri
 	if resp.Header["Content-Security-Policy"] != nil {
 		policy["Content-Security-Policy"] = resp.Header["Content-Security-Policy"][0]
 		result := checkCSP(policy["Content-Security-Policy"])
-
 		if result != "" {
 			policy["BypassCSP"] = result
 		}

@@ -1,6 +1,8 @@
 package scanning
 
-import "strings"
+import (
+	"strings"
+)
 
 // checkCSP is bypass CSP for StaticAnalysis
 func checkCSP(policy string) string {
@@ -150,8 +152,10 @@ func checkCSP(policy string) string {
 	if strings.Contains(policy, "*.googleapis.com") {
 		arr = append(arr, "*googleapis.com")
 	}
-	result = strings.Join(arr[:], ",")
-	result = result + "\n" + "    Please check https://raw.githubusercontent.com/swisskyrepo/PayloadsAllTheThings/master/XSS%20Injection/Intruders/jsonp_endpoint.txt"
+	if len(arr) > 0 {
+		result = strings.Join(arr[:], " ")
+		result = result + "\n" + "    Please check https://raw.githubusercontent.com/swisskyrepo/PayloadsAllTheThings/master/XSS%20Injection/Intruders/jsonp_endpoint.txt"
+	}
 	// https://raw.githubusercontent.com/swisskyrepo/PayloadsAllTheThings/master/XSS%20Injection/Intruders/jsonp_endpoint.txt
 	return result
 }
