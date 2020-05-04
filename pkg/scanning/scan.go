@@ -328,7 +328,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 										printing.DalLog("PRINT", k.URL.String(), optionsStr)
 										vStatus[v["param"]] = true
 										if optionsStr["foundAction"] != "" {
-											foundAction(optionsStr, target, k.URL.RawQuery, "VULN")
+											foundAction(optionsStr, target, k.URL.String(), "VULN")
 										}
 									}
 									mutex.Unlock()
@@ -343,7 +343,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 										printing.DalLog("PRINT", k.URL.String(), optionsStr)
 										vStatus[v["param"]] = true
 										if optionsStr["foundAction"] != "" {
-											foundAction(optionsStr, target, k.URL.RawQuery, "VULN")
+											foundAction(optionsStr, target, k.URL.String(), "VULN")
 										}
 									}
 									mutex.Unlock()
@@ -355,7 +355,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 										printing.DalLog("CODE", code, optionsStr)
 										printing.DalLog("PRINT", k.URL.String(), optionsStr)
 										if optionsStr["foundAction"] != "" {
-											foundAction(optionsStr, target, k.URL.RawQuery, "WEAK")
+											foundAction(optionsStr, target, k.URL.String(), "WEAK")
 										}
 									}
 									mutex.Unlock()
@@ -370,7 +370,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 										printing.DalLog("PRINT", k.URL.String(), optionsStr)
 										vStatus[v["param"]] = true
 										if optionsStr["foundAction"] != "" {
-											foundAction(optionsStr, target, k.URL.RawQuery, "VULN")
+											foundAction(optionsStr, target, k.URL.String(), "VULN")
 										}
 									}
 									mutex.Unlock()
@@ -382,7 +382,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 										printing.DalLog("CODE", code, optionsStr)
 										printing.DalLog("PRINT", k.URL.String(), optionsStr)
 										if optionsStr["foundAction"] != "" {
-											foundAction(optionsStr, target, k.URL.RawQuery, "WEAK")
+											foundAction(optionsStr, target, k.URL.String(), "WEAK")
 										}
 									}
 									mutex.Unlock()
