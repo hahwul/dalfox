@@ -154,7 +154,7 @@ func checkCSP(policy string) string {
 	}
 	if len(arr) > 0 {
 		result = strings.Join(arr[:], " ")
-		result = result + "\n" + "    Please check https://raw.githubusercontent.com/swisskyrepo/PayloadsAllTheThings/master/XSS%20Injection/Intruders/jsonp_endpoint.txt"
+		result = result + "\n" + "    Needs manual testing. please refer to it. https://t.co/lElLxtainw?amp=1"
 	}
 	// https://raw.githubusercontent.com/swisskyrepo/PayloadsAllTheThings/master/XSS%20Injection/Intruders/jsonp_endpoint.txt
 	return result
