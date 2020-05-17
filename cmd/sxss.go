@@ -33,7 +33,7 @@ func init() {
 	sxssCmd.PersistentFlags().StringVar(&trigger, "trigger", "", "Checking this url after inject sxss code")
 
 	//Int
-	sxssCmd.PersistentFlags().IntVar(&sequence, "sequence", -1, "Set sequence to first number")
+	sxssCmd.PersistentFlags().IntVar(&sequence, "sequence", -1, "Set sequence to first number (comming soon)")
 
 	//Int
 	sxssCmd.PersistentFlags().BoolVar(&mass, "mass", false, "Testing mass vector (comming soon)")
