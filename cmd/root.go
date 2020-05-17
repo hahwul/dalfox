@@ -66,6 +66,8 @@ func init() {
 	//Bool
 	rootCmd.PersistentFlags().BoolVar(&onlyDiscovery, "only-discovery", false, "Only testing parameter analysis")
 	rootCmd.PersistentFlags().BoolVar(&silence, "silence", false, "Not printing all logs")
+
+	printing.Banner()
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -132,7 +134,4 @@ func initConfig() {
 		}
 	}
 
-	if !silence {
-		printing.Banner()
-	}
 }
