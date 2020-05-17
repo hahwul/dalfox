@@ -30,10 +30,10 @@ func init() {
 	rootCmd.AddCommand(sxssCmd)
 
 	//Str
-	sxssCmd.PersistentFlags().StringVar(&trigger, "trigger", "", "Checking this url after inject sxss code")
+	sxssCmd.PersistentFlags().StringVar(&trigger, "trigger", "", "Checking this url after inject sxss code (e.g --trigger https://~~/profile)")
 
 	//Int
-	sxssCmd.PersistentFlags().IntVar(&sequence, "sequence", -1, "Set sequence to first number (comming soon)")
+	sxssCmd.PersistentFlags().IntVar(&sequence, "sequence", -1, "Set sequence to first number (e.g --trigger https://~/view?no=SEQNC --sequence 3)")
 
 	//Int
 	sxssCmd.PersistentFlags().BoolVar(&mass, "mass", false, "Testing mass vector (comming soon)")
