@@ -97,7 +97,7 @@ Available Commands:
   version     Show version
 
 Flags:
-  -b, --blind string            Add your blind xss (e.g -b https://hahwul.xss.ht)
+  -b, --blind string            Add your blind xss (e.g -b hahwul.xss.ht)
       --config string           Using config from file
   -C, --cookie string           Add custom cookie
       --custom-payload string   Add custom payloads from file
@@ -107,7 +107,7 @@ Flags:
       --grep string             Using custom grepping file (e.g --grep ./samples/sample_grep.json)
   -H, --header string           Add custom headers
   -h, --help                    help for dalfox
-      --ignore-return string    Ignore scanning from return code (e.g --ignore-return 302,403,404
+      --ignore-return string    Ignore scanning from return code (e.g --ignore-return 302,403,404)
       --only-discovery          Only testing parameter analysis
   -o, --output string           Write to output file
       --output-format string    -o/--output 's format (txt/json/xml)
