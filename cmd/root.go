@@ -15,6 +15,7 @@ var cfgFile string
 var optionsStr = make(map[string]string)
 var optionsBool = make(map[string]bool)
 var config, cookie, data, header, p, customPayload, userAgent, blind, output, format, foundAction, proxy, grep string
+var ignoreReturn string
 var timeout, concurrence, delay int
 var onlyDiscovery, silence bool
 
@@ -55,6 +56,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&foundAction, "found-action", "", "If found weak/vuln, action(cmd) to next")
 	rootCmd.PersistentFlags().StringVar(&proxy, "proxy", "", "Send all request to proxy server (e.g --proxy http://127.0.0.1:8080)")
 	rootCmd.PersistentFlags().StringVar(&grep, "grep", "", "Using custom grepping file (e.g --grep ./samples/sample_grep.json)")
+	rootCmd.PersistentFlags().StringVar(&ignoreReturn, "ignore-return", "", "Ignore scanning from return code (e.g --ignore-return 302,403,404")
 
 	//Int
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 10, "Second of timeout")
@@ -80,6 +82,7 @@ func initConfig() {
 	optionsStr["foundAction"] = foundAction
 	optionsStr["proxy"] = proxy
 	optionsStr["grep"] = grep
+	optionsStr["ignoreReturn"] = ignoreReturn
 	optionsStr["timeout"] = strconv.Itoa(timeout)
 	optionsStr["concurrence"] = strconv.Itoa(concurrence)
 	optionsStr["delay"] = strconv.Itoa(delay)
