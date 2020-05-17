@@ -7,7 +7,6 @@ import (
 	"github.com/hahwul/dalfox/pkg/printing"
 	"github.com/rhysd/go-github-selfupdate/selfupdate"
 	"github.com/spf13/cobra"
-	"net/http"
 	"os"
 )
 
@@ -18,20 +17,6 @@ var updateCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		confirmAndSelfUpdate()
 	},
-}
-
-func selfUpdate() error {
-	url := "https://github.com/hahwul/dalfox"
-	resp, err := http.Get(url)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	err = update.Apply(resp.Body, update.Options{})
-	if err != nil {
-		// error handling
-	}
-	return err
 }
 
 func init() {
