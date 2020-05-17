@@ -61,6 +61,17 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 			printing.DalLog("ERROR", msg, optionsStr)
 			return
 		}
+		if optionsStr["ignoreReturn"] != "" {
+			rcode := strings.Split(optionsStr["ignoreReturn"], ",")
+			tcode := strconv.Itoa(tres.StatusCode)
+			for _, v := range rcode {
+				if tcode == v {
+					printing.DalLog("SYSTEM", "Not running "+target+" url from --ignore-return option", optionsStr)
+					return
+				}
+			}
+		}
+
 		defer tres.Body.Close()
 		body, err := ioutil.ReadAll(tres.Body)
 		printing.DalLog("SYSTEM", "Vaild target [ code:"+strconv.Itoa(tres.StatusCode)+" / size:"+strconv.Itoa(len(body))+" ]", optionsStr)
