@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"github.com/blang/semver"
 	"github.com/hahwul/dalfox/pkg/printing"
-	"github.com/inconshreveable/go-update"
 	"github.com/rhysd/go-github-selfupdate/selfupdate"
 	"github.com/spf13/cobra"
 	"net/http"
