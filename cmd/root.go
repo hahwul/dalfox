@@ -50,13 +50,13 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&p, "param", "p", "", "Only testing selected parameters")
 	rootCmd.PersistentFlags().StringVar(&customPayload, "custom-payload", "", "Add custom payloads from file")
 	rootCmd.PersistentFlags().StringVar(&userAgent, "user-agent", "", "Add custom UserAgent")
-	rootCmd.PersistentFlags().StringVarP(&blind, "blind", "b", "", "Add your blind xss (e.g -b https://hahwul.xss.ht)")
+	rootCmd.PersistentFlags().StringVarP(&blind, "blind", "b", "", "Add your blind xss (e.g -b hahwul.xss.ht)")
 	rootCmd.PersistentFlags().StringVarP(&output, "output", "o", "", "Write to output file")
 	rootCmd.PersistentFlags().StringVar(&format, "output-format", "", "-o/--output 's format (txt/json/xml)")
 	rootCmd.PersistentFlags().StringVar(&foundAction, "found-action", "", "If found weak/vuln, action(cmd) to next")
 	rootCmd.PersistentFlags().StringVar(&proxy, "proxy", "", "Send all request to proxy server (e.g --proxy http://127.0.0.1:8080)")
 	rootCmd.PersistentFlags().StringVar(&grep, "grep", "", "Using custom grepping file (e.g --grep ./samples/sample_grep.json)")
-	rootCmd.PersistentFlags().StringVar(&ignoreReturn, "ignore-return", "", "Ignore scanning from return code (e.g --ignore-return 302,403,404")
+	rootCmd.PersistentFlags().StringVar(&ignoreReturn, "ignore-return", "", "Ignore scanning from return code (e.g --ignore-return 302,403,404)")
 
 	//Int
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 10, "Second of timeout")
