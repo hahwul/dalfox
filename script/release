@@ -42,9 +42,11 @@ for ARCH in "amd64" "386"; do
         if [[ "${OS}" == "windows" ]]; then
             ARCHIVE="${BINARY}-${OS}-${ARCH}-${VERSION}.zip"
             zip ${ARCHIVE} ${BINFILE}
+	    cp ${BINFILE} ${BINARY}_${OS}_${ARCH}
         else
             ARCHIVE="${BINARY}-${OS}-${ARCH}-${VERSION}.tgz"
             tar --create --gzip --file=${ARCHIVE} ${BINFILE}
+	    cp ${BINFILE} ${BINARY}_${OS}_${ARCH}
         fi
     done
 done
