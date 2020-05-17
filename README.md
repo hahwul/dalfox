@@ -22,7 +22,7 @@ I talk about naming. Dal(달) is the Korean pronunciation of moon and fox was ma
 - Optimization query of payloads
   - Check the injection point through abstraction and generated the fit payload.
   - Eliminate unnecessary payloads based on badchar
-- XSS Scanning and DOM Base Verifying
+- XSS Scanning(Reflected + Stored) and DOM Base Verifying
 - All test payloads(build-in, your custom/blind) are tested in parallel with the encoder.
   - Support to Double URL Encoder
   - Support to HTML Hex Encoder
@@ -91,6 +91,8 @@ Available Commands:
   file        Use file mode(targets list or rawdata)
   help        Help about any command
   pipe        Use pipeline mode
+  sxss        Use Stored XSS mode
+  update      Update DalFox (Binary patch)
   url         Use single target mode
   version     Show version
 
@@ -105,6 +107,7 @@ Flags:
       --grep string             Using custom grepping file (e.g --grep ./samples/sample_grep.json)
   -H, --header string           Add custom headers
   -h, --help                    help for dalfox
+      --ignore-return string    Ignore scanning from return code (e.g --ignore-return 302,403,404
       --only-discovery          Only testing parameter analysis
   -o, --output string           Write to output file
       --output-format string    -o/--output 's format (txt/json/xml)
