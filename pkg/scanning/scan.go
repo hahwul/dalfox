@@ -700,9 +700,44 @@ func SendReq(req *http.Request, payload string, optionsStr map[string]string) (s
 		}
 	}
 
-	vds := verification.VerifyDOM(str)
-	vrs := verification.VerifyReflection(str, payload)
-	return str, resp, vds, vrs, nil
+	if optionsStr["trigger"] != "" {
+		seq, err := strconv.Atoi(optionsStr["sequence"])
+		var treq *http.Request
+		if seq < 0 {
+			treq = optimization.GenerateNewRequest(optionsStr["trigger"], "", optionsStr)
+		} else {
+
+			triggerUrl := strings.Replace(optionsStr["trigger"], "SEQNC", optionsStr["sequence"], 1)
+			treq = optimization.GenerateNewRequest(triggerUrl, "", optionsStr)
+			optionsStr["sequence"] = strconv.Itoa(seq + 1)
+		}
+		netTransport := getTransport(optionsStr)
+		t, _ := strconv.Atoi(optionsStr["timeout"])
+
+		client := &http.Client{
+			Timeout:   time.Duration(t) * time.Second,
+			Transport: netTransport,
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				return errors.New("something bad happened") // or maybe the error from the request
+			},
+		}
+		resp, err := client.Do(treq)
+		if err != nil {
+			return "", resp, false, false, err
+		}
+
+		bytes, _ := ioutil.ReadAll(resp.Body)
+		str := string(bytes)
+
+		vds := verification.VerifyDOM(str)
+		vrs := verification.VerifyReflection(str, payload)
+		return str, resp, vds, vrs, nil
+
+	} else {
+		vds := verification.VerifyDOM(str)
+		vrs := verification.VerifyReflection(str, payload)
+		return str, resp, vds, vrs, nil
+	}
 
 }
 
