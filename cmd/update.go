@@ -37,7 +37,7 @@ func confirmAndSelfUpdate() {
 		return
 	}
 
-	fmt.Print("Do you want to update to", latest.Version, "? (y/n): ")
+	fmt.Print("Do you want to update to v", latest.Version, "? (y/n): ")
 	input, err := bufio.NewReader(os.Stdin).ReadString('\n')
 	if err != nil || (input != "y\n" && input != "n\n") {
 		printing.DalLog("ERROR", "Invalid input", optionsStr)
