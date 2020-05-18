@@ -42,6 +42,7 @@ func MakeRequestQuery(target, param, payload, ptype string, optionsStr map[strin
 	tempMap["payload"] = payload
 	tempMap["param"] = param
 
+	payload = url.QueryEscape(payload)
 	u, _ := url.Parse(target)
 	data := u.String()
 	if optionsStr["data"] != "" {
@@ -71,6 +72,7 @@ func MakePathQuery(target, fakeparam, payload, ptype string, optionsStr map[stri
 	tempMap["type"] = ptype
 	tempMap["payload"] = payload
 	tempMap["param"] = fakeparam
+	payload = url.QueryEscape(payload)
 	u, err := url.Parse(target)
 	if err != nil {
 		rst := GenerateNewRequest(target, "", optionsStr)
@@ -102,6 +104,7 @@ func MakeURLEncodeRequestQuery(target, param, payload, ptype string, optionsStr 
 	tempMap["type"] = ptype
 	tempMap["payload"] = payload
 	tempMap["param"] = param
+	payload = url.QueryEscape(payload)
 
 	u, _ := url.Parse(target)
 	data := u.String()
@@ -134,6 +137,7 @@ func MakeHTMLEncodeRequestQuery(target, param, payload, ptype string, optionsStr
 	tempMap["type"] = ptype
 	tempMap["payload"] = payload
 	tempMap["param"] = param
+	payload = url.QueryEscape(payload)
 
 	u, _ := url.Parse(target)
 	data := u.String()
