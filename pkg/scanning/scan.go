@@ -257,12 +257,22 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 			spu, _ := url.Parse(target)
 			spd := spu.Query()
 			bpayloads := getBlindPayload()
+
+			//strings.HasPrefix("foobar", "foo") // true
+			var bcallback string
+
+			if strings.HasPrefix(optionsStr["blind"], "https://") || strings.HasPrefix(optionsStr["blind"], "http://") {
+				bcallback = optionsStr["blind"]
+			} else {
+				bcallback = "//" + optionsStr["blind"]
+			}
+
 			// loop parameter list
 			for spk := range spd {
 				// loop payload list
 				for _, bpayload := range bpayloads {
 					// Add plain XSS Query
-					bp := strings.Replace(bpayload, "CALLBACKURL", optionsStr["blind"], 10)
+					bp := strings.Replace(bpayload, "CALLBACKURL", bcallback, 10)
 					tq, tm := optimization.MakeRequestQuery(target, spk, bp, "toBlind", optionsStr)
 					tm["payload"] = "toBlind"
 					query[tq] = tm
