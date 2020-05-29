@@ -11,3 +11,5 @@ require (
 	github.com/rhysd/go-github-selfupdate v1.2.2
 	github.com/spf13/cobra v1.0.0
 )
+
+replace github.com/rhysd/go-github-selfupdate => github.com/hahwul/go-github-selfupdate v1.2.2
