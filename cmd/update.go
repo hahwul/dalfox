@@ -7,7 +7,7 @@ import (
 
 	"github.com/blang/semver"
 	"github.com/hahwul/dalfox/pkg/printing"
-	"github.com/rhysd/go-github-selfupdate/selfupdate"
+	"github.com/hahwul/go-github-selfupdate/selfupdate"
 	"github.com/spf13/cobra"
 )
 
