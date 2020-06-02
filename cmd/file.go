@@ -72,8 +72,14 @@ var fileCmd = &cobra.Command{
 				// Remove Deplicated value
 				targets = unique(targets)
 				printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target urls", optionsStr)
-				for i := range targets {
-					scanning.Scan(targets[i], optionsStr, optionsBool)
+				multi, _ := cmd.Flags().GetBool("multicast")
+				if multi {
+					//t := multicasting.makeTargetSlice(targets)
+				} else {
+					for i := range targets {
+						scanning.Scan(targets[i], optionsStr, optionsBool)
+					}
+
 				}
 			}
 		} else {
@@ -97,6 +103,7 @@ func init() {
 
 	fileCmd.Flags().Bool("rawdata", false, "Using req rawdata from Burp/ZAP")
 	fileCmd.Flags().Bool("http", false, "Using force http on rawdata mode")
+	fileCmd.Flags().Bool("multicast", false, "Scanning N*Host mode")
 }
 
 // a slice of strings, returning the slice and any error
