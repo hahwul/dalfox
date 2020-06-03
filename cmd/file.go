@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/hahwul/dalfox/pkg/multicasting"
+	//"github.com/hahwul/dalfox/pkg/multicasting"
 	"github.com/hahwul/dalfox/pkg/printing"
 	"github.com/hahwul/dalfox/pkg/scanning"
 	"github.com/spf13/cobra"
@@ -75,7 +75,7 @@ var fileCmd = &cobra.Command{
 				printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target urls", optionsStr)
 				multi, _ := cmd.Flags().GetBool("multicast")
 				if multi {
-					t := multicasting.makeTargetSlice(targets)
+					//t := multicasting.makeTargetSlice(targets)
 				} else {
 					for i := range targets {
 						scanning.Scan(targets[i], optionsStr, optionsBool)
