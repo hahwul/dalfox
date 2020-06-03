@@ -5,6 +5,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/hahwul/dalfox/pkg/printing"
 	"github.com/hahwul/dalfox/pkg/scanning"
@@ -25,14 +26,36 @@ var pipeCmd = &cobra.Command{
 		}
 		targets = unique(targets)
 		printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target urls", optionsStr)
-		for i := range targets {
-			scanning.Scan(targets[i], optionsStr, optionsBool)
+
+		multi, _ := cmd.Flags().GetBool("multicast")
+		if multi {
+			printing.DalLog("SYSTEM", "Using multicasting mode", optionsStr)
+			t := scanning.MakeTargetSlice(targets)
+			var wg sync.WaitGroup
+			for k, v := range t {
+				wg.Add(1)
+				go func(k string, v []string) {
+					defer wg.Done()
+					printing.DalLog("SYSTEM", "testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", optionsStr)
+					for i := range v {
+						scanning.Scan(v[i], optionsStr, optionsBool)
+					}
+				}(k, v)
+			}
+			wg.Wait()
+		} else {
+			for i := range targets {
+				scanning.Scan(targets[i], optionsStr, optionsBool)
+			}
+
 		}
+
 	},
 }
 
 func init() {
 	rootCmd.AddCommand(pipeCmd)
+	pipeCmd.Flags().Bool("multicast", false, "Scanning N*Host mode")
 
 	// Here you will define your flags and configuration settings.
 
