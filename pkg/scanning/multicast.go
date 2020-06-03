@@ -1,4 +1,4 @@
-package multicasting
+package scanning
 
 import "net/url"
 
