@@ -52,7 +52,7 @@ $ ~/go/bin/dalfox
 **go-get**
 1) go get dalfox!
 ```
-$ go get -u github.com/hahwul/dalfox
+$ GO111MODULE=on go get -u -v github.com/hahwul/dalfox
 ```
 2) using dalfox
 ```
