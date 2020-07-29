@@ -1,4 +1,5 @@
 FROM golang:1.14
+MAINTAINER hahwul@gmail.com
 
 WORKDIR /go/src/app
 COPY . .
