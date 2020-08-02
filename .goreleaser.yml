@@ -47,15 +47,6 @@ release:
     owner: hahwul
     name: dalfox
 
-dockers:
-  -
-    dockerfile: Dockerfile
-    image_templates:
-      - "hahwul/dalfox:v{{ .Major }}"
-      - "hahwul/dalfox:v{{ .Major }}.{{ .Minor }}"
-      - "hahwul/dalfox:{{ .Tag }}"
-      - "hahwul/dalfox:latest"
-
 brews:
   -
     name: dalfox
