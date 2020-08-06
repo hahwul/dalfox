@@ -3,6 +3,7 @@ package scanning
 import (
 	"encoding/json"
 	"errors"
+	"os"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -91,7 +92,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 		params = ParameterAnalysis(target, optionsStr)
 	}()
 
-	s := spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
+	s := spinner.New(spinner.CharSets[4], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 	s.Prefix = " "
 	s.Suffix = "  Waiting routines.."
 	if optionsStr["silence"] == "" {
@@ -315,7 +316,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 		}
 
 		printing.DalLog("SYSTEM", "Start XSS Scanning.. with "+strconv.Itoa(len(query))+" queries 🗡", optionsStr)
-		s := spinner.New(spinner.CharSets[7], 100*time.Millisecond) // Build our new spinner
+		s := spinner.New(spinner.CharSets[4], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 		mutex := &sync.Mutex{}
 		queryCount := 0
 		s.Prefix = " "
