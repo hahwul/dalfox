@@ -16,7 +16,6 @@ limitations under the License.
 package cmd
 
 import (
-	"fmt"
 	"github.com/hahwul/dalfox/pkg/printing"
 	"github.com/spf13/cobra"
 )
@@ -26,7 +25,8 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Show version",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println(printing.VERSION)
+		fake := make(map[string]string)
+		printing.DalLog("YELLOW", printing.VERSION, fake)
 	},
 }
 

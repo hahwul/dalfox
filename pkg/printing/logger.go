@@ -67,6 +67,10 @@ func DalLog(level, text string, optionsStr map[string]string) {
 		text = aurora.Yellow("[E] ").String() + text
 	}
 
+	if level == "YELLOW"{
+		text = aurora.BrightYellow(text).String()
+	}
+
 	//mutex.Lock()
 	if optionsStr["silence"] != "" {
 		ftext = "[POC] "+text
