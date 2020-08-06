@@ -368,7 +368,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 											code := CodeView(resbody, v["payload"])
 											printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], optionsStr)
 											printing.DalLog("CODE", code, optionsStr)
-											printing.DalLog("PRINT", "[FOUND/VERIFIED] "+k.URL.String(), optionsStr)
+											printing.DalLog("PRINT", k.URL.String(), optionsStr)
 											vStatus[v["param"]] = true
 											if optionsStr["foundAction"] != "" {
 												foundAction(optionsStr, target, k.URL.String(), "VULN")
@@ -381,7 +381,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 											code := CodeView(resbody, v["payload"])
 											printing.DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"], optionsStr)
 											printing.DalLog("CODE", code, optionsStr)
-											printing.DalLog("PRINT", "[FOUND] "+k.URL.String(), optionsStr)
+											printing.DalLog("PRINT", k.URL.String(), optionsStr)
 											if optionsStr["foundAction"] != "" {
 												foundAction(optionsStr, target, k.URL.String(), "WEAK")
 											}
@@ -395,7 +395,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 											code := CodeView(resbody, v["payload"])
 											printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], optionsStr)
 											printing.DalLog("CODE", code, optionsStr)
-											printing.DalLog("PRINT", "[FOUND/VERIFIED] "+k.URL.String(), optionsStr)
+											printing.DalLog("PRINT", k.URL.String(), optionsStr)
 											vStatus[v["param"]] = true
 											if optionsStr["foundAction"] != "" {
 												foundAction(optionsStr, target, k.URL.String(), "VULN")
@@ -408,7 +408,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 											code := CodeView(resbody, v["payload"])
 											printing.DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"], optionsStr)
 											printing.DalLog("CODE", code, optionsStr)
-											printing.DalLog("PRINT", "[FOUND] "+k.URL.String(), optionsStr)
+											printing.DalLog("PRINT", k.URL.String(), optionsStr)
 											if optionsStr["foundAction"] != "" {
 												foundAction(optionsStr, target, k.URL.String(), "WEAK")
 											}
