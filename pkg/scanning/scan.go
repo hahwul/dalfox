@@ -95,6 +95,9 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 	s := spinner.New(spinner.CharSets[4], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 	s.Prefix = " "
 	s.Suffix = "  Waiting routines.."
+	if optionsStr["nowURL"] != "" {
+		s.Suffix = "  URLs("+optionsStr["nowURL"]+" / "+optionsStr["allURLs"]+") :: Waiting routines"
+	}
 	if optionsStr["silence"] == "" {
 		time.Sleep(1 * time.Second) // Waiting log
 		s.Start()                   // Start the spinner
@@ -425,7 +428,11 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 
 					if optionsStr["silence"] == "" {
 						s.Lock()
-						s.Suffix = "  Tested (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") queries from " + optionsStr["concurrence"] + " worker"
+						if optionsStr["nowURL"] == ""{
+							s.Suffix = "  Queries(" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") :: Testing with " + optionsStr["concurrence"] + " worker"
+						} else {
+							s.Suffix = "  Queries(" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + "), URLs("+optionsStr["nowURL"]+" / "+optionsStr["allURLs"]+") :: Testing with " + optionsStr["concurrence"] + " worker"
+						}
 						//s.Suffix = " Waiting routines.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
 						s.Unlock()
 					}

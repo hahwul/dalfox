@@ -44,7 +44,9 @@ var pipeCmd = &cobra.Command{
 			}
 			wg.Wait()
 		} else {
+			optionsStr["allURLs"] = strconv.Itoa(len(targets))
 			for i := range targets {
+				optionsStr["nowURL"] = strconv.Itoa(i+1)
 				scanning.Scan(targets[i], optionsStr, optionsBool)
 			}
 
