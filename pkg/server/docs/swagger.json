@@ -1,0 +1,78 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "This is a dalfox api swagger",
+        "title": "DalFox API",
+        "termsOfService": "http://swagger.io/terms/",
+        "contact": {},
+        "license": {
+            "name": "MIT",
+            "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
+        },
+        "version": "1.0"
+    },
+    "host": "localhost:6664",
+    "basePath": "/",
+    "paths": {
+        "/scan": {
+            "post": {
+                "description": "add dalfox scan",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "scan",
+                "parameters": [
+                    {
+                        "description": "json data",
+                        "name": "data",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/server.Req"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/server.Res"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "server.Req": {
+            "type": "object",
+            "properties": {
+                "options": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "url": {
+                    "type": "string"
+                }
+            }
+        },
+        "server.Res": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "integer"
+                },
+                "data": {
+                    "type": "object",
+                    "additionalProperties": true
+                },
+                "msg": {
+                    "type": "string"
+                }
+            }
+        }
+    }
+}

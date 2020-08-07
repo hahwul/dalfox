@@ -4,10 +4,24 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/swaggo/echo-swagger"
+	_ "github.com/hahwul/dalfox/pkg/server/docs"
+	printing "github.com/hahwul/dalfox/pkg/printing"
 	"github.com/tylerb/graceful"
-	"github.com/labstack/echo/middleware"
-	"github.com/labstack/echo"
+	"github.com/labstack/echo/v4/middleware"
+	"github.com/labstack/echo/v4"
 )
+
+// @title DalFox API
+// @version 1.0
+// @description This is a dalfox api swagger
+// @termsOfService http://swagger.io/terms/
+
+// @license.name MIT
+// @license.url http://www.apache.org/licenses/LICENSE-2.0.html
+
+// @host localhost:6664
+// @BasePath /
 
 func RunAPIServer(optionsStr map[string]string, optionsBool map[string]bool) {
 	e := echo.New()
@@ -29,6 +43,7 @@ func RunAPIServer(optionsStr map[string]string, optionsBool map[string]bool) {
 		}
 		return c.JSON(http.StatusOK,r)
 	})
+	e.GET("/swagger/*", echoSwagger.WrapHandler)
 	e.GET("/scans", func(c echo.Context) error {
 		return c.String(http.StatusOK, "")
 	})
@@ -52,5 +67,6 @@ func RunAPIServer(optionsStr map[string]string, optionsBool map[string]bool) {
 		go ScanFromAPI(rq.URL, rq.Options, optionsStr,optionsBool)
 		return c.JSON(http.StatusOK,r)
 	})
+	printing.DalLog("SYSTEM", "Listen "+e.Server.Addr, optionsStr)
 	graceful.ListenAndServe(e.Server, 5*time.Second)
 }
