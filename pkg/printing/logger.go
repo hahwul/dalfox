@@ -77,7 +77,7 @@ func DalLog(level, text string, optionsStr map[string]string) {
 	} else {
 		if level == "PRINT" {
 			ftext = "[POC] "+text
-			fmt.Println(aurora.BrightYellow("[POC] "+text))
+			fmt.Println(aurora.BrightGreen("[POC] "+text))
 		} else {
 			text = "\r" + text
 			fmt.Fprintln(os.Stderr, text)
