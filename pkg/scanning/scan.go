@@ -412,10 +412,17 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 
 				if optionsStr["silence"] == "" {
 					s.Lock()
-					if optionsStr["nowURL"] == ""{
-						s.Suffix = "  Queries(" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") :: Testing with " + optionsStr["concurrence"] + " worker"
+					var msg string
+					if (vStatus[v["param"]] == false){
+						msg = "Testing \""+v["param"]+"\" param with " + optionsStr["concurrence"] + " worker"
 					} else {
-						s.Suffix = "  Queries(" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + "), URLs("+optionsStr["nowURL"]+" / "+optionsStr["allURLs"]+") :: Testing with " + optionsStr["concurrence"] + " worker"
+						msg = "Passing \""+v["param"]+"\" param queries with " + optionsStr["concurrence"] + " worker" 
+					}
+
+					if optionsStr["nowURL"] == ""{
+						s.Suffix = "  Queries(" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") :: "+msg
+					} else {
+						s.Suffix = "  Queries(" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + "), URLs("+optionsStr["nowURL"]+" / "+optionsStr["allURLs"]+") :: "+msg
 					}
 					//s.Suffix = " Waiting routines.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
 					s.Unlock()
