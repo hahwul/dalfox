@@ -1,10 +1,10 @@
 package cmd
 
 import (
-	"fmt"
 
 	"github.com/spf13/cobra"
 	. "github.com/hahwul/dalfox/pkg/server"
+	printing "github.com/hahwul/dalfox/pkg/printing"
 )
 
 // serverCmd represents the server command
@@ -12,7 +12,7 @@ var serverCmd = &cobra.Command{
 	Use:   "server",
 	Short: "Start API Server",
 	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("server called")
+		printing.DalLog("SYSTEM", "Starting API Server", optionsStr)
 		RunAPIServer(optionsStr,optionsBool)
 	},
 }
