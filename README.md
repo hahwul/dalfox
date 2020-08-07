@@ -1,6 +1,6 @@
 <h1 align="center">
   <br>
-  <a href=""><img src="https://user-images.githubusercontent.com/13212227/89556464-61e91200-d84c-11ea-8624-cf09aee2a6a6.png" alt="" width="500px;"></a>
+  <a href=""><img src="https://user-images.githubusercontent.com/13212227/89670501-45b4a600-d91c-11ea-95d9-0b3802259dfd.png" alt="" width="260px;"></a>
   <br>
   DalFox(Finder Of XSS)
   <br>
