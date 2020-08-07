@@ -61,7 +61,7 @@ func init() {
 	//Int
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 10, "Second of timeout")
 	rootCmd.PersistentFlags().IntVar(&delay, "delay", 0, "Milliseconds between send to same host (1000==1s)")
-	rootCmd.PersistentFlags().IntVarP(&concurrence, "worker", "w", 40, "Number of worker")
+	rootCmd.PersistentFlags().IntVarP(&concurrence, "worker", "w", 100, "Number of worker")
 
 	//Bool
 	rootCmd.PersistentFlags().BoolVar(&onlyDiscovery, "only-discovery", false, "Only testing parameter analysis")
