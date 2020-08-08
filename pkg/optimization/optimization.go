@@ -40,7 +40,7 @@ func MakeHeaderQuery(target, hn, hv string,optionsStr map[string]string) (*http.
 	tempMap := make(map[string]string)
 	tempMap["type"] = "toBlind"
 	tempMap["payload"] = hv
-	tempMap["param"] = "thisisheadertestingvector"
+	tempMap["param"] = "thisisheadertesting"
 	req, _ := http.NewRequest("GET", target, nil)
 	if optionsStr["data"] != "" {
 		d := []byte("")

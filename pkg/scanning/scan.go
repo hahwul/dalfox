@@ -255,6 +255,14 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 			bcallback = "//" + optionsStr["blind"]
 		}
 
+		for _, bpayload := range bpayloads {
+			// header base blind xss
+			bp := strings.Replace(bpayload, "CALLBACKURL", bcallback, 10)
+			tq, tm := optimization.MakeHeaderQuery(target,"Referer",bp,optionsStr)
+			tm["payload"] = "toBlind"
+			query[tq] = tm
+		}
+
 		// loop parameter list
 		for spk := range spd {
 			// loop payload list
