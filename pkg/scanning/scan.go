@@ -340,7 +340,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 										code := CodeView(resbody, v["payload"])
 										printing.DalLog("VULN", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], optionsStr)
 										printing.DalLog("CODE", code, optionsStr)
-										printing.DalLog("PRINT", "[FOUND] "+k.URL.String(), optionsStr)
+										printing.DalLog("PRINT", "[R] "+k.URL.String(), optionsStr)
 										vStatus[v["param"]] = true
 										if optionsStr["foundAction"] != "" {
 											foundAction(optionsStr, target, k.URL.String(), "VULN")
@@ -355,7 +355,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 										code := CodeView(resbody, v["payload"])
 										printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], optionsStr)
 										printing.DalLog("CODE", code, optionsStr)
-										printing.DalLog("PRINT", k.URL.String(), optionsStr)
+										printing.DalLog("PRINT", "[V] "+k.URL.String(), optionsStr)
 										vStatus[v["param"]] = true
 										if optionsStr["foundAction"] != "" {
 											foundAction(optionsStr, target, k.URL.String(), "VULN")
@@ -368,7 +368,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 										code := CodeView(resbody, v["payload"])
 										printing.DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"], optionsStr)
 										printing.DalLog("CODE", code, optionsStr)
-										printing.DalLog("PRINT", k.URL.String(), optionsStr)
+										printing.DalLog("PRINT", "[R] "+k.URL.String(), optionsStr)
 										if optionsStr["foundAction"] != "" {
 											foundAction(optionsStr, target, k.URL.String(), "WEAK")
 										}
@@ -382,7 +382,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 										code := CodeView(resbody, v["payload"])
 										printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], optionsStr)
 										printing.DalLog("CODE", code, optionsStr)
-										printing.DalLog("PRINT", k.URL.String(), optionsStr)
+										printing.DalLog("PRINT", "[V] "+k.URL.String(), optionsStr)
 										vStatus[v["param"]] = true
 										if optionsStr["foundAction"] != "" {
 											foundAction(optionsStr, target, k.URL.String(), "VULN")
@@ -395,7 +395,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 										code := CodeView(resbody, v["payload"])
 										printing.DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"], optionsStr)
 										printing.DalLog("CODE", code, optionsStr)
-										printing.DalLog("PRINT", k.URL.String(), optionsStr)
+										printing.DalLog("PRINT", "[R] "+k.URL.String(), optionsStr)
 										if optionsStr["foundAction"] != "" {
 											foundAction(optionsStr, target, k.URL.String(), "WEAK")
 										}
@@ -686,7 +686,7 @@ func SendReq(req *http.Request, payload string, optionsStr map[string]string) (s
 				for _, vv := range v {
 					printing.DalLog("CODE", vv, optionsStr)
 				}
-				printing.DalLog("PRINT", req.URL.String(), optionsStr)
+				printing.DalLog("PRINT", "[G] "+req.URL.String(), optionsStr)
 			}
 		} else {
 			// other case
@@ -694,7 +694,7 @@ func SendReq(req *http.Request, payload string, optionsStr map[string]string) (s
 			for _, vv := range v {
 				printing.DalLog("CODE", vv, optionsStr)
 			}
-			printing.DalLog("PRINT", req.URL.String(), optionsStr)
+			printing.DalLog("PRINT", "[G] "+req.URL.String(), optionsStr)
 		}
 	}
 
@@ -711,7 +711,7 @@ func SendReq(req *http.Request, payload string, optionsStr map[string]string) (s
 			for _, vv := range v {
 				printing.DalLog("CODE", vv, optionsStr)
 			}
-			printing.DalLog("PRINT", req.URL.String(), optionsStr)
+			printing.DalLog("PRINT", "[G] "+req.URL.String(), optionsStr)
 		}
 	}
 
