@@ -35,6 +35,35 @@ func GenerateNewRequest(url, payload string, optionsStr map[string]string) *http
 	return req
 }
 
+// MakeHeaderQuery is generate http query with custom header
+func MakeHeaderQuery(target, hn, hv string,optionsStr map[string]string) *http.Request {
+	req, _ := http.NewRequest("GET", target, nil)
+	if optionsStr["data"] != "" {
+		d := []byte("")
+		req, _ = http.NewRequest("POST", target, bytes.NewBuffer(d))
+		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+	}
+
+	if optionsStr["header"] != "" {
+		h := strings.Split(optionsStr["header"], ": ")
+		if len(h) > 1 {
+			req.Header.Add(h[0], h[1])
+		}
+	}
+	if optionsStr["cookie"] != "" {
+		req.Header.Add("Cookie", optionsStr["cookie"])
+	}
+	if optionsStr["ua"] != "" {
+		req.Header.Add("User-Agent", optionsStr["ua"])
+	} else {
+		req.Header.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:75.0) Gecko/20100101 Firefox/75.0")
+	}
+
+	req.Header.Add(hn, hv)
+	return req
+}
+
+
 // MakeRequestQuery is generate http query with custom paramters
 func MakeRequestQuery(target, param, payload, ptype string, optionsStr map[string]string) (*http.Request, map[string]string) {
 	tempMap := make(map[string]string)
