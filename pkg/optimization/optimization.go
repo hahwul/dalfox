@@ -36,7 +36,11 @@ func GenerateNewRequest(url, payload string, optionsStr map[string]string) *http
 }
 
 // MakeHeaderQuery is generate http query with custom header
-func MakeHeaderQuery(target, hn, hv string,optionsStr map[string]string) *http.Request {
+func MakeHeaderQuery(target, hn, hv string,optionsStr map[string]string) (*http.Request, map[string]string) {
+	tempMap := make(map[string]string)
+	tempMap["type"] = "toBlind"
+	tempMap["payload"] = hv
+	tempMap["param"] = "thisisheadertestingvector"
 	req, _ := http.NewRequest("GET", target, nil)
 	if optionsStr["data"] != "" {
 		d := []byte("")
@@ -60,7 +64,7 @@ func MakeHeaderQuery(target, hn, hv string,optionsStr map[string]string) *http.R
 	}
 
 	req.Header.Add(hn, hv)
-	return req
+	return req, tempMap
 }
 
 
