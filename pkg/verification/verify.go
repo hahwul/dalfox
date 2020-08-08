@@ -12,9 +12,8 @@ import (
 func VerifyReflection(body, payload string) bool {
 	if strings.Contains(body, payload) {
 		return true
-	} else {
-		return false
-	}
+	} 
+	return false
 }
 
 // VerifyDOM is check success inject on code

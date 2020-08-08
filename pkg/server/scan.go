@@ -1,7 +1,7 @@
 package server 
 
 import (
-	. "github.com/hahwul/dalfox/pkg/scanning"
+	scan "github.com/hahwul/dalfox/pkg/scanning"
 )
 
 // ScanFromAPI is scanning dalfox with REST API
@@ -13,5 +13,5 @@ import (
 // @Success 200 {object} Res
 // @Router /scan [post]
 func ScanFromAPI(url string, options map[string]interface{}, optionsStr map[string]string, optionsBool map[string]bool){
-	Scan(url,optionsStr,optionsBool)
+	scan.Scan(url,optionsStr,optionsBool)
 }
