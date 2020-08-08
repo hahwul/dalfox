@@ -78,6 +78,9 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 		printing.DalLog("SYSTEM", "Vaild target [ code:"+strconv.Itoa(tres.StatusCode)+" / size:"+strconv.Itoa(len(body))+" ]", optionsStr)
 	}
 
+	if optionsStr["format"] == "json"{
+		printing.DalLog("PRINT","[",optionsStr)
+	}
 	var wait sync.WaitGroup
 	task := 2
 	wait.Add(task)
@@ -327,7 +330,6 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 	concurrency, _ := strconv.Atoi(optionsStr["concurrence"])
 	// make reqeust channel
 	queries := make(chan Queries)
-
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func() {
@@ -348,7 +350,11 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 										code := CodeView(resbody, v["payload"])
 										printing.DalLog("VULN", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], optionsStr)
 										printing.DalLog("CODE", code, optionsStr)
-										printing.DalLog("PRINT", "[R] "+k.URL.String(), optionsStr)
+										if optionsStr["format"] == "json"{
+											printing.DalLog("PRINT", "{\"type\":\"inJS\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", optionsStr)
+										} else {
+											printing.DalLog("PRINT", "[R] "+k.URL.String(), optionsStr)
+										}
 										vStatus[v["param"]] = true
 										if optionsStr["foundAction"] != "" {
 											foundAction(optionsStr, target, k.URL.String(), "VULN")
@@ -363,7 +369,11 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 										code := CodeView(resbody, v["payload"])
 										printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], optionsStr)
 										printing.DalLog("CODE", code, optionsStr)
-										printing.DalLog("PRINT", "[V] "+k.URL.String(), optionsStr)
+										if optionsStr["format"] == "json"{
+											printing.DalLog("PRINT", "{\"type\":\"inATTR\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", optionsStr)
+										} else {
+											printing.DalLog("PRINT", "[V] "+k.URL.String(), optionsStr)
+										}
 										vStatus[v["param"]] = true
 										if optionsStr["foundAction"] != "" {
 											foundAction(optionsStr, target, k.URL.String(), "VULN")
@@ -376,7 +386,11 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 										code := CodeView(resbody, v["payload"])
 										printing.DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"], optionsStr)
 										printing.DalLog("CODE", code, optionsStr)
-										printing.DalLog("PRINT", "[R] "+k.URL.String(), optionsStr)
+										if optionsStr["format"] == "json"{
+											printing.DalLog("PRINT", "{\"type\":\"inATTR\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", optionsStr)
+										} else {
+											printing.DalLog("PRINT", "[R] "+k.URL.String(), optionsStr)
+										}
 										if optionsStr["foundAction"] != "" {
 											foundAction(optionsStr, target, k.URL.String(), "WEAK")
 										}
@@ -390,7 +404,11 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 										code := CodeView(resbody, v["payload"])
 										printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], optionsStr)
 										printing.DalLog("CODE", code, optionsStr)
-										printing.DalLog("PRINT", "[V] "+k.URL.String(), optionsStr)
+										if optionsStr["format"] == "json"{
+											printing.DalLog("PRINT", "{\"type\":\"inHTML\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", optionsStr)
+										} else {
+											printing.DalLog("PRINT", "[V] "+k.URL.String(), optionsStr)
+										}
 										vStatus[v["param"]] = true
 										if optionsStr["foundAction"] != "" {
 											foundAction(optionsStr, target, k.URL.String(), "VULN")
@@ -403,7 +421,11 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 										code := CodeView(resbody, v["payload"])
 										printing.DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"], optionsStr)
 										printing.DalLog("CODE", code, optionsStr)
-										printing.DalLog("PRINT", "[R] "+k.URL.String(), optionsStr)
+										if optionsStr["format"] == "json"{
+											printing.DalLog("PRINT", "{\"type\":\"inHTML\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", optionsStr)
+										} else {
+											printing.DalLog("PRINT", "[R] "+k.URL.String(), optionsStr)
+										}
 										if optionsStr["foundAction"] != "" {
 											foundAction(optionsStr, target, k.URL.String(), "WEAK")
 										}
@@ -453,6 +475,9 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 	if optionsStr["silence"] == "" {
 		s.Stop()
 	}
+}
+if optionsStr["format"] == "json"{
+	printing.DalLog("PRINT","{}]",optionsStr)
 }
 printing.DalLog("SYSTEM", "Finish :D", optionsStr)
 }
@@ -694,7 +719,11 @@ func SendReq(req *http.Request, payload string, optionsStr map[string]string) (s
 				for _, vv := range v {
 					printing.DalLog("CODE", vv, optionsStr)
 				}
-				printing.DalLog("PRINT", "[G][SSTI] "+req.URL.String(), optionsStr)
+				if optionsStr["format"] == "json"{
+					printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"SSTI\",\"poc\":\""+req.URL.String()+"\"", optionsStr)
+				} else {
+					printing.DalLog("PRINT", "[G][SSTI] "+req.URL.String(), optionsStr)
+				}
 			}
 		} else {
 			// other case
@@ -702,7 +731,11 @@ func SendReq(req *http.Request, payload string, optionsStr map[string]string) (s
 			for _, vv := range v {
 				printing.DalLog("CODE", vv, optionsStr)
 			}
-			printing.DalLog("PRINT", "[G][BUILT-IN] "+req.URL.String(), optionsStr)
+			if optionsStr["format"] == "json"{
+				printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"BUILT-IN\",\"poc\":\""+req.URL.String()+"\"", optionsStr)
+			} else {
+				printing.DalLog("PRINT", "[G][BUILT-IN] "+req.URL.String(), optionsStr)
+			}
 		}
 	}
 
@@ -719,7 +752,11 @@ func SendReq(req *http.Request, payload string, optionsStr map[string]string) (s
 			for _, vv := range v {
 				printing.DalLog("CODE", vv, optionsStr)
 			}
-			printing.DalLog("PRINT", "[G]["+k+"] "+req.URL.String(), optionsStr)
+			if optionsStr["format"] == "json"{
+				printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\""+k+"\",\"poc\":\""+req.URL.String()+"\"", optionsStr)
+			} else {
+				printing.DalLog("PRINT", "[G]["+k+"] "+req.URL.String(), optionsStr)
+			}
 		}
 	}
 

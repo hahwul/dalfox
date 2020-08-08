@@ -3,7 +3,6 @@ package printing
 import (
 	"fmt"
 	"os"
-	"strings"
 	"sync"
 
 	"github.com/logrusorgru/aurora"
@@ -15,7 +14,6 @@ var (
 
 // DalLog is log fomatting for DalFox
 func DalLog(level, text string, optionsStr map[string]string) {
-	fdata := text
 	var ftext string
 	if level == "INFO" {
 		if optionsStr["output"] != "" {
@@ -76,8 +74,15 @@ func DalLog(level, text string, optionsStr map[string]string) {
 		ftext = "[POC] "+text
 	} else {
 		if level == "PRINT" {
-			ftext = "[POC] "+text
-			fmt.Println(aurora.BrightGreen("[POC]"+text))
+			if optionsStr["format"] == "json" {
+				ftext = text
+				//fmt.Println(aurora.BrightGreen(text))
+				fmt.Println(text)
+
+			} else {
+				ftext = "[POC] "+text
+				fmt.Println(aurora.BrightGreen("[POC]"+text))
+			}
 		} else {
 			text = "\r" + text
 			fmt.Fprintln(os.Stderr, text)
@@ -86,16 +91,7 @@ func DalLog(level, text string, optionsStr map[string]string) {
 
 	if optionsStr["output"] != "" {
 		var fdtext string
-		if strings.ToLower(optionsStr["format"]) == "json" {
-			escapedFdata := strings.ReplaceAll(fdata, "\"", "\\\"")
-			fdtext = "{\"type\":\"" + level + "\",\"text\":\"" + escapedFdata + "\"},"
-		} else if strings.ToLower(optionsStr["format"]) == "xml" {
-			escapedFdata := strings.ReplaceAll(fdata, "<", "&lt;")
-			escapedFdata = strings.ReplaceAll(escapedFdata, ">", "&gt;")
-			fdtext = "<log><type>" + level + "</type><value>" + escapedFdata + "</value></log>"
-		} else { // format: txt or any case
-			fdtext = ftext
-		}
+		fdtext = ftext
 		f, err := os.OpenFile(optionsStr["output"],
 			os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
