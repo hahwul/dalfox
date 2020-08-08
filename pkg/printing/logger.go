@@ -71,7 +71,17 @@ func DalLog(level, text string, optionsStr map[string]string) {
 
 	//mutex.Lock()
 	if optionsStr["silence"] != "" {
-		ftext = "[POC] "+text
+		if level == "PRINT" {
+			if optionsStr["format"] == "json" {
+				ftext = text
+				//fmt.Println(aurora.BrightGreen(text))
+				fmt.Println(text)
+
+			} else {
+				ftext = "[POC] "+text
+				fmt.Println(aurora.BrightGreen("[POC]"+text))
+			}
+		}
 	} else {
 		if level == "PRINT" {
 			if optionsStr["format"] == "json" {
