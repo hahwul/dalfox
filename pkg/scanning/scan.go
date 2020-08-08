@@ -686,7 +686,7 @@ func SendReq(req *http.Request, payload string, optionsStr map[string]string) (s
 				for _, vv := range v {
 					printing.DalLog("CODE", vv, optionsStr)
 				}
-				printing.DalLog("PRINT", "[G] "+req.URL.String(), optionsStr)
+				printing.DalLog("PRINT", "[G][SSTI] "+req.URL.String(), optionsStr)
 			}
 		} else {
 			// other case
@@ -694,7 +694,7 @@ func SendReq(req *http.Request, payload string, optionsStr map[string]string) (s
 			for _, vv := range v {
 				printing.DalLog("CODE", vv, optionsStr)
 			}
-			printing.DalLog("PRINT", "[G] "+req.URL.String(), optionsStr)
+			printing.DalLog("PRINT", "[G][BUILT-IN] "+req.URL.String(), optionsStr)
 		}
 	}
 
@@ -711,7 +711,7 @@ func SendReq(req *http.Request, payload string, optionsStr map[string]string) (s
 			for _, vv := range v {
 				printing.DalLog("CODE", vv, optionsStr)
 			}
-			printing.DalLog("PRINT", "[G] "+req.URL.String(), optionsStr)
+			printing.DalLog("PRINT", "[G]["+k+"] "+req.URL.String(), optionsStr)
 		}
 	}
 
