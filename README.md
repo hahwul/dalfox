@@ -85,8 +85,6 @@ docker run -it hahwul/dalfox:latest dalfox url https://www.hahwul.com
    '-.::''
 Parameter Analysis and XSS Scanning tool based on golang
 Finder Of XSS and Dal is the Korean pronunciation of moon. @hahwul
-
-
 Usage:
   dalfox [command]
 
@@ -94,8 +92,8 @@ Available Commands:
   file        Use file mode(targets list or rawdata)
   help        Help about any command
   pipe        Use pipeline mode
+  server      Start API Server
   sxss        Use Stored XSS mode
-  update      Update DalFox (Binary patch)
   url         Use single target mode
   version     Show version
 
@@ -106,6 +104,7 @@ Flags:
       --custom-payload string   Add custom payloads from file
   -d, --data string             Using POST Method and add Body data
       --delay int               Milliseconds between send to same host (1000==1s)
+      --format string           stdout output format(plain/json) (default "plain")
       --found-action string     If found weak/vuln, action(cmd) to next
       --grep string             Using custom grepping file (e.g --grep ./samples/sample_grep.json)
   -H, --header string           Add custom headers
@@ -113,13 +112,12 @@ Flags:
       --ignore-return string    Ignore scanning from return code (e.g --ignore-return 302,403,404)
       --only-discovery          Only testing parameter analysis
   -o, --output string           Write to output file
-      --output-format string    -o/--output 's format (txt/json/xml)
   -p, --param string            Only testing selected parameters
       --proxy string            Send all request to proxy server (e.g --proxy http://127.0.0.1:8080)
       --silence                 Not printing all logs
       --timeout int             Second of timeout (default 10)
       --user-agent string       Add custom UserAgent
-  -w, --worker int              Number of worker (default 40)
+  -w, --worker int              Number of worker (default 100)
 ```
 
 ```
