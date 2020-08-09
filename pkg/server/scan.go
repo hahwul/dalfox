@@ -30,3 +30,10 @@ func GetScan(sid string, options model.Options) model.Scan {
 	return options.Scan[sid]
 }
 
+// GetScans is list of scan
+// @Summary scan
+// @Description show scan list
+// @Accept  json
+// @Produce  json
+// @Success 200 {object} Scans
+// @Router /scans [get]

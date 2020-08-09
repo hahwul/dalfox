@@ -13,7 +13,6 @@ type Res struct {
 	Data []model.Issue `json:"data"`
 }
 
-
 type Scans struct {
 	Code int `json:"code"`
 	Scans []string `json:"scans"`

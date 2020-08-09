@@ -47,7 +47,11 @@ func RunAPIServer(options model.Options) {
 	})
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 	e.GET("/scans", func(c echo.Context) error {
-		return c.String(http.StatusOK, "")
+		r := &Scans{
+			Code: 200,
+			Scans: scans,
+		}
+		return c.JSON(http.StatusNotFound,r)
 	})
 	e.GET("/scan/:sid", func(c echo.Context) error {
 		sid := c.Param("sid")
