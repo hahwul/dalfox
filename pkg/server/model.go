@@ -1,5 +1,7 @@
 package server
 
+import "github.com/hahwul/dalfox/pkg/model"
+
 type Req struct {
 	URL string `json:"url"`
 	Options map[string]interface{} `json:"options"`
@@ -8,5 +10,5 @@ type Req struct {
 type Res struct {
 	Code int `json:"code"`
 	Msg string `json:"msg"`
-	Data map[string]interface{} `json:"data"`
+	Data []model.Issue `json:"data"`
 }

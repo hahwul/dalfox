@@ -25,6 +25,7 @@ import (
 // @BasePath /
 
 func RunAPIServer(options model.Options) {
+	var scans []string
 	e := echo.New()
 	options.IsAPI = true
 	e.Server.Addr = ":6664"
@@ -33,7 +34,6 @@ func RunAPIServer(options model.Options) {
 		ContentTypeNosniff:    "",
 		XFrameOptions:         "",
 		HSTSMaxAge:            3600,
-		ContentSecurityPolicy: "default-src 'self'",
 	}))
 	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
 		Format: "method=${method}, uri=${uri}, status=${status}\n",
@@ -50,7 +50,26 @@ func RunAPIServer(options model.Options) {
 		return c.String(http.StatusOK, "")
 	})
 	e.GET("/scan/:sid", func(c echo.Context) error {
-		return c.String(http.StatusOK, "")
+		sid := c.Param("sid")
+		if !contains(scans,sid){
+			r := &Res{
+				Code: 404,
+				Msg: "Not found scanid",
+			}
+			return c.JSON(http.StatusNotFound,r)
+
+		}
+		r := &Res{
+			Code: 200,
+		}
+		scan := GetScan(sid,options)
+		if len(scan.URL) == 0{
+			r.Msg = "scanning"	
+		} else {
+			r.Msg = "finish"
+			r.Data = scan.Results
+		}
+		return c.JSON(http.StatusOK,r)
 	})
 	e.POST("/scan", func(c echo.Context) error {
 		rq := new(Req)
@@ -66,9 +85,20 @@ func RunAPIServer(options model.Options) {
 			Code: 200,
 			Msg: sid,
 		}
-		go ScanFromAPI(rq.URL, rq.Options, options)
+		scans = append(scans,sid)
+		go ScanFromAPI(rq.URL, rq.Options, options, sid)
 		return c.JSON(http.StatusOK,r)
 	})
 	printing.DalLog("SYSTEM", "Listen "+e.Server.Addr, options)
 	graceful.ListenAndServe(e.Server, 5*time.Second)
+}
+
+func contains(slice []string, item string) bool {
+    set := make(map[string]struct{}, len(slice))
+    for _, s := range slice {
+        set[s] = struct{}{}
+    }
+
+    _, ok := set[item] 
+    return ok
 }

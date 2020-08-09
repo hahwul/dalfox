@@ -92,6 +92,7 @@ func initConfig() {
 		Delay: delay,
 		OnlyDiscovery: onlyDiscovery,
 		Silence: silence,
+		Scan: make(map[string]model.Scan),
 	}
 	_=options
 

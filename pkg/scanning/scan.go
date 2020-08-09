@@ -20,10 +20,16 @@ import (
 	"github.com/hahwul/dalfox/pkg/verification"
 )
 
+var scanObject model.Scan
+
 // Scan is main scanning function
-func Scan(target string, options model.Options) {
+func Scan(target string, options model.Options, sid string) {
 	printing.DalLog("SYSTEM", "Target URL: "+target, options)
-	//var params []string
+
+	scanObject := model.Scan{
+		ScanID: sid,
+		URL: target,
+	}
 
 	// query is XSS payloads
 	query := make(map[*http.Request]map[string]string)
@@ -133,7 +139,6 @@ func Scan(target string, options model.Options) {
 
 	if !options.OnlyDiscovery {
 		// XSS Scanning
-
 		printing.DalLog("SYSTEM", "Generate XSS payload and optimization.Optimization.. 🛠", options)
 		// optimization.Optimization..
 
@@ -360,6 +365,12 @@ func Scan(target string, options model.Options) {
 										if options.FoundAction != "" {
 											foundAction(options, target, k.URL.String(), "VULN")
 										}
+										rst := &model.Issue{
+											Type: "found code",
+											Param: v["param"],
+											PoC: k.URL.String(),
+										}
+										scanObject.Results = append(scanObject.Results,*rst)
 									}
 									mutex.Unlock()
 								}
@@ -379,6 +390,12 @@ func Scan(target string, options model.Options) {
 										if options.FoundAction != "" {
 											foundAction(options, target, k.URL.String(), "VULN")
 										}
+										rst := &model.Issue{
+											Type: "verify code",
+											Param: v["param"],
+											PoC: k.URL.String(),
+										}
+										scanObject.Results = append(scanObject.Results,*rst)
 									}
 									mutex.Unlock()
 								} else if vrs {
@@ -395,6 +412,12 @@ func Scan(target string, options model.Options) {
 										if options.FoundAction != "" {
 											foundAction(options, target, k.URL.String(), "WEAK")
 										}
+										rst := &model.Issue{
+											Type: "found code",
+											Param: v["param"],
+											PoC: k.URL.String(),
+										}
+										scanObject.Results = append(scanObject.Results,*rst)
 									}
 									mutex.Unlock()
 								}
@@ -414,6 +437,12 @@ func Scan(target string, options model.Options) {
 										if options.FoundAction != "" {
 											foundAction(options, target, k.URL.String(), "VULN")
 										}
+										rst := &model.Issue{
+											Type: "verify code",
+											Param: v["param"],
+											PoC: k.URL.String(),
+										}
+										scanObject.Results = append(scanObject.Results,*rst)
 									}
 									mutex.Unlock()
 								} else if vrs {
@@ -430,6 +459,12 @@ func Scan(target string, options model.Options) {
 										if options.FoundAction != "" {
 											foundAction(options, target, k.URL.String(), "WEAK")
 										}
+										rst := &model.Issue{
+											Type: "found code",
+											Param: v["param"],
+											PoC: k.URL.String(),
+										}
+										scanObject.Results = append(scanObject.Results,*rst)
 									}
 									mutex.Unlock()
 								}
@@ -480,6 +515,7 @@ func Scan(target string, options model.Options) {
 if options.Format == "json"{
 	printing.DalLog("PRINT","{}]",options)
 }
+options.Scan[sid] = scanObject
 printing.DalLog("SYSTEM", "Finish :D", options)
 }
 
@@ -722,6 +758,11 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				} else {
 					printing.DalLog("PRINT", "[G][SSTI] "+req.URL.String(), options)
 				}
+				rst := &model.Issue{
+					Type: "Greped pattern",
+					PoC: req.URL.String(),
+				}
+				scanObject.Results = append(scanObject.Results,*rst)
 			}
 		} else {
 			// other case
@@ -734,6 +775,11 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 			} else {
 				printing.DalLog("PRINT", "[G][BUILT-IN] "+req.URL.String(), options)
 			}
+			rst := &model.Issue{
+				Type: "Greped pattern",
+				PoC: req.URL.String(),
+			}
+			scanObject.Results = append(scanObject.Results,*rst)
 		}
 	}
 
@@ -755,6 +801,11 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 			} else {
 				printing.DalLog("PRINT", "[G]["+k+"] "+req.URL.String(), options)
 			}
+			rst := &model.Issue{
+				Type: "Greped pattern",
+				PoC: req.URL.String(),
+			}
+			scanObject.Results = append(scanObject.Results,*rst)
 		}
 	}
 

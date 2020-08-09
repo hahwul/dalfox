@@ -13,7 +13,7 @@ var urlCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) >= 1 {
 			printing.DalLog("SYSTEM", "Using single target mode", options)
-			scanning.Scan(args[0], options)
+			scanning.Scan(args[0], options, "url")
 		} else {
 			printing.DalLog("ERROR", "Input target url", options)
 			printing.DalLog("ERROR", "e.g dalfox url https://google.com/?q=1", options)

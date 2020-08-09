@@ -26,6 +26,18 @@ type Options struct {
 	Silence bool
 	IsAPI bool
 	Mass bool
-	Logs []interface{}
-	Results []interface{}
+	Scan map[string]Scan
+}
+
+type Scan struct {
+	URL string
+	ScanID string
+	Logs []string
+	Results []Issue
+}
+
+type Issue struct {
+	Type string `json:"type"`
+	Param string `json:"param"`
+	PoC string `json:"poc"`	
 }
