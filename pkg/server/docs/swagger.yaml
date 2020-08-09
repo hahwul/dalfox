@@ -67,4 +67,19 @@ paths:
           schema:
             $ref: '#/definitions/server.Res'
       summary: scan
+  /scans:
+    get:
+      consumes:
+      - application/json
+      description: show scan list
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            items:
+              type: string
+            type: array
+      summary: scan
 swagger: "2.0"
