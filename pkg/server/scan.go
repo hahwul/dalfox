@@ -23,7 +23,7 @@ func ScanFromAPI(url string, rqOptions map[string]interface{}, options model.Opt
 // @Description get scan info
 // @Accept  json
 // @Produce  json
-// @Param data body Req true "json data"
+// @Param scanid path string true "scan id"
 // @Success 200 {object} Res
 // @Router /scan/{scanid} [get]
 func GetScan(sid string, options model.Options) model.Scan {

@@ -59,6 +59,35 @@ var doc = `{
                     }
                 }
             }
+        },
+        "/scan/{scanid}": {
+            "get": {
+                "description": "get scan info",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "summary": "scan",
+                "parameters": [
+                    {
+                        "type": "string",
+                        "description": "scan id",
+                        "name": "scanid",
+                        "in": "path",
+                        "required": true
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "schema": {
+                            "$ref": "#/definitions/server.Res"
+                        }
+                    }
+                }
+            }
         }
     },
     "definitions": {
@@ -81,8 +110,7 @@ var doc = `{
                     "type": "integer"
                 },
                 "data": {
-                    "type": "object",
-                    "additionalProperties": true
+                    "type": "string"
                 },
                 "msg": {
                     "type": "string"

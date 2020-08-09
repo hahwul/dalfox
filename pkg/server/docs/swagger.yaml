@@ -13,8 +13,7 @@ definitions:
       code:
         type: integer
       data:
-        additionalProperties: true
-        type: object
+        type: string
       msg:
         type: string
     type: object
@@ -41,6 +40,25 @@ paths:
         required: true
         schema:
           $ref: '#/definitions/server.Req'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: OK
+          schema:
+            $ref: '#/definitions/server.Res'
+      summary: scan
+  /scan/{scanid}:
+    get:
+      consumes:
+      - application/json
+      description: get scan info
+      parameters:
+      - description: scan id
+        in: path
+        name: scanid
+        required: true
+        type: string
       produces:
       - application/json
       responses:
