@@ -1,5 +1,5 @@
 {
-	"sample_pattern":"phoenix.html",
+	"sample_pattern":"https://www.hahwul.com/images/ologo.png",
 	"amazonaws_url": "s3\\.amazonaws.com[/]+|[a-zA-Z0-9_-]*\\.s3\\.amazonaws.com",
 	"slack_webhook": "https://hooks.slack.com/services/T[a-zA-Z0-9_]{8}/B[a-zA-Z0-9_]{8}/[a-zA-Z0-9_]{24}"
 }

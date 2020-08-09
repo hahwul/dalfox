@@ -62,6 +62,11 @@ func Scan(target string, options model.Options, sid string) {
 			Timeout:   time.Duration(t) * time.Second,
 			Transport: transport,
 		}
+		if !options.FollowRedirect {
+			client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+                		return errors.New("Follow redirect") // or maybe the error from the request
+               		}
+		}
 		tres, err := client.Do(treq)
 		if err != nil {
 			msg := fmt.Sprintf("not running %v", err)
@@ -720,9 +725,11 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 	client := &http.Client{
 		Timeout:   time.Duration(options.Timeout) * time.Second,
 		Transport: netTransport,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			return errors.New("something bad happened") // or maybe the error from the request
-		},
+	}
+	if !options.FollowRedirect {
+		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+                	return errors.New("Follow redirect") // or maybe the error from the request
+                }
 	}
 	resp, err := client.Do(req)
 	if err != nil {

@@ -17,7 +17,7 @@ var optionsBool = make(map[string]bool)
 var config, cookie, data, header, p, customPayload, userAgent, blind, output, format, foundAction, proxy, grep string
 var ignoreReturn string
 var timeout, concurrence, delay int
-var onlyDiscovery, silence bool
+var onlyDiscovery, silence, followRedirect bool
 var options model.Options
 
 // rootCmd represents the base command when called without any subcommands
@@ -67,6 +67,7 @@ func init() {
 	//Bool
 	rootCmd.PersistentFlags().BoolVar(&onlyDiscovery, "only-discovery", false, "Only testing parameter analysis")
 	rootCmd.PersistentFlags().BoolVar(&silence, "silence", false, "Not printing all logs")
+	rootCmd.PersistentFlags().BoolVar(&followRedirect, "follow-redirects", false, "Following redirection")
 
 	printing.Banner()
 }
@@ -92,9 +93,9 @@ func initConfig() {
 		Delay: delay,
 		OnlyDiscovery: onlyDiscovery,
 		Silence: silence,
+		FollowRedirect: followRedirect,
 		Scan: make(map[string]model.Scan),
 	}
-	_=options
 
 	if grep != "" {
 		// Open our jsonFile

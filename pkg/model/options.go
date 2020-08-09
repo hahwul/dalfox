@@ -27,6 +27,7 @@ type Options struct {
 	IsAPI bool
 	Mass bool
 	Scan map[string]Scan
+	FollowRedirect bool
 }
 
 type Scan struct {
