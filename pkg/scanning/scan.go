@@ -756,37 +756,41 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 			}
 
 			if really {
-				printing.DalLog("GREP", "Found SSTI via built-in grepping / payload: "+payload, options)
+				rst := &model.Issue{
+					Type: "Grep:SSTI",
+					PoC: req.URL.String(),
+				}
+				if !duplicatedResult(scanObject.Results,*rst){
+					printing.DalLog("GREP", "Found SSTI via built-in grepping / payload: "+payload, options)
+					for _, vv := range v {
+						printing.DalLog("CODE", vv, options)
+					}
+					if options.Format == "json"{
+						printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"SSTI\",\"poc\":\""+req.URL.String()+"\"", options)
+					} else {
+						printing.DalLog("PRINT", "[G][SSTI] "+req.URL.String(), options)
+					}
+					scanObject.Results = append(scanObject.Results,*rst)
+				}
+			}
+		} else {
+			// other case
+			rst := &model.Issue{
+				Type: "Grep:"+k,
+				PoC: req.URL.String(),
+			}
+			if !duplicatedResult(scanObject.Results,*rst){
+				printing.DalLog("GREP", "Found "+k+" via built-in grepping / payload: "+payload, options)
 				for _, vv := range v {
 					printing.DalLog("CODE", vv, options)
 				}
 				if options.Format == "json"{
-					printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"SSTI\",\"poc\":\""+req.URL.String()+"\"", options)
+					printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"BUILT-IN\",\"poc\":\""+req.URL.String()+"\"", options)
 				} else {
-					printing.DalLog("PRINT", "[G][SSTI] "+req.URL.String(), options)
-				}
-				rst := &model.Issue{
-					Type: "Greped pattern",
-					PoC: req.URL.String(),
+					printing.DalLog("PRINT", "[G][BUILT-IN] "+req.URL.String(), options)
 				}
 				scanObject.Results = append(scanObject.Results,*rst)
 			}
-		} else {
-			// other case
-			printing.DalLog("GREP", "Found "+k+" via built-in grepping / payload: "+payload, options)
-			for _, vv := range v {
-				printing.DalLog("CODE", vv, options)
-			}
-			if options.Format == "json"{
-				printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"BUILT-IN\",\"poc\":\""+req.URL.String()+"\"", options)
-			} else {
-				printing.DalLog("PRINT", "[G][BUILT-IN] "+req.URL.String(), options)
-			}
-			rst := &model.Issue{
-				Type: "Greped pattern",
-				PoC: req.URL.String(),
-			}
-			scanObject.Results = append(scanObject.Results,*rst)
 		}
 	}
 
@@ -799,20 +803,22 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 		}
 		cg := customGrep(str, pattern)
 		for k, v := range cg {
-			printing.DalLog("GREP", "Found "+k+" via custom grepping / payload: "+payload, options)
-			for _, vv := range v {
-				printing.DalLog("CODE", vv, options)
-			}
-			if options.Format == "json"{
-				printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\""+k+"\",\"poc\":\""+req.URL.String()+"\"", options)
-			} else {
-				printing.DalLog("PRINT", "[G]["+k+"] "+req.URL.String(), options)
-			}
 			rst := &model.Issue{
-				Type: "Greped pattern",
+				Type: "Grep:"+k,
 				PoC: req.URL.String(),
 			}
-			scanObject.Results = append(scanObject.Results,*rst)
+			if !duplicatedResult(scanObject.Results,*rst){
+				printing.DalLog("GREP", "Found "+k+" via custom grepping / payload: "+payload, options)
+				for _, vv := range v {
+					printing.DalLog("CODE", vv, options)
+				}
+				if options.Format == "json"{
+					printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\""+k+"\",\"poc\":\""+req.URL.String()+"\"", options)
+				} else {
+					printing.DalLog("PRINT", "[G]["+k+"] "+req.URL.String(), options)
+				}
+				scanObject.Results = append(scanObject.Results,*rst)
+			}
 		}
 	}
 
@@ -861,4 +867,13 @@ func indexOf(element string, data []string) int {
 		}
 	}
 	return -1 //not found.
+}
+
+func duplicatedResult(result []model.Issue, rst model.Issue) bool {
+	for _,v := range result {
+		if v.Type == rst.Type {
+			return true
+		}
+	}
+	return false
 }
