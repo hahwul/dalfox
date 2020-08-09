@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"strconv"
 
 	"github.com/hahwul/dalfox/pkg/printing"
+	"github.com/hahwul/dalfox/pkg/model"
 	"github.com/spf13/cobra"
 )
 
@@ -18,6 +18,7 @@ var config, cookie, data, header, p, customPayload, userAgent, blind, output, fo
 var ignoreReturn string
 var timeout, concurrence, delay int
 var onlyDiscovery, silence bool
+var options model.Options
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -72,28 +73,27 @@ func init() {
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
-	optionsStr["header"] = header
-	optionsStr["cookie"] = cookie
-	optionsStr["p"] = p
-	optionsStr["blind"] = blind
-	optionsStr["customPayload"] = customPayload
-	optionsStr["data"] = data
-	optionsStr["ua"] = userAgent
-	optionsStr["output"] = output
-	optionsStr["format"] = format
-	optionsStr["foundAction"] = foundAction
-	optionsStr["proxy"] = proxy
-	optionsStr["grep"] = grep
-	optionsStr["ignoreReturn"] = ignoreReturn
-	optionsStr["timeout"] = strconv.Itoa(timeout)
-	optionsStr["concurrence"] = strconv.Itoa(concurrence)
-	optionsStr["delay"] = strconv.Itoa(delay)
-
-	optionsBool["only-discovery"] = onlyDiscovery
-
-	if silence {
-		optionsStr["silence"] = "yes"
+	options = model.Options{
+		Header: header,
+		Cookie: cookie,
+		UniqParam: p,
+		BlindURL: blind,
+		CustomPayloadFile: customPayload,
+		Data: data,
+		UserAgent: userAgent,
+		OutputFile: output,
+		Format: format,
+		FoundAction: foundAction,
+		ProxyAddress: proxy,
+		Grep: grep,
+		IgnoreReturn: ignoreReturn,
+		Timeout: timeout,
+		Concurrence: concurrence,
+		Delay: delay,
+		OnlyDiscovery: onlyDiscovery,
+		Silence: silence,
 	}
+	_=options
 
 	if grep != "" {
 		// Open our jsonFile
@@ -102,12 +102,14 @@ func initConfig() {
 		if err != nil {
 			fmt.Println(err)
 		}
-		printing.DalLog("SYSTEM", "Loaded "+grep+" file for grepping", optionsStr)
+		printing.DalLog("SYSTEM", "Loaded "+grep+" file for grepping", options)
 		// defer the closing of our jsonFile so that we can parse it later on
 		defer jsonFile.Close()
 		byteValue, _ := ioutil.ReadAll(jsonFile)
-		optionsStr["grep"] = string(byteValue)
+		options.Grep = string(byteValue)
+
 	}
+
 
 	if config != "" {
 		// Open our jsonFile
@@ -116,22 +118,12 @@ func initConfig() {
 		if err != nil {
 			fmt.Println(err)
 		}
-		printing.DalLog("SYSTEM", "Loaded "+config+" file for config option", optionsStr)
+		printing.DalLog("SYSTEM", "Loaded "+config+" file for config option", options)
 		// defer the closing of our jsonFile so that we can parse it later on
 		defer jsonFile.Close()
 
 		byteValue, _ := ioutil.ReadAll(jsonFile)
-
-		var result map[string]interface{}
-		json.Unmarshal([]byte(byteValue), &result)
-
-		for k, v := range result {
-			if k == "only-discovery" {
-				optionsBool[k] = v.(bool)
-			} else {
-				optionsStr[k] = v.(string)
-			}
-		}
+		json.Unmarshal([]byte(byteValue), options)
 	}
 
 }

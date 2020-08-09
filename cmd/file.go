@@ -21,7 +21,7 @@ var fileCmd = &cobra.Command{
 		if len(args) >= 1 {
 			rawdata, _ := cmd.Flags().GetBool("rawdata")
 			if rawdata {
-				printing.DalLog("SYSTEM", "Using file mode(rawdata)", optionsStr)
+				printing.DalLog("SYSTEM", "Using file mode(rawdata)", options)
 				ff, err := readLinesOrLiteral(args[0])
 				_ = err
 				var path, body, host, target string
@@ -37,10 +37,10 @@ var fileCmd = &cobra.Command{
 						host = line[6:]
 					}
 					if strings.Index(line, "Cookie: ") != -1 {
-						optionsStr["cookie"] = line[9:]
+						options.Cookie = line[9:]
 					}
 					if strings.Index(line, "User-Agent: ") != -1 {
-						optionsStr["ua"] = line[12:]
+						options.UserAgent = line[12:]
 					}
 					if bodyswitch {
 						body = body + line
@@ -49,7 +49,7 @@ var fileCmd = &cobra.Command{
 						bodyswitch = true
 					}
 				}
-				optionsStr["data"] = body
+				options.Data = body
 				http, _ := cmd.Flags().GetBool("http")
 				if strings.Index(path, "http") == 0 {
 					target = path
@@ -60,10 +60,10 @@ var fileCmd = &cobra.Command{
 						target = "https://" + host + path
 					}
 				}
-				scanning.Scan(target, optionsStr, optionsBool)
+				scanning.Scan(target, options)
 
 			} else {
-				printing.DalLog("SYSTEM", "Using file mode(targets list)", optionsStr)
+				printing.DalLog("SYSTEM", "Using file mode(targets list)", options)
 				ff, err := readLinesOrLiteral(args[0])
 				_ = err
 				for _, target := range ff {
@@ -72,35 +72,35 @@ var fileCmd = &cobra.Command{
 
 				// Remove Deplicated value
 				targets = unique(targets)
-				printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target urls", optionsStr)
+				printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target urls", options)
 				multi, _ := cmd.Flags().GetBool("multicast")
 				if multi {
-					printing.DalLog("SYSTEM", "Using multicasting mode", optionsStr)
+					printing.DalLog("SYSTEM", "Using multicasting mode", options)
 					t := scanning.MakeTargetSlice(targets)
 					var wg sync.WaitGroup
 					for k, v := range t {
 						wg.Add(1)
 						go func(k string, v []string) {
 							defer wg.Done()
-							printing.DalLog("SYSTEM", "testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", optionsStr)
+							printing.DalLog("SYSTEM", "testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", options)
 							for i := range v {
-								scanning.Scan(v[i], optionsStr, optionsBool)
+								scanning.Scan(v[i], options)
 							}
 						}(k, v)
 					}
 					wg.Wait()
 				} else {
-					optionsStr["allURLs"] = strconv.Itoa(len(targets))
+					options.AllURLS = len(targets)
 					for i := range targets {
-						optionsStr["nowURL"] = strconv.Itoa(i+1)
-						scanning.Scan(targets[i], optionsStr, optionsBool)
+						options.NowURL = i+1
+						scanning.Scan(targets[i], options)
 					}
 
 				}
 			}
 		} else {
-			printing.DalLog("ERROR", "Input file path", optionsStr)
-			printing.DalLog("ERROR", "e.g dalfox file ./targets.txt or ./rawdata.raw", optionsStr)
+			printing.DalLog("ERROR", "Input file path", options)
+			printing.DalLog("ERROR", "e.g dalfox file ./targets.txt or ./rawdata.raw", options)
 		}
 	},
 }

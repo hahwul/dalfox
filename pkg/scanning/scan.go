@@ -15,13 +15,14 @@ import (
 
 	"github.com/briandowns/spinner"
 	"github.com/hahwul/dalfox/pkg/optimization"
+	"github.com/hahwul/dalfox/pkg/model"
 	"github.com/hahwul/dalfox/pkg/printing"
 	"github.com/hahwul/dalfox/pkg/verification"
 )
 
 // Scan is main scanning function
-func Scan(target string, optionsStr map[string]string, optionsBool map[string]bool) {
-	printing.DalLog("SYSTEM", "Target URL: "+target, optionsStr)
+func Scan(target string, options model.Options) {
+	printing.DalLog("SYSTEM", "Target URL: "+target, options)
 	//var params []string
 
 	// query is XSS payloads
@@ -38,20 +39,19 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 	policy := make(map[string]string)
 
 	// set up a rate limit
-	delay, _ := strconv.Atoi(optionsStr["delay"])
-	rl := newRateLimiter(time.Duration(delay * 1000000))
+	rl := newRateLimiter(time.Duration(options.Delay * 1000000))
 
 	_, err := url.Parse(target)
 	if err != nil {
-		printing.DalLog("SYSTEM", "Not running "+target+" url", optionsStr)
+		printing.DalLog("SYSTEM", "Not running "+target+" url", options)
 		return
 	}
 
 	treq, terr := http.NewRequest("GET", target, nil)
 	if terr != nil {
 	} else {
-		transport := getTransport(optionsStr)
-		t, _ := strconv.Atoi(optionsStr["timeout"])
+		transport := getTransport(options)
+		t := options.Timeout
 		client := &http.Client{
 			Timeout:   time.Duration(t) * time.Second,
 			Transport: transport,
@@ -59,15 +59,15 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 		tres, err := client.Do(treq)
 		if err != nil {
 			msg := fmt.Sprintf("not running %v", err)
-			printing.DalLog("ERROR", msg, optionsStr)
+			printing.DalLog("ERROR", msg, options)
 			return
 		}
-		if optionsStr["ignoreReturn"] != "" {
-			rcode := strings.Split(optionsStr["ignoreReturn"], ",")
+		if options.IgnoreReturn != "" {
+			rcode := strings.Split(options.IgnoreReturn, ",")
 			tcode := strconv.Itoa(tres.StatusCode)
 			for _, v := range rcode {
 				if tcode == v {
-					printing.DalLog("SYSTEM", "Not running "+target+" url from --ignore-return option", optionsStr)
+					printing.DalLog("SYSTEM", "Not running "+target+" url from --ignore-return option", options)
 					return
 				}
 			}
@@ -75,47 +75,48 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 
 		defer tres.Body.Close()
 		body, err := ioutil.ReadAll(tres.Body)
-		printing.DalLog("SYSTEM", "Vaild target [ code:"+strconv.Itoa(tres.StatusCode)+" / size:"+strconv.Itoa(len(body))+" ]", optionsStr)
+		printing.DalLog("SYSTEM", "Vaild target [ code:"+strconv.Itoa(tres.StatusCode)+" / size:"+strconv.Itoa(len(body))+" ]", options)
 	}
 
-	if optionsStr["format"] == "json"{
-		printing.DalLog("PRINT","[",optionsStr)
+	if options.Format == "json"{
+		printing.DalLog("PRINT","[",options)
 	}
 	var wait sync.WaitGroup
 	task := 2
 	wait.Add(task)
 	go func() {
 		defer wait.Done()
-		printing.DalLog("SYSTEM", "Start static analysis.. 🔍", optionsStr)
-		policy = StaticAnalysis(target, optionsStr)
+		printing.DalLog("SYSTEM", "Start static analysis.. 🔍", options)
+		policy = StaticAnalysis(target, options)
 	}()
 	go func() {
 		defer wait.Done()
-		printing.DalLog("SYSTEM", "Start parameter analysis.. 🔍", optionsStr)
-		params = ParameterAnalysis(target, optionsStr)
+		printing.DalLog("SYSTEM", "Start parameter analysis.. 🔍", options)
+		params = ParameterAnalysis(target, options)
 	}()
 
 	s := spinner.New(spinner.CharSets[4], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 	s.Prefix = " "
 	s.Suffix = "  Waiting routines.."
-	if optionsStr["nowURL"] != "" {
-		s.Suffix = "  URLs("+optionsStr["nowURL"]+" / "+optionsStr["allURLs"]+") :: Waiting routines"
+	if options.NowURL!= 0 {
+		s.Suffix = "  URLs("+strconv.Itoa(options.NowURL)+" / "+strconv.Itoa(options.AllURLS)+") :: Waiting routines"
 	}
-	if optionsStr["silence"] == "" {
+
+	if !options.Silence {
 		time.Sleep(1 * time.Second) // Waiting log
 		s.Start()                   // Start the spinner
 		//time.Sleep(3 * time.Second) // Run for some time to simulate work
 	}
 	wait.Wait()
-	if optionsStr["silence"] == "" {
+	if !options.Silence {
 		s.Stop()
 	}
 	for k, v := range policy {
 		if len(v) != 0 {
 			if k == "BypassCSP" {
-				printing.DalLog("WEAK", k+": "+v, optionsStr)
+				printing.DalLog("WEAK", k+": "+v, options)
 			} else {
-				printing.DalLog("INFO", k+" is "+v, optionsStr)
+				printing.DalLog("INFO", k+" is "+v, options)
 			}
 		}
 	}
@@ -125,15 +126,15 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 			code, vv := v[len(v)-1], v[:len(v)-1]
 			char := strings.Join(vv, "  ")
 			//x, a = a[len(a)-1], a[:len(a)-1]
-			printing.DalLog("INFO", "Reflected "+k+" param => "+char, optionsStr)
-			printing.DalLog("CODE", code, optionsStr)
+			printing.DalLog("INFO", "Reflected "+k+" param => "+char, options)
+			printing.DalLog("CODE", code, options)
 		}
 	}
 
-	if !optionsBool["only-discovery"] {
+	if !options.OnlyDiscovery {
 		// XSS Scanning
 
-		printing.DalLog("SYSTEM", "Generate XSS payload and optimization.Optimization.. 🛠", optionsStr)
+		printing.DalLog("SYSTEM", "Generate XSS payload and optimization.Optimization.. 🛠", options)
 		// optimization.Optimization..
 
 		/*
@@ -148,7 +149,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 
 			arr := getCommonPayload()
 			for _, avv := range arr {
-				tq, tm := optimization.MakePathQuery(target, "pleasedonthaveanamelikethis_plz_plz", avv, "inPATH", optionsStr)
+				tq, tm := optimization.MakePathQuery(target, "pleasedonthaveanamelikethis_plz_plz", avv, "inPATH", options)
 				tm["payload"] = ";" + avv
 				query[tq] = tm
 
@@ -157,7 +158,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 			// set param base xss
 			for k, v := range params {
 				vStatus[k] = false
-				if (optionsStr["p"] == "") || (optionsStr["p"] == k) {
+				if (options.UniqParam == "") || (options.UniqParam == k) {
 					chars := GetSpecialChar()
 					var badchars []string
 					for _, av := range v {
@@ -172,13 +173,13 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 							for _, avv := range arr {
 								if optimization.Optimization(avv, badchars) {
 									// Add plain XSS Query
-									tq, tm := optimization.MakeRequestQuery(target, k, avv, "inJS", optionsStr)
+									tq, tm := optimization.MakeRequestQuery(target, k, avv, "inJS", options)
 									query[tq] = tm
 									// Add URL Encoded XSS Query
-									etq, etm := optimization.MakeURLEncodeRequestQuery(target, k, avv, "inJS", optionsStr)
+									etq, etm := optimization.MakeURLEncodeRequestQuery(target, k, avv, "inJS", options)
 									query[etq] = etm
 									// Add HTML Encoded XSS Query
-									htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, k, avv, "inJS", optionsStr)
+									htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, k, avv, "inJS", options)
 									query[htq] = htm
 								}
 							}
@@ -188,13 +189,13 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 							for _, avv := range arr {
 								if optimization.Optimization(avv, badchars) {
 									// Add plain XSS Query
-									tq, tm := optimization.MakeRequestQuery(target, k, avv, "inATTR", optionsStr)
+									tq, tm := optimization.MakeRequestQuery(target, k, avv, "inATTR", options)
 									query[tq] = tm
 									// Add URL Encoded XSS Query
-									etq, etm := optimization.MakeURLEncodeRequestQuery(target, k, avv, "inATTR", optionsStr)
+									etq, etm := optimization.MakeURLEncodeRequestQuery(target, k, avv, "inATTR", options)
 									query[etq] = etm
 									// Add HTML Encoded XSS Query
-									htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, k, avv, "inATTR", optionsStr)
+									htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, k, avv, "inATTR", options)
 									query[htq] = htm
 								}
 							}
@@ -204,13 +205,13 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 						for _, avv := range arc {
 							if optimization.Optimization(avv, badchars) {
 								// Add plain XSS Query
-								tq, tm := optimization.MakeRequestQuery(target, k, avv, "inHTML", optionsStr)
+								tq, tm := optimization.MakeRequestQuery(target, k, avv, "inHTML", options)
 								query[tq] = tm
 								// Add URL encoded XSS Query
-								etq, etm := optimization.MakeURLEncodeRequestQuery(target, k, avv, "inHTML", optionsStr)
+								etq, etm := optimization.MakeURLEncodeRequestQuery(target, k, avv, "inHTML", options)
 								query[etq] = etm
 								// Add HTML Encoded XSS Query
-								htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, k, avv, "inHTML", optionsStr)
+								htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, k, avv, "inHTML", options)
 								query[htq] = htm
 							}
 						}
@@ -218,7 +219,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 				}
 			}
 		} else {
-			printing.DalLog("SYSTEM", "Type is '"+policy["Content-Type"]+"', It does not test except customized payload (custom/blind).", optionsStr)
+			printing.DalLog("SYSTEM", "Type is '"+policy["Content-Type"]+"', It does not test except customized payload (custom/blind).", options)
 		}
 
 		// Build-in Grepping payload :: SSTI
@@ -229,22 +230,22 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 		for bpk := range bpd {
 			for _, ssti := range getSSTIPayload() {
 				// Add plain XSS Query
-				tq, tm := optimization.MakeRequestQuery(target, bpk, ssti, "toGrepping", optionsStr)
+				tq, tm := optimization.MakeRequestQuery(target, bpk, ssti, "toGrepping", options)
 				tm["payload"] = "toGrepping"
 				query[tq] = tm
 				// Add URL encoded XSS Query
-				etq, etm := optimization.MakeURLEncodeRequestQuery(target, bpk, ssti, "toGrepping", optionsStr)
+				etq, etm := optimization.MakeURLEncodeRequestQuery(target, bpk, ssti, "toGrepping", options)
 				etm["payload"] = "toGrepping"
 				query[etq] = etm
 				// Add HTML Encoded XSS Query
-				htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, bpk, ssti, "toGrepping", optionsStr)
+				htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, bpk, ssti, "toGrepping", options)
 				htm["payload"] = "toGrepping"
 				query[htq] = htm
 			}
 		}
 
 		// Blind payload
-		if optionsStr["blind"] != "" {
+		if options.BlindURL != "" {
 			spu, _ := url.Parse(target)
 			spd := spu.Query()
 			bpayloads := getBlindPayload()
@@ -252,16 +253,16 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 			//strings.HasPrefix("foobar", "foo") // true
 			var bcallback string
 
-			if strings.HasPrefix(optionsStr["blind"], "https://") || strings.HasPrefix(optionsStr["blind"], "http://") {
-			bcallback = optionsStr["blind"]
+			if strings.HasPrefix(options.BlindURL, "https://") || strings.HasPrefix(options.BlindURL, "http://") {
+			bcallback = options.BlindURL
 		} else {
-			bcallback = "//" + optionsStr["blind"]
+			bcallback = "//" + options.BlindURL
 		}
 
 		for _, bpayload := range bpayloads {
 			// header base blind xss
 			bp := strings.Replace(bpayload, "CALLBACKURL", bcallback, 10)
-			tq, tm := optimization.MakeHeaderQuery(target,"Referer",bp,optionsStr)
+			tq, tm := optimization.MakeHeaderQuery(target,"Referer",bp,options)
 			tm["payload"] = "toBlind"
 			query[tq] = tm
 		}
@@ -272,62 +273,62 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 			for _, bpayload := range bpayloads {
 				// Add plain XSS Query
 				bp := strings.Replace(bpayload, "CALLBACKURL", bcallback, 10)
-				tq, tm := optimization.MakeRequestQuery(target, spk, bp, "toBlind", optionsStr)
+				tq, tm := optimization.MakeRequestQuery(target, spk, bp, "toBlind", options)
 				tm["payload"] = "toBlind"
 				query[tq] = tm
 				// Add URL encoded XSS Query
-				etq, etm := optimization.MakeURLEncodeRequestQuery(target, spk, bp, "toBlind", optionsStr)
+				etq, etm := optimization.MakeURLEncodeRequestQuery(target, spk, bp, "toBlind", options)
 				etm["payload"] = "toBlind"
 				query[etq] = etm
 				// Add HTML Encoded XSS Query
-				htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, spk, bp, "toBlind", optionsStr)
+				htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, spk, bp, "toBlind", options)
 				htm["payload"] = "toBlind"
 				query[htq] = htm
 			}
 		}
-		printing.DalLog("SYSTEM", "Added your blind XSS ("+optionsStr["blind"]+")", optionsStr)
+		printing.DalLog("SYSTEM", "Added your blind XSS ("+options.BlindURL+")", options)
 	}
 
 	// Custom Payload
-	if optionsStr["customPayload"] != "" {
-		ff, err := readLinesOrLiteral(optionsStr["customPayload"])
+	if options.CustomPayloadFile != "" {
+		ff, err := readLinesOrLiteral(options.CustomPayloadFile)
 		if err != nil {
-			printing.DalLog("SYSTEM", "Custom XSS payload load fail..", optionsStr)
+			printing.DalLog("SYSTEM", "Custom XSS payload load fail..", options)
 		} else {
 			for _, customPayload := range ff {
 				spu, _ := url.Parse(target)
 				spd := spu.Query()
 				for spk := range spd {
 					// Add plain XSS Query
-					tq, tm := optimization.MakeRequestQuery(target, spk, customPayload, "toHTML", optionsStr)
+					tq, tm := optimization.MakeRequestQuery(target, spk, customPayload, "toHTML", options)
 					query[tq] = tm
 					// Add URL encoded XSS Query
-					etq, etm := optimization.MakeURLEncodeRequestQuery(target, spk, customPayload, "inHTML", optionsStr)
+					etq, etm := optimization.MakeURLEncodeRequestQuery(target, spk, customPayload, "inHTML", options)
 					query[etq] = etm
 					// Add HTML Encoded XSS Query
-					htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, spk, customPayload, "inHTML", optionsStr)
+					htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, spk, customPayload, "inHTML", options)
 					query[htq] = htm
 				}
 			}
-			printing.DalLog("SYSTEM", "Added your "+strconv.Itoa(len(ff))+" custom xss payload", optionsStr)
+			printing.DalLog("SYSTEM", "Added your "+strconv.Itoa(len(ff))+" custom xss payload", options)
 		}
 	}
 
-	printing.DalLog("SYSTEM", "Start XSS Scanning.. with "+strconv.Itoa(len(query))+" queries 🗡", optionsStr)
+	printing.DalLog("SYSTEM", "Start XSS Scanning.. with "+strconv.Itoa(len(query))+" queries 🗡", options)
 	s := spinner.New(spinner.CharSets[4], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 	mutex := &sync.Mutex{}
 	queryCount := 0
 	s.Prefix = " "
-	s.Suffix = "  Make " + optionsStr["concurrence"] + " workers and allocated " + strconv.Itoa(len(query)) + " queries"
+	s.Suffix = "  Make " + strconv.Itoa(options.Concurrence) + " workers and allocated " + strconv.Itoa(len(query)) + " queries"
 
-	if optionsStr["silence"] == "" {
+	if !options.Silence {
 		s.Start() // Start the spinner
 		//time.Sleep(3 * time.Second) // Run for some time to simulate work
 	}
 	// make waiting group
 	var wg sync.WaitGroup
 	// set concurrency
-	concurrency, _ := strconv.Atoi(optionsStr["concurrence"])
+	concurrency := options.Concurrence
 	// make reqeust channel
 	queries := make(chan Queries)
 	for i := 0; i < concurrency; i++ {
@@ -340,7 +341,7 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 				v := reqJob.metadata
 				if (vStatus[v["param"]] == false) || (v["type"] != "toBlind") || (v["type"] != "toGrepping") {
 					rl.Block(k.Host)
-					resbody, _, vds, vrs, err := SendReq(k, v["payload"], optionsStr)
+					resbody, _, vds, vrs, err := SendReq(k, v["payload"], options)
 					if err == nil {
 						if (v["type"] != "toBlind") && (v["type"] != "toGrepping") {
 							if v["type"] == "inJS" {
@@ -348,16 +349,16 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 									mutex.Lock()
 									if vStatus[v["param"]] == false {
 										code := CodeView(resbody, v["payload"])
-										printing.DalLog("VULN", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], optionsStr)
-										printing.DalLog("CODE", code, optionsStr)
-										if optionsStr["format"] == "json"{
-											printing.DalLog("PRINT", "{\"type\":\"inJS\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", optionsStr)
+										printing.DalLog("VULN", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], options)
+										printing.DalLog("CODE", code, options)
+										if options.Format == "json"{
+											printing.DalLog("PRINT", "{\"type\":\"inJS\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
 										} else {
-											printing.DalLog("PRINT", "[R] "+k.URL.String(), optionsStr)
+											printing.DalLog("PRINT", "[R] "+k.URL.String(), options)
 										}
 										vStatus[v["param"]] = true
-										if optionsStr["foundAction"] != "" {
-											foundAction(optionsStr, target, k.URL.String(), "VULN")
+										if options.FoundAction != "" {
+											foundAction(options, target, k.URL.String(), "VULN")
 										}
 									}
 									mutex.Unlock()
@@ -367,16 +368,16 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 									mutex.Lock()
 									if vStatus[v["param"]] == false {
 										code := CodeView(resbody, v["payload"])
-										printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], optionsStr)
-										printing.DalLog("CODE", code, optionsStr)
-										if optionsStr["format"] == "json"{
-											printing.DalLog("PRINT", "{\"type\":\"inATTR\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", optionsStr)
+										printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], options)
+										printing.DalLog("CODE", code, options)
+										if options.Format == "json"{
+											printing.DalLog("PRINT", "{\"type\":\"inATTR\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", options)
 										} else {
-											printing.DalLog("PRINT", "[V] "+k.URL.String(), optionsStr)
+											printing.DalLog("PRINT", "[V] "+k.URL.String(), options)
 										}
 										vStatus[v["param"]] = true
-										if optionsStr["foundAction"] != "" {
-											foundAction(optionsStr, target, k.URL.String(), "VULN")
+										if options.FoundAction != "" {
+											foundAction(options, target, k.URL.String(), "VULN")
 										}
 									}
 									mutex.Unlock()
@@ -384,15 +385,15 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 									mutex.Lock()
 									if vStatus[v["param"]] == false {
 										code := CodeView(resbody, v["payload"])
-										printing.DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"], optionsStr)
-										printing.DalLog("CODE", code, optionsStr)
-										if optionsStr["format"] == "json"{
-											printing.DalLog("PRINT", "{\"type\":\"inATTR\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", optionsStr)
+										printing.DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"], options)
+										printing.DalLog("CODE", code, options)
+										if options.Format == "json"{
+											printing.DalLog("PRINT", "{\"type\":\"inATTR\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
 										} else {
-											printing.DalLog("PRINT", "[R] "+k.URL.String(), optionsStr)
+											printing.DalLog("PRINT", "[R] "+k.URL.String(), options)
 										}
-										if optionsStr["foundAction"] != "" {
-											foundAction(optionsStr, target, k.URL.String(), "WEAK")
+										if options.FoundAction != "" {
+											foundAction(options, target, k.URL.String(), "WEAK")
 										}
 									}
 									mutex.Unlock()
@@ -402,16 +403,16 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 									mutex.Lock()
 									if vStatus[v["param"]] == false {
 										code := CodeView(resbody, v["payload"])
-										printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], optionsStr)
-										printing.DalLog("CODE", code, optionsStr)
-										if optionsStr["format"] == "json"{
-											printing.DalLog("PRINT", "{\"type\":\"inHTML\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", optionsStr)
+										printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], options)
+										printing.DalLog("CODE", code, options)
+										if options.Format == "json"{
+											printing.DalLog("PRINT", "{\"type\":\"inHTML\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", options)
 										} else {
-											printing.DalLog("PRINT", "[V] "+k.URL.String(), optionsStr)
+											printing.DalLog("PRINT", "[V] "+k.URL.String(), options)
 										}
 										vStatus[v["param"]] = true
-										if optionsStr["foundAction"] != "" {
-											foundAction(optionsStr, target, k.URL.String(), "VULN")
+										if options.FoundAction != "" {
+											foundAction(options, target, k.URL.String(), "VULN")
 										}
 									}
 									mutex.Unlock()
@@ -419,15 +420,15 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 									mutex.Lock()
 									if vStatus[v["param"]] == false {
 										code := CodeView(resbody, v["payload"])
-										printing.DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"], optionsStr)
-										printing.DalLog("CODE", code, optionsStr)
-										if optionsStr["format"] == "json"{
-											printing.DalLog("PRINT", "{\"type\":\"inHTML\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", optionsStr)
+										printing.DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"], options)
+										printing.DalLog("CODE", code, options)
+										if options.Format == "json"{
+											printing.DalLog("PRINT", "{\"type\":\"inHTML\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
 										} else {
-											printing.DalLog("PRINT", "[R] "+k.URL.String(), optionsStr)
+											printing.DalLog("PRINT", "[R] "+k.URL.String(), options)
 										}
-										if optionsStr["foundAction"] != "" {
-											foundAction(optionsStr, target, k.URL.String(), "WEAK")
+										if options.FoundAction != "" {
+											foundAction(options, target, k.URL.String(), "WEAK")
 										}
 									}
 									mutex.Unlock()
@@ -440,19 +441,19 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 				mutex.Lock()
 				queryCount = queryCount + 1
 
-				if optionsStr["silence"] == "" {
+				if !options.Silence {
 					s.Lock()
 					var msg string
 					if (vStatus[v["param"]] == false){
-						msg = "Testing \""+v["param"]+"\" param with " + optionsStr["concurrence"] + " worker"
+						msg = "Testing \""+v["param"]+"\" param with " + strconv.Itoa(options.Concurrence) + " worker"
 					} else {
-						msg = "Passing \""+v["param"]+"\" param queries with " + optionsStr["concurrence"] + " worker" 
+						msg = "Passing \""+v["param"]+"\" param queries with " + strconv.Itoa(options.Concurrence) + " worker" 
 					}
 
-					if optionsStr["nowURL"] == ""{
+					if options.NowURL == 0 {
 						s.Suffix = "  Queries(" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") :: "+msg
 					} else {
-						s.Suffix = "  Queries(" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + "), URLs("+optionsStr["nowURL"]+" / "+optionsStr["allURLs"]+") :: "+msg
+						s.Suffix = "  Queries(" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + "), URLs("+strconv.Itoa(options.NowURL)+" / "+strconv.Itoa(options.AllURLS)+") :: "+msg
 					}
 					//s.Suffix = " Waiting routines.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
 					s.Unlock()
@@ -472,14 +473,14 @@ func Scan(target string, optionsStr map[string]string, optionsBool map[string]bo
 	}
 	close(queries)
 	wg.Wait()
-	if optionsStr["silence"] == "" {
+	if !options.Silence {
 		s.Stop()
 	}
 }
-if optionsStr["format"] == "json"{
-	printing.DalLog("PRINT","{}]",optionsStr)
+if options.Format == "json"{
+	printing.DalLog("PRINT","{}]",options)
 }
-printing.DalLog("SYSTEM", "Finish :D", optionsStr)
+printing.DalLog("SYSTEM", "Finish :D", options)
 }
 
 //CodeView is showing reflected code function
@@ -515,10 +516,10 @@ func CodeView(resbody, pattern string) string {
 }
 
 // StaticAnalysis is found information on original req/res
-func StaticAnalysis(target string, optionsStr map[string]string) map[string]string {
+func StaticAnalysis(target string, options model.Options) map[string]string {
 	policy := make(map[string]string)
-	req := optimization.GenerateNewRequest(target, "", optionsStr)
-	resbody, resp, _, _, err := SendReq(req, "", optionsStr)
+	req := optimization.GenerateNewRequest(target, "", options)
+	resbody, resp, _, _, err := SendReq(req, "", options)
 	if err != nil {
 		return policy
 	}
@@ -547,20 +548,19 @@ func StaticAnalysis(target string, optionsStr map[string]string) map[string]stri
 }
 
 // ParameterAnalysis is check reflected and mining params
-func ParameterAnalysis(target string, optionsStr map[string]string) map[string][]string {
+func ParameterAnalysis(target string, options model.Options) map[string][]string {
 	u, err := url.Parse(target)
 	params := make(map[string][]string)
 	// set up a rate limit
-	delay, _ := strconv.Atoi(optionsStr["delay"])
-	rl := newRateLimiter(time.Duration(delay * 1000000))
+	rl := newRateLimiter(time.Duration(options.Delay * 1000000))
 	if err != nil {
 		return params
 	}
 	var p url.Values
-	if optionsStr["data"] == "" {
+	if options.Data == "" {
 		p, _ = url.ParseQuery(u.RawQuery)
 	} else {
-		p, _ = url.ParseQuery(optionsStr["data"])
+		p, _ = url.ParseQuery(options.Data)
 	}
 	var wgg sync.WaitGroup
 	for kk := range p {
@@ -568,7 +568,7 @@ func ParameterAnalysis(target string, optionsStr map[string]string) map[string][
 		wgg.Add(1)
 		go func() {
 			defer wgg.Done()
-			if (optionsStr["p"] == "") || (optionsStr["p"] == k) {
+			if (options.UniqParam == "") || (options.UniqParam == k) {
 				//tempURL := u
 				//temp_q := u.Query()
 				//temp_q.Set(k, v[0]+"DalFox")
@@ -579,12 +579,12 @@ func ParameterAnalysis(target string, optionsStr map[string]string) map[string][
 				temp_q := tempURL.Query()
 				tempURL.RawQuery = temp_q.Encode()
 				*/
-				tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA", optionsStr)
+				tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA", options)
 				var code string
 
 				//tempURL.RawQuery = temp_q.Encode()
 				rl.Block(tempURL.Host)
-				resbody, resp, _, vrs, _ := SendReq(tempURL, "DalFox", optionsStr)
+				resbody, resp, _, vrs, _ := SendReq(tempURL, "DalFox", options)
 				if vrs {
 					code = CodeView(resbody, "DalFox")
 					code = code[:len(code)-5]
@@ -607,27 +607,27 @@ func ParameterAnalysis(target string, optionsStr map[string]string) map[string][
 						smap = smap + "inJS[" + strconv.Itoa(ij) + "] "
 					}
 					ia := 0
-					tempURL, _ := optimization.MakeRequestQuery(target, k, "\" id=dalfox \"", "PA", optionsStr)
+					tempURL, _ := optimization.MakeRequestQuery(target, k, "\" id=dalfox \"", "PA", options)
 					rl.Block(tempURL.Host)
-					_, _, vds, _, _ := SendReq(tempURL, "", optionsStr)
+					_, _, vds, _, _ := SendReq(tempURL, "", options)
 					if vds {
 						ia = ia + 1
 					}
-					tempURL, _ = optimization.MakeRequestQuery(target, k, "' id=dalfox '", "PA", optionsStr)
+					tempURL, _ = optimization.MakeRequestQuery(target, k, "' id=dalfox '", "PA", options)
 					rl.Block(tempURL.Host)
-					_, _, vds, _, _ = SendReq(tempURL, "", optionsStr)
+					_, _, vds, _, _ = SendReq(tempURL, "", options)
 					if vds {
 						ia = ia + 1
 					}
-					tempURL, _ = optimization.MakeRequestQuery(target, k, "' class=dalfox '", "PA", optionsStr)
+					tempURL, _ = optimization.MakeRequestQuery(target, k, "' class=dalfox '", "PA", options)
 					rl.Block(tempURL.Host)
-					_, _, vds, _, _ = SendReq(tempURL, "", optionsStr)
+					_, _, vds, _, _ = SendReq(tempURL, "", options)
 					if vds {
 						ia = ia + 1
 					}
-					tempURL, _ = optimization.MakeRequestQuery(target, k, "\" class=dalfox \"", "PA", optionsStr)
+					tempURL, _ = optimization.MakeRequestQuery(target, k, "\" class=dalfox \"", "PA", options)
 					rl.Block(tempURL.Host)
-					_, _, vds, _, _ = SendReq(tempURL, "", optionsStr)
+					_, _, vds, _, _ = SendReq(tempURL, "", options)
 					if vds {
 						ia = ia + 1
 					}
@@ -657,9 +657,9 @@ func ParameterAnalysis(target string, optionsStr map[string]string) map[string][
 						*/
 						go func() {
 							defer wg.Done()
-							turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA", optionsStr)
+							turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA", options)
 							rl.Block(tempURL.Host)
-							_, _, _, vrs, _ := SendReq(turl, "dalfox"+char, optionsStr)
+							_, _, _, vrs, _ := SendReq(turl, "dalfox"+char, options)
 							_ = resp
 							if vrs {
 								mutex.Lock()
@@ -679,12 +679,10 @@ func ParameterAnalysis(target string, optionsStr map[string]string) map[string][
 }
 
 // SendReq is sending http request (handled GET/POST)
-func SendReq(req *http.Request, payload string, optionsStr map[string]string) (string, *http.Response, bool, bool, error) {
-	netTransport := getTransport(optionsStr)
-	t, _ := strconv.Atoi(optionsStr["timeout"])
-
+func SendReq(req *http.Request, payload string, options model.Options) (string, *http.Response, bool, bool, error) {
+	netTransport := getTransport(options)
 	client := &http.Client{
-		Timeout:   time.Duration(t) * time.Second,
+		Timeout:   time.Duration(options.Timeout) * time.Second,
 		Transport: netTransport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return errors.New("something bad happened") // or maybe the error from the request
@@ -715,67 +713,64 @@ func SendReq(req *http.Request, payload string, optionsStr map[string]string) (s
 			}
 
 			if really {
-				printing.DalLog("GREP", "Found SSTI via built-in grepping / payload: "+payload, optionsStr)
+				printing.DalLog("GREP", "Found SSTI via built-in grepping / payload: "+payload, options)
 				for _, vv := range v {
-					printing.DalLog("CODE", vv, optionsStr)
+					printing.DalLog("CODE", vv, options)
 				}
-				if optionsStr["format"] == "json"{
-					printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"SSTI\",\"poc\":\""+req.URL.String()+"\"", optionsStr)
+				if options.Format == "json"{
+					printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"SSTI\",\"poc\":\""+req.URL.String()+"\"", options)
 				} else {
-					printing.DalLog("PRINT", "[G][SSTI] "+req.URL.String(), optionsStr)
+					printing.DalLog("PRINT", "[G][SSTI] "+req.URL.String(), options)
 				}
 			}
 		} else {
 			// other case
-			printing.DalLog("GREP", "Found "+k+" via built-in grepping / payload: "+payload, optionsStr)
+			printing.DalLog("GREP", "Found "+k+" via built-in grepping / payload: "+payload, options)
 			for _, vv := range v {
-				printing.DalLog("CODE", vv, optionsStr)
+				printing.DalLog("CODE", vv, options)
 			}
-			if optionsStr["format"] == "json"{
-				printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"BUILT-IN\",\"poc\":\""+req.URL.String()+"\"", optionsStr)
+			if options.Format == "json"{
+				printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"BUILT-IN\",\"poc\":\""+req.URL.String()+"\"", options)
 			} else {
-				printing.DalLog("PRINT", "[G][BUILT-IN] "+req.URL.String(), optionsStr)
+				printing.DalLog("PRINT", "[G][BUILT-IN] "+req.URL.String(), options)
 			}
 		}
 	}
 
-	if optionsStr["grep"] != "" {
+	if options.Grep != "" {
 		pattern := make(map[string]string)
 		var result map[string]interface{}
-		json.Unmarshal([]byte(optionsStr["grep"]), &result)
+		json.Unmarshal([]byte(options.Grep), &result)
 		for k, v := range result {
 			pattern[k] = v.(string)
 		}
 		cg := customGrep(str, pattern)
 		for k, v := range cg {
-			printing.DalLog("GREP", "Found "+k+" via custom grepping / payload: "+payload, optionsStr)
+			printing.DalLog("GREP", "Found "+k+" via custom grepping / payload: "+payload, options)
 			for _, vv := range v {
-				printing.DalLog("CODE", vv, optionsStr)
+				printing.DalLog("CODE", vv, options)
 			}
-			if optionsStr["format"] == "json"{
-				printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\""+k+"\",\"poc\":\""+req.URL.String()+"\"", optionsStr)
+			if options.Format == "json"{
+				printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\""+k+"\",\"poc\":\""+req.URL.String()+"\"", options)
 			} else {
-				printing.DalLog("PRINT", "[G]["+k+"] "+req.URL.String(), optionsStr)
+				printing.DalLog("PRINT", "[G]["+k+"] "+req.URL.String(), options)
 			}
 		}
 	}
 
-	if optionsStr["trigger"] != "" {
-		seq, err := strconv.Atoi(optionsStr["sequence"])
+	if options.Trigger != "" {
 		var treq *http.Request
-		if seq < 0 {
-			treq = optimization.GenerateNewRequest(optionsStr["trigger"], "", optionsStr)
+		if options.Sequence < 0 {
+			treq = optimization.GenerateNewRequest(options.Trigger, "", options)
 		} else {
 
-			triggerUrl := strings.Replace(optionsStr["trigger"], "SEQNC", optionsStr["sequence"], 1)
-			treq = optimization.GenerateNewRequest(triggerUrl, "", optionsStr)
-			optionsStr["sequence"] = strconv.Itoa(seq + 1)
+			triggerUrl := strings.Replace(options.Trigger, "SEQNC", strconv.Itoa(options.Sequence), 1)
+			treq = optimization.GenerateNewRequest(triggerUrl, "", options)
+			options.Sequence = options.Sequence + 1
 		}
-		netTransport := getTransport(optionsStr)
-		t, _ := strconv.Atoi(optionsStr["timeout"])
-
+		netTransport := getTransport(options)
 		client := &http.Client{
-			Timeout:   time.Duration(t) * time.Second,
+			Timeout:   time.Duration(options.Timeout) * time.Second,
 			Transport: netTransport,
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
 				return errors.New("something bad happened") // or maybe the error from the request

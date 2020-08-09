@@ -5,6 +5,8 @@ import (
 	"os"
 	"sync"
 
+
+	"github.com/hahwul/dalfox/pkg/model"
 	"github.com/logrusorgru/aurora"
 )
 
@@ -13,38 +15,38 @@ var (
 )
 
 // DalLog is log fomatting for DalFox
-func DalLog(level, text string, optionsStr map[string]string) {
+func DalLog(level, text string, options model.Options) {
 	var ftext string
 	if level == "INFO" {
-		if optionsStr["output"] != "" {
+		if options.OutputFile != "" {
 			ftext = "[I] " + text
 		}
 		text = aurora.Blue("[I] ").String() + text
 
 	}
 	if level == "WEAK" {
-		if optionsStr["output"] != "" {
+		if options.OutputFile != "" {
 			ftext = "[W] " + text
 		}
 		text = aurora.Yellow("[W] ").String() + text
 
 	}
 	if level == "VULN" {
-		if optionsStr["output"] != "" {
+		if options.OutputFile != "" {
 			ftext = "[V] " + text
 		}
 		text = aurora.Red("[V] ").String() + text
 
 	}
 	if level == "SYSTEM" {
-		if optionsStr["output"] != "" {
+		if options.OutputFile != "" {
 			ftext = "[*] " + text
 		}
 		text = aurora.White("[*] ").String() + text
 
 	}
 	if level == "GREP" {
-		if optionsStr["output"] != "" {
+		if options.OutputFile != "" {
 			ftext = "[G] " + text
 		}
 		text = aurora.Green("[G] ").String() + text
@@ -52,14 +54,14 @@ func DalLog(level, text string, optionsStr map[string]string) {
 	}
 
 	if level == "CODE" {
-		if optionsStr["output"] != "" {
+		if options.OutputFile != "" {
 			ftext = "    " + text
 		}
 		text = aurora.Gray(16-1, "    "+text).String()
 	}
 
 	if level == "ERROR" {
-		if optionsStr["output"] != "" {
+		if options.OutputFile != "" {
 			ftext = "[I] " + text
 		}
 		text = aurora.Yellow("[E] ").String() + text
@@ -70,9 +72,9 @@ func DalLog(level, text string, optionsStr map[string]string) {
 	}
 
 	//mutex.Lock()
-	if optionsStr["silence"] != "" {
+	if options.Silence == true {
 		if level == "PRINT" {
-			if optionsStr["format"] == "json" {
+			if options.Format == "json" {
 				ftext = text
 				//fmt.Println(aurora.BrightGreen(text))
 				fmt.Println(text)
@@ -84,7 +86,7 @@ func DalLog(level, text string, optionsStr map[string]string) {
 		}
 	} else {
 		if level == "PRINT" {
-			if optionsStr["format"] == "json" {
+			if options.Format == "json" {
 				ftext = text
 				//fmt.Println(aurora.BrightGreen(text))
 				fmt.Println(text)
@@ -99,10 +101,10 @@ func DalLog(level, text string, optionsStr map[string]string) {
 		}
 	}
 
-	if optionsStr["output"] != "" {
+	if options.OutputFile != "" {
 		var fdtext string
 		fdtext = ftext
-		f, err := os.OpenFile(optionsStr["output"],
+		f, err := os.OpenFile(options.OutputFile,
 			os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "output file error (file)")

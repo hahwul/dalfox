@@ -12,11 +12,11 @@ var urlCmd = &cobra.Command{
 	Short: "Use single target mode",
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) >= 1 {
-			printing.DalLog("SYSTEM", "Using single target mode", optionsStr)
-			scanning.Scan(args[0], optionsStr, optionsBool)
+			printing.DalLog("SYSTEM", "Using single target mode", options)
+			scanning.Scan(args[0], options)
 		} else {
-			printing.DalLog("ERROR", "Input target url", optionsStr)
-			printing.DalLog("ERROR", "e.g dalfox url https://google.com/?q=1", optionsStr)
+			printing.DalLog("ERROR", "Input target url", options)
+			printing.DalLog("ERROR", "e.g dalfox url https://google.com/?q=1", options)
 		}
 	},
 }

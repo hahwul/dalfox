@@ -19,35 +19,35 @@ var pipeCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		var targets []string
 		sc := bufio.NewScanner(os.Stdin)
-		printing.DalLog("SYSTEM", "Using pipeline mode", optionsStr)
+		printing.DalLog("SYSTEM", "Using pipeline mode", options)
 		for sc.Scan() {
 			target := strings.ToLower(sc.Text())
 			targets = append(targets, target)
 		}
 		targets = unique(targets)
-		printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target urls", optionsStr)
+		printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target urls", options)
 
 		multi, _ := cmd.Flags().GetBool("multicast")
 		if multi {
-			printing.DalLog("SYSTEM", "Using multicasting mode", optionsStr)
+			printing.DalLog("SYSTEM", "Using multicasting mode", options)
 			t := scanning.MakeTargetSlice(targets)
 			var wg sync.WaitGroup
 			for k, v := range t {
 				wg.Add(1)
 				go func(k string, v []string) {
 					defer wg.Done()
-					printing.DalLog("SYSTEM", "testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", optionsStr)
+					printing.DalLog("SYSTEM", "testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", options)
 					for i := range v {
-						scanning.Scan(v[i], optionsStr, optionsBool)
+						scanning.Scan(v[i], options)
 					}
 				}(k, v)
 			}
 			wg.Wait()
 		} else {
-			optionsStr["allURLs"] = strconv.Itoa(len(targets))
+			options.AllURLS = len(targets)
 			for i := range targets {
-				optionsStr["nowURL"] = strconv.Itoa(i+1)
-				scanning.Scan(targets[i], optionsStr, optionsBool)
+				options.NowURL = i+1
+				scanning.Scan(targets[i], options)
 			}
 
 		}

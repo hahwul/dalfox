@@ -4,17 +4,16 @@ import (
 	"crypto/tls"
 	"fmt"
 	"github.com/hahwul/dalfox/pkg/printing"
+	"github.com/hahwul/dalfox/pkg/model"
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 )
 
 // getTransport is setting timetout and proxy on tranport
-func getTransport(optionsStr map[string]string) *http.Transport {
+func getTransport(options model.Options) *http.Transport {
 	// set timeout
-	t, _ := strconv.Atoi(optionsStr["timeout"])
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: true,
@@ -22,17 +21,17 @@ func getTransport(optionsStr map[string]string) *http.Transport {
 		},
 		DisableKeepAlives: true,
 		DialContext: (&net.Dialer{
-			Timeout:   time.Duration(t) * time.Second,
+			Timeout:   time.Duration(options.Timeout) * time.Second,
 			DualStack: true,
 		}).DialContext,
 	}
 	// if use proxy mode , set proxy
-	if optionsStr["proxy"] != "" {
-		proxyAddress, err := url.Parse(optionsStr["proxy"])
+	if options.ProxyAddress != "" {
+		proxyAddress, err := url.Parse(options.ProxyAddress)
 		_ = proxyAddress
 		if err != nil {
 			msg := fmt.Sprintf("not running %v from proxy option", err)
-			printing.DalLog("ERROR", msg, optionsStr)
+			printing.DalLog("ERROR", msg, options)
 		}
 		transport.Proxy = http.ProxyURL(proxyAddress)
 	}

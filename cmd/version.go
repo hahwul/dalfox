@@ -25,8 +25,7 @@ var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Show version",
 	Run: func(cmd *cobra.Command, args []string) {
-		fake := make(map[string]string)
-		printing.DalLog("YELLOW", printing.VERSION, fake)
+		printing.DalLog("YELLOW", printing.VERSION, options)
 	},
 }
 

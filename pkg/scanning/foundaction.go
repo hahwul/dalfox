@@ -5,11 +5,12 @@ import (
 	"strings"
 
 	"github.com/hahwul/dalfox/pkg/printing"
+	"github.com/hahwul/dalfox/pkg/model"
 )
 
 // foundAction is after command function.
-func foundAction(optionsStr map[string]string, target, query, ptype string) {
-	afterCmd := optionsStr["foundAction"]
+func foundAction(options model.Options, target, query, ptype string) {
+	afterCmd := options.FoundAction
 	// afterCmd := strings.Join(tempCmd[:], " ")
 	afterCmd = strings.ReplaceAll(afterCmd, "@@query@@", query)
 	afterCmd = strings.ReplaceAll(afterCmd, "@@target@@", target)
@@ -17,6 +18,6 @@ func foundAction(optionsStr map[string]string, target, query, ptype string) {
 	cmd := exec.Command("bash", "-c", afterCmd)
 	err := cmd.Start()
 	if err != nil {
-		printing.DalLog("ERROR", "execution error from found-action", optionsStr)
+		printing.DalLog("ERROR", "execution error from found-action", options)
 	}
 }

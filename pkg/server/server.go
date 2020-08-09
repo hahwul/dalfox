@@ -4,12 +4,13 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/swaggo/echo-swagger"
-	_ "github.com/hahwul/dalfox/pkg/server/docs"
+	"github.com/hahwul/dalfox/pkg/model"
 	printing "github.com/hahwul/dalfox/pkg/printing"
-	"github.com/tylerb/graceful"
-	"github.com/labstack/echo/v4/middleware"
+	_ "github.com/hahwul/dalfox/pkg/server/docs"
 	"github.com/labstack/echo/v4"
+	"github.com/labstack/echo/v4/middleware"
+	"github.com/swaggo/echo-swagger"
+	"github.com/tylerb/graceful"
 )
 
 // @title DalFox API
@@ -23,8 +24,9 @@ import (
 // @host localhost:6664
 // @BasePath /
 
-func RunAPIServer(optionsStr map[string]string, optionsBool map[string]bool) {
+func RunAPIServer(options model.Options) {
 	e := echo.New()
+	options.IsAPI = true
 	e.Server.Addr = ":6664"
 	e.Use(middleware.SecureWithConfig(middleware.SecureConfig{
 		XSSProtection:         "",
@@ -64,9 +66,9 @@ func RunAPIServer(optionsStr map[string]string, optionsBool map[string]bool) {
 			Code: 200,
 			Msg: sid,
 		}
-		go ScanFromAPI(rq.URL, rq.Options, optionsStr,optionsBool)
+		go ScanFromAPI(rq.URL, rq.Options, options)
 		return c.JSON(http.StatusOK,r)
 	})
-	printing.DalLog("SYSTEM", "Listen "+e.Server.Addr, optionsStr)
+	printing.DalLog("SYSTEM", "Listen "+e.Server.Addr, options)
 	graceful.ListenAndServe(e.Server, 5*time.Second)
 }

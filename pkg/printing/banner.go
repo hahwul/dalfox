@@ -1,8 +1,10 @@
 package printing
 
+import "github.com/hahwul/dalfox/pkg/model"
+
 // Banner is DalFox banner function
 func Banner() {
-	fake := make(map[string]string)
+	var fake model.Options
 	DalLog("", `
     _..._
   .' .::::.   __   _   _    ___ _ __ __ 

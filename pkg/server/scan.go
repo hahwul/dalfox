@@ -1,6 +1,7 @@
-package server 
+package server
 
 import (
+	"github.com/hahwul/dalfox/pkg/model"
 	scan "github.com/hahwul/dalfox/pkg/scanning"
 )
 
@@ -12,6 +13,6 @@ import (
 // @Param data body Req true "json data"
 // @Success 200 {object} Res
 // @Router /scan [post]
-func ScanFromAPI(url string, options map[string]interface{}, optionsStr map[string]string, optionsBool map[string]bool){
-	scan.Scan(url,optionsStr,optionsBool)
+func ScanFromAPI(url string, rqOptions map[string]interface{}, options model.Options){
+	scan.Scan(url,options)
 }

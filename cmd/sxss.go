@@ -4,7 +4,6 @@ import (
 	"github.com/hahwul/dalfox/pkg/printing"
 	"github.com/hahwul/dalfox/pkg/scanning"
 	"github.com/spf13/cobra"
-	"strconv"
 )
 
 var trigger string
@@ -17,11 +16,11 @@ var sxssCmd = &cobra.Command{
 	Short: "Use Stored XSS mode",
 	Run: func(cmd *cobra.Command, args []string) {
 		if len(args) >= 1 {
-			printing.DalLog("SYSTEM", "Using Stored XSS mode", optionsStr)
-			scanning.Scan(args[0], optionsStr, optionsBool)
+			printing.DalLog("SYSTEM", "Using Stored XSS mode", options)
+			scanning.Scan(args[0], options)
 		} else {
-			printing.DalLog("ERROR", "Input target url", optionsStr)
-			printing.DalLog("ERROR", "e.g dalfox sxss https://google.com/?q=1 --trigger https://target/profile", optionsStr)
+			printing.DalLog("ERROR", "Input target url", options)
+			printing.DalLog("ERROR", "e.g dalfox sxss https://google.com/?q=1 --trigger https://target/profile", options)
 		}
 	},
 }
@@ -38,7 +37,7 @@ func init() {
 	//Int
 	sxssCmd.PersistentFlags().BoolVar(&mass, "mass", false, "Testing mass vector (comming soon)")
 
-	optionsStr["trigger"] = trigger
-	optionsStr["sequence"] = strconv.Itoa(sequence)
-	optionsBool["mass"] = mass
+	options.Trigger = trigger
+	options.Sequence = sequence
+	options.Mass = mass
 }

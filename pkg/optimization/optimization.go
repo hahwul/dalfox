@@ -7,28 +7,29 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"github.com/hahwul/dalfox/pkg/model"
 )
 
 // GenerateNewRequest is make http.Cilent
-func GenerateNewRequest(url, payload string, optionsStr map[string]string) *http.Request {
+func GenerateNewRequest(url, payload string, options model.Options) *http.Request {
 	req, _ := http.NewRequest("GET", url, nil)
-	if optionsStr["data"] != "" {
+	if options.Data != "" {
 		d := []byte(payload)
 		req, _ = http.NewRequest("POST", url, bytes.NewBuffer(d))
 		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	}
 
-	if optionsStr["header"] != "" {
-		h := strings.Split(optionsStr["header"], ": ")
+	if options.Header != "" {
+		h := strings.Split(options.Header, ": ")
 		if len(h) > 1 {
 			req.Header.Add(h[0], h[1])
 		}
 	}
-	if optionsStr["cookie"] != "" {
-		req.Header.Add("Cookie", optionsStr["cookie"])
+	if options.Cookie != "" {
+		req.Header.Add("Cookie", options.Cookie)
 	}
-	if optionsStr["ua"] != "" {
-		req.Header.Add("User-Agent", optionsStr["ua"])
+	if options.UserAgent != "" {
+		req.Header.Add("User-Agent", options.UserAgent)
 	} else {
 		req.Header.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:75.0) Gecko/20100101 Firefox/75.0")
 	}
@@ -36,29 +37,29 @@ func GenerateNewRequest(url, payload string, optionsStr map[string]string) *http
 }
 
 // MakeHeaderQuery is generate http query with custom header
-func MakeHeaderQuery(target, hn, hv string,optionsStr map[string]string) (*http.Request, map[string]string) {
+func MakeHeaderQuery(target, hn, hv string,options model.Options) (*http.Request, map[string]string) {
 	tempMap := make(map[string]string)
 	tempMap["type"] = "toBlind"
 	tempMap["payload"] = hv
 	tempMap["param"] = "thisisheadertesting"
 	req, _ := http.NewRequest("GET", target, nil)
-	if optionsStr["data"] != "" {
+	if options.Data != "" {
 		d := []byte("")
 		req, _ = http.NewRequest("POST", target, bytes.NewBuffer(d))
 		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	}
 
-	if optionsStr["header"] != "" {
-		h := strings.Split(optionsStr["header"], ": ")
+	if options.Header != "" {
+		h := strings.Split(options.Header, ": ")
 		if len(h) > 1 {
 			req.Header.Add(h[0], h[1])
 		}
 	}
-	if optionsStr["cookie"] != "" {
-		req.Header.Add("Cookie", optionsStr["cookie"])
+	if options.Cookie != "" {
+		req.Header.Add("Cookie", options.Cookie)
 	}
-	if optionsStr["ua"] != "" {
-		req.Header.Add("User-Agent", optionsStr["ua"])
+	if options.UserAgent != "" {
+		req.Header.Add("User-Agent", options.UserAgent)
 	} else {
 		req.Header.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:75.0) Gecko/20100101 Firefox/75.0")
 	}
@@ -69,7 +70,7 @@ func MakeHeaderQuery(target, hn, hv string,optionsStr map[string]string) (*http.
 
 
 // MakeRequestQuery is generate http query with custom paramters
-func MakeRequestQuery(target, param, payload, ptype string, optionsStr map[string]string) (*http.Request, map[string]string) {
+func MakeRequestQuery(target, param, payload, ptype string, options model.Options) (*http.Request, map[string]string) {
 	tempMap := make(map[string]string)
 	tempMap["type"] = ptype
 	tempMap["payload"] = payload
@@ -78,14 +79,14 @@ func MakeRequestQuery(target, param, payload, ptype string, optionsStr map[strin
 	payload = url.QueryEscape(payload)
 	u, _ := url.Parse(target)
 	data := u.String()
-	if optionsStr["data"] != "" {
-		tempParam, _ := url.ParseQuery(optionsStr["data"])
-		body := strings.Replace(optionsStr["data"], param+"="+tempParam[param][0], param+"="+tempParam[param][0]+payload, 1)
+	if options.Data != "" {
+		tempParam, _ := url.ParseQuery(options.Data)
+		body := strings.Replace(options.Data, param+"="+tempParam[param][0], param+"="+tempParam[param][0]+payload, 1)
 		tempURL, _ := url.Parse(data)
 		tempQuery := tempURL.Query()
 		tempURL.RawQuery = tempQuery.Encode()
 
-		rst := GenerateNewRequest(tempURL.String(), body, optionsStr)
+		rst := GenerateNewRequest(tempURL.String(), body, options)
 		return rst, tempMap
 
 	} else {
@@ -94,13 +95,13 @@ func MakeRequestQuery(target, param, payload, ptype string, optionsStr map[strin
 		tempURL, _ := url.Parse(data)
 		tempQuery := tempURL.Query()
 		tempURL.RawQuery = tempQuery.Encode()
-		rst := GenerateNewRequest(tempURL.String(), "", optionsStr)
+		rst := GenerateNewRequest(tempURL.String(), "", options)
 		return rst, tempMap
 	}
 }
 
 // MakePathQuery is generate http query with path
-func MakePathQuery(target, fakeparam, payload, ptype string, optionsStr map[string]string) (*http.Request, map[string]string) {
+func MakePathQuery(target, fakeparam, payload, ptype string, options model.Options) (*http.Request, map[string]string) {
 	tempMap := make(map[string]string)
 	tempMap["type"] = ptype
 	tempMap["payload"] = payload
@@ -108,7 +109,7 @@ func MakePathQuery(target, fakeparam, payload, ptype string, optionsStr map[stri
 	payload = url.QueryEscape(payload)
 	u, err := url.Parse(target)
 	if err != nil {
-		rst := GenerateNewRequest(target, "", optionsStr)
+		rst := GenerateNewRequest(target, "", options)
 		return rst, tempMap
 	}
 	data := ""
@@ -119,19 +120,19 @@ func MakePathQuery(target, fakeparam, payload, ptype string, optionsStr map[stri
 	}
 	tempURL, err := url.Parse(data)
 	if err != nil {
-		rst := GenerateNewRequest(target, "", optionsStr)
+		rst := GenerateNewRequest(target, "", options)
 		return rst, tempMap
 	}
 
 	tempQuery := tempURL.Query()
 	tempURL.RawQuery = tempQuery.Encode()
 
-	rst := GenerateNewRequest(tempURL.String(), optionsStr["data"], optionsStr)
+	rst := GenerateNewRequest(tempURL.String(), options.Data, options)
 	return rst, tempMap
 }
 
 // MakeURLEncodeRequestQuery is generate http query with Double URL Encoding
-func MakeURLEncodeRequestQuery(target, param, payload, ptype string, optionsStr map[string]string) (*http.Request, map[string]string) {
+func MakeURLEncodeRequestQuery(target, param, payload, ptype string, options model.Options) (*http.Request, map[string]string) {
 
 	tempMap := make(map[string]string)
 	tempMap["type"] = ptype
@@ -143,14 +144,14 @@ func MakeURLEncodeRequestQuery(target, param, payload, ptype string, optionsStr 
 	data := u.String()
 	// URL Encoding
 	encodedPayload := UrlEncode(UrlEncode(payload))
-	if optionsStr["data"] != "" {
-		tempParam, _ := url.ParseQuery(optionsStr["data"])
-		body := strings.Replace(optionsStr["data"], param+"="+tempParam[param][0], param+"="+tempParam[param][0]+encodedPayload, 1)
+	if options.Data != "" {
+		tempParam, _ := url.ParseQuery(options.Data)
+		body := strings.Replace(options.Data, param+"="+tempParam[param][0], param+"="+tempParam[param][0]+encodedPayload, 1)
 		tempURL, _ := url.Parse(data)
 		tempQuery := tempURL.Query()
 		tempURL.RawQuery = tempQuery.Encode()
 
-		rst := GenerateNewRequest(tempURL.String(), body, optionsStr)
+		rst := GenerateNewRequest(tempURL.String(), body, options)
 		return rst, tempMap
 
 	} else {
@@ -159,13 +160,13 @@ func MakeURLEncodeRequestQuery(target, param, payload, ptype string, optionsStr 
 		tempURL, _ := url.Parse(data)
 		tempQuery := tempURL.Query()
 		tempURL.RawQuery = tempQuery.Encode()
-		rst := GenerateNewRequest(tempURL.String(), "", optionsStr)
+		rst := GenerateNewRequest(tempURL.String(), "", options)
 		return rst, tempMap
 	}
 }
 
 // MakeHTMLEncodeRequestQuery is generate http query with Hex Encoding
-func MakeHTMLEncodeRequestQuery(target, param, payload, ptype string, optionsStr map[string]string) (*http.Request, map[string]string) {
+func MakeHTMLEncodeRequestQuery(target, param, payload, ptype string, options model.Options) (*http.Request, map[string]string) {
 	tempMap := make(map[string]string)
 	tempMap["type"] = ptype
 	tempMap["payload"] = payload
@@ -176,13 +177,13 @@ func MakeHTMLEncodeRequestQuery(target, param, payload, ptype string, optionsStr
 	data := u.String()
 	// HTML HEX Encoding
 	encodedPayload := template.HTMLEscapeString(payload)
-	if optionsStr["data"] != "" {
-		tempParam, _ := url.ParseQuery(optionsStr["data"])
-		body := strings.Replace(optionsStr["data"], param+"="+tempParam[param][0], param+"="+tempParam[param][0]+encodedPayload, 1)
+	if options.Data != "" {
+		tempParam, _ := url.ParseQuery(options.Data)
+		body := strings.Replace(options.Data, param+"="+tempParam[param][0], param+"="+tempParam[param][0]+encodedPayload, 1)
 		tempURL, _ := url.Parse(data)
 		tempQuery := tempURL.Query()
 		tempURL.RawQuery = tempQuery.Encode()
-		rst := GenerateNewRequest(tempURL.String(), body, optionsStr)
+		rst := GenerateNewRequest(tempURL.String(), body, options)
 		return rst, tempMap
 
 	} else {
@@ -191,7 +192,7 @@ func MakeHTMLEncodeRequestQuery(target, param, payload, ptype string, optionsStr
 		tempURL, _ := url.Parse(data)
 		tempQuery := tempURL.Query()
 		tempURL.RawQuery = tempQuery.Encode()
-		rst := GenerateNewRequest(tempURL.String(), "", optionsStr)
+		rst := GenerateNewRequest(tempURL.String(), "", options)
 		return rst, tempMap
 	}
 }
