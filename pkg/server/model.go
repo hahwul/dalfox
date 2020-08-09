@@ -12,3 +12,9 @@ type Res struct {
 	Msg string `json:"msg"`
 	Data []model.Issue `json:"data"`
 }
+
+
+type Scans struct {
+	Code int `json:"code"`
+	Scans []string `json:"scans"`
+}
