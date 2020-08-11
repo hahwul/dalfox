@@ -32,48 +32,11 @@ I talk about naming. Dal(달) is the Korean pronunciation of moon and fox was ma
   - built-in / custom grepping for find other vulnerability
   - if you found, after action
   - etc..
+- Support API Server and Swagger
+- Support package manager and docker env ( `homebrew` `snapcraft` `docker hub` `github dockerhub` )
 
 ## How to Install
-There are a total of three ways to Personally, I recommend go install.
-### Build and Install 
-1) clone this repo
-```
-$ git clone https://github.com/hahwul/dalfox
-```
-2) install in cloned dalfox path
-```
-$ go install
-```
-3) using dalfox
-```
-$ ~/go/bin/dalfox
-```
-
-### Download release version
-1) Open latest release page
-https://github.com/hahwul/dalfox/releases/latest
-
-2) Download file 
-Download and extract the file that fits your OS.
-
-3) You can put it in the execution directory and use it.
-e.g 
-```
-$ cp dalfox /usr/bin/
-```
-
-### Installation Docker
-Pull and run
-```
-$ docker pull hahwul/dalfox:latest
-$ docker run -it hahwul/dalfox:latest /bin/bash
-$ dalfox
-```
-
-run dalfox on docker
-```
-docker run -it hahwul/dalfox:latest dalfox url https://www.hahwul.com
-```
+You can find some additional installation variations in the [Installation Guide](https://github.com/hahwul/dalfox/wiki/1.-Installation).
 
 ## Usage
 ```plain
@@ -104,6 +67,7 @@ Flags:
       --custom-payload string   Add custom payloads from file
   -d, --data string             Using POST Method and add Body data
       --delay int               Milliseconds between send to same host (1000==1s)
+      --follow-redirects        Following redirection
       --format string           stdout output format(plain/json) (default "plain")
       --found-action string     If found weak/vuln, action(cmd) to next
       --grep string             Using custom grepping file (e.g --grep ./samples/sample_grep.json)
@@ -118,6 +82,8 @@ Flags:
       --timeout int             Second of timeout (default 10)
       --user-agent string       Add custom UserAgent
   -w, --worker int              Number of worker (default 100)
+
+Use "dalfox [command] --help" for more information about a command.
 ```
 
 ```
@@ -141,7 +107,10 @@ $ cat urls_file | dalfox pipe -H "AuthToken: bbadsfkasdfadsf87"
 
 Other tips, See [wiki](https://github.com/hahwul/dalfox/wiki) for detailed instructions!
 
+## Screenshots
+| ![1414](https://user-images.githubusercontent.com/13212227/89736704-4ed17e80-daa6-11ea-90d8-32f915911b52.png) | ![1415](https://user-images.githubusercontent.com/13212227/89736705-5002ab80-daa6-11ea-9ee8-d2def396c25a.png) |
+| ------------------------------------------------------------ | ------------------------------------------------------------ |
+| Single URL Scanning                                          | API Server and Swagger                                       |
+| ![1416](https://user-images.githubusercontent.com/13212227/89736707-509b4200-daa6-11ea-9ca6-8055fa714401.png) | ![1419](https://user-images.githubusercontent.com/13212227/89736914-087d1f00-daa8-11ea-87e6-e33b78e2d344.png) |
+| Built-in and Custom Grepping                                 | Pipeline Scanning                                            |
 
-## ScreenShot
-![1414](https://user-images.githubusercontent.com/13212227/80303671-97fa0d00-87ec-11ea-814c-96d623f842ec.png)
-![1415](https://user-images.githubusercontent.com/13212227/80303674-9cbec100-87ec-11ea-8307-1eae2749a203.png)
