@@ -359,16 +359,16 @@ func Scan(target string, options model.Options, sid string) {
 									mutex.Lock()
 									if vStatus[v["param"]] == false {
 										code := CodeView(resbody, v["payload"])
-										printing.DalLog("VULN", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], options)
+										printing.DalLog("WEAK", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], options)
 										printing.DalLog("CODE", code, options)
 										if options.Format == "json"{
 											printing.DalLog("PRINT", "{\"type\":\"inJS\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
 										} else {
 											printing.DalLog("PRINT", "[R] "+k.URL.String(), options)
 										}
-										vStatus[v["param"]] = true
+
 										if options.FoundAction != "" {
-											foundAction(options, target, k.URL.String(), "VULN")
+											foundAction(options, target, k.URL.String(), "WEAK")
 										}
 										rst := &model.Issue{
 											Type: "found code",
