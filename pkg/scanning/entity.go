@@ -118,6 +118,7 @@ func GetEventHandlers() []string {
 		"onselect",
 		"onselectionchange",
 		"onselectstart",
+		"onshow",
 		"onstart",
 		"onstop",
 		"onstorage",
