@@ -36,6 +36,7 @@ func GetEventHandlers() []string {
 		"ondataavailable",
 		"ondatasetchanged",
 		"ondatasetcomplete",
+		"ondurationchange",
 		"ondblclick",
 		"ondeactivate",
 		"ondrag",
