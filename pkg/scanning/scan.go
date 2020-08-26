@@ -52,9 +52,9 @@ func Scan(target string, options model.Options, sid string) {
 		printing.DalLog("SYSTEM", "Not running "+target+" url", options)
 		return
 	}
-
-	treq, terr := http.NewRequest("GET", target, nil)
-	if terr != nil {
+	treq := optimization.GenerateNewRequest(target,"",options)
+	//treq, terr := http.NewRequest("GET", target, nil)
+	if treq == nil {
 	} else {
 		transport := getTransport(options)
 		t := options.Timeout
