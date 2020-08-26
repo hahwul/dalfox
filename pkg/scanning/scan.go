@@ -787,7 +787,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				if options.Format == "json"{
 					printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"BUILT-IN\",\"poc\":\""+req.URL.String()+"\"", options)
 				} else {
-					printing.DalLog("PRINT", "[G][BUILT-IN] "+req.URL.String(), options)
+					printing.DalLog("PRINT", "[G][BUILT-IN]["+k+"] "+req.URL.String(), options)
 				}
 				scanObject.Results = append(scanObject.Results,*rst)
 			}
