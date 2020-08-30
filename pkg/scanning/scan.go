@@ -598,10 +598,19 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 		return params
 	}
 	var p url.Values
+
 	if options.Data == "" {
 		p, _ = url.ParseQuery(u.RawQuery)
 	} else {
 		p, _ = url.ParseQuery(options.Data)
+	}
+	// Param mining with Gf-Patterins
+	for _,gfParam := range GetGfXSS(){
+		if gfParam != ""{
+			if p.Get(gfParam) == "" {
+				p.Set(gfParam, "")
+			}
+		}
 	}
 	var wgg sync.WaitGroup
 	for kk := range p {

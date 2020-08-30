@@ -1,5 +1,51 @@
 package scanning
 
+// GetGfXSS is get cool parameter name from Gf-Patterns
+func GetGfXSS() []string {
+	// https://github.com/1ndianl33t/Gf-Patterns/blob/master/xss.json
+	params := []string {
+		"q",
+		"s",
+		"search",
+		"lang",
+		"keyword",
+		"query",
+		"page",
+		"keywords",
+		"year",
+		"view",
+		"email",
+		"type",
+		"name",
+		"p",
+		"callback",
+		"jsonp",
+		"api_key",
+		"api",
+		"password",
+		"email",
+		"emailto",
+		"token",
+		"username",
+		"csrf_token",
+		"unsubscribe_token",
+		"id",
+		"item",
+		"page_id",
+		"month",
+		"immagine",
+		"list_type",
+		"url",
+		"terms",
+		"categoryid",
+		"key",
+		"l",
+		"begindate",
+		"enddate",
+	}
+	return params
+}
+
 //GetEventHandlers is return event handlers (array type)
 func GetEventHandlers() []string {
 	handlers := []string{

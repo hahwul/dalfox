@@ -81,7 +81,12 @@ func MakeRequestQuery(target, param, payload, ptype string, options model.Option
 	data := u.String()
 	if options.Data != "" {
 		tempParam, _ := url.ParseQuery(options.Data)
-		body := strings.Replace(options.Data, param+"="+tempParam[param][0], param+"="+tempParam[param][0]+payload, 1)
+		var body string
+		if tempParam[param] == nil {
+			body = param+"="+payload+"&"+data
+		} else {
+			body = strings.Replace(options.Data, param+"="+tempParam[param][0], param+"="+tempParam[param][0]+payload, 1)
+		}
 		tempURL, _ := url.Parse(data)
 		tempQuery := tempURL.Query()
 		tempURL.RawQuery = tempQuery.Encode()
@@ -91,7 +96,11 @@ func MakeRequestQuery(target, param, payload, ptype string, options model.Option
 
 	} else {
 		tempParam := u.Query()
-		data = strings.Replace(data, param+"="+tempParam[param][0], param+"="+tempParam[param][0]+payload, 1)
+		if tempParam[param] == nil {
+			data = "?"+param+"="+payload+"&"+data
+		} else {
+			data = strings.Replace(data, param+"="+tempParam[param][0], param+"="+tempParam[param][0]+payload, 1)
+		}
 		tempURL, _ := url.Parse(data)
 		tempQuery := tempURL.Query()
 		tempURL.RawQuery = tempQuery.Encode()
