@@ -28,6 +28,8 @@ type Options struct {
 	Mass bool
 	Scan map[string]Scan
 	FollowRedirect bool
+	Mining bool
+	MiningWordlist string
 }
 
 type Scan struct {
