@@ -88,6 +88,14 @@ func Scan(target string, options model.Options, sid string) {
 		body, err := ioutil.ReadAll(tres.Body)
 		printing.DalLog("SYSTEM", "Vaild target [ code:"+strconv.Itoa(tres.StatusCode)+" / size:"+strconv.Itoa(len(body))+" ]", options)
 	}
+	if options.Mining {
+		printing.DalLog("SYSTEM", "Using parameter mining option ⛏", options)
+		if options.MiningWordlist != "" {
+			printing.DalLog("CODE", "Using wordlsit file: '"+options.MiningWordlist+"'", options)
+		} else {
+			printing.DalLog("CODE", "Using default pattern(Gf-Patterns > XSS)", options)
+		}
+	}
 
 	if options.Format == "json"{
 		printing.DalLog("PRINT","[",options)
