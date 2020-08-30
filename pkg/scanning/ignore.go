@@ -6,7 +6,14 @@ import "strings"
 func isAllowType(contentType string) bool {
 	notScanningType := []string{
 		"application/json",
+		"application/javascript",
+		"text/javascript",
 		"text/plain",
+		"text/css",
+		"image/jpeg",
+		"image/png",
+		"image/bmp",
+		"image/gif",
 	}
 	for _, n := range notScanningType {
 		if strings.Contains(contentType, n) {
