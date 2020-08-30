@@ -64,8 +64,8 @@ func Scan(target string, options model.Options, sid string) {
 		}
 		if !options.FollowRedirect {
 			client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-                		return errors.New("Follow redirect") // or maybe the error from the request
-               		}
+				return errors.New("Follow redirect") // or maybe the error from the request
+			}
 		}
 		tres, err := client.Do(treq)
 		if err != nil {
@@ -604,127 +604,153 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 	} else {
 		p, _ = url.ParseQuery(options.Data)
 	}
-	// Param mining with Gf-Patterins
-	for _,gfParam := range GetGfXSS(){
-		if gfParam != ""{
-			if p.Get(gfParam) == "" {
-				p.Set(gfParam, "")
+	if options.Mining {
+		// Param mining with Gf-Patterins
+		if options.MiningWordlist == ""{
+			for _, gfParam := range GetGfXSS(){
+				if gfParam != ""{
+					if p.Get(gfParam) == "" {
+						p.Set(gfParam, "")
+					}
+				}
+			}
+		} else {
+			ff, err := readLinesOrLiteral(options.MiningWordlist)
+			if err != nil {
+				printing.DalLog("SYSTEM","Mining wordlist load fail..", options)
+			} else {
+				for _, wdParam := range ff {
+					if wdParam != "" {
+						if p.Get(wdParam) == "" {
+							p.Set(wdParam, "")
+						}
+					}
+				}
 			}
 		}
 	}
 	var wgg sync.WaitGroup
-	for kk := range p {
-		k := kk
+	concurrency := options.Concurrence
+	paramsQue := make(chan string)
+	for i := 0; i < concurrency ; i++ {
 		wgg.Add(1)
 		go func() {
-			defer wgg.Done()
-			if (options.UniqParam == "") || (options.UniqParam == k) {
-				//tempURL := u
-				//temp_q := u.Query()
-				//temp_q.Set(k, v[0]+"DalFox")
-				/*
-				data := u.String()
-				data = strings.Replace(data, k+"="+v[0], k+"="+v[0]+"DalFox", 1)
-				tempURL, _ := url.Parse(data)
-				temp_q := tempURL.Query()
-				tempURL.RawQuery = temp_q.Encode()
-				*/
-				tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA", options)
-				var code string
+			for k := range paramsQue {
+				if (options.UniqParam == "") || (options.UniqParam == k) {
+					//tempURL := u
+					//temp_q := u.Query()
+					//temp_q.Set(k, v[0]+"DalFox")
+					/*
+					data := u.String()
+					data = strings.Replace(data, k+"="+v[0], k+"="+v[0]+"DalFox", 1)
+					tempURL, _ := url.Parse(data)
+					temp_q := tempURL.Query()
+					tempURL.RawQuery = temp_q.Encode()
+					*/
+					tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA", options)
+					var code string
 
-				//tempURL.RawQuery = temp_q.Encode()
-				rl.Block(tempURL.Host)
-				resbody, resp, _, vrs, _ := SendReq(tempURL, "DalFox", options)
-				if vrs {
-					code = CodeView(resbody, "DalFox")
-					code = code[:len(code)-5]
-					pointer := optimization.Abstraction(resbody)
-					var smap string
-					ih := 0
-					ij := 0
-					for _, sv := range pointer {
-						if sv == "inHTML" {
-							ih = ih + 1
-						}
-						if sv == "inJS" {
-							ij = ij + 1
-						}
-					}
-					if ih > 0 {
-						smap = smap + "inHTML[" + strconv.Itoa(ih) + "] "
-					}
-					if ij > 0 {
-						smap = smap + "inJS[" + strconv.Itoa(ij) + "] "
-					}
-					ia := 0
-					tempURL, _ := optimization.MakeRequestQuery(target, k, "\" id=dalfox \"", "PA", options)
+					//tempURL.RawQuery = temp_q.Encode()
 					rl.Block(tempURL.Host)
-					_, _, vds, _, _ := SendReq(tempURL, "", options)
-					if vds {
-						ia = ia + 1
-					}
-					tempURL, _ = optimization.MakeRequestQuery(target, k, "' id=dalfox '", "PA", options)
-					rl.Block(tempURL.Host)
-					_, _, vds, _, _ = SendReq(tempURL, "", options)
-					if vds {
-						ia = ia + 1
-					}
-					tempURL, _ = optimization.MakeRequestQuery(target, k, "' class=dalfox '", "PA", options)
-					rl.Block(tempURL.Host)
-					_, _, vds, _, _ = SendReq(tempURL, "", options)
-					if vds {
-						ia = ia + 1
-					}
-					tempURL, _ = optimization.MakeRequestQuery(target, k, "\" class=dalfox \"", "PA", options)
-					rl.Block(tempURL.Host)
-					_, _, vds, _, _ = SendReq(tempURL, "", options)
-					if vds {
-						ia = ia + 1
-					}
-					if ia > 0 {
-						smap = smap + "inATTR[" + strconv.Itoa(ia) + "] "
-					}
-
-					params[k] = append(params[k], smap)
-					var wg sync.WaitGroup
-					mutex := &sync.Mutex{}
-					chars := GetSpecialChar()
-					for _, c := range chars {
-						wg.Add(1)
-						char := c
-						/*
-						tdata := u.String()
-						tdata = strings.Replace(tdata, k+"="+v[0], k+"="+v[0]+"DalFox"+char, 1)
-						turl, _ := url.Parse(tdata)
-						tq := turl.Query()
-						turl.RawQuery = tq.Encode()
-						*/
-
-						/* turl := u
-						q := u.Query()
-						q.Set(k, v[0]+"DalFox"+string(char))
-						turl.RawQuery = q.Encode()
-						*/
-						go func() {
-							defer wg.Done()
-							turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA", options)
-							rl.Block(tempURL.Host)
-							_, _, _, vrs, _ := SendReq(turl, "dalfox"+char, options)
-							_ = resp
-							if vrs {
-								mutex.Lock()
-								params[k] = append(params[k], char)
-								mutex.Unlock()
+					resbody, resp, _, vrs, _ := SendReq(tempURL, "DalFox", options)
+					if vrs {
+						code = CodeView(resbody, "DalFox")
+						code = code[:len(code)-5]
+						pointer := optimization.Abstraction(resbody)
+						var smap string
+						ih := 0
+						ij := 0
+						for _, sv := range pointer {
+							if sv == "inHTML" {
+								ih = ih + 1
 							}
-						}()
+							if sv == "inJS" {
+								ij = ij + 1
+							}
+						}
+						if ih > 0 {
+							smap = smap + "inHTML[" + strconv.Itoa(ih) + "] "
+						}
+						if ij > 0 {
+							smap = smap + "inJS[" + strconv.Itoa(ij) + "] "
+						}
+						ia := 0
+						tempURL, _ := optimization.MakeRequestQuery(target, k, "\" id=dalfox \"", "PA", options)
+						rl.Block(tempURL.Host)
+						_, _, vds, _, _ := SendReq(tempURL, "", options)
+						if vds {
+							ia = ia + 1
+						}
+						tempURL, _ = optimization.MakeRequestQuery(target, k, "' id=dalfox '", "PA", options)
+						rl.Block(tempURL.Host)
+						_, _, vds, _, _ = SendReq(tempURL, "", options)
+						if vds {
+							ia = ia + 1
+						}
+						tempURL, _ = optimization.MakeRequestQuery(target, k, "' class=dalfox '", "PA", options)
+						rl.Block(tempURL.Host)
+						_, _, vds, _, _ = SendReq(tempURL, "", options)
+						if vds {
+							ia = ia + 1
+						}
+						tempURL, _ = optimization.MakeRequestQuery(target, k, "\" class=dalfox \"", "PA", options)
+						rl.Block(tempURL.Host)
+						_, _, vds, _, _ = SendReq(tempURL, "", options)
+						if vds {
+							ia = ia + 1
+						}
+						if ia > 0 {
+							smap = smap + "inATTR[" + strconv.Itoa(ia) + "] "
+						}
+
+						params[k] = append(params[k], smap)
+						var wg sync.WaitGroup
+						mutex := &sync.Mutex{}
+						chars := GetSpecialChar()
+						for _, c := range chars {
+							wg.Add(1)
+							char := c
+							/*
+							tdata := u.String()
+							tdata = strings.Replace(tdata, k+"="+v[0], k+"="+v[0]+"DalFox"+char, 1)
+							turl, _ := url.Parse(tdata)
+							tq := turl.Query()
+							turl.RawQuery = tq.Encode()
+							*/
+
+							/* turl := u
+							q := u.Query()
+							q.Set(k, v[0]+"DalFox"+string(char))
+							turl.RawQuery = q.Encode()
+							*/
+							go func() {
+								defer wg.Done()
+								turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA", options)
+								rl.Block(tempURL.Host)
+								_, _, _, vrs, _ := SendReq(turl, "dalfox"+char, options)
+								_ = resp
+								if vrs {
+									mutex.Lock()
+									params[k] = append(params[k], char)
+									mutex.Unlock()
+								}
+							}()
+						}
+						wg.Wait()
+						params[k] = append(params[k], code)
 					}
-					wg.Wait()
-					params[k] = append(params[k], code)
 				}
 			}
+		wgg.Done()
 		}()
-		wgg.Wait()
 	}
+
+	for v := range p {
+		paramsQue <- v
+	}
+
+	close(paramsQue)
+	wgg.Wait()
 	return params
 }
 
@@ -737,8 +763,8 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 	}
 	if !options.FollowRedirect {
 		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-                	return errors.New("Follow redirect") // or maybe the error from the request
-                }
+			return errors.New("Follow redirect") // or maybe the error from the request
+		}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
