@@ -58,7 +58,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&proxy, "proxy", "", "Send all request to proxy server (e.g --proxy http://127.0.0.1:8080)")
 	rootCmd.PersistentFlags().StringVar(&grep, "grep", "", "Using custom grepping file (e.g --grep ./samples/sample_grep.json)")
 	rootCmd.PersistentFlags().StringVar(&ignoreReturn, "ignore-return", "", "Ignore scanning from return code (e.g --ignore-return 302,403,404)")
-	rootCmd.PersistentFlags().StringVar(&miningWord, "mining-word", "", "custom wordlist file for param mining (e.g --mining-word word.txt")
+	rootCmd.PersistentFlags().StringVar(&miningWord, "mining-word", "", "custom wordlist file for param mining (e.g --mining-word word.txt)")
 
 	//Int
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 10, "Second of timeout")
