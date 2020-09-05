@@ -679,6 +679,13 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 							count = count + 1
 						}
 					})
+					doc.Find("select").Each(func(i int, s *goquery.Selection){
+						name, _ := s.Attr("name")
+						if p.Get(name) == "" {
+							p.Set(name,"")
+							count = count + 1
+						}
+					})
 					printing.DalLog("INFO","Found "+strconv.Itoa(count)+" testing point in DOM Mining",options)
 				}
 			}
