@@ -18,52 +18,38 @@ var (
 func DalLog(level, text string, options model.Options) {
 	var ftext string
 	if level == "INFO" {
-		if options.OutputFile != "" {
-			ftext = "[I] " + text
-		}
+		ftext = "[I] " + text
 		text = aurora.Blue("[I] ").String() + text
 
 	}
 	if level == "WEAK" {
-		if options.OutputFile != "" {
-			ftext = "[W] " + text
-		}
+		ftext = "[W] " + text
 		text = aurora.Yellow("[W] ").String() + text
 
 	}
 	if level == "VULN" {
-		if options.OutputFile != "" {
-			ftext = "[V] " + text
-		}
+		ftext = "[V] " + text
 		text = aurora.Red("[V] ").String() + text
 
 	}
 	if level == "SYSTEM" {
-		if options.OutputFile != "" {
-			ftext = "[*] " + text
-		}
+		ftext = "[*] " + text
 		text = aurora.White("[*] ").String() + text
 
 	}
 	if level == "GREP" {
-		if options.OutputFile != "" {
-			ftext = "[G] " + text
-		}
+		ftext = "[G] " + text
 		text = aurora.Green("[G] ").String() + text
 
 	}
 
 	if level == "CODE" {
-		if options.OutputFile != "" {
-			ftext = "    " + text
-		}
+		ftext = "    " + text
 		text = aurora.Gray(16-1, "    "+text).String()
 	}
 
 	if level == "ERROR" {
-		if options.OutputFile != "" {
-			ftext = "[I] " + text
-		}
+		ftext = "[E] " + text
 		text = aurora.Yellow("[E] ").String() + text
 	}
 
@@ -81,7 +67,11 @@ func DalLog(level, text string, options model.Options) {
 
 			} else {
 				ftext = "[POC] "+text
-				fmt.Println(aurora.BrightGreen("[POC]"+text))
+				if options.NoColor {
+					fmt.Println("[POC]"+text)
+				} else {
+					fmt.Println(aurora.BrightGreen("[POC]"+text))
+				}
 			}
 		}
 	} else {
@@ -93,10 +83,18 @@ func DalLog(level, text string, options model.Options) {
 
 			} else {
 				ftext = "[POC] "+text
-				fmt.Println(aurora.BrightGreen("[POC]"+text))
+				if options.NoColor {
+					fmt.Println("[POC]"+text)
+				} else {
+					fmt.Println(aurora.BrightGreen("[POC]"+text))
+				}
 			}
 		} else {
-			text = "\r" + text
+			if options.NoColor {
+				text = "\r" + ftext
+			} else {
+				text = "\r" + text
+			}
 			fmt.Fprintln(os.Stderr, text)
 		}
 	}

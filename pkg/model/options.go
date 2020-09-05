@@ -31,6 +31,7 @@ type Options struct {
 	Mining bool
 	FindingDOM bool
 	MiningWordlist string
+	NoColor bool
 }
 
 type Scan struct {
