@@ -29,6 +29,7 @@ type Options struct {
 	Scan map[string]Scan
 	FollowRedirect bool
 	Mining bool
+	FindingDOM bool
 	MiningWordlist string
 }
 
