@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/briandowns/spinner"
+	"github.com/PuerkitoBio/goquery"
 	"github.com/hahwul/dalfox/pkg/optimization"
 	"github.com/hahwul/dalfox/pkg/model"
 	"github.com/hahwul/dalfox/pkg/printing"
@@ -89,12 +90,14 @@ func Scan(target string, options model.Options, sid string) {
 		printing.DalLog("SYSTEM", "Vaild target [ code:"+strconv.Itoa(tres.StatusCode)+" / size:"+strconv.Itoa(len(body))+" ]", options)
 	}
 	if options.Mining {
-		printing.DalLog("SYSTEM", "Using parameter mining option ⛏", options)
 		if options.MiningWordlist != "" {
-			printing.DalLog("CODE", "Using wordlsit file: '"+options.MiningWordlist+"'", options)
+			printing.DalLog("SYSTEM", "Using dictionary mining option [list="+options.MiningWordlist+"] 📚⛏", options)
 		} else {
-			printing.DalLog("CODE", "Using default pattern(Gf-Patterns > XSS)", options)
+			printing.DalLog("SYSTEM", "Using dictionary mining option [list=GF-Patterns] 📚⛏", options)
 		}
+	}
+	if options.FindingDOM {
+		printing.DalLog("SYSTEM", "Using DOM mining option 📦⛏", options)
 	}
 
 	if options.Format == "json"{
@@ -637,6 +640,51 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 			}
 		}
 	}
+
+	if options.FindingDOM {
+		treq := optimization.GenerateNewRequest(target,"",options)
+		//treq, terr := http.NewRequest("GET", target, nil)
+		if treq != nil {
+			transport := getTransport(options)
+			t := options.Timeout
+			client := &http.Client{
+				Timeout:   time.Duration(t) * time.Second,
+				Transport: transport,
+			}
+			if !options.FollowRedirect {
+				client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+					return errors.New("Follow redirect") // or maybe the error from the request
+				}
+			}
+			tres, err := client.Do(treq)
+			if err == nil {
+				defer tres.Body.Close()
+				bodyString, _ := ioutil.ReadAll(tres.Body)
+				body := ioutil.NopCloser(strings.NewReader(string(bodyString)))
+				defer body.Close()
+				doc, err := goquery.NewDocumentFromReader(body)
+				if err == nil {
+					count := 0
+					doc.Find("input").Each(func(i int, s *goquery.Selection){
+						name, _ := s.Attr("name")
+						if p.Get(name) == "" {
+							p.Set(name,"")
+							count = count + 1
+						}
+					})
+					doc.Find("textarea").Each(func(i int, s *goquery.Selection){
+						name, _ := s.Attr("name")
+						if p.Get(name) == "" {
+							p.Set(name,"")
+							count = count + 1
+						}
+					})
+					printing.DalLog("INFO","Found "+strconv.Itoa(count)+" testing point in DOM Mining",options)
+				}
+			}
+		}	
+	}
+
 	var wgg sync.WaitGroup
 	concurrency := options.Concurrence
 	paramsQue := make(chan string)
@@ -749,7 +797,7 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 					}
 				}
 			}
-		wgg.Done()
+			wgg.Done()
 		}()
 	}
 
