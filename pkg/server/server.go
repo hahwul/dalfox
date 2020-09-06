@@ -24,6 +24,7 @@ import (
 // @host localhost:6664
 // @BasePath /
 
+// RunAPIServer is Running Echo server with swag
 func RunAPIServer(options model.Options) {
 	var scans []string
 	e := echo.New()
