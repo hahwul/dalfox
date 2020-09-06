@@ -3,7 +3,7 @@ package cmd
 import (
 
 	"github.com/spf13/cobra"
-	. "github.com/hahwul/dalfox/pkg/server"
+	server "github.com/hahwul/dalfox/pkg/server"
 	printing "github.com/hahwul/dalfox/pkg/printing"
 )
 
@@ -13,7 +13,7 @@ var serverCmd = &cobra.Command{
 	Short: "Start API Server",
 	Run: func(cmd *cobra.Command, args []string) {
 		printing.DalLog("SYSTEM", "Starting API Server", options)
-		RunAPIServer(options)
+		server.RunAPIServer(options)
 	},
 }
 
