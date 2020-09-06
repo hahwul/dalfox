@@ -37,8 +37,8 @@ Mode: `url` `sxss` `pipe` `file` `server`
 | Extensibility | REST API                      | - API Server and Swagger (`dalfox server`)                   |
 |               | Found Action                  | - Lets you specify the actions to take when detected. <br />- Notify, for example (`--found-action`) |
 |               | Custom Grepping               | - Can grep with custom regular expressions on response<br />- If duplicate detection, it performs deduplication (`--grep`) |
-| Package       | Package manger                | - homebrew<br />- snapcraft                                  |
-|               | Docker ENV                    | - docker hub<br />- gitub docker hub                         |
+| Package       | Package manger                | - [homebrew with tap](https://github.com/hahwul/homebrew-dalfox)<br />- [snapcraft](https://snapcraft.io/dalfox)                                  |
+|               | Docker ENV                    | - [docker hub](https://hub.docker.com/repository/docker/hahwul/dalfox)<br />- [gitub package of docker](https://github.com/hahwul/dalfox/packages)                         |
 
 And the various options required for the testing :D
 
