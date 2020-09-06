@@ -1,5 +1,6 @@
 package model
 
+// Options is struct of options
 type Options struct {
 	UniqParam string
 	Cookie string
@@ -34,6 +35,7 @@ type Options struct {
 	NoColor bool
 }
 
+// Scan is struct of scan
 type Scan struct {
 	URL string
 	ScanID string
@@ -41,6 +43,7 @@ type Scan struct {
 	Results []Issue
 }
 
+// Issue is struct of issue
 type Issue struct {
 	Type string `json:"type"`
 	Param string `json:"param"`

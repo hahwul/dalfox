@@ -926,8 +926,8 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 			treq = optimization.GenerateNewRequest(options.Trigger, "", options)
 		} else {
 
-			triggerUrl := strings.Replace(options.Trigger, "SEQNC", strconv.Itoa(options.Sequence), 1)
-			treq = optimization.GenerateNewRequest(triggerUrl, "", options)
+			triggerURL := strings.Replace(options.Trigger, "SEQNC", strconv.Itoa(options.Sequence), 1)
+			treq = optimization.GenerateNewRequest(triggerURL, "", options)
 			options.Sequence = options.Sequence + 1
 		}
 		netTransport := getTransport(options)
