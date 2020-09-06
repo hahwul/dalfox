@@ -12,28 +12,35 @@
 Finder Of XSS, and Dal is the Korean pronunciation of moon.
 
 ## What is DalFox 🌘🦊
-Just, XSS Scanning and Parameter Analysis tool. I previously developed [XSpear](https://github.com/hahwul/XSpear), a ruby-based XSS tool, and this time, a full change occurred during the process of porting with golang!!! and created it as a new project. The basic concept is to analyze parameters, find XSS, and verify them based on DOM Parser.
-
-I talk about naming. Dal(달) is the Korean pronunciation of moon and fox was made into Fox(Find Of XSS).
+DalFox is a fast, powerful parameter analysis and XSS scanner, based on a golang/DOM parser. supports friendly Pipeline, CI/CD and testing of different types of XSS. I talk about naming. Dal(달) is the Korean pronunciation of moon and fox was made into Fox(Find Of XSS).
 
 ## Key features
+Mode: `url` `sxss` `pipe` `file` `server`
 
-- Paramter Analysis (find reflected parameter, find free/bad characters, Identification of injection point)
-- Static Analysis (Check Bad-header like CSP, X-Frame-optiopns, etc.. with base request/response base)
-- Optimization query of payloads
-  - Check the injection point through abstraction and generated the fit payload.
-  - Eliminate unnecessary payloads based on badchar
-- XSS Scanning(Reflected + Stored) and DOM Base Verifying
-- All test payloads(build-in, your custom/blind) are tested in parallel with the encoder.
-  - Support to Double URL Encoder
-  - Support to HTML Hex Encoder
-- Friendly Pipeline (single url, from file, from IO)
-- And the various options required for the testing :D
-  - built-in / custom grepping for find other vulnerability
-  - if you found, after action
-  - etc..
-- Support API Server and Swagger
-- Support package manager and docker env ( `homebrew` `snapcraft` `docker hub` `github dockerhub` )
+| Class         | Key Feature                   | Description                                                  |
+| ------------- | ----------------------------- | ------------------------------------------------------------ |
+| Discovery     | Parameter analysis            | - Find reflected param<br />- Find alive/bad special chars, event handler and attack code <br />- Identification of injection points(HTML/JS/Attribute) |
+|               | Static analysis               | - Check bad-header like CSP, XFO, etc.. with req/res base    |
+|               | Parameter Mining              | - Find new param with Dictonary attack (default is GF-Patterns)<br />- Support custom dictonary file (`--mining-dict-word`)<br />- FInd new param with DOM |
+|               | Built-in Grepping             | - It Identify the basic info leak of SSTi, Credential, SQL Error, and so on |
+| Scanning      | XSS Scanning                  | - Reflected xss / stored xss <br />- DOM base verifying<br />- Blind XSS testing with param, header(`-b` , `--blind` options)<br />- Only testing selected parameters (`-p`, `--param`)<br />- Only testing parameter analysis (`--only-discovery`) |
+|               | Friendly Pipeline             | - Single url mode (`dalfox url`)<br />- From file mode (`dalfox file urls.txt`)<br />- From IO(pipeline) mode (`dalfox pipe`)<br />- From raw http request file mode (`dalfox file raw.txt --rawdata`) |
+|               | Optimizaion query of payloads | - Check the injection point through abstraction and generated the fit payload.<br />- Eliminate unnecessary payloads based on badchar |
+|               | Encoder                       | - All test payloads(build-in, your custom/blind) are tested in parallel with the encoder.<br />- To Double URL Encoder<br />- To HTML Hex Encoder |
+|               | Sequence                      | - Auto-check the special page for stored xss (`--trigger`) <br />- Support (`--sequence`) options for Stored XSS , only `sxss` mode |
+| HTTP          | HTTP Options                  | - Follow redirects (`--follow-redirects`)<br />- Add header (`-H`, `--header`)<br />- Add cookie (`-C`, `--cookie`)<br />- Add User-Agent (`--user-agent`)<br />- Set timeout (`--timeout`)<br />- Set Delay (`--delay`)<br />- Set Proxy (`--proxy`)<br />- Set ignore return codes (`--ignore-return`) |
+| Concurrency   | Worker                        | - Set worker's number(`-w`, `--worker`)                      |
+|               | N * hosts                     | - Use multicast mode (`--multicast`) , only `file` / `pipe` mode |
+| Output        | Output                        | - Only the PoC code and useful information is write as Stdout<br />- Save output (`-o`, `--output`) |
+|               | Format                        | - JSON / Plain (`--format`)                                  |
+|               | Printing                      | - Silence mode (`--silence`)<br />- You may choose not to print the color (`--no-color`) |
+| Extensibility | REST API                      | - API Server and Swagger (`dalfox server`)                   |
+|               | Found Action                  | - Lets you specify the actions to take when detected. <br />- Notify, for example (`--found-action`) |
+|               | Custom Grepping               | - Can grep with custom regular expressions on response<br />- If duplicate detection, it performs deduplication (`--grep`) |
+| Package       | Package manger                | - homebrew<br />- snapcraft                                  |
+|               | Docker ENV                    | - docker hub<br />- gitub docker hub                         |
+
+And the various options required for the testing :D
 
 ## How to Install
 You can find some additional installation variations in the [Installation Guide](https://github.com/hahwul/dalfox/wiki/1.-Installation).
@@ -61,27 +68,31 @@ Available Commands:
   version     Show version
 
 Flags:
-  -b, --blind string            Add your blind xss (e.g -b hahwul.xss.ht)
-      --config string           Using config from file
-  -C, --cookie string           Add custom cookie
-      --custom-payload string   Add custom payloads from file
-  -d, --data string             Using POST Method and add Body data
-      --delay int               Milliseconds between send to same host (1000==1s)
-      --follow-redirects        Following redirection
-      --format string           stdout output format(plain/json) (default "plain")
-      --found-action string     If found weak/vuln, action(cmd) to next
-      --grep string             Using custom grepping file (e.g --grep ./samples/sample_grep.json)
-  -H, --header string           Add custom headers
-  -h, --help                    help for dalfox
-      --ignore-return string    Ignore scanning from return code (e.g --ignore-return 302,403,404)
-      --only-discovery          Only testing parameter analysis
-  -o, --output string           Write to output file
-  -p, --param string            Only testing selected parameters
-      --proxy string            Send all request to proxy server (e.g --proxy http://127.0.0.1:8080)
-      --silence                 Not printing all logs
-      --timeout int             Second of timeout (default 10)
-      --user-agent string       Add custom UserAgent
-  -w, --worker int              Number of worker (default 100)
+  -b, --blind string              Add your blind xss (e.g -b hahwul.xss.ht)
+      --config string             Using config from file
+  -C, --cookie string             Add custom cookie
+      --custom-payload string     Add custom payloads from file
+  -d, --data string               Using POST Method and add Body data
+      --delay int                 Milliseconds between send to same host (1000==1s)
+      --follow-redirects          Following redirection
+      --format string             stdout output format(plain/json) (default "plain")
+      --found-action string       If found weak/vuln, action(cmd) to next
+      --grep string               Using custom grepping file (e.g --grep ./samples/sample_grep.json)
+  -H, --header string             Add custom headers
+  -h, --help                      help for dalfox
+      --ignore-return string      Ignore scanning from return code (e.g --ignore-return 302,403,404)
+      --mining-dict               Find new parameter with dictionary attack, default is Gf-Patterns=>XSS (default true)
+      --mining-dict-word string   custom wordlist file for param mining (e.g --mining-dict-word word.txt)
+      --mining-dom                Find new parameter in DOM (attribute/js value) (default true)
+      --no-color                  not use colorize
+      --only-discovery            Only testing parameter analysis
+  -o, --output string             Write to output file
+  -p, --param string              Only testing selected parameters
+      --proxy string              Send all request to proxy server (e.g --proxy http://127.0.0.1:8080)
+      --silence                   Not printing all logs
+      --timeout int               Second of timeout (default 10)
+      --user-agent string         Add custom UserAgent
+  -w, --worker int                Number of worker (default 100)
 
 Use "dalfox [command] --help" for more information about a command.
 ```
