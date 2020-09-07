@@ -41,7 +41,7 @@ Mode: `url` `sxss` `pipe` `file` `server`
 |               | N * hosts                     | - Use multicast mode (`--multicast`) , only `file` / `pipe` mode |
 | Output        | Output                        | - Only the PoC code and useful information is write as Stdout<br />- Save output (`-o`, `--output`) |
 |               | Format                        | - JSON / Plain (`--format`)                                  |
-|               | Printing                      | - Silence mode (`--silence`)<br />- You may choose not to print the color (`--no-color`) |
+|               | Printing                      | - Silence mode (`--silence`)<br />- You may choose not to print the color (`--no-color`)<br />- You may choose not to print the spinner (`--no-spinner`) / from [#104](https://github.com/hahwul/dalfox/issues/104) |
 | Extensibility | REST API                      | - API Server and Swagger (`dalfox server`)                   |
 |               | Found Action                  | - Lets you specify the actions to take when detected. <br />- Notify, for example (`--found-action`) |
 |               | Custom Grepping               | - Can grep with custom regular expressions on response<br />- If duplicate detection, it performs deduplication (`--grep`) |
@@ -95,6 +95,7 @@ Flags:
       --mining-dict-word string   custom wordlist file for param mining (e.g --mining-dict-word word.txt)
       --mining-dom                Find new parameter in DOM (attribute/js value) (default true)
       --no-color                  not use colorize
+      --no-spinner                not use spinner
       --only-discovery            Only testing parameter analysis
   -o, --output string             Write to output file
   -p, --param string              Only testing selected parameters
