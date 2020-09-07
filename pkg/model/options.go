@@ -33,6 +33,7 @@ type Options struct {
 	FindingDOM bool
 	MiningWordlist string
 	NoColor bool
+	Method string
 }
 
 // Scan is struct of scan
