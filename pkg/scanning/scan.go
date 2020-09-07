@@ -375,7 +375,7 @@ func Scan(target string, options model.Options, sid string) {
 										if options.Format == "json"{
 											printing.DalLog("PRINT", "{\"type\":\"inJS\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
 										} else {
-											printing.DalLog("PRINT", "[R] "+k.URL.String(), options)
+											printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
 										}
 
 										if options.FoundAction != "" {
@@ -400,7 +400,7 @@ func Scan(target string, options model.Options, sid string) {
 										if options.Format == "json"{
 											printing.DalLog("PRINT", "{\"type\":\"inATTR\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", options)
 										} else {
-											printing.DalLog("PRINT", "[V] "+k.URL.String(), options)
+											printing.DalLog("PRINT", "[V]["+k.Method+"] "+k.URL.String(), options)
 										}
 										vStatus[v["param"]] = true
 										if options.FoundAction != "" {
@@ -423,7 +423,7 @@ func Scan(target string, options model.Options, sid string) {
 										if options.Format == "json"{
 											printing.DalLog("PRINT", "{\"type\":\"inATTR\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
 										} else {
-											printing.DalLog("PRINT", "[R] "+k.URL.String(), options)
+											printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
 										}
 										if options.FoundAction != "" {
 											foundAction(options, target, k.URL.String(), "WEAK")
@@ -447,7 +447,7 @@ func Scan(target string, options model.Options, sid string) {
 										if options.Format == "json"{
 											printing.DalLog("PRINT", "{\"type\":\"inHTML\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", options)
 										} else {
-											printing.DalLog("PRINT", "[V] "+k.URL.String(), options)
+											printing.DalLog("PRINT", "[V]["+k.Method+"] "+k.URL.String(), options)
 										}
 										vStatus[v["param"]] = true
 										if options.FoundAction != "" {
@@ -470,7 +470,7 @@ func Scan(target string, options model.Options, sid string) {
 										if options.Format == "json"{
 											printing.DalLog("PRINT", "{\"type\":\"inHTML\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
 										} else {
-											printing.DalLog("PRINT", "[R] "+k.URL.String(), options)
+											printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
 										}
 										if options.FoundAction != "" {
 											foundAction(options, target, k.URL.String(), "WEAK")
@@ -866,7 +866,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					if options.Format == "json"{
 						printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"SSTI\",\"poc\":\""+req.URL.String()+"\"", options)
 					} else {
-						printing.DalLog("PRINT", "[G][SSTI] "+req.URL.String(), options)
+						printing.DalLog("PRINT", "[G][SSTI]["+req.Method+"] "+req.URL.String(), options)
 					}
 					scanObject.Results = append(scanObject.Results,*rst)
 				}
@@ -885,7 +885,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				if options.Format == "json"{
 					printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"BUILT-IN\",\"poc\":\""+req.URL.String()+"\"", options)
 				} else {
-					printing.DalLog("PRINT", "[G][BUILT-IN]["+k+"] "+req.URL.String(), options)
+					printing.DalLog("PRINT", "[G][BUILT-IN]["+k+"]["+req.Method+"] "+req.URL.String(), options)
 				}
 				scanObject.Results = append(scanObject.Results,*rst)
 			}
@@ -913,7 +913,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				if options.Format == "json"{
 					printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\""+k+"\",\"poc\":\""+req.URL.String()+"\"", options)
 				} else {
-					printing.DalLog("PRINT", "[G]["+k+"] "+req.URL.String(), options)
+					printing.DalLog("PRINT", "[G]["+k+"]["+req.Method+"] "+req.URL.String(), options)
 				}
 				scanObject.Results = append(scanObject.Results,*rst)
 			}
