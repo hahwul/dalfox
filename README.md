@@ -28,7 +28,7 @@ Mode: `url` `sxss` `pipe` `file` `server`
 |               | Optimizaion query of payloads | - Check the injection point through abstraction and generated the fit payload.<br />- Eliminate unnecessary payloads based on badchar |
 |               | Encoder                       | - All test payloads(build-in, your custom/blind) are tested in parallel with the encoder.<br />- To Double URL Encoder<br />- To HTML Hex Encoder |
 |               | Sequence                      | - Auto-check the special page for stored xss (`--trigger`) <br />- Support (`--sequence`) options for Stored XSS , only `sxss` mode |
-| HTTP          | HTTP Options                  | - Follow redirects (`--follow-redirects`)<br />- Add header (`-H`, `--header`)<br />- Add cookie (`-C`, `--cookie`)<br />- Add User-Agent (`--user-agent`)<br />- Set timeout (`--timeout`)<br />- Set Delay (`--delay`)<br />- Set Proxy (`--proxy`)<br />- Set ignore return codes (`--ignore-return`) |
+| HTTP          | HTTP Options                  | - Overwrite HTTP Method (`-X`, `--method`)<br />- Follow redirects (`--follow-redirects`)<br />- Add header (`-H`, `--header`)<br />- Add cookie (`-C`, `--cookie`)<br />- Add User-Agent (`--user-agent`)<br />- Set timeout (`--timeout`)<br />- Set Delay (`--delay`)<br />- Set Proxy (`--proxy`)<br />- Set ignore return codes (`--ignore-return`) |
 | Concurrency   | Worker                        | - Set worker's number(`-w`, `--worker`)                      |
 |               | N * hosts                     | - Use multicast mode (`--multicast`) , only `file` / `pipe` mode |
 | Output        | Output                        | - Only the PoC code and useful information is write as Stdout<br />- Save output (`-o`, `--output`) |
@@ -82,6 +82,7 @@ Flags:
   -H, --header string             Add custom headers
   -h, --help                      help for dalfox
       --ignore-return string      Ignore scanning from return code (e.g --ignore-return 302,403,404)
+  -X, --method string             Force overriding HTTP Method (e.g -X PUT)
       --mining-dict               Find new parameter with dictionary attack, default is Gf-Patterns=>XSS (default true)
       --mining-dict-word string   custom wordlist file for param mining (e.g --mining-dict-word word.txt)
       --mining-dom                Find new parameter in DOM (attribute/js value) (default true)
