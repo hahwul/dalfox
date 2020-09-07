@@ -14,6 +14,14 @@ Finder Of XSS, and Dal is the Korean pronunciation of moon.
 ## What is DalFox 🌘🦊
 DalFox is a fast, powerful parameter analysis and XSS scanner, based on a golang/DOM parser. supports friendly Pipeline, CI/CD and testing of different types of XSS. I talk about naming. Dal(달) is the Korean pronunciation of moon and fox was made into Fox(Find Of XSS).
 
+## TOC
+- [Key features](#key-features)
+- [How to Install](#how-to-install)
+- [Usage](#usage)
+- [POC format](#poc-format)
+- [Screenshots](#screenshots)
+- [Contribute](#contribute)
+
 ## Key features
 Mode: `url` `sxss` `pipe` `file` `server`
 
@@ -21,7 +29,7 @@ Mode: `url` `sxss` `pipe` `file` `server`
 | ------------- | ----------------------------- | ------------------------------------------------------------ |
 | Discovery     | Parameter analysis            | - Find reflected param<br />- Find alive/bad special chars, event handler and attack code <br />- Identification of injection points(HTML/JS/Attribute) |
 |               | Static analysis               | - Check bad-header like CSP, XFO, etc.. with req/res base    |
-|               | Parameter Mining              | - Find new param with Dictonary attack (default is GF-Patterns)<br />- Support custom dictonary file (`--mining-dict-word`)<br />- FInd new param with DOM |
+|               | Parameter Mining              | - Find new param with Dictonary attack (default is [GF-Patterns](https://github.com/1ndianl33t/Gf-Patterns))<br />- Support custom dictonary file (`--mining-dict-word`)<br />- FInd new param with DOM |
 |               | Built-in Grepping             | - It Identify the basic info leak of SSTi, Credential, SQL Error, and so on |
 | Scanning      | XSS Scanning                  | - Reflected xss / stored xss <br />- DOM base verifying<br />- Blind XSS testing with param, header(`-b` , `--blind` options)<br />- Only testing selected parameters (`-p`, `--param`)<br />- Only testing parameter analysis (`--only-discovery`) |
 |               | Friendly Pipeline             | - Single url mode (`dalfox url`)<br />- From file mode (`dalfox file urls.txt`)<br />- From IO(pipeline) mode (`dalfox pipe`)<br />- From raw http request file mode (`dalfox file raw.txt --rawdata`) |
