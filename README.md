@@ -21,6 +21,7 @@ DalFox is a fast, powerful parameter analysis and XSS scanner, based on a golang
 - [POC format](#poc-format)
 - [Screenshots](#screenshots)
 - [Contribute](#contribute)
+- [Wiki](https://github.com/hahwul/dalfox/wiki)
 
 ## Key features
 Mode: `url` `sxss` `pipe` `file` `server`
