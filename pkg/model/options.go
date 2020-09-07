@@ -34,6 +34,7 @@ type Options struct {
 	MiningWordlist string
 	NoColor bool
 	Method string
+	NoSpinner bool
 }
 
 // Scan is struct of scan

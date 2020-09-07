@@ -17,7 +17,7 @@ var optionsBool = make(map[string]bool)
 var config, cookie, data, header, p, customPayload, userAgent, blind, output, format, foundAction, proxy, grep string
 var ignoreReturn, miningWord, method string
 var timeout, concurrence, delay int
-var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor bool
+var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner bool
 var options model.Options
 
 // rootCmd represents the base command when called without any subcommands
@@ -73,6 +73,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&findingDOM, "mining-dom", true, "Find new parameter in DOM (attribute/js value)")
 	rootCmd.PersistentFlags().BoolVar(&followRedirect, "follow-redirects", false, "Following redirection")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "not use colorize")
+	rootCmd.PersistentFlags().BoolVar(&noSpinner, "no-spinner", false, "not use spinner")
 
 	printing.Banner()
 }
@@ -105,6 +106,7 @@ func initConfig() {
 		FindingDOM: findingDOM,
 		NoColor: noColor,
 		Method: method,
+		NoSpinner: noSpinner,
 	}
 
 	if grep != "" {

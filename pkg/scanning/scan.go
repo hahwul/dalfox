@@ -124,13 +124,13 @@ func Scan(target string, options model.Options, sid string) {
 		s.Suffix = "  URLs("+strconv.Itoa(options.NowURL)+" / "+strconv.Itoa(options.AllURLS)+") :: Waiting routines"
 	}
 
-	if !options.Silence {
+	if !(options.Silence || options.NoSpinner) {
 		time.Sleep(1 * time.Second) // Waiting log
 		s.Start()                   // Start the spinner
 		//time.Sleep(3 * time.Second) // Run for some time to simulate work
 	}
 	wait.Wait()
-	if !options.Silence {
+	if !(options.Silence || options.NoSpinner) {
 		s.Stop()
 	}
 	for k, v := range policy {
@@ -342,7 +342,7 @@ func Scan(target string, options model.Options, sid string) {
 	s.Prefix = " "
 	s.Suffix = "  Make " + strconv.Itoa(options.Concurrence) + " workers and allocated " + strconv.Itoa(len(query)) + " queries"
 
-	if !options.Silence {
+	if !(options.Silence || options.NoSpinner) {
 		s.Start() // Start the spinner
 		//time.Sleep(3 * time.Second) // Run for some time to simulate work
 	}
@@ -492,7 +492,7 @@ func Scan(target string, options model.Options, sid string) {
 				mutex.Lock()
 				queryCount = queryCount + 1
 
-				if !options.Silence {
+				if !(options.Silence || options.NoSpinner) {
 					s.Lock()
 					var msg string
 					if (vStatus[v["param"]] == false){
@@ -524,7 +524,7 @@ func Scan(target string, options model.Options, sid string) {
 	}
 	close(queries)
 	wg.Wait()
-	if !options.Silence {
+	if !(options.Silence || options.NoSpinner) {
 		s.Stop()
 	}
 }
