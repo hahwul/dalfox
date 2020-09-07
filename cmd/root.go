@@ -15,7 +15,7 @@ var cfgFile string
 var optionsStr = make(map[string]string)
 var optionsBool = make(map[string]bool)
 var config, cookie, data, header, p, customPayload, userAgent, blind, output, format, foundAction, proxy, grep string
-var ignoreReturn, miningWord string
+var ignoreReturn, miningWord, method string
 var timeout, concurrence, delay int
 var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor bool
 var options model.Options
@@ -59,6 +59,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&grep, "grep", "", "Using custom grepping file (e.g --grep ./samples/sample_grep.json)")
 	rootCmd.PersistentFlags().StringVar(&ignoreReturn, "ignore-return", "", "Ignore scanning from return code (e.g --ignore-return 302,403,404)")
 	rootCmd.PersistentFlags().StringVar(&miningWord, "mining-dict-word", "", "custom wordlist file for param mining (e.g --mining-dict-word word.txt)")
+	rootCmd.PersistentFlags().StringVarP(&method, "method", "X",  "", "Force overriding HTTP Method (e.g -X PUT)")
 
 	//Int
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 10, "Second of timeout")
@@ -103,6 +104,7 @@ func initConfig() {
 		MiningWordlist: miningWord,
 		FindingDOM: findingDOM,
 		NoColor: noColor,
+		Method: method,
 	}
 
 	if grep != "" {
