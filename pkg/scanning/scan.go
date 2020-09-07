@@ -866,7 +866,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					if options.Format == "json"{
 						printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"SSTI\",\"poc\":\""+req.URL.String()+"\"", options)
 					} else {
-						printing.DalLog("PRINT", "[G][SSTI]["+req.Method+"] "+req.URL.String(), options)
+						printing.DalLog("PRINT", "[G][SSTI/"+req.Method+"] "+req.URL.String(), options)
 					}
 					scanObject.Results = append(scanObject.Results,*rst)
 				}
@@ -885,7 +885,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				if options.Format == "json"{
 					printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"BUILT-IN\",\"poc\":\""+req.URL.String()+"\"", options)
 				} else {
-					printing.DalLog("PRINT", "[G][BUILT-IN]["+k+"]["+req.Method+"] "+req.URL.String(), options)
+					printing.DalLog("PRINT", "[G][BUILT-IN/"+k+"/"+req.Method+"] "+req.URL.String(), options)
 				}
 				scanObject.Results = append(scanObject.Results,*rst)
 			}
@@ -913,7 +913,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				if options.Format == "json"{
 					printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\""+k+"\",\"poc\":\""+req.URL.String()+"\"", options)
 				} else {
-					printing.DalLog("PRINT", "[G]["+k+"]["+req.Method+"] "+req.URL.String(), options)
+					printing.DalLog("PRINT", "[G]["+k+"/"+req.Method+"] "+req.URL.String(), options)
 				}
 				scanObject.Results = append(scanObject.Results,*rst)
 			}
