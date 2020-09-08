@@ -90,7 +90,7 @@ func MakeRequestQuery(target, param, payload, ptype string, options model.Option
 		if tempParam[param] == nil {
 			body = param+"="+payload+"&"+data
 		} else {
-			body = strings.Replace(options.Data, param+"="+tempParam[param][0], param+"="+tempParam[param][0]+payload, 1)
+			body = strings.Replace(body, param+"="+ url.QueryEscape(tempParam[param][0]), param+"="+     url.QueryEscape(tempParam[param][0])+payload, 1)
 		}
 		tempURL, _ := url.Parse(data)
 		tempQuery := tempURL.Query()
@@ -104,7 +104,7 @@ func MakeRequestQuery(target, param, payload, ptype string, options model.Option
 		if tempParam[param] == nil {
 			data = "?"+param+"="+payload+"&"+data
 		} else {
-			data = strings.Replace(data, param+"="+tempParam[param][0], param+"="+tempParam[param][0]+payload, 1)
+			data = strings.Replace(data, param+"="+ url.QueryEscape(tempParam[param][0]), param+"="+     url.QueryEscape(tempParam[param][0])+payload, 1)
 		}
 		tempURL, _ := url.Parse(data)
 		tempQuery := tempURL.Query()
@@ -160,7 +160,7 @@ func MakeURLEncodeRequestQuery(target, param, payload, ptype string, options mod
 	encodedPayload := UrlEncode(UrlEncode(payload))
 	if options.Data != "" {
 		tempParam, _ := url.ParseQuery(options.Data)
-		body := strings.Replace(options.Data, param+"="+tempParam[param][0], param+"="+tempParam[param][0]+encodedPayload, 1)
+		body := strings.Replace(options.Data, param+"="+url.QueryEscape(tempParam[param][0]), param+"="+url.QueryEscape(tempParam[param][0])+encodedPayload, 1)
 		tempURL, _ := url.Parse(data)
 		tempQuery := tempURL.Query()
 		tempURL.RawQuery = tempQuery.Encode()
@@ -170,7 +170,7 @@ func MakeURLEncodeRequestQuery(target, param, payload, ptype string, options mod
 
 	} else {
 		tempParam := u.Query()
-		data = strings.Replace(data, param+"="+tempParam[param][0], param+"="+tempParam[param][0]+encodedPayload, 1)
+		data = strings.Replace(data, param+"="+url.QueryEscape(tempParam[param][0]), param+"="+url.QueryEscape(tempParam[param][0])+encodedPayload, 1)
 		tempURL, _ := url.Parse(data)
 		tempQuery := tempURL.Query()
 		tempURL.RawQuery = tempQuery.Encode()
@@ -193,7 +193,7 @@ func MakeHTMLEncodeRequestQuery(target, param, payload, ptype string, options mo
 	encodedPayload := template.HTMLEscapeString(payload)
 	if options.Data != "" {
 		tempParam, _ := url.ParseQuery(options.Data)
-		body := strings.Replace(options.Data, param+"="+tempParam[param][0], param+"="+tempParam[param][0]+encodedPayload, 1)
+		body := strings.Replace(options.Data, param+"="+url.QueryEscape(tempParam[param][0]), param+"="+url.QueryEscape(tempParam[param][0])+encodedPayload, 1)
 		tempURL, _ := url.Parse(data)
 		tempQuery := tempURL.Query()
 		tempURL.RawQuery = tempQuery.Encode()
@@ -202,7 +202,7 @@ func MakeHTMLEncodeRequestQuery(target, param, payload, ptype string, options mo
 
 	} else {
 		tempParam := u.Query()
-		data = strings.Replace(data, param+"="+tempParam[param][0], param+"="+tempParam[param][0]+encodedPayload, 1)
+		data = strings.Replace(data, param+"="+url.QueryEscape(tempParam[param][0]), param+"="+url.QueryEscape(tempParam[param][0])+encodedPayload, 1)
 		tempURL, _ := url.Parse(data)
 		tempQuery := tempURL.Query()
 		tempURL.RawQuery = tempQuery.Encode()
