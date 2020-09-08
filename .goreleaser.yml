@@ -72,9 +72,15 @@ snapcrafts:
     summary: DalFox(Finder Of XSS) / Parameter Analysis and XSS Scanning tool based on golang
     description: DalFox is a fast, powerful parameter analysis and XSS scanner, based on a golang/DOM parser. supports friendly Pipeline, CI/CD and testing of different types of XSS. I talk about naming. Dal(달) is the Korean pronunciation of moon and fox was made into Fox(Find Of XSS).
     grade: stable
-    confinement: classic
+    confinement: strict
     license: MIT
 
     apps:
       dalfox:
-        plugs: ["network","network-bind"]
+        plugs: ["network","network-bind","dot-config"]
+
+    plugs:
+      dot-config:
+        interface: personal-files
+        read:
+        - $HOME/.config
