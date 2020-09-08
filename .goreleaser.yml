@@ -77,10 +77,4 @@ snapcrafts:
 
     apps:
       dalfox:
-        plugs: ["network","network-bind","dot-config"]
-
-    plugs:
-      dot-config:
-        interface: personal-files
-        read:
-        - $HOME/.config
+        plugs: ["network","network-bind"]
