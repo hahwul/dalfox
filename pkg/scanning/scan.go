@@ -196,7 +196,7 @@ func Scan(target string, options model.Options, sid string) {
 									arr = getInJsPayload(ip)
 								}
 								if strings.Contains(ip, "inHTML") {
-									arr = getInJsPayload(ip)
+									arr = getHTMLPayload(ip)
 								}
 								if strings.Contains(ip, "inATTR") {
 									arr = getAttrPayload(ip)
