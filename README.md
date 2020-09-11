@@ -28,7 +28,7 @@ Mode: `url` `sxss` `pipe` `file` `server`
 
 | Class         | Key Feature                   | Description                                                  |
 | ------------- | ----------------------------- | ------------------------------------------------------------ |
-| Discovery     | Parameter analysis            | - Find reflected param<br />- Find alive/bad special chars, event handler and attack code <br />- Identification of injection points(HTML/JS/Attribute) |
+| Discovery     | Parameter analysis            | - Find reflected param<br />- Find alive/bad special chars, event handler and attack code <br />- Identification of injection points(HTML/JS/Attribute) <br /> `inHTML-none` `inJS-none` `inJS-double` `inJS-single` `inJS-backtick` `inATTR-none` `inATTR-double` `-inATTR-single` |
 |               | Static analysis               | - Check bad-header like CSP, XFO, etc.. with req/res base    |
 |               | Parameter Mining              | - Find new param with Dictonary attack (default is [GF-Patterns](https://github.com/1ndianl33t/Gf-Patterns))<br />- Support custom dictonary file (`--mining-dict-word`)<br />- FInd new param with DOM |
 |               | Built-in Grepping             | - It Identify the basic info leak of SSTi, Credential, SQL Error, and so on |
