@@ -186,58 +186,54 @@ func Scan(target string, options model.Options, sid string) {
 						if indexOf(av, chars) == -1 {
 							badchars = append(badchars, av)
 						}
+						if strings.Contains(av, "Injected:") {
+							// Injected pattern
+							injectedPoint := strings.Split(av,"/")
+							injectedPoint = injectedPoint[1:]
+							for _, ip := range injectedPoint {
+								var arr []string
+								if strings.Contains(ip, "inJS") {
+									arr = getInJsPayload(ip)
+								}
+								if strings.Contains(ip, "inHTML") {
+									arr = getInJsPayload(ip)
+								}
+								if strings.Contains(ip, "inATTR") {
+									arr = getAttrPayload(ip)
+								}
+								for _, avv := range arr {
+									if optimization.Optimization(avv, badchars) {
+										// Add plain XSS Query
+										tq, tm := optimization.MakeRequestQuery(target, k, avv, ip, options)
+										query[tq] = tm
+										// Add URL Encoded XSS Query
+										etq, etm := optimization.MakeURLEncodeRequestQuery(target, k, avv, ip, options)
+										query[etq] = etm
+										// Add HTML Encoded XSS Query
+										htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, k, avv, ip, options)
+										query[htq] = htm	
+									}
+								}
+							}
+						}
 					}
-					for _, av := range v {
-						if strings.Contains(av, "inJS") {
-							// inJS XSS
-							arr := getInJsPayload()
-							for _, avv := range arr {
-								if optimization.Optimization(avv, badchars) {
-									// Add plain XSS Query
-									tq, tm := optimization.MakeRequestQuery(target, k, avv, "inJS", options)
-									query[tq] = tm
-									// Add URL Encoded XSS Query
-									etq, etm := optimization.MakeURLEncodeRequestQuery(target, k, avv, "inJS", options)
-									query[etq] = etm
-									// Add HTML Encoded XSS Query
-									htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, k, avv, "inJS", options)
-									query[htq] = htm
-								}
-							}
-						}
-						if strings.Contains(av, "inATTR") {
-							arr := getAttrPayload()
-							for _, avv := range arr {
-								if optimization.Optimization(avv, badchars) {
-									// Add plain XSS Query
-									tq, tm := optimization.MakeRequestQuery(target, k, avv, "inATTR", options)
-									query[tq] = tm
-									// Add URL Encoded XSS Query
-									etq, etm := optimization.MakeURLEncodeRequestQuery(target, k, avv, "inATTR", options)
-									query[etq] = etm
-									// Add HTML Encoded XSS Query
-									htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, k, avv, "inATTR", options)
-									query[htq] = htm
-								}
-							}
-						}
-						// common XSS
-						arc := getCommonPayload()
-						for _, avv := range arc {
-							if optimization.Optimization(avv, badchars) {
-								// Add plain XSS Query
-								tq, tm := optimization.MakeRequestQuery(target, k, avv, "inHTML", options)
-								query[tq] = tm
-								// Add URL encoded XSS Query
-								etq, etm := optimization.MakeURLEncodeRequestQuery(target, k, avv, "inHTML", options)
-								query[etq] = etm
-								// Add HTML Encoded XSS Query
-								htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, k, avv, "inHTML", options)
-								query[htq] = htm
-							}
+					// common XSS
+					arc := getCommonPayload()
+					for _, avv := range arc {
+						if optimization.Optimization(avv, badchars) {
+							// Add plain XSS Query
+							tq, tm := optimization.MakeRequestQuery(target, k, avv, "inHTML", options)
+							query[tq] = tm
+							// Add URL encoded XSS Query
+							etq, etm := optimization.MakeURLEncodeRequestQuery(target, k, avv, "inHTML", options)
+							query[etq] = etm
+							// Add HTML Encoded XSS Query
+							htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, k, avv, "inHTML", options)
+							query[htq] = htm
 						}
 					}
 				}
+			
 			}
 		} else {
 			printing.DalLog("SYSTEM", "Type is '"+policy["Content-Type"]+"', It does not test except customized payload (custom/blind).", options)
@@ -719,53 +715,20 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 					if vrs {
 						code = CodeView(resbody, "DalFox")
 						code = code[:len(code)-5]
-						pointer := optimization.Abstraction(resbody)
-						var smap string
-						ih := 0
-						ij := 0
-						for _, sv := range pointer {
-							if sv == "inHTML" {
-								ih = ih + 1
-							}
-							if sv == "inJS" {
-								ij = ij + 1
-							}
-						}
-						if ih > 0 {
-							smap = smap + "inHTML[" + strconv.Itoa(ih) + "] "
-						}
-						if ij > 0 {
-							smap = smap + "inJS[" + strconv.Itoa(ij) + "] "
-						}
-						ia := 0
-						tempURL, _ := optimization.MakeRequestQuery(target, k, "\" id=dalfox \"", "PA", options)
-						rl.Block(tempURL.Host)
-						_, _, vds, _, _ := SendReq(tempURL, "", options)
-						if vds {
-							ia = ia + 1
-						}
-						tempURL, _ = optimization.MakeRequestQuery(target, k, "' id=dalfox '", "PA", options)
-						rl.Block(tempURL.Host)
-						_, _, vds, _, _ = SendReq(tempURL, "", options)
-						if vds {
-							ia = ia + 1
-						}
-						tempURL, _ = optimization.MakeRequestQuery(target, k, "' class=dalfox '", "PA", options)
-						rl.Block(tempURL.Host)
-						_, _, vds, _, _ = SendReq(tempURL, "", options)
-						if vds {
-							ia = ia + 1
-						}
-						tempURL, _ = optimization.MakeRequestQuery(target, k, "\" class=dalfox \"", "PA", options)
-						rl.Block(tempURL.Host)
-						_, _, vds, _, _ = SendReq(tempURL, "", options)
-						if vds {
-							ia = ia + 1
-						}
-						if ia > 0 {
-							smap = smap + "inATTR[" + strconv.Itoa(ia) + "] "
-						}
+						pointer := optimization.Abstraction(resbody, "DalFox")
+						smap := "Injected: "
+						tempSmap := make(map[string]int)
 
+						for _, v := range pointer {
+							if tempSmap[v] == 0 {
+								tempSmap[v] = 1
+							} else {
+								tempSmap[v] = tempSmap[v] + 1
+							}
+						}
+						for k, v := range tempSmap {
+							smap = smap + "/" + k + "("+strconv.Itoa(v)+")"
+						}
 						params[k] = append(params[k], smap)
 						var wg sync.WaitGroup
 						mutex := &sync.Mutex{}
