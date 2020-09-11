@@ -361,7 +361,7 @@ func Scan(target string, options model.Options, sid string) {
 					resbody, _, vds, vrs, err := SendReq(k, v["payload"], options)
 					if err == nil {
 						if (v["type"] != "toBlind") && (v["type"] != "toGrepping") {
-							if v["type"] == "inJS" {
+							if strings.Contains(v["type"],"inJS") {
 								if vrs {
 									mutex.Lock()
 									if vStatus[v["param"]] == false {
@@ -386,7 +386,7 @@ func Scan(target string, options model.Options, sid string) {
 									}
 									mutex.Unlock()
 								}
-							} else if v["type"] == "inATTR" {
+							} else if strings.Contains(v["type"],"inATTR") {
 								if vds {
 									mutex.Lock()
 									if vStatus[v["param"]] == false {
