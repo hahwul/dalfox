@@ -309,23 +309,6 @@ func Scan(target string, options model.Options, sid string) {
 			printing.DalLog("SYSTEM", "Added your blind XSS ("+options.BlindURL+")", options)
 		}
 
-		/*
-			// sqli payload
-
-			sqlipayloads := getSQLIPayload()
-
-			for _, sqlipayload := range sqlipayloads {
-				spu, _ := url.Parse(target)
-				spd := spu.Query()
-				for spk := range spd {
-					// Add plain XSS Query
-					tq, tm := optimization.MakeRequestQuery(target, spk, sqlipayload, "toHTML", options)
-					query[tq] = tm
-				}
-			}
-			printing.DalLog("SYSTEM", "Added "+strconv.Itoa(len(sqlipayloads))+" Sqli payload", options)
-		*/
-
 		// Custom Payload
 		if options.CustomPayloadFile != "" {
 			ff, err := readLinesOrLiteral(options.CustomPayloadFile)
