@@ -104,20 +104,27 @@ func Scan(target string, options model.Options, sid string) {
 		printing.DalLog("PRINT", "[", options)
 	}
 
-	SqliAnalysis(target, options)
 
 	var wait sync.WaitGroup
-	task := 2
+	task := 3
 	wait.Add(task)
 	go func() {
 		defer wait.Done()
 		printing.DalLog("SYSTEM", "Start static analysis.. 🔍", options)
 		policy = StaticAnalysis(target, options)
+		printing.DalLog("SYSTEM", "Static analysis done ✓", options)
 	}()
 	go func() {
 		defer wait.Done()
 		printing.DalLog("SYSTEM", "Start parameter analysis.. 🔍", options)
 		params = ParameterAnalysis(target, options)
+		printing.DalLog("SYSTEM", "Parameter analysis  done ✓", options)
+	}()
+	go func() {
+		defer wait.Done()
+		printing.DalLog("SYSTEM", "Start basic(sqli) analysis.. 🔍", options)
+		SqliAnalysis(target, options)
+		printing.DalLog("SYSTEM", "Basic(sqli) analysis done ✓", options)
 	}()
 
 	s := spinner.New(spinner.CharSets[4], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
@@ -567,41 +574,24 @@ func CodeView(resbody, pattern string) string {
 }
 
 //SqliAnalysis is sql injection basic checks
-func SqliAnalysis(target string, options model.Options) map[string]string {
-
+func SqliAnalysis(target string, options model.Options) {
 	// sqli payload
 	sqlipayloads := getSQLIPayload()
 	bpu, _ := url.Parse(target)
 	bpd := bpu.Query()
-
-	printing.DalLog("SYSTEM", "Start SQLi Scanning 🗡", options)
-	s := spinner.New(spinner.CharSets[4], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
-	s.Prefix = " "
-	s.Suffix = " Testing " + strconv.Itoa(len(sqlipayloads)) + " payloads for SQLi"
-
-	time.Sleep(1 * time.Second) // Waiting log
-	s.Start()
 	var wg sync.WaitGroup
 
 	for bpk := range bpd {
 		for _, sqlipayload := range sqlipayloads {
 			turl, _ := optimization.MakeRequestQuery(target, bpk, sqlipayload, "", options)
-
-			//printing.DalLog("SYSTEM", "debug: "+turl.URL.String(), options)
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
 				SendReq(turl, sqlipayload, options)
 			}()
-
 		}
 		wg.Wait()
-
 	}
-	s.Stop()
-
-	printing.DalLog("SYSTEM", "SQLi Scanning done!", options)
-	return nil
 }
 
 // StaticAnalysis is found information on original req/res
