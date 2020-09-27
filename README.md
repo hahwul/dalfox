@@ -30,7 +30,7 @@ Mode: `url` `sxss` `pipe` `file` `server`
 | ------------- | ----------------------------- | ------------------------------------------------------------ |
 | Discovery     | Parameter analysis            | - Find reflected param<br />- Find alive/bad special chars, event handler and attack code <br />- Identification of injection points(HTML/JS/Attribute) <br /> `inHTML-none` `inJS-none` `inJS-double` `inJS-single` `inJS-backtick` `inATTR-none` `inATTR-double` `inATTR-single` |
 |               | Static analysis               | - Check bad-header like CSP, XFO, etc.. with req/res base    |
-|               | BAV analysis                  | - Testing BAV(Basic Another Vulnerability) ,  e.g sqli)    |
+|               | BAV analysis                  | - Testing BAV(Basic Another Vulnerability) ,  e.g `sqli` `ssti`)    |
 |               | Parameter Mining              | - Find new param with Dictonary attack (default is [GF-Patterns](https://github.com/1ndianl33t/Gf-Patterns))<br />- Support custom dictonary file (`--mining-dict-word`)<br />- FInd new param with DOM |
 |               | Built-in Grepping             | - It Identify the basic info leak of SSTi, Credential, SQL Error, and so on |
 | Scanning      | XSS Scanning                  | - Reflected xss / stored xss <br />- DOM base verifying<br />- Blind XSS testing with param, header(`-b` , `--blind` options)<br />- Only testing selected parameters (`-p`, `--param`)<br />- Only testing parameter analysis (`--only-discovery`) |
@@ -96,6 +96,7 @@ Flags:
       --mining-dict               Find new parameter with dictionary attack, default is Gf-Patterns=>XSS (default true)
       --mining-dict-word string   custom wordlist file for param mining (e.g --mining-dict-word word.txt)
       --mining-dom                Find new parameter in DOM (attribute/js value) (default true)
+      --no-bav                    not use BAV(Basic Another Vulnerability) analysis
       --no-color                  not use colorize
       --no-spinner                not use spinner
       --only-discovery            Only testing parameter analysis
