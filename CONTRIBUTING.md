@@ -22,3 +22,8 @@ go build
 
 ### How to add new entity(e.g event handler)
 - Add new pattern to https://github.com/hahwul/dalfox/blob/master/pkg/scanning/entity.go
+
+### How to add BAV(Basic Another Vulnerability) Patterns
+- Add new code to https://github.com/hahwul/dalfox/blob/master/pkg/scanning/bav.go
+- The payload will use above is need define below.
++ https://github.com/hahwul/dalfox/blob/master/pkg/scanning/payload.go
