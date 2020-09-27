@@ -35,6 +35,7 @@ type Options struct {
 	NoColor bool
 	Method string
 	NoSpinner bool
+	NoBAV bool
 }
 
 // Scan is struct of scan

@@ -107,6 +107,9 @@ func Scan(target string, options model.Options, sid string) {
 
 	var wait sync.WaitGroup
 	task := 3
+	if options.NoBAV {
+		task = 2
+	}
 	wait.Add(task)
 	go func() {
 		defer wait.Done()
@@ -120,24 +123,25 @@ func Scan(target string, options model.Options, sid string) {
 		params = ParameterAnalysis(target, options)
 		printing.DalLog("SYSTEM", "Parameter analysis  done ✓", options)
 	}()
-	go func() {
-		defer wait.Done()
-		printing.DalLog("SYSTEM", "Start BAV(Basic Another Vulnerability) analysis.. / like sqli,ssti  🔍", options)
-		var bavWaitGroup sync.WaitGroup
-		bavTask := 2
-		bavWaitGroup.Add(bavTask)
-		go func(){
-			defer bavWaitGroup.Done()
-			SqliAnalysis(target, options)
+	if !options.NoBAV {
+		go func() {
+			defer wait.Done()
+			printing.DalLog("SYSTEM", "Start BAV(Basic Another Vulnerability) analysis.. / like sqli,ssti  🔍", options)
+			var bavWaitGroup sync.WaitGroup
+			bavTask := 2
+			bavWaitGroup.Add(bavTask)
+			go func(){
+				defer bavWaitGroup.Done()
+				SqliAnalysis(target, options)
+			}()
+			go func(){
+				defer bavWaitGroup.Done()
+				SSTIAnalysis(target, options)
+			}()
+			bavWaitGroup.Wait()
+			printing.DalLog("SYSTEM", "BAV analysis done ✓", options)
 		}()
-		go func(){
-			defer bavWaitGroup.Done()
-			SSTIAnalysis(target, options)
-		}()
-		bavWaitGroup.Wait()
-		printing.DalLog("SYSTEM", "BAV analysis done ✓", options)
-	}()
-
+	}
 	s := spinner.New(spinner.CharSets[4], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 	s.Prefix = " "
 	s.Suffix = "  Waiting routines.."
