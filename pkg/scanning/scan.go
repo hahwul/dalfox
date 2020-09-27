@@ -122,9 +122,9 @@ func Scan(target string, options model.Options, sid string) {
 	}()
 	go func() {
 		defer wait.Done()
-		printing.DalLog("SYSTEM", "Start basic(sqli) analysis.. 🔍", options)
+		printing.DalLog("SYSTEM", "Start Another vuln analysis.. / sqli  🔍", options)
 		SqliAnalysis(target, options)
-		printing.DalLog("SYSTEM", "Basic(sqli) analysis done ✓", options)
+		printing.DalLog("SYSTEM", "Another vuln analysis done ✓", options)
 	}()
 
 	s := spinner.New(spinner.CharSets[4], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
