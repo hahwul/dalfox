@@ -122,9 +122,20 @@ func Scan(target string, options model.Options, sid string) {
 	}()
 	go func() {
 		defer wait.Done()
-		printing.DalLog("SYSTEM", "Start Another vuln analysis.. / sqli  🔍", options)
-		SqliAnalysis(target, options)
-		printing.DalLog("SYSTEM", "Another vuln analysis done ✓", options)
+		printing.DalLog("SYSTEM", "Start BAV(Basic Another Vulnerability) analysis.. / like sqli,ssti  🔍", options)
+		var bavWaitGroup sync.WaitGroup
+		bavTask := 2
+		bavWaitGroup.Add(bavTask)
+		go func(){
+			defer bavWaitGroup.Done()
+			SqliAnalysis(target, options)
+		}()
+		go func(){
+			defer bavWaitGroup.Done()
+			SSTIAnalysis(target, options)
+		}()
+		bavWaitGroup.Wait()
+		printing.DalLog("SYSTEM", "BAV analysis done ✓", options)
 	}()
 
 	s := spinner.New(spinner.CharSets[4], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
@@ -247,28 +258,6 @@ func Scan(target string, options model.Options, sid string) {
 			}
 		} else {
 			printing.DalLog("SYSTEM", "Type is '"+policy["Content-Type"]+"', It does not test except customized payload (custom/blind).", options)
-		}
-
-		// Build-in Grepping payload :: SSTI
-		// {444*6664}
-		// 2958816
-		bpu, _ := url.Parse(target)
-		bpd := bpu.Query()
-		for bpk := range bpd {
-			for _, ssti := range getSSTIPayload() {
-				// Add plain XSS Query
-				tq, tm := optimization.MakeRequestQuery(target, bpk, ssti, "toGrepping", options)
-				tm["payload"] = "toGrepping"
-				query[tq] = tm
-				// Add URL encoded XSS Query
-				etq, etm := optimization.MakeURLEncodeRequestQuery(target, bpk, ssti, "toGrepping", options)
-				etm["payload"] = "toGrepping"
-				query[etq] = etm
-				// Add HTML Encoded XSS Query
-				htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, bpk, ssti, "toGrepping", options)
-				htm["payload"] = "toGrepping"
-				query[htq] = htm
-			}
 		}
 
 		// Blind payload
@@ -573,25 +562,64 @@ func CodeView(resbody, pattern string) string {
 	return code
 }
 
-//SqliAnalysis is sql injection basic checks
-func SqliAnalysis(target string, options model.Options) {
-	// sqli payload
-	sqlipayloads := getSQLIPayload()
+// SSTIAnalysis is basic check for SSTI
+func SSTIAnalysis(target string, options model.Options) {
+	// Build-in Grepping payload :: SSTI
+	// {444*6664}
+	// 2958816
 	bpu, _ := url.Parse(target)
 	bpd := bpu.Query()
 	var wg sync.WaitGroup
+	concurrency := options.Concurrence
+	reqs := make(chan *http.Request)
+
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func(){
+			for req := range reqs {
+				SendReq(req, "toGrepping", options)
+			}
+			wg.Done()
+		}()
+	}
 
 	for bpk := range bpd {
-		for _, sqlipayload := range sqlipayloads {
-			turl, _ := optimization.MakeRequestQuery(target, bpk, sqlipayload, "", options)
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				SendReq(turl, sqlipayload, options)
-			}()
+		for _, ssti := range getSSTIPayload() {
+			turl, _ := optimization.MakeRequestQuery(target, bpk, ssti, "toGrepping", options)
+			reqs <- turl
 		}
-		wg.Wait()
 	}
+	close(reqs)
+	wg.Wait()
+}
+
+//SqliAnalysis is basic check for SQL Injection
+func SqliAnalysis(target string, options model.Options) {
+	// sqli payload
+	bpu, _ := url.Parse(target)
+	bpd := bpu.Query()
+	var wg sync.WaitGroup
+	concurrency := options.Concurrence
+	reqs := make(chan *http.Request)
+
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func(){
+			for req := range reqs {
+				SendReq(req, "toGrepping", options)
+			}
+			wg.Done()
+		}()
+	}
+
+	for bpk := range bpd {
+		for _, sqlipayload := range getSQLIPayload() {
+			turl, _ := optimization.MakeRequestQuery(target, bpk, sqlipayload, "toGrepping", options)
+			reqs <- turl
+		}
+	}
+	close(reqs)
+	wg.Wait()
 }
 
 // StaticAnalysis is found information on original req/res
