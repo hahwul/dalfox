@@ -3,20 +3,20 @@ package scanning
 import (
 	"encoding/json"
 	"errors"
-	"os"
 	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/briandowns/spinner"
 	"github.com/PuerkitoBio/goquery"
-	"github.com/hahwul/dalfox/pkg/optimization"
+	"github.com/briandowns/spinner"
 	"github.com/hahwul/dalfox/pkg/model"
+	"github.com/hahwul/dalfox/pkg/optimization"
 	"github.com/hahwul/dalfox/pkg/printing"
 	"github.com/hahwul/dalfox/pkg/verification"
 )
@@ -29,7 +29,7 @@ func Scan(target string, options model.Options, sid string) {
 
 	scanObject := model.Scan{
 		ScanID: sid,
-		URL: target,
+		URL:    target,
 	}
 
 	// query is XSS payloads
@@ -53,7 +53,7 @@ func Scan(target string, options model.Options, sid string) {
 		printing.DalLog("SYSTEM", "Not running "+target+" url", options)
 		return
 	}
-	treq := optimization.GenerateNewRequest(target,"",options)
+	treq := optimization.GenerateNewRequest(target, "", options)
 	//treq, terr := http.NewRequest("GET", target, nil)
 	if treq == nil {
 	} else {
@@ -100,9 +100,12 @@ func Scan(target string, options model.Options, sid string) {
 		printing.DalLog("SYSTEM", "Using DOM mining option 📦⛏", options)
 	}
 
-	if options.Format == "json"{
-		printing.DalLog("PRINT","[",options)
+	if options.Format == "json" {
+		printing.DalLog("PRINT", "[", options)
 	}
+
+	SqliAnalysis(target, options)
+
 	var wait sync.WaitGroup
 	task := 2
 	wait.Add(task)
@@ -120,8 +123,8 @@ func Scan(target string, options model.Options, sid string) {
 	s := spinner.New(spinner.CharSets[4], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 	s.Prefix = " "
 	s.Suffix = "  Waiting routines.."
-	if options.NowURL!= 0 {
-		s.Suffix = "  URLs("+strconv.Itoa(options.NowURL)+" / "+strconv.Itoa(options.AllURLS)+") :: Waiting routines"
+	if options.NowURL != 0 {
+		s.Suffix = "  URLs(" + strconv.Itoa(options.NowURL) + " / " + strconv.Itoa(options.AllURLS) + ") :: Waiting routines"
 	}
 
 	if !(options.Silence || options.NoSpinner) {
@@ -159,9 +162,9 @@ func Scan(target string, options model.Options, sid string) {
 		// optimization.Optimization..
 
 		/*
-		k: parama name
-		v: pattern [injs, inhtml, ' < > ]
-		av: reflected type, valid char
+			k: parama name
+			v: pattern [injs, inhtml, ' < > ]
+			av: reflected type, valid char
 		*/
 
 		// set path base xss
@@ -188,7 +191,7 @@ func Scan(target string, options model.Options, sid string) {
 						}
 						if strings.Contains(av, "Injected:") {
 							// Injected pattern
-							injectedPoint := strings.Split(av,"/")
+							injectedPoint := strings.Split(av, "/")
 							injectedPoint = injectedPoint[1:]
 							for _, ip := range injectedPoint {
 								var arr []string
@@ -211,7 +214,7 @@ func Scan(target string, options model.Options, sid string) {
 										query[etq] = etm
 										// Add HTML Encoded XSS Query
 										htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, k, avv, ip, options)
-										query[htq] = htm	
+										query[htq] = htm
 									}
 								}
 							}
@@ -233,7 +236,7 @@ func Scan(target string, options model.Options, sid string) {
 						}
 					}
 				}
-			
+
 			}
 		} else {
 			printing.DalLog("SYSTEM", "Type is '"+policy["Content-Type"]+"', It does not test except customized payload (custom/blind).", options)
@@ -271,264 +274,281 @@ func Scan(target string, options model.Options, sid string) {
 			var bcallback string
 
 			if strings.HasPrefix(options.BlindURL, "https://") || strings.HasPrefix(options.BlindURL, "http://") {
-			bcallback = options.BlindURL
-		} else {
-			bcallback = "//" + options.BlindURL
-		}
+				bcallback = options.BlindURL
+			} else {
+				bcallback = "//" + options.BlindURL
+			}
 
-		for _, bpayload := range bpayloads {
-			// header base blind xss
-			bp := strings.Replace(bpayload, "CALLBACKURL", bcallback, 10)
-			tq, tm := optimization.MakeHeaderQuery(target,"Referer",bp,options)
-			tm["payload"] = "toBlind"
-			query[tq] = tm
-		}
-
-		// loop parameter list
-		for spk := range spd {
-			// loop payload list
 			for _, bpayload := range bpayloads {
-				// Add plain XSS Query
+				// header base blind xss
 				bp := strings.Replace(bpayload, "CALLBACKURL", bcallback, 10)
-				tq, tm := optimization.MakeRequestQuery(target, spk, bp, "toBlind", options)
+				tq, tm := optimization.MakeHeaderQuery(target, "Referer", bp, options)
 				tm["payload"] = "toBlind"
 				query[tq] = tm
-				// Add URL encoded XSS Query
-				etq, etm := optimization.MakeURLEncodeRequestQuery(target, spk, bp, "toBlind", options)
-				etm["payload"] = "toBlind"
-				query[etq] = etm
-				// Add HTML Encoded XSS Query
-				htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, spk, bp, "toBlind", options)
-				htm["payload"] = "toBlind"
-				query[htq] = htm
 			}
-		}
-		printing.DalLog("SYSTEM", "Added your blind XSS ("+options.BlindURL+")", options)
-	}
 
-	// Custom Payload
-	if options.CustomPayloadFile != "" {
-		ff, err := readLinesOrLiteral(options.CustomPayloadFile)
-		if err != nil {
-			printing.DalLog("SYSTEM", "Custom XSS payload load fail..", options)
-		} else {
-			for _, customPayload := range ff {
+			// loop parameter list
+			for spk := range spd {
+				// loop payload list
+				for _, bpayload := range bpayloads {
+					// Add plain XSS Query
+					bp := strings.Replace(bpayload, "CALLBACKURL", bcallback, 10)
+					tq, tm := optimization.MakeRequestQuery(target, spk, bp, "toBlind", options)
+					tm["payload"] = "toBlind"
+					query[tq] = tm
+					// Add URL encoded XSS Query
+					etq, etm := optimization.MakeURLEncodeRequestQuery(target, spk, bp, "toBlind", options)
+					etm["payload"] = "toBlind"
+					query[etq] = etm
+					// Add HTML Encoded XSS Query
+					htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, spk, bp, "toBlind", options)
+					htm["payload"] = "toBlind"
+					query[htq] = htm
+				}
+			}
+			printing.DalLog("SYSTEM", "Added your blind XSS ("+options.BlindURL+")", options)
+		}
+
+		/*
+			// sqli payload
+
+			sqlipayloads := getSQLIPayload()
+
+			for _, sqlipayload := range sqlipayloads {
 				spu, _ := url.Parse(target)
 				spd := spu.Query()
 				for spk := range spd {
 					// Add plain XSS Query
-					tq, tm := optimization.MakeRequestQuery(target, spk, customPayload, "toHTML", options)
+					tq, tm := optimization.MakeRequestQuery(target, spk, sqlipayload, "toHTML", options)
 					query[tq] = tm
-					// Add URL encoded XSS Query
-					etq, etm := optimization.MakeURLEncodeRequestQuery(target, spk, customPayload, "inHTML", options)
-					query[etq] = etm
-					// Add HTML Encoded XSS Query
-					htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, spk, customPayload, "inHTML", options)
-					query[htq] = htm
 				}
 			}
-			printing.DalLog("SYSTEM", "Added your "+strconv.Itoa(len(ff))+" custom xss payload", options)
+			printing.DalLog("SYSTEM", "Added "+strconv.Itoa(len(sqlipayloads))+" Sqli payload", options)
+		*/
+
+		// Custom Payload
+		if options.CustomPayloadFile != "" {
+			ff, err := readLinesOrLiteral(options.CustomPayloadFile)
+			if err != nil {
+				printing.DalLog("SYSTEM", "Custom XSS payload load fail..", options)
+			} else {
+				for _, customPayload := range ff {
+					spu, _ := url.Parse(target)
+					spd := spu.Query()
+					for spk := range spd {
+						// Add plain XSS Query
+						tq, tm := optimization.MakeRequestQuery(target, spk, customPayload, "toHTML", options)
+						query[tq] = tm
+						// Add URL encoded XSS Query
+						etq, etm := optimization.MakeURLEncodeRequestQuery(target, spk, customPayload, "inHTML", options)
+						query[etq] = etm
+						// Add HTML Encoded XSS Query
+						htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, spk, customPayload, "inHTML", options)
+						query[htq] = htm
+					}
+				}
+				printing.DalLog("SYSTEM", "Added your "+strconv.Itoa(len(ff))+" custom xss payload", options)
+			}
 		}
-	}
 
-	printing.DalLog("SYSTEM", "Start XSS Scanning.. with "+strconv.Itoa(len(query))+" queries 🗡", options)
-	s := spinner.New(spinner.CharSets[4], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
-	mutex := &sync.Mutex{}
-	queryCount := 0
-	s.Prefix = " "
-	s.Suffix = "  Make " + strconv.Itoa(options.Concurrence) + " workers and allocated " + strconv.Itoa(len(query)) + " queries"
+		printing.DalLog("SYSTEM", "Start XSS Scanning.. with "+strconv.Itoa(len(query))+" queries 🗡", options)
+		s := spinner.New(spinner.CharSets[4], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
+		mutex := &sync.Mutex{}
+		queryCount := 0
+		s.Prefix = " "
+		s.Suffix = "  Make " + strconv.Itoa(options.Concurrence) + " workers and allocated " + strconv.Itoa(len(query)) + " queries"
 
-	if !(options.Silence || options.NoSpinner) {
-		s.Start() // Start the spinner
-		//time.Sleep(3 * time.Second) // Run for some time to simulate work
-	}
-	// make waiting group
-	var wg sync.WaitGroup
-	// set concurrency
-	concurrency := options.Concurrence
-	// make reqeust channel
-	queries := make(chan Queries)
-	for i := 0; i < concurrency; i++ {
-		wg.Add(1)
-		go func() {
-			for reqJob := range queries {
-				// quires.request : http.Request
-				// queries.metadata : map[string]string
-				k := reqJob.request
-				v := reqJob.metadata
-				if (vStatus[v["param"]] == false) || (v["type"] != "toBlind") || (v["type"] != "toGrepping") {
-					rl.Block(k.Host)
-					resbody, _, vds, vrs, err := SendReq(k, v["payload"], options)
-					if err == nil {
-						if (v["type"] != "toBlind") && (v["type"] != "toGrepping") {
-							if strings.Contains(v["type"],"inJS") {
-								if vrs {
-									mutex.Lock()
-									if vStatus[v["param"]] == false {
-										code := CodeView(resbody, v["payload"])
-										printing.DalLog("WEAK", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], options)
-										printing.DalLog("CODE", code, options)
-										if options.Format == "json"{
-											printing.DalLog("PRINT", "{\"type\":\"inJS\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
-										} else {
-											printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
-										}
+		if !(options.Silence || options.NoSpinner) {
+			s.Start() // Start the spinner
+			//time.Sleep(3 * time.Second) // Run for some time to simulate work
+		}
+		// make waiting group
+		var wg sync.WaitGroup
+		// set concurrency
+		concurrency := options.Concurrence
+		// make reqeust channel
+		queries := make(chan Queries)
+		for i := 0; i < concurrency; i++ {
+			wg.Add(1)
+			go func() {
+				for reqJob := range queries {
+					// quires.request : http.Request
+					// queries.metadata : map[string]string
+					k := reqJob.request
+					v := reqJob.metadata
+					if (vStatus[v["param"]] == false) || (v["type"] != "toBlind") || (v["type"] != "toGrepping") {
+						rl.Block(k.Host)
+						resbody, _, vds, vrs, err := SendReq(k, v["payload"], options)
+						if err == nil {
+							if (v["type"] != "toBlind") && (v["type"] != "toGrepping") {
+								if strings.Contains(v["type"], "inJS") {
+									if vrs {
+										mutex.Lock()
+										if vStatus[v["param"]] == false {
+											code := CodeView(resbody, v["payload"])
+											printing.DalLog("WEAK", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], options)
+											printing.DalLog("CODE", code, options)
+											if options.Format == "json" {
+												printing.DalLog("PRINT", "{\"type\":\"inJS\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
+											} else {
+												printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
+											}
 
-										if options.FoundAction != "" {
-											foundAction(options, target, k.URL.String(), "WEAK")
+											if options.FoundAction != "" {
+												foundAction(options, target, k.URL.String(), "WEAK")
+											}
+											rst := &model.Issue{
+												Type:  "found code",
+												Param: v["param"],
+												PoC:   k.URL.String(),
+											}
+											scanObject.Results = append(scanObject.Results, *rst)
 										}
-										rst := &model.Issue{
-											Type: "found code",
-											Param: v["param"],
-											PoC: k.URL.String(),
-										}
-										scanObject.Results = append(scanObject.Results,*rst)
+										mutex.Unlock()
 									}
-									mutex.Unlock()
+								} else if strings.Contains(v["type"], "inATTR") {
+									if vds {
+										mutex.Lock()
+										if vStatus[v["param"]] == false {
+											code := CodeView(resbody, v["payload"])
+											printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], options)
+											printing.DalLog("CODE", code, options)
+											if options.Format == "json" {
+												printing.DalLog("PRINT", "{\"type\":\"inATTR\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", options)
+											} else {
+												printing.DalLog("PRINT", "[V]["+k.Method+"] "+k.URL.String(), options)
+											}
+											vStatus[v["param"]] = true
+											if options.FoundAction != "" {
+												foundAction(options, target, k.URL.String(), "VULN")
+											}
+											rst := &model.Issue{
+												Type:  "verify code",
+												Param: v["param"],
+												PoC:   k.URL.String(),
+											}
+											scanObject.Results = append(scanObject.Results, *rst)
+										}
+										mutex.Unlock()
+									} else if vrs {
+										mutex.Lock()
+										if vStatus[v["param"]] == false {
+											code := CodeView(resbody, v["payload"])
+											printing.DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"], options)
+											printing.DalLog("CODE", code, options)
+											if options.Format == "json" {
+												printing.DalLog("PRINT", "{\"type\":\"inATTR\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
+											} else {
+												printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
+											}
+											if options.FoundAction != "" {
+												foundAction(options, target, k.URL.String(), "WEAK")
+											}
+											rst := &model.Issue{
+												Type:  "found code",
+												Param: v["param"],
+												PoC:   k.URL.String(),
+											}
+											scanObject.Results = append(scanObject.Results, *rst)
+										}
+										mutex.Unlock()
+									}
+								} else {
+									if vds {
+										mutex.Lock()
+										if vStatus[v["param"]] == false {
+											code := CodeView(resbody, v["payload"])
+											printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], options)
+											printing.DalLog("CODE", code, options)
+											if options.Format == "json" {
+												printing.DalLog("PRINT", "{\"type\":\"inHTML\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", options)
+											} else {
+												printing.DalLog("PRINT", "[V]["+k.Method+"] "+k.URL.String(), options)
+											}
+											vStatus[v["param"]] = true
+											if options.FoundAction != "" {
+												foundAction(options, target, k.URL.String(), "VULN")
+											}
+											rst := &model.Issue{
+												Type:  "verify code",
+												Param: v["param"],
+												PoC:   k.URL.String(),
+											}
+											scanObject.Results = append(scanObject.Results, *rst)
+										}
+										mutex.Unlock()
+									} else if vrs {
+										mutex.Lock()
+										if vStatus[v["param"]] == false {
+											code := CodeView(resbody, v["payload"])
+											printing.DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"], options)
+											printing.DalLog("CODE", code, options)
+											if options.Format == "json" {
+												printing.DalLog("PRINT", "{\"type\":\"inHTML\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
+											} else {
+												printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
+											}
+											if options.FoundAction != "" {
+												foundAction(options, target, k.URL.String(), "WEAK")
+											}
+											rst := &model.Issue{
+												Type:  "found code",
+												Param: v["param"],
+												PoC:   k.URL.String(),
+											}
+											scanObject.Results = append(scanObject.Results, *rst)
+										}
+										mutex.Unlock()
+									}
+
 								}
-							} else if strings.Contains(v["type"],"inATTR") {
-								if vds {
-									mutex.Lock()
-									if vStatus[v["param"]] == false {
-										code := CodeView(resbody, v["payload"])
-										printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], options)
-										printing.DalLog("CODE", code, options)
-										if options.Format == "json"{
-											printing.DalLog("PRINT", "{\"type\":\"inATTR\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", options)
-										} else {
-											printing.DalLog("PRINT", "[V]["+k.Method+"] "+k.URL.String(), options)
-										}
-										vStatus[v["param"]] = true
-										if options.FoundAction != "" {
-											foundAction(options, target, k.URL.String(), "VULN")
-										}
-										rst := &model.Issue{
-											Type: "verify code",
-											Param: v["param"],
-											PoC: k.URL.String(),
-										}
-										scanObject.Results = append(scanObject.Results,*rst)
-									}
-									mutex.Unlock()
-								} else if vrs {
-									mutex.Lock()
-									if vStatus[v["param"]] == false {
-										code := CodeView(resbody, v["payload"])
-										printing.DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"], options)
-										printing.DalLog("CODE", code, options)
-										if options.Format == "json"{
-											printing.DalLog("PRINT", "{\"type\":\"inATTR\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
-										} else {
-											printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
-										}
-										if options.FoundAction != "" {
-											foundAction(options, target, k.URL.String(), "WEAK")
-										}
-										rst := &model.Issue{
-											Type: "found code",
-											Param: v["param"],
-											PoC: k.URL.String(),
-										}
-										scanObject.Results = append(scanObject.Results,*rst)
-									}
-									mutex.Unlock()
-								}
-							} else {
-								if vds {
-									mutex.Lock()
-									if vStatus[v["param"]] == false {
-										code := CodeView(resbody, v["payload"])
-										printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], options)
-										printing.DalLog("CODE", code, options)
-										if options.Format == "json"{
-											printing.DalLog("PRINT", "{\"type\":\"inHTML\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", options)
-										} else {
-											printing.DalLog("PRINT", "[V]["+k.Method+"] "+k.URL.String(), options)
-										}
-										vStatus[v["param"]] = true
-										if options.FoundAction != "" {
-											foundAction(options, target, k.URL.String(), "VULN")
-										}
-										rst := &model.Issue{
-											Type: "verify code",
-											Param: v["param"],
-											PoC: k.URL.String(),
-										}
-										scanObject.Results = append(scanObject.Results,*rst)
-									}
-									mutex.Unlock()
-								} else if vrs {
-									mutex.Lock()
-									if vStatus[v["param"]] == false {
-										code := CodeView(resbody, v["payload"])
-										printing.DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"], options)
-										printing.DalLog("CODE", code, options)
-										if options.Format == "json"{
-											printing.DalLog("PRINT", "{\"type\":\"inHTML\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
-										} else {
-											printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
-										}
-										if options.FoundAction != "" {
-											foundAction(options, target, k.URL.String(), "WEAK")
-										}
-										rst := &model.Issue{
-											Type: "found code",
-											Param: v["param"],
-											PoC: k.URL.String(),
-										}
-										scanObject.Results = append(scanObject.Results,*rst)
-									}
-									mutex.Unlock()
-								}
-
 							}
 						}
 					}
-				}
-				mutex.Lock()
-				queryCount = queryCount + 1
+					mutex.Lock()
+					queryCount = queryCount + 1
 
-				if !(options.Silence || options.NoSpinner) {
-					s.Lock()
-					var msg string
-					if (vStatus[v["param"]] == false){
-						msg = "Testing \""+v["param"]+"\" param with " + strconv.Itoa(options.Concurrence) + " worker"
-					} else {
-						msg = "Passing \""+v["param"]+"\" param queries with " + strconv.Itoa(options.Concurrence) + " worker" 
-					}
+					if !(options.Silence || options.NoSpinner) {
+						s.Lock()
+						var msg string
+						if vStatus[v["param"]] == false {
+							msg = "Testing \"" + v["param"] + "\" param with " + strconv.Itoa(options.Concurrence) + " worker"
+						} else {
+							msg = "Passing \"" + v["param"] + "\" param queries with " + strconv.Itoa(options.Concurrence) + " worker"
+						}
 
-					if options.NowURL == 0 {
-						s.Suffix = "  Queries(" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") :: "+msg
-					} else {
-						s.Suffix = "  Queries(" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + "), URLs("+strconv.Itoa(options.NowURL)+" / "+strconv.Itoa(options.AllURLS)+") :: "+msg
+						if options.NowURL == 0 {
+							s.Suffix = "  Queries(" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") :: " + msg
+						} else {
+							s.Suffix = "  Queries(" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + "), URLs(" + strconv.Itoa(options.NowURL) + " / " + strconv.Itoa(options.AllURLS) + ") :: " + msg
+						}
+						//s.Suffix = " Waiting routines.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
+						s.Unlock()
 					}
-					//s.Suffix = " Waiting routines.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
-					s.Unlock()
+					mutex.Unlock()
 				}
-				mutex.Unlock()
+				wg.Done()
+			}()
+		}
+
+		// Send testing query to quires channel
+		for k, v := range query {
+			queries <- Queries{
+				request:  k,
+				metadata: v,
 			}
-			wg.Done()
-		}()
-	}
-
-	// Send testing query to quires channel
-	for k, v := range query {
-		queries <- Queries{
-			request:  k,
-			metadata: v,
+		}
+		close(queries)
+		wg.Wait()
+		if !(options.Silence || options.NoSpinner) {
+			s.Stop()
 		}
 	}
-	close(queries)
-	wg.Wait()
-	if !(options.Silence || options.NoSpinner) {
-		s.Stop()
+	if options.Format == "json" {
+		printing.DalLog("PRINT", "{}]", options)
 	}
-}
-if options.Format == "json"{
-	printing.DalLog("PRINT","{}]",options)
-}
-options.Scan[sid] = scanObject
-printing.DalLog("SYSTEM", "Finish :D", options)
+	options.Scan[sid] = scanObject
+	printing.DalLog("SYSTEM", "Finish :D", options)
 }
 
 //CodeView is showing reflected code function
@@ -561,6 +581,43 @@ func CodeView(resbody, pattern string) string {
 		return code[:len(code)-5]
 	}
 	return code
+}
+
+func SqliAnalysis(target string, options model.Options) map[string]string {
+
+	// sqli payload
+	sqlipayloads := getSQLIPayload()
+	bpu, _ := url.Parse(target)
+	bpd := bpu.Query()
+
+	printing.DalLog("SYSTEM", "Start SQLi Scanning 🗡", options)
+	s := spinner.New(spinner.CharSets[4], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
+	s.Prefix = " "
+	s.Suffix = " Testing " + strconv.Itoa(len(sqlipayloads)) + " payloads for SQLi"
+
+	time.Sleep(1 * time.Second) // Waiting log
+	s.Start()
+	var wg sync.WaitGroup
+
+	for bpk := range bpd {
+		for _, sqlipayload := range sqlipayloads {
+			turl, _ := optimization.MakeRequestQuery(target, bpk, sqlipayload, "", options)
+
+			//printing.DalLog("SYSTEM", "debug: "+turl.URL.String(), options)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				SendReq(turl, sqlipayload, options)
+			}()
+
+		}
+		wg.Wait()
+
+	}
+	s.Stop()
+
+	printing.DalLog("SYSTEM", "SQLi Scanning done!", options)
+	return nil
 }
 
 // StaticAnalysis is found information on original req/res
@@ -613,9 +670,9 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 	}
 	if options.Mining {
 		// Param mining with Gf-Patterins
-		if options.MiningWordlist == ""{
-			for _, gfParam := range GetGfXSS(){
-				if gfParam != ""{
+		if options.MiningWordlist == "" {
+			for _, gfParam := range GetGfXSS() {
+				if gfParam != "" {
 					if p.Get(gfParam) == "" {
 						p.Set(gfParam, "")
 					}
@@ -624,7 +681,7 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 		} else {
 			ff, err := readLinesOrLiteral(options.MiningWordlist)
 			if err != nil {
-				printing.DalLog("SYSTEM","Mining wordlist load fail..", options)
+				printing.DalLog("SYSTEM", "Mining wordlist load fail..", options)
 			} else {
 				for _, wdParam := range ff {
 					if wdParam != "" {
@@ -638,7 +695,7 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 	}
 
 	if options.FindingDOM {
-		treq := optimization.GenerateNewRequest(target,"",options)
+		treq := optimization.GenerateNewRequest(target, "", options)
 		//treq, terr := http.NewRequest("GET", target, nil)
 		if treq != nil {
 			transport := getTransport(options)
@@ -661,37 +718,37 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 				doc, err := goquery.NewDocumentFromReader(body)
 				if err == nil {
 					count := 0
-					doc.Find("input").Each(func(i int, s *goquery.Selection){
+					doc.Find("input").Each(func(i int, s *goquery.Selection) {
 						name, _ := s.Attr("name")
 						if p.Get(name) == "" {
-							p.Set(name,"")
+							p.Set(name, "")
 							count = count + 1
 						}
 					})
-					doc.Find("textarea").Each(func(i int, s *goquery.Selection){
+					doc.Find("textarea").Each(func(i int, s *goquery.Selection) {
 						name, _ := s.Attr("name")
 						if p.Get(name) == "" {
-							p.Set(name,"")
+							p.Set(name, "")
 							count = count + 1
 						}
 					})
-					doc.Find("select").Each(func(i int, s *goquery.Selection){
+					doc.Find("select").Each(func(i int, s *goquery.Selection) {
 						name, _ := s.Attr("name")
 						if p.Get(name) == "" {
-							p.Set(name,"")
+							p.Set(name, "")
 							count = count + 1
 						}
 					})
-					printing.DalLog("INFO","Found "+strconv.Itoa(count)+" testing point in DOM Mining",options)
+					printing.DalLog("INFO", "Found "+strconv.Itoa(count)+" testing point in DOM Mining", options)
 				}
 			}
-		}	
+		}
 	}
 
 	var wgg sync.WaitGroup
 	concurrency := options.Concurrence
 	paramsQue := make(chan string)
-	for i := 0; i < concurrency ; i++ {
+	for i := 0; i < concurrency; i++ {
 		wgg.Add(1)
 		go func() {
 			for k := range paramsQue {
@@ -700,11 +757,11 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 					//temp_q := u.Query()
 					//temp_q.Set(k, v[0]+"DalFox")
 					/*
-					data := u.String()
-					data = strings.Replace(data, k+"="+v[0], k+"="+v[0]+"DalFox", 1)
-					tempURL, _ := url.Parse(data)
-					temp_q := tempURL.Query()
-					tempURL.RawQuery = temp_q.Encode()
+						data := u.String()
+						data = strings.Replace(data, k+"="+v[0], k+"="+v[0]+"DalFox", 1)
+						tempURL, _ := url.Parse(data)
+						temp_q := tempURL.Query()
+						tempURL.RawQuery = temp_q.Encode()
 					*/
 					tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA", options)
 					var code string
@@ -727,7 +784,7 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 							}
 						}
 						for k, v := range tempSmap {
-							smap = smap + "/" + k + "("+strconv.Itoa(v)+")"
+							smap = smap + "/" + k + "(" + strconv.Itoa(v) + ")"
 						}
 						params[k] = append(params[k], smap)
 						var wg sync.WaitGroup
@@ -737,11 +794,11 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 							wg.Add(1)
 							char := c
 							/*
-							tdata := u.String()
-							tdata = strings.Replace(tdata, k+"="+v[0], k+"="+v[0]+"DalFox"+char, 1)
-							turl, _ := url.Parse(tdata)
-							tq := turl.Query()
-							turl.RawQuery = tq.Encode()
+								tdata := u.String()
+								tdata = strings.Replace(tdata, k+"="+v[0], k+"="+v[0]+"DalFox"+char, 1)
+								turl, _ := url.Parse(tdata)
+								tq := turl.Query()
+								turl.RawQuery = tq.Encode()
 							*/
 
 							/* turl := u
@@ -794,6 +851,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		//fmt.Println("HTTP call failed:", err)
 		return "", resp, false, false, err
 	}
 
@@ -806,7 +864,9 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 	ssti := getSSTIPayload()
 
 	//grepResult := make(map[string][]string)
+
 	grepResult := builtinGrep(str)
+
 	for k, v := range grepResult {
 		if k == "dalfox-ssti" {
 			really := false
@@ -819,38 +879,38 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 			if really {
 				rst := &model.Issue{
 					Type: "Grep:SSTI",
-					PoC: req.URL.String(),
+					PoC:  req.URL.String(),
 				}
-				if !duplicatedResult(scanObject.Results,*rst){
+				if !duplicatedResult(scanObject.Results, *rst) {
 					printing.DalLog("GREP", "Found SSTI via built-in grepping / payload: "+payload, options)
 					for _, vv := range v {
 						printing.DalLog("CODE", vv, options)
 					}
-					if options.Format == "json"{
+					if options.Format == "json" {
 						printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"SSTI\",\"poc\":\""+req.URL.String()+"\"", options)
 					} else {
 						printing.DalLog("PRINT", "[G][SSTI/"+req.Method+"] "+req.URL.String(), options)
 					}
-					scanObject.Results = append(scanObject.Results,*rst)
+					scanObject.Results = append(scanObject.Results, *rst)
 				}
 			}
 		} else {
 			// other case
 			rst := &model.Issue{
-				Type: "Grep:"+k,
-				PoC: req.URL.String(),
+				Type: "Grep:" + k,
+				PoC:  req.URL.String(),
 			}
-			if !duplicatedResult(scanObject.Results,*rst){
+			if !duplicatedResult(scanObject.Results, *rst) {
 				printing.DalLog("GREP", "Found "+k+" via built-in grepping / payload: "+payload, options)
 				for _, vv := range v {
 					printing.DalLog("CODE", vv, options)
 				}
-				if options.Format == "json"{
+				if options.Format == "json" {
 					printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"BUILT-IN\",\"poc\":\""+req.URL.String()+"\"", options)
 				} else {
 					printing.DalLog("PRINT", "[G][BUILT-IN/"+k+"/"+req.Method+"] "+req.URL.String(), options)
 				}
-				scanObject.Results = append(scanObject.Results,*rst)
+				scanObject.Results = append(scanObject.Results, *rst)
 			}
 		}
 	}
@@ -865,20 +925,20 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 		cg := customGrep(str, pattern)
 		for k, v := range cg {
 			rst := &model.Issue{
-				Type: "Grep:"+k,
-				PoC: req.URL.String(),
+				Type: "Grep:" + k,
+				PoC:  req.URL.String(),
 			}
-			if !duplicatedResult(scanObject.Results,*rst){
+			if !duplicatedResult(scanObject.Results, *rst) {
 				printing.DalLog("GREP", "Found "+k+" via custom grepping / payload: "+payload, options)
 				for _, vv := range v {
 					printing.DalLog("CODE", vv, options)
 				}
-				if options.Format == "json"{
+				if options.Format == "json" {
 					printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\""+k+"\",\"poc\":\""+req.URL.String()+"\"", options)
 				} else {
 					printing.DalLog("PRINT", "[G]["+k+"/"+req.Method+"] "+req.URL.String(), options)
 				}
-				scanObject.Results = append(scanObject.Results,*rst)
+				scanObject.Results = append(scanObject.Results, *rst)
 			}
 		}
 	}
@@ -931,7 +991,7 @@ func indexOf(element string, data []string) int {
 }
 
 func duplicatedResult(result []model.Issue, rst model.Issue) bool {
-	for _,v := range result {
+	for _, v := range result {
 		if v.Type == rst.Type {
 			return true
 		}
