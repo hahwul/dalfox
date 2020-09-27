@@ -566,7 +566,7 @@ func CodeView(resbody, pattern string) string {
 	return code
 }
 
-//sql injection basic checks
+//SqliAnalysis is sql injection basic checks
 func SqliAnalysis(target string, options model.Options) map[string]string {
 
 	// sqli payload
