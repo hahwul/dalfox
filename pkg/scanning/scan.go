@@ -361,6 +361,12 @@ func Scan(target string, options model.Options, sid string) {
 					if (vStatus[v["param"]] == false) || (v["type"] != "toBlind") || (v["type"] != "toGrepping") {
 						rl.Block(k.Host)
 						resbody, _, vds, vrs, err := SendReq(k, v["payload"], options)
+						abs := optimization.Abstraction(resbody, v["payload"])
+						if containsFromArray(abs,v["payload"]) {
+							vrs = true
+						} else {
+							vrs = false
+						}
 						if err == nil {
 							if (v["type"] != "toBlind") && (v["type"] != "toGrepping") {
 								if strings.Contains(v["type"], "inJS") {
@@ -942,4 +948,14 @@ func duplicatedResult(result []model.Issue, rst model.Issue) bool {
 		}
 	}
 	return false
+}
+
+func containsFromArray(slice []string, item string) bool {
+	set := make(map[string]struct{}, len(slice))
+	for _, s := range slice {
+		set[s] = struct{}{}
+	}
+
+	_, ok := set[item]
+	return ok
 }
