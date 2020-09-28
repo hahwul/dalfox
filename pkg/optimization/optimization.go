@@ -83,7 +83,9 @@ func MakeRequestQuery(target, param, payload, ptype string, options model.Option
 
 	payload = url.QueryEscape(payload)
 	u, _ := url.Parse(target)
+
 	data := u.String()
+
 	if options.Data != "" {
 		tempParam, _ := url.ParseQuery(options.Data)
 		var body string
@@ -101,11 +103,18 @@ func MakeRequestQuery(target, param, payload, ptype string, options model.Option
 
 	} else {
 		tempParam := u.Query()
-		if tempParam[param] == nil {
-			data = "?"+param+"="+payload+"&"+data
+		if tempParam[param] == nil {			
+			if(strings.Contains(data, "?")){
+				data = data + "&"+param+"="+payload
+			}else{
+				data = data + "?"+param+"="+payload
+			}						
 		} else {
-			data = strings.Replace(data, param+"="+ url.QueryEscape(tempParam[param][0]), param+"="+     url.QueryEscape(tempParam[param][0])+payload, 1)
+			data = strings.Replace(data, param+"=" + url.QueryEscape(tempParam[param][0]), param + "=" + url.QueryEscape(tempParam[param][0])+payload, 1)
 		}
+
+		fmt.Printf("data: %v\n", data)
+
 		tempURL, _ := url.Parse(data)
 		tempQuery := tempURL.Query()
 		tempURL.RawQuery = tempQuery.Encode()
