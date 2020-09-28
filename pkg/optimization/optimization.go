@@ -113,8 +113,6 @@ func MakeRequestQuery(target, param, payload, ptype string, options model.Option
 			data = strings.Replace(data, param+"=" + url.QueryEscape(tempParam[param][0]), param + "=" + url.QueryEscape(tempParam[param][0])+payload, 1)
 		}
 
-		fmt.Printf("data: %v\n", data)
-
 		tempURL, _ := url.Parse(data)
 		tempQuery := tempURL.Query()
 		tempURL.RawQuery = tempQuery.Encode()
