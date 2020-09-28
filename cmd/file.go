@@ -60,7 +60,7 @@ var fileCmd = &cobra.Command{
 						target = "https://" + host + path
 					}
 				}
-				scanning.Scan(target, options,"single")
+				scanning.Scan(target, options, "single")
 
 			} else {
 				printing.DalLog("SYSTEM", "Using file mode(targets list)", options)
@@ -92,7 +92,7 @@ var fileCmd = &cobra.Command{
 				} else {
 					options.AllURLS = len(targets)
 					for i := range targets {
-						options.NowURL = i+1
+						options.NowURL = i + 1
 						scanning.Scan(targets[i], options, strconv.Itoa(i))
 					}
 

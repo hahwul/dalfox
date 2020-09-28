@@ -104,7 +104,6 @@ func Scan(target string, options model.Options, sid string) {
 		printing.DalLog("PRINT", "[", options)
 	}
 
-
 	var wait sync.WaitGroup
 	task := 3
 	if options.NoBAV {
@@ -130,11 +129,11 @@ func Scan(target string, options model.Options, sid string) {
 			var bavWaitGroup sync.WaitGroup
 			bavTask := 2
 			bavWaitGroup.Add(bavTask)
-			go func(){
+			go func() {
 				defer bavWaitGroup.Done()
 				SqliAnalysis(target, options)
 			}()
-			go func(){
+			go func() {
 				defer bavWaitGroup.Done()
 				SSTIAnalysis(target, options)
 			}()

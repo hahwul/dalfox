@@ -31,10 +31,10 @@ func RunAPIServer(options model.Options) {
 	options.IsAPI = true
 	e.Server.Addr = ":6664"
 	e.Use(middleware.SecureWithConfig(middleware.SecureConfig{
-		XSSProtection:         "",
-		ContentTypeNosniff:    "",
-		XFrameOptions:         "",
-		HSTSMaxAge:            3600,
+		XSSProtection:      "",
+		ContentTypeNosniff: "",
+		XFrameOptions:      "",
+		HSTSMaxAge:         3600,
 	}))
 	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
 		Format: "method=${method}, uri=${uri}, status=${status}\n",
@@ -42,68 +42,68 @@ func RunAPIServer(options model.Options) {
 	e.GET("/health", func(c echo.Context) error {
 		r := &Res{
 			Code: 200,
-			Msg: "ok",
+			Msg:  "ok",
 		}
-		return c.JSON(http.StatusOK,r)
+		return c.JSON(http.StatusOK, r)
 	})
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 	e.GET("/scans", func(c echo.Context) error {
 		r := &Scans{
-			Code: 200,
+			Code:  200,
 			Scans: scans,
 		}
-		return c.JSON(http.StatusNotFound,r)
+		return c.JSON(http.StatusNotFound, r)
 	})
 	e.GET("/scan/:sid", func(c echo.Context) error {
 		sid := c.Param("sid")
-		if !contains(scans,sid){
+		if !contains(scans, sid) {
 			r := &Res{
 				Code: 404,
-				Msg: "Not found scanid",
+				Msg:  "Not found scanid",
 			}
-			return c.JSON(http.StatusNotFound,r)
+			return c.JSON(http.StatusNotFound, r)
 
 		}
 		r := &Res{
 			Code: 200,
 		}
-		scan := GetScan(sid,options)
-		if len(scan.URL) == 0{
-			r.Msg = "scanning"	
+		scan := GetScan(sid, options)
+		if len(scan.URL) == 0 {
+			r.Msg = "scanning"
 		} else {
 			r.Msg = "finish"
 			r.Data = scan.Results
 		}
-		return c.JSON(http.StatusOK,r)
+		return c.JSON(http.StatusOK, r)
 	})
 	e.POST("/scan", func(c echo.Context) error {
 		rq := new(Req)
-		if err := c.Bind(rq); err != nil{
+		if err := c.Bind(rq); err != nil {
 			r := &Res{
 				Code: 500,
-				Msg: "Parameter Bind error",
+				Msg:  "Parameter Bind error",
 			}
-			return c.JSON(http.StatusInternalServerError,r)
+			return c.JSON(http.StatusInternalServerError, r)
 		}
 		sid := GenerateRandomToken(rq.URL)
 		r := &Res{
 			Code: 200,
-			Msg: sid,
+			Msg:  sid,
 		}
-		scans = append(scans,sid)
+		scans = append(scans, sid)
 		go ScanFromAPI(rq.URL, rq.Options, options, sid)
-		return c.JSON(http.StatusOK,r)
+		return c.JSON(http.StatusOK, r)
 	})
 	printing.DalLog("SYSTEM", "Listen "+e.Server.Addr, options)
 	graceful.ListenAndServe(e.Server, 5*time.Second)
 }
 
 func contains(slice []string, item string) bool {
-    set := make(map[string]struct{}, len(slice))
-    for _, s := range slice {
-        set[s] = struct{}{}
-    }
+	set := make(map[string]struct{}, len(slice))
+	for _, s := range slice {
+		set[s] = struct{}{}
+	}
 
-    _, ok := set[item] 
-    return ok
+	_, ok := set[item]
+	return ok
 }

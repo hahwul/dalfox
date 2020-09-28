@@ -13,10 +13,9 @@ import (
 // @Param data body Req true "json data"
 // @Success 200 {object} Res
 // @Router /scan [post]
-func ScanFromAPI(url string, rqOptions map[string]interface{}, options model.Options, sid string){
+func ScanFromAPI(url string, rqOptions map[string]interface{}, options model.Options, sid string) {
 	scan.Scan(url, options, sid)
 }
-
 
 // GetScan is get scan information
 // @Summary scan
@@ -37,6 +36,6 @@ func GetScan(sid string, options model.Options) model.Scan {
 // @Produce  json
 // @Success 200 {array} string
 // @Router /scans [get]
-func GetScans(){
+func GetScans() {
 
 }

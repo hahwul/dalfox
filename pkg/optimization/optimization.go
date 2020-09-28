@@ -3,11 +3,11 @@ package optimization
 import (
 	"bytes"
 	"fmt"
+	"github.com/hahwul/dalfox/pkg/model"
 	"html/template"
 	"net/http"
 	"net/url"
 	"strings"
-	"github.com/hahwul/dalfox/pkg/model"
 )
 
 // GenerateNewRequest is make http.Cilent
@@ -40,7 +40,7 @@ func GenerateNewRequest(url, payload string, options model.Options) *http.Reques
 }
 
 // MakeHeaderQuery is generate http query with custom header
-func MakeHeaderQuery(target, hn, hv string,options model.Options) (*http.Request, map[string]string) {
+func MakeHeaderQuery(target, hn, hv string, options model.Options) (*http.Request, map[string]string) {
 	tempMap := make(map[string]string)
 	tempMap["type"] = "toBlind"
 	tempMap["payload"] = hv
@@ -73,7 +73,6 @@ func MakeHeaderQuery(target, hn, hv string,options model.Options) (*http.Request
 	return req, tempMap
 }
 
-
 // MakeRequestQuery is generate http query with custom paramters
 func MakeRequestQuery(target, param, payload, ptype string, options model.Options) (*http.Request, map[string]string) {
 	tempMap := make(map[string]string)
@@ -88,9 +87,9 @@ func MakeRequestQuery(target, param, payload, ptype string, options model.Option
 		tempParam, _ := url.ParseQuery(options.Data)
 		var body string
 		if tempParam[param] == nil {
-			body = param+"="+payload+"&"+data
+			body = param + "=" + payload + "&" + data
 		} else {
-			body = strings.Replace(body, param+"="+ url.QueryEscape(tempParam[param][0]), param+"="+     url.QueryEscape(tempParam[param][0])+payload, 1)
+			body = strings.Replace(body, param+"="+url.QueryEscape(tempParam[param][0]), param+"="+url.QueryEscape(tempParam[param][0])+payload, 1)
 		}
 		tempURL, _ := url.Parse(data)
 		tempQuery := tempURL.Query()
@@ -102,9 +101,9 @@ func MakeRequestQuery(target, param, payload, ptype string, options model.Option
 	} else {
 		tempParam := u.Query()
 		if tempParam[param] == nil {
-			data = "?"+param+"="+payload+"&"+data
+			data = "?" + param + "=" + payload + "&" + data
 		} else {
-			data = strings.Replace(data, param+"="+ url.QueryEscape(tempParam[param][0]), param+"="+     url.QueryEscape(tempParam[param][0])+payload, 1)
+			data = strings.Replace(data, param+"="+url.QueryEscape(tempParam[param][0]), param+"="+url.QueryEscape(tempParam[param][0])+payload, 1)
 		}
 		tempURL, _ := url.Parse(data)
 		tempQuery := tempURL.Query()

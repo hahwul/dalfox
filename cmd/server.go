@@ -1,10 +1,9 @@
 package cmd
 
 import (
-
-	"github.com/spf13/cobra"
-	server "github.com/hahwul/dalfox/pkg/server"
 	printing "github.com/hahwul/dalfox/pkg/printing"
+	server "github.com/hahwul/dalfox/pkg/server"
+	"github.com/spf13/cobra"
 )
 
 // serverCmd represents the server command

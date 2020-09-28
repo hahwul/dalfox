@@ -4,8 +4,8 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/hahwul/dalfox/pkg/printing"
 	"github.com/hahwul/dalfox/pkg/model"
+	"github.com/hahwul/dalfox/pkg/printing"
 )
 
 // foundAction is after command function.

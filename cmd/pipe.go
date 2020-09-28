@@ -38,7 +38,7 @@ var pipeCmd = &cobra.Command{
 					defer wg.Done()
 					printing.DalLog("SYSTEM", "testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", options)
 					for i := range v {
-						scanning.Scan(v[i], options,strconv.Itoa(len(v)))
+						scanning.Scan(v[i], options, strconv.Itoa(len(v)))
 					}
 				}(k, v)
 			}
@@ -46,7 +46,7 @@ var pipeCmd = &cobra.Command{
 		} else {
 			options.AllURLS = len(targets)
 			for i := range targets {
-				options.NowURL = i+1
+				options.NowURL = i + 1
 				scanning.Scan(targets[i], options, strconv.Itoa(i))
 			}
 
