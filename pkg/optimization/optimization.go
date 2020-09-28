@@ -104,18 +104,18 @@ func MakeRequestQuery(target, param, payload, ptype string, options model.Option
 		tempParam := u.Query()
 
 		if tempParam[param] == nil {			
-			if(strings.Contains(data, "?")){
+			if(strings.Contains(data, "?")) {
 				data = data + "&"+param+"="+payload
-			}else{
+			} else{
 				data = data + "?"+param+"="+payload
 			}						
 		} else {
 			data = strings.Replace(data, param+"=" + url.QueryEscape(tempParam[param][0]), param + "=" + url.QueryEscape(tempParam[param][0])+payload, 1)
-
-		if tempParam[param] == nil {
-			data = "?" + param + "=" + payload + "&" + data
-		} else {
-			data = strings.Replace(data, param+"="+url.QueryEscape(tempParam[param][0]), param+"="+url.QueryEscape(tempParam[param][0])+payload, 1)
+			if tempParam[param] == nil {
+				data = "?" + param + "=" + payload + "&" + data
+			} else {
+				data = strings.Replace(data, param+"="+url.QueryEscape(tempParam[param][0]), param+"="+url.QueryEscape(tempParam[param][0])+payload, 1)
+			}
 		}
 
 		tempURL, _ := url.Parse(data)
