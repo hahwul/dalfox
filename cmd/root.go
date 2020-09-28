@@ -6,8 +6,8 @@ import (
 	"io/ioutil"
 	"os"
 
-	"github.com/hahwul/dalfox/pkg/printing"
 	"github.com/hahwul/dalfox/pkg/model"
+	"github.com/hahwul/dalfox/pkg/printing"
 	"github.com/spf13/cobra"
 )
 
@@ -59,7 +59,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&grep, "grep", "", "Using custom grepping file (e.g --grep ./samples/sample_grep.json)")
 	rootCmd.PersistentFlags().StringVar(&ignoreReturn, "ignore-return", "", "Ignore scanning from return code (e.g --ignore-return 302,403,404)")
 	rootCmd.PersistentFlags().StringVar(&miningWord, "mining-dict-word", "", "custom wordlist file for param mining (e.g --mining-dict-word word.txt)")
-	rootCmd.PersistentFlags().StringVarP(&method, "method", "X",  "", "Force overriding HTTP Method (e.g -X PUT)")
+	rootCmd.PersistentFlags().StringVarP(&method, "method", "X", "", "Force overriding HTTP Method (e.g -X PUT)")
 
 	//Int
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 10, "Second of timeout")
@@ -82,33 +82,33 @@ func init() {
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
 	options = model.Options{
-		Header: header,
-		Cookie: cookie,
-		UniqParam: p,
-		BlindURL: blind,
+		Header:            header,
+		Cookie:            cookie,
+		UniqParam:         p,
+		BlindURL:          blind,
 		CustomPayloadFile: customPayload,
-		Data: data,
-		UserAgent: userAgent,
-		OutputFile: output,
-		Format: format,
-		FoundAction: foundAction,
-		ProxyAddress: proxy,
-		Grep: grep,
-		IgnoreReturn: ignoreReturn,
-		Timeout: timeout,
-		Concurrence: concurrence,
-		Delay: delay,
-		OnlyDiscovery: onlyDiscovery,
-		Silence: silence,
-		FollowRedirect: followRedirect,
-		Scan: make(map[string]model.Scan),
-		Mining: mining,
-		MiningWordlist: miningWord,
-		FindingDOM: findingDOM,
-		NoColor: noColor,
-		Method: method,
-		NoSpinner: noSpinner,
-		NoBAV: noBAV,
+		Data:              data,
+		UserAgent:         userAgent,
+		OutputFile:        output,
+		Format:            format,
+		FoundAction:       foundAction,
+		ProxyAddress:      proxy,
+		Grep:              grep,
+		IgnoreReturn:      ignoreReturn,
+		Timeout:           timeout,
+		Concurrence:       concurrence,
+		Delay:             delay,
+		OnlyDiscovery:     onlyDiscovery,
+		Silence:           silence,
+		FollowRedirect:    followRedirect,
+		Scan:              make(map[string]model.Scan),
+		Mining:            mining,
+		MiningWordlist:    miningWord,
+		FindingDOM:        findingDOM,
+		NoColor:           noColor,
+		Method:            method,
+		NoSpinner:         noSpinner,
+		NoBAV:             noBAV,
 	}
 
 	if grep != "" {
@@ -125,7 +125,6 @@ func initConfig() {
 		options.Grep = string(byteValue)
 
 	}
-
 
 	if config != "" {
 		// Open our jsonFile

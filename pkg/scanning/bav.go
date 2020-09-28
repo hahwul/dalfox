@@ -22,7 +22,7 @@ func SSTIAnalysis(target string, options model.Options) {
 
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
-		go func(){
+		go func() {
 			for req := range reqs {
 				SendReq(req, "toGrepping", options)
 			}
@@ -51,7 +51,7 @@ func SqliAnalysis(target string, options model.Options) {
 
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
-		go func(){
+		go func() {
 			for req := range reqs {
 				SendReq(req, "toGrepping", options)
 			}

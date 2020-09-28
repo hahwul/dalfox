@@ -5,7 +5,6 @@ import (
 	"os"
 	"sync"
 
-
 	"github.com/hahwul/dalfox/pkg/model"
 	"github.com/logrusorgru/aurora"
 )
@@ -53,7 +52,7 @@ func DalLog(level, text string, options model.Options) {
 		text = aurora.Yellow("[E] ").String() + text
 	}
 
-	if level == "YELLOW"{
+	if level == "YELLOW" {
 		text = aurora.BrightYellow(text).String()
 	}
 
@@ -66,11 +65,11 @@ func DalLog(level, text string, options model.Options) {
 				fmt.Println(text)
 
 			} else {
-				ftext = "[POC] "+text
+				ftext = "[POC] " + text
 				if options.NoColor {
-					fmt.Println("[POC]"+text)
+					fmt.Println("[POC]" + text)
 				} else {
-					fmt.Println(aurora.BrightGreen("[POC]"+text))
+					fmt.Println(aurora.BrightGreen("[POC]" + text))
 				}
 			}
 		}
@@ -82,11 +81,11 @@ func DalLog(level, text string, options model.Options) {
 				fmt.Println(text)
 
 			} else {
-				ftext = "[POC] "+text
+				ftext = "[POC] " + text
 				if options.NoColor {
-					fmt.Println("[POC]"+text)
+					fmt.Println("[POC]" + text)
 				} else {
-					fmt.Println(aurora.BrightGreen("[POC]"+text))
+					fmt.Println(aurora.BrightGreen("[POC]" + text))
 				}
 			}
 		} else {

@@ -12,7 +12,7 @@ import (
 func VerifyReflection(body, payload string) bool {
 	if strings.Contains(body, payload) {
 		return true
-	} 
+	}
 	return false
 }
 

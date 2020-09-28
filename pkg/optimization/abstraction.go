@@ -15,18 +15,18 @@ func Abstraction(s, payload string) []string {
 	position := 1
 	for _, text := range bodyarr {
 		pointer := make(map[int]string)
-		ptn := FindIndexesInLine(text,payload, lineSize, 0)
-		doubleQuote := FindIndexesInLine(text,"\"", lineSize, 0)
-		singleQuote := FindIndexesInLine(text,"'", lineSize, 0)
-		backtick := FindIndexesInLine(text,"`", lineSize, 0)
-		startTag := FindIndexesInLine(text,"<", lineSize, 0)
-		endTag := FindIndexesInLine(text,">", lineSize, 0)
-		startScript := FindIndexesInLine(text,"<script", lineSize, 0)
-		endScript := FindIndexesInLine(text,"</script", lineSize, 0)
+		ptn := FindIndexesInLine(text, payload, lineSize, 0)
+		doubleQuote := FindIndexesInLine(text, "\"", lineSize, 0)
+		singleQuote := FindIndexesInLine(text, "'", lineSize, 0)
+		backtick := FindIndexesInLine(text, "`", lineSize, 0)
+		startTag := FindIndexesInLine(text, "<", lineSize, 0)
+		endTag := FindIndexesInLine(text, ">", lineSize, 0)
+		startScript := FindIndexesInLine(text, "<script", lineSize, 0)
+		endScript := FindIndexesInLine(text, "</script", lineSize, 0)
 
 		// script와 태그를 구별하기 위해 tag부터(덮어써지도록)
 		setPointer(startTag, pointer, "tag-start")
-		setPointer(endTag, pointer, "tag-end")		
+		setPointer(endTag, pointer, "tag-end")
 		setPointer(startScript, pointer, "script-start")
 		setPointer(endScript, pointer, "script-end")
 		setPointer(doubleQuote, pointer, "double")
@@ -44,7 +44,7 @@ func Abstraction(s, payload string) []string {
 
 		modeMap := make(map[int]string)
 		positionMap := make(map[int]string)
-		
+
 		modeMap[1] = "inHTML"
 		modeMap[2] = "inJS"
 		modeMap[3] = "inATTR"
@@ -56,7 +56,7 @@ func Abstraction(s, payload string) []string {
 		positionMap[5] = "comment"
 		positionMap[6] = "pre"
 		positionMap[7] = "textarea"
-		
+
 		// 1 none
 		// 2 double
 		// 3 single
@@ -69,10 +69,10 @@ func Abstraction(s, payload string) []string {
 			if pointer[k] == "script-start" {
 				if (mode == 1) || ((mode == 3) && (position == 1)) {
 					mode = 4
-				} 
+				}
 			}
 			if pointer[k] == "script-end" {
-				if (mode != 3) && (mode != 4){
+				if (mode != 3) && (mode != 4) {
 					mode = 1
 				}
 			}
@@ -84,7 +84,7 @@ func Abstraction(s, payload string) []string {
 			if pointer[k] == "tag-end" {
 				if mode == 4 {
 					mode = 2
-				} else if (mode == 3 || position == 1) {
+				} else if mode == 3 || position == 1 {
 					mode = 1
 				}
 			}
@@ -101,17 +101,17 @@ func Abstraction(s, payload string) []string {
 				} else if (mode == 2 || mode == 3) && position == 3 {
 					position = 1
 				}
-			}	
+			}
 			if pointer[k] == "backtick" {
 				if (mode == 2) && position == 1 {
 					position = 4
 				} else if (mode == 2) && position == 4 {
 					position = 1
 				}
-			}	
+			}
 			if pointer[k] == payload {
-				mapdata = append(mapdata,modeMap[mode]+"-"+positionMap[position])
-				
+				mapdata = append(mapdata, modeMap[mode]+"-"+positionMap[position])
+
 			}
 		}
 
@@ -121,9 +121,9 @@ func Abstraction(s, payload string) []string {
 }
 
 // setPointer is settting pointer
-func setPointer(arr []int, pointer map[int]string, key string){
+func setPointer(arr []int, pointer map[int]string, key string) {
 	if len(arr) > 0 {
-		for k,v := range arr {
+		for k, v := range arr {
 			_ = k
 			pointer[v] = key
 		}
@@ -137,7 +137,7 @@ func FindIndexesInLine(text, key string, lineSize, pointing int) []int {
 	if pointer != -1 {
 		tempIndexes := FindIndexesInLine(text[pointer+1:], key, lineSize, pointer+pointing+1)
 		indexes = append(indexes, pointer+lineSize+pointing)
-		for _,v := range tempIndexes {
+		for _, v := range tempIndexes {
 			indexes = append(indexes, v)
 		}
 	}

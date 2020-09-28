@@ -3,7 +3,7 @@ package scanning
 // GetGfXSS is get cool parameter name from Gf-Patterns
 func GetGfXSS() []string {
 	// https://github.com/1ndianl33t/Gf-Patterns/blob/master/xss.json
-	params := []string {
+	params := []string{
 		"q",
 		"s",
 		"search",
