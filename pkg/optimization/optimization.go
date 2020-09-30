@@ -74,56 +74,47 @@ func MakeHeaderQuery(target, hn, hv string, options model.Options) (*http.Reques
 }
 
 // MakeRequestQuery is generate http query with custom paramters
-func MakeRequestQuery(target, param, payload, ptype string, options model.Options) (*http.Request, map[string]string) {
+func MakeRequestQuery(target, param, payload, ptype string, pAction string, options model.Options) (*http.Request, map[string]string) {
+	
 	tempMap := make(map[string]string)
 	tempMap["type"] = ptype
+	tempMap["action"] = pAction
 	tempMap["payload"] = payload
 	tempMap["param"] = param
 
 	payload = url.QueryEscape(payload)
 	u, _ := url.Parse(target)
 
-	data := u.String()
+	var tempParam string
+	if(options.Data == ""){
+		tempParam = u.RawQuery				// ---> GET
+	} else{
+		tempParam = options.Data			// ---> POST
+	}	
+	
+	paramList, _ := url.ParseQuery(tempParam)
 
-	if options.Data != "" {
-		tempParam, _ := url.ParseQuery(options.Data)
-		var body string
-		if tempParam[param] == nil {
-			body = param + "=" + payload + "&" + data
-		} else {
-			body = strings.Replace(body, param+"="+url.QueryEscape(tempParam[param][0]), param+"="+url.QueryEscape(tempParam[param][0])+payload, 1)
-		}
-		tempURL, _ := url.Parse(data)
-		tempQuery := tempURL.Query()
-		tempURL.RawQuery = tempQuery.Encode()
-
-		rst := GenerateNewRequest(tempURL.String(), body, options)
-		return rst, tempMap
-
-	} else {
-		tempParam := u.Query()
-
-		if tempParam[param] == nil {			
-			if(strings.Contains(data, "?")) {
-				data = data + "&"+param+"="+payload
-			} else{
-				data = data + "?"+param+"="+payload
-			}						
-		} else {
-			data = strings.Replace(data, param+"=" + url.QueryEscape(tempParam[param][0]), param + "=" + url.QueryEscape(tempParam[param][0])+payload, 1)
-			if tempParam[param] == nil {
-				data = "?" + param + "=" + payload + "&" + data
-			} else {
-				data = strings.Replace(data, param+"="+url.QueryEscape(tempParam[param][0]), param+"="+url.QueryEscape(tempParam[param][0])+payload, 1)
-			}
-		}
-
-		tempURL, _ := url.Parse(data)
-		tempQuery := tempURL.Query()
-		tempURL.RawQuery = tempQuery.Encode()
-		rst := GenerateNewRequest(tempURL.String(), "", options)
-		return rst, tempMap
+	// We first check if the parameter exist and then "append or replace" the value
+	if val, ok := paramList[tempMap["param"]]; ok {
+		if(tempMap["action"] == "toAppend"){
+			paramList[tempMap["param"]][0] = val[0] + payload
+		}else { //toReplace lies here
+			paramList[tempMap["param"]][0] = payload
+		}			
+	}else{
+		//if the parameter doesn't exist, is added.
+		paramList.Add(tempMap["param"], payload)
+	}				
+		
+	var rst *http.Request
+	if(options.Data == ""){
+		u.RawQuery = paramList.Encode()
+		rst = GenerateNewRequest(u.String(), "", options)
+	}else{
+		rst = GenerateNewRequest(u.String(), paramList.Encode(), options)
 	}
+		
+	return rst, tempMap
 }
 
 // MakePathQuery is generate http query with path

