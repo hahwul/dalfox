@@ -203,10 +203,22 @@ func Scan(target string, options model.Options, sid string) {
 
 			arr := getCommonPayload()
 			for _, avv := range arr {
-				tq, tm := optimization.MakePathQuery(target, "pleasedonthaveanamelikethis_plz_plz", avv, "inPATH", options)
+
+				var PathFinal string
+				tmpTarget, err := url.Parse(target)
+				if err != nil {
+					return
+				}
+
+				if tmpTarget.Path != "" {
+					PathFinal = tmpTarget.Scheme + "://" + tmpTarget.Hostname() + tmpTarget.Path
+				} else {
+					PathFinal = tmpTarget.Scheme + "://" + tmpTarget.Hostname() + "/" + tmpTarget.Path
+				}
+
+				tq, tm := optimization.MakeRequestQuery(PathFinal + ";" + avv, "", "", "inPATH", "toAppend", "NaN", options)
 				tm["payload"] = ";" + avv
 				query[tq] = tm
-
 			}
 
 			// set param base xss
@@ -237,13 +249,13 @@ func Scan(target string, options model.Options, sid string) {
 								for _, avv := range arr {
 									if optimization.Optimization(avv, badchars) {
 										// Add plain XSS Query
-										tq, tm := optimization.MakeRequestQuery(target, k, avv, ip, "toAppend", options)
+										tq, tm := optimization.MakeRequestQuery(target, k, avv, ip, "toAppend", "NaN", options)
 										query[tq] = tm
 										// Add URL Encoded XSS Query
-										etq, etm := optimization.MakeURLEncodeRequestQuery(target, k, avv, ip, options)
+										etq, etm := optimization.MakeRequestQuery(target, k, avv, ip, "toAppend", "urlEncode", options)
 										query[etq] = etm
 										// Add HTML Encoded XSS Query
-										htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, k, avv, ip, options)
+										htq, htm := optimization.MakeRequestQuery(target, k, avv, ip, "toAppend", "htmlEncode", options)
 										query[htq] = htm
 									}
 								}
@@ -255,13 +267,13 @@ func Scan(target string, options model.Options, sid string) {
 					for _, avv := range arc {
 						if optimization.Optimization(avv, badchars) {
 							// Add plain XSS Query
-							tq, tm := optimization.MakeRequestQuery(target, k, avv, "inHTML", "toAppend", options)
+							tq, tm := optimization.MakeRequestQuery(target, k, avv, "inHTML", "toAppend", "NaN", options)
 							query[tq] = tm
 							// Add URL encoded XSS Query
-							etq, etm := optimization.MakeURLEncodeRequestQuery(target, k, avv, "inHTML", options)
+							etq, etm := optimization.MakeRequestQuery(target, k, avv, "inHTML", "toAppend", "urlEncode", options)
 							query[etq] = etm
 							// Add HTML Encoded XSS Query
-							htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, k, avv, "inHTML", options)
+							htq, htm := optimization.MakeRequestQuery(target, k, avv, "inHTML", "toAppend", "htmlEncode", options)
 							query[htq] = htm
 						}
 					}
@@ -301,15 +313,15 @@ func Scan(target string, options model.Options, sid string) {
 				for _, bpayload := range bpayloads {
 					// Add plain XSS Query
 					bp := strings.Replace(bpayload, "CALLBACKURL", bcallback, 10)
-					tq, tm := optimization.MakeRequestQuery(target, spk, bp, "toBlind", "toAppend", options)
+					tq, tm := optimization.MakeRequestQuery(target, spk, bp, "toBlind", "toAppend", "NaN", options)
 					tm["payload"] = "toBlind"
 					query[tq] = tm
 					// Add URL encoded XSS Query
-					etq, etm := optimization.MakeURLEncodeRequestQuery(target, spk, bp, "toBlind", options)
+					etq, etm := optimization.MakeRequestQuery(target, spk, bp, "toBlind", "toAppend", "urlEncode", options)
 					etm["payload"] = "toBlind"
 					query[etq] = etm
 					// Add HTML Encoded XSS Query
-					htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, spk, bp, "toBlind", options)
+					htq, htm := optimization.MakeRequestQuery(target, spk, bp, "toBlind", "toAppend", "htmlEncode", options)
 					htm["payload"] = "toBlind"
 					query[htq] = htm
 				}
@@ -328,13 +340,13 @@ func Scan(target string, options model.Options, sid string) {
 					spd := spu.Query()
 					for spk := range spd {
 						// Add plain XSS Query
-						tq, tm := optimization.MakeRequestQuery(target, spk, customPayload, "toHTML", "toAppend", options)
+						tq, tm := optimization.MakeRequestQuery(target, spk, customPayload, "toHTML", "toAppend", "NaN", options)
 						query[tq] = tm
 						// Add URL encoded XSS Query
-						etq, etm := optimization.MakeURLEncodeRequestQuery(target, spk, customPayload, "inHTML", options)
+						etq, etm := optimization.MakeRequestQuery(target, spk, customPayload, "inHTML", "toAppend", "urlEncode",options)
 						query[etq] = etm
 						// Add HTML Encoded XSS Query
-						htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, spk, customPayload, "inHTML", options)
+						htq, htm := optimization.MakeRequestQuery(target, spk, customPayload, "inHTML", "toAppend", "htmlEncode",options)
 						query[htq] = htm
 					}
 				}
@@ -725,7 +737,7 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 						temp_q := tempURL.Query()
 						tempURL.RawQuery = temp_q.Encode()
 					*/
-					tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA", "toAppend", options)
+					tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA", "toAppend", "NaN", options)
 					var code string
 
 					//tempURL.RawQuery = temp_q.Encode()
@@ -770,7 +782,7 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 							*/
 							go func() {
 								defer wg.Done()
-								turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA", "toAppend", options)
+								turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA", "toAppend", "NaN", options)
 								rl.Block(tempURL.Host)
 								_, _, _, vrs, _ := SendReq(turl, "dalfox"+char, options)
 								_ = resp

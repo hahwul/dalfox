@@ -33,7 +33,7 @@ func SSTIAnalysis(target string, options model.Options) {
 
 	for bpk := range bpd {
 		for _, ssti := range getSSTIPayload() {
-			turl, _ := optimization.MakeRequestQuery(target, bpk, ssti, "toGrepping", "ToAppend", options)
+			turl, _ := optimization.MakeRequestQuery(target, bpk, ssti, "toGrepping", "ToAppend", "Nan", options)
 			reqs <- turl
 		}
 	}
@@ -63,7 +63,7 @@ func SqliAnalysis(target string, options model.Options) {
 
 	for bpk := range bpd {
 		for _, sqlipayload := range getSQLIPayload() {
-			turl, _ := optimization.MakeRequestQuery(target, bpk, sqlipayload, "toGrepping", "ToAppend", options)
+			turl, _ := optimization.MakeRequestQuery(target, bpk, sqlipayload, "toGrepping", "ToAppend", "NaN", options)
 			reqs <- turl
 		}
 	}
@@ -94,7 +94,7 @@ func OpeRedirectorAnalysis(target string, options model.Options) {
 
 	for bpk := range bpd {
 		for _, openRedirectPayload := range getOpenRedirectPayload() {
-			turl, _ := optimization.MakeRequestQuery(target, bpk, openRedirectPayload, "toOpenRedirecting", "toReplace", options)
+			turl, _ := optimization.MakeRequestQuery(target, bpk, openRedirectPayload, "toOpenRedirecting", "toReplace", "NaN", options)
 			reqs <- turl
 		}
 	}
