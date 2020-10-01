@@ -830,7 +830,6 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				foundAction(options, via[0].Host, via[0].URL.String(), "BAV")
 			}
 		}
-		}
 
 		return nil
 	}
