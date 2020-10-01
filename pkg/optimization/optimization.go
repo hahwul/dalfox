@@ -83,10 +83,6 @@ func MakeRequestQuery(target, param, payload, ptype string, pAction string, pEnc
 	tempMap["payload"] = payload
 	tempMap["param"] = param
 
-	if(tempMap["type"] != "toOpenRedirecting") {
-		payload = url.QueryEscape(payload)
-	}
-			
 	u, _ := url.Parse(target)
 
 	var tempParam string
@@ -123,7 +119,7 @@ func MakeRequestQuery(target, param, payload, ptype string, pAction string, pEnc
 		//if the parameter doesn't exist, is added.
 		paramList.Add(tempMap["param"], payload)
 	}				
-		
+	
 	var rst *http.Request
 	if(options.Data == ""){
 		u.RawQuery = paramList.Encode()
