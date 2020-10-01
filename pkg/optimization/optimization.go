@@ -83,7 +83,10 @@ func MakeRequestQuery(target, param, payload, ptype string, pAction string, pEnc
 	tempMap["payload"] = payload
 	tempMap["param"] = param
 
-	payload = url.QueryEscape(payload)
+	if(tempMap["type"] != "toOpenRedirecting") {
+		payload = url.QueryEscape(payload)
+	}
+			
 	u, _ := url.Parse(target)
 
 	var tempParam string

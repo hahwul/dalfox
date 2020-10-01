@@ -63,12 +63,14 @@ func Scan(target string, options model.Options, sid string) {
 			Timeout:   time.Duration(t) * time.Second,
 			Transport: transport,
 		}
+		
 		if !options.FollowRedirect {
 			client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 				//return errors.New("Follow redirect") // or maybe the error from the request
 				return nil
 			}
 		}
+
 		tres, err := client.Do(treq)
 		if err != nil {
 			msg := fmt.Sprintf("not running %v", err)
@@ -677,12 +679,14 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 				Timeout:   time.Duration(t) * time.Second,
 				Transport: transport,
 			}
+			
 			if !options.FollowRedirect {
 				client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 					//return errors.New("Follow redirect") // or maybe the error from the request
 					return nil
 				}
 			}
+
 			tres, err := client.Do(treq)
 			if err == nil {
 				defer tres.Body.Close()
@@ -819,18 +823,17 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 		Transport: netTransport,
 	}
 		
-	//if !options.FollowRedirect {
-	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {			
-		if(strings.Contains(req.URL.String(), "google")){
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {					
+		if(strings.Contains(req.URL.Host, "google")){
 			printing.DalLog("GREP", "Found Open Redirector. Payload: " + via[0].URL.String(), options)
-			}					
-			return nil
 		}
-	//}
+
+		return nil
+	}
 	
 	resp, err := client.Do(req)
 	if err != nil {
-		//fmt.Println("HTTP call failed:", err)
+		//fmt.Printf("HTTP call failed: %v --> %v", req.URL.String(), err)
 		return "", resp, false, false, err
 	}
 

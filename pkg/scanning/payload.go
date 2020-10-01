@@ -5,6 +5,8 @@ import "strings"
 //basic open redirect payloads
 func getOpenRedirectPayload() []string {
 	payload := []string{
+		"//google.com",
+		"//google.com/",
 		"//google.com/%2f..",
 		"///google.com/%2f..",
 		"////google.com/%2f..",
