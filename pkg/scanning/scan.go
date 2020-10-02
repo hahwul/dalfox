@@ -63,11 +63,14 @@ func Scan(target string, options model.Options, sid string) {
 			Timeout:   time.Duration(t) * time.Second,
 			Transport: transport,
 		}
+		
 		if !options.FollowRedirect {
 			client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-				return errors.New("Follow redirect") // or maybe the error from the request
+				//return errors.New("Follow redirect") // or maybe the error from the request
+				return nil
 			}
 		}
+
 		tres, err := client.Do(treq)
 		if err != nil {
 			msg := fmt.Sprintf("not running %v", err)
@@ -89,6 +92,7 @@ func Scan(target string, options model.Options, sid string) {
 		body, err := ioutil.ReadAll(tres.Body)
 		printing.DalLog("SYSTEM", "Vaild target [ code:"+strconv.Itoa(tres.StatusCode)+" / size:"+strconv.Itoa(len(body))+" ]", options)
 	}
+
 	if options.Mining {
 		if options.MiningWordlist != "" {
 			printing.DalLog("SYSTEM", "Using dictionary mining option [list="+options.MiningWordlist+"] 📚⛏", options)
@@ -109,6 +113,7 @@ func Scan(target string, options model.Options, sid string) {
 	if options.NoBAV {
 		task = 2
 	}
+
 	wait.Add(task)
 	go func() {
 		defer wait.Done()
@@ -125,9 +130,9 @@ func Scan(target string, options model.Options, sid string) {
 	if !options.NoBAV {
 		go func() {
 			defer wait.Done()
-			printing.DalLog("SYSTEM", "Start BAV(Basic Another Vulnerability) analysis.. / like sqli,ssti  🔍", options)
+			printing.DalLog("SYSTEM", "Start BAV(Basic Another Vulnerability) analysis / [sqli, ssti, OpenRedirect]  🔍", options)
 			var bavWaitGroup sync.WaitGroup
-			bavTask := 2
+			bavTask := 3
 			bavWaitGroup.Add(bavTask)
 			go func() {
 				defer bavWaitGroup.Done()
@@ -137,10 +142,15 @@ func Scan(target string, options model.Options, sid string) {
 				defer bavWaitGroup.Done()
 				SSTIAnalysis(target, options)
 			}()
+			go func(){
+				defer bavWaitGroup.Done()
+				OpeRedirectorAnalysis(target, options)
+			}()
 			bavWaitGroup.Wait()
 			printing.DalLog("SYSTEM", "BAV analysis done ✓", options)
 		}()
 	}
+	
 	s := spinner.New(spinner.CharSets[4], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 	s.Prefix = " "
 	s.Suffix = "  Waiting routines.."
@@ -154,6 +164,7 @@ func Scan(target string, options model.Options, sid string) {
 		//time.Sleep(3 * time.Second) // Run for some time to simulate work
 	}
 	wait.Wait()
+
 	if !(options.Silence || options.NoSpinner) {
 		s.Stop()
 	}
@@ -194,10 +205,22 @@ func Scan(target string, options model.Options, sid string) {
 
 			arr := getCommonPayload()
 			for _, avv := range arr {
-				tq, tm := optimization.MakePathQuery(target, "pleasedonthaveanamelikethis_plz_plz", avv, "inPATH", options)
+
+				var PathFinal string
+				tmpTarget, err := url.Parse(target)
+				if err != nil {
+					return
+				}
+
+				if tmpTarget.Path != "" {
+					PathFinal = tmpTarget.Scheme + "://" + tmpTarget.Hostname() + tmpTarget.Path
+				} else {
+					PathFinal = tmpTarget.Scheme + "://" + tmpTarget.Hostname() + "/" + tmpTarget.Path
+				}
+
+				tq, tm := optimization.MakeRequestQuery(PathFinal + ";" + avv, "", "", "inPATH", "toAppend", "NaN", options)
 				tm["payload"] = ";" + avv
 				query[tq] = tm
-
 			}
 
 			// set param base xss
@@ -228,13 +251,13 @@ func Scan(target string, options model.Options, sid string) {
 								for _, avv := range arr {
 									if optimization.Optimization(avv, badchars) {
 										// Add plain XSS Query
-										tq, tm := optimization.MakeRequestQuery(target, k, avv, ip, options)
+										tq, tm := optimization.MakeRequestQuery(target, k, avv, ip, "toAppend", "NaN", options)
 										query[tq] = tm
 										// Add URL Encoded XSS Query
-										etq, etm := optimization.MakeURLEncodeRequestQuery(target, k, avv, ip, options)
+										etq, etm := optimization.MakeRequestQuery(target, k, avv, ip, "toAppend", "urlEncode", options)
 										query[etq] = etm
 										// Add HTML Encoded XSS Query
-										htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, k, avv, ip, options)
+										htq, htm := optimization.MakeRequestQuery(target, k, avv, ip, "toAppend", "htmlEncode", options)
 										query[htq] = htm
 									}
 								}
@@ -246,13 +269,13 @@ func Scan(target string, options model.Options, sid string) {
 					for _, avv := range arc {
 						if optimization.Optimization(avv, badchars) {
 							// Add plain XSS Query
-							tq, tm := optimization.MakeRequestQuery(target, k, avv, "inHTML", options)
+							tq, tm := optimization.MakeRequestQuery(target, k, avv, "inHTML", "toAppend", "NaN", options)
 							query[tq] = tm
 							// Add URL encoded XSS Query
-							etq, etm := optimization.MakeURLEncodeRequestQuery(target, k, avv, "inHTML", options)
+							etq, etm := optimization.MakeRequestQuery(target, k, avv, "inHTML", "toAppend", "urlEncode", options)
 							query[etq] = etm
 							// Add HTML Encoded XSS Query
-							htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, k, avv, "inHTML", options)
+							htq, htm := optimization.MakeRequestQuery(target, k, avv, "inHTML", "toAppend", "htmlEncode", options)
 							query[htq] = htm
 						}
 					}
@@ -292,15 +315,15 @@ func Scan(target string, options model.Options, sid string) {
 				for _, bpayload := range bpayloads {
 					// Add plain XSS Query
 					bp := strings.Replace(bpayload, "CALLBACKURL", bcallback, 10)
-					tq, tm := optimization.MakeRequestQuery(target, spk, bp, "toBlind", options)
+					tq, tm := optimization.MakeRequestQuery(target, spk, bp, "toBlind", "toAppend", "NaN", options)
 					tm["payload"] = "toBlind"
 					query[tq] = tm
 					// Add URL encoded XSS Query
-					etq, etm := optimization.MakeURLEncodeRequestQuery(target, spk, bp, "toBlind", options)
+					etq, etm := optimization.MakeRequestQuery(target, spk, bp, "toBlind", "toAppend", "urlEncode", options)
 					etm["payload"] = "toBlind"
 					query[etq] = etm
 					// Add HTML Encoded XSS Query
-					htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, spk, bp, "toBlind", options)
+					htq, htm := optimization.MakeRequestQuery(target, spk, bp, "toBlind", "toAppend", "htmlEncode", options)
 					htm["payload"] = "toBlind"
 					query[htq] = htm
 				}
@@ -319,13 +342,13 @@ func Scan(target string, options model.Options, sid string) {
 					spd := spu.Query()
 					for spk := range spd {
 						// Add plain XSS Query
-						tq, tm := optimization.MakeRequestQuery(target, spk, customPayload, "toHTML", options)
+						tq, tm := optimization.MakeRequestQuery(target, spk, customPayload, "toHTML", "toAppend", "NaN", options)
 						query[tq] = tm
 						// Add URL encoded XSS Query
-						etq, etm := optimization.MakeURLEncodeRequestQuery(target, spk, customPayload, "inHTML", options)
+						etq, etm := optimization.MakeRequestQuery(target, spk, customPayload, "inHTML", "toAppend", "urlEncode",options)
 						query[etq] = etm
 						// Add HTML Encoded XSS Query
-						htq, htm := optimization.MakeHTMLEncodeRequestQuery(target, spk, customPayload, "inHTML", options)
+						htq, htm := optimization.MakeRequestQuery(target, spk, customPayload, "inHTML", "toAppend", "htmlEncode",options)
 						query[htq] = htm
 					}
 				}
@@ -358,6 +381,7 @@ func Scan(target string, options model.Options, sid string) {
 					// queries.metadata : map[string]string
 					k := reqJob.request
 					v := reqJob.metadata
+
 					if (vStatus[v["param"]] == false) || (v["type"] != "toBlind") || (v["type"] != "toGrepping") {
 						rl.Block(k.Host)
 						resbody, _, vds, vrs, err := SendReq(k, v["payload"], options)
@@ -655,11 +679,14 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 				Timeout:   time.Duration(t) * time.Second,
 				Transport: transport,
 			}
+			
 			if !options.FollowRedirect {
 				client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-					return errors.New("Follow redirect") // or maybe the error from the request
+					//return errors.New("Follow redirect") // or maybe the error from the request
+					return nil
 				}
 			}
+
 			tres, err := client.Do(treq)
 			if err == nil {
 				defer tres.Body.Close()
@@ -714,7 +741,7 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 						temp_q := tempURL.Query()
 						tempURL.RawQuery = temp_q.Encode()
 					*/
-					tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA", options)
+					tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA", "toAppend", "NaN", options)
 					var code string
 
 					//tempURL.RawQuery = temp_q.Encode()
@@ -759,7 +786,7 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 							*/
 							go func() {
 								defer wg.Done()
-								turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA", options)
+								turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA", "toAppend", "NaN", options)
 								rl.Block(tempURL.Host)
 								_, _, _, vrs, _ := SendReq(turl, "dalfox"+char, options)
 								_ = resp
@@ -795,14 +822,21 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 		Timeout:   time.Duration(options.Timeout) * time.Second,
 		Transport: netTransport,
 	}
-	if !options.FollowRedirect {
-		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-			return errors.New("Follow redirect") // or maybe the error from the request
+		
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {					
+		if(strings.Contains(req.URL.Host, "google")){
+			printing.DalLog("GREP", "Found Open Redirector. Payload: " + via[0].URL.String(), options)
+			if options.FoundAction != "" {
+				foundAction(options, via[0].Host, via[0].URL.String(), "BAV")
+			}
 		}
+
+		return nil
 	}
+	
 	resp, err := client.Do(req)
 	if err != nil {
-		//fmt.Println("HTTP call failed:", err)
+		//fmt.Printf("HTTP call failed: %v --> %v", req.URL.String(), err)
 		return "", resp, false, false, err
 	}
 
