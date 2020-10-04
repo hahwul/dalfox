@@ -66,8 +66,7 @@ func Scan(target string, options model.Options, sid string) {
 		
 		if !options.FollowRedirect {
 			client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-				//return errors.New("Follow redirect") // or maybe the error from the request
-				return nil
+				return http.ErrUseLastResponse
 			}
 		}
 
