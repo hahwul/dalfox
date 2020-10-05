@@ -54,12 +54,12 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&userAgent, "user-agent", "", "Add custom UserAgent")
 	rootCmd.PersistentFlags().StringVarP(&blind, "blind", "b", "", "Add your blind xss (e.g -b hahwul.xss.ht)")
 	rootCmd.PersistentFlags().StringVarP(&output, "output", "o", "", "Write to output file")
-	rootCmd.PersistentFlags().StringVar(&format, "format", "plain", "stdout output format(plain/json)")
+	rootCmd.PersistentFlags().StringVar(&format, "format", "plain", "Stdout output format(plain/json)")
 	rootCmd.PersistentFlags().StringVar(&foundAction, "found-action", "", "If found weak/vuln, action(cmd) to next")
 	rootCmd.PersistentFlags().StringVar(&proxy, "proxy", "", "Send all request to proxy server (e.g --proxy http://127.0.0.1:8080)")
 	rootCmd.PersistentFlags().StringVar(&grep, "grep", "", "Using custom grepping file (e.g --grep ./samples/sample_grep.json)")
 	rootCmd.PersistentFlags().StringVar(&ignoreReturn, "ignore-return", "", "Ignore scanning from return code (e.g --ignore-return 302,403,404)")
-	rootCmd.PersistentFlags().StringVar(&miningWord, "mining-dict-word", "", "custom wordlist file for param mining (e.g --mining-dict-word word.txt)")
+	rootCmd.PersistentFlags().StringVar(&miningWord, "mining-dict-word", "", "Custom wordlist file for param mining (e.g --mining-dict-word word.txt)")
 	rootCmd.PersistentFlags().StringVarP(&method, "method", "X", "", "Force overriding HTTP Method (e.g -X PUT)")
 
 	//Int
