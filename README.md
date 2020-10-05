@@ -96,14 +96,18 @@ Flags:
       --mining-dict               Find new parameter with dictionary attack, default is Gf-Patterns=>XSS (default true)
       --mining-dict-word string   custom wordlist file for param mining (e.g --mining-dict-word word.txt)
       --mining-dom                Find new parameter in DOM (attribute/js value) (default true)
-      --no-bav                    not use BAV(Basic Another Vulnerability) analysis
-      --no-color                  not use colorize
-      --no-spinner                not use spinner
-      --only-discovery            Only testing parameter analysis
+      --no-color                  Not use colorize
+      --no-spinner                Not use spinner
+      --only-discovery            Only testing parameter analysis (same '--skip-xss-scanning' option)
   -o, --output string             Write to output file
   -p, --param string              Only testing selected parameters
       --proxy string              Send all request to proxy server (e.g --proxy http://127.0.0.1:8080)
       --silence                   Not printing all logs
+      --skip-bav                  Skipping BAV(Basic Another Vulnerability) analysis
+      --skip-mining-all           Skipping ALL parameter mining
+      --skip-mining-dict          Skipping Dict base parameter mining
+      --skip-mining-dom           Skipping DOM base parameter mining
+      --skip-xss-scanning         Skipping XSS Scanning (same '--only-discovery' option)
       --timeout int               Second of timeout (default 10)
       --user-agent string         Add custom UserAgent
   -w, --worker int                Number of worker (default 100)
