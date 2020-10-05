@@ -17,8 +17,9 @@ var optionsBool = make(map[string]bool)
 var config, cookie, data, header, p, customPayload, userAgent, blind, output, format, foundAction, proxy, grep string
 var ignoreReturn, miningWord, method string
 var timeout, concurrence, delay int
-var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, noBAV bool
+var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner bool
 var options model.Options
+var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV bool
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -67,14 +68,18 @@ func init() {
 	rootCmd.PersistentFlags().IntVarP(&concurrence, "worker", "w", 100, "Number of worker")
 
 	//Bool
-	rootCmd.PersistentFlags().BoolVar(&onlyDiscovery, "only-discovery", false, "Only testing parameter analysis")
+	rootCmd.PersistentFlags().BoolVar(&onlyDiscovery, "only-discovery", false, "Only testing parameter analysis (same '--skip-xss-scanning' option)")
 	rootCmd.PersistentFlags().BoolVar(&silence, "silence", false, "Not printing all logs")
 	rootCmd.PersistentFlags().BoolVar(&mining, "mining-dict", true, "Find new parameter with dictionary attack, default is Gf-Patterns=>XSS")
 	rootCmd.PersistentFlags().BoolVar(&findingDOM, "mining-dom", true, "Find new parameter in DOM (attribute/js value)")
 	rootCmd.PersistentFlags().BoolVar(&followRedirect, "follow-redirects", false, "Following redirection")
-	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "not use colorize")
-	rootCmd.PersistentFlags().BoolVar(&noSpinner, "no-spinner", false, "not use spinner")
-	rootCmd.PersistentFlags().BoolVar(&noBAV, "no-bav", false, "not use BAV(Basic Another Vulnerability) analysis")
+	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Not use colorize")
+	rootCmd.PersistentFlags().BoolVar(&noSpinner, "no-spinner", false, "Not use spinner")
+	rootCmd.PersistentFlags().BoolVar(&skipBAV, "skip-bav", false, "Skipping BAV(Basic Another Vulnerability) analysis")
+	rootCmd.PersistentFlags().BoolVar(&skipMiningDom, "skip-mining-dom", false, "Skipping DOM base parameter mining")
+	rootCmd.PersistentFlags().BoolVar(&skipMiningDict, "skip-mining-dict", false, "Skipping Dict base parameter mining")
+	rootCmd.PersistentFlags().BoolVar(&skipMiningAll, "skip-mining-all", false, "Skipping ALL parameter mining")
+	rootCmd.PersistentFlags().BoolVar(&skipXSSScan, "skip-xss-scanning", false, "Skipping XSS Scanning (same '--only-discovery' option)")
 
 	printing.Banner()
 }
@@ -108,7 +113,25 @@ func initConfig() {
 		NoColor:           noColor,
 		Method:            method,
 		NoSpinner:         noSpinner,
-		NoBAV:             noBAV,
+		NoBAV:             skipBAV,
+	}
+	// var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV bool
+
+	if skipMiningAll {
+		options.FindingDOM = false
+		options.Mining = false
+
+	} else {
+		if skipMiningDom {
+			options.FindingDOM = false
+		}
+		if skipMiningDict {
+			options.Mining = false
+		}
+	}
+
+	if skipXSSScan {
+		options.OnlyDiscovery = true
 	}
 
 	if grep != "" {
