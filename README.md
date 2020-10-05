@@ -86,7 +86,7 @@ Flags:
   -d, --data string               Using POST Method and add Body data
       --delay int                 Milliseconds between send to same host (1000==1s)
       --follow-redirects          Following redirection
-      --format string             stdout output format(plain/json) (default "plain")
+      --format string             Stdout output format(plain/json) (default "plain")
       --found-action string       If found weak/vuln, action(cmd) to next
       --grep string               Using custom grepping file (e.g --grep ./samples/sample_grep.json)
   -H, --header string             Add custom headers
@@ -94,7 +94,7 @@ Flags:
       --ignore-return string      Ignore scanning from return code (e.g --ignore-return 302,403,404)
   -X, --method string             Force overriding HTTP Method (e.g -X PUT)
       --mining-dict               Find new parameter with dictionary attack, default is Gf-Patterns=>XSS (default true)
-      --mining-dict-word string   custom wordlist file for param mining (e.g --mining-dict-word word.txt)
+      --mining-dict-word string   Custom wordlist file for param mining (e.g --mining-dict-word word.txt)
       --mining-dom                Find new parameter in DOM (attribute/js value) (default true)
       --no-color                  Not use colorize
       --no-spinner                Not use spinner
