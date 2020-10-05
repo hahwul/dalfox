@@ -58,7 +58,7 @@ You can find some additional installation variations in the [Installation Guide]
 
 ## Usage
 ```plain
-Available Commands:
+Modes: 
   file        Use file mode(targets list or rawdata)
   help        Help about any command
   pipe        Use pipeline mode
