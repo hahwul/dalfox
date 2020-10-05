@@ -36,6 +36,8 @@ type Options struct {
 	Method            string
 	NoSpinner         bool
 	NoBAV             bool
+	ServerHost        string
+	ServerPort        int
 }
 
 // Scan is struct of scan

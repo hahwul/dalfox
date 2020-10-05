@@ -3,6 +3,7 @@ package server
 import (
 	"net/http"
 	"time"
+	"strconv"
 
 	"github.com/hahwul/dalfox/pkg/model"
 	printing "github.com/hahwul/dalfox/pkg/printing"
@@ -29,7 +30,7 @@ func RunAPIServer(options model.Options) {
 	var scans []string
 	e := echo.New()
 	options.IsAPI = true
-	e.Server.Addr = ":6664"
+	e.Server.Addr = options.ServerHost+":"+strconv.Itoa(options.ServerPort)
 	e.Use(middleware.SecureWithConfig(middleware.SecureConfig{
 		XSSProtection:      "",
 		ContentTypeNosniff: "",
