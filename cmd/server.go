@@ -15,6 +15,8 @@ var serverCmd = &cobra.Command{
 	Short: "Start API Server",
 	Run: func(cmd *cobra.Command, args []string) {
 		printing.DalLog("SYSTEM", "Starting API Server", options)
+		options.ServerHost = host
+		options.ServerPort = port
 		server.RunAPIServer(options)
 	},
 }
@@ -23,6 +25,4 @@ func init() {
 	rootCmd.AddCommand(serverCmd)
 	serverCmd.Flags().IntVar(&port, "port", 6664, "Bind Port")
 	serverCmd.Flags().StringVar(&host, "host", "0.0.0.0", "Bind address")
-	options.ServerHost = host
-	options.ServerPort = port
 }
