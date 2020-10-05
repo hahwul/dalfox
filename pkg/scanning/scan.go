@@ -866,7 +866,11 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					PoC:  req.URL.String(),
 				}
 				if !duplicatedResult(scanObject.Results, *rst) {
-					printing.DalLog("GREP", "Found SSTI via built-in grepping / payload: "+payload, options)
+					if payload != "" {
+						printing.DalLog("GREP", "Found SSTI via built-in grepping / payload: "+payload, options)
+					} else {
+						printing.DalLog("GREP", "Found SSTI via built-in grepping / original request", options)
+					}
 					for _, vv := range v {
 						printing.DalLog("CODE", vv, options)
 					}
@@ -885,7 +889,11 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				PoC:  req.URL.String(),
 			}
 			if !duplicatedResult(scanObject.Results, *rst) {
-				printing.DalLog("GREP", "Found "+k+" via built-in grepping / payload: "+payload, options)
+				if payload != "" {
+					printing.DalLog("GREP", "Found "+k+" via built-in grepping / payload: "+payload, options)
+				} else {
+					printing.DalLog("GREP", "Found "+k+" via built-in grepping / original request", options)
+				}
 				for _, vv := range v {
 					printing.DalLog("CODE", vv, options)
 				}
