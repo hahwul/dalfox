@@ -58,17 +58,6 @@ You can find some additional installation variations in the [Installation Guide]
 
 ## Usage
 ```plain
-    _..._
-  .' .::::.   __   _   _    ___ _ __ __
- :  :::::::: |  \ / \ | |  | __/ \\ V /
- :  :::::::: | o ) o || |_ | _( o )) (
- '. '::::::' |__/|_n_||___||_| \_//_n_\
-   '-.::''
-Parameter Analysis and XSS Scanning tool based on golang
-Finder Of XSS and Dal is the Korean pronunciation of moon. @hahwul
-Usage:
-  dalfox [command]
-
 Available Commands:
   file        Use file mode(targets list or rawdata)
   help        Help about any command
@@ -78,7 +67,7 @@ Available Commands:
   url         Use single target mode
   version     Show version
 
-Flags:
+Global Flags:
   -b, --blind string              Add your blind xss (e.g -b hahwul.xss.ht)
       --config string             Using config from file
   -C, --cookie string             Add custom cookie
@@ -112,7 +101,26 @@ Flags:
       --user-agent string         Add custom UserAgent
   -w, --worker int                Number of worker (default 100)
 
-Use "dalfox [command] --help" for more information about a command.
+Server Flags:
+  -h, --help          help for server
+      --host string   Bind address (default "0.0.0.0")
+      --port int      Bind Port (default 6664)
+      
+Pipe Flags:
+  -h, --help        help for pipe
+      --multicast   Scanning N*Host mode
+      
+File Flags:
+  -h, --help        help for file
+      --http        Using force http on rawdata mode
+      --multicast   Scanning N*Host mode
+      --rawdata     Using req rawdata from Burp/ZAP
+      
+SXSS Flags:
+  -h, --help             help for sxss
+      --mass             Testing mass vector (comming soon)
+      --sequence int     Set sequence to first number (e.g --trigger https://~/view?no=SEQNC --sequence 3) (default -1)
+      --trigger string   Checking this url after inject sxss code (e.g --trigger https://~~/profile)
 ```
 
 ```
