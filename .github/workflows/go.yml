@@ -9,7 +9,7 @@ jobs:
         go: ["1.13", "1.14", "1.15"]
     steps:
       - name: Set up Go ${{ matrix.go }}
-        uses: actions/setup-go@v1
+        uses: actions/setup-go@v2
         with:
           go-version: ${{ matrix.go }}
         id: go
