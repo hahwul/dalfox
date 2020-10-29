@@ -77,4 +77,4 @@ snapcrafts:
 
     apps:
       dalfox:
-        plugs: ["network","network-bind"]
+        plugs: ["home","network","network-bind"]
