@@ -17,6 +17,6 @@ require (
 	github.com/spf13/cobra v1.1.1
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/swaggo/echo-swagger v1.0.0
-	github.com/swaggo/swag v1.6.8
+	github.com/swaggo/swag v1.6.9
 	github.com/tylerb/graceful v1.2.15
 )
