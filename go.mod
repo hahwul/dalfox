@@ -1,6 +1,6 @@
 module github.com/hahwul/dalfox
 
-go 1.15
+go 1.14
 
 require (
 	github.com/PuerkitoBio/goquery v1.6.0
