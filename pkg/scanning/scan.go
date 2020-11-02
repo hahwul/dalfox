@@ -200,7 +200,7 @@ func Scan(target string, options model.Options, sid string) {
 
 		// set path base xss
 
-		if isAllowType(policy["Content-Type"]) {
+		if (isAllowType(policy["Content-Type"]) && !options.OnlyCustomPayload){
 
 			arr := getCommonPayload()
 			for _, avv := range arr {
@@ -847,10 +847,11 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 	//for SSTI
 	ssti := getSSTIPayload()
 
-	//grepResult := make(map[string][]string)
+	grepResult := make(map[string][]string)
 
-	grepResult := builtinGrep(str)
-
+	if !options.NoGrep {
+		grepResult = builtinGrep(str)
+	}
 	for k, v := range grepResult {
 		if k == "dalfox-ssti" {
 			really := false

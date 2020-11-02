@@ -24,6 +24,7 @@ type Options struct {
 	NowURL            int
 	Sequence          int
 	OnlyDiscovery     bool
+	OnlyCustomPayload bool
 	Silence           bool
 	IsAPI             bool
 	Mass              bool
@@ -38,6 +39,7 @@ type Options struct {
 	NoBAV             bool
 	ServerHost        string
 	ServerPort        int
+	NoGrep            bool
 }
 
 // Scan is struct of scan
