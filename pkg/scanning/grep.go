@@ -40,8 +40,6 @@ func builtinGrep(data string) map[string][]string {
 		"dalfox-aws-access-key":        "AKIA[0-9A-Z]{16}",
 		"dalfox-amazon-mws-auth-token": "amzn\\.mws\\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
 		"dalfox-facebook-access-token": "EAACEdEose0cBA[0-9A-Za-z]+",
-		"dalfox-authorization-basic":   "basic [a-zA-Z0-9_\\-:\\.]+",
-		"dalfox-authorization-beare":   "bearer [a-zA-Z0-9_\\-\\.]+",
 		"dalfox-github-access-token":   "[a-zA-Z0-9_-]*:[a-zA-Z0-9_\\-]+@github\\.com*",
 		"dalfox-azure-storage":         "[a-zA-Z0-9_-]*\\.file.core.windows.net",
 		"dalfox-error-mysql":           "(SQL syntax.*MySQL|Warning.*mysql_.*|MySqlException \\(0x|valid MySQL result|check the manual that corresponds to your (MySQL|MariaDB) server version|MySqlClient\\.|com\\.mysql\\.jdbc\\.exceptions)",
