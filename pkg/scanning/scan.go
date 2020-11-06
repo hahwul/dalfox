@@ -287,8 +287,6 @@ func Scan(target string, options model.Options, sid string) {
 
 		// Blind payload
 		if options.BlindURL != "" {
-			spu, _ := url.Parse(target)
-			spd := spu.Query()
 			bpayloads := getBlindPayload()
 
 			//strings.HasPrefix("foobar", "foo") // true
@@ -309,20 +307,20 @@ func Scan(target string, options model.Options, sid string) {
 			}
 
 			// loop parameter list
-			for spk := range spd {
+			for k,_ := range params {
 				// loop payload list
 				for _, bpayload := range bpayloads {
 					// Add plain XSS Query
 					bp := strings.Replace(bpayload, "CALLBACKURL", bcallback, 10)
-					tq, tm := optimization.MakeRequestQuery(target, spk, bp, "toBlind", "toAppend", "NaN", options)
+					tq, tm := optimization.MakeRequestQuery(target, k, bp, "toBlind", "toAppend", "NaN", options)
 					tm["payload"] = "toBlind"
 					query[tq] = tm
 					// Add URL encoded XSS Query
-					etq, etm := optimization.MakeRequestQuery(target, spk, bp, "toBlind", "toAppend", "urlEncode", options)
+					etq, etm := optimization.MakeRequestQuery(target, k, bp, "toBlind", "toAppend", "urlEncode", options)
 					etm["payload"] = "toBlind"
 					query[etq] = etm
 					// Add HTML Encoded XSS Query
-					htq, htm := optimization.MakeRequestQuery(target, spk, bp, "toBlind", "toAppend", "htmlEncode", options)
+					htq, htm := optimization.MakeRequestQuery(target, k, bp, "toBlind", "toAppend", "htmlEncode", options)
 					htm["payload"] = "toBlind"
 					query[htq] = htm
 				}
@@ -337,17 +335,15 @@ func Scan(target string, options model.Options, sid string) {
 				printing.DalLog("SYSTEM", "Custom XSS payload load fail..", options)
 			} else {
 				for _, customPayload := range ff {
-					spu, _ := url.Parse(target)
-					spd := spu.Query()
-					for spk := range spd {
+					for k, _ := range params {
 						// Add plain XSS Query
-						tq, tm := optimization.MakeRequestQuery(target, spk, customPayload, "toHTML", "toAppend", "NaN", options)
+						tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "toHTML", "toAppend", "NaN", options)
 						query[tq] = tm
 						// Add URL encoded XSS Query
-						etq, etm := optimization.MakeRequestQuery(target, spk, customPayload, "inHTML", "toAppend", "urlEncode",options)
+						etq, etm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML", "toAppend", "urlEncode",options)
 						query[etq] = etm
 						// Add HTML Encoded XSS Query
-						htq, htm := optimization.MakeRequestQuery(target, spk, customPayload, "inHTML", "toAppend", "htmlEncode",options)
+						htq, htm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML", "toAppend", "htmlEncode",options)
 						query[htq] = htm
 					}
 				}
