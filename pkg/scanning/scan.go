@@ -822,7 +822,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 		if(strings.Contains(req.URL.Host, "google")){
 			printing.DalLog("GREP", "Found Open Redirector. Payload: " + via[0].URL.String(), options)
 			if options.FoundAction != "" {
-				foundAction(options, via[0].Host, via[0].URL.String(), "BAV")
+				foundAction(options, via[0].Host, via[0].URL.String(), "BAV: OpenRedirect")
 			}
 		}
 
@@ -868,6 +868,11 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					} else {
 						printing.DalLog("GREP", "Found SSTI via built-in grepping / original request", options)
 					}
+
+					if options.FoundAction != "" {
+						foundAction(options, req.URL.Host, rst.PoC, "BAV: " + rst.Type)
+					}
+
 					for _, vv := range v {
 						printing.DalLog("CODE", vv, options)
 					}
@@ -891,6 +896,11 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				} else {
 					printing.DalLog("GREP", "Found "+k+" via built-in grepping / original request", options)
 				}
+
+				if options.FoundAction != "" {
+					foundAction(options, req.URL.Host, rst.PoC, "BAV: " + rst.Type)
+				}
+
 				for _, vv := range v {
 					printing.DalLog("CODE", vv, options)
 				}
@@ -922,6 +932,11 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				for _, vv := range v {
 					printing.DalLog("CODE", vv, options)
 				}
+				
+				if options.FoundAction != "" {
+					foundAction(options, req.URL.Host, payload, "BAV")
+				}
+
 				if options.Format == "json" {
 					printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\""+k+"\",\"poc\":\""+req.URL.String()+"\"", options)
 				} else {
