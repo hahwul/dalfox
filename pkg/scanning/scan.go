@@ -934,7 +934,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				}
 				
 				if options.FoundAction != "" {
-					foundAction(options, req.URL.Host, payload, "BAV")
+					foundAction(options, req.URL.Host, rst.PoC, "BAV: " + rst.Type)
 				}
 
 				if options.Format == "json" {
