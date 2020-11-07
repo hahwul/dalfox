@@ -87,12 +87,14 @@ Global Flags:
       --mining-dom                Find new parameter in DOM (attribute/js value) (default true)
       --no-color                  Not use colorize
       --no-spinner                Not use spinner
+      --only-custom-payload       Only testing custom payload (required --custom-payload)
       --only-discovery            Only testing parameter analysis (same '--skip-xss-scanning' option)
   -o, --output string             Write to output file
   -p, --param string              Only testing selected parameters
       --proxy string              Send all request to proxy server (e.g --proxy http://127.0.0.1:8080)
       --silence                   Not printing all logs
       --skip-bav                  Skipping BAV(Basic Another Vulnerability) analysis
+      --skip-grepping             Skipping built-in grepping
       --skip-mining-all           Skipping ALL parameter mining
       --skip-mining-dict          Skipping Dict base parameter mining
       --skip-mining-dom           Skipping DOM base parameter mining

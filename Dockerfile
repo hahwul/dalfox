@@ -1,9 +1,15 @@
-FROM golang:1.15.2-alpine3.12
-
+# BUILDER
+FROM golang:latest AS builder
 WORKDIR /go/src/app
 COPY . .
 
 RUN go get -d -v ./...
-RUN go install -v ./...
+RUN go build -o dalfox
 
-CMD ["dalfox"]
+# RUNNING
+FROM debian:buster
+RUN mkdir /app
+COPY --from=builder /go/src/app/dalfox /app/dalfox
+COPY --from=builder /go/src/app/samples /app/samples
+WORKDIR /app/
+CMD ["/app/dalfox"]
