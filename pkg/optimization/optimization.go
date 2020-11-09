@@ -73,7 +73,7 @@ func MakeHeaderQuery(target, hn, hv string, options model.Options) (*http.Reques
 	return req, tempMap
 }
 
-// MakeRequestQuery is generate http query with custom paramters
+// MakeRequestQuery is generate http query with custom parameters
 func MakeRequestQuery(target, param, payload, ptype string, pAction string, pEncode string, options model.Options) (*http.Request, map[string]string) {
 	
 	tempMap := make(map[string]string)
