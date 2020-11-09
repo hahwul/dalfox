@@ -58,7 +58,6 @@ func getOpenRedirectPayload() []string {
 	return payload
 }
 
-
 //basic sql injection payloads
 func getSQLIPayload() []string {
 	payload := []string{
@@ -299,7 +298,7 @@ func getInJsPayload(ip string) []string {
 func makeDynamicPayload(badchars, rtype string) []string {
 	payload := []string{}
 	if rtype == "inHTML" {
-		for _ = range badchars {
+		for range badchars {
 
 		}
 	} else {
