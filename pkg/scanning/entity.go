@@ -42,6 +42,23 @@ func GetGfXSS() []string {
 		"l",
 		"begindate",
 		"enddate",
+		"go",
+		"goto",
+		"host",
+		"html",
+		"image_url",
+		"img_url",
+		"data",
+		"domain",
+		"dir",
+		"feed",
+		"file",
+		"file_name",
+		"file_url",
+		"rurl",
+		"show",
+		"window",
+		"return",
 	}
 	return params
 }
