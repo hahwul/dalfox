@@ -16,6 +16,7 @@ func GetGfXSS() []string {
 		"view",
 		"email",
 		"type",
+		"cat",
 		"name",
 		"p",
 		"callback",
@@ -96,6 +97,7 @@ func GetEventHandlers() []string {
 		"oncontrolselect",
 		"oncopy",
 		"oncut",
+		"oncuechange",
 		"ondataavailable",
 		"ondatasetchanged",
 		"ondatasetcomplete",
@@ -195,6 +197,7 @@ func GetEventHandlers() []string {
 		"ontouchmove",
 		"ontouchstart",
 		"ontrackchange",
+		"ontransitionstart",
 		"ontransitioncancel",
 		"ontransitionend",
 		"ontransitionrun",
@@ -204,9 +207,11 @@ func GetEventHandlers() []string {
 		"onurlflip",
 		"onvolumechange",
 		"onwaiting",
+		"onwebkitanimationiteration",
 		"onwheel",
 		"whatthe=\"'onload",
 		"onpointerrawupdate",
+		"onpagehide",
 	}
 	return handlers
 }
