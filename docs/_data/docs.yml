@@ -1,0 +1,24 @@
+- title: Getting Started
+  docs:
+  - home
+  - installation
+  - update
+  - format-of-poc
+  - usage
+  - scan-single-url
+  - scan-multiple-url
+  - scan-from-rawreq
+  - output-handling
+
+- title: Modes
+  docs:
+  - modes/url-mode
+  - modes/pipe-mode
+  - modes/file-mode
+  - modes/sxss-mode
+  - modes/server-mode
+
+- title: Tips of Dalfox
+  docs:
+  - tips/oneliner 
+  - tips/found-action 

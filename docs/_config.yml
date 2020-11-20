@@ -1,0 +1,44 @@
+title: DalFox
+description: Parameter Analysis and XSS Scanning tool based on golang
+lang: en-US
+
+baseurl: "/" # the subpath of your site, e.g. /blog/
+url: https://dalfox.hahwul.com # the base hostname & protocol for your site
+git_address: https://github.com/hahwul/dalfox
+git_edit_address: https://github.com/hahwul/dalfox/docs
+
+# Configure the remote_theme plugin with the gh-pages branch
+# or the specific tag
+remote_theme: aksakalli/jekyll-doc-theme@gh-pages   
+
+# Build settings
+markdown: kramdown
+highlighter: rouge
+# Plugins (previously gems:)
+plugins:
+  - jekyll-feed
+  - jekyll-redirect-from
+  - jekyll-seo-tag
+  - jekyll-sitemap
+
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - .idea/
+  - .gitignore
+  - README.md
+
+defaults:
+- scope:
+    path: _docs
+    type: docs
+  values:
+    layout: docs
+    sectionid: docs
+    seo:
+      type: "WebPage"
+
+collections:
+  docs:
+    permalink: /:collection/:path/
+    output: true
