@@ -23,7 +23,7 @@ DalFox is a fast, powerful parameter analysis and XSS scanner, based on a golang
 - [POC format](#poc-format)
 - [Screenshots](#screenshots)
 - [Contribute](https://github.com/hahwul/dalfox/blob/master/CONTRIBUTING.md)
-- [Wiki](https://github.com/hahwul/dalfox/wiki)
+- [Wiki](https://dalfox.hahwul.com/docs/home/)
 
 ## Key features
 Mode: `url` `sxss` `pipe` `file` `server`
@@ -56,7 +56,7 @@ Mode: `url` `sxss` `pipe` `file` `server`
 And the various options required for the testing :D
 
 ## How to Install
-You can find some additional installation variations in the [Installation Guide](https://github.com/hahwul/dalfox/wiki/1.-Installation).
+You can find some additional installation variations in the [Installation Guide](https://dalfox.hahwul.com/docs/installation/).
 
 ## Usage
 ```plain
@@ -186,4 +186,4 @@ http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123%22%3E%3Cs
 [Contribute](https://github.com/hahwul/dalfox/blob/master/CONTRIBUTING.md)
 
 ## Wiki
-[Wiki](https://github.com/hahwul/dalfox/wiki)
+[Wiki](https://dalfox.hahwul.com/docs/home/)
