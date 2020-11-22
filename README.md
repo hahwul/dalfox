@@ -10,6 +10,7 @@
 <a href="https://twitter.com/intent/follow?screen_name=hahwul"><img src="https://img.shields.io/twitter/follow/hahwul?style=flat-square"></a>
   <img src="https://github.com/hahwul/dalfox/workflows/Go%20build/badge.svg">
   <img src="https://github.com/hahwul/dalfox/workflows/Docker%20build/badge.svg">
+  <img src="https://github.com/hahwul/dalfox/workflows/CodeQL/badge.svg">
 </h1>
 Finder Of XSS, and Dal is the Korean pronunciation of moon.
 
