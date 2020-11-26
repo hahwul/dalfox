@@ -4,13 +4,19 @@
   <br>
   DalFox(Finder Of XSS)
   <br>
-  <img src="https://img.shields.io/github/v/release/hahwul/dalfox?style=flat-square"> 
+  <img src="https://img.shields.io/github/v/release/hahwul/dalfox?style=flat"> 
   <a href="https://snapcraft.io/dalfox"><img alt="dalfox" src="https://snapcraft.io/dalfox/badge.svg" /></a>
-  <img src="https://img.shields.io/github/languages/top/hahwul/dalfox?style=flat-square"> <img src="https://api.codacy.com/project/badge/Grade/17cac7b8d1e849a688577f2bbdd6ecd0"> <a href="https://goreportcard.com/report/github.com/hahwul/dalfox"><img src="https://goreportcard.com/badge/github.com/hahwul/dalfox"></a> <img src="https://img.shields.io/github/issues-closed/hahwul/dalfox?style=flat-square"> 
-<a href="https://twitter.com/intent/follow?screen_name=hahwul"><img src="https://img.shields.io/twitter/follow/hahwul?style=flat-square"></a>
+  <img src="https://img.shields.io/github/languages/top/hahwul/dalfox?style=flat"> 
+  <img src="https://api.codacy.com/project/badge/Grade/17cac7b8d1e849a688577f2bbdd6ecd0"> 
+  <a href="https://goreportcard.com/report/github.com/hahwul/dalfox"><img src="https://goreportcard.com/badge/github.com/hahwul/dalfox"></a> 
   <img src="https://github.com/hahwul/dalfox/workflows/Go%20build/badge.svg">
   <img src="https://github.com/hahwul/dalfox/workflows/Docker%20build/badge.svg">
   <img src="https://github.com/hahwul/dalfox/workflows/CodeQL/badge.svg">
+  <a href="https://twitter.com/intent/follow?screen_name=hahwul"><img src="https://img.shields.io/twitter/follow/hahwul?style=flat&logo=twitter"></a>
+  <a href="https://github.com/hahwul"><img src="https://img.shields.io/github/followers/hahwul?style=flat&logo=github"></a>
+  <a href="https://github.com/hahwul"><img src="https://img.shields.io/github/stars/hahwul?style=flat&logo=github"></a>
+  <a href="https://paypal.me/hahwul"><img src="https://img.shields.io/badge/support-$-ff69b4.svg?style=flat&logo=paypal"></a>
+  <a href="https://www.buymeacoffee.com/hahwul"><img src="https://img.shields.io/badge/support-@-ff69b4.svg?style=flat&color=orange&logo=buy%20me%20a%20coffee"></a>
 </h1>
 Finder Of XSS, and Dal is the Korean pronunciation of moon.
 
