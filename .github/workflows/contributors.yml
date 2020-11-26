@@ -18,4 +18,4 @@ jobs:
       - uses: bubkoo/contributors-list@v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          round: false
+          round: true
