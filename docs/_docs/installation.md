@@ -34,7 +34,7 @@ $ go get -u github.com/hahwul/dalfox
 ```
 The update is the same as the installation method.
 
-### Use to `git clone`, `go build` and `go isntall`
+### Use to `git clone`, `go build` and `go install`
 
 ```
 // clone repo (for first-time installations)
