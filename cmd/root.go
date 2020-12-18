@@ -17,7 +17,7 @@ var optionsBool = make(map[string]bool)
 var config, cookie, data, header, p, customPayload, userAgent, blind, output, format, foundAction, proxy, grep string
 var ignoreReturn, miningWord, method string
 var timeout, concurrence, delay int
-var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, onlyCustomPayload bool
+var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, onlyCustomPayload, debug bool
 var options model.Options
 var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV, skipGrep bool
 
@@ -82,6 +82,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&skipXSSScan, "skip-xss-scanning", false, "Skipping XSS Scanning (same '--only-discovery' option)")
 	rootCmd.PersistentFlags().BoolVar(&onlyCustomPayload, "only-custom-payload", false, "Only testing custom payload (required --custom-payload)")
 	rootCmd.PersistentFlags().BoolVar(&skipGrep, "skip-grepping", false, "Skipping built-in grepping")
+	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "debug mode, save all log using -o option")
 
 	printing.Banner()
 }
@@ -118,6 +119,7 @@ func initConfig() {
 		NoSpinner:         noSpinner,
 		NoBAV:             skipBAV,
 		NoGrep:            skipGrep,
+		Debug:             debug,
 	}
 	// var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV bool
 

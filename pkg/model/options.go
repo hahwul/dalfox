@@ -40,6 +40,7 @@ type Options struct {
 	ServerHost        string
 	ServerPort        int
 	NoGrep            bool
+	Debug		  bool
 }
 
 // Scan is struct of scan

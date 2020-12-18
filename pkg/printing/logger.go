@@ -17,38 +17,52 @@ var (
 func DalLog(level, text string, options model.Options) {
 	var ftext string
 	if level == "INFO" {
-		ftext = "[I] " + text
+		if options.Debug {
+			ftext = "[I] " + text
+		}
 		text = aurora.Blue("[I] ").String() + text
 
 	}
 	if level == "WEAK" {
-		ftext = "[W] " + text
+		if options.Debug {
+			ftext = "[W] " + text
+		}
 		text = aurora.Yellow("[W] ").String() + text
 
 	}
 	if level == "VULN" {
-		ftext = "[V] " + text
+		if options.Debug {
+			ftext = "[V] " + text
+		}
 		text = aurora.Red("[V] ").String() + text
 
 	}
 	if level == "SYSTEM" {
-		ftext = "[*] " + text
+		if options.Debug {
+			ftext = "[*] " + text
+		}
 		text = aurora.White("[*] ").String() + text
 
 	}
 	if level == "GREP" {
-		ftext = "[G] " + text
+		if options.Debug {
+			ftext = "[G] " + text
+		}
 		text = aurora.Green("[G] ").String() + text
 
 	}
 
 	if level == "CODE" {
-		ftext = "    " + text
+		if options.Debug {
+			ftext = "    " + text
+		}
 		text = aurora.Gray(16-1, "    "+text).String()
 	}
 
 	if level == "ERROR" {
-		ftext = "[E] " + text
+		if options.Debug {
+			ftext = "[E] " + text
+		}
 		text = aurora.Yellow("[E] ").String() + text
 	}
 
@@ -100,17 +114,17 @@ func DalLog(level, text string, options model.Options) {
 
 	if options.OutputFile != "" {
 		var fdtext string
-		fdtext = ftext
-		f, err := os.OpenFile(options.OutputFile,
-			os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "output file error (file)")
-		}
-		defer f.Close()
-		if _, err := f.WriteString(fdtext + "\n"); err != nil {
-			fmt.Fprintln(os.Stderr, "output file error (write)")
+		if ftext != "" {
+			fdtext = ftext
+			f, err := os.OpenFile(options.OutputFile,
+				os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "output file error (file)")
+			}
+			defer f.Close()
+			if _, err := f.WriteString(fdtext + "\n"); err != nil {
+				fmt.Fprintln(os.Stderr, "output file error (write)")
+			}
 		}
 	}
-	//mutex.Unlock()
-
 }
