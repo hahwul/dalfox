@@ -264,12 +264,15 @@ func getInJsPayload(ip string) []string {
 		var tempPayload []string
 		for _, v := range payload {
 			tempPayload = append(tempPayload, ";"+v+";//")
+			tempPayload = append(tempPayload, ";"+v+";")
+			tempPayload = append(tempPayload, v)
 		}
 		return tempPayload
 	}
 	if strings.Contains(ip, "double") {
 		var tempPayload []string
 		for _, v := range payload {
+			tempPayload = append(tempPayload, "\"+"+v+"//")
 			tempPayload = append(tempPayload, "\"+"+v+"+\"")
 			tempPayload = append(tempPayload, "\"-"+v+"+\"")
 		}
@@ -278,6 +281,7 @@ func getInJsPayload(ip string) []string {
 	if strings.Contains(ip, "single") {
 		var tempPayload []string
 		for _, v := range payload {
+			tempPayload = append(tempPayload, "'+"+v+"//")
 			tempPayload = append(tempPayload, "'+"+v+"+'")
 			tempPayload = append(tempPayload, "'-"+v+"+'")
 		}
