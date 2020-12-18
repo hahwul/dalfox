@@ -24,6 +24,7 @@ Global Flags:
   -C, --cookie string             Add custom cookie
       --custom-payload string     Add custom payloads from file
   -d, --data string               Using POST Method and add Body data
+      --debug                     debug mode, save all log using -o option
       --delay int                 Milliseconds between send to same host (1000==1s)
       --follow-redirects          Following redirection
       --format string             Stdout output format(plain/json) (default "plain")

