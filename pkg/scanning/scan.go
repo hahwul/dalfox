@@ -723,6 +723,7 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 	var wgg sync.WaitGroup
 	concurrency := options.Concurrence
 	paramsQue := make(chan string)
+	mutex := &sync.Mutex{}
 	for i := 0; i < concurrency; i++ {
 		wgg.Add(1)
 		go func() {
@@ -761,9 +762,10 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 						for k, v := range tempSmap {
 							smap = smap + "/" + k + "(" + strconv.Itoa(v) + ")"
 						}
+						mutex.Lock()
 						params[k] = append(params[k], smap)
+						mutex.Unlock()
 						var wg sync.WaitGroup
-						mutex := &sync.Mutex{}
 						chars := GetSpecialChar()
 						for _, c := range chars {
 							wg.Add(1)
