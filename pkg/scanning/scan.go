@@ -335,16 +335,18 @@ func Scan(target string, options model.Options, sid string) {
 				printing.DalLog("SYSTEM", "Custom XSS payload load fail..", options)
 			} else {
 				for _, customPayload := range ff {
-					for k, _ := range params {
-						// Add plain XSS Query
-						tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "toHTML", "toAppend", "NaN", options)
-						query[tq] = tm
-						// Add URL encoded XSS Query
-						etq, etm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML", "toAppend", "urlEncode",options)
-						query[etq] = etm
-						// Add HTML Encoded XSS Query
-						htq, htm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML", "toAppend", "htmlEncode",options)
-						query[htq] = htm
+					if customPayload != "" {
+						for k, _ := range params {
+							// Add plain XSS Query
+							tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "toHTML", "toAppend", "NaN", options)
+							query[tq] = tm
+							// Add URL encoded XSS Query
+							etq, etm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML", "toAppend", "urlEncode",options)
+							query[etq] = etm
+							// Add HTML Encoded XSS Query
+							htq, htm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML", "toAppend", "htmlEncode",options)
+							query[htq] = htm
+						}
 					}
 				}
 				printing.DalLog("SYSTEM", "Added your "+strconv.Itoa(len(ff))+" custom xss payload", options)
