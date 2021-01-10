@@ -2,8 +2,8 @@ package server
 
 import (
 	"net/http"
-	"time"
 	"strconv"
+	"time"
 
 	"github.com/hahwul/dalfox/pkg/model"
 	printing "github.com/hahwul/dalfox/pkg/printing"
@@ -38,7 +38,10 @@ func RunAPIServer(options model.Options) {
 		HSTSMaxAge:         3600,
 	}))
 	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
-		Format: "method=${method}, uri=${uri}, status=${status}\n",
+		Format: `{"time":"${time_rfc3339_nano}","id":"${id}","remote_ip":"${remote_ip}","host":"${host}",` +
+    `"method":"${method}","uri":"${uri}","status":${status},"error":"${error}","latency":${latency},` +
+    `"latency_human":"${latency_human}","bytes_in":${bytes_in},` +
+    `"bytes_out":${bytes_out}}` + "\n",
 	}))
 	e.GET("/health", func(c echo.Context) error {
 		r := &Res{

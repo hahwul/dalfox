@@ -5,7 +5,7 @@ import "github.com/hahwul/dalfox/pkg/model"
 // Req is struct of request
 type Req struct {
 	URL     string                 `json:"url"`
-	Options map[string]interface{} `json:"options"`
+	Options model.Options `json:"options"`
 }
 
 // Res is struct of response

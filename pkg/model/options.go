@@ -2,45 +2,45 @@ package model
 
 // Options is struct of options
 type Options struct {
-	UniqParam         string
-	Cookie            string
-	Header            string
-	ConfigFile        string
-	BlindURL          string
-	CustomPayloadFile string
-	Data              string
-	UserAgent         string
-	OutputFile        string
-	Format            string
-	FoundAction       string
-	ProxyAddress      string
-	Grep              string
-	IgnoreReturn      string
-	Trigger           string
-	Timeout           int
-	Concurrence       int
-	Delay             int
-	AllURLS           int
+	UniqParam         string `json:"param"`
+	Cookie            string `json:"cookie"`
+	Header            string `json:"header"`
+	ConfigFile        string `json:"config"`
+	BlindURL          string `json:"blind"`
+	CustomPayloadFile string `json:""`
+	Data              string `json:"data"`
+	UserAgent         string `json:"user-agent"`
+	OutputFile        string `json:"output"`
+	Format            string `json:"format"`
+	FoundAction       string `json:"found-action"`
+	ProxyAddress      string `json:"proxy"`
+	Grep              string `json:"grep"`
+	IgnoreReturn      string `json:"ignore-return"`
+	Trigger           string `json:"trigger"`
+	Timeout           int `json:"timeout"`
+	Concurrence       int `json:"worker"`
+	Delay             int `json:"delay"`
+	AllURLS           int 
 	NowURL            int
-	Sequence          int
-	OnlyDiscovery     bool
-	OnlyCustomPayload bool
-	Silence           bool
-	IsAPI             bool
-	Mass              bool
+	Sequence          int `json:"sequence"`
+	OnlyDiscovery     bool `json:"only-discovery"`
+	OnlyCustomPayload bool `json:"only-custom-payload"`
+	Silence           bool `json:"silence"`
+	IsAPI             bool 
+	Mass              bool `json:"mass"`
 	Scan              map[string]Scan
-	FollowRedirect    bool
-	Mining            bool
-	FindingDOM        bool
-	MiningWordlist    string
-	NoColor           bool
-	Method            string
-	NoSpinner         bool
-	NoBAV             bool
+	FollowRedirect    bool `json:"follow-redirects"`
+	Mining            bool `json:"mining-dict"`
+	FindingDOM        bool `json:"mining-dom"`
+	MiningWordlist    string `json:"mining-dict-word"`
+	NoColor           bool `json:"no-color"`
+	Method            string `json:"method"`
+	NoSpinner         bool `json:"no-spinner"`
+	NoBAV             bool `json:"no-bav"`
 	ServerHost        string
 	ServerPort        int
-	NoGrep            bool
-	Debug		  bool
+	NoGrep            bool `json:"skip-grepping"`
+	Debug		  bool `json:"debug"`
 }
 
 // Scan is struct of scan
