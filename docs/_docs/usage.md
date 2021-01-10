@@ -81,8 +81,8 @@ SXSS Flags:
 The dalfox supports a total of five modes. (`url` / `pipe` / `file` / `sxss` / `server`)
 
 Each mode has the following purposes.
-* [URL Mode](http://frozen.hahwul.com:4000/docs/modes/url-mode/)
-* [Pipe Mode](http://frozen.hahwul.com:4000/docs/modes/pipe-mode/)
-* [File Mode](http://frozen.hahwul.com:4000/docs/modes/file-mode/)
-* [SXSS Mode](http://frozen.hahwul.com:4000/docs/modes/sxss-mode/)
-* [Server Mode](http://frozen.hahwul.com:4000/docs/modes/server-mode/)
+* [URL Mode](/docs/modes/url-mode/)
+* [Pipe Mode](/docs/modes/pipe-mode/)
+* [File Mode](/docs/modes/file-mode/)
+* [SXSS Mode](/docs/modes/sxss-mode/)
+* [Server Mode](/docs/modes/server-mode/)
