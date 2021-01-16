@@ -89,7 +89,7 @@ func Scan(target string, options model.Options, sid string) {
 
 		defer tres.Body.Close()
 		body, err := ioutil.ReadAll(tres.Body)
-		printing.DalLog("SYSTEM", "Vaild target [ code:"+strconv.Itoa(tres.StatusCode)+" / size:"+strconv.Itoa(len(body))+" ]", options)
+		printing.DalLog("SYSTEM", "Valid target [ code:"+strconv.Itoa(tres.StatusCode)+" / size:"+strconv.Itoa(len(body))+" ]", options)
 	}
 
 	if options.Mining {
