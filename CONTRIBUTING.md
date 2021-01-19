@@ -4,7 +4,7 @@
 - Finaly, writing code push and PR to me
 
 ## Writing code
-I checking the quality of code through Codacy when PR/Merge/Push. If you want to consider code quality in advance, please check the link below (not perfect, but very helpful).
+I'm checking the quality of code through Codacy when PR/Merge/Push. If you want to consider code quality in advance, please check the link below (not perfect, but very helpful).
 
 https://goreportcard.com/report/github.com/hahwul/dalfox
 
@@ -25,9 +25,9 @@ go build
 
 ### How to add BAV(Basic Another Vulnerability) Patterns
 - Add new code to https://github.com/hahwul/dalfox/blob/master/pkg/scanning/bav.go
-- The payload will use above is need define below.
+- The payload above needs to be defined below.
  + https://github.com/hahwul/dalfox/blob/master/pkg/scanning/payload.go
-- Add Greeping pattenr
+- Add Greeping pattern
  + https://github.com/hahwul/dalfox/blob/master/pkg/scanning/grep.go
 - e.g
 payload.go
