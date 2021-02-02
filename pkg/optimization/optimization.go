@@ -13,6 +13,8 @@ import (
 // GenerateNewRequest is make http.Cilent
 func GenerateNewRequest(url, payload string, options model.Options) *http.Request {
 	req, _ := http.NewRequest("GET", url, nil)
+	// Add the Accept header like browsers do.
+	req.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9")
 	if options.Data != "" {
 		d := []byte(payload)
 		req, _ = http.NewRequest("POST", url, bytes.NewBuffer(d))
