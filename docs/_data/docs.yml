@@ -9,6 +9,7 @@
   - scan-multiple-url
   - scan-from-rawreq
   - output-handling
+  - custom-payload
 
 - title: Modes
   docs:
