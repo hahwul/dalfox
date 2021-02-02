@@ -79,8 +79,8 @@ Global Flags:
   -b, --blind string              Add your blind xss (e.g -b hahwul.xss.ht)
       --config string             Using config from file
   -C, --cookie string             Add custom cookie
-      --custom-alert-type string    Change alert value type (e.g =none / =str,none) (default "none")
-      --custom-alert-value string   Change alert value (e.g custom-alert-value=document.cookie (default "1")
+      --custom-alert-type string  Change alert value type (e.g =none / =str,none) (default "none")
+      --custom-alert-value string Change alert value (e.g custom-alert-value=document.cookie (default "1")
       --custom-payload string     Add custom payloads from file
   -d, --data string               Using POST Method and add Body data
       --debug                     debug mode, save all log using -o option
