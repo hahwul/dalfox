@@ -15,7 +15,7 @@ var cfgFile string
 var optionsStr = make(map[string]string)
 var optionsBool = make(map[string]bool)
 var config, cookie, data, header, p, customPayload, userAgent, blind, output, format, foundAction, proxy, grep string
-var ignoreReturn, miningWord, method string
+var ignoreReturn, miningWord, method, customAlertValue, customAlertType string
 var timeout, concurrence, delay int
 var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, onlyCustomPayload, debug bool
 var options model.Options
@@ -51,6 +51,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&header, "header", "H", "", "Add custom headers")
 	rootCmd.PersistentFlags().StringVarP(&p, "param", "p", "", "Only testing selected parameters")
 	rootCmd.PersistentFlags().StringVar(&customPayload, "custom-payload", "", "Add custom payloads from file")
+	rootCmd.PersistentFlags().StringVar(&customAlertValue, "custom-alert-value", "1", "Change alert value (e.g custom-alert-value=document.cookie")
+	rootCmd.PersistentFlags().StringVar(&customAlertType, "custom-alert-type", "int", "Change alert value type (e.g =none / =str,none)")
 	rootCmd.PersistentFlags().StringVar(&userAgent, "user-agent", "", "Add custom UserAgent")
 	rootCmd.PersistentFlags().StringVarP(&blind, "blind", "b", "", "Add your blind xss (e.g -b hahwul.xss.ht)")
 	rootCmd.PersistentFlags().StringVarP(&output, "output", "o", "", "Write to output file")
@@ -95,6 +97,8 @@ func initConfig() {
 		UniqParam:         p,
 		BlindURL:          blind,
 		CustomPayloadFile: customPayload,
+		CustomAlertValue:  customAlertValue,
+		CustomAlertType:   customAlertType,
 		Data:              data,
 		UserAgent:         userAgent,
 		OutputFile:        output,

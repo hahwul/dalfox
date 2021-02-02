@@ -8,6 +8,8 @@ type Options struct {
 	ConfigFile        string `json:"config"`
 	BlindURL          string `json:"blind"`
 	CustomPayloadFile string `json:""`
+	CustomAlertValue  string `json:"custom-alert-value"`
+	CustomAlertType   string `json:"custom-alert-type"`
 	Data              string `json:"data"`
 	UserAgent         string `json:"user-agent"`
 	OutputFile        string `json:"output"`

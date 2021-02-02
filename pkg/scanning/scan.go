@@ -202,9 +202,8 @@ func Scan(target string, options model.Options, sid string) {
 
 		if (isAllowType(policy["Content-Type"]) && !options.OnlyCustomPayload){
 
-			arr := getCommonPayload()
+			arr := optimization.SetPayloadValue(getCommonPayload(), options)
 			for _, avv := range arr {
-
 				var PathFinal string
 				tmpTarget, err := url.Parse(target)
 				if err != nil {
@@ -239,13 +238,13 @@ func Scan(target string, options model.Options, sid string) {
 							for _, ip := range injectedPoint {
 								var arr []string
 								if strings.Contains(ip, "inJS") {
-									arr = getInJsPayload(ip)
+									arr = optimization.SetPayloadValue(getInJsPayload(ip), options)
 								}
 								if strings.Contains(ip, "inHTML") {
-									arr = getHTMLPayload(ip)
+									arr = optimization.SetPayloadValue(getHTMLPayload(ip), options)
 								}
 								if strings.Contains(ip, "inATTR") {
-									arr = getAttrPayload(ip)
+									arr = optimization.SetPayloadValue(getAttrPayload(ip), options)
 								}
 								for _, avv := range arr {
 									if optimization.Optimization(avv, badchars) {
@@ -264,7 +263,7 @@ func Scan(target string, options model.Options, sid string) {
 						}
 					}
 					// common XSS
-					arc := getCommonPayload()
+					arc := optimization.SetPayloadValue(getCommonPayload(), options)
 					for _, avv := range arc {
 						if optimization.Optimization(avv, badchars) {
 							// Add plain XSS Query
