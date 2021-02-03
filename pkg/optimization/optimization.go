@@ -55,6 +55,7 @@ func GenerateNewRequest(url, payload string, options model.Options) *http.Reques
 		}else{
 		req.Header.Add("Cookie", GetRawCookie(rq.Cookies()))
 	}}
+	}
 	return req
 }
 
