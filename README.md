@@ -46,7 +46,7 @@ Mode: `url` `sxss` `pipe` `file` `server`
 |               | Optimizaion query of payloads | - Check the injection point through abstraction and generated the fit payload.<br />- Eliminate unnecessary payloads based on badchar |
 |               | Encoder                       | - All test payloads(build-in, your custom/blind) are tested in parallel with the encoder.<br />- To Double URL Encoder<br />- To HTML Hex Encoder |
 |               | Sequence                      | - Auto-check the special page for stored xss (`--trigger`) <br />- Support (`--sequence`) options for Stored XSS , only `sxss` mode |
-| HTTP          | HTTP Options                  | - Overwrite HTTP Method (`-X`, `--method`)<br />- Follow redirects (`--follow-redirects`)<br />- Add header (`-H`, `--header`)<br />- Add cookie (`-C`, `--cookie`)<br />- Add User-Agent (`--user-agent`)<br />- Set timeout (`--timeout`)<br />- Set Delay (`--delay`)<br />- Set Proxy (`--proxy`)<br />- Set ignore return codes (`--ignore-return`) |
+| HTTP          | HTTP Options                  | - Overwrite HTTP Method (`-X`, `--method`)<br />- Follow redirects (`--follow-redirects`)<br />- Add header (`-H`, `--header`)<br />- Add cookie (`-C`, `--cookie`)<br />- Add User-Agent (`--user-agent`)<br />- Set timeout (`--timeout`)<br />- Set Delay (`--delay`)<br />- Set Proxy (`--proxy`)<br />- Set ignore return codes (`--ignore-return`)<br />- Load cookie from raw request (`--burp`) |
 | Concurrency   | Worker                        | - Set worker's number(`-w`, `--worker`)                      |
 |               | N * hosts                     | - Use multicast mode (`--multicast`) , only `file` / `pipe` mode |
 | Output        | Output                        | - Only the PoC code and useful information is write as Stdout<br />- Save output (`-o`, `--output`) |
@@ -77,6 +77,7 @@ Modes:
 
 Global Flags:
   -b, --blind string              Add your blind xss (e.g -b hahwul.xss.ht)
+      --burp                      Load cookie from raw request (e.g --burp request.txt)
       --config string             Using config from file
   -C, --cookie string             Add custom cookie
       --custom-alert-type string  Change alert value type (e.g =none / =str,none) (default "none")
