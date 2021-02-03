@@ -59,7 +59,7 @@ func GenerateNewRequest(url, payload string, options model.Options) *http.Reques
 	return req
 }
 
-//Get Cookie from Raw request
+//GetRawCookie gets cookie from raw request
 func GetRawCookie(cookies []*http.Cookie) string {
     var rawCookies []string
     for _, c := range cookies {
