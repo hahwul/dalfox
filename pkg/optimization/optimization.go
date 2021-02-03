@@ -40,14 +40,14 @@ func GenerateNewRequest(url, payload string, options model.Options) *http.Reques
 	if options.Method != "" {
 		req.Method = options.Method
 	}
-	if options.Burp != "" {
-		burpFile := options.Burp
-		bF, err := os.Open(burpFile)
+	if options.CookieFromRaw != "" {
+		rawFile := options.CookieFromRaw
+		rF, err := os.Open(rawFile)
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
 		}else {
-		rd := bufio.NewReader(bF)
+		rd := bufio.NewReader(rF)
 		rq, err := http.ReadRequest(rd)
 		if err != nil {
 			fmt.Println(err)
