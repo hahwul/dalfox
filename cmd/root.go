@@ -63,7 +63,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&ignoreReturn, "ignore-return", "", "Ignore scanning from return code (e.g --ignore-return 302,403,404)")
 	rootCmd.PersistentFlags().StringVar(&miningWord, "mining-dict-word", "", "Custom wordlist file for param mining (e.g --mining-dict-word word.txt)")
 	rootCmd.PersistentFlags().StringVarP(&method, "method", "X", "", "Force overriding HTTP Method (e.g -X PUT)")
-	rootCmd.PersistentFlags().StringVarP(&burp, "burp", "", "", "Load cookie from burp raw http request (e.g --burp burp.req)")
+	rootCmd.PersistentFlags().StringVarP(&burp, "burp", "", "", "Load cookie from burp raw http request (e.g --burp request.txt)")
 
 	//Int
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 10, "Second of timeout")
