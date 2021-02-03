@@ -46,7 +46,7 @@ Mode: `url` `sxss` `pipe` `file` `server`
 |               | Optimizaion query of payloads | - Check the injection point through abstraction and generated the fit payload.<br />- Eliminate unnecessary payloads based on badchar |
 |               | Encoder                       | - All test payloads(build-in, your custom/blind) are tested in parallel with the encoder.<br />- To Double URL Encoder<br />- To HTML Hex Encoder |
 |               | Sequence                      | - Auto-check the special page for stored xss (`--trigger`) <br />- Support (`--sequence`) options for Stored XSS , only `sxss` mode |
-| HTTP          | HTTP Options                  | - Overwrite HTTP Method (`-X`, `--method`)<br />- Follow redirects (`--follow-redirects`)<br />- Add header (`-H`, `--header`)<br />- Add cookie (`-C`, `--cookie`)<br />- Add User-Agent (`--user-agent`)<br />- Set timeout (`--timeout`)<br />- Set Delay (`--delay`)<br />- Set Proxy (`--proxy`)<br />- Set ignore return codes (`--ignore-return`)<br />- Load cookie from raw request (`--burp`) |
+| HTTP          | HTTP Options                  | - Overwrite HTTP Method (`-X`, `--method`)<br />- Follow redirects (`--follow-redirects`)<br />- Add header (`-H`, `--header`)<br />- Add cookie (`-C`, `--cookie`)<br />- Add User-Agent (`--user-agent`)<br />- Set timeout (`--timeout`)<br />- Set Delay (`--delay`)<br />- Set Proxy (`--proxy`)<br />- Set ignore return codes (`--ignore-return`)<br />- Load cookie from raw request (`--cookie-from-raw`) |
 | Concurrency   | Worker                        | - Set worker's number(`-w`, `--worker`)                      |
 |               | N * hosts                     | - Use multicast mode (`--multicast`) , only `file` / `pipe` mode |
 | Output        | Output                        | - Only the PoC code and useful information is write as Stdout<br />- Save output (`-o`, `--output`) |
@@ -76,10 +76,10 @@ Modes:
   version     Show version
 
 Global Flags:
-  -b, --blind string              Add your blind xss (e.g -b hahwul.xss.ht)
-      --burp                      Load cookie from raw request (e.g --burp request.txt)
+  -b, --blind string              Add your blind xss (e.g -b hahwul.xss.ht)                      
       --config string             Using config from file
   -C, --cookie string             Add custom cookie
+      --cookie-from-raw           Load cookie from raw request (e.g --cookie-from-raw request.txt)
       --custom-alert-type string  Change alert value type (e.g =none / =str,none) (default "none")
       --custom-alert-value string Change alert value (e.g custom-alert-value=document.cookie (default "1")
       --custom-payload string     Add custom payloads from file
