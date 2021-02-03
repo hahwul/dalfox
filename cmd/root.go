@@ -14,7 +14,7 @@ import (
 var cfgFile string
 var optionsStr = make(map[string]string)
 var optionsBool = make(map[string]bool)
-var config, cookie, data, header, p, customPayload, userAgent, blind, output, format, foundAction, proxy, grep string
+var config, cookie, data, header, p, customPayload, userAgent, blind, output, format, foundAction, proxy, grep ,cookieFromRaw string
 var ignoreReturn, miningWord, method, customAlertValue, customAlertType string
 var timeout, concurrence, delay int
 var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, onlyCustomPayload, debug bool
@@ -63,6 +63,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&ignoreReturn, "ignore-return", "", "Ignore scanning from return code (e.g --ignore-return 302,403,404)")
 	rootCmd.PersistentFlags().StringVar(&miningWord, "mining-dict-word", "", "Custom wordlist file for param mining (e.g --mining-dict-word word.txt)")
 	rootCmd.PersistentFlags().StringVarP(&method, "method", "X", "", "Force overriding HTTP Method (e.g -X PUT)")
+	rootCmd.PersistentFlags().StringVarP(&cookieFromRaw, "cookie-from-raw", "", "", "Load cookie from burp raw http request (e.g --cookie-from-raw request.txt)")
 
 	//Int
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 10, "Second of timeout")
@@ -124,6 +125,7 @@ func initConfig() {
 		NoBAV:             skipBAV,
 		NoGrep:            skipGrep,
 		Debug:             debug,
+		CookieFromRaw:     cookieFromRaw,
 	}
 	// var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV bool
 
