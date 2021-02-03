@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"os"
+	"bufio"
 )
 
 // GenerateNewRequest is make http.Cilent
@@ -38,7 +40,32 @@ func GenerateNewRequest(url, payload string, options model.Options) *http.Reques
 	if options.Method != "" {
 		req.Method = options.Method
 	}
+	if options.Burp != "" {
+		burpFile := options.Burp
+		bF, err := os.Open(burpFile)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}else {
+		rd := bufio.NewReader(bF)
+		rq, err := http.ReadRequest(rd)
+		if err != nil {
+			fmt.Println(err)
+			os.Exit(1)
+		}else{
+		req.Header.Add("Cookie", GetRawCookie(rq.Cookies()))
+	}}
 	return req
+}
+
+//Get Cookie from Raw request
+func GetRawCookie(cookies []*http.Cookie) string {
+    var rawCookies []string
+    for _, c := range cookies {
+        e := fmt.Sprintf("%s=%s", c.Name, c.Value)
+        rawCookies = append(rawCookies, e)
+    }
+    return strings.Join(rawCookies, "; ")
 }
 
 // MakeHeaderQuery is generate http query with custom header
