@@ -43,7 +43,7 @@ type Options struct {
 	ServerPort        int
 	NoGrep            bool `json:"skip-grepping"`
 	Debug		  bool `json:"debug"`
-	Burp		  string
+	CookieFromRaw	  string
 }
 
 // Scan is struct of scan
