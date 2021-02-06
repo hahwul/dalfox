@@ -15,6 +15,7 @@ var sxssCmd = &cobra.Command{
 	Use:   "sxss [target] [flags]",
 	Short: "Use Stored XSS mode",
 	Run: func(cmd *cobra.Command, args []string) {
+		printing.Banner(options)
 		if len(args) >= 1 {
 			printing.DalLog("SYSTEM", "Using Stored XSS mode", options)
 			scanning.Scan(args[0], options, "sxss")

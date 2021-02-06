@@ -17,6 +17,7 @@ var pipeCmd = &cobra.Command{
 	Use:   "pipe [flags]",
 	Short: "Use pipeline mode",
 	Run: func(cmd *cobra.Command, args []string) {
+		printing.Banner(options)
 		var targets []string
 		sc := bufio.NewScanner(os.Stdin)
 		printing.DalLog("SYSTEM", "Using pipeline mode", options)

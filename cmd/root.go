@@ -24,9 +24,10 @@ var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV, skipGrep
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use: "dalfox",
-	// Uncomment the following line if your bare application
-	// has an action associated with it:
-	//	Run: func(cmd *cobra.Command, args []string) { },
+	Run: func(cmd *cobra.Command, args []string) { 
+		printing.Banner(options)
+		printing.DalLog("YELLOW", "Read the help page using the -h flag to see other options and flags!", options)
+	},
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.
@@ -86,8 +87,6 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&onlyCustomPayload, "only-custom-payload", false, "Only testing custom payload (required --custom-payload)")
 	rootCmd.PersistentFlags().BoolVar(&skipGrep, "skip-grepping", false, "Skipping built-in grepping")
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "debug mode, save all log using -o option")
-
-	printing.Banner()
 }
 
 // initConfig reads in config file and ENV variables if set.
