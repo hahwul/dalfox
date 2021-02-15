@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"github.com/hahwul/dalfox/pkg/printing"
+	"github.com/hahwul/dalfox/v2/pkg/printing"
 	"github.com/spf13/cobra"
 )
 

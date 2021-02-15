@@ -3,8 +3,8 @@ package scanning
 import (
 	"crypto/tls"
 	"fmt"
-	"github.com/hahwul/dalfox/pkg/model"
-	"github.com/hahwul/dalfox/pkg/printing"
+	"github.com/hahwul/dalfox/v2/pkg/model"
+	"github.com/hahwul/dalfox/v2/pkg/printing"
 	"net"
 	"net/http"
 	"net/url"

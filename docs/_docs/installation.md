@@ -30,7 +30,7 @@ $ sudo snap install dalfox
 ## From the source (developement version)
 ### Use to `go get`
 ```
-$ go get -u github.com/hahwul/dalfox
+$ go get -u github.com/hahwul/dalfox/v2
 ```
 The update is the same as the installation method.
 

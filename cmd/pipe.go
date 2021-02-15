@@ -7,8 +7,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/hahwul/dalfox/pkg/printing"
-	"github.com/hahwul/dalfox/pkg/scanning"
+	"github.com/hahwul/dalfox/v2/pkg/printing"
+	"github.com/hahwul/dalfox/v2/pkg/scanning"
 	"github.com/spf13/cobra"
 )
 

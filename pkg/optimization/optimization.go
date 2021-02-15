@@ -3,7 +3,7 @@ package optimization
 import (
 	"bytes"
 	"fmt"
-	"github.com/hahwul/dalfox/pkg/model"
+	"github.com/hahwul/dalfox/v2/pkg/model"
 	"html/template"
 	"net/http"
 	"net/url"

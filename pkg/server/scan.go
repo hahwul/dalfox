@@ -1,8 +1,8 @@
 package server
 
 import (
-	"github.com/hahwul/dalfox/pkg/model"
-	scan "github.com/hahwul/dalfox/pkg/scanning"
+	"github.com/hahwul/dalfox/v2/pkg/model"
+	scan "github.com/hahwul/dalfox/v2/pkg/scanning"
 )
 
 // ScanFromAPI is scanning dalfox with REST API

@@ -5,7 +5,7 @@ import (
 	"os"
 	"sync"
 
-	"github.com/hahwul/dalfox/pkg/model"
+	"github.com/hahwul/dalfox/v2/pkg/model"
 	"github.com/logrusorgru/aurora"
 )
 

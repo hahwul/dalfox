@@ -6,8 +6,8 @@ import (
 	"io/ioutil"
 	"os"
 
-	"github.com/hahwul/dalfox/pkg/model"
-	"github.com/hahwul/dalfox/pkg/printing"
+	"github.com/hahwul/dalfox/v2/pkg/model"
+	"github.com/hahwul/dalfox/v2/pkg/printing"
 	"github.com/spf13/cobra"
 )
 

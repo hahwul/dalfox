@@ -3,7 +3,7 @@ package optimization
 import (
 	"strings"
 
-	model "github.com/hahwul/dalfox/pkg/model"
+	model "github.com/hahwul/dalfox/v2/pkg/model"
 )
 
 // SetPayloadValue is change alert/prompt/conrifm value and type

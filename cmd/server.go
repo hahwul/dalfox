@@ -1,8 +1,8 @@
 package cmd
 
 import (
-	printing "github.com/hahwul/dalfox/pkg/printing"
-	server "github.com/hahwul/dalfox/pkg/server"
+	printing "github.com/hahwul/dalfox/v2/pkg/printing"
+	server "github.com/hahwul/dalfox/v2/pkg/server"
 	"github.com/spf13/cobra"
 )
 

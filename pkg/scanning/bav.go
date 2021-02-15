@@ -5,8 +5,8 @@ import (
 	"net/url"
 	"sync"
 	
-	"github.com/hahwul/dalfox/pkg/model"
-	"github.com/hahwul/dalfox/pkg/optimization"
+	"github.com/hahwul/dalfox/v2/pkg/model"
+	"github.com/hahwul/dalfox/v2/pkg/optimization"
 )
 
 // SSTIAnalysis is basic check for SSTI

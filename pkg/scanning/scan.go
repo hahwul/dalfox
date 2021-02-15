@@ -15,10 +15,10 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/briandowns/spinner"
-	"github.com/hahwul/dalfox/pkg/model"
-	"github.com/hahwul/dalfox/pkg/optimization"
-	"github.com/hahwul/dalfox/pkg/printing"
-	"github.com/hahwul/dalfox/pkg/verification"
+	"github.com/hahwul/dalfox/v2/pkg/model"
+	"github.com/hahwul/dalfox/v2/pkg/optimization"
+	"github.com/hahwul/dalfox/v2/pkg/printing"
+	"github.com/hahwul/dalfox/v2/pkg/verification"
 )
 
 var scanObject model.Scan
