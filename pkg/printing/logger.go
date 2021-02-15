@@ -42,7 +42,13 @@ func DalLog(level, text string, options model.Options) {
 			ftext = "[*] " + text
 		}
 		text = aurora.White("[*] ").String() + text
-
+	}
+	if level == "SYSTEM-M" {
+		if options.Debug {
+			ftext = "[*] " + text
+		}
+		text = aurora.White("[*] ").String() + text
+		fmt.Fprintln(os.Stderr, text)
 	}
 	if level == "GREP" {
 		if options.Debug {

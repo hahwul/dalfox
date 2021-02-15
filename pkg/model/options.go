@@ -19,31 +19,31 @@ type Options struct {
 	Grep              string `json:"grep"`
 	IgnoreReturn      string `json:"ignore-return"`
 	Trigger           string `json:"trigger"`
-	Timeout           int `json:"timeout"`
-	Concurrence       int `json:"worker"`
-	Delay             int `json:"delay"`
-	AllURLS           int 
+	Timeout           int    `json:"timeout"`
+	Concurrence       int    `json:"worker"`
+	Delay             int    `json:"delay"`
+	AllURLS           int
 	NowURL            int
-	Sequence          int `json:"sequence"`
+	Sequence          int  `json:"sequence"`
 	OnlyDiscovery     bool `json:"only-discovery"`
 	OnlyCustomPayload bool `json:"only-custom-payload"`
 	Silence           bool `json:"silence"`
-	IsAPI             bool 
+	IsAPI             bool
 	Mass              bool `json:"mass"`
 	Scan              map[string]Scan
-	FollowRedirect    bool `json:"follow-redirects"`
-	Mining            bool `json:"mining-dict"`
-	FindingDOM        bool `json:"mining-dom"`
+	FollowRedirect    bool   `json:"follow-redirects"`
+	Mining            bool   `json:"mining-dict"`
+	FindingDOM        bool   `json:"mining-dom"`
 	MiningWordlist    string `json:"mining-dict-word"`
-	NoColor           bool `json:"no-color"`
+	NoColor           bool   `json:"no-color"`
 	Method            string `json:"method"`
-	NoSpinner         bool `json:"no-spinner"`
-	NoBAV             bool `json:"no-bav"`
+	NoSpinner         bool   `json:"no-spinner"`
+	NoBAV             bool   `json:"no-bav"`
 	ServerHost        string
 	ServerPort        int
 	NoGrep            bool `json:"skip-grepping"`
-	Debug		  bool `json:"debug"`
-	CookieFromRaw	  string
+	Debug             bool `json:"debug"`
+	CookieFromRaw     string
 }
 
 // Scan is struct of scan

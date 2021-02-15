@@ -77,13 +77,20 @@ var fileCmd = &cobra.Command{
 				multi, _ := cmd.Flags().GetBool("multicast")
 				if multi {
 					printing.DalLog("SYSTEM", "Using multicasting mode", options)
+					options.Silence = true
 					t := scanning.MakeTargetSlice(targets)
 					var wg sync.WaitGroup
+					//mutex := &sync.Mutex{}
+
+					for k, v := range t {
+						printing.DalLog("SYSTEM-M", "Parallel testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", options)
+					}
+					printing.DalLog("SYSTEM-M", "Scanning.. (show only poc code)", options)
+
 					for k, v := range t {
 						wg.Add(1)
 						go func(k string, v []string) {
 							defer wg.Done()
-							printing.DalLog("SYSTEM", "testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", options)
 							for i := range v {
 								scanning.Scan(v[i], options, strconv.Itoa(len(v)))
 							}
@@ -108,19 +115,9 @@ var fileCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(fileCmd)
-
-	// Here you will define your flags and configuration settings.
-
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// fileCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-
 	fileCmd.Flags().Bool("rawdata", false, "Using req rawdata from Burp/ZAP")
 	fileCmd.Flags().Bool("http", false, "Using force http on rawdata mode")
-	fileCmd.Flags().Bool("multicast", false, "Scanning N*Host mode")
+	fileCmd.Flags().Bool("multicast", false, "Parallel scanning N*Host mode (show only poc code)")
 }
 
 // a slice of strings, returning the slice and any error
