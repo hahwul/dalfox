@@ -9,7 +9,6 @@ require (
 	github.com/blang/semver/v4 v4.0.0
 	github.com/briandowns/spinner v1.12.0
 	github.com/fatih/color v1.9.0 // indirect
-	github.com/hahwul/dalfox/v2 v2.2.8
 	github.com/labstack/echo/v4 v4.2.0
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/logrusorgru/aurora/v3 v3.0.0
