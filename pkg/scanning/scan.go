@@ -63,7 +63,7 @@ func Scan(target string, options model.Options, sid string) {
 			Timeout:   time.Duration(t) * time.Second,
 			Transport: transport,
 		}
-		
+
 		if !options.FollowRedirect {
 			client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 				return http.ErrUseLastResponse
@@ -141,7 +141,7 @@ func Scan(target string, options model.Options, sid string) {
 				defer bavWaitGroup.Done()
 				SSTIAnalysis(target, options)
 			}()
-			go func(){
+			go func() {
 				defer bavWaitGroup.Done()
 				OpeRedirectorAnalysis(target, options)
 			}()
@@ -149,7 +149,7 @@ func Scan(target string, options model.Options, sid string) {
 			printing.DalLog("SYSTEM", "BAV analysis done ✓", options)
 		}()
 	}
-	
+
 	s := spinner.New(spinner.CharSets[4], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 	s.Prefix = " "
 	s.Suffix = "  Waiting routines.."
@@ -200,7 +200,7 @@ func Scan(target string, options model.Options, sid string) {
 
 		// set path base xss
 
-		if (isAllowType(policy["Content-Type"]) && !options.OnlyCustomPayload){
+		if isAllowType(policy["Content-Type"]) && !options.OnlyCustomPayload {
 
 			arr := optimization.SetPayloadValue(getCommonPayload(), options)
 			for _, avv := range arr {
@@ -216,7 +216,7 @@ func Scan(target string, options model.Options, sid string) {
 					PathFinal = tmpTarget.Scheme + "://" + tmpTarget.Hostname() + "/" + tmpTarget.Path
 				}
 
-				tq, tm := optimization.MakeRequestQuery(PathFinal + ";" + avv, "", "", "inPATH", "toAppend", "NaN", options)
+				tq, tm := optimization.MakeRequestQuery(PathFinal+";"+avv, "", "", "inPATH", "toAppend", "NaN", options)
 				tm["payload"] = ";" + avv
 				query[tq] = tm
 			}
@@ -306,7 +306,7 @@ func Scan(target string, options model.Options, sid string) {
 			}
 
 			// loop parameter list
-			for k,_ := range params {
+			for k, _ := range params {
 				// loop payload list
 				for _, bpayload := range bpayloads {
 					// Add plain XSS Query
@@ -340,10 +340,10 @@ func Scan(target string, options model.Options, sid string) {
 							tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "toHTML", "toAppend", "NaN", options)
 							query[tq] = tm
 							// Add URL encoded XSS Query
-							etq, etm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML", "toAppend", "urlEncode",options)
+							etq, etm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML", "toAppend", "urlEncode", options)
 							query[etq] = etm
 							// Add HTML Encoded XSS Query
-							htq, htm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML", "toAppend", "htmlEncode",options)
+							htq, htm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML", "toAppend", "htmlEncode", options)
 							query[htq] = htm
 						}
 					}
@@ -382,7 +382,7 @@ func Scan(target string, options model.Options, sid string) {
 						rl.Block(k.Host)
 						resbody, _, vds, vrs, err := SendReq(k, v["payload"], options)
 						abs := optimization.Abstraction(resbody, v["payload"])
-						if containsFromArray(abs,v["payload"]) {
+						if containsFromArray(abs, v["payload"]) {
 							vrs = true
 						} else {
 							vrs = false
@@ -639,25 +639,33 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 	} else {
 		p, _ = url.ParseQuery(options.Data)
 	}
+
 	if options.Mining {
-		// Param mining with Gf-Patterins
-		if options.MiningWordlist == "" {
-			for _, gfParam := range GetGfXSS() {
-				if gfParam != "" {
-					if p.Get(gfParam) == "" {
-						p.Set(gfParam, "")
+		tempURL, _ := optimization.MakeRequestQuery(target, "pleasedonthaveanamelikethis_plz_plz", "pleasedonthaveanamelikethis_plz_plz", "PA", "toAppend", "NaN", options)
+		rl.Block(tempURL.Host)
+		_, _, _, vrs, _ := SendReq(tempURL, "pleasedonthaveanamelikethis_plz_plz", options)
+		if vrs {
+			p.Set("pleasedonthaveanamelikethis_plz_plz", "")
+		} else {
+			// Param mining with Gf-Patterins
+			if options.MiningWordlist == "" {
+				for _, gfParam := range GetGfXSS() {
+					if gfParam != "" {
+						if p.Get(gfParam) == "" {
+							p.Set(gfParam, "")
+						}
 					}
 				}
-			}
-		} else {
-			ff, err := readLinesOrLiteral(options.MiningWordlist)
-			if err != nil {
-				printing.DalLog("SYSTEM", "Mining wordlist load fail..", options)
 			} else {
-				for _, wdParam := range ff {
-					if wdParam != "" {
-						if p.Get(wdParam) == "" {
-							p.Set(wdParam, "")
+				ff, err := readLinesOrLiteral(options.MiningWordlist)
+				if err != nil {
+					printing.DalLog("SYSTEM", "Mining wordlist load fail..", options)
+				} else {
+					for _, wdParam := range ff {
+						if wdParam != "" {
+							if p.Get(wdParam) == "" {
+								p.Set(wdParam, "")
+							}
 						}
 					}
 				}
@@ -675,7 +683,7 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 				Timeout:   time.Duration(t) * time.Second,
 				Transport: transport,
 			}
-			
+
 			if !options.FollowRedirect {
 				client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 					//return errors.New("Follow redirect") // or maybe the error from the request
@@ -820,10 +828,10 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 		Timeout:   time.Duration(options.Timeout) * time.Second,
 		Transport: netTransport,
 	}
-		
-	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {					
-		if(strings.Contains(req.URL.Host, "google")){
-			printing.DalLog("GREP", "Found Open Redirector. Payload: " + via[0].URL.String(), options)
+
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if strings.Contains(req.URL.Host, "google") {
+			printing.DalLog("GREP", "Found Open Redirector. Payload: "+via[0].URL.String(), options)
 			if options.FoundAction != "" {
 				foundAction(options, via[0].Host, via[0].URL.String(), "BAV: OpenRedirect")
 			}
@@ -831,7 +839,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 
 		return nil
 	}
-	
+
 	resp, err := client.Do(req)
 	if err != nil {
 		//fmt.Printf("HTTP call failed: %v --> %v", req.URL.String(), err)
@@ -873,7 +881,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					}
 
 					if options.FoundAction != "" {
-						foundAction(options, req.URL.Host, rst.PoC, "BAV: " + rst.Type)
+						foundAction(options, req.URL.Host, rst.PoC, "BAV: "+rst.Type)
 					}
 
 					for _, vv := range v {
@@ -901,7 +909,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				}
 
 				if options.FoundAction != "" {
-					foundAction(options, req.URL.Host, rst.PoC, "BAV: " + rst.Type)
+					foundAction(options, req.URL.Host, rst.PoC, "BAV: "+rst.Type)
 				}
 
 				for _, vv := range v {
@@ -935,9 +943,9 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				for _, vv := range v {
 					printing.DalLog("CODE", vv, options)
 				}
-				
+
 				if options.FoundAction != "" {
-					foundAction(options, req.URL.Host, rst.PoC, "BAV: " + rst.Type)
+					foundAction(options, req.URL.Host, rst.PoC, "BAV: "+rst.Type)
 				}
 
 				if options.Format == "json" {
