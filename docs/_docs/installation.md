@@ -24,13 +24,13 @@ Please check this documents [https://snapcraft.io/docs/installing-snapd](https:/
 
 ### Install dalfox
 ```
-$ sudo snap install dalfox
+▶ sudo snap install dalfox
 ```
 
 ## From the source (developement version)
 ### Use to `go get`
 ```
-$ go get -u github.com/hahwul/dalfox/v2
+▶ GO111MODULE=on go get -v github.com/hahwul/dalfox/v2
 ```
 The update is the same as the installation method.
 
@@ -38,33 +38,33 @@ The update is the same as the installation method.
 
 ```
 // clone repo (for first-time installations)
-$ git clone https://github.com/hahwul/dalfox
+▶ git clone https://github.com/hahwul/dalfox
 
 // if you update dalfox,
 // git pull -v
 
 // if you install GOPATH
-$ go install
+▶ go install
 
 // build binary
-$ go build
+▶ go build
 ```
 
 ## Using Docker
 Dalfox provides docker images by version. It can be used lightly with less capacity.
 ```
-$ docker pull hahwul/dalfox:latest
+▶ docker pull hahwul/dalfox:latest
 ```
 
 if you installed it, using like this command
 ```
-docker run -it hahwul/dalfox:latest /app/dalfox url https://www.hahwul.com
+▶ docker run -it hahwul/dalfox:latest /app/dalfox url https://www.hahwul.com
 ```
 
 or live in docker
 
 ```
-$ docker run -it hahwul/dalfox:latest /bin/bash
-$ ./dalfox
+▶ docker run -it hahwul/dalfox:latest /bin/bash
+▶ ./dalfox
 run dalfox on docker
 ```
