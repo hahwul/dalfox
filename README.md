@@ -18,7 +18,7 @@
 Finder Of XSS, and Dal is the Korean pronunciation of moon.
 
 ## What is DalFox 🌘🦊
-DalFox is a fast, powerful parameter analysis and XSS scanner, based on a golang/DOM parser. supports friendly Pipeline, CI/CD and testing of different types of XSS. I talk about naming. Dal(달) is the Korean pronunciation of moon and fox was made into Fox(Find Of XSS).
+DalFox is a fast, powerful parameter analysis and XSS scanner, based on a golang/DOM parser. supports friendly Pipeline, CI/CD and testing of different types of XSS. I talk about naming. Dal([달](https://en.wiktionary.org/wiki/달)) is the Korean pronunciation of moon and fox was made into Fox(Find Of XSS).
 
 ## TOC
 - [Key features](#key-features)
@@ -76,44 +76,45 @@ Modes:
   version     Show version
 
 Global Flags:
-  -b, --blind string              Add your blind xss (e.g -b hahwul.xss.ht)                      
-      --config string             Using config from file
-  -C, --cookie string             Add custom cookie
-      --cookie-from-raw           Load cookie from raw request (e.g --cookie-from-raw request.txt)
-      --custom-alert-type string  Change alert value type (e.g =none / =str,none) (default "none")
-      --custom-alert-value string Change alert value (e.g custom-alert-value=document.cookie (default "1")
-      --custom-payload string     Add custom payloads from file
-  -d, --data string               Using POST Method and add Body data
-      --debug                     debug mode, save all log using -o option
-      --delay int                 Milliseconds between send to same host (1000==1s)
-      --follow-redirects          Following redirection
-      --format string             Stdout output format(plain/json) (default "plain")
-      --found-action string       If found weak/vuln, action(cmd) to next
-      --grep string               Using custom grepping file (e.g --grep ./samples/sample_grep.json)
-  -H, --header string             Add custom headers
-  -h, --help                      help for dalfox
-      --ignore-return string      Ignore scanning from return code (e.g --ignore-return 302,403,404)
-  -X, --method string             Force overriding HTTP Method (e.g -X PUT)
-      --mining-dict               Find new parameter with dictionary attack, default is Gf-Patterns=>XSS (default true)
-      --mining-dict-word string   Custom wordlist file for param mining (e.g --mining-dict-word word.txt)
-      --mining-dom                Find new parameter in DOM (attribute/js value) (default true)
-      --no-color                  Not use colorize
-      --no-spinner                Not use spinner
-      --only-custom-payload       Only testing custom payload (required --custom-payload)
-      --only-discovery            Only testing parameter analysis (same '--skip-xss-scanning' option)
-  -o, --output string             Write to output file
-  -p, --param string              Only testing selected parameters
-      --proxy string              Send all request to proxy server (e.g --proxy http://127.0.0.1:8080)
-      --silence                   Not printing all logs
-      --skip-bav                  Skipping BAV(Basic Another Vulnerability) analysis
-      --skip-grepping             Skipping built-in grepping
-      --skip-mining-all           Skipping ALL parameter mining
-      --skip-mining-dict          Skipping Dict base parameter mining
-      --skip-mining-dom           Skipping DOM base parameter mining
-      --skip-xss-scanning         Skipping XSS Scanning (same '--only-discovery' option)
-      --timeout int               Second of timeout (default 10)
-      --user-agent string         Add custom UserAgent
-  -w, --worker int                Number of worker (default 100)
+Flags:
+  -b, --blind string                Add your blind xss (e.g -b hahwul.xss.ht)
+      --config string               Using config from file
+  -C, --cookie string               Add custom cookie
+      --cookie-from-raw string      Load cookie from burp raw http request (e.g --cookie-from-raw request.txt)
+      --custom-alert-type string    Change alert value type (e.g =none / =str,none) (default "none")
+      --custom-alert-value string   Change alert value (e.g custom-alert-value=document.cookie (default "1")
+      --custom-payload string       Add custom payloads from file
+  -d, --data string                 Using POST Method and add Body data
+      --debug                       debug mode, save all log using -o option
+      --delay int                   Milliseconds between send to same host (1000==1s)
+      --follow-redirects            Following redirection
+      --format string               Stdout output format(plain/json) (default "plain")
+      --found-action string         If found weak/vuln, action(cmd) to next
+      --grep string                 Using custom grepping file (e.g --grep ./samples/sample_grep.json)
+  -H, --header string               Add custom headers
+  -h, --help                        help for dalfox
+      --ignore-return string        Ignore scanning from return code (e.g --ignore-return 302,403,404)
+  -X, --method string               Force overriding HTTP Method (e.g -X PUT)
+      --mining-dict                 Find new parameter with dictionary attack, default is Gf-Patterns=>XSS (default true)
+      --mining-dict-word string     Custom wordlist file for param mining (e.g --mining-dict-word word.txt)
+      --mining-dom                  Find new parameter in DOM (attribute/js value) (default true)
+      --no-color                    Not use colorize
+      --no-spinner                  Not use spinner
+      --only-custom-payload         Only testing custom payload (required --custom-payload)
+      --only-discovery              Only testing parameter analysis (same '--skip-xss-scanning' option)
+  -o, --output string               Write to output file
+  -p, --param string                Only testing selected parameters
+      --proxy string                Send all request to proxy server (e.g --proxy http://127.0.0.1:8080)
+      --silence                     Not printing all logs
+      --skip-bav                    Skipping BAV(Basic Another Vulnerability) analysis
+      --skip-grepping               Skipping built-in grepping
+      --skip-mining-all             Skipping ALL parameter mining
+      --skip-mining-dict            Skipping Dict base parameter mining
+      --skip-mining-dom             Skipping DOM base parameter mining
+      --skip-xss-scanning           Skipping XSS Scanning (same '--only-discovery' option)
+      --timeout int                 Second of timeout (default 10)
+      --user-agent string           Add custom UserAgent
+  -w, --worker int                  Number of worker (default 100)
 
 Server Flags:
   -h, --help          help for server
@@ -122,12 +123,12 @@ Server Flags:
       
 Pipe Flags:
   -h, --help        help for pipe
-      --multicast   Scanning N*Host mode
+      --multicast   Parallel scanning N*Host mode (show only poc code)
       
 File Flags:
   -h, --help        help for file
       --http        Using force http on rawdata mode
-      --multicast   Scanning N*Host mode
+      --multicast   Parallel scanning N*Host mode (show only poc code)
       --rawdata     Using req rawdata from Burp/ZAP
       
 SXSS Flags:
@@ -138,22 +139,22 @@ SXSS Flags:
 ```
 
 ```
-$ dalfox [mode] [flags]
+▶ dalfox [mode] [flags] [data]
 ```
 
 Single target mode
 ```plain
-$ dalfox url http://testphp.vulnweb.com/listproducts.php\?cat\=123\&artist\=123\&asdf\=ff -b https://hahwul.xss.ht
+▶ dalfox url http://testphp.vulnweb.com/listproducts.php\?cat\=123\&artist\=123\&asdf\=ff -b https://hahwul.xss.ht
 ```
 
 Multiple target mode from file
 ```plain
-$ dalfox file urls_file --custom-payload ./mypayloads.txt
+▶ dalfox file urls_file --custom-payload ./mypayloads.txt
 ```
 
 Pipeline mode
 ```plain
-$ cat urls_file | dalfox pipe -H "AuthToken: bbadsfkasdfadsf87"
+▶ cat urls_file | dalfox pipe -H "AuthToken: bbadsfkasdfadsf87"
 ```
 
 Other tips, See [wiki](https://github.com/hahwul/dalfox/wiki) for detailed instructions!
@@ -178,8 +179,8 @@ Format
 Why is there a gap?
 It is a method to make it easier to parse only the poc code through cut etc. For example, you can do this.
 ```shell
-$ dalfox url http://testphp.vulnweb.com/listproducts.php\?cat\=123\&artist\=123\&asdf\=ff | cut -d " " -f 2 > output
-$ cat output
+▶ dalfox url http://testphp.vulnweb.com/listproducts.php\?cat\=123\&artist\=123\&asdf\=ff | cut -d " " -f 2 > output
+▶ cat output
 http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123DalFox
 http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123%22%3E%3Csvg%2FOnLoad%3D%22%60%24%7Bprompt%60%60%7D%60%22+class%3Ddalfox%3E
 ```
