@@ -8,12 +8,12 @@ Homebrew is the package manager for MacOS(or linux). On devices using homebrew, 
 
 ### Install homebrew
 ```shell
-$ /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)"
+▶ /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)"
 ```
 ### Install dalfox
 ```shell
-$ brew tap hahwul/dalfox
-$ brew install dalfox
+▶ brew tap hahwul/dalfox
+▶ brew install dalfox
 ```
 
 ## Using Snapcraft
