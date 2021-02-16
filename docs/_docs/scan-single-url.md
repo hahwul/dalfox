@@ -5,7 +5,7 @@ permalink: /docs/scan-single-url/
 
 Command
 ```
-$ dalfox url http://testphp.vulnweb.com/listproducts.php
+▶ dalfox url http://testphp.vulnweb.com/listproducts.php
 ```
 
 Output
@@ -37,7 +37,7 @@ Finder Of XSS and Dal is the Korean pronunciation of moon. @hahwul
 [POC][G][BUILT-IN/dalfox-error-mysql5/GET] http://testphp.vulnweb.com/listproducts.php?cat=dalfox%3E
 [*] Parameter analysis  done ✓
 [I] Content-Type is text/html; charset=UTF-8
-[I] Reflected cat param => Injected: /inHTML-none(1)  $
+[I] Reflected cat param => Injected: /inHTML-none(1)  ▶
     48 line:  	Error: Unknown column 'DalFox' in 'where cl
 [*] Generate XSS payload and optimization.Optimization.. 🛠
 [*] Start XSS Scanning.. with 201 queries 🗡

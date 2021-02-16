@@ -8,7 +8,7 @@ Homebrew is the package manager for MacOS(or linux). On devices using homebrew, 
 
 ### Install homebrew
 ```shell
-▶ /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)"
+▶ /bin/bash -c "▶(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)"
 ```
 ### Install dalfox
 ```shell

@@ -6,18 +6,18 @@ permalink: /docs/output-handling/
 ## Use dalfox output to other tools via Pipeline
 Command
 ```
-$ dalfox url http://testphp.vulnweb.com/listproducts.php | grep "\[V\]" | cut -d " " -f2 | xargs -I % open %
+▶ dalfox url http://testphp.vulnweb.com/listproducts.php | grep "\[V\]" | cut -d " " -f2 | xargs -I % open %
 ```
 
 ## Save only PoC code with Stdout
 Command
 ```
-$ dalfox url http://testphp.vulnweb.com/listproducts.php > output
+▶ dalfox url http://testphp.vulnweb.com/listproducts.php > output
 ```
 
 Output file
 ```
-$ cat output
+▶ cat output
 [POC][G][BUILT-IN/dalfox-error-mysql2/GET] http://testphp.vulnweb.com/listproducts.php
 [POC][G][BUILT-IN/dalfox-error-mysql/GET] http://testphp.vulnweb.com/listproducts.php
 [POC][G][BUILT-IN/dalfox-error-mysql5/GET] http://testphp.vulnweb.com/listproducts.php?cat=dalfox.
@@ -28,12 +28,12 @@ $ cat output
 ## Save only PoC code with `-o` option
 Command
 ```
-$ dalfox url http://testphp.vulnweb.com/listproducts.php -o output
+▶ dalfox url http://testphp.vulnweb.com/listproducts.php -o output
 ```
 
 Output file
 ```
-$ cat output
+▶ cat output
 [POC][G][BUILT-IN/dalfox-error-mysql2/GET] http://testphp.vulnweb.com/listproducts.php
 [POC][G][BUILT-IN/dalfox-error-mysql/GET] http://testphp.vulnweb.com/listproducts.php
 [POC][G][BUILT-IN/dalfox-error-mysql5/GET] http://testphp.vulnweb.com/listproducts.php?cat=dalfox.
@@ -45,12 +45,12 @@ $ cat output
 
 Command
 ```
-$ dalfox url http://testphp.vulnweb.com/listproducts.php -o alllog.txt --debug
+▶ dalfox url http://testphp.vulnweb.com/listproducts.php -o alllog.txt --debug
 ```
 
 Output file
 ```
-$ cat alllog.txt
+▶ cat alllog.txt
 [*] Using single target mode
 [*] Target URL: http://testphp.vulnweb.com/listproducts.php
 [*] Vaild target [ code:200 / size:4819 ]

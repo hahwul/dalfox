@@ -6,7 +6,7 @@ permalink: /docs/scan-multiple-url/
 ## Using pipe mode
 Command
 ```
-$ cat samples/sample_target.txt| dalfox pipe
+▶ cat samples/sample_target.txt| dalfox pipe
 ```
 Output
 ```
@@ -52,7 +52,7 @@ Output
 [*] BAV analysis done ✓
 [*] Parameter analysis  done ✓tines
 [I] Content-Type is text/html; charset=UTF-8
-[I] Reflected cat param => Injected: /inHTML-none(1)  $
+[I] Reflected cat param => Injected: /inHTML-none(1)  ▶
     48 line:  	Error: Unknown column 'asdfDalFox' in 'where cl
 [*] Generate XSS payload and optimization.Optimization.. 🛠
 [*] Start XSS Scanning.. with 201 queries 🗡
@@ -64,7 +64,7 @@ Output
 ## Using file mode
 Command
 ```
-$ dalfox file ./samples/sample_target.txt
+▶ dalfox file ./samples/sample_target.txt
 ```
 Output
 ```
@@ -110,7 +110,7 @@ Output
 [*] BAV analysis done ✓ing routines
 [*] Parameter analysis  done ✓tines
 [I] Content-Type is text/html; charset=UTF-8
-[I] Reflected cat param => Injected: /inHTML-none(1)  $
+[I] Reflected cat param => Injected: /inHTML-none(1)  ▶
     48 line:  	Error: Unknown column 'asdfDalFox' in 'where cl
 [*] Generate XSS payload and optimization.Optimization.. 🛠
 [*] Start XSS Scanning.. with 201 queries 🗡

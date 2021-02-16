@@ -13,11 +13,11 @@ Found action(`--found-action`) is lets you specify the actions to take when dete
 
 
 ```
-$ dalfox url http://testphp.vulnweb.com/listproducts.php\?cat\=123\&artist\=123\&asdf\=ff --found-action "echo '@@query@@' > data"
+▶ dalfox url http://testphp.vulnweb.com/listproducts.php\?cat\=123\&artist\=123\&asdf\=ff --found-action "echo '@@query@@' > data"
 ```
 
 ```
-$ cat data
+▶ cat data
 http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123%27%3E%3Csvg%2Fclass%3D%27dalfox%27onLoad%3Dalert%2845%29%3E
 ```
 
