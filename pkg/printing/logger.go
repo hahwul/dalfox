@@ -31,20 +31,19 @@ func Summary(options model.Options, target string) {
 		if options.MiningWordlist != "" {
 			miningWord = options.MiningWordlist
 		}
-
-		fmt.Fprintf(os.Stderr, "\n 🎯  Target: %s\n", aurora.BrightYellow(target).String())
-		fmt.Fprintf(os.Stderr, "───────────────────────────┬───────────────────────────────────────\n")
-		fmt.Fprintf(os.Stderr, " 🏁  Method                │ %s\n", aurora.BrightBlue(options.Method).String())
-		fmt.Fprintf(os.Stderr, " 🧞‍♂️  Worker                │ %d\n", options.Concurrence)
-		fmt.Fprintf(os.Stderr, " 🦹🏼‍♂️  BAV                   │ %s\n", boolToColorStr(!options.NoBAV))
-		fmt.Fprintf(os.Stderr, " ⛏   Mining                │ %s (%s)\n", boolToColorStr(options.Mining), miningWord)
-		fmt.Fprintf(os.Stderr, " 🔬  Mining-DOM            │ %s (mining from DOM)\n", boolToColorStr(options.FindingDOM))
+		fmt.Fprintf(os.Stderr, "\n 🎯  Target                 %s\n", aurora.BrightYellow(target).String())
+		fmt.Fprintf(os.Stderr, " 🏁  Method                 %s\n", aurora.BrightBlue(options.Method).String())
+		fmt.Fprintf(os.Stderr, " 🧞‍♂️  Worker                 %d\n", options.Concurrence)
+		fmt.Fprintf(os.Stderr, " 🦹🏼‍♂️  BAV                    %s\n", boolToColorStr(!options.NoBAV))
+		fmt.Fprintf(os.Stderr, " ⛏   Mining                 %s (%s)\n", boolToColorStr(options.Mining), miningWord)
+		fmt.Fprintf(os.Stderr, " 🔬  Mining-DOM             %s (mining from DOM)\n", boolToColorStr(options.FindingDOM))
 		if options.BlindURL != "" {
-			fmt.Fprintf(os.Stderr, " 🛰   Blind XSS Callback    │ %s\n", aurora.BrightBlue(options.BlindURL).String())
+			fmt.Fprintf(os.Stderr, " 🛰   Blind XSS Callback     %s\n", aurora.BrightBlue(options.BlindURL).String())
 		}
-		fmt.Fprintf(os.Stderr, " ⏱   Timeout               │ %d\n", options.Timeout)
-		fmt.Fprintf(os.Stderr, " 📤  FollowRedirect        │ %s\n", boolToColorStr(options.FollowRedirect))
-		fmt.Fprintf(os.Stderr, "───────────────────────────┴───────────────────────────────────────\n")
+		fmt.Fprintf(os.Stderr, " ⏱   Timeout                %d\n", options.Timeout)
+		fmt.Fprintf(os.Stderr, " 📤  FollowRedirect         %s\n", boolToColorStr(options.FollowRedirect))
+		//fmt.Fprintf(os.Stderr, "\n")
+		fmt.Fprintf(os.Stderr, "\n >>>>>>>>>>>>>>>>>>>>>>>>>\n")
 	}
 }
 
