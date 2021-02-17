@@ -1,5 +1,7 @@
 package model
 
+import s "github.com/briandowns/spinner"
+
 // Options is struct of options
 type Options struct {
 	UniqParam         string `json:"param"`
@@ -44,6 +46,7 @@ type Options struct {
 	NoGrep            bool `json:"skip-grepping"`
 	Debug             bool `json:"debug"`
 	CookieFromRaw     string
+	SpinnerObject     *s.Spinner
 }
 
 // Scan is struct of scan

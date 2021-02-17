@@ -6,7 +6,9 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/briandowns/spinner"
 	"github.com/hahwul/dalfox/v2/pkg/printing"
 	"github.com/hahwul/dalfox/v2/pkg/scanning"
 	"github.com/spf13/cobra"
@@ -34,21 +36,33 @@ var pipeCmd = &cobra.Command{
 			options.Silence = true
 			t := scanning.MakeTargetSlice(targets)
 			var wg sync.WaitGroup
+			tt := 0
 			for k, v := range t {
 				printing.DalLog("SYSTEM-M", "Parallel testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", options)
+				tt = tt + len(v)
 			}
-			printing.DalLog("SYSTEM-M", "Scanning.. (show only poc code)", options)
-
+			s := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
+			s.Prefix = " "
+			s.Suffix = "  Scanning [ " + strconv.Itoa(options.NowURL) + " / " + strconv.Itoa(tt) + " URLs] [ show only poc code ]"
+			options.SpinnerObject = s
+			s.Start()
+			options.NowURL = 0
 			for k, v := range t {
 				wg.Add(1)
 				go func(k string, v []string) {
 					defer wg.Done()
 					for i := range v {
 						scanning.Scan(v[i], options, strconv.Itoa(len(v)))
+						mutex := &sync.Mutex{}
+						mutex.Lock()
+						options.NowURL = options.NowURL + 1
+						s.Suffix = "  Scanning [ " + strconv.Itoa(options.NowURL) + " / " + strconv.Itoa(tt) + " URLs] [ show only poc code ]"
+						mutex.Unlock()
 					}
 				}(k, v)
 			}
 			wg.Wait()
+			s.Stop()
 		} else {
 			options.AllURLS = len(targets)
 			for i := range targets {

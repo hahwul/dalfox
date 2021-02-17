@@ -41,7 +41,14 @@ func DalLog(level, text string, options model.Options) {
 		if options.Debug {
 			ftext = "[*] " + text
 		}
-		text = aurora.White("[*] ").String() + text
+		if options.NoSpinner {
+			text = aurora.White("[*] ").String() + text
+		} else if !options.Silence {
+			mutex.Lock()
+			setSpinner("[ SYSTEM ] [ "+text+" ]", options)
+			mutex.Unlock()
+			text = "HIDDENMESSAGE!!"
+		}
 	}
 	if level == "SYSTEM-M" {
 		if options.Debug {
@@ -76,9 +83,10 @@ func DalLog(level, text string, options model.Options) {
 		text = aurora.BrightYellow(text).String()
 	}
 
-	//mutex.Lock()
-	if options.Silence == true {
+	mutex.Lock()
+	if options.Silence {
 		if level == "PRINT" {
+			stopSpinner(options)
 			if options.Format == "json" {
 				ftext = text
 				//fmt.Println(aurora.BrightGreen(text))
@@ -92,6 +100,7 @@ func DalLog(level, text string, options model.Options) {
 					fmt.Println(aurora.BrightGreen("[POC]" + text))
 				}
 			}
+			restartSpinner(options)
 		}
 	} else {
 		if level == "PRINT" {
@@ -109,12 +118,14 @@ func DalLog(level, text string, options model.Options) {
 				}
 			}
 		} else {
-			if options.NoColor {
-				text = "\r" + ftext
-			} else {
-				text = "\r" + text
+			if text != "HIDDENMESSAGE!!" {
+				if options.NoColor {
+					text = "\r" + ftext
+				} else {
+					text = "\r" + text
+				}
+				fmt.Fprintln(os.Stderr, text)
 			}
-			fmt.Fprintln(os.Stderr, text)
 		}
 	}
 
@@ -132,5 +143,24 @@ func DalLog(level, text string, options model.Options) {
 				fmt.Fprintln(os.Stderr, "output file error (write)")
 			}
 		}
+	}
+	mutex.Unlock()
+}
+
+func setSpinner(str string, options model.Options) {
+	if options.SpinnerObject != nil {
+		options.SpinnerObject.Suffix = "  " + str
+	}
+}
+
+func restartSpinner(options model.Options) {
+	if options.SpinnerObject != nil {
+		options.SpinnerObject.Restart()
+	}
+}
+
+func stopSpinner(options model.Options) {
+	if options.SpinnerObject != nil {
+		options.SpinnerObject.Stop()
 	}
 }

@@ -21,10 +21,15 @@ import (
 	"github.com/hahwul/dalfox/v2/pkg/verification"
 )
 
-var scanObject model.Scan
+var (
+	scanObject model.Scan
+	s          = spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr))
+)
 
 // Scan is main scanning function
 func Scan(target string, options model.Options, sid string) {
+	s.Prefix = " "
+	s.Start()
 	printing.DalLog("SYSTEM", "Target URL: "+target, options)
 
 	scanObject := model.Scan{
@@ -150,11 +155,8 @@ func Scan(target string, options model.Options, sid string) {
 		}()
 	}
 
-	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
-	s.Prefix = " "
-	s.Suffix = "  Waiting routines.."
-	if options.NowURL != 0 {
-		s.Suffix = "  URLs(" + strconv.Itoa(options.NowURL) + " / " + strconv.Itoa(options.AllURLS) + ") :: Waiting routines"
+	if options.NowURL != 0 && !options.Silence {
+		s.Suffix = "  Scanning [ " + strconv.Itoa(options.NowURL) + " / " + strconv.Itoa(options.AllURLS) + " URLs ]"
 	}
 
 	if !(options.Silence || options.NoSpinner) {
@@ -353,11 +355,9 @@ func Scan(target string, options model.Options, sid string) {
 		}
 
 		printing.DalLog("SYSTEM", "Start XSS Scanning.. with "+strconv.Itoa(len(query))+" queries 🗡", options)
-		s := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 		mutex := &sync.Mutex{}
 		queryCount := 0
-		s.Prefix = " "
-		s.Suffix = "  Make " + strconv.Itoa(options.Concurrence) + " workers and allocated " + strconv.Itoa(len(query)) + " queries"
+		printing.DalLog("SYSTEM", "[ Make "+strconv.Itoa(options.Concurrence)+" workers ] [ Allocated "+strconv.Itoa(len(query))+" queries ]", options)
 
 		if !(options.Silence || options.NoSpinner) {
 			s.Start() // Start the spinner
@@ -526,9 +526,9 @@ func Scan(target string, options model.Options, sid string) {
 						}
 
 						if options.NowURL == 0 {
-							s.Suffix = "  Queries(" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") :: " + msg
-						} else {
-							s.Suffix = "  Queries(" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + "), URLs(" + strconv.Itoa(options.NowURL) + " / " + strconv.Itoa(options.AllURLS) + ") :: " + msg
+							s.Suffix = "  [ " + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + " Queries] [ " + msg + " ]"
+						} else if !options.Silence {
+							s.Suffix = "  [ " + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + " Queries] [ " + strconv.Itoa(options.NowURL) + " / " + strconv.Itoa(options.AllURLS) + " URLs ] [ " + msg + " ]"
 						}
 						//s.Suffix = " Waiting routines.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
 						s.Unlock()
