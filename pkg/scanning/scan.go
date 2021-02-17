@@ -150,7 +150,7 @@ func Scan(target string, options model.Options, sid string) {
 		}()
 	}
 
-	s := spinner.New(spinner.CharSets[4], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
+	s := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 	s.Prefix = " "
 	s.Suffix = "  Waiting routines.."
 	if options.NowURL != 0 {
@@ -353,7 +353,7 @@ func Scan(target string, options model.Options, sid string) {
 		}
 
 		printing.DalLog("SYSTEM", "Start XSS Scanning.. with "+strconv.Itoa(len(query))+" queries 🗡", options)
-		s := spinner.New(spinner.CharSets[4], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
+		s := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 		mutex := &sync.Mutex{}
 		queryCount := 0
 		s.Prefix = " "
