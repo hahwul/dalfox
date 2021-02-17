@@ -12,6 +12,7 @@ var urlCmd = &cobra.Command{
 	Short: "Use single target mode",
 	Run: func(cmd *cobra.Command, args []string) {
 		printing.Banner(options)
+		printing.Summary(options, args[0])
 		if len(args) >= 1 {
 			printing.DalLog("SYSTEM", "Using single target mode", options)
 			scanning.Scan(args[0], options, "url")

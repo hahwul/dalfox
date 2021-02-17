@@ -20,6 +20,7 @@ var fileCmd = &cobra.Command{
 	Short: "Use file mode(targets list or rawdata)",
 	Run: func(cmd *cobra.Command, args []string) {
 		printing.Banner(options)
+		printing.Summary(options, args[0])
 		var targets []string
 		if len(args) >= 1 {
 			rawdata, _ := cmd.Flags().GetBool("rawdata")

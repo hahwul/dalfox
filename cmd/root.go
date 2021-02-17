@@ -14,7 +14,7 @@ import (
 var cfgFile string
 var optionsStr = make(map[string]string)
 var optionsBool = make(map[string]bool)
-var config, cookie, data, header, p, customPayload, userAgent, blind, output, format, foundAction, proxy, grep ,cookieFromRaw string
+var config, cookie, data, header, p, customPayload, userAgent, blind, output, format, foundAction, proxy, grep, cookieFromRaw string
 var ignoreReturn, miningWord, method, customAlertValue, customAlertType string
 var timeout, concurrence, delay int
 var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, onlyCustomPayload, debug bool
@@ -24,7 +24,7 @@ var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV, skipGrep
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
 	Use: "dalfox",
-	Run: func(cmd *cobra.Command, args []string) { 
+	Run: func(cmd *cobra.Command, args []string) {
 		printing.Banner(options)
 		printing.DalLog("YELLOW", "Read the help page using the -h flag to see other options and flags!", options)
 	},
@@ -63,7 +63,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&grep, "grep", "", "Using custom grepping file (e.g --grep ./samples/sample_grep.json)")
 	rootCmd.PersistentFlags().StringVar(&ignoreReturn, "ignore-return", "", "Ignore scanning from return code (e.g --ignore-return 302,403,404)")
 	rootCmd.PersistentFlags().StringVar(&miningWord, "mining-dict-word", "", "Custom wordlist file for param mining (e.g --mining-dict-word word.txt)")
-	rootCmd.PersistentFlags().StringVarP(&method, "method", "X", "", "Force overriding HTTP Method (e.g -X PUT)")
+	rootCmd.PersistentFlags().StringVarP(&method, "method", "X", "GET", "Force overriding HTTP Method (e.g -X PUT)")
 	rootCmd.PersistentFlags().StringVarP(&cookieFromRaw, "cookie-from-raw", "", "", "Load cookie from burp raw http request (e.g --cookie-from-raw request.txt)")
 
 	//Int

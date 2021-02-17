@@ -28,8 +28,15 @@ var (
 
 // Scan is main scanning function
 func Scan(target string, options model.Options, sid string) {
-	s.Prefix = " "
-	s.Start()
+	if !(options.Silence || options.NoSpinner) {
+		time.Sleep(1 * time.Second) // Waiting log
+		s.Prefix = " "
+		s.Suffix = ""
+		s.Color("red", "bold")
+		options.SpinnerObject = s
+		s.Start()
+	}
+
 	printing.DalLog("SYSTEM", "Target URL: "+target, options)
 
 	scanObject := model.Scan{
