@@ -39,12 +39,11 @@ func Scan(target string, options model.Options, sid string) {
 		s.Start()
 	}
 
-	printing.DalLog("SYSTEM", "Target URL: "+target, options)
-
 	scanObject := model.Scan{
 		ScanID: sid,
 		URL:    target,
 	}
+	printing.DalLog("SYSTEM", "Start DalFox 🦊", options)
 
 	// query is XSS payloads
 	query := make(map[*http.Request]map[string]string)
@@ -104,17 +103,6 @@ func Scan(target string, options model.Options, sid string) {
 		defer tres.Body.Close()
 		body, err := ioutil.ReadAll(tres.Body)
 		printing.DalLog("SYSTEM", "Valid target [ code:"+strconv.Itoa(tres.StatusCode)+" / size:"+strconv.Itoa(len(body))+" ]", options)
-	}
-
-	if options.Mining {
-		if options.MiningWordlist != "" {
-			printing.DalLog("SYSTEM", "Using dictionary mining option [list="+options.MiningWordlist+"] 📚⛏", options)
-		} else {
-			printing.DalLog("SYSTEM", "Using dictionary mining option [list=GF-Patterns] 📚⛏", options)
-		}
-	}
-	if options.FindingDOM {
-		printing.DalLog("SYSTEM", "Using DOM mining option 📦⛏", options)
 	}
 
 	if options.Format == "json" {
@@ -544,7 +532,7 @@ func Scan(target string, options model.Options, sid string) {
 							s.Suffix = "  [" + strconv.Itoa(queryCount) + "/" + strconv.Itoa(len(query)) + " Queries][" + percent + "] " + msg
 						} else if !options.Silence {
 							percent2 := fmt.Sprintf("%0.2f%%", (float64(options.NowURL) / float64(options.AllURLS) * 100))
-							s.Suffix = "  [" + strconv.Itoa(queryCount) + "/" + strconv.Itoa(len(query)) + " Queries][" + percent + "][" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][" + percent2 + "]" + msg
+							s.Suffix = "  [" + strconv.Itoa(queryCount) + "/" + strconv.Itoa(len(query)) + " Queries][" + percent + "][" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][" + percent2 + "] " + msg
 						}
 						//s.Suffix = " Waiting routines.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
 						s.Unlock()
