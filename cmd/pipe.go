@@ -33,7 +33,8 @@ var pipeCmd = &cobra.Command{
 		printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target urls", options)
 
 		multi, _ := cmd.Flags().GetBool("multicast")
-		if multi {
+		mass, _ := cmd.Flags().GetBool("mass")
+		if multi || mass {
 			printing.DalLog("SYSTEM", "Using multicasting mode", options)
 			options.Silence = true
 			t := scanning.MakeTargetSlice(targets)
@@ -84,6 +85,7 @@ var pipeCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(pipeCmd)
 	pipeCmd.Flags().Bool("multicast", false, "Parallel scanning N*Host mode (show only poc code)")
+	pipeCmd.Flags().Bool("mass", false, "Parallel scanning N*Host mode (show only poc code)")
 
 	// Here you will define your flags and configuration settings.
 

@@ -79,7 +79,8 @@ var fileCmd = &cobra.Command{
 				targets = unique(targets)
 				printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target urls", options)
 				multi, _ := cmd.Flags().GetBool("multicast")
-				if multi {
+				mass, _ := cmd.Flags().GetBool("mass")
+				if multi || mass {
 					printing.DalLog("SYSTEM", "Using multicasting mode", options)
 					options.Silence = true
 					t := scanning.MakeTargetSlice(targets)
@@ -138,6 +139,7 @@ func init() {
 	fileCmd.Flags().Bool("rawdata", false, "Using req rawdata from Burp/ZAP")
 	fileCmd.Flags().Bool("http", false, "Using force http on rawdata mode")
 	fileCmd.Flags().Bool("multicast", false, "Parallel scanning N*Host mode (show only poc code)")
+	fileCmd.Flags().Bool("mass", false, "Parallel scanning N*Host mode (show only poc code)")
 }
 
 // a slice of strings, returning the slice and any error
