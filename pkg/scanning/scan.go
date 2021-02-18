@@ -19,7 +19,6 @@ import (
 	"github.com/hahwul/dalfox/v2/pkg/optimization"
 	"github.com/hahwul/dalfox/v2/pkg/printing"
 	"github.com/hahwul/dalfox/v2/pkg/verification"
-	"github.com/logrusorgru/aurora"
 )
 
 var (
@@ -33,7 +32,9 @@ func Scan(target string, options model.Options, sid string) {
 		time.Sleep(1 * time.Second) // Waiting log
 		s.Prefix = " "
 		s.Suffix = ""
-		s.Color("red", "bold")
+		if !options.NoColor {
+			s.Color("red", "bold")
+		}
 		options.SpinnerObject = s
 		s.Start()
 	}
@@ -135,13 +136,13 @@ func Scan(target string, options model.Options, sid string) {
 	go func() {
 		defer wait.Done()
 		policy = StaticAnalysis(target, options)
-		sa = aurora.Green(sa).String()
+		sa = options.AuroraObject.Green(sa).String()
 		printing.DalLog("SYSTEM", "["+sa+sp+bav+"] Waiting for parameter and static analysis 🔍", options)
 	}()
 	go func() {
 		defer wait.Done()
 		params = ParameterAnalysis(target, options)
-		sp = aurora.Green(sp).String()
+		sp = options.AuroraObject.Green(sp).String()
 		printing.DalLog("SYSTEM", "["+sa+sp+bav+"] Waiting for parameter and static analysis 🔍", options)
 	}()
 	if !options.NoBAV {
@@ -163,7 +164,7 @@ func Scan(target string, options model.Options, sid string) {
 				OpeRedirectorAnalysis(target, options)
 			}()
 			bavWaitGroup.Wait()
-			bav = aurora.Green(bav).String()
+			bav = options.AuroraObject.Green(bav).String()
 			printing.DalLog("SYSTEM", "["+sa+sp+bav+"] Waiting for parameter and static analysis 🔍", options)
 		}()
 	}

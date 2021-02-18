@@ -9,6 +9,7 @@ import (
 
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	"github.com/hahwul/dalfox/v2/pkg/printing"
+	"github.com/logrusorgru/aurora"
 	"github.com/spf13/cobra"
 )
 
@@ -93,6 +94,7 @@ func init() {
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
 	stime := time.Now()
+	au := aurora.NewAurora(!noColor)
 	options = model.Options{
 		Header:            header,
 		Cookie:            cookie,
@@ -127,6 +129,7 @@ func initConfig() {
 		NoGrep:            skipGrep,
 		Debug:             debug,
 		CookieFromRaw:     cookieFromRaw,
+		AuroraObject:      au,
 		StartTime:         stime,
 	}
 

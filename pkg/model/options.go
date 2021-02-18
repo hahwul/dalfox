@@ -4,6 +4,7 @@ import (
 	t "time"
 
 	s "github.com/briandowns/spinner"
+	a "github.com/logrusorgru/aurora"
 )
 
 // Options is struct of options
@@ -51,6 +52,7 @@ type Options struct {
 	Debug             bool `json:"debug"`
 	CookieFromRaw     string
 	SpinnerObject     *s.Spinner
+	AuroraObject      a.Aurora
 	StartTime         t.Time
 }
 

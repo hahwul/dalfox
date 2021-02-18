@@ -95,7 +95,9 @@ var fileCmd = &cobra.Command{
 					s.Prefix = " "
 					s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(tt) + " Tasks][0%] Parallel scanning from file"
 					options.SpinnerObject = s
-					s.Color("red", "bold")
+					if !options.NoColor {
+						s.Color("red", "bold")
+					}
 					s.Start()
 					options.NowURL = 0
 					for k, v := range t {
