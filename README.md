@@ -1,7 +1,10 @@
-<p align="center">
+<h1 align="center">
   <br>
   <a href=""><img src="https://user-images.githubusercontent.com/13212227/79072646-1cdd2500-7d1d-11ea-8a6d-d24301172a17.png" alt="" width="500px;"></a>
-  <br>
+</h1>
+<h4 align="center">Finder Of XSS, and Dal is the Korean pronunciation of moon.</h4>
+
+<p align="center"> 
   <a href=""><img src="https://img.shields.io/github/v/release/hahwul/dalfox?style=flat"></a>
   <a href=""><img src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat"></a>
   <a href=""><img src="https://api.codacy.com/project/badge/Grade/17cac7b8d1e849a688577f2bbdd6ecd0"></a>
@@ -10,7 +13,6 @@
   <a href="https://twitter.com/intent/follow?screen_name=hahwul"><img src="https://img.shields.io/twitter/follow/hahwul?style=flat&logo=twitter"></a>
   <a href="https://github.com/hahwul"><img src="https://img.shields.io/github/stars/hahwul?style=flat&logo=github"></a></a>
 </p>
-Finder Of XSS, and Dal is the Korean pronunciation of moon.
 
 ## What is DalFox 🌘🦊
 DalFox is a fast, powerful parameter analysis and XSS scanner, based on a golang/DOM parser. supports friendly Pipeline, CI/CD and testing of different types of XSS. I talk about naming. Dal([달](https://en.wiktionary.org/wiki/달)) is the Korean pronunciation of moon and fox was made into Fox(Find Of XSS).
