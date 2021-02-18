@@ -64,7 +64,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&proxy, "proxy", "", "Send all request to proxy server (e.g --proxy http://127.0.0.1:8080)")
 	rootCmd.PersistentFlags().StringVar(&grep, "grep", "", "Using custom grepping file (e.g --grep ./samples/sample_grep.json)")
 	rootCmd.PersistentFlags().StringVar(&ignoreReturn, "ignore-return", "", "Ignore scanning from return code (e.g --ignore-return 302,403,404)")
-	rootCmd.PersistentFlags().StringVar(&miningWord, "mining-dict-word", "", "Custom wordlist file for param mining (e.g --mining-dict-word word.txt)")
+	rootCmd.PersistentFlags().StringVarP(&miningWord, "mining-dict-word", "W", "", "Custom wordlist file for param mining (e.g --mining-dict-word word.txt)")
 	rootCmd.PersistentFlags().StringVarP(&method, "method", "X", "GET", "Force overriding HTTP Method (e.g -X PUT)")
 	rootCmd.PersistentFlags().StringVarP(&cookieFromRaw, "cookie-from-raw", "", "", "Load cookie from burp raw http request (e.g --cookie-from-raw request.txt)")
 
@@ -75,10 +75,10 @@ func init() {
 
 	//Bool
 	rootCmd.PersistentFlags().BoolVar(&onlyDiscovery, "only-discovery", false, "Only testing parameter analysis (same '--skip-xss-scanning' option)")
-	rootCmd.PersistentFlags().BoolVar(&silence, "silence", false, "Not printing all logs")
+	rootCmd.PersistentFlags().BoolVarP(&silence, "silence", "S", false, "Not printing all logs")
 	rootCmd.PersistentFlags().BoolVar(&mining, "mining-dict", true, "Find new parameter with dictionary attack, default is Gf-Patterns=>XSS")
 	rootCmd.PersistentFlags().BoolVar(&findingDOM, "mining-dom", true, "Find new parameter in DOM (attribute/js value)")
-	rootCmd.PersistentFlags().BoolVar(&followRedirect, "follow-redirects", false, "Following redirection")
+	rootCmd.PersistentFlags().BoolVarP(&followRedirect, "follow-redirects", "F", false, "Following redirection")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Not use colorize")
 	rootCmd.PersistentFlags().BoolVar(&noSpinner, "no-spinner", false, "Not use spinner")
 	rootCmd.PersistentFlags().BoolVar(&skipBAV, "skip-bav", false, "Skipping BAV(Basic Another Vulnerability) analysis")
