@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"time"
 
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	"github.com/hahwul/dalfox/v2/pkg/printing"
@@ -91,6 +92,7 @@ func init() {
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
+	stime := time.Now()
 	options = model.Options{
 		Header:            header,
 		Cookie:            cookie,
@@ -125,7 +127,9 @@ func initConfig() {
 		NoGrep:            skipGrep,
 		Debug:             debug,
 		CookieFromRaw:     cookieFromRaw,
+		StartTime:         stime,
 	}
+
 	// var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV bool
 
 	if skipMiningAll {

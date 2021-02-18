@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"bufio"
+	"fmt"
 	"os"
 	"strconv"
 	"strings"
@@ -92,8 +93,9 @@ var fileCmd = &cobra.Command{
 					}
 					s := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 					s.Prefix = " "
-					s.Suffix = "  Scanning [ " + strconv.Itoa(options.NowURL) + " / " + strconv.Itoa(tt) + " URLs] [ show only poc code ]"
+					s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(tt) + " Tasks][0%] Parallel scanning from file"
 					options.SpinnerObject = s
+					s.Color("red", "bold")
 					s.Start()
 					options.NowURL = 0
 					for k, v := range t {
@@ -105,7 +107,8 @@ var fileCmd = &cobra.Command{
 								mutex := &sync.Mutex{}
 								mutex.Lock()
 								options.NowURL = options.NowURL + 1
-								s.Suffix = "  Scanning [ " + strconv.Itoa(options.NowURL) + " / " + strconv.Itoa(tt) + " URLs] [ show only poc code ]"
+								percent := fmt.Sprintf("%0.2f%%", float64(options.NowURL)/float64(tt)*100)
+								s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(tt) + " Tasks][" + percent + "] Parallel scanning from file"
 								mutex.Unlock()
 							}
 						}(k, v)

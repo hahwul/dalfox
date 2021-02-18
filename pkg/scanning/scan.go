@@ -19,6 +19,7 @@ import (
 	"github.com/hahwul/dalfox/v2/pkg/optimization"
 	"github.com/hahwul/dalfox/v2/pkg/printing"
 	"github.com/hahwul/dalfox/v2/pkg/verification"
+	"github.com/logrusorgru/aurora"
 )
 
 var (
@@ -121,27 +122,31 @@ func Scan(target string, options model.Options, sid string) {
 
 	var wait sync.WaitGroup
 	task := 3
+	sa := "SA: ✓ "
+	sp := "SP: ✓ "
+	bav := "BAV: ✓ "
 	if options.NoBAV {
 		task = 2
+		bav = ""
 	}
 
 	wait.Add(task)
+	printing.DalLog("SYSTEM", "["+sa+sp+bav+"] Waiting for parameter and static analysis 🔍", options)
 	go func() {
 		defer wait.Done()
-		printing.DalLog("SYSTEM", "Start static analysis.. 🔍", options)
 		policy = StaticAnalysis(target, options)
-		printing.DalLog("SYSTEM", "Static analysis done ✓", options)
+		sa = aurora.Green(sa).String()
+		printing.DalLog("SYSTEM", "["+sa+sp+bav+"] Waiting for parameter and static analysis 🔍", options)
 	}()
 	go func() {
 		defer wait.Done()
-		printing.DalLog("SYSTEM", "Start parameter analysis.. 🔍", options)
 		params = ParameterAnalysis(target, options)
-		printing.DalLog("SYSTEM", "Parameter analysis  done ✓", options)
+		sp = aurora.Green(sp).String()
+		printing.DalLog("SYSTEM", "["+sa+sp+bav+"] Waiting for parameter and static analysis 🔍", options)
 	}()
 	if !options.NoBAV {
 		go func() {
 			defer wait.Done()
-			printing.DalLog("SYSTEM", "Start BAV(Basic Another Vulnerability) analysis / [sqli, ssti, OpenRedirect]  🔍", options)
 			var bavWaitGroup sync.WaitGroup
 			bavTask := 3
 			bavWaitGroup.Add(bavTask)
@@ -158,12 +163,13 @@ func Scan(target string, options model.Options, sid string) {
 				OpeRedirectorAnalysis(target, options)
 			}()
 			bavWaitGroup.Wait()
-			printing.DalLog("SYSTEM", "BAV analysis done ✓", options)
+			bav = aurora.Green(bav).String()
+			printing.DalLog("SYSTEM", "["+sa+sp+bav+"] Waiting for parameter and static analysis 🔍", options)
 		}()
 	}
 
 	if options.NowURL != 0 && !options.Silence {
-		s.Suffix = "  Scanning [ " + strconv.Itoa(options.NowURL) + " / " + strconv.Itoa(options.AllURLS) + " URLs ]"
+		s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks] Scanning.."
 	}
 
 	if !(options.Silence || options.NoSpinner) {
@@ -527,15 +533,17 @@ func Scan(target string, options model.Options, sid string) {
 						s.Lock()
 						var msg string
 						if vStatus[v["param"]] == false {
-							msg = "Testing \"" + v["param"] + "\" param with " + strconv.Itoa(options.Concurrence) + " worker"
+							msg = "Testing \"" + v["param"] + "\" param"
 						} else {
-							msg = "Passing \"" + v["param"] + "\" param queries with " + strconv.Itoa(options.Concurrence) + " worker"
+							msg = "Passing \"" + v["param"] + "\" param queries"
 						}
 
+						percent := fmt.Sprintf("%0.2f%%", (float64(queryCount)/float64(len(query)))*100)
 						if options.NowURL == 0 {
-							s.Suffix = "  [ " + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + " Queries] [ " + msg + " ]"
+							s.Suffix = "  [" + strconv.Itoa(queryCount) + "/" + strconv.Itoa(len(query)) + " Queries][" + percent + "] " + msg
 						} else if !options.Silence {
-							s.Suffix = "  [ " + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + " Queries] [ " + strconv.Itoa(options.NowURL) + " / " + strconv.Itoa(options.AllURLS) + " URLs ] [ " + msg + " ]"
+							percent2 := fmt.Sprintf("%0.2f%%", (float64(options.NowURL) / float64(options.AllURLS) * 100))
+							s.Suffix = "  [" + strconv.Itoa(queryCount) + "/" + strconv.Itoa(len(query)) + " Queries][" + percent + "][" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][" + percent2 + "]" + msg
 						}
 						//s.Suffix = " Waiting routines.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
 						s.Unlock()

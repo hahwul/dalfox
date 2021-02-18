@@ -42,6 +42,7 @@ func Summary(options model.Options, target string) {
 		}
 		fmt.Fprintf(os.Stderr, " ⏱   Timeout                %d\n", options.Timeout)
 		fmt.Fprintf(os.Stderr, " 📤  FollowRedirect         %s\n", boolToColorStr(options.FollowRedirect))
+		fmt.Fprintf(os.Stderr, " 🕰   Started at             %s\n", options.StartTime.String())
 		//fmt.Fprintf(os.Stderr, "\n")
 		fmt.Fprintf(os.Stderr, "\n >>>>>>>>>>>>>>>>>>>>>>>>>\n")
 	}
@@ -50,107 +51,87 @@ func Summary(options model.Options, target string) {
 // DalLog is log fomatting for DalFox
 func DalLog(level, text string, options model.Options) {
 	var ftext string
-	if level == "INFO" {
+	switch level {
+	case "INFO":
 		if options.Debug {
 			ftext = "[I] " + text
 		}
-		text = aurora.Blue("[I] ").String() + text
+		text = aurora.BrightBlue("[I] ").String() + text
 
-	}
-	if level == "WEAK" {
+	case "WEAK":
 		if options.Debug {
 			ftext = "[W] " + text
 		}
 		text = aurora.Yellow("[W] ").String() + text
 
-	}
-	if level == "VULN" {
+	case "VULN":
 		if options.Debug {
 			ftext = "[V] " + text
 		}
-		text = aurora.Red("[V] ").String() + text
+		text = aurora.BrightRed("[V] ").String() + text
 
-	}
-	if level == "SYSTEM" {
+	case "SYSTEM":
 		if options.Debug {
 			ftext = "[*] " + text
 		}
 		if options.NoSpinner {
 			text = aurora.White("[*] ").String() + text
 		} else if !(options.Silence || options.NoSpinner) {
-			setSpinner("[ SYSTEM ] [ "+text+" ]", options)
+			setSpinner(text, options)
 			text = "HIDDENMESSAGE!!"
 		}
-	}
-	//!(options.Silence || options.NoSpinner)
-	if level == "SYSTEM-M" {
+
+	case "SYSTEM-M":
 		if options.Debug {
 			ftext = "[*] " + text
 		}
 		text = aurora.White("[*] ").String() + text
 		fmt.Fprintln(os.Stderr, text)
-	}
-	if level == "GREP" {
+
+	case "GREP":
 		if options.Debug {
 			ftext = "[G] " + text
 		}
 		text = aurora.Green("[G] ").String() + text
-
-	}
-
-	if level == "CODE" {
+	case "CODE":
 		if options.Debug {
 			ftext = "    " + text
 		}
 		text = aurora.Gray(16-1, "    "+text).String()
-	}
-
-	if level == "ERROR" {
+	case "ERROR":
 		if options.Debug {
 			ftext = "[E] " + text
 		}
 		text = aurora.Yellow("[E] ").String() + text
-	}
 
-	if level == "YELLOW" {
+	case "YELLOW":
 		text = aurora.BrightYellow(text).String()
 	}
 
+	// Printing
 	mutex.Lock()
-	if options.Silence {
-		if level == "PRINT" {
+	if level == "PRINT" {
+		if options.Silence {
 			stopSpinner(options)
-			if options.Format == "json" {
-				ftext = text
-				//fmt.Println(aurora.BrightGreen(text))
-				fmt.Println(text)
+		}
+		if options.Format == "json" {
+			ftext = text
+			//fmt.Println(aurora.BrightGreen(text))
+			fmt.Println(text)
 
+		} else {
+			ftext = "[POC] " + text
+			if options.NoColor {
+				fmt.Println("[POC]" + text)
 			} else {
-				ftext = "[POC] " + text
-				if options.NoColor {
-					fmt.Println("[POC]" + text)
-				} else {
-					fmt.Println(aurora.BrightGreen("[POC]" + text))
-				}
+				fmt.Println(aurora.BrightMagenta("[POC]" + text))
 			}
+		}
+		if options.Silence {
 			restartSpinner(options)
 		}
 	} else {
-		if level == "PRINT" {
-			if options.Format == "json" {
-				ftext = text
-				//fmt.Println(aurora.BrightGreen(text))
-				fmt.Println(text)
-
-			} else {
-				ftext = "[POC] " + text
-				if options.NoColor {
-					fmt.Println("[POC]" + text)
-				} else {
-					fmt.Println(aurora.BrightGreen("[POC]" + text))
-				}
-			}
-		} else {
+		if !options.Silence {
 			if text != "HIDDENMESSAGE!!" {
 				if options.NoColor {
 					text = "\r" + ftext

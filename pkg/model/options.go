@@ -1,6 +1,10 @@
 package model
 
-import s "github.com/briandowns/spinner"
+import (
+	t "time"
+
+	s "github.com/briandowns/spinner"
+)
 
 // Options is struct of options
 type Options struct {
@@ -47,6 +51,7 @@ type Options struct {
 	Debug             bool `json:"debug"`
 	CookieFromRaw     string
 	SpinnerObject     *s.Spinner
+	StartTime         t.Time
 }
 
 // Scan is struct of scan
