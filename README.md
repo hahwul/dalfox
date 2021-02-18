@@ -1,20 +1,15 @@
-<h1 align="center">
+<p align="center">
   <br>
   <a href=""><img src="https://user-images.githubusercontent.com/13212227/79072646-1cdd2500-7d1d-11ea-8a6d-d24301172a17.png" alt="" width="500px;"></a>
   <br>
-  DalFox(Finder Of XSS)
-  <br>
-  <img src="https://img.shields.io/github/v/release/hahwul/dalfox?style=flat"> 
-  <a href="https://snapcraft.io/dalfox"><img alt="dalfox" src="https://snapcraft.io/dalfox/badge.svg" /></a>
-  <img src="https://img.shields.io/github/languages/top/hahwul/dalfox?style=flat"> 
-  <img src="https://api.codacy.com/project/badge/Grade/17cac7b8d1e849a688577f2bbdd6ecd0"> 
-  <a href="https://goreportcard.com/report/github.com/hahwul/dalfox"><img src="https://goreportcard.com/badge/github.com/hahwul/dalfox"></a> 
-  <img src="https://github.com/hahwul/dalfox/workflows/Go%20build/badge.svg">
-  <img src="https://github.com/hahwul/dalfox/workflows/Docker%20build/badge.svg">
-  <img src="https://github.com/hahwul/dalfox/workflows/CodeQL/badge.svg">
+  <a href=""><img src="https://img.shields.io/github/v/release/hahwul/dalfox?style=flat"></a>
+  <a href=""><img src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat"></a>
+  <a href=""><img src="https://api.codacy.com/project/badge/Grade/17cac7b8d1e849a688577f2bbdd6ecd0"></a>
+  <a href="https://goreportcard.com/report/github.com/hahwul/dalfox"><img src="https://goreportcard.com/badge/github.com/hahwul/dalfox"></a>
+  <a href=""><img src="https://github.com/hahwul/dalfox/workflows/Go%20build/badge.svg"></a>
   <a href="https://twitter.com/intent/follow?screen_name=hahwul"><img src="https://img.shields.io/twitter/follow/hahwul?style=flat&logo=twitter"></a>
   <a href="https://github.com/hahwul"><img src="https://img.shields.io/github/stars/hahwul?style=flat&logo=github"></a></a>
-</h1>
+</p>
 Finder Of XSS, and Dal is the Korean pronunciation of moon.
 
 ## What is DalFox 🌘🦊
