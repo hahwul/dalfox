@@ -15,6 +15,9 @@ import (
 // @Router /scan [post]
 func ScanFromAPI(url string, rqOptions model.Options, options model.Options, sid string) {
 	rqOptions.Scan = options.Scan
+	rqOptions.SpinnerObject = options.SpinnerObject
+	rqOptions.AuroraObject = options.AuroraObject
+	rqOptions.StartTime = options.StartTime
 	scan.Scan(url, rqOptions, sid)
 }
 

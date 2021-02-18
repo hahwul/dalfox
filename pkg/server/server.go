@@ -30,7 +30,7 @@ func RunAPIServer(options model.Options) {
 	var scans []string
 	e := echo.New()
 	options.IsAPI = true
-	e.Server.Addr = options.ServerHost+":"+strconv.Itoa(options.ServerPort)
+	e.Server.Addr = options.ServerHost + ":" + strconv.Itoa(options.ServerPort)
 	e.Use(middleware.SecureWithConfig(middleware.SecureConfig{
 		XSSProtection:      "",
 		ContentTypeNosniff: "",
@@ -39,9 +39,9 @@ func RunAPIServer(options model.Options) {
 	}))
 	e.Use(middleware.LoggerWithConfig(middleware.LoggerConfig{
 		Format: `{"time":"${time_rfc3339_nano}","id":"${id}","remote_ip":"${remote_ip}","host":"${host}",` +
-    `"method":"${method}","uri":"${uri}","status":${status},"error":"${error}","latency":${latency},` +
-    `"latency_human":"${latency_human}","bytes_in":${bytes_in},` +
-    `"bytes_out":${bytes_out}}` + "\n",
+			`"method":"${method}","uri":"${uri}","status":${status},"error":"${error}","latency":${latency},` +
+			`"latency_human":"${latency_human}","bytes_in":${bytes_in},` +
+			`"bytes_out":${bytes_out}}` + "\n",
 	}))
 	e.GET("/health", func(c echo.Context) error {
 		r := &Res{
