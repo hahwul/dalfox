@@ -10,7 +10,7 @@ require (
 	github.com/briandowns/spinner v1.12.0
 	github.com/fatih/color v1.9.0 // indirect
 	github.com/labstack/echo/v4 v4.2.0
-	github.com/logrusorgru/aurora v2.0.3+incompatible
+	github.com/logrusorgru/aurora/v3 v3.0.0
 	github.com/logrusorgru/aurora/v3 v3.0.0
 	github.com/mattn/go-colorable v0.1.7 // indirect
 	github.com/mitchellh/go-homedir v1.1.0
