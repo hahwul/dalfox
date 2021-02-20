@@ -120,11 +120,15 @@ Server Flags:
       
 Pipe Flags:
   -h, --help        help for pipe
+      --mass              Parallel scanning N*Host mode (show only poc code)
+      --mass-worker int   Parallel worker of --mass and --multicast option (default 10)
       --multicast   Parallel scanning N*Host mode (show only poc code)
       
 File Flags:
   -h, --help        help for file
       --http        Using force http on rawdata mode
+      --mass              Parallel scanning N*Host mode (show only poc code)
+      --mass-worker int   Parallel worker of --mass and --multicast option (default 10)
       --multicast   Parallel scanning N*Host mode (show only poc code)
       --rawdata     Using req rawdata from Burp/ZAP
       
