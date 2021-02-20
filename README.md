@@ -187,11 +187,11 @@ http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123%22%3E%3Cs
 ```
 
 ## Screenshots
-| ![1414](https://user-images.githubusercontent.com/13212227/89736704-4ed17e80-daa6-11ea-90d8-32f915911b52.png) | ![1415](https://user-images.githubusercontent.com/13212227/89736705-5002ab80-daa6-11ea-9ee8-d2def396c25a.png) |
+| ![1414](https://user-images.githubusercontent.com/13212227/108603497-7a390c80-73eb-11eb-92c1-b31bd9574861.jpg) | ![1415](https://user-images.githubusercontent.com/13212227/108603373-ebc48b00-73ea-11eb-9651-7ce4617845f6.jpg) |
 | ------------------------------------------------------------ | ------------------------------------------------------------ |
-| Single URL Scanning                                          | API Server and Swagger                                       |
-| ![1416](https://user-images.githubusercontent.com/13212227/89736707-509b4200-daa6-11ea-9ca6-8055fa714401.png) | ![1419](https://user-images.githubusercontent.com/13212227/89736914-087d1f00-daa8-11ea-87e6-e33b78e2d344.png) |
-| Built-in and Custom Grepping                                 | Pipeline Scanning                                            |
+| Single URL Scanning                                          | Massive(Multicast/Mass) Scanning                             |
+| ![1416](https://user-images.githubusercontent.com/13212227/108603375-ec5d2180-73ea-11eb-8e6e-d59d915c0291.jpg) | ![1417](https://user-images.githubusercontent.com/13212227/108603376-ed8e4e80-73ea-11eb-87bf-3418a4512126.jpg) |
+| REST API Server Mode                                 | From Raw HTTP Request File(Burp/ZAP)                                            |
 
 ## Wiki
 [Wiki](https://dalfox.hahwul.com/docs/home/)
