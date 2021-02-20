@@ -56,6 +56,12 @@ type Options struct {
 	StartTime         t.Time
 }
 
+// MassJob is list for mass
+type MassJob struct {
+	Name string
+	URLs []string
+}
+
 // Scan is struct of scan
 type Scan struct {
 	URL     string

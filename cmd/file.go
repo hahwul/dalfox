@@ -10,6 +10,7 @@ import (
 	"time"
 
 	spinner "github.com/briandowns/spinner"
+	model "github.com/hahwul/dalfox/v2/pkg/model"
 	"github.com/hahwul/dalfox/v2/pkg/printing"
 	"github.com/hahwul/dalfox/v2/pkg/scanning"
 	"github.com/spf13/cobra"
@@ -85,11 +86,10 @@ var fileCmd = &cobra.Command{
 					options.Silence = true
 					t := scanning.MakeTargetSlice(targets)
 					tt := 0
-					var wg sync.WaitGroup
 					//mutex := &sync.Mutex{}
 
 					for k, v := range t {
-						printing.DalLog("SYSTEM-M", "Parallel testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", options)
+						_ = k
 						tt = tt + len(v)
 					}
 					s := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
@@ -100,22 +100,38 @@ var fileCmd = &cobra.Command{
 						s.Color("red", "bold")
 					}
 					s.Start()
+					var wg sync.WaitGroup
+					tasks := make(chan model.MassJob)
 					options.NowURL = 0
-					for k, v := range t {
+					concurrency, _ := cmd.Flags().GetInt("mass-worker")
+					for task := 0; task < concurrency; task++ {
 						wg.Add(1)
-						go func(k string, v []string) {
+						go func() {
 							defer wg.Done()
-							for i := range v {
-								scanning.Scan(v[i], options, strconv.Itoa(len(v)))
-								mutex := &sync.Mutex{}
-								mutex.Lock()
-								options.NowURL = options.NowURL + 1
-								percent := fmt.Sprintf("%0.2f%%", float64(options.NowURL)/float64(tt)*100)
-								s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(tt) + " Tasks][" + percent + "] Parallel scanning from file"
-								mutex.Unlock()
+							for kv := range tasks {
+								k := kv.Name
+								v := kv.URLs
+								printing.DalLog("SYSTEM-M", "Parallel testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", options)
+								for i := range v {
+									scanning.Scan(v[i], options, strconv.Itoa(len(v)))
+									mutex := &sync.Mutex{}
+									mutex.Lock()
+									options.NowURL = options.NowURL + 1
+									percent := fmt.Sprintf("%0.2f%%", float64(options.NowURL)/float64(tt)*100)
+									s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(tt) + " Tasks][" + percent + "] Parallel scanning from pipe"
+									mutex.Unlock()
+								}
 							}
-						}(k, v)
+						}()
 					}
+					for k, v := range t {
+						temp := model.MassJob{
+							Name: k,
+							URLs: v,
+						}
+						tasks <- temp
+					}
+					close(tasks)
 					wg.Wait()
 					s.Stop()
 				} else {
@@ -124,7 +140,6 @@ var fileCmd = &cobra.Command{
 						options.NowURL = i + 1
 						scanning.Scan(targets[i], options, strconv.Itoa(i))
 					}
-
 				}
 			}
 		} else {
@@ -140,6 +155,7 @@ func init() {
 	fileCmd.Flags().Bool("http", false, "Using force http on rawdata mode")
 	fileCmd.Flags().Bool("multicast", false, "Parallel scanning N*Host mode (show only poc code)")
 	fileCmd.Flags().Bool("mass", false, "Parallel scanning N*Host mode (show only poc code)")
+	fileCmd.Flags().Int("mass-worker", 10, "Parallel worker of --mass and --multicast option")
 }
 
 // a slice of strings, returning the slice and any error

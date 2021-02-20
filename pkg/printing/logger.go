@@ -85,7 +85,13 @@ func DalLog(level, text string, options model.Options) {
 			ftext = "[*] " + text
 		}
 		text = options.AuroraObject.White("[*] ").String() + text
+		if options.Silence {
+			stopSpinner(options)
+		}
 		fmt.Fprintln(os.Stderr, text)
+		if options.Silence {
+			restartSpinner(options)
+		}
 
 	case "GREP":
 		if options.Debug {
