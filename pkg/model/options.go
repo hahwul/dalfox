@@ -37,6 +37,7 @@ type Options struct {
 	Silence           bool `json:"silence"`
 	IsAPI             bool
 	Mass              bool `json:"mass"`
+	MulticastMode     bool
 	Scan              map[string]Scan
 	FollowRedirect    bool   `json:"follow-redirects"`
 	Mining            bool   `json:"mining-dict"`

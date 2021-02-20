@@ -131,8 +131,8 @@ func initConfig() {
 		CookieFromRaw:     cookieFromRaw,
 		AuroraObject:      au,
 		StartTime:         stime,
+		MulticastMode:     false,
 	}
-
 	// var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV bool
 
 	if skipMiningAll {

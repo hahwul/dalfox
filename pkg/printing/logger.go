@@ -85,11 +85,9 @@ func DalLog(level, text string, options model.Options) {
 			ftext = "[*] " + text
 		}
 		text = options.AuroraObject.White("[*] ").String() + text
-		if options.Silence {
+		if options.Silence && options.MulticastMode {
 			stopSpinner(options)
-		}
-		fmt.Fprintln(os.Stderr, text)
-		if options.Silence {
+			fmt.Fprintln(os.Stderr, text)
 			restartSpinner(options)
 		}
 

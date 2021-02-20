@@ -42,6 +42,7 @@ var pipeCmd = &cobra.Command{
 		if multi || mass {
 			printing.DalLog("SYSTEM", "Using multicasting mode", options)
 			options.Silence = true
+			options.MulticastMode = true
 			t := scanning.MakeTargetSlice(targets)
 
 			tt := 0

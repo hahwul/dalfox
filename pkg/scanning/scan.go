@@ -560,7 +560,9 @@ func Scan(target string, options model.Options, sid string) {
 		printing.DalLog("PRINT", "{}]", options)
 	}
 	options.Scan[sid] = scanObject
-	printing.DalLog("SYSTEM", "Finish :D", options)
+	if !(options.Silence && options.MulticastMode) {
+		printing.DalLog("SYSTEM-M", "Finish scan", options)
+	}
 }
 
 //CodeView is showing reflected code function
