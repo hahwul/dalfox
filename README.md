@@ -2,7 +2,7 @@
   <br>
   <a href=""><img src="https://user-images.githubusercontent.com/13212227/79072646-1cdd2500-7d1d-11ea-8a6d-d24301172a17.png" alt="" width="500px;"></a>
 </h1>
-<h4 align="center">Finder Of XSS, and Dal is the Korean pronunciation of moon.</h4>
+<h4 align="center">Finder Of XSS, and Dal(달) is the Korean pronunciation of moon.</h4>
 
 <p align="center"> 
   <a href=""><img src="https://img.shields.io/github/v/release/hahwul/dalfox?style=flat"></a>
