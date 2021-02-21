@@ -566,7 +566,7 @@ func Scan(target string, options model.Options, sid string) {
 	}
 	options.Scan[sid] = scanObject
 	if !(options.Silence && options.MulticastMode) {
-		printing.DalLog("SYSTEM-M", "Finish scan", options)
+		printing.DalLog("SYSTEM-M", "Finish Scan", options)
 	}
 }
 
