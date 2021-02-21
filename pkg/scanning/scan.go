@@ -45,9 +45,15 @@ func Scan(target string, options model.Options, sid string) {
 		URL:    target,
 	}
 	if !(options.Silence && options.MulticastMode) {
-		printing.DalLog("SYSTEM", "Start DalFox 🦊", options)
-		printing.DalLog("SYSTEM-M", "Start DalFox 🦊", options)
-		printing.DalLog("SYSTEM-M", "SID: "+sid+" / URL: "+target, options)
+		printing.DalLog("SYSTEM", "Start Scan 🦊", options)
+		//printing.DalLog("SYSTEM-M", "Start Scan 🦊", options)
+		if options.AllURLS > 0 {
+			snow, _ := strconv.Atoi(sid)
+			percent := fmt.Sprintf("%0.2f%%", float64(snow)/float64(options.AllURLS)*100)
+			printing.DalLog("SYSTEM-M", "🦊 Start scan [SID:"+sid+"]["+sid+"/"+strconv.Itoa(options.AllURLS)+"]["+percent+"%] / URL: "+target, options)
+		} else {
+			printing.DalLog("SYSTEM-M", "🦊 Start scan [SID:"+sid+"] / URL: "+target, options)
+		}
 	}
 
 	// query is XSS payloads
