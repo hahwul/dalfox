@@ -190,8 +190,8 @@ http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123%22%3E%3Cs
 | ![1414](https://user-images.githubusercontent.com/13212227/108603497-7a390c80-73eb-11eb-92c1-b31bd9574861.jpg) | ![1415](https://user-images.githubusercontent.com/13212227/108603373-ebc48b00-73ea-11eb-9651-7ce4617845f6.jpg) |
 | ------------------------------------------------------------ | ------------------------------------------------------------ |
 | Single URL Scanning                                          | Massive(Multicast/Mass) Scanning                             |
-| ![1416](https://user-images.githubusercontent.com/13212227/108603375-ec5d2180-73ea-11eb-8e6e-d59d915c0291.jpg) | ![1417](https://user-images.githubusercontent.com/13212227/108603376-ed8e4e80-73ea-11eb-87bf-3418a4512126.jpg) |
-| REST API Server Mode                                 | From Raw HTTP Request File(Burp/ZAP)                                            |
+| ![1416](https://user-images.githubusercontent.com/13212227/108603375-ec5d2180-73ea-11eb-8e6e-d59d915c0291.jpg) | ![1417](https://user-images.githubusercontent.com/13212227/108613244-66b19400-7433-11eb-87fc-2f195f9011b3.jpg) |
+| REST API Server Mode                                 | Output and Customizing (found-action / grepping)              |
 
 ## Wiki
 [Wiki](https://dalfox.hahwul.com/docs/home/)
