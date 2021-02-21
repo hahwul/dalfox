@@ -28,6 +28,7 @@ var (
 
 // Scan is main scanning function
 func Scan(target string, options model.Options, sid string) {
+
 	if !(options.Silence || options.NoSpinner) {
 		time.Sleep(1 * time.Second) // Waiting log
 		s.Prefix = " "
@@ -43,7 +44,11 @@ func Scan(target string, options model.Options, sid string) {
 		ScanID: sid,
 		URL:    target,
 	}
-	printing.DalLog("SYSTEM", "Start DalFox 🦊", options)
+	if !(options.Silence && options.MulticastMode) {
+		printing.DalLog("SYSTEM", "Start DalFox 🦊", options)
+		printing.DalLog("SYSTEM-M", "Start DalFox 🦊", options)
+		printing.DalLog("SYSTEM-M", "SID: "+sid+" / URL: "+target, options)
+	}
 
 	// query is XSS payloads
 	query := make(map[*http.Request]map[string]string)
