@@ -59,7 +59,23 @@ Mode: `url` `sxss` `pipe` `file` `server`
 And the various options required for the testing :D
 
 ## How to Install
-You can find some additional installation variations in the [Installation Guide](https://dalfox.hahwul.com/docs/installation/).
+### From source
+```
+▶ GO111MODULE=on go get -v github.com/hahwul/dalfox/v2
+```
+
+### Using homebrew (macos)
+```
+▶ brew tap hahwul/dalfox
+▶ brew install dalfox
+```
+
+### Using snapcraft (ubuntu)
+```
+▶ sudo snap install dalfox
+```
+
+More information? please read [Installation guide](https://dalfox.hahwul.com/docs/installation/)
 
 ## Usage
 ```plain
