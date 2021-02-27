@@ -216,4 +216,4 @@ http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123%22%3E%3Cs
 [Contribute](https://github.com/hahwul/dalfox/blob/master/CONTRIBUTING.md)
 
 ## Contributors
-![](/CONTRIBUTORS.svg)
+[![](/CONTRIBUTORS.svg)](https://github.com/hahwul/dalfox/graphs/contributors)
