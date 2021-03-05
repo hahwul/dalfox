@@ -1001,16 +1001,24 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 		bytes, _ := ioutil.ReadAll(resp.Body)
 		str := string(bytes)
 
-		vds := verification.VerifyDOM(str)
-		vrs := verification.VerifyReflection(str, payload)
-		return str, resp, vds, vrs, nil
-
+		if resp.Header["Content-Type"] != nil {
+			if isAllowType(resp.Header["Content-Type"][0]) {
+				vds := verification.VerifyDOM(str)
+				vrs := verification.VerifyReflection(str, payload)
+				return str, resp, vds, vrs, nil
+			}
+		}
+		return str, resp, false, false, nil
 	} else {
-		vds := verification.VerifyDOM(str)
-		vrs := verification.VerifyReflection(str, payload)
-		return str, resp, vds, vrs, nil
+		if resp.Header["Content-Type"] != nil {
+			if isAllowType(resp.Header["Content-Type"][0]) {
+				vds := verification.VerifyDOM(str)
+				vrs := verification.VerifyReflection(str, payload)
+				return str, resp, vds, vrs, nil
+			}
+		}
+		return str, resp, false, false, nil
 	}
-
 }
 
 func indexOf(element string, data []string) int {
