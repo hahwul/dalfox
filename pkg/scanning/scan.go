@@ -72,7 +72,7 @@ func Scan(target string, options model.Options, sid string) {
 	// set up a rate limit
 	rl := newRateLimiter(time.Duration(options.Delay * 1000000))
 
-	_, err := url.Parse(target)
+	parsedURL, err := url.Parse(target)
 	if err != nil {
 		printing.DalLog("SYSTEM", "Not running "+target+" url", options)
 		return
@@ -123,7 +123,7 @@ func Scan(target string, options model.Options, sid string) {
 	var wait sync.WaitGroup
 	task := 3
 	sa := "SA: ✓ "
-	sp := "SP: ✓ "
+	sp := "PA: ✓ "
 	bav := "BAV: ✓ "
 	if options.NoBAV {
 		task = 2
@@ -134,7 +134,7 @@ func Scan(target string, options model.Options, sid string) {
 	printing.DalLog("SYSTEM", "["+sa+sp+bav+"] Waiting for parameter and static analysis 🔍", options)
 	go func() {
 		defer wait.Done()
-		policy = StaticAnalysis(target, options)
+		policy, options.PathReflection = StaticAnalysis(target, options)
 		sa = options.AuroraObject.Green(sa).String()
 		printing.DalLog("SYSTEM", "["+sa+sp+bav+"] Waiting for parameter and static analysis 🔍", options)
 	}()
@@ -192,6 +192,13 @@ func Scan(target string, options model.Options, sid string) {
 		}
 	}
 
+	for k, v := range options.PathReflection {
+		split := strings.Split(parsedURL.Path, "/")
+		split[k+1] = options.AuroraObject.Yellow("dalfoxpathtest").String()
+		tempURL := strings.Join(split, "/")
+		printing.DalLog("INFO", "Reflected PATH '"+tempURL+"' => "+v+"]", options)
+	}
+
 	for k, v := range params {
 		if len(v) != 0 {
 			code, vv := v[len(v)-1], v[:len(v)-1]
@@ -213,10 +220,8 @@ func Scan(target string, options model.Options, sid string) {
 			av: reflected type, valid char
 		*/
 
-		// set path base xss
-
 		if isAllowType(policy["Content-Type"]) && !options.OnlyCustomPayload {
-
+			// set common xss
 			arr := optimization.SetPayloadValue(getCommonPayload(), options)
 			for _, avv := range arr {
 				var PathFinal string
@@ -609,12 +614,14 @@ func CodeView(resbody, pattern string) string {
 }
 
 // StaticAnalysis is found information on original req/res
-func StaticAnalysis(target string, options model.Options) map[string]string {
+func StaticAnalysis(target string, options model.Options) (map[string]string, map[int]string) {
+	rl := newRateLimiter(time.Duration(options.Delay * 1000000))
 	policy := make(map[string]string)
+	pathReflection := make(map[int]string)
 	req := optimization.GenerateNewRequest(target, "", options)
 	resbody, resp, _, _, err := SendReq(req, "", options)
 	if err != nil {
-		return policy
+		return policy, pathReflection
 	}
 	_ = resbody
 	if resp.Header["Content-Type"] != nil {
@@ -636,8 +643,45 @@ func StaticAnalysis(target string, options model.Options) map[string]string {
 	if resp.Header["Access-Control-Allow-Origin"] != nil {
 		policy["Access-Control-Allow-Origin"] = resp.Header["Access-Control-Allow-Origin"][0]
 	}
+	paths := strings.Split(target, "/")
+	for idx, _ := range paths {
+		if idx > 2 {
+			id := idx - 3
+			_ = id
+			//var tempPath []string
+			//copy(tempPath, paths)
+			tempPath := strings.Split(target, "/")
+			tempPath[idx] = "dalfoxpathtest"
 
-	return policy
+			tempURL := strings.Join(tempPath, "/")
+			req := optimization.GenerateNewRequest(tempURL, "", options)
+			rl.Block(req.Host)
+			resbody, _, _, vrs, err := SendReq(req, "dalfoxpathtest", options)
+			if err != nil {
+				return policy, pathReflection
+			}
+			if vrs {
+				pointer := optimization.Abstraction(resbody, "dalfoxpathtest")
+				smap := "Injected: "
+				tempSmap := make(map[string]int)
+
+				for _, v := range pointer {
+					if tempSmap[v] == 0 {
+						tempSmap[v] = 1
+					} else {
+						tempSmap[v] = tempSmap[v] + 1
+					}
+				}
+				for k, v := range tempSmap {
+					smap = smap + "/" + k + "(" + strconv.Itoa(v) + ")"
+				}
+				pathReflection[id] = smap
+			}
+		}
+	}
+	_ = paths
+
+	return policy, pathReflection
 }
 
 // ParameterAnalysis is check reflected and mining params

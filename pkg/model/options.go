@@ -55,6 +55,7 @@ type Options struct {
 	SpinnerObject     *s.Spinner
 	AuroraObject      a.Aurora
 	StartTime         t.Time
+	PathReflection    map[int]string
 }
 
 // MassJob is list for mass
