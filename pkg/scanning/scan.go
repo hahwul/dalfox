@@ -123,7 +123,7 @@ func Scan(target string, options model.Options, sid string) {
 	var wait sync.WaitGroup
 	task := 3
 	sa := "SA: ✓ "
-	sp := "PA: ✓ "
+	pa := "PA: ✓ "
 	bav := "BAV: ✓ "
 	if options.NoBAV {
 		task = 2
@@ -131,18 +131,18 @@ func Scan(target string, options model.Options, sid string) {
 	}
 
 	wait.Add(task)
-	printing.DalLog("SYSTEM", "["+sa+sp+bav+"] Waiting for parameter and static analysis 🔍", options)
+	printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for parameter and static analysis 🔍", options)
 	go func() {
 		defer wait.Done()
 		policy, options.PathReflection = StaticAnalysis(target, options)
 		sa = options.AuroraObject.Green(sa).String()
-		printing.DalLog("SYSTEM", "["+sa+sp+bav+"] Waiting for parameter and static analysis 🔍", options)
+		printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for parameter and static analysis 🔍", options)
 	}()
 	go func() {
 		defer wait.Done()
 		params = ParameterAnalysis(target, options)
-		sp = options.AuroraObject.Green(sp).String()
-		printing.DalLog("SYSTEM", "["+sa+sp+bav+"] Waiting for parameter and static analysis 🔍", options)
+		pa = options.AuroraObject.Green(pa).String()
+		printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for parameter and static analysis 🔍", options)
 	}()
 	if !options.NoBAV {
 		go func() {
@@ -164,7 +164,7 @@ func Scan(target string, options model.Options, sid string) {
 			}()
 			bavWaitGroup.Wait()
 			bav = options.AuroraObject.Green(bav).String()
-			printing.DalLog("SYSTEM", "["+sa+sp+bav+"] Waiting for parameter and static analysis 🔍", options)
+			printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for parameter and static analysis 🔍", options)
 		}()
 	}
 
