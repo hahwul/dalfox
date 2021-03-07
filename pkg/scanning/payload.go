@@ -276,7 +276,7 @@ func getInJsPayload(ip string) []string {
 		for _, v := range payload {
 			tempPayload = append(tempPayload, "\"+"+v+"//")
 			tempPayload = append(tempPayload, "\"+"+v+"+\"")
-			tempPayload = append(tempPayload, "\"-"+v+"+\"")
+			tempPayload = append(tempPayload, "\"-"+v+"-\"")
 		}
 		return tempPayload
 	}
@@ -285,7 +285,7 @@ func getInJsPayload(ip string) []string {
 		for _, v := range payload {
 			tempPayload = append(tempPayload, "'+"+v+"//")
 			tempPayload = append(tempPayload, "'+"+v+"+'")
-			tempPayload = append(tempPayload, "'-"+v+"+'")
+			tempPayload = append(tempPayload, "'-"+v+"-'")
 		}
 		return tempPayload
 	}
