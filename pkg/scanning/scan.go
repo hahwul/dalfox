@@ -229,7 +229,6 @@ func Scan(target string, options model.Options, sid string) {
 					injectedPoint = injectedPoint[1:]
 					for _, ip := range injectedPoint {
 						var arr []string
-						_ = arr
 						if strings.Contains(ip, "inJS") {
 							arr = optimization.SetPayloadValue(getInJsPayload(ip), options)
 						}
@@ -241,33 +240,16 @@ func Scan(target string, options model.Options, sid string) {
 						}
 						for _, avv := range arr {
 							split := strings.Split(target, "/")
-							split[k+3] = avv
+							split[k+3] = split[k+3] + avv
 							tempURL := strings.Join(split, "/")
-							tq, tm := optimization.MakeRequestQuery(tempURL, "", "", "inPATH", "toAppend", "NaN", options)
+
+							// Add Path XSS Query
+							tq, tm := optimization.MakeRequestQuery(tempURL, "", "", ip, "toAppend", "NaN", options)
 							tm["payload"] = avv
 							query[tq] = tm
 						}
 					}
 				}
-			}
-			// set common xss with semi
-			arr := optimization.SetPayloadValue(getCommonPayload(), options)
-			for _, avv := range arr {
-				var PathFinal string
-				tmpTarget, err := url.Parse(target)
-				if err != nil {
-					return
-				}
-
-				if tmpTarget.Path != "" {
-					PathFinal = tmpTarget.Scheme + "://" + tmpTarget.Hostname() + tmpTarget.Path
-				} else {
-					PathFinal = tmpTarget.Scheme + "://" + tmpTarget.Hostname() + "/" + tmpTarget.Path
-				}
-
-				tq, tm := optimization.MakeRequestQuery(PathFinal+";"+avv, "", "", "inPATH", "toAppend", "NaN", options)
-				tm["payload"] = ";" + avv
-				query[tq] = tm
 			}
 
 			// set param base xss
@@ -429,10 +411,10 @@ func Scan(target string, options model.Options, sid string) {
 						rl.Block(k.Host)
 						resbody, _, vds, vrs, err := SendReq(k, v["payload"], options)
 						abs := optimization.Abstraction(resbody, v["payload"])
-						if containsFromArray(abs, v["payload"]) {
-							vrs = true
-						} else {
-							vrs = false
+						if vrs {
+							if !containsFromArray(abs, v["type"]) {
+								vrs = false
+							}
 						}
 						if err == nil {
 							if (v["type"] != "toBlind") && (v["type"] != "toGrepping") {
@@ -1114,10 +1096,12 @@ func duplicatedResult(result []model.Issue, rst model.Issue) bool {
 
 func containsFromArray(slice []string, item string) bool {
 	set := make(map[string]struct{}, len(slice))
+	t := strings.Split(item, "(")
+	i := t[0]
 	for _, s := range slice {
 		set[s] = struct{}{}
 	}
 
-	_, ok := set[item]
+	_, ok := set[i]
 	return ok
 }
