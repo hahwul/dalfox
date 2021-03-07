@@ -221,7 +221,36 @@ func Scan(target string, options model.Options, sid string) {
 		*/
 
 		if isAllowType(policy["Content-Type"]) && !options.OnlyCustomPayload {
-			// set common xss
+			// set path base XSS
+			for k, v := range options.PathReflection {
+				if strings.Contains(v, "Injected:") {
+					// Injected pattern
+					injectedPoint := strings.Split(v, "/")
+					injectedPoint = injectedPoint[1:]
+					for _, ip := range injectedPoint {
+						var arr []string
+						_ = arr
+						if strings.Contains(ip, "inJS") {
+							arr = optimization.SetPayloadValue(getInJsPayload(ip), options)
+						}
+						if strings.Contains(ip, "inHTML") {
+							arr = optimization.SetPayloadValue(getHTMLPayload(ip), options)
+						}
+						if strings.Contains(ip, "inATTR") {
+							arr = optimization.SetPayloadValue(getAttrPayload(ip), options)
+						}
+						for _, avv := range arr {
+							split := strings.Split(target, "/")
+							split[k+3] = avv
+							tempURL := strings.Join(split, "/")
+							tq, tm := optimization.MakeRequestQuery(tempURL, "", "", "inPATH", "toAppend", "NaN", options)
+							tm["payload"] = avv
+							query[tq] = tm
+						}
+					}
+				}
+			}
+			// set common xss with semi
 			arr := optimization.SetPayloadValue(getCommonPayload(), options)
 			for _, avv := range arr {
 				var PathFinal string
