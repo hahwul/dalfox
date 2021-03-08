@@ -178,6 +178,8 @@ func GetEventHandlers() []string {
 		"onrowexit",
 		"onrowinserted",
 		"onrowsenter",
+		"onrowsdelete",
+		"onrowsinserted",
 		"onscroll",
 		"onsearch",
 		"onseek",
