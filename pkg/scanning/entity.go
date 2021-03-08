@@ -64,7 +64,8 @@ func GetGfXSS() []string {
 	return params
 }
 
-//GetEventHandlers is return event handlers (array type)
+// GetEventHandlers is return event handlers (array type)
+// level: 1(none trigger) / 2(user interaction) / 3(direct trigger)
 func GetEventHandlers() []string {
 	handlers := []string{
 		"onabort",

