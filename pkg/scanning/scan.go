@@ -252,7 +252,35 @@ func Scan(target string, options model.Options, sid string) {
 				}
 			}
 
-			// set param base xss
+			// Set common payloads
+			cu, err := url.Parse(target)
+			var cp url.Values
+			var cpArr []string
+			if err == nil {
+				if options.Data == "" {
+					cp, _ = url.ParseQuery(cu.RawQuery)
+				} else {
+					cp, _ = url.ParseQuery(options.Data)
+				}
+			}
+
+			for v := range cp {
+				cpArr = append(cpArr, v)
+				arc := optimization.SetPayloadValue(getCommonPayload(), options)
+				for _, avv := range arc {
+					// Add plain XSS Query
+					tq, tm := optimization.MakeRequestQuery(target, v, avv, "inHTML", "toAppend", "NaN", options)
+					query[tq] = tm
+					// Add URL encoded XSS Query
+					etq, etm := optimization.MakeRequestQuery(target, v, avv, "inHTML", "toAppend", "urlEncode", options)
+					query[etq] = etm
+					// Add HTML Encoded XSS Query
+					htq, htm := optimization.MakeRequestQuery(target, v, avv, "inHTML", "toAppend", "htmlEncode", options)
+					query[htq] = htm
+				}
+			}
+
+			// Set param base xss
 			for k, v := range params {
 				vStatus[k] = false
 				if (options.UniqParam == "") || (options.UniqParam == k) {
@@ -293,19 +321,21 @@ func Scan(target string, options model.Options, sid string) {
 							}
 						}
 					}
-					// common XSS
+					// common XSS for new param
 					arc := optimization.SetPayloadValue(getCommonPayload(), options)
 					for _, avv := range arc {
-						if optimization.Optimization(avv, badchars) {
-							// Add plain XSS Query
-							tq, tm := optimization.MakeRequestQuery(target, k, avv, "inHTML", "toAppend", "NaN", options)
-							query[tq] = tm
-							// Add URL encoded XSS Query
-							etq, etm := optimization.MakeRequestQuery(target, k, avv, "inHTML", "toAppend", "urlEncode", options)
-							query[etq] = etm
-							// Add HTML Encoded XSS Query
-							htq, htm := optimization.MakeRequestQuery(target, k, avv, "inHTML", "toAppend", "htmlEncode", options)
-							query[htq] = htm
+						if !containsFromArray(cpArr, k) {
+							if optimization.Optimization(avv, badchars) {
+								// Add plain XSS Query
+								tq, tm := optimization.MakeRequestQuery(target, k, avv, "inHTML", "toAppend", "NaN", options)
+								query[tq] = tm
+								// Add URL encoded XSS Query
+								etq, etm := optimization.MakeRequestQuery(target, k, avv, "inHTML", "toAppend", "urlEncode", options)
+								query[etq] = etm
+								// Add HTML Encoded XSS Query
+								htq, htm := optimization.MakeRequestQuery(target, k, avv, "inHTML", "toAppend", "htmlEncode", options)
+								query[htq] = htm
+							}
 						}
 					}
 				}
