@@ -21,7 +21,7 @@ var ignoreReturn, miningWord, method, customAlertValue, customAlertType string
 var timeout, concurrence, delay int
 var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, onlyCustomPayload, debug bool
 var options model.Options
-var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV, skipGrep, BAV, Grep bool
+var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV, skipGrep bool
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -81,14 +81,12 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&followRedirect, "follow-redirects", "F", false, "Following redirection")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Not use colorize")
 	rootCmd.PersistentFlags().BoolVar(&noSpinner, "no-spinner", false, "Not use spinner")
-	rootCmd.PersistentFlags().BoolVar(&BAV, "use-bav", false, "Using BAV(Basic Another Vulnerability) analysis")
 	rootCmd.PersistentFlags().BoolVar(&skipBAV, "skip-bav", false, "Skipping BAV(Basic Another Vulnerability) analysis")
 	rootCmd.PersistentFlags().BoolVar(&skipMiningDom, "skip-mining-dom", false, "Skipping DOM base parameter mining")
 	rootCmd.PersistentFlags().BoolVar(&skipMiningDict, "skip-mining-dict", false, "Skipping Dict base parameter mining")
 	rootCmd.PersistentFlags().BoolVar(&skipMiningAll, "skip-mining-all", false, "Skipping ALL parameter mining")
 	rootCmd.PersistentFlags().BoolVar(&skipXSSScan, "skip-xss-scanning", false, "Skipping XSS Scanning (same '--only-discovery' option)")
 	rootCmd.PersistentFlags().BoolVar(&onlyCustomPayload, "only-custom-payload", false, "Only testing custom payload (required --custom-payload)")
-	rootCmd.PersistentFlags().BoolVar(&Grep, "use-grepping", false, "Using built-in grepping")
 	rootCmd.PersistentFlags().BoolVar(&skipGrep, "skip-grepping", false, "Skipping built-in grepping")
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "debug mode, save all log using -o option")
 }
@@ -97,12 +95,6 @@ func init() {
 func initConfig() {
 	stime := time.Now()
 	au := aurora.NewAurora(!noColor)
-	if BAV == false {
-		skipBAV = true
-	}
-	if Grep == false {
-		skipGrep = true
-	}
 	options = model.Options{
 		Header:            header,
 		Cookie:            cookie,
