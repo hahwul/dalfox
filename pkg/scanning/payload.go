@@ -323,6 +323,12 @@ func getInJsPayload(ip string) []string {
 			tempPayload = append(tempPayload, "\"+"+v+"+\"")
 			tempPayload = append(tempPayload, "\"-"+v+"-\"")
 			tempPayload = append(tempPayload, "\""+v+"\"")
+
+			tempPayload = append(tempPayload, "\\\"+"+v+"//")
+			tempPayload = append(tempPayload, "\\\";"+v+"//")
+			tempPayload = append(tempPayload, "\\\"+"+v+"+\"")
+			tempPayload = append(tempPayload, "\\\"-"+v+"-\"")
+			tempPayload = append(tempPayload, "\\\""+v+"\"")
 		}
 		return tempPayload
 	}
@@ -334,6 +340,12 @@ func getInJsPayload(ip string) []string {
 			tempPayload = append(tempPayload, "'+"+v+"+'")
 			tempPayload = append(tempPayload, "'-"+v+"-'")
 			tempPayload = append(tempPayload, "'"+v+"'")
+
+			tempPayload = append(tempPayload, "\\'+"+v+"//")
+			tempPayload = append(tempPayload, "\\';"+v+"//")
+			tempPayload = append(tempPayload, "\\'+"+v+"+'")
+			tempPayload = append(tempPayload, "\\'-"+v+"-'")
+			tempPayload = append(tempPayload, "\\'"+v+"'")
 		}
 		return tempPayload
 	}

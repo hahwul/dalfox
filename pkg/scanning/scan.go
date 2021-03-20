@@ -450,28 +450,36 @@ func Scan(target string, options model.Options, sid string) {
 							if (v["type"] != "toBlind") && (v["type"] != "toGrepping") {
 								if strings.Contains(v["type"], "inJS") {
 									if vrs {
-										mutex.Lock()
-										if vStatus[v["param"]] == false {
-											code := CodeView(resbody, v["payload"])
-											printing.DalLog("WEAK", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], options)
-											printing.DalLog("CODE", code, options)
-											if options.Format == "json" {
-												printing.DalLog("PRINT", "{\"type\":\"inJS\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
-											} else {
-												printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
+										protected := false
+										if verification.VerifyReflection(resbody, "\\"+v["payload"]) {
+											if !strings.Contains(v["payload"], "\\") {
+												protected = true
 											}
-
-											if options.FoundAction != "" {
-												foundAction(options, target, k.URL.String(), "WEAK")
-											}
-											rst := &model.Issue{
-												Type:  "found code",
-												Param: v["param"],
-												PoC:   k.URL.String(),
-											}
-											scanObject.Results = append(scanObject.Results, *rst)
 										}
-										mutex.Unlock()
+										if !protected {
+											mutex.Lock()
+											if vStatus[v["param"]] == false {
+												code := CodeView(resbody, v["payload"])
+												printing.DalLog("WEAK", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], options)
+												printing.DalLog("CODE", code, options)
+												if options.Format == "json" {
+													printing.DalLog("PRINT", "{\"type\":\"inJS\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
+												} else {
+													printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
+												}
+
+												if options.FoundAction != "" {
+													foundAction(options, target, k.URL.String(), "WEAK")
+												}
+												rst := &model.Issue{
+													Type:  "found code",
+													Param: v["param"],
+													PoC:   k.URL.String(),
+												}
+												scanObject.Results = append(scanObject.Results, *rst)
+											}
+											mutex.Unlock()
+										}
 									}
 								} else if strings.Contains(v["type"], "inATTR") {
 									if vds {
@@ -933,7 +941,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if strings.Contains(req.URL.Host, "google") {
-			printing.DalLog("GREP", "Found Open Redirector. Payload: "+via[0].URL.String(), options)
+			printing.DalLog("GREP", "Found Open Redirect. Payload: "+via[0].URL.String(), options)
 			if options.FoundAction != "" {
 				foundAction(options, via[0].Host, via[0].URL.String(), "BAV: OpenRedirect")
 			}

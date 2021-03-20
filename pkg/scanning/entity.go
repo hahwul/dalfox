@@ -262,6 +262,7 @@ func GetSpecialChar() []string {
 		"-",
 		"=",
 		"$",
+		"\\",
 	}
 	return chars
 }
