@@ -940,9 +940,10 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 		Timeout:   time.Duration(options.Timeout) * time.Second,
 		Transport: netTransport,
 	}
+	oReq := req
 
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if !options.NoBAV && (payload == "toOpenRedirecting") {
+		if (!options.NoBAV) && (payload == "toOpenRedirecting") && !(strings.Contains(oReq.Host, ".google.com")) {
 			if strings.Contains(req.URL.Host, "google.com") {
 				printing.DalLog("GREP", "Found Open Redirect. Payload: "+via[0].URL.String(), options)
 				if options.FoundAction != "" {
