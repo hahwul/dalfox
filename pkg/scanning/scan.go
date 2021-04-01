@@ -194,9 +194,11 @@ func Scan(target string, options model.Options, sid string) {
 
 	for k, v := range options.PathReflection {
 		split := strings.Split(parsedURL.Path, "/")
-		split[k+1] = options.AuroraObject.Yellow("dalfoxpathtest").String()
-		tempURL := strings.Join(split, "/")
-		printing.DalLog("INFO", "Reflected PATH '"+tempURL+"' => "+v+"]", options)
+		if len(split) > k+1 {
+			split[k+1] = options.AuroraObject.Yellow("dalfoxpathtest").String()
+			tempURL := strings.Join(split, "/")
+			printing.DalLog("INFO", "Reflected PATH '"+tempURL+"' => "+v+"]", options)
+		}
 	}
 
 	for k, v := range params {
