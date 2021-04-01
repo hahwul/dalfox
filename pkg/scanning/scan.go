@@ -942,13 +942,14 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 	}
 
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if strings.Contains(req.URL.Host, "google") {
-			printing.DalLog("GREP", "Found Open Redirect. Payload: "+via[0].URL.String(), options)
-			if options.FoundAction != "" {
-				foundAction(options, via[0].Host, via[0].URL.String(), "BAV: OpenRedirect")
+		if !options.NoBAV {
+			if strings.Contains(req.URL.Host, "google.com") {
+				printing.DalLog("GREP", "Found Open Redirect. Payload: "+via[0].URL.String(), options)
+				if options.FoundAction != "" {
+					foundAction(options, via[0].Host, via[0].URL.String(), "BAV: OpenRedirect")
+				}
 			}
 		}
-
 		return nil
 	}
 
