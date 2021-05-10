@@ -8,7 +8,7 @@ require (
 	github.com/andybalholm/cascadia v1.2.0 // indirect
 	github.com/briandowns/spinner v1.12.0
 	github.com/fatih/color v1.9.0 // indirect
-	github.com/labstack/echo/v4 v4.2.2
+	github.com/labstack/echo/v4 v4.3.0
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/spf13/cobra v1.1.3
 	github.com/swaggo/echo-swagger v1.1.0
