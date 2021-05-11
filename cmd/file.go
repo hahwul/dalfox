@@ -105,6 +105,7 @@ var fileCmd = &cobra.Command{
 					tasks := make(chan model.MassJob)
 					options.NowURL = 0
 					concurrency, _ := cmd.Flags().GetInt("mass-worker")
+					mutex := &sync.Mutex{}
 					for task := 0; task < concurrency; task++ {
 						wg.Add(1)
 						go func() {
@@ -115,7 +116,6 @@ var fileCmd = &cobra.Command{
 								printing.DalLog("SYSTEM-M", "Parallel testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", options)
 								for i := range v {
 									scanning.Scan(v[i], options, strconv.Itoa(len(v)))
-									mutex := &sync.Mutex{}
 									mutex.Lock()
 									options.NowURL = options.NowURL + 1
 									percent := fmt.Sprintf("%0.2f%%", float64(options.NowURL)/float64(tt)*100)
