@@ -8,7 +8,6 @@ import (
 
 var trigger string
 var sequence int
-var mass bool
 
 // sxssCmd represents the sxss command
 var sxssCmd = &cobra.Command{
@@ -18,8 +17,14 @@ var sxssCmd = &cobra.Command{
 		printing.Banner(options)
 		printing.Summary(options, args[0])
 		if len(args) >= 1 {
-			printing.DalLog("SYSTEM", "Using Stored XSS mode", options)
-			scanning.Scan(args[0], options, "Single")
+			options.Trigger = trigger
+			options.Sequence = sequence
+			if options.Trigger != "" {
+				printing.DalLog("SYSTEM", "Using Stored XSS mode", options)
+				scanning.Scan(args[0], options, "Single")
+			} else {
+				printing.DalLog("ERROR", "Please input trigger url with --trigger option", options)
+			}
 		} else {
 			printing.DalLog("ERROR", "Input target url", options)
 			printing.DalLog("ERROR", "e.g dalfox sxss https://google.com/?q=1 --trigger https://target/profile", options)
@@ -29,17 +34,6 @@ var sxssCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(sxssCmd)
-
-	//Str
 	sxssCmd.PersistentFlags().StringVar(&trigger, "trigger", "", "Checking this url after inject sxss code (e.g --trigger https://~~/profile)")
-
-	//Int
 	sxssCmd.PersistentFlags().IntVar(&sequence, "sequence", -1, "Set sequence to first number (e.g --trigger https://~/view?no=SEQNC --sequence 3)")
-
-	//Int
-	sxssCmd.PersistentFlags().BoolVar(&mass, "mass", false, "Testing mass vector (coming soon)")
-
-	options.Trigger = trigger
-	options.Sequence = sequence
-	options.Mass = mass
 }
