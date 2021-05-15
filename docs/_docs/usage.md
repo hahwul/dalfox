@@ -9,7 +9,7 @@ The options for the Dalfox are largely configured with `commands` and `flags`.
 ```
 
 ```
-Modes: 
+Modes:
   file        Use file mode(targets list or rawdata)
   help        Help about any command
   pipe        Use pipeline mode
@@ -61,20 +61,19 @@ Server Flags:
   -h, --help          help for server
       --host string   Bind address (default "0.0.0.0")
       --port int      Bind Port (default 6664)
-      
+
 Pipe Flags:
   -h, --help        help for pipe
       --multicast   Scanning N*Host mode
-      
+
 File Flags:
   -h, --help        help for file
       --http        Using force http on rawdata mode
       --multicast   Scanning N*Host mode
       --rawdata     Using req rawdata from Burp/ZAP
-      
+
 SXSS Flags:
   -h, --help             help for sxss
-      --mass             Testing mass vector (comming soon)
       --sequence int     Set sequence to first number (e.g --trigger https://~/view?no=SEQNC --sequence 3) (default -1)
       --trigger string   Checking this url after inject sxss code (e.g --trigger https://~~/profile)
 ```

@@ -4,7 +4,7 @@
 </h1>
 <h4 align="center">Finder Of XSS, and Dal(달) is the Korean pronunciation of moon.</h4>
 
-<p align="center"> 
+<p align="center">
   <a href=""><img src="https://img.shields.io/github/v/release/hahwul/dalfox?style=flat"></a>
   <a href=""><img src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat"></a>
   <a href=""><img src="https://api.codacy.com/project/badge/Grade/17cac7b8d1e849a688577f2bbdd6ecd0"></a>
@@ -79,7 +79,7 @@ More information? please read [Installation guide](https://dalfox.hahwul.com/doc
 
 ## Usage
 ```plain
-Modes: 
+Modes:
   file        Use file mode(targets list or rawdata)
   help        Help about any command
   pipe        Use pipeline mode
@@ -133,13 +133,13 @@ Server Flags:
   -h, --help          help for server
       --host string   Bind address (default "0.0.0.0")
       --port int      Bind Port (default 6664)
-      
+
 Pipe Flags:
   -h, --help        help for pipe
       --mass              Parallel scanning N*Host mode (show only poc code)
       --mass-worker int   Parallel worker of --mass and --multicast option (default 10)
       --multicast   Parallel scanning N*Host mode (show only poc code)
-      
+
 File Flags:
   -h, --help        help for file
       --http        Using force http on rawdata mode
@@ -147,10 +147,9 @@ File Flags:
       --mass-worker int   Parallel worker of --mass and --multicast option (default 10)
       --multicast   Parallel scanning N*Host mode (show only poc code)
       --rawdata     Using req rawdata from Burp/ZAP
-      
+
 SXSS Flags:
   -h, --help             help for sxss
-      --mass             Testing mass vector (comming soon)
       --sequence int     Set sequence to first number (e.g --trigger https://~/view?no=SEQNC --sequence 3) (default -1)
       --trigger string   Checking this url after inject sxss code (e.g --trigger https://~~/profile)
 ```
