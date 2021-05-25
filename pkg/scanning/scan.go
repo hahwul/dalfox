@@ -193,11 +193,16 @@ func Scan(target string, options model.Options, sid string) {
 	}
 
 	for k, v := range options.PathReflection {
-		split := strings.Split(parsedURL.Path, "/")
-		if len(split) > k+1 {
-			split[k+1] = options.AuroraObject.Yellow("dalfoxpathtest").String()
-			tempURL := strings.Join(split, "/")
-			printing.DalLog("INFO", "Reflected PATH '"+tempURL+"' => "+v+"]", options)
+		if len(parsedURL.Path) == 0 {
+			str := options.AuroraObject.Yellow("dalfoxpathtest").String()
+			printing.DalLog("INFO", "Reflected PATH '/"+str+"' => "+v+"]", options)
+		} else {
+			split := strings.Split(parsedURL.Path, "/")
+			if len(split) > k+1 {
+				split[k+1] = options.AuroraObject.Yellow("dalfoxpathtest").String()
+				tempURL := strings.Join(split, "/")
+				printing.DalLog("INFO", "Reflected PATH '"+tempURL+"' => "+v+"]", options)
+			}
 		}
 	}
 
@@ -229,6 +234,7 @@ func Scan(target string, options model.Options, sid string) {
 					// Injected pattern
 					injectedPoint := strings.Split(v, "/")
 					injectedPoint = injectedPoint[1:]
+
 					for _, ip := range injectedPoint {
 						var arr []string
 						if strings.Contains(ip, "inJS") {
@@ -241,10 +247,14 @@ func Scan(target string, options model.Options, sid string) {
 							arr = optimization.SetPayloadValue(getAttrPayload(ip), options)
 						}
 						for _, avv := range arr {
-							split := strings.Split(target, "/")
-							split[k+3] = split[k+3] + avv
-							tempURL := strings.Join(split, "/")
-
+							var tempURL string
+							if len(parsedURL.Path) == 0 {
+								tempURL = target + "/" + avv
+							} else {
+								split := strings.Split(target, "/")
+								split[k+3] = split[k+3] + avv
+								tempURL = strings.Join(split, "/")
+							}
 							// Add Path XSS Query
 							tq, tm := optimization.MakeRequestQuery(tempURL, "", "", ip, "toAppend", "NaN", options)
 							tm["payload"] = avv
@@ -695,6 +705,8 @@ func StaticAnalysis(target string, options model.Options) (map[string]string, ma
 		policy["Access-Control-Allow-Origin"] = resp.Header["Access-Control-Allow-Origin"][0]
 	}
 	paths := strings.Split(target, "/")
+
+	// case of https://domain/ + @
 	for idx, _ := range paths {
 		if idx > 2 {
 			id := idx - 3
@@ -730,8 +742,35 @@ func StaticAnalysis(target string, options model.Options) (map[string]string, ma
 			}
 		}
 	}
-	_ = paths
 
+	// case of https://domain
+	if len(paths) == 3 {
+
+		tempURL := target + "/dalfoxpathtest"
+		req := optimization.GenerateNewRequest(tempURL, "", options)
+		rl.Block(req.Host)
+		resbody, _, _, vrs, err := SendReq(req, "dalfoxpathtest", options)
+		if err != nil {
+			return policy, pathReflection
+		}
+		if vrs {
+			pointer := optimization.Abstraction(resbody, "dalfoxpathtest")
+			smap := "Injected: "
+			tempSmap := make(map[string]int)
+
+			for _, v := range pointer {
+				if tempSmap[v] == 0 {
+					tempSmap[v] = 1
+				} else {
+					tempSmap[v] = tempSmap[v] + 1
+				}
+			}
+			for k, v := range tempSmap {
+				smap = smap + "/" + k + "(" + strconv.Itoa(v) + ")"
+			}
+			pathReflection[0] = smap
+		}
+	}
 	return policy, pathReflection
 }
 
