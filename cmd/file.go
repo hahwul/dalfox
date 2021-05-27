@@ -94,13 +94,15 @@ var fileCmd = &cobra.Command{
 						tt = tt + len(v)
 					}
 					s := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
-					s.Prefix = " "
-					s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(tt) + " Tasks][0%] Parallel scanning from file"
-					options.SpinnerObject = s
-					if !options.NoColor {
-						s.Color("red", "bold")
+					if !options.NoSpinner {
+						options.SpinnerObject = s
+						s.Prefix = " "
+						s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(tt) + " Tasks][0%] Parallel scanning from file"
+						if !options.NoColor {
+							s.Color("red", "bold")
+						}
+						s.Start()
 					}
-					s.Start()
 					var wg sync.WaitGroup
 					tasks := make(chan model.MassJob)
 					options.NowURL = 0
@@ -116,11 +118,13 @@ var fileCmd = &cobra.Command{
 								printing.DalLog("SYSTEM-M", "Parallel testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", options)
 								for i := range v {
 									scanning.Scan(v[i], options, strconv.Itoa(len(v)))
-									mutex.Lock()
-									options.NowURL = options.NowURL + 1
-									percent := fmt.Sprintf("%0.2f%%", float64(options.NowURL)/float64(tt)*100)
-									s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(tt) + " Tasks][" + percent + "] Parallel scanning from pipe"
-									mutex.Unlock()
+									if !options.NoSpinner {
+										mutex.Lock()
+										options.NowURL = options.NowURL + 1
+										percent := fmt.Sprintf("%0.2f%%", float64(options.NowURL)/float64(tt)*100)
+										s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(tt) + " Tasks][" + percent + "] Parallel scanning from pipe"
+										mutex.Unlock()
+									}
 								}
 							}
 						}()
@@ -134,7 +138,9 @@ var fileCmd = &cobra.Command{
 					}
 					close(tasks)
 					wg.Wait()
-					s.Stop()
+					if options.NoSpinner {
+						s.Stop()
+					}
 				} else {
 					options.AllURLS = len(targets)
 					for i := range targets {
