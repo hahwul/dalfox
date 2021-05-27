@@ -359,17 +359,3 @@ func getInJsPayload(ip string) []string {
 	return payload
 
 }
-
-// makeDynamicPayload is return xss
-func makeDynamicPayload(badchars, rtype string) []string {
-	payload := []string{}
-	if rtype == "inHTML" {
-		for range badchars {
-
-		}
-	} else {
-		// inJS
-
-	}
-	return payload
-}
