@@ -126,6 +126,25 @@ func getSSTIPayload() []string {
 	return payload
 }
 
+// getPayloadBoxPayload is use for remote payloads (PortSwigger Cheatsheet)
+func getPortswiggerPayload() []string {
+	// https://assets.hahwul.com/portswigger-xss.json
+	// or https://github.com/TheKingOfDuck/easyXssPayload/raw/master/burpXssPayload.txt
+	payload := []string{
+		"",
+	}
+	return payload
+}
+
+// getPayloadBoxPayload is use for remote payloads (PayloadBox)
+func getPayloadBoxPayload() []string {
+	// https://assets.hahwul.com/wl-payloadbox-xss.json
+	payload := []string{
+		"",
+	}
+	return payload
+}
+
 // getBlindPayload is return Blind XSS Payload
 func getBlindPayload() []string {
 	payload := []string{
