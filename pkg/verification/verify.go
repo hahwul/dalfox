@@ -8,7 +8,22 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
-// VerifyReflection is check reflected xss pattern
+// VerifyReflectionWithLine is check reflected param for mining
+func VerifyReflectionWithLine(body, payload string) (bool, int) {
+	bodyArray := strings.Split(body, "\n")
+	count := 0
+	for l, v := range bodyArray {
+		if strings.Contains(v, payload) {
+			count = count + l
+		}
+	}
+	if count != 0 {
+		return true, count
+	}
+	return false, 0
+}
+
+// VerifyReflection is check reflected param for xss and mining
 func VerifyReflection(body, payload string) bool {
 	if strings.Contains(body, payload) {
 		return true
