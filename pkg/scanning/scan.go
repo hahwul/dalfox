@@ -776,6 +776,8 @@ func StaticAnalysis(target string, options model.Options) (map[string]string, ma
 
 // ParameterAnalysis is check reflected and mining params
 func ParameterAnalysis(target string, options model.Options) map[string][]string {
+	//miningCheckerSize := 0
+	miningCheckerLine := 0
 	u, err := url.Parse(target)
 	params := make(map[string][]string)
 	// set up a rate limit
@@ -792,31 +794,31 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 	}
 
 	if options.Mining {
-		tempURL, _ := optimization.MakeRequestQuery(target, "pleasedonthaveanamelikethis_plz_plz", "pleasedonthaveanamelikethis_plz_plz", "PA", "toAppend", "NaN", options)
+		tempURL, _ := optimization.MakeRequestQuery(target, "pleasedonthaveanamelikethis_plz_plz", "DalFox", "PA", "toAppend", "NaN", options)
 		rl.Block(tempURL.Host)
-		_, _, _, vrs, _ := SendReq(tempURL, "pleasedonthaveanamelikethis_plz_plz", options)
+		resBody, _, _, vrs, _ := SendReq(tempURL, "DalFox", options)
 		if vrs {
-			p.Set("pleasedonthaveanamelikethis_plz_plz", "")
-		} else {
-			// Param mining with Gf-Patterins
-			if options.MiningWordlist == "" {
-				for _, gfParam := range GetGfXSS() {
-					if gfParam != "" {
-						if p.Get(gfParam) == "" {
-							p.Set(gfParam, "")
-						}
+			_, lineSum := verification.VerifyReflectionWithLine(resBody, "DalFox")
+			miningCheckerLine = lineSum
+		}
+		// Param mining with Gf-Patterins
+		if options.MiningWordlist == "" {
+			for _, gfParam := range GetGfXSS() {
+				if gfParam != "" {
+					if p.Get(gfParam) == "" {
+						p.Set(gfParam, "")
 					}
 				}
+			}
+		} else {
+			ff, err := readLinesOrLiteral(options.MiningWordlist)
+			if err != nil {
+				printing.DalLog("SYSTEM", "Mining wordlist load fail..", options)
 			} else {
-				ff, err := readLinesOrLiteral(options.MiningWordlist)
-				if err != nil {
-					printing.DalLog("SYSTEM", "Mining wordlist load fail..", options)
-				} else {
-					for _, wdParam := range ff {
-						if wdParam != "" {
-							if p.Get(wdParam) == "" {
-								p.Set(wdParam, "")
-							}
+				for _, wdParam := range ff {
+					if wdParam != "" {
+						if p.Get(wdParam) == "" {
+							p.Set(wdParam, "")
 						}
 					}
 				}
@@ -887,22 +889,15 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 		go func() {
 			for k := range paramsQue {
 				if (options.UniqParam == "") || (options.UniqParam == k) {
-					//tempURL := u
-					//temp_q := u.Query()
-					//temp_q.Set(k, v[0]+"DalFox")
-					/*
-						data := u.String()
-						data = strings.Replace(data, k+"="+v[0], k+"="+v[0]+"DalFox", 1)
-						tempURL, _ := url.Parse(data)
-						temp_q := tempURL.Query()
-						tempURL.RawQuery = temp_q.Encode()
-					*/
 					tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA", "toAppend", "NaN", options)
 					var code string
-
-					//tempURL.RawQuery = temp_q.Encode()
 					rl.Block(tempURL.Host)
 					resbody, resp, _, vrs, _ := SendReq(tempURL, "DalFox", options)
+					_, lineSum := verification.VerifyReflectionWithLine(resbody, "DalFox")
+					//fmt.Printf("%s => %d : %d\n", k, miningCheckerLine, lineSum)
+					if miningCheckerLine == lineSum {
+						vrs = false
+					}
 					if vrs {
 						code = CodeView(resbody, "DalFox")
 						code = code[:len(code)-5]
