@@ -883,6 +883,7 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 	var wgg sync.WaitGroup
 	concurrency := options.Concurrence
 	paramsQue := make(chan string)
+	miningDictCount := 0
 	mutex := &sync.Mutex{}
 	for i := 0; i < concurrency; i++ {
 		wgg.Add(1)
@@ -899,6 +900,7 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 						vrs = false
 					}
 					if vrs {
+
 						code = CodeView(resbody, "DalFox")
 						code = code[:len(code)-5]
 						pointer := optimization.Abstraction(resbody, "DalFox")
@@ -916,6 +918,7 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 							smap = smap + "/" + k + "(" + strconv.Itoa(v) + ")"
 						}
 						mutex.Lock()
+						miningDictCount = miningDictCount + 1
 						params[k] = append(params[k], smap)
 						mutex.Unlock()
 						var wg sync.WaitGroup
@@ -964,6 +967,9 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 
 	close(paramsQue)
 	wgg.Wait()
+	if miningDictCount != 0 {
+		printing.DalLog("INFO", "Found "+strconv.Itoa(miningDictCount)+" testing point in Dict Mining", options)
+	}
 	return params
 }
 
