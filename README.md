@@ -53,6 +53,7 @@ Mode: `url` `sxss` `pipe` `file` `server`
 |               | Found Action                  | - Lets you specify the actions to take when detected. <br />- Notify, for example (`--found-action`) |
 |               | Custom Grepping               | - Can grep with custom regular expressions on response<br />- If duplicate detection, it performs deduplication (`--grep`) |
 |               | Custom Payloads               | - Use custom payloads list file (`--custom-payload`) <br />- Custom alert value (`--custom-alert-value`) <br />- Custom alert type (`--custom-alert-type`)|
+|               | Remote Payloads               | - Use remote payloads from portswigger, payloadbox, etc.. (`--remote-payloads`)                  |
 | Package       | Package manager                | - [pkg.go.dev](https://pkg.go.dev/github.com/hahwul/dalfox/v2)<br/>- [homebrew with tap](https://github.com/hahwul/homebrew-dalfox)<br />- [snapcraft](https://snapcraft.io/dalfox)                                  |
 |               | Docker ENV                    | - [docker hub](https://hub.docker.com/repository/docker/hahwul/dalfox)<br />- [gitub package of docker](https://github.com/hahwul/dalfox/packages)                         |
 
@@ -90,44 +91,45 @@ Modes:
 
 Global Flags:
 Flags:
-  -b, --blind string                Add your blind xss (e.g -b hahwul.xss.ht)
-      --config string               Using config from file
-  -C, --cookie string               Add custom cookie
-      --cookie-from-raw string      Load cookie from burp raw http request (e.g --cookie-from-raw request.txt)
-      --custom-alert-type string    Change alert value type (e.g =none / =str,none) (default "none")
-      --custom-alert-value string   Change alert value (e.g custom-alert-value=document.cookie (default "1")
-      --custom-payload string       Add custom payloads from file
-  -d, --data string                 Using POST Method and add Body data
-      --debug                       debug mode, save all log using -o option
-      --delay int                   Milliseconds between send to same host (1000==1s)
-      --follow-redirects            Following redirection
-      --format string               Stdout output format(plain/json) (default "plain")
-      --found-action string         If found weak/vuln, action(cmd) to next
-      --grep string                 Using custom grepping file (e.g --grep ./samples/sample_grep.json)
-  -H, --header string               Add custom headers
-  -h, --help                        help for dalfox
-      --ignore-return string        Ignore scanning from return code (e.g --ignore-return 302,403,404)
-  -X, --method string               Force overriding HTTP Method (e.g -X PUT)
-      --mining-dict                 Find new parameter with dictionary attack, default is Gf-Patterns=>XSS (default true)
-      --mining-dict-word string     Custom wordlist file for param mining (e.g --mining-dict-word word.txt)
-      --mining-dom                  Find new parameter in DOM (attribute/js value) (default true)
-      --no-color                    Not use colorize
-      --no-spinner                  Not use spinner
-      --only-custom-payload         Only testing custom payload (required --custom-payload)
-      --only-discovery              Only testing parameter analysis (same '--skip-xss-scanning' option)
-  -o, --output string               Write to output file
-  -p, --param string                Only testing selected parameters
-      --proxy string                Send all request to proxy server (e.g --proxy http://127.0.0.1:8080)
-      --silence                     Not printing all logs
-      --skip-bav                    Skipping BAV(Basic Another Vulnerability) analysis
-      --skip-grepping               Skipping built-in grepping
-      --skip-mining-all             Skipping ALL parameter mining
-      --skip-mining-dict            Skipping Dict base parameter mining
-      --skip-mining-dom             Skipping DOM base parameter mining
-      --skip-xss-scanning           Skipping XSS Scanning (same '--only-discovery' option)
-      --timeout int                 Second of timeout (default 10)
-      --user-agent string           Add custom UserAgent
-  -w, --worker int                  Number of worker (default 100)
+-b, --blind string                Add your blind xss (e.g -b hahwul.xss.ht)
+    --config string               Using config from file
+-C, --cookie string               Add custom cookie
+    --cookie-from-raw string      Load cookie from burp raw http request (e.g --cookie-from-raw request.txt)
+    --custom-alert-type string    Change alert value type (e.g =none / =str,none) (default "none")
+    --custom-alert-value string   Change alert value (e.g custom-alert-value=document.cookie (default "1")
+    --custom-payload string       Add custom payloads from file
+-d, --data string                 Using POST Method and add Body data
+    --debug                       debug mode, save all log using -o option
+    --delay int                   Milliseconds between send to same host (1000==1s)
+-F, --follow-redirects            Following redirection
+    --format string               Stdout output format(plain/json) (default "plain")
+    --found-action string         If found weak/vuln, action(cmd) to next
+    --grep string                 Using custom grepping file (e.g --grep ./samples/sample_grep.json)
+-H, --header string               Add custom headers
+-h, --help                        help for dalfox
+    --ignore-return string        Ignore scanning from return code (e.g --ignore-return 302,403,404)
+-X, --method string               Force overriding HTTP Method (e.g -X PUT) (default "GET")
+    --mining-dict                 Find new parameter with dictionary attack, default is Gf-Patterns=>XSS (default true)
+-W, --mining-dict-word string     Custom wordlist file for param mining (e.g --mining-dict-word word.txt)
+    --mining-dom                  Find new parameter in DOM (attribute/js value) (default true)
+    --no-color                    Not use colorize
+    --no-spinner                  Not use spinner
+    --only-custom-payload         Only testing custom payload (required --custom-payload)
+    --only-discovery              Only testing parameter analysis (same '--skip-xss-scanning' option)
+-o, --output string               Write to output file
+-p, --param string                Only testing selected parameters
+    --proxy string                Send all request to proxy server (e.g --proxy http://127.0.0.1:8080)
+    --remote-payloads string      Using remote payload [portswigger / payloadbox ](e.g --remote-payloads=portswigger,paylaodbox)
+-S, --silence                     Not printing all logs
+    --skip-bav                    Skipping BAV(Basic Another Vulnerability) analysis
+    --skip-grepping               Skipping built-in grepping
+    --skip-mining-all             Skipping ALL parameter mining
+    --skip-mining-dict            Skipping Dict base parameter mining
+    --skip-mining-dom             Skipping DOM base parameter mining
+    --skip-xss-scanning           Skipping XSS Scanning (same '--only-discovery' option)
+    --timeout int                 Second of timeout (default 10)
+    --user-agent string           Add custom UserAgent
+-w, --worker int                  Number of worker (default 100)
 
 Server Flags:
   -h, --help          help for server
