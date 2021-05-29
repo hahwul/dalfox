@@ -159,7 +159,6 @@ func getAssetHahwul(apiEndpoint, dataEndpoint string) ([]string, string, string)
 	}
 	defer dataResp.Body.Close()
 	payloadData, err := ioutil.ReadAll(dataResp.Body)
-	_ = payloadData
 	payload := strings.Split(string(payloadData), `\n`)
 
 	return payload, asset.Line, asset.Size
