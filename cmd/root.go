@@ -17,7 +17,7 @@ var cfgFile string
 var optionsStr = make(map[string]string)
 var optionsBool = make(map[string]bool)
 var config, cookie, data, header, p, customPayload, userAgent, blind, output, format, foundAction, proxy, grep, cookieFromRaw string
-var ignoreReturn, miningWord, method, customAlertValue, customAlertType string
+var ignoreReturn, miningWord, method, customAlertValue, customAlertType, remotePayloads string
 var timeout, concurrence, delay int
 var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, onlyCustomPayload, debug bool
 var options model.Options
@@ -67,6 +67,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&miningWord, "mining-dict-word", "W", "", "Custom wordlist file for param mining (e.g --mining-dict-word word.txt)")
 	rootCmd.PersistentFlags().StringVarP(&method, "method", "X", "GET", "Force overriding HTTP Method (e.g -X PUT)")
 	rootCmd.PersistentFlags().StringVarP(&cookieFromRaw, "cookie-from-raw", "", "", "Load cookie from burp raw http request (e.g --cookie-from-raw request.txt)")
+	rootCmd.PersistentFlags().StringVar(&remotePayloads, "remote-payloads", "", "Using remote payload [portswigger / payloadbox ](e.g --remote-payloads=portswigger,paylaodbox)")
 
 	//Int
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 10, "Second of timeout")
@@ -132,6 +133,7 @@ func initConfig() {
 		AuroraObject:      au,
 		StartTime:         stime,
 		MulticastMode:     false,
+		RemotePayloads:    remotePayloads,
 	}
 	// var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV bool
 

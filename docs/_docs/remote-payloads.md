@@ -11,7 +11,7 @@ Single resources
 
 Multiple resources
 ```
-▶ dalfox url --remote-payloads portswigger,paylaodbox
+▶ dalfox url --remote-payloads portswigger,payloadbox
 ```
 
 ## Supported resources
