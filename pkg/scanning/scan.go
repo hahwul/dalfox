@@ -131,18 +131,18 @@ func Scan(target string, options model.Options, sid string) {
 	}
 
 	wait.Add(task)
-	printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for parameter and static analysis 🔍", options)
+	printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for analysis 🔍", options)
 	go func() {
 		defer wait.Done()
 		policy, options.PathReflection = StaticAnalysis(target, options)
 		sa = options.AuroraObject.Green(sa).String()
-		printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for parameter and static analysis 🔍", options)
+		printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for analysis 🔍", options)
 	}()
 	go func() {
 		defer wait.Done()
 		params = ParameterAnalysis(target, options)
 		pa = options.AuroraObject.Green(pa).String()
-		printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for parameter and static analysis 🔍", options)
+		printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for analysis 🔍", options)
 	}()
 	if !options.NoBAV {
 		go func() {
@@ -164,7 +164,7 @@ func Scan(target string, options model.Options, sid string) {
 			}()
 			bavWaitGroup.Wait()
 			bav = options.AuroraObject.Green(bav).String()
-			printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for parameter and static analysis 🔍", options)
+			printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for analysis 🔍", options)
 		}()
 	}
 
@@ -398,6 +398,42 @@ func Scan(target string, options model.Options, sid string) {
 				}
 			}
 			printing.DalLog("SYSTEM", "Added your blind XSS ("+options.BlindURL+")", options)
+		}
+
+		// Remote Payloads
+		if options.RemotePayloads != "" {
+			rp := strings.Split(options.RemotePayloads, ",")
+			for _, endpoint := range rp {
+				var payload []string
+				var line string
+				var size string
+				if endpoint == "portswigger" {
+					payload, line, size = getPortswiggerPayload()
+				}
+				if endpoint == "paylaodbox" {
+					payload, line, size = getPayloadBoxPayload()
+				}
+				if line != "" {
+					printing.DalLog("INFO", endpoint+" payload load success ["+line+"L / "+size+"]", options)
+					for _, customPayload := range payload {
+						if customPayload != "" {
+							for k, _ := range params {
+								// Add plain XSS Query
+								tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "toHTML", "toAppend", "NaN", options)
+								query[tq] = tm
+								// Add URL encoded XSS Query
+								etq, etm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML", "toAppend", "urlEncode", options)
+								query[etq] = etm
+								// Add HTML Encoded XSS Query
+								htq, htm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML", "toAppend", "htmlEncode", options)
+								query[htq] = htm
+							}
+						}
+					}
+				} else {
+					printing.DalLog("SYSTEM", endpoint+" payload load fail..", options)
+				}
+			}
 		}
 
 		// Custom Payload
@@ -874,7 +910,7 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 							count = count + 1
 						}
 					})
-					printing.DalLog("INFO", "Found "+strconv.Itoa(count)+" testing point in DOM Mining", options)
+					printing.DalLog("INFO", "Found "+strconv.Itoa(count)+" testing point in DOM base parameter mining", options)
 				}
 			}
 		}
@@ -968,7 +1004,7 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 	close(paramsQue)
 	wgg.Wait()
 	if miningDictCount != 0 {
-		printing.DalLog("INFO", "Found "+strconv.Itoa(miningDictCount)+" testing point in Dict Mining", options)
+		printing.DalLog("INFO", "Found "+strconv.Itoa(miningDictCount)+" testing point in Dictionary base paramter mining", options)
 	}
 	return params
 }

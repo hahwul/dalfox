@@ -56,6 +56,7 @@ type Options struct {
 	AuroraObject      a.Aurora
 	StartTime         t.Time
 	PathReflection    map[int]string
+	RemotePayloads    string
 }
 
 // MassJob is list for mass
