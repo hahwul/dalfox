@@ -10,6 +10,7 @@
   - scan-from-rawreq
   - output-handling
   - custom-payload
+  - remote-payloads
 
 - title: Modes
   docs:
@@ -21,5 +22,5 @@
 
 - title: Tips of Dalfox
   docs:
-  - tips/oneliner 
-  - tips/found-action 
+  - tips/oneliner
+  - tips/found-action
