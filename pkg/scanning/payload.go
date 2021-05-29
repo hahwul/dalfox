@@ -143,7 +143,8 @@ func getAssetHahwul(apiEndpoint, dataEndpoint string) ([]string, string, string)
 	// Get Info JSON
 	apiResp, err := http.Get(apiLink)
 	if err != nil {
-
+		var t []string
+		return t, "", ""
 	}
 	defer apiResp.Body.Close()
 	var asset Asset
@@ -153,7 +154,8 @@ func getAssetHahwul(apiEndpoint, dataEndpoint string) ([]string, string, string)
 	// Get Payload Data
 	dataResp, err := http.Get(dataLink)
 	if err != nil {
-
+		var t []string
+		return t, "", ""
 	}
 	defer dataResp.Body.Close()
 	payloadData, err := ioutil.ReadAll(dataResp.Body)
