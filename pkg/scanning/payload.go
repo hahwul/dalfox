@@ -1,6 +1,16 @@
 package scanning
 
-import "strings"
+import (
+	"encoding/json"
+	"io/ioutil"
+	"net/http"
+	"strings"
+)
+
+type Asset struct {
+	Line string
+	Size string
+}
 
 //basic open redirect payloads
 func getOpenRedirectPayload() []string {
@@ -126,23 +136,47 @@ func getSSTIPayload() []string {
 	return payload
 }
 
-// getPayloadBoxPayload is use for remote payloads (PortSwigger Cheatsheet)
-func getPortswiggerPayload() []string {
-	// https://assets.hahwul.com/portswigger-xss.json
-	// or https://github.com/TheKingOfDuck/easyXssPayload/raw/master/burpXssPayload.txt
-	payload := []string{
-		"",
+// getAssetHahwul is pull data and information for remote payloads
+func getAssetHahwul(apiEndpoint, dataEndpoint string) ([]string, string, string) {
+	apiLink := "https://assets.hahwul.com/" + apiEndpoint
+	dataLink := "https://assets.hahwul.com/" + dataEndpoint
+	// Get Info JSON
+	apiResp, err := http.Get(apiLink)
+	if err != nil {
+
 	}
-	return payload
+	defer apiResp.Body.Close()
+	var asset Asset
+	infoJSON, err := ioutil.ReadAll(apiResp.Body)
+	json.Unmarshal(infoJSON, &asset)
+
+	// Get Payload Data
+	dataResp, err := http.Get(dataLink)
+	if err != nil {
+
+	}
+	defer dataResp.Body.Close()
+	payloadData, err := ioutil.ReadAll(dataResp.Body)
+	_ = payloadData
+	payload := strings.Split(string(payloadData), `\n`)
+
+	return payload, asset.Line, asset.Size
+}
+
+// getPayloadBoxPayload is use for remote payloads (PortSwigger Cheatsheet)
+func getPortswiggerPayload() ([]string, string, string) {
+	apiEndpoint := "xss-portswigger.json"
+	dataEndpoint := "xss-portswigger.txt"
+	payload, line, size := getAssetHahwul(apiEndpoint, dataEndpoint)
+	return payload, line, size
 }
 
 // getPayloadBoxPayload is use for remote payloads (PayloadBox)
-func getPayloadBoxPayload() []string {
-	// https://assets.hahwul.com/wl-payloadbox-xss.json
-	payload := []string{
-		"",
-	}
-	return payload
+func getPayloadBoxPayload() ([]string, string, string) {
+	apiEndpoint := "xss-payloadbox.json"
+	dataEndpoint := "xss-payloadbox.txt"
+	payload, line, size := getAssetHahwul(apiEndpoint, dataEndpoint)
+	return payload, line, size
 }
 
 // getBlindPayload is return Blind XSS Payload
