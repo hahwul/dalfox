@@ -1,6 +1,6 @@
 <h1 align="center">
   <br>
-  <a href=""><img src="https://user-images.githubusercontent.com/13212227/79072646-1cdd2500-7d1d-11ea-8a6d-d24301172a17.png" alt="" width="500px;"></a>
+  <a href=""><img src="https://user-images.githubusercontent.com/13212227/120111054-49ffc780-c1ab-11eb-974e-e198d53ddb48.png" alt="" width="300px;"></a>
 </h1>
 <h4 align="center">Finder Of XSS, and Dal(달) is the Korean pronunciation of moon.</h4>
 
@@ -209,6 +209,9 @@ http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123%22%3E%3Cs
 | Single URL Scanning                                          | Massive(Multicast/Mass) Scanning                             |
 | ![1416](https://user-images.githubusercontent.com/13212227/108603375-ec5d2180-73ea-11eb-8e6e-d59d915c0291.jpg) | ![1417](https://user-images.githubusercontent.com/13212227/108613244-66b19400-7433-11eb-87fc-2f195f9011b3.jpg) |
 | REST API Server Mode                                 | Output and Customizing (found-action / grepping)              |
+
+and dalfox's banner image!
+![dalfox-wide](https://user-images.githubusercontent.com/13212227/120111056-4b30f480-c1ab-11eb-90a4-c831ccf76e11.jpg)
 
 ## Wiki
 [Wiki](https://dalfox.hahwul.com/docs/home/)
