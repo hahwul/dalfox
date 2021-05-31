@@ -57,6 +57,7 @@ type Options struct {
 	StartTime         t.Time
 	PathReflection    map[int]string
 	RemotePayloads    string
+	RemoteWordlists   string
 }
 
 // MassJob is list for mass

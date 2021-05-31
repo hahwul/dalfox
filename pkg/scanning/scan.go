@@ -414,7 +414,7 @@ func Scan(target string, options model.Options, sid string) {
 					payload, line, size = getPayloadBoxPayload()
 				}
 				if line != "" {
-					printing.DalLog("INFO", endpoint+" payload load success ["+line+"L / "+size+"]", options)
+					printing.DalLog("INFO", "A '"+endpoint+"' payloads has been loaded ["+line+"L / "+size+"]               ", options)
 					for _, customPayload := range payload {
 						if customPayload != "" {
 							for k, _ := range params {
@@ -847,6 +847,7 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 				}
 			}
 		} else {
+			// Param mining with wordlist fil --mining-dict-word
 			ff, err := readLinesOrLiteral(options.MiningWordlist)
 			if err != nil {
 				printing.DalLog("SYSTEM", "Mining wordlist load fail..", options)
@@ -855,6 +856,33 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 					if wdParam != "" {
 						if p.Get(wdParam) == "" {
 							p.Set(wdParam, "")
+						}
+					}
+				}
+			}
+		}
+
+		if options.RemoteWordlists != "" {
+                        rw := strings.Split(options.RemoteWordlists, ",")
+                        for _, endpoint := range rw {
+                                var wordlist []string
+                                var line string
+                                var size string
+                                if endpoint == "burp" {
+                                        wordlist, line, size = getBurpWordlist()
+
+                                }
+                                if endpoint == "assetnote" {
+                                        wordlist, line, size = getAssetnoteWordlist()
+                                }
+
+                                if line != "" {
+                                        printing.DalLog("INFO", "A '" + endpoint+"' wordlist has been loaded ["+line+"L / "+size+"]                   ", options)
+                                        for _, remoteWord := range wordlist {
+                                                if remoteWord != "" {
+							if p.Get(remoteWord) == "" {
+								p.Set(remoteWord, "")
+							}
 						}
 					}
 				}

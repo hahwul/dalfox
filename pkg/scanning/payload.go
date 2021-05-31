@@ -180,6 +180,22 @@ func getPayloadBoxPayload() ([]string, string, string) {
 	return payload, line, size
 }
 
+// getBurpWordlist is use for remote wordlist (BurpSuite's param-minior)
+func getBurpWordlist() ([]string, string, string) {
+	apiEndpoint := "wl-params.json"
+	dataEndpoint := "wl-params.txt"
+	payload, line, size := getAssetHahwul(apiEndpoint, dataEndpoint)
+	return payload, line, size
+}
+
+// getAssetnoteWordlist is use for remote wordlist (assetnote)
+func getAssetnoteWordlist() ([]string, string, string) {
+	apiEndpoint := "wl-assetnote-params.json"
+	dataEndpoint := "wl-assetnote-params.txt"
+	payload, line, size := getAssetHahwul(apiEndpoint, dataEndpoint)
+	return payload, line, size
+}
+
 // getBlindPayload is return Blind XSS Payload
 func getBlindPayload() []string {
 	payload := []string{
