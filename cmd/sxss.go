@@ -34,6 +34,6 @@ var sxssCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(sxssCmd)
-	sxssCmd.PersistentFlags().StringVar(&trigger, "trigger", "", "Checking this url after inject sxss code (e.g --trigger https://~~/profile)")
-	sxssCmd.PersistentFlags().IntVar(&sequence, "sequence", -1, "Set sequence to first number (e.g --trigger https://~/view?no=SEQNC --sequence 3)")
+	sxssCmd.PersistentFlags().StringVar(&trigger, "trigger", "", "Checking this url after inject sxss code\n  * Example: --trigger=https://~~/profile")
+	sxssCmd.PersistentFlags().IntVar(&sequence, "sequence", -1, "Set sequence to first number\n  * Example: --trigger=https://~/view?no=SEQNC --sequence=3")
 }
