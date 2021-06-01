@@ -29,7 +29,7 @@ DalFox is a fast, powerful parameter analysis and XSS scanner, based on a golang
 
 
 ## Key features
-Mode: `url` `sxss` `pipe` `file` `server`
+Mode: `url` `sxss` `pipe` `file` `server` `payload`
 
 | Class         | Key Feature                   | Description                                                  |
 | ------------- | ----------------------------- | ------------------------------------------------------------ |
@@ -50,6 +50,7 @@ Mode: `url` `sxss` `pipe` `file` `server`
 |               | Format                        | - JSON / Plain (`--format`)                                  |
 |               | Printing                      | - Silence mode (`--silence`)<br />- You may choose not to print the color (`--no-color`)<br />- You may choose not to print the spinner (`--no-spinner`) |
 | Extensibility | REST API                      | - API Server and Swagger (`dalfox server`)                   |
+|               | Payload Mode                  | - Generate and Enumerate Payloads for XSS Testing (`dalfox payload`) |
 |               | Found Action                  | - Lets you specify the actions to take when detected. <br />- Notify, for example (`--found-action`) |
 |               | Custom Grepping               | - Can grep with custom regular expressions on response<br />- If duplicate detection, it performs deduplication (`--grep`) |
 |               | Custom Payloads               | - Use custom payloads list file (`--custom-payload`) <br />- Custom alert value (`--custom-alert-value`) <br />- Custom alert type (`--custom-alert-type`)|
@@ -81,13 +82,14 @@ More information? please read [Installation guide](https://dalfox.hahwul.com/doc
 ## Usage
 ```plain
 Modes:
-  file        Use file mode(targets list or rawdata)
-  help        Help about any command
-  pipe        Use pipeline mode
-  server      Start API Server
-  sxss        Use Stored XSS mode
-  url         Use single target mode
-  version     Show version
+file        Use file mode(targets list or rawdata)
+help        Help about any command
+payload     Payload mode, make and enum payloads
+pipe        Use pipeline mode
+server      Start API Server
+sxss        Use Stored XSS mode
+url         Use single target mode
+version     Show version
 
 Global Flags:
   -b, --blind string                Add your blind xss
@@ -171,6 +173,21 @@ SXSS Flags:
                            * Example: --trigger=https://~/view?no=SEQNC --sequence=3 (default -1)
       --trigger string   Checking this url after inject sxss code
                            * Example: --trigger=https://~~/profile
+
+Payload Flags:
+     --encoder-url            Encoding output [URL]
+     --entity-event-handler   Enumerate a event handlers for xss
+     --entity-gf              Enumerate a gf-patterns xss params
+     --entity-special-chars   Enumerate a special chars for xss
+     --entity-useful-tags     Enumerate a useful tags for xss
+     --enum-attr              Enumerate a in-attr xss payloads
+     --enum-common            Enumerate a common xss payloads
+     --enum-html              Enumerate a in-html xss payloads
+     --enum-injs              Enumerate a in-js xss payloads
+ -h, --help                   help for payload
+     --make-bulk              Make bulk payloads for stored xss
+     --remote-payloadbox      Enumerate a payloadbox's xss payloads
+     --remote-portswigger     Enumerate a portswigger xss cheatsheet payloads
 ```
 
 ```
