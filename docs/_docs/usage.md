@@ -100,6 +100,20 @@ SXSS Flags:
                            * Example: --trigger=https://~/view?no=SEQNC --sequence=3 (default -1)
       --trigger string   Checking this url after inject sxss code
                            * Example: --trigger=https://~~/profile
+                           Payload Flags:
+                                --encoder-url            Encoding output [URL]
+                                --entity-event-handler   Enumerate a event handlers for xss
+                                --entity-gf              Enumerate a gf-patterns xss params
+                                --entity-special-chars   Enumerate a special chars for xss
+                                --entity-useful-tags     Enumerate a useful tags for xss
+                                --enum-attr              Enumerate a in-attr xss payloads
+                                --enum-common            Enumerate a common xss payloads
+                                --enum-html              Enumerate a in-html xss payloads
+                                --enum-injs              Enumerate a in-js xss payloads
+                            -h, --help                   help for payload
+                                --make-bulk              Make bulk payloads for stored xss
+                                --remote-payloadbox      Enumerate a payloadbox's xss payloads
+                                --remote-portswigger     Enumerate a portswigger xss cheatsheet payloads
 ```
 
 ## Modes(commands)

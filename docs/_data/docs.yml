@@ -20,6 +20,7 @@
   - modes/file-mode
   - modes/sxss-mode
   - modes/server-mode
+  - modes/payload-mode
 
 - title: Tips of Dalfox
   docs:
