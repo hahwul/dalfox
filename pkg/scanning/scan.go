@@ -863,23 +863,23 @@ func ParameterAnalysis(target string, options model.Options) map[string][]string
 		}
 
 		if options.RemoteWordlists != "" {
-                        rw := strings.Split(options.RemoteWordlists, ",")
-                        for _, endpoint := range rw {
-                                var wordlist []string
-                                var line string
-                                var size string
-                                if endpoint == "burp" {
-                                        wordlist, line, size = getBurpWordlist()
+			rw := strings.Split(options.RemoteWordlists, ",")
+			for _, endpoint := range rw {
+				var wordlist []string
+				var line string
+				var size string
+				if endpoint == "burp" {
+					wordlist, line, size = getBurpWordlist()
 
-                                }
-                                if endpoint == "assetnote" {
-                                        wordlist, line, size = getAssetnoteWordlist()
-                                }
+				}
+				if endpoint == "assetnote" {
+					wordlist, line, size = getAssetnoteWordlist()
+				}
 
-                                if line != "" {
-                                        printing.DalLog("INFO", "A '" + endpoint+"' wordlist has been loaded ["+line+"L / "+size+"]                   ", options)
-                                        for _, remoteWord := range wordlist {
-                                                if remoteWord != "" {
+				if line != "" {
+					printing.DalLog("INFO", "A '"+endpoint+"' wordlist has been loaded ["+line+"L / "+size+"]                   ", options)
+					for _, remoteWord := range wordlist {
+						if remoteWord != "" {
 							if p.Get(remoteWord) == "" {
 								p.Set(remoteWord, "")
 							}

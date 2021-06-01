@@ -12,6 +12,42 @@ type Asset struct {
 	Size string
 }
 
+// GetPortswiggerPayload is exported interface
+func GetPortswiggerPayload() ([]string, int) {
+	lst, _, _ := getPortswiggerPayload()
+	return lst, len(lst)
+}
+
+// GetPayloadBoxPayload is exported interface
+func GetPayloadBoxPayload() ([]string, int) {
+	lst, _, _ := getPayloadBoxPayload()
+	return lst, len(lst)
+}
+
+// GetCommonPayload is exported interface
+func GetCommonPayload() ([]string, int) {
+	lst := getCommonPayload()
+	return lst, len(lst)
+}
+
+// GetHTMLPayload is exported interface
+func GetHTMLPayload() ([]string, int) {
+	lst := getHTMLPayload("")
+	return lst, len(lst)
+}
+
+// GetAttrPayload is exported interface
+func GetAttrPayload() ([]string, int) {
+	lst := getAttrPayload("")
+	return lst, len(lst)
+}
+
+// GetInJsPayload is exported interface
+func GetInJsPayload() ([]string, int) {
+	lst := getInJsPayload("")
+	return lst, len(lst)
+}
+
 //basic open redirect payloads
 func getOpenRedirectPayload() []string {
 	payload := []string{

@@ -1,5 +1,35 @@
 package scanning
 
+// InterfaceGetGfXSS is exported interface
+func InterfaceGetGfXSS() ([]string, int) {
+	lst := GetGfXSS()
+	return lst, len(lst)
+}
+
+// InterfaceGetEventHandlers is exported interface
+func InterfaceGetEventHandlers() ([]string, int) {
+	lst := GetEventHandlers()
+	return lst, len(lst)
+}
+
+// InterfaceGetTags is exported interface
+func InterfaceGetTags() ([]string, int) {
+	lst := GetTags()
+	return lst, len(lst)
+}
+
+// InterfaceGetSpecialChar is exported interface
+func InterfaceGetSpecialChar() ([]string, int) {
+	lst := GetSpecialChar()
+	return lst, len(lst)
+}
+
+// InterfaceGetUsefulCode is exported interface
+func InterfaceGetUsefulCode() ([]string, int) {
+	lst := GetUsefulCode()
+	return lst, len(lst)
+}
+
 // GetGfXSS is get cool parameter name from Gf-Patterns
 func GetGfXSS() []string {
 	// https://github.com/1ndianl33t/Gf-Patterns/blob/master/xss.json
