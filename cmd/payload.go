@@ -6,6 +6,7 @@ import (
 	"github.com/hahwul/dalfox/v2/pkg/optimization"
 	"github.com/hahwul/dalfox/v2/pkg/printing"
 	"github.com/hahwul/dalfox/v2/pkg/scanning"
+	"github.com/hahwul/dalfox/v2/pkg/generating"
 	"github.com/spf13/cobra"
 )
 
@@ -28,6 +29,7 @@ var payloadCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		printing.Banner(options)
 		var objects []Object
+		objects = append(objects, Object{Use: makeBulk, Name: "Bulk-XSS", Listener: generating.GenerateBulkPayload})
 		objects = append(objects, Object{Use: enumCommon, Name: "Enum-Common-XSS", Listener: scanning.GetCommonPayload})
 		objects = append(objects, Object{Use: enumHTML, Name: "Enum-HTML-XSS", Listener: scanning.GetHTMLPayload})
 		objects = append(objects, Object{Use: enumAttr, Name: "Enum-Attribute-XSS", Listener: scanning.GetAttrPayload})
