@@ -2,6 +2,7 @@ package scanning
 
 import (
 	"encoding/json"
+	"bufio"
 	"io/ioutil"
 	"net/http"
 	"strings"
@@ -172,6 +173,15 @@ func getSSTIPayload() []string {
 	return payload
 }
 
+func splitLines(s string) []string {
+    var lines []string
+    sc := bufio.NewScanner(strings.NewReader(s))
+    for sc.Scan() {
+        lines = append(lines, sc.Text())
+    }
+    return lines
+}
+
 // getAssetHahwul is pull data and information for remote payloads
 func getAssetHahwul(apiEndpoint, dataEndpoint string) ([]string, string, string) {
 	apiLink := "https://assets.hahwul.com/" + apiEndpoint
@@ -195,7 +205,8 @@ func getAssetHahwul(apiEndpoint, dataEndpoint string) ([]string, string, string)
 	}
 	defer dataResp.Body.Close()
 	payloadData, err := ioutil.ReadAll(dataResp.Body)
-	payload := strings.Split(string(payloadData), `\n`)
+	//payload := strings.Split(string(payloadData), `\n`)
+	payload := splitLines(string(payloadData))
 
 	return payload, asset.Line, asset.Size
 }
