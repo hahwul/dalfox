@@ -122,7 +122,7 @@ var fileCmd = &cobra.Command{
 										mutex.Lock()
 										options.NowURL = options.NowURL + 1
 										percent := fmt.Sprintf("%0.2f%%", float64(options.NowURL)/float64(tt)*100)
-										s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(tt) + " Tasks][" + percent + "] Parallel scanning from pipe"
+										s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(tt) + " Tasks][" + percent + "] Parallel scanning from file"
 										mutex.Unlock()
 									}
 								}
