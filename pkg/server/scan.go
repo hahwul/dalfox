@@ -18,7 +18,7 @@ func ScanFromAPI(url string, rqOptions model.Options, options model.Options, sid
 	rqOptions.SpinnerObject = options.SpinnerObject
 	rqOptions.AuroraObject = options.AuroraObject
 	rqOptions.StartTime = options.StartTime
-	scan.Scan(url, rqOptions, sid)
+	_, _ = scan.Scan(url, rqOptions, sid)
 }
 
 // GetScan is get scan information

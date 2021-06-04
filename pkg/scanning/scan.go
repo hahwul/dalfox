@@ -27,8 +27,10 @@ var (
 )
 
 // Scan is main scanning function
-func Scan(target string, options model.Options, sid string) {
-
+func Scan(target string, options model.Options, sid string) (model.Result, error) {
+	var scanResult model.Result
+	options.ScanResult = scanResult
+	scanResult.StartTime = time.Now()
 	if !(options.Silence || options.NoSpinner) {
 		time.Sleep(1 * time.Second) // Waiting log
 		s.Prefix = " "
@@ -75,7 +77,7 @@ func Scan(target string, options model.Options, sid string) {
 	parsedURL, err := url.Parse(target)
 	if err != nil {
 		printing.DalLog("SYSTEM", "Not running "+target+" url", options)
-		return
+		return scanResult, err
 	}
 	treq := optimization.GenerateNewRequest(target, "", options)
 	//treq, terr := http.NewRequest("GET", target, nil)
@@ -98,7 +100,7 @@ func Scan(target string, options model.Options, sid string) {
 		if err != nil {
 			msg := fmt.Sprintf("not running %v", err)
 			printing.DalLog("ERROR", msg, options)
-			return
+			return scanResult, err
 		}
 		if options.IgnoreReturn != "" {
 			rcode := strings.Split(options.IgnoreReturn, ",")
@@ -106,7 +108,7 @@ func Scan(target string, options model.Options, sid string) {
 			for _, v := range rcode {
 				if tcode == v {
 					printing.DalLog("SYSTEM", "Not running "+target+" url from --ignore-return option", options)
-					return
+					return scanResult, nil
 				}
 			}
 		}
@@ -562,6 +564,12 @@ func Scan(target string, options model.Options, sid string) {
 											if options.Format == "json" {
 												printing.DalLog("PRINT", "{\"type\":\"inATTR\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
 											} else {
+												poc := model.PoC{
+													Type:   "R",
+													Method: k.Method,
+													Data:   k.URL.String(),
+												}
+												scanResult.PoCs = append(scanResult.PoCs, poc)
 												printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
 											}
 											if options.FoundAction != "" {
@@ -586,6 +594,12 @@ func Scan(target string, options model.Options, sid string) {
 											if options.Format == "json" {
 												printing.DalLog("PRINT", "{\"type\":\"inHTML\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", options)
 											} else {
+												poc := model.PoC{
+													Type:   "V",
+													Method: k.Method,
+													Data:   k.URL.String(),
+												}
+												scanResult.PoCs = append(scanResult.PoCs, poc)
 												printing.DalLog("PRINT", "[V]["+k.Method+"] "+k.URL.String(), options)
 											}
 											vStatus[v["param"]] = true
@@ -609,6 +623,12 @@ func Scan(target string, options model.Options, sid string) {
 											if options.Format == "json" {
 												printing.DalLog("PRINT", "{\"type\":\"inHTML\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
 											} else {
+												poc := model.PoC{
+													Type:   "R",
+													Method: k.Method,
+													Data:   k.URL.String(),
+												}
+												scanResult.PoCs = append(scanResult.PoCs, poc)
 												printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
 											}
 											if options.FoundAction != "" {
@@ -673,9 +693,12 @@ func Scan(target string, options model.Options, sid string) {
 		printing.DalLog("PRINT", "{}]", options)
 	}
 	options.Scan[sid] = scanObject
+	scanResult.EndTime = time.Now()
+	scanResult.Duration = scanResult.EndTime.Sub(scanResult.StartTime)
 	if !(options.Silence && options.MulticastMode) {
 		printing.DalLog("SYSTEM-M", "Finish Scan", options)
 	}
+	return scanResult, nil
 }
 
 //CodeView is showing reflected code function

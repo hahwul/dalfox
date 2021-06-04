@@ -21,7 +21,7 @@ var sxssCmd = &cobra.Command{
 			options.Sequence = sequence
 			if options.Trigger != "" {
 				printing.DalLog("SYSTEM", "Using Stored XSS mode", options)
-				scanning.Scan(args[0], options, "Single")
+				_, _ = scanning.Scan(args[0], options, "Single")
 			} else {
 				printing.DalLog("ERROR", "Please input trigger url with --trigger option", options)
 			}

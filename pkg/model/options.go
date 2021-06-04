@@ -36,6 +36,7 @@ type Options struct {
 	OnlyCustomPayload bool `json:"only-custom-payload"`
 	Silence           bool `json:"silence"`
 	IsAPI             bool
+	IsLibrary         bool
 	Mass              bool `json:"mass"`
 	MulticastMode     bool
 	Scan              map[string]Scan
@@ -52,6 +53,7 @@ type Options struct {
 	NoGrep            bool `json:"skip-grepping"`
 	Debug             bool `json:"debug"`
 	CookieFromRaw     string
+	ScanResult        Result
 	SpinnerObject     *s.Spinner
 	AuroraObject      a.Aurora
 	StartTime         t.Time

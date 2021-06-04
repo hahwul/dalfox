@@ -66,7 +66,7 @@ var fileCmd = &cobra.Command{
 						target = "https://" + host + path
 					}
 				}
-				scanning.Scan(target, options, "single")
+				_, _ = scanning.Scan(target, options, "single")
 
 			} else {
 				printing.DalLog("SYSTEM", "Using file mode(targets list)", options)
@@ -117,7 +117,7 @@ var fileCmd = &cobra.Command{
 								v := kv.URLs
 								printing.DalLog("SYSTEM-M", "Parallel testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", options)
 								for i := range v {
-									scanning.Scan(v[i], options, strconv.Itoa(len(v)))
+									_, _ = scanning.Scan(v[i], options, strconv.Itoa(len(v)))
 									if !options.NoSpinner {
 										mutex.Lock()
 										options.NowURL = options.NowURL + 1
@@ -145,7 +145,7 @@ var fileCmd = &cobra.Command{
 					options.AllURLS = len(targets)
 					for i := range targets {
 						options.NowURL = i + 1
-						scanning.Scan(targets[i], options, strconv.Itoa(i))
+						_, _ = scanning.Scan(targets[i], options, strconv.Itoa(i))
 					}
 				}
 			}

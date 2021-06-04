@@ -15,15 +15,30 @@ func TestInitialize(t *testing.T) {
 		Method:  "GET",
 		Options: opt,
 	}
-	/*
-		dalfox.NewScan(dalfox.Target{
-			URL:     "https://www.hahwul.com",
-			Method:  "GET",
-			Options: opt,
-		})
-	*/
+
 	newOptions := dalfox.Initialize(target, opt)
 	if newOptions.Cookie == "" {
-		t.Errorf("dalfox options initialize error")
+		t.Errorf("DalFox Options Initialize error")
 	}
 }
+
+/*
+func TestNewScan(t *testing.T) {
+	opt := dalfox.Options{
+		Cookie:     "ABCD=1234",
+		NoBAV:      true,
+		Mining:     false,
+		FindingDOM: false,
+		UniqParam:  "abababab",
+	}
+
+	result, _ := dalfox.NewScan(dalfox.Target{
+		URL:     "https://dalfox.hahwul.com?abababab=1",
+		Method:  "GET",
+		Options: opt,
+	})
+	if len(result.Logs) == 0 {
+		t.Errorf("DalFox NewScan Error")
+	}
+}
+*/

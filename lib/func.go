@@ -14,6 +14,7 @@ func Initialize(target Target, options Options) model.Options {
 	au := aurora.NewAurora(false)
 	stime := time.Now()
 	newOptions := model.Options{
+		IsLibrary:         true,
 		Header:            "",
 		Cookie:            "",
 		UniqParam:         "",
@@ -126,7 +127,15 @@ func Initialize(target Target, options Options) model.Options {
 }
 
 // NewScan is dalfox single scan in lib
-func NewScan(target Target) {
+func NewScan(target Target) (Result, error) {
 	newOptions := Initialize(target, target.Options)
-	scanning.Scan(target.URL, newOptions, "Single")
+	modelResult, err := scanning.Scan(target.URL, newOptions, "Single")
+	result := Result{
+		Logs:      modelResult.Logs,
+		PoCs:      modelResult.PoCs,
+		Duration:  modelResult.Duration,
+		StartTime: modelResult.StartTime,
+		EndTime:   modelResult.EndTime,
+	}
+	return result, err
 }
