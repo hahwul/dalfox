@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
@@ -27,7 +26,7 @@ var pipeCmd = &cobra.Command{
 		sc := bufio.NewScanner(os.Stdin)
 		printing.DalLog("SYSTEM", "Using pipeline mode", options)
 		for sc.Scan() {
-			target := strings.ToLower(sc.Text())
+			target := sc.Text()
 			targets = append(targets, target)
 		}
 		targets = unique(targets)
