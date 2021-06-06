@@ -1,4 +1,4 @@
-package lib_test
+/*package lib_test
 
 import (
 	"testing"
@@ -6,6 +6,7 @@ import (
 	dalfox "github.com/hahwul/dalfox/v2/lib"
 	model "github.com/hahwul/dalfox/v2/model"
 )
+*/
 
 /*
 // Result is struct for library and cli application
