@@ -54,6 +54,10 @@ func TestInitialize(t *testing.T) {
 	assert.NotEqual(t,newOptions.NoGrep,false,"they should not bee equal")
 	assert.NotEqual(t,newOptions.RemotePayloads,"","they should not bee equal")
 	assert.NotEqual(t,newOptions.RemoteWordlists,"","they should not bee equal")
+	assert.NotEqual(t,newOptions.OnlyDiscovery,true,"they should not bee equal")
+	assert.NotEqual(t,newOptions.FollowRedirect,true,"they should not bee equal")
+	assert.NotEqual(t,newOptions.Mining,false,"they should not bee equal")
+	assert.NotEqual(t,newOptions.FindingDOM,false,"they should not bee equal")
 }
 
 /*
