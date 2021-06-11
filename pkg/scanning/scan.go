@@ -65,6 +65,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 	// 1: non-reflected , 2: reflected , 3: reflected-with-sc
 	params := make(map[string][]string)
 
+	// durls is url for dom xss
+	var durls []string
+
 	vStatus := make(map[string]bool)
 	vStatus["pleasedonthaveanamelikethis_plz_plz"] = false
 
@@ -270,9 +273,14 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			cu, err := url.Parse(target)
 			var cp url.Values
 			var cpArr []string
+			hashParam := false
 			if err == nil {
 				if options.Data == "" {
 					cp, _ = url.ParseQuery(cu.RawQuery)
+					if len(cp) == 0 {
+						cp, _ = url.ParseQuery(cu.Fragment)
+						hashParam = true
+					}
 				} else {
 					cp, _ = url.ParseQuery(options.Data)
 				}
@@ -291,6 +299,25 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					// Add HTML Encoded XSS Query
 					htq, htm := optimization.MakeRequestQuery(target, v, avv, "inHTML", "toAppend", "htmlEncode", options)
 					query[htq] = htm
+				}
+			}
+
+			// DOM XSS payload
+
+			dpayloads := optimization.SetPayloadValue(getDOMXSSPayload(), options)
+			for v := range cp {
+				// loop payload list
+				for _, dpayload := range dpayloads {
+					var durl string
+					u, _ := url.Parse(target)
+					dp, _ := url.ParseQuery(u.RawQuery)
+					if hashParam {
+						dp, _ = url.ParseQuery(u.Fragment)
+					}
+					dp.Set(v, dpayload)
+					u.RawQuery = dp.Encode()
+					durl = u.String()
+					durls = append(durls, durl)
 				}
 			}
 
@@ -478,6 +505,32 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 		concurrency := options.Concurrence
 		// make reqeust channel
 		queries := make(chan Queries)
+
+		if options.UseHeadless {
+			// start DOM XSS checker
+			wg.Add(1)
+			go func() {
+				for _, v := range durls {
+					if CheckXSSWithHeadless(v, options) {
+						if options.Format == "json" {
+							printing.DalLog("PRINT", "{\"type\":\"DOM\",\"evidence\":\"headless verify\",\"poc\":\""+v+"\"},", options)
+						} else {
+							printing.DalLog("PRINT", "[V][GET] "+v, options)
+						}
+						if options.FoundAction != "" {
+							foundAction(options, target, v, "VULN")
+						}
+						rst := &model.Issue{
+							Type:  "verify code",
+							Param: "DOM",
+							PoC:   v,
+						}
+						scanObject.Results = append(scanObject.Results, *rst)
+					}
+				}
+				wg.Done()
+			}()
+		}
 		for i := 0; i < concurrency; i++ {
 			wg.Add(1)
 			go func() {
@@ -517,16 +570,44 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												} else {
 													printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
 												}
-
-												if options.FoundAction != "" {
-													foundAction(options, target, k.URL.String(), "WEAK")
+												if options.UseHeadless {
+													if CheckXSSWithHeadless(k.URL.String(), options) {
+														if options.Format == "json" {
+															printing.DalLog("PRINT", "{\"type\":\"inJS\",\"evidence\":\"headless verify\",\"poc\":\""+k.URL.String()+"\"},", options)
+														} else {
+															printing.DalLog("PRINT", "[V]["+k.Method+"] "+k.URL.String(), options)
+														}
+														if options.FoundAction != "" {
+															foundAction(options, target, k.URL.String(), "VULN")
+														}
+														rst := &model.Issue{
+															Type:  "verify code",
+															Param: v["param"],
+															PoC:   k.URL.String(),
+														}
+														scanObject.Results = append(scanObject.Results, *rst)
+													} else {
+														if options.FoundAction != "" {
+															foundAction(options, target, k.URL.String(), "WEAK")
+														}
+														rst := &model.Issue{
+															Type:  "found code",
+															Param: v["param"],
+															PoC:   k.URL.String(),
+														}
+														scanObject.Results = append(scanObject.Results, *rst)
+													}
+												} else {
+													if options.FoundAction != "" {
+														foundAction(options, target, k.URL.String(), "WEAK")
+													}
+													rst := &model.Issue{
+														Type:  "found code",
+														Param: v["param"],
+														PoC:   k.URL.String(),
+													}
+													scanObject.Results = append(scanObject.Results, *rst)
 												}
-												rst := &model.Issue{
-													Type:  "found code",
-													Param: v["param"],
-													PoC:   k.URL.String(),
-												}
-												scanObject.Results = append(scanObject.Results, *rst)
 											}
 											mutex.Unlock()
 										}

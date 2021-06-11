@@ -60,6 +60,7 @@ type Options struct {
 	PathReflection    map[int]string
 	RemotePayloads    string
 	RemoteWordlists   string
+	UseHeadless       bool `json:"use-headless"`
 }
 
 // MassJob is list for mass

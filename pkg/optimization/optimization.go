@@ -1,15 +1,16 @@
 package optimization
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/hahwul/dalfox/v2/pkg/model"
 	"html/template"
 	"net/http"
 	"net/url"
-	"strings"
 	"os"
-	"bufio"
+	"strings"
+
+	"github.com/hahwul/dalfox/v2/pkg/model"
 )
 
 // GenerateNewRequest is make http.Cilent
@@ -46,27 +47,28 @@ func GenerateNewRequest(url, payload string, options model.Options) *http.Reques
 		if err != nil {
 			fmt.Println(err)
 			os.Exit(1)
-		}else {
-		rd := bufio.NewReader(rF)
-		rq, err := http.ReadRequest(rd)
-		if err != nil {
-			fmt.Println(err)
-			os.Exit(1)
-		}else{
-		req.Header.Add("Cookie", GetRawCookie(rq.Cookies()))
-	}}
+		} else {
+			rd := bufio.NewReader(rF)
+			rq, err := http.ReadRequest(rd)
+			if err != nil {
+				fmt.Println(err)
+				os.Exit(1)
+			} else {
+				req.Header.Add("Cookie", GetRawCookie(rq.Cookies()))
+			}
+		}
 	}
 	return req
 }
 
 //GetRawCookie gets cookie from raw request
 func GetRawCookie(cookies []*http.Cookie) string {
-    var rawCookies []string
-    for _, c := range cookies {
-        e := fmt.Sprintf("%s=%s", c.Name, c.Value)
-        rawCookies = append(rawCookies, e)
-    }
-    return strings.Join(rawCookies, "; ")
+	var rawCookies []string
+	for _, c := range cookies {
+		e := fmt.Sprintf("%s=%s", c.Name, c.Value)
+		rawCookies = append(rawCookies, e)
+	}
+	return strings.Join(rawCookies, "; ")
 }
 
 // MakeHeaderQuery is generate http query with custom header
@@ -105,7 +107,7 @@ func MakeHeaderQuery(target, hn, hv string, options model.Options) (*http.Reques
 
 // MakeRequestQuery is generate http query with custom parameters
 func MakeRequestQuery(target, param, payload, ptype string, pAction string, pEncode string, options model.Options) (*http.Request, map[string]string) {
-	
+
 	tempMap := make(map[string]string)
 	tempMap["type"] = ptype
 	tempMap["action"] = pAction
@@ -116,48 +118,48 @@ func MakeRequestQuery(target, param, payload, ptype string, pAction string, pEnc
 	u, _ := url.Parse(target)
 
 	var tempParam string
-	if(options.Data == ""){
-		tempParam = u.RawQuery				// ---> GET
-	} else{
-		tempParam = options.Data			// ---> POST
-	}	
-	
+	if options.Data == "" {
+		tempParam = u.RawQuery // ---> GET
+	} else {
+		tempParam = options.Data // ---> POST
+	}
+
 	paramList, _ := url.ParseQuery(tempParam)
 
 	//What we should do to the payload?
-	switch tempMap["encode"]{
-		case "urlEncode":
-			payload = UrlEncode(payload)
-			break
+	switch tempMap["encode"] {
+	case "urlEncode":
+		payload = UrlEncode(payload)
+		break
 
-		case "htmlEncode":
-			payload = template.HTMLEscapeString(payload)
-			break
-			
-		default:
-			break	
+	case "htmlEncode":
+		payload = template.HTMLEscapeString(payload)
+		break
+
+	default:
+		break
 	}
 
 	// We first check if the parameter exist and then "append or replace" the value
 	if val, ok := paramList[tempMap["param"]]; ok {
-		if(tempMap["action"] == "toAppend"){
+		if tempMap["action"] == "toAppend" {
 			paramList[tempMap["param"]][0] = val[0] + payload
-		}else { //toReplace lies here
+		} else { //toReplace lies here
 			paramList[tempMap["param"]][0] = payload
-		}			
-	}else{
+		}
+	} else {
 		//if the parameter doesn't exist, is added.
 		paramList.Add(tempMap["param"], payload)
-	}				
-	
+	}
+
 	var rst *http.Request
-	if(options.Data == ""){
+	if options.Data == "" {
 		u.RawQuery = paramList.Encode()
 		rst = GenerateNewRequest(u.String(), "", options)
-	}else{
+	} else {
 		rst = GenerateNewRequest(u.String(), paramList.Encode(), options)
 	}
-		
+
 	return rst, tempMap
 }
 
