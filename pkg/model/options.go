@@ -61,6 +61,7 @@ type Options struct {
 	RemotePayloads    string
 	RemoteWordlists   string
 	UseHeadless       bool `json:"use-headless"`
+	UseDeepDXSS       bool `json:"use-deepdxss"`
 }
 
 // MassJob is list for mass

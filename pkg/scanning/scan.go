@@ -303,8 +303,13 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			}
 
 			// DOM XSS payload
-
-			dpayloads := optimization.SetPayloadValue(getDOMXSSPayload(), options)
+			var dlst []string
+			if options.UseDeepDXSS {
+				dlst = getDeepDOMXSPayload()
+			} else {
+				dlst = getDOMXSSPayload()
+			}
+			dpayloads := optimization.SetPayloadValue(dlst, options)
 			for v := range cp {
 				// loop payload list
 				for _, dpayload := range dpayloads {
