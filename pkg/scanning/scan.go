@@ -313,9 +313,12 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					dp, _ := url.ParseQuery(u.RawQuery)
 					if hashParam {
 						dp, _ = url.ParseQuery(u.Fragment)
+						dp.Set(v, dpayload)
+						u.Fragment,_ = url.QueryUnescape(dp.Encode())
+					} else {
+						dp.Set(v, dpayload)
+						u.RawQuery = dp.Encode()
 					}
-					dp.Set(v, dpayload)
-					u.RawQuery = dp.Encode()
 					durl = u.String()
 					durls = append(durls, durl)
 				}
