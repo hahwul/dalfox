@@ -28,6 +28,7 @@ func CheckXSSWithHeadless(url string, options model.Options) bool {
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
 		if _, ok := ev.(*page.EventJavascriptDialogOpening); ok {
 			check = true
+			cancel()
 		}
 	})
 
