@@ -19,7 +19,7 @@ var optionsBool = make(map[string]bool)
 var config, cookie, data, header, p, customPayload, userAgent, blind, output, format, foundAction, proxy, grep, cookieFromRaw string
 var ignoreReturn, miningWord, method, customAlertValue, customAlertType, remotePayloads, remoteWordlists string
 var timeout, concurrence, delay int
-var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, onlyCustomPayload, debug, useHeadless bool
+var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, onlyCustomPayload, debug, skipHeadless bool
 var options model.Options
 var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV, skipGrep bool
 
@@ -91,7 +91,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&onlyCustomPayload, "only-custom-payload", false, "Only testing custom payload (required --custom-payload)")
 	rootCmd.PersistentFlags().BoolVar(&skipGrep, "skip-grepping", false, "Skipping built-in grepping")
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "debug mode, save all log using -o option")
-	rootCmd.PersistentFlags().BoolVar(&useHeadless, "headless", false, "Use headless browser for dom xss, inJS verify [so.. slow]")
+	rootCmd.PersistentFlags().BoolVar(&skipHeadless, "skip-headless", false, "Skipping headless browser base scanning[DOM XSS and inJS verify]")
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -137,7 +137,7 @@ func initConfig() {
 		MulticastMode:     false,
 		RemotePayloads:    remotePayloads,
 		RemoteWordlists:   remoteWordlists,
-		UseHeadless:       useHeadless,
+		UseHeadless:       !skipHeadless,
 	}
 	// var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV bool
 
