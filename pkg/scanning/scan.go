@@ -580,14 +580,6 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 										if !protected {
 											mutex.Lock()
 											if vStatus[v["param"]] == false {
-												code := CodeView(resbody, v["payload"])
-												printing.DalLog("WEAK", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], options)
-												printing.DalLog("CODE", code, options)
-												if options.Format == "json" {
-													printing.DalLog("PRINT", "{\"type\":\"inJS\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
-												} else {
-													printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
-												}
 												if options.UseHeadless {
 													if CheckXSSWithHeadless(k.URL.String(), options) {
 														if options.Format == "json" {
@@ -595,6 +587,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 														} else {
 															printing.DalLog("PRINT", "[V]["+k.Method+"] "+k.URL.String(), options)
 														}
+														vStatus[v["param"]] = true
 														if options.FoundAction != "" {
 															foundAction(options, target, k.URL.String(), "VULN")
 														}
@@ -616,6 +609,14 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 														scanObject.Results = append(scanObject.Results, *rst)
 													}
 												} else {
+													code := CodeView(resbody, v["payload"])
+													printing.DalLog("WEAK", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], options)
+													printing.DalLog("CODE", code, options)
+													if options.Format == "json" {
+														printing.DalLog("PRINT", "{\"type\":\"inJS\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
+													} else {
+														printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
+													}
 													if options.FoundAction != "" {
 														foundAction(options, target, k.URL.String(), "WEAK")
 													}
