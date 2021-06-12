@@ -26,9 +26,15 @@ func CheckXSSWithHeadless(url string, options model.Options) bool {
 	defer cancel()
 
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
-		if _, ok := ev.(*page.EventJavascriptDialogOpening); ok {
-			check = true
-			cancel()
+		if ev, ok := ev.(*page.EventJavascriptDialogOpening); ok {
+			if string(ev.Message) == options.CustomAlertValue {
+				check = true
+				cancel()
+			} else {
+				go func() {
+					chromedp.Run(ctx,page.HandleJavaScriptDialog(true),)
+				}()
+			}
 		}
 	})
 
@@ -57,6 +63,7 @@ func CheckXSSWithHeadless(url string, options model.Options) bool {
 			&res,
 		))
 	*/
+	
 	err := chromedp.Run(ctx,
 		chromedp.Navigate(url),
 		// wait for footer element is visible (ie, page is loaded)
