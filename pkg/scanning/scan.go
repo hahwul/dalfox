@@ -312,6 +312,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			dpayloads := optimization.SetPayloadValue(dlst, options)
 			for v := range cp {
 				// loop payload list
+				if len(params[v]) == 0 {
 				for _, dpayload := range dpayloads {
 					var durl string
 					u, _ := url.Parse(target)
@@ -326,7 +327,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					}
 					durl = u.String()
 					durls = append(durls, durl)
-				}
+				}}
 			}
 
 			// Set param base xss
