@@ -510,23 +510,32 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			// start DOM XSS checker
 			wg.Add(1)
 			go func() {
+				var wgg sync.WaitGroup
 				for _, v := range durls {
-					if CheckXSSWithHeadless(v, options) {
-						if options.Format == "json" {
-							printing.DalLog("PRINT", "{\"type\":\"DOM\",\"evidence\":\"headless verify\",\"poc\":\""+v+"\"},", options)
-						} else {
-							printing.DalLog("PRINT", "[V][GET] "+v, options)
+					wgg.Add(1)
+					go func(){
+						if CheckXSSWithHeadless(v, options) {
+							mutex.Lock()
+							printing.DalLog("VULN", "Triggered XSS Payload (found dialog in headless)", options)
+							if options.Format == "json" {
+								printing.DalLog("PRINT", "{\"type\":\"DOM\",\"evidence\":\"headless verify\",\"poc\":\""+v+"\"},", options)
+							} else {
+								printing.DalLog("PRINT", "[V][GET] "+v, options)
+							}
+							if options.FoundAction != "" {
+								foundAction(options, target, v, "VULN")
+							}
+							rst := &model.Issue{
+								Type:  "verify code",
+								Param: "DOM",
+								PoC:   v,
+							}
+							scanObject.Results = append(scanObject.Results, *rst)
+							mutex.Unlock()
 						}
-						if options.FoundAction != "" {
-							foundAction(options, target, v, "VULN")
-						}
-						rst := &model.Issue{
-							Type:  "verify code",
-							Param: "DOM",
-							PoC:   v,
-						}
-						scanObject.Results = append(scanObject.Results, *rst)
-					}
+						wgg.Done()
+					}()
+					wgg.Wait()
 				}
 				wg.Done()
 			}()
@@ -736,9 +745,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 						s.Lock()
 						var msg string
 						if vStatus[v["param"]] == false {
-							msg = "Testing \"" + v["param"] + "\" param"
+							msg = "Testing \"" + v["param"] + "\" param and waiting dom xss"
 						} else {
-							msg = "Passing \"" + v["param"] + "\" param queries"
+							msg = "Passing \"" + v["param"] + "\" param queries and waiting dom xss"
 						}
 
 						percent := fmt.Sprintf("%0.2f%%", (float64(queryCount)/float64(len(query)))*100)

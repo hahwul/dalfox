@@ -2,7 +2,7 @@ package scanning
 
 import (
 	"context"
-	"log"
+	//"log"
 	"strings"
 	"time"
 
@@ -17,7 +17,7 @@ func CheckXSSWithHeadless(url string, options model.Options) bool {
 	check := false
 	ctx, cancel := chromedp.NewContext(
 		context.Background(),
-		chromedp.WithLogf(log.Printf),
+		//chromedp.WithLogf(log.Printf),
 	)
 	defer cancel()
 
