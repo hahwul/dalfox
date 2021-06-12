@@ -578,10 +578,10 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											}
 										}
 										if !protected {
-											mutex.Lock()
 											if vStatus[v["param"]] == false {
 												if options.UseHeadless {
 													if CheckXSSWithHeadless(k.URL.String(), options) {
+														mutex.Lock()
 														if options.Format == "json" {
 															printing.DalLog("PRINT", "{\"type\":\"inJS\",\"evidence\":\"headless verify\",\"poc\":\""+k.URL.String()+"\"},", options)
 														} else {
@@ -597,7 +597,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 															PoC:   k.URL.String(),
 														}
 														scanObject.Results = append(scanObject.Results, *rst)
+														mutex.Unlock()
 													} else {
+														mutex.Lock()
 														if options.FoundAction != "" {
 															foundAction(options, target, k.URL.String(), "WEAK")
 														}
@@ -607,8 +609,10 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 															PoC:   k.URL.String(),
 														}
 														scanObject.Results = append(scanObject.Results, *rst)
+														mutex.Unlock()
 													}
 												} else {
+													mutex.Lock()
 													code := CodeView(resbody, v["payload"])
 													printing.DalLog("WEAK", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], options)
 													printing.DalLog("CODE", code, options)
@@ -626,9 +630,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 														PoC:   k.URL.String(),
 													}
 													scanObject.Results = append(scanObject.Results, *rst)
+													mutex.Unlock()
 												}
 											}
-											mutex.Unlock()
 										}
 									}
 								} else if strings.Contains(v["type"], "inATTR") {
