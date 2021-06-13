@@ -582,6 +582,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												if options.UseHeadless {
 													if CheckXSSWithHeadless(k.URL.String(), options) {
 														mutex.Lock()
+														printing.DalLog("VULN", "Triggered XSS Payload (found dialog in headless)", options)
 														if options.Format == "json" {
 															printing.DalLog("PRINT", "{\"type\":\"inJS\",\"evidence\":\"headless verify\",\"poc\":\""+k.URL.String()+"\"},", options)
 														} else {
