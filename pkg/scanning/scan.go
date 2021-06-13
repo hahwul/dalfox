@@ -304,30 +304,33 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 
 			// DOM XSS payload
 			var dlst []string
-			if options.UseDeepDXSS {
-				dlst = getDeepDOMXSPayload()
-			} else {
-				dlst = getDOMXSSPayload()
-			}
-			dpayloads := optimization.SetPayloadValue(dlst, options)
-			for v := range cp {
-				// loop payload list
-				if len(params[v]) == 0 {
-				for _, dpayload := range dpayloads {
-					var durl string
-					u, _ := url.Parse(target)
-					dp, _ := url.ParseQuery(u.RawQuery)
-					if hashParam {
-						dp, _ = url.ParseQuery(u.Fragment)
-						dp.Set(v, dpayload)
-						u.Fragment,_ = url.QueryUnescape(dp.Encode())
-					} else {
-						dp.Set(v, dpayload)
-						u.RawQuery = dp.Encode()
+			if options.UseHeadless {
+				if options.UseDeepDXSS {
+					dlst = getDeepDOMXSPayload()
+				} else {
+					dlst = getDOMXSSPayload()
+				}
+				dpayloads := optimization.SetPayloadValue(dlst, options)
+				for v := range cp {
+					// loop payload list
+					if len(params[v]) == 0 {
+						for _, dpayload := range dpayloads {
+							var durl string
+							u, _ := url.Parse(target)
+							dp, _ := url.ParseQuery(u.RawQuery)
+							if hashParam {
+								dp, _ = url.ParseQuery(u.Fragment)
+								dp.Set(v, dpayload)
+								u.Fragment, _ = url.QueryUnescape(dp.Encode())
+							} else {
+								dp.Set(v, dpayload)
+								u.RawQuery = dp.Encode()
+							}
+							durl = u.String()
+							durls = append(durls, durl)
+						}
 					}
-					durl = u.String()
-					durls = append(durls, durl)
-				}}
+				}
 			}
 
 			// Set param base xss
@@ -522,7 +525,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 				var wgg sync.WaitGroup
 				for _, v := range durls {
 					wgg.Add(1)
-					go func(){
+					go func() {
 						if CheckXSSWithHeadless(v, options) {
 							mutex.Lock()
 							printing.DalLog("VULN", "Triggered XSS Payload (found dialog in headless)", options)
@@ -542,6 +545,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 							scanObject.Results = append(scanObject.Results, *rst)
 							mutex.Unlock()
 						}
+						queryCount = queryCount + 1
 						wgg.Done()
 					}()
 					wgg.Wait()
@@ -760,17 +764,25 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 						s.Lock()
 						var msg string
 						if vStatus[v["param"]] == false {
-							msg = "Testing \"" + v["param"] + "\" param and waiting dom xss"
+							if options.UseHeadless {
+								msg = "Testing \"" + v["param"] + "\" param and waiting headless"
+							} else {
+								msg = "Testing \"" + v["param"] + "\" param"
+							}
 						} else {
-							msg = "Passing \"" + v["param"] + "\" param queries and waiting dom xss"
+							if options.UseHeadless {
+								msg = "Passing \"" + v["param"] + "\" param queries and waiting headless"
+							} else {
+								msg = "Passing \"" + v["param"] + "\" param queries"
+							}
 						}
 
-						percent := fmt.Sprintf("%0.2f%%", (float64(queryCount)/float64(len(query)))*100)
+						percent := fmt.Sprintf("%0.2f%%", (float64(queryCount)/float64(len(query)+len(durls)))*100)
 						if options.NowURL == 0 {
-							s.Suffix = "  [" + strconv.Itoa(queryCount) + "/" + strconv.Itoa(len(query)) + " Queries][" + percent + "] " + msg
+							s.Suffix = "  [" + strconv.Itoa(queryCount) + "/" + strconv.Itoa(len(query)+len(durls)) + " Queries][" + percent + "] " + msg
 						} else if !options.Silence {
 							percent2 := fmt.Sprintf("%0.2f%%", (float64(options.NowURL) / float64(options.AllURLS) * 100))
-							s.Suffix = "  [" + strconv.Itoa(queryCount) + "/" + strconv.Itoa(len(query)) + " Queries][" + percent + "][" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][" + percent2 + "] " + msg
+							s.Suffix = "  [" + strconv.Itoa(queryCount) + "/" + strconv.Itoa(len(query)+len(durls)) + " Queries][" + percent + "][" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][" + percent2 + "] " + msg
 						}
 						//s.Suffix = " Waiting routines.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
 						s.Unlock()
