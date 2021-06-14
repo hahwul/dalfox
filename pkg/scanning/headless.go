@@ -22,7 +22,7 @@ func CheckXSSWithHeadless(url string, options model.Options) bool {
 	defer cancel()
 
 	// create a timeout
-	ctx, cancel = context.WithTimeout(ctx, 15*time.Second)
+	ctx, cancel = context.WithTimeout(ctx, 8*time.Second)
 	defer cancel()
 
 	chromedp.ListenTarget(ctx, func(ev interface{}) {
@@ -67,7 +67,7 @@ func CheckXSSWithHeadless(url string, options model.Options) bool {
 	err := chromedp.Run(ctx,
 		chromedp.Navigate(url),
 		// wait for footer element is visible (ie, page is loaded)
-		chromedp.WaitVisible(`body > footer`),
+		// chromedp.WaitVisible(`body > footer`),
 	)
 	if err != nil {
 		//
