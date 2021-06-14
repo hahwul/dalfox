@@ -522,34 +522,45 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			// start DOM XSS checker
 			wg.Add(1)
 			go func() {
+				dconcurrency := options.Concurrence/2
+				if dconcurrency < 1 {
+					dconcurrency = 1
+				}
+				dchan := make(chan string)
 				var wgg sync.WaitGroup
-				for _, v := range durls {
+				for i := 0; i < dconcurrency; i++ {
 					wgg.Add(1)
 					go func() {
-						if CheckXSSWithHeadless(v, options) {
-							mutex.Lock()
-							printing.DalLog("VULN", "Triggered XSS Payload (found dialog in headless)", options)
-							if options.Format == "json" {
-								printing.DalLog("PRINT", "{\"type\":\"DOM\",\"evidence\":\"headless verify\",\"poc\":\""+v+"\"},", options)
-							} else {
-								printing.DalLog("PRINT", "[V][GET] "+v, options)
+						for v := range dchan {
+							if CheckXSSWithHeadless(v, options) {
+								mutex.Lock()
+								printing.DalLog("VULN", "Triggered XSS Payload (found dialog in headless)", options)
+								if options.Format == "json" {
+									printing.DalLog("PRINT", "{\"type\":\"DOM\",\"evidence\":\"headless verify\",\"poc\":\""+v+"\"},", options)
+								} else {
+									printing.DalLog("PRINT", "[V][GET] "+v, options)
+								}
+								if options.FoundAction != "" {
+									foundAction(options, target, v, "VULN")
+								}
+								rst := &model.Issue{
+									Type:  "verify code",
+									Param: "DOM",
+									PoC:   v,
+								}
+								scanObject.Results = append(scanObject.Results, *rst)
+								mutex.Unlock()
 							}
-							if options.FoundAction != "" {
-								foundAction(options, target, v, "VULN")
-							}
-							rst := &model.Issue{
-								Type:  "verify code",
-								Param: "DOM",
-								PoC:   v,
-							}
-							scanObject.Results = append(scanObject.Results, *rst)
-							mutex.Unlock()
+							queryCount = queryCount + 1
 						}
-						queryCount = queryCount + 1
 						wgg.Done()
 					}()
-					wgg.Wait()
 				}
+				for _, dchanData := range durls {
+					dchan <- dchanData
+				}
+				close(dchan)
+				wgg.Wait()
 				wg.Done()
 			}()
 		}
