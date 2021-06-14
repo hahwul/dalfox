@@ -34,10 +34,10 @@ Mode: `url` `sxss` `pipe` `file` `server` `payload`
 | ------------- | ----------------------------- | ------------------------------------------------------------ |
 | Discovery     | Parameter analysis            | - Find reflected param<br />- Find alive/bad special chars, event handler and attack code <br />- Identification of injection points(HTML/JS/Attribute) <br /> `inHTML-none` `inJS-none` `inJS-double` `inJS-single` `inJS-backtick` `inATTR-none` `inATTR-double` `inATTR-single` |
 |               | Static analysis               | - Check bad-header like CSP, XFO, etc.. with req/res base    |
-|               | BAV analysis                  | - Testing BAV(Basic Another Vulnerability) ,  e.g `sqli` `ssti` `open-redirects`    |
+|               | BAV analysis                  | - Testing BAV(Basic Another Vulnerability) ,  e.g `sqli` `ssti` `open-redirects`, `crlf`    |
 |               | Parameter Mining              | - Find new param with Dictonary attack (default is [GF-Patterns](https://github.com/1ndianl33t/Gf-Patterns))<br />- Support custom dictonary file (`--mining-dict-word`)<br />- Find new param with DOM<br />- Use remote wordlist to mining (`--remote-wordlists`) |
 |               | Built-in Grepping             | - It Identify the basic info leak of SSTi, Credential, SQL Error, and so on |
-| Scanning      | XSS Scanning                  | - Reflected xss / stored xss <br />- DOM base verifying<br />- Blind XSS testing with param, header(`-b` , `--blind` options)<br />- Only testing selected parameters (`-p`, `--param`)<br />- Only testing parameter analysis (`--only-discovery`) |
+| Scanning      | XSS Scanning                  | - Reflected XSS / Stored XSS / DOM XSS<br />- DOM base verifying<br />- Headless base verifying<br />- Blind XSS testing with param, header(`-b` , `--blind` options)<br />- Only testing selected parameters (`-p`, `--param`)<br />- Only testing parameter analysis (`--only-discovery`) |
 |               | Friendly Pipeline             | - Single url mode (`dalfox url`)<br />- From file mode (`dalfox file urls.txt`)<br />- From IO(pipeline) mode (`dalfox pipe`)<br />- From raw http request file mode (`dalfox file raw.txt --rawdata`) |
 |               | Optimizaion query of payloads | - Check the injection point through abstraction and generated the fit payload.<br />- Eliminate unnecessary payloads based on badchar |
 |               | Encoder                       | - All test payloads(build-in, your custom/blind) are tested in parallel with the encoder.<br />- To Double URL Encoder<br />- To HTML Hex Encoder |
@@ -104,6 +104,7 @@ Global Flags:
       --custom-payload string       Add custom payloads from file
   -d, --data string                 Using POST Method and add Body data
       --debug                       debug mode, save all log using -o option
+      --deep-domxss                 DOM XSS Testing with more payloads on headless [so slow]
       --delay int                   Milliseconds between send to same host (1000==1s)
   -F, --follow-redirects            Following redirection
       --format string               Stdout output format
@@ -139,6 +140,7 @@ Global Flags:
   -S, --silence                     Not printing all logs
       --skip-bav                    Skipping BAV(Basic Another Vulnerability) analysis
       --skip-grepping               Skipping built-in grepping
+      --skip-headless               Skipping headless browser base scanning[DOM XSS and inJS verify]
       --skip-mining-all             Skipping ALL parameter mining
       --skip-mining-dict            Skipping Dict base parameter mining
       --skip-mining-dom             Skipping DOM base parameter mining
