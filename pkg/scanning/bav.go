@@ -41,6 +41,35 @@ func SSTIAnalysis(target string, options model.Options) {
 	wg.Wait()
 }
 
+//CRLFAnalysis is basic check for CRLF Injection
+func CRLFAnalysis(target string, options model.Options) {
+	bpu, _ := url.Parse(target)
+	bpd := bpu.Query()
+	var wg sync.WaitGroup
+	concurrency := options.Concurrence
+	reqs := make(chan *http.Request)
+
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			for req := range reqs {
+				SendReq(req, "toGrepping", options)
+			}
+			wg.Done()
+		}()
+	}
+
+	for bpk := range bpd {
+		for _, crlfpayload := range getCRLFPayload() {
+			turl, _ := optimization.MakeRequestQuery(target, bpk, crlfpayload, "toGrepping", "ToAppend", "NaN", options)
+			reqs <- turl
+		}
+	}
+	close(reqs)
+	wg.Wait()
+	
+}
+
 //SqliAnalysis is basic check for SQL Injection
 func SqliAnalysis(target string, options model.Options) {
 	// sqli payload
@@ -72,8 +101,8 @@ func SqliAnalysis(target string, options model.Options) {
 	
 }
 
-//OpeRedirectorAnalysis is basic check for open redirectors
-func OpeRedirectorAnalysis(target string, options model.Options) {
+//OpenRedirectorAnalysis is basic check for open redirectors
+func OpenRedirectorAnalysis(target string, options model.Options) {
 	
 	// openredirect payload
 	bpu, _ := url.Parse(target)

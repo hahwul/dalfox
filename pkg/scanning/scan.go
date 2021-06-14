@@ -153,7 +153,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 		go func() {
 			defer wait.Done()
 			var bavWaitGroup sync.WaitGroup
-			bavTask := 3
+			bavTask := 4
 			bavWaitGroup.Add(bavTask)
 			go func() {
 				defer bavWaitGroup.Done()
@@ -165,7 +165,11 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			}()
 			go func() {
 				defer bavWaitGroup.Done()
-				OpeRedirectorAnalysis(target, options)
+				OpenRedirectorAnalysis(target, options)
+			}()
+			go func() {
+				defer bavWaitGroup.Done()
+				CRLFAnalysis(target, options)
 			}()
 			bavWaitGroup.Wait()
 			bav = options.AuroraObject.Green(bav).String()
@@ -1224,7 +1228,30 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 	ssti := getSSTIPayload()
 
 	grepResult := make(map[string][]string)
-
+	if !options.NoBAV {
+		if (len(resp.Header["Dalfoxcrlf"]) != 0) {
+			rst := &model.Issue{
+				Type: "Grep:CRLF",
+				PoC:  req.URL.String(),
+			}
+			if !duplicatedResult(scanObject.Results, *rst) {
+				if payload != "" {
+					printing.DalLog("GREP", "Found CRLF Injection via built-in grepping / payload: "+payload, options)
+				} else {
+					printing.DalLog("GREP", "Found CRLF Injection via built-in grepping / original request", options)
+				}
+					if options.FoundAction != "" {
+					foundAction(options, req.URL.Host, rst.PoC, "BAV: "+rst.Type)
+				}
+				if options.Format == "json" {
+					printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"CRLF\",\"poc\":\""+req.URL.String()+"\"", options)
+				} else {
+					printing.DalLog("PRINT", "[G][CRLF/"+req.Method+"] "+req.URL.String(), options)
+				}
+				scanObject.Results = append(scanObject.Results, *rst)
+			}
+		}
+	}
 	if !options.NoGrep {
 		grepResult = builtinGrep(str)
 	}

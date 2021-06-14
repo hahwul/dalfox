@@ -105,6 +105,15 @@ func getOpenRedirectPayload() []string {
 	return payload
 }
 
+func getCRLFPayload() []string{
+	payload := []string{
+		"%0d%0aDalfoxcrlf: 1234",
+		"%E5%98%8D%E5%98%8ADalfoxcrlf: 1234",
+		"\\u560d\\u560aDalfoxcrlf: 1234",
+	}
+	return payload
+}
+
 //basic sql injection payloads
 func getSQLIPayload() []string {
 	payload := []string{
