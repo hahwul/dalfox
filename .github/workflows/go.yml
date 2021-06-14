@@ -1,4 +1,4 @@
-name: Go build
+name: CI
 on: [push, pull_request]
 jobs:
   build:
