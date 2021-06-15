@@ -9,15 +9,15 @@ import (
 func main() {
 	opt := dalfox.Options{
 		Cookie:     "ABCD=1234",
-		NoBAV:      true,
-		Mining:     false,
-		FindingDOM: false,
-		UniqParam:  "abababab",
 	}
-	result, _ := dalfox.NewScan(dalfox.Target{
-		URL:     "https://www.hahwul.com?abababab=1",
+	result, err := dalfox.NewScan(dalfox.Target{
+		URL:     "https://xss-game.appspot.com/level1/frame",
 		Method:  "GET",
 		Options: opt,
 	})
-	fmt.Println(result)
+	if err != {
+		fmt.Println(err)
+	} else {
+		fmt.Println(result)
+	}
 }
