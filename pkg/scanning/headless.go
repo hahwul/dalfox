@@ -2,8 +2,6 @@ package scanning
 
 import (
 	"context"
-	//"log"
-	"strings"
 	"time"
 
 	"github.com/chromedp/cdproto/network"
@@ -37,8 +35,10 @@ func CheckXSSWithHeadless(url string, options model.Options) bool {
 			}
 		}
 	})
-
+	
+	/*
 	var headers map[string]interface{}
+
 
 	if options.Header != "" {
 		h := strings.Split(options.Header, ": ")
@@ -54,6 +54,7 @@ func CheckXSSWithHeadless(url string, options model.Options) bool {
 	if options.UserAgent != "" {
 		headers["User-Agent"] = options.UserAgent
 	}
+	*/
 
 	/*
 		var res string
