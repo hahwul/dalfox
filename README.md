@@ -21,6 +21,7 @@ DalFox is a fast, powerful parameter analysis and XSS scanner, based on a golang
 - [How to Install](#how-to-install)
 - [Usage](#usage)
 - [POC format](#poc-format)
+- [In the Code](#in-the-code)
 - [Screenshots](#screenshots)
 - [Wiki](https://dalfox.hahwul.com/docs/home/)
 - [Contribute](https://github.com/hahwul/dalfox/blob/master/CONTRIBUTING.md)
@@ -236,6 +237,33 @@ It is a method to make it easier to parse only the poc code through cut etc. For
 ▶ cat output
 http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123DalFox
 http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123%22%3E%3Csvg%2FOnLoad%3D%22%60%24%7Bprompt%60%60%7D%60%22+class%3Ddalfox%3E
+```
+
+## In the code
+```go
+package main 
+
+import (
+	"fmt"
+
+	dalfox "github.com/hahwul/dalfox/v2/lib"
+)
+
+func main() {
+	opt := dalfox.Options{
+		Cookie:     "ABCD=1234",
+	}
+	result, err := dalfox.NewScan(dalfox.Target{
+		URL:     "https://xss-game.appspot.com/level1/frame",
+		Method:  "GET",
+		Options: opt,
+	})
+	if err != {
+		fmt.Println(err)
+	} else {
+		fmt.Println(result)
+	}
+}
 ```
 
 ## Screenshots
