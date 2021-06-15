@@ -34,3 +34,6 @@ func main() {
 	}
 }
 ```
+
+## More info
+[https://pkg.go.dev/github.com/hahwul/dalfox/v2/lib](https://pkg.go.dev/github.com/hahwul/dalfox/v2/lib)
