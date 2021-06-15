@@ -90,10 +90,10 @@ func Initialize(target Target, options Options) model.Options {
 	if options.Trigger != "" {
 		newOptions.Trigger = options.Trigger
 	}
-	if options.Timeout != 10 {
+	if options.Timeout != 0 {
 		newOptions.Timeout = options.Timeout
 	}
-	if options.Concurrence != 100 {
+	if options.Concurrence != 0 {
 		newOptions.Concurrence = options.Concurrence
 	}
 	if options.Delay != 0 {

@@ -60,24 +60,20 @@ func TestInitialize(t *testing.T) {
 	assert.NotEqual(t,newOptions.FindingDOM,false,"they should not bee equal")
 }
 
-/*
+
 func TestNewScan(t *testing.T) {
 	opt := dalfox.Options{
 		Cookie:     "ABCD=1234",
-		NoBAV:      true,
-		Mining:     false,
-		FindingDOM: false,
-		UniqParam:  "abababab",
 	}
 	t.Log(opt)
-	result, _ := dalfox.NewScan(dalfox.Target{
-		URL:     "https://www.hahwul.com?abababab=1",
+	result, err := dalfox.NewScan(dalfox.Target{
+		URL:     "https://xss-game.appspot.com/level1/frame",
 		Method:  "GET",
 		Options: opt,
 	})
 	t.Log(result)
-	if len(result.Logs) == 0 {
+	if err != nil {
 		t.Errorf("DalFox NewScan Error")
 	}
 }
-*/
+
