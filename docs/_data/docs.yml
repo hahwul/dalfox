@@ -13,6 +13,7 @@
   - custom-payload
   - remote-payloads
   - code
+  - gitaction
 
 - title: Modes
   docs:
