@@ -55,6 +55,7 @@ Global Flags:
     --no-spinner                  Not use spinner
     --only-custom-payload         Only testing custom payload (required --custom-payload)
     --only-discovery              Only testing parameter analysis (same '--skip-xss-scanning' option)
+    --only-poc string             Shows only the PoC code for the specified pattern (g: grep / r: reflected / v: verified)
 -o, --output string               Write to output file
 -p, --param string                Only testing selected parameters
     --proxy string                Send all request to proxy server

@@ -48,7 +48,7 @@ Mode: `url` `sxss` `pipe` `file` `server` `payload`
 |               | N * hosts                     | - Use multicast mode (`--multicast`) , only `file` / `pipe` mode |
 | Output        | Output                        | - Only the PoC code and useful information is write as Stdout<br />- Save output (`-o`, `--output`) |
 |               | Format                        | - JSON / Plain (`--format`)                                  |
-|               | Printing                      | - Silence mode (`--silence`)<br />- You may choose not to print the color (`--no-color`)<br />- You may choose not to print the spinner (`--no-spinner`) |
+|               | Printing                      | - Silence mode (`--silence`)<br />- You may choose not to print the color (`--no-color`)<br />- You may choose not to print the spinner (`--no-spinner`)<br />- You may choose show only special poc code (`--only-poc`) |
 | Extensibility | REST API                      | - API Server and Swagger (`dalfox server`)                   |
 |               | Payload Mode                  | - Generate and Enumerate Payloads for XSS Testing (`dalfox payload`) |
 |               | Found Action                  | - Lets you specify the actions to take when detected. <br />- Notify, for example (`--found-action`) |
@@ -129,6 +129,7 @@ Global Flags:
       --no-spinner                  Not use spinner
       --only-custom-payload         Only testing custom payload (required --custom-payload)
       --only-discovery              Only testing parameter analysis (same '--skip-xss-scanning' option)
+      --only-poc string             Shows only the PoC code for the specified pattern (g: grep / r: reflected / v: verified)
   -o, --output string               Write to output file
   -p, --param string                Only testing selected parameters
       --proxy string                Send all request to proxy server
@@ -242,7 +243,7 @@ http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123%22%3E%3Cs
 
 ## In the code
 ```go
-package main 
+package main
 
 import (
 	"fmt"

