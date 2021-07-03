@@ -50,6 +50,7 @@ func Summary(options model.Options, target string) {
 // DalLog is log fomatting for DalFox
 func DalLog(level, text string, options model.Options) {
 	var ftext string
+
 	switch level {
 	case "INFO":
 		if options.Debug {

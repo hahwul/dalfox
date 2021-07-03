@@ -22,6 +22,7 @@ var timeout, concurrence, delay int
 var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, onlyCustomPayload, debug, useDeepDXSS bool
 var options model.Options
 var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV, skipGrep, skipHeadless bool
+var onlyPoC string
 
 // rootCmd represents the base command when called without any subcommands
 var rootCmd = &cobra.Command{
@@ -69,6 +70,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&cookieFromRaw, "cookie-from-raw", "", "", "Load cookie from burp raw http request\n  * Example: --cookie-from-raw request.txt")
 	rootCmd.PersistentFlags().StringVar(&remotePayloads, "remote-payloads", "", "Using remote payload for XSS testing\n  * Supported: portswigger/payloadbox\n  * Example: --remote-payloads=portswigger,payloadbox")
 	rootCmd.PersistentFlags().StringVar(&remoteWordlists, "remote-wordlists", "", "Using remote wordlists for param mining\n  * Supported: burp/assetnote\n  * Example: --remote-wordlists=burp")
+	rootCmd.PersistentFlags().StringVar(&onlyPoC, "only-poc", "", "Shows only the PoC code for the specified pattern (g: grep / r: reflected / v: verified)\n * Example: --only-poc='g,v'")
 
 	//Int
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 10, "Second of timeout")
@@ -140,6 +142,7 @@ func initConfig() {
 		RemoteWordlists:   remoteWordlists,
 		UseHeadless:       !skipHeadless,
 		UseDeepDXSS:       useDeepDXSS,
+		OnlyPoC:           onlyPoC,
 	}
 	// var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV bool
 

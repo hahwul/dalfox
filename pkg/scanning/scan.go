@@ -515,6 +515,16 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			s.Start() // Start the spinner
 			//time.Sleep(3 * time.Second) // Run for some time to simulate work
 		}
+
+		showR := false
+		showV := false
+		if options.OnlyPoC != "" {
+			_, showR, showV = printing.CheckToShowPoC(options.OnlyPoC)
+		} else {
+			showR = true
+			showV = true
+		}
+
 		// make waiting group
 		var wg sync.WaitGroup
 		// set concurrency
@@ -526,7 +536,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			// start DOM XSS checker
 			wg.Add(1)
 			go func() {
-				dconcurrency := options.Concurrence/2
+				dconcurrency := options.Concurrence / 2
 				if dconcurrency < 1 {
 					dconcurrency = 1
 				}
@@ -539,10 +549,12 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 							if CheckXSSWithHeadless(v, options) {
 								mutex.Lock()
 								printing.DalLog("VULN", "Triggered XSS Payload (found dialog in headless)", options)
-								if options.Format == "json" {
-									printing.DalLog("PRINT", "{\"type\":\"DOM\",\"evidence\":\"headless verify\",\"poc\":\""+v+"\"},", options)
-								} else {
-									printing.DalLog("PRINT", "[V][GET] "+v, options)
+								if showV {
+									if options.Format == "json" {
+										printing.DalLog("PRINT", "{\"type\":\"DOM\",\"evidence\":\"headless verify\",\"poc\":\""+v+"\"},", options)
+									} else {
+										printing.DalLog("PRINT", "[V][GET] "+v, options)
+									}
 								}
 								if options.FoundAction != "" {
 									foundAction(options, target, v, "VULN")
@@ -602,10 +614,12 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 													if CheckXSSWithHeadless(k.URL.String(), options) {
 														mutex.Lock()
 														printing.DalLog("VULN", "Triggered XSS Payload (found dialog in headless)", options)
-														if options.Format == "json" {
-															printing.DalLog("PRINT", "{\"type\":\"inJS\",\"evidence\":\"headless verify\",\"poc\":\""+k.URL.String()+"\"},", options)
-														} else {
-															printing.DalLog("PRINT", "[V]["+k.Method+"] "+k.URL.String(), options)
+														if showV {
+															if options.Format == "json" {
+																printing.DalLog("PRINT", "{\"type\":\"inJS\",\"evidence\":\"headless verify\",\"poc\":\""+k.URL.String()+"\"},", options)
+															} else {
+																printing.DalLog("PRINT", "[V]["+k.Method+"] "+k.URL.String(), options)
+															}
 														}
 														vStatus[v["param"]] = true
 														if options.FoundAction != "" {
@@ -636,10 +650,12 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 													code := CodeView(resbody, v["payload"])
 													printing.DalLog("WEAK", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], options)
 													printing.DalLog("CODE", code, options)
-													if options.Format == "json" {
-														printing.DalLog("PRINT", "{\"type\":\"inJS\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
-													} else {
-														printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
+													if showR {
+														if options.Format == "json" {
+															printing.DalLog("PRINT", "{\"type\":\"inJS\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
+														} else {
+															printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
+														}
 													}
 													if options.FoundAction != "" {
 														foundAction(options, target, k.URL.String(), "WEAK")
@@ -662,10 +678,12 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											code := CodeView(resbody, v["payload"])
 											printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], options)
 											printing.DalLog("CODE", code, options)
-											if options.Format == "json" {
-												printing.DalLog("PRINT", "{\"type\":\"inATTR\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", options)
-											} else {
-												printing.DalLog("PRINT", "[V]["+k.Method+"] "+k.URL.String(), options)
+											if showV {
+												if options.Format == "json" {
+													printing.DalLog("PRINT", "{\"type\":\"inATTR\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", options)
+												} else {
+													printing.DalLog("PRINT", "[V]["+k.Method+"] "+k.URL.String(), options)
+												}
 											}
 											vStatus[v["param"]] = true
 											if options.FoundAction != "" {
@@ -685,16 +703,18 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											code := CodeView(resbody, v["payload"])
 											printing.DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"], options)
 											printing.DalLog("CODE", code, options)
-											if options.Format == "json" {
-												printing.DalLog("PRINT", "{\"type\":\"inATTR\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
-											} else {
-												poc := model.PoC{
-													Type:   "R",
-													Method: k.Method,
-													Data:   k.URL.String(),
+											if showR {
+												if options.Format == "json" {
+													printing.DalLog("PRINT", "{\"type\":\"inATTR\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
+												} else {
+													poc := model.PoC{
+														Type:   "R",
+														Method: k.Method,
+														Data:   k.URL.String(),
+													}
+													scanResult.PoCs = append(scanResult.PoCs, poc)
+													printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
 												}
-												scanResult.PoCs = append(scanResult.PoCs, poc)
-												printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
 											}
 											if options.FoundAction != "" {
 												foundAction(options, target, k.URL.String(), "WEAK")
@@ -715,16 +735,18 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											code := CodeView(resbody, v["payload"])
 											printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], options)
 											printing.DalLog("CODE", code, options)
-											if options.Format == "json" {
-												printing.DalLog("PRINT", "{\"type\":\"inHTML\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", options)
-											} else {
-												poc := model.PoC{
-													Type:   "V",
-													Method: k.Method,
-													Data:   k.URL.String(),
+											if showV {
+												if options.Format == "json" {
+													printing.DalLog("PRINT", "{\"type\":\"inHTML\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", options)
+												} else {
+													poc := model.PoC{
+														Type:   "V",
+														Method: k.Method,
+														Data:   k.URL.String(),
+													}
+													scanResult.PoCs = append(scanResult.PoCs, poc)
+													printing.DalLog("PRINT", "[V]["+k.Method+"] "+k.URL.String(), options)
 												}
-												scanResult.PoCs = append(scanResult.PoCs, poc)
-												printing.DalLog("PRINT", "[V]["+k.Method+"] "+k.URL.String(), options)
 											}
 											vStatus[v["param"]] = true
 											if options.FoundAction != "" {
@@ -744,16 +766,18 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											code := CodeView(resbody, v["payload"])
 											printing.DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"], options)
 											printing.DalLog("CODE", code, options)
-											if options.Format == "json" {
-												printing.DalLog("PRINT", "{\"type\":\"inHTML\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
-											} else {
-												poc := model.PoC{
-													Type:   "R",
-													Method: k.Method,
-													Data:   k.URL.String(),
+											if showR {
+												if options.Format == "json" {
+													printing.DalLog("PRINT", "{\"type\":\"inHTML\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
+												} else {
+													poc := model.PoC{
+														Type:   "R",
+														Method: k.Method,
+														Data:   k.URL.String(),
+													}
+													scanResult.PoCs = append(scanResult.PoCs, poc)
+													printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
 												}
-												scanResult.PoCs = append(scanResult.PoCs, poc)
-												printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
 											}
 											if options.FoundAction != "" {
 												foundAction(options, target, k.URL.String(), "WEAK")
@@ -1201,6 +1225,13 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 	}
 	oReq := req
 
+	showG := false
+	if options.OnlyPoC != "" {
+		showG, _, _ = printing.CheckToShowPoC(options.OnlyPoC)
+	} else {
+		showG = true
+	}
+
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
 		if (!options.NoBAV) && (payload == "toOpenRedirecting") && !(strings.Contains(oReq.Host, ".google.com")) {
 			if strings.Contains(req.URL.Host, "google.com") {
@@ -1229,7 +1260,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 
 	grepResult := make(map[string][]string)
 	if !options.NoBAV {
-		if (len(resp.Header["Dalfoxcrlf"]) != 0) {
+		if len(resp.Header["Dalfoxcrlf"]) != 0 {
 			rst := &model.Issue{
 				Type: "Grep:CRLF",
 				PoC:  req.URL.String(),
@@ -1240,13 +1271,15 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				} else {
 					printing.DalLog("GREP", "Found CRLF Injection via built-in grepping / original request", options)
 				}
-					if options.FoundAction != "" {
+				if options.FoundAction != "" {
 					foundAction(options, req.URL.Host, rst.PoC, "BAV: "+rst.Type)
 				}
-				if options.Format == "json" {
-					printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"CRLF\",\"poc\":\""+req.URL.String()+"\"", options)
-				} else {
-					printing.DalLog("PRINT", "[G][CRLF/"+req.Method+"] "+req.URL.String(), options)
+				if showG {
+					if options.Format == "json" {
+						printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"CRLF\",\"poc\":\""+req.URL.String()+"\"", options)
+					} else {
+						printing.DalLog("PRINT", "[G][CRLF/"+req.Method+"] "+req.URL.String(), options)
+					}
 				}
 				scanObject.Results = append(scanObject.Results, *rst)
 			}
@@ -1283,10 +1316,12 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					for _, vv := range v {
 						printing.DalLog("CODE", vv, options)
 					}
-					if options.Format == "json" {
-						printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"SSTI\",\"poc\":\""+req.URL.String()+"\"", options)
-					} else {
-						printing.DalLog("PRINT", "[G][SSTI/"+req.Method+"] "+req.URL.String(), options)
+					if showG {
+						if options.Format == "json" {
+							printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"SSTI\",\"poc\":\""+req.URL.String()+"\"", options)
+						} else {
+							printing.DalLog("PRINT", "[G][SSTI/"+req.Method+"] "+req.URL.String(), options)
+						}
 					}
 					scanObject.Results = append(scanObject.Results, *rst)
 				}
@@ -1311,10 +1346,12 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				for _, vv := range v {
 					printing.DalLog("CODE", vv, options)
 				}
-				if options.Format == "json" {
-					printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"BUILT-IN\",\"poc\":\""+req.URL.String()+"\"", options)
-				} else {
-					printing.DalLog("PRINT", "[G][BUILT-IN/"+k+"/"+req.Method+"] "+req.URL.String(), options)
+				if showG {
+					if options.Format == "json" {
+						printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"BUILT-IN\",\"poc\":\""+req.URL.String()+"\"", options)
+					} else {
+						printing.DalLog("PRINT", "[G][BUILT-IN/"+k+"/"+req.Method+"] "+req.URL.String(), options)
+					}
 				}
 				scanObject.Results = append(scanObject.Results, *rst)
 			}
@@ -1344,10 +1381,12 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					foundAction(options, req.URL.Host, rst.PoC, "BAV: "+rst.Type)
 				}
 
-				if options.Format == "json" {
-					printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\""+k+"\",\"poc\":\""+req.URL.String()+"\"", options)
-				} else {
-					printing.DalLog("PRINT", "[G]["+k+"/"+req.Method+"] "+req.URL.String(), options)
+				if showG {
+					if options.Format == "json" {
+						printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\""+k+"\",\"poc\":\""+req.URL.String()+"\"", options)
+					} else {
+						printing.DalLog("PRINT", "[G]["+k+"/"+req.Method+"] "+req.URL.String(), options)
+					}
 				}
 				scanObject.Results = append(scanObject.Results, *rst)
 			}

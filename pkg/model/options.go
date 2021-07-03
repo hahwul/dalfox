@@ -60,8 +60,9 @@ type Options struct {
 	PathReflection    map[int]string
 	RemotePayloads    string
 	RemoteWordlists   string
-	UseHeadless       bool `json:"use-headless"`
-	UseDeepDXSS       bool `json:"use-deepdxss"`
+	UseHeadless       bool   `json:"use-headless"`
+	UseDeepDXSS       bool   `json:"use-deepdxss"`
+	OnlyPoC           string `json:"only-poc"`
 }
 
 // MassJob is list for mass
