@@ -109,6 +109,6 @@ The options values are approximately the same as the cli option by default.
 ## Swagger-ui
 Swagger ui is available in the dalfox.
 ```
-http://your-host:your-port/swagger-ui/index.html
+http://your-host:your-port/swagger/index.html
 ```
-e.g `http://localhost:6664/swagger-ui/index.html`
+e.g `http://localhost:6664/swagger/index.html`
