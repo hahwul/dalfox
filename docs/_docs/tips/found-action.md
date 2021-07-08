@@ -1,5 +1,5 @@
 ---
-title: Using found-action
+title: Integration with found-action
 permalink: /docs/tips/found-action/
 ---
 
