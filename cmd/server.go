@@ -15,10 +15,10 @@ var serverCmd = &cobra.Command{
 	Short: "Start API Server",
 	Run: func(cmd *cobra.Command, args []string) {
 		printing.Banner(options)
-		printing.Summary(options, "REST API Mode")
 		printing.DalLog("SYSTEM", "Starting API Server", options)
 		options.ServerHost = host
 		options.ServerPort = port
+		printing.Summary(options, "REST API Mode")
 		server.RunAPIServer(options)
 	},
 }

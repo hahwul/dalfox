@@ -31,6 +31,9 @@ func Summary(options model.Options, target string) {
 			miningWord = options.MiningWordlist
 		}
 		fmt.Fprintf(os.Stderr, "\n 🎯  Target                 %s\n", options.AuroraObject.BrightYellow(target).String())
+		if target == "REST API Mode" {
+			fmt.Fprintf(os.Stderr, " 🧲  Listen Address         %s\n", options.AuroraObject.BrightBlue(options.ServerHost+":"+strconv.Itoa(options.ServerPort)).String())
+		}
 		fmt.Fprintf(os.Stderr, " 🏁  Method                 %s\n", options.AuroraObject.BrightBlue(options.Method).String())
 		fmt.Fprintf(os.Stderr, " 🖥   Worker                 %d\n", options.Concurrence)
 		fmt.Fprintf(os.Stderr, " 🔦  BAV                    %s\n", boolToColorStr(!options.NoBAV, options))
