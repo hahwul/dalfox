@@ -113,6 +113,7 @@ Global Flags:
                                       * Supported: plain / json (default "plain")
       --found-action string         If found weak/vuln, action(cmd) to next
                                       * Example: --found-action='./notify.sh'
+      --found-action-shell string   Select shell application for --found-action (default "bash")
       --grep string                 Using custom grepping file
                                       * Example: --grep ./samples/sample_grep.json
   -H, --header string               Add custom headers
