@@ -1,5 +1,5 @@
 ---
-title: For CI/CD Piline
+title: For CI/CD Pipeline
 permalink: /docs/tips/cicd/
 ---
 
