@@ -15,7 +15,7 @@ permalink: /docs/update/
 
 ## Installed from source(go-get)
 ```
-▶ go get -u github.com/hahwul/dalfox
+▶ go get -v github.com/hahwul/dalfox/v2
 ```
 
 ## Installed from docker
