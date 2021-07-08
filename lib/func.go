@@ -27,6 +27,7 @@ func Initialize(target Target, options Options) model.Options {
 		OutputFile:        "",
 		Format:            "plain",
 		FoundAction:       "",
+		FoundActionShell:  "bash",
 		ProxyAddress:      "",
 		Grep:              "",
 		IgnoreReturn:      "",
@@ -53,6 +54,7 @@ func Initialize(target Target, options Options) model.Options {
 		MulticastMode:     false,
 		RemotePayloads:    "",
 		RemoteWordlists:   "",
+		OnlyPoC:           "",
 	}
 	if options.UniqParam != "" {
 		newOptions.UniqParam = options.UniqParam
