@@ -55,6 +55,7 @@ func Initialize(target Target, options Options) model.Options {
 		RemotePayloads:    "",
 		RemoteWordlists:   "",
 		OnlyPoC:           "",
+		OutputAll:         false,
 	}
 	if options.UniqParam != "" {
 		newOptions.UniqParam = options.UniqParam
