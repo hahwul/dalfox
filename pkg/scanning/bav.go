@@ -2,6 +2,7 @@ package scanning
 
 import (
 	"net/http"
+	"time"
 	"net/url"
 	"sync"
 	
@@ -14,7 +15,7 @@ func SSTIAnalysis(target string, options model.Options) {
 	// Build-in Grepping payload :: SSTI
 	// {444*6664}
 	// 2958816
-	
+	rl := newRateLimiter(time.Duration(options.Delay * 1000000))
 	bpu, _ := url.Parse(target)
 	bpd := bpu.Query()
 	var wg sync.WaitGroup
@@ -25,6 +26,7 @@ func SSTIAnalysis(target string, options model.Options) {
 		wg.Add(1)
 		go func() {
 			for req := range reqs {
+				rl.Block(req.Host)
 				SendReq(req, "toGrepping", options)
 			}
 			wg.Done()
@@ -48,11 +50,13 @@ func CRLFAnalysis(target string, options model.Options) {
 	var wg sync.WaitGroup
 	concurrency := options.Concurrence
 	reqs := make(chan *http.Request)
+	rl := newRateLimiter(time.Duration(options.Delay * 1000000))
 
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func() {
 			for req := range reqs {
+				rl.Block(req.Host)
 				SendReq(req, "toGrepping", options)
 			}
 			wg.Done()
@@ -79,11 +83,13 @@ func SqliAnalysis(target string, options model.Options) {
 	var wg sync.WaitGroup
 	concurrency := options.Concurrence
 	reqs := make(chan *http.Request)
+	rl := newRateLimiter(time.Duration(options.Delay * 1000000))
 
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func() {
 			for req := range reqs {
+				rl.Block(req.Host)
 				SendReq(req, "toGrepping", options)
 			}
 			wg.Done()
@@ -110,11 +116,13 @@ func OpenRedirectorAnalysis(target string, options model.Options) {
 	var wg sync.WaitGroup
 	concurrency := options.Concurrence
 	reqs := make(chan *http.Request)
+	rl := newRateLimiter(time.Duration(options.Delay * 1000000))
 
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
 		go func(){
 			for req := range reqs {
+				rl.Block(req.Host)
 				SendReq(req, "toOpenRedirecting", options)
 			}
 			wg.Done()
