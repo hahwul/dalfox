@@ -57,7 +57,8 @@ Global Flags:
     --only-custom-payload         Only testing custom payload (required --custom-payload)
     --only-discovery              Only testing parameter analysis (same '--skip-xss-scanning' option)
     --only-poc string             Shows only the PoC code for the specified pattern (g: grep / r: reflected / v: verified)
--o, --output string               Write to output file
+-o, --output string               Write to output file (By default, only the PoC code is saved)
+    --output-all                  All log write mode (-o or stdout)
 -p, --param string                Only testing selected parameters
     --proxy string                Send all request to proxy server
                                     * Example: --proxy http://127.0.0.1:8080

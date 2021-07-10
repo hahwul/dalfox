@@ -25,7 +25,7 @@ Output file
 [POC][V][GET] http://testphp.vulnweb.com/listproducts.php?cat=%3CsCriPt+class%3Ddalfox%3Eprompt%2845%29%3C%2Fscript%3E
 ```
 
-## Save only PoC code with `-o` option
+## Save only PoC code with `-o` flag
 Command
 ```
 ▶ dalfox url http://testphp.vulnweb.com/listproducts.php -o output
@@ -41,11 +41,11 @@ Output file
 [POC][V][GET] http://testphp.vulnweb.com/listproducts.php?cat=%3CsCriPt+class%3Ddalfox%3Eprompt%2845%29%3C%2Fscript%3E
 ```
 
-## Save all log (with `-o`, `--debug` option)
+## Save all log (with `--output-all` flag)
 
 Command
 ```
-▶ dalfox url http://testphp.vulnweb.com/listproducts.php -o alllog.txt --debug
+▶ dalfox url http://testphp.vulnweb.com/listproducts.php -o alllog.txt --output-all
 ```
 
 Output file
