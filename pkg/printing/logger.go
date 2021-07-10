@@ -53,28 +53,35 @@ func Summary(options model.Options, target string) {
 // DalLog is log fomatting for DalFox
 func DalLog(level, text string, options model.Options) {
 	var ftext string
+	var allWrite = false
+	if options.Debug {
+		allWrite = true
+	}
+	if options.OutputAll {
+		allWrite = true
+	}
 
 	switch level {
 	case "INFO":
-		if options.Debug {
+		if allWrite {
 			ftext = "[I] " + text
 		}
 		text = options.AuroraObject.BrightBlue("[I] ").String() + text
 
 	case "WEAK":
-		if options.Debug {
+		if allWrite {
 			ftext = "[W] " + text
 		}
 		text = options.AuroraObject.Yellow("[W] ").String() + text
 
 	case "VULN":
-		if options.Debug {
+		if allWrite {
 			ftext = "[V] " + text
 		}
 		text = options.AuroraObject.BrightRed("[V] ").String() + text
 
 	case "SYSTEM":
-		if options.Debug {
+		if allWrite {
 			ftext = "[*] " + text
 		}
 		if options.NoSpinner {
@@ -85,7 +92,7 @@ func DalLog(level, text string, options model.Options) {
 		}
 
 	case "SYSTEM-M":
-		if options.Debug {
+		if allWrite {
 			ftext = "[*] " + text
 		}
 		text = options.AuroraObject.White("[*] ").String() + text
@@ -96,17 +103,17 @@ func DalLog(level, text string, options model.Options) {
 		}
 
 	case "GREP":
-		if options.Debug {
+		if allWrite {
 			ftext = "[G] " + text
 		}
 		text = options.AuroraObject.Green("[G] ").String() + text
 	case "CODE":
-		if options.Debug {
+		if allWrite {
 			ftext = "    " + text
 		}
 		text = options.AuroraObject.Gray(16-1, "    "+text).String()
 	case "ERROR":
-		if options.Debug {
+		if allWrite {
 			ftext = "[E] " + text
 		}
 		text = options.AuroraObject.Yellow("[E] ").String() + text
