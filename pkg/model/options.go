@@ -64,6 +64,7 @@ type Options struct {
 	UseHeadless       bool   `json:"use-headless"`
 	UseDeepDXSS       bool   `json:"use-deepdxss"`
 	OnlyPoC           string `json:"only-poc"`
+	OutputAll         bool   `json:"output-all"`
 }
 
 // MassJob is list for mass

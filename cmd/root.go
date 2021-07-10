@@ -19,7 +19,7 @@ var optionsBool = make(map[string]bool)
 var config, cookie, data, header, p, customPayload, userAgent, blind, output, format, foundAction, proxy, grep, cookieFromRaw string
 var ignoreReturn, miningWord, method, customAlertValue, customAlertType, remotePayloads, remoteWordlists string
 var timeout, concurrence, delay int
-var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, onlyCustomPayload, debug, useDeepDXSS bool
+var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, onlyCustomPayload, debug, useDeepDXSS, outputAll bool
 var options model.Options
 var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV, skipGrep, skipHeadless bool
 var onlyPoC, foundActionShell string
@@ -59,7 +59,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&customAlertType, "custom-alert-type", "none", "Change alert value type\n  * Example: --custom-alert-type=none / --custom-alert-type=str,none")
 	rootCmd.PersistentFlags().StringVar(&userAgent, "user-agent", "", "Add custom UserAgent")
 	rootCmd.PersistentFlags().StringVarP(&blind, "blind", "b", "", "Add your blind xss\n  * Example: -b hahwul.xss.ht")
-	rootCmd.PersistentFlags().StringVarP(&output, "output", "o", "", "Write to output file")
+	rootCmd.PersistentFlags().StringVarP(&output, "output", "o", "", "Write to output file (By default, only the PoC code is saved)")
 	rootCmd.PersistentFlags().StringVar(&format, "format", "plain", "Stdout output format\n  * Supported: plain / json")
 	rootCmd.PersistentFlags().StringVar(&foundAction, "found-action", "", "If found weak/vuln, action(cmd) to next\n  * Example: --found-action='./notify.sh'")
 	rootCmd.PersistentFlags().StringVar(&foundActionShell, "found-action-shell", "bash", "Select shell application for --found-action")
@@ -96,6 +96,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "debug mode, save all log using -o option")
 	rootCmd.PersistentFlags().BoolVar(&skipHeadless, "skip-headless", false, "Skipping headless browser base scanning[DOM XSS and inJS verify]")
 	rootCmd.PersistentFlags().BoolVar(&useDeepDXSS, "deep-domxss", false, "DOM XSS Testing with more payloads on headless [so slow]")
+	rootCmd.PersistentFlags().BoolVar(&outputAll, "output-all", false, "All log write mode (-o or stdout)")
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -145,6 +146,7 @@ func initConfig() {
 		UseHeadless:       !skipHeadless,
 		UseDeepDXSS:       useDeepDXSS,
 		OnlyPoC:           onlyPoC,
+		OutputAll:         outputAll,
 	}
 	// var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV bool
 
