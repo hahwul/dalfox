@@ -139,13 +139,13 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 	printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for analysis 🔍", options)
 	go func() {
 		defer wait.Done()
-		policy, options.PathReflection = StaticAnalysis(target, options)
+		policy, options.PathReflection = StaticAnalysis(target, options, rl)
 		sa = options.AuroraObject.Green(sa).String()
 		printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for analysis 🔍", options)
 	}()
 	go func() {
 		defer wait.Done()
-		params = ParameterAnalysis(target, options)
+		params = ParameterAnalysis(target, options, rl)
 		pa = options.AuroraObject.Green(pa).String()
 		printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for analysis 🔍", options)
 	}()
@@ -157,19 +157,19 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			bavWaitGroup.Add(bavTask)
 			go func() {
 				defer bavWaitGroup.Done()
-				SqliAnalysis(target, options)
+				SqliAnalysis(target, options, rl)
 			}()
 			go func() {
 				defer bavWaitGroup.Done()
-				SSTIAnalysis(target, options)
+				SSTIAnalysis(target, options, rl)
 			}()
 			go func() {
 				defer bavWaitGroup.Done()
-				OpenRedirectorAnalysis(target, options)
+				OpenRedirectorAnalysis(target, options, rl)
 			}()
 			go func() {
 				defer bavWaitGroup.Done()
-				CRLFAnalysis(target, options)
+				CRLFAnalysis(target, options, rl)
 			}()
 			bavWaitGroup.Wait()
 			bav = options.AuroraObject.Green(bav).String()
@@ -890,8 +890,7 @@ func CodeView(resbody, pattern string) string {
 }
 
 // StaticAnalysis is found information on original req/res
-func StaticAnalysis(target string, options model.Options) (map[string]string, map[int]string) {
-	rl := newRateLimiter(time.Duration(options.Delay * 1000000))
+func StaticAnalysis(target string, options model.Options, rl *rateLimiter) (map[string]string, map[int]string) {
 	policy := make(map[string]string)
 	pathReflection := make(map[int]string)
 	req := optimization.GenerateNewRequest(target, "", options)
@@ -990,13 +989,11 @@ func StaticAnalysis(target string, options model.Options) (map[string]string, ma
 }
 
 // ParameterAnalysis is check reflected and mining params
-func ParameterAnalysis(target string, options model.Options) map[string][]string {
+func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) map[string][]string {
 	//miningCheckerSize := 0
 	miningCheckerLine := 0
 	u, err := url.Parse(target)
 	params := make(map[string][]string)
-	// set up a rate limit
-	rl := newRateLimiter(time.Duration(options.Delay * 1000000))
 	if err != nil {
 		return params
 	}

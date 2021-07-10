@@ -2,20 +2,18 @@ package scanning
 
 import (
 	"net/http"
-	"time"
 	"net/url"
 	"sync"
-	
+
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	"github.com/hahwul/dalfox/v2/pkg/optimization"
 )
 
 // SSTIAnalysis is basic check for SSTI
-func SSTIAnalysis(target string, options model.Options) {
+func SSTIAnalysis(target string, options model.Options, rl *rateLimiter) {
 	// Build-in Grepping payload :: SSTI
 	// {444*6664}
 	// 2958816
-	rl := newRateLimiter(time.Duration(options.Delay * 1000000))
 	bpu, _ := url.Parse(target)
 	bpd := bpu.Query()
 	var wg sync.WaitGroup
@@ -44,13 +42,12 @@ func SSTIAnalysis(target string, options model.Options) {
 }
 
 //CRLFAnalysis is basic check for CRLF Injection
-func CRLFAnalysis(target string, options model.Options) {
+func CRLFAnalysis(target string, options model.Options, rl *rateLimiter) {
 	bpu, _ := url.Parse(target)
 	bpd := bpu.Query()
 	var wg sync.WaitGroup
 	concurrency := options.Concurrence
 	reqs := make(chan *http.Request)
-	rl := newRateLimiter(time.Duration(options.Delay * 1000000))
 
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
@@ -71,19 +68,18 @@ func CRLFAnalysis(target string, options model.Options) {
 	}
 	close(reqs)
 	wg.Wait()
-	
+
 }
 
 //SqliAnalysis is basic check for SQL Injection
-func SqliAnalysis(target string, options model.Options) {
+func SqliAnalysis(target string, options model.Options, rl *rateLimiter) {
 	// sqli payload
-	
+
 	bpu, _ := url.Parse(target)
 	bpd := bpu.Query()
 	var wg sync.WaitGroup
 	concurrency := options.Concurrence
 	reqs := make(chan *http.Request)
-	rl := newRateLimiter(time.Duration(options.Delay * 1000000))
 
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
@@ -104,23 +100,22 @@ func SqliAnalysis(target string, options model.Options) {
 	}
 	close(reqs)
 	wg.Wait()
-	
+
 }
 
 //OpenRedirectorAnalysis is basic check for open redirectors
-func OpenRedirectorAnalysis(target string, options model.Options) {
-	
+func OpenRedirectorAnalysis(target string, options model.Options, rl *rateLimiter) {
+
 	// openredirect payload
 	bpu, _ := url.Parse(target)
 	bpd := bpu.Query()
 	var wg sync.WaitGroup
 	concurrency := options.Concurrence
 	reqs := make(chan *http.Request)
-	rl := newRateLimiter(time.Duration(options.Delay * 1000000))
 
 	for i := 0; i < concurrency; i++ {
 		wg.Add(1)
-		go func(){
+		go func() {
 			for req := range reqs {
 				rl.Block(req.Host)
 				SendReq(req, "toOpenRedirecting", options)
