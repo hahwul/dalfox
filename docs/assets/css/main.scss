@@ -20,6 +20,26 @@
   "jekyll-doc-theme"
 ;
 
+code {
+    padding: 2px 4px;
+    font-size: 90%;
+    color: #eee;
+    background-color: #555;
+    border-radius: 4px;
+}
+
+
+.highlight .nt {
+    color: #55f;
+}
+
+.panel-title {
+    margin-top: 0;
+    margin-bottom: 0;
+    font-size: 16px;
+    color: white;
+}
+
 .footer {
     position: absolute;
     bottom: 0;
