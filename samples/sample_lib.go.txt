@@ -15,7 +15,7 @@ func main() {
 		Method:  "GET",
 		Options: opt,
 	})
-	if err != {
+	if err != nil {
 		fmt.Println(err)
 	} else {
 		fmt.Println(result)
