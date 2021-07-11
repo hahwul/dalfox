@@ -38,7 +38,7 @@ func main() {
 ### Running log
 go mod init your project
 ```
-$ go mod init {{YOUR_PROJECT_REPO}}
+$ go mod init <YOUR_PROJECT_REPO>
 ```
 
 go build 
