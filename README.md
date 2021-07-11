@@ -262,13 +262,19 @@ func main() {
 		Method:  "GET",
 		Options: opt,
 	})
-	if err != {
+	if err != nil {
 		fmt.Println(err)
 	} else {
 		fmt.Println(result)
 	}
 }
 ```
+
+```
+$ go build -o xssapp ; ./xssapp
+[] [{V GET https://xss-game.appspot.com/level1/frame?query=%3Ciframe+srcdoc%3D%22%3Cinput+onauxclick%3Dprint%281%29%3E%22+class%3Ddalfox%3E%3C%2Fiframe%3E}] 2.618998247s 2021-07-11 10:59:26.508483153 +0900 KST m=+0.000794230 2021-07-11 10:59:29.127481217 +0900 KST m=+2.619792477}
+```
+
 
 ## Screenshots
 | ![1414](https://user-images.githubusercontent.com/13212227/108603497-7a390c80-73eb-11eb-92c1-b31bd9574861.jpg) | ![1415](https://user-images.githubusercontent.com/13212227/108603373-ebc48b00-73ea-11eb-9651-7ce4617845f6.jpg) |
