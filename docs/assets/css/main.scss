@@ -19,3 +19,33 @@
   "syntax-highlighting",
   "jekyll-doc-theme"
 ;
+
+.footer {
+    position: absolute;
+    bottom: 0;
+    width: 100%;
+    padding-top: 10px;
+    background-color: black;
+    color: #aaa;
+}
+
+.highlight {
+	background: black;
+	color: #aaa;
+};
+
+.highlight .n {
+    color: #aaa;
+}
+
+h1, .h1 { font-size: 45px; }
+
+h2, .h2 { font-size: 34px; }
+
+h3, .h3 { font-size: 24px; }
+
+h4, .h4 { font-size: 20px; }
+
+h5, .h5 { font-size: 16px; }
+
+h6, .h6 { font-size: 16px; }

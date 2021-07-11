@@ -28,7 +28,7 @@ exclude:
   - .gitignore
   - README.md
 
-bootwatch: Flatly
+bootwatch: cyborg
 
 defaults:
 - scope:
