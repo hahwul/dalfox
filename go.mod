@@ -3,9 +3,8 @@ module github.com/hahwul/dalfox/v2
 go 1.14
 
 require (
-	github.com/PuerkitoBio/goquery v1.7.0
+	github.com/PuerkitoBio/goquery v1.7.1
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
-	github.com/andybalholm/cascadia v1.2.0 // indirect
 	github.com/briandowns/spinner v1.16.0
 	github.com/chromedp/cdproto v0.0.0-20210610012203-ae0add727b87
 	github.com/chromedp/chromedp v0.7.3
