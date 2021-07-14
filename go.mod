@@ -9,7 +9,7 @@ require (
 	github.com/chromedp/cdproto v0.0.0-20210610012203-ae0add727b87
 	github.com/chromedp/chromedp v0.7.3
 	github.com/fatih/color v1.9.0 // indirect
-	github.com/labstack/echo/v4 v4.3.0
+	github.com/labstack/echo/v4 v4.4.0
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/spf13/cobra v1.2.1
 	github.com/stretchr/testify v1.7.0
