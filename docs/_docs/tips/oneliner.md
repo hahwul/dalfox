@@ -18,3 +18,11 @@ permalink: /docs/tips/oneliner/
 ```
 ▶ dalfox file hosts --mining-dom  --deep-domxss --ignore-return -b 'YOURS.xss.ht' --follow-redirects --proxy http://127.0.0.1:8080
 ```
+* [dalfox scan to bugbounty targets / from KingOfBugBountyTips](https://github.com/KingOfBugbounty/KingOfBugBountyTips#dalfox-scan-to-bugbounty-targets-1)
+```
+▶ wget https://raw.githubusercontent.com/arkadiyt/bounty-targets-data/master/data/domains.txt -nv ; cat domains.txt | anew | httpx -silent -threads 500 | xargs -I@ dalfox url @
+```
+* [Recon subdomains and gau to search vuls DalFox / from KingOfBugBountyTips](https://github.com/KingOfBugbounty/KingOfBugBountyTips#recon-subdomains-and-gau-to-search-vuls-dalfox)
+```
+▶ assetfinder testphp.vulnweb.com | gau |  dalfox pipe
+```
