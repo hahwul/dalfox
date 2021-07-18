@@ -24,7 +24,7 @@ DalFox is a fast, powerful parameter analysis and XSS scanner, based on a golang
 - [In the Code](#in-the-code)
 - [Screenshots](#screenshots)
 - [Wiki](https://dalfox.hahwul.com/docs/home/)
-- [Contribute](https://github.com/hahwul/dalfox/blob/master/CONTRIBUTING.md)
+- [Contribute](https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md)
 - [Contributors](#contributors)
 
 
@@ -290,7 +290,7 @@ and dalfox's banner image!
 [Wiki](https://dalfox.hahwul.com/docs/home/)
 
 ## Contribute
-[Contribute](https://github.com/hahwul/dalfox/blob/master/CONTRIBUTING.md)
+[Contribute](https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md)
 
 ## Contributors
 [![](/CONTRIBUTORS.svg)](https://github.com/hahwul/dalfox/graphs/contributors)
