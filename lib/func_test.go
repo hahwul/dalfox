@@ -10,7 +10,6 @@ func TestInitialize(t *testing.T) {
 	opt := dalfox.Options{
 		Cookie: "ABCD=1234",
 		UniqParam: "q",
-		Header: "Authorization: abcd",
 		BlindURL: "hahwul.xss.ht",
 		CustomAlertValue: "1",
 		CustomAlertType: "none",
@@ -37,7 +36,6 @@ func TestInitialize(t *testing.T) {
 	newOptions := dalfox.Initialize(target, opt)
 	assert.NotEqual(t,newOptions.Cookie,"","they should not bee equal")
 	assert.NotEqual(t,newOptions.UniqParam,"","they should not bee equal")
-	assert.NotEqual(t,newOptions.Header,"","they should not bee equal")
 	assert.NotEqual(t,newOptions.BlindURL,"","they should not bee equal")
 	assert.NotEqual(t,newOptions.CustomAlertValue,"","they should not bee equal")
 	assert.NotEqual(t,newOptions.CustomAlertType,"","they should not bee equal")

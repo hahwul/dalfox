@@ -11,7 +11,7 @@ import (
 type Options struct {
 	UniqParam         string `json:"param"`
 	Cookie            string `json:"cookie"`
-	Header            string `json:"header"`
+	Header            []string `json:"header"`
 	ConfigFile        string `json:"config"`
 	BlindURL          string `json:"blind"`
 	CustomPayloadFile string `json:""`

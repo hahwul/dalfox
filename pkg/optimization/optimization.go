@@ -24,10 +24,12 @@ func GenerateNewRequest(url, payload string, options model.Options) *http.Reques
 		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	}
 
-	if options.Header != "" {
-		h := strings.Split(options.Header, ": ")
-		if len(h) > 1 {
-			req.Header.Add(h[0], h[1])
+	if len(options.Header) > 0 {
+		for _,v := range options.Header {
+			h := strings.Split(v, ": ")
+			if len(h) > 1 {
+				req.Header.Add(h[0], h[1])
+			}
 		}
 	}
 	if options.Cookie != "" {
@@ -83,13 +85,16 @@ func MakeHeaderQuery(target, hn, hv string, options model.Options) (*http.Reques
 		req, _ = http.NewRequest("POST", target, bytes.NewBuffer(d))
 		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	}
-
-	if options.Header != "" {
-		h := strings.Split(options.Header, ": ")
-		if len(h) > 1 {
-			req.Header.Add(h[0], h[1])
+	
+	if len(options.Header) > 0 {
+		for _,v := range options.Header {
+			h := strings.Split(v, ": ")
+			if len(h) > 1 {
+				req.Header.Add(h[0], h[1])
+			}
 		}
 	}
+
 	if options.Cookie != "" {
 		req.Header.Add("Cookie", options.Cookie)
 	}

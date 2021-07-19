@@ -15,7 +15,7 @@ func Initialize(target Target, options Options) model.Options {
 	stime := time.Now()
 	newOptions := model.Options{
 		IsLibrary:         true,
-		Header:            "",
+		Header:            []string{},
 		Cookie:            "",
 		UniqParam:         "",
 		BlindURL:          "",
@@ -63,8 +63,10 @@ func Initialize(target Target, options Options) model.Options {
 	if options.Cookie != "" {
 		newOptions.Cookie = options.Cookie
 	}
-	if options.Header != "" {
-		newOptions.Header = options.Header
+	if len(options.Header) > 0 {
+		for _,v := range options.Header {
+			newOptions.Header = append(newOptions.Header,v)
+		}
 	}
 	if options.BlindURL != "" {
 		newOptions.BlindURL = options.BlindURL

@@ -10,7 +10,7 @@ import (
 type Options struct {
 	UniqParam        string `json:"param"`
 	Cookie           string `json:"cookie"`
-	Header           string `json:"header"`
+	Header           []string `json:"header"`
 	BlindURL         string `json:"blind"`
 	CustomAlertValue string `json:"custom-alert-value"`
 	CustomAlertType  string `json:"custom-alert-type"`
