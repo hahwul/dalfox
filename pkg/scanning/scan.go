@@ -1114,6 +1114,34 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 							count = count + 1
 						}
 					})
+					doc.Find("form").Each(func(i int, s *goquery.Selection) {
+						action, _ := s.Attr("action")
+						if (strings.HasPrefix(action, "/") || strings.HasPrefix(action, "?")) { // assuming this is a relative URL
+							url, _ := url.Parse(action)
+							query := url.Query()
+							for aParam := range query {
+								if p.Get(aParam) == "" {
+									p.Set(aParam, "")
+									count = count + 1
+								}
+							}
+							
+						}
+					})
+					doc.Find("a").Each(func(i int, s *goquery.Selection) {
+						href, _ := s.Attr("href")
+						if (strings.HasPrefix(href, "/") || strings.HasPrefix(href, "?")) { // assuming this is a relative URL
+							url, _ := url.Parse(href)
+							query := url.Query()
+							for aParam := range query {
+								if p.Get(aParam) == "" {
+									p.Set(aParam, "")
+									count = count + 1
+								}
+							}
+							
+						}
+					})
 					printing.DalLog("INFO", "Found "+strconv.Itoa(count)+" testing point in DOM base parameter mining", options)
 				}
 			}
