@@ -588,8 +588,15 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					// queries.metadata : map[string]string
 					k := reqJob.request
 					v := reqJob.metadata
+					checkVtype := false
+					if v["type"] != "toBlind" {
+						checkVtype = true
+					}
+					if v["type"] != "toGrepping" {
+						checkVtype = true
+					}
 
-					if (vStatus[v["param"]] == false) || (v["type"] != "toBlind") || (v["type"] != "toGrepping") {
+					if vStatus[v["param"]] == false || checkVtype {
 						rl.Block(k.Host)
 						resbody, _, vds, vrs, err := SendReq(k, v["payload"], options)
 						abs := optimization.Abstraction(resbody, v["payload"])
