@@ -25,7 +25,7 @@ func GenerateNewRequest(url, payload string, options model.Options) *http.Reques
 	}
 
 	if len(options.Header) > 0 {
-		for _,v := range options.Header {
+		for _, v := range options.Header {
 			h := strings.Split(v, ": ")
 			if len(h) > 1 {
 				req.Header.Add(h[0], h[1])
@@ -85,9 +85,9 @@ func MakeHeaderQuery(target, hn, hv string, options model.Options) (*http.Reques
 		req, _ = http.NewRequest("POST", target, bytes.NewBuffer(d))
 		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	}
-	
+
 	if len(options.Header) > 0 {
-		for _,v := range options.Header {
+		for _, v := range options.Header {
 			h := strings.Split(v, ": ")
 			if len(h) > 1 {
 				req.Header.Add(h[0], h[1])

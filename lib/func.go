@@ -64,8 +64,8 @@ func Initialize(target Target, options Options) model.Options {
 		newOptions.Cookie = options.Cookie
 	}
 	if len(options.Header) > 0 {
-		for _,v := range options.Header {
-			newOptions.Header = append(newOptions.Header,v)
+		for _, v := range options.Header {
+			newOptions.Header = append(newOptions.Header, v)
 		}
 	}
 	if options.BlindURL != "" {
