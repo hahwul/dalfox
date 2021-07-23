@@ -142,3 +142,267 @@ func Test_stopSpinner(t *testing.T) {
 		})
 	}
 }
+
+func TestSummary(t *testing.T) {
+	type args struct {
+		options model.Options
+		target  string
+	}
+	tests := []struct {
+		name string
+		args args
+	}{
+		{
+			name: "test",
+			args: args{
+				options: model.Options{
+					Silence:        true,
+					MiningWordlist: "",
+					BlindURL:       "",
+				},
+				target: "",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			Summary(tt.args.options, tt.args.target)
+		})
+	}
+}
+
+func TestDalLog(t *testing.T) {
+	type args struct {
+		level   string
+		text    string
+		options model.Options
+	}
+	tests := []struct {
+		name string
+		args args
+	}{
+		{
+			name: "test - INFO",
+			args: args{
+				level: "INFO",
+				text:  "",
+				options: model.Options{
+					Debug:        true,
+					OutputAll:    true,
+					IsLibrary:    true,
+					AuroraObject: aurora.NewAurora(true),
+					ScanResult: model.Result{
+						Logs: []string{""},
+					},
+				},
+			},
+		},
+		{
+			name: "test - WEAK",
+			args: args{
+				level: "WEAK",
+				text:  "",
+				options: model.Options{
+					Debug:        true,
+					OutputAll:    true,
+					IsLibrary:    true,
+					AuroraObject: aurora.NewAurora(true),
+					ScanResult: model.Result{
+						Logs: []string{""},
+					},
+				},
+			},
+		},
+		{
+			name: "test - VULN",
+			args: args{
+				level: "VULN",
+				text:  "",
+				options: model.Options{
+					Debug:        true,
+					OutputAll:    true,
+					IsLibrary:    true,
+					AuroraObject: aurora.NewAurora(true),
+					ScanResult: model.Result{
+						Logs: []string{""},
+					},
+				},
+			},
+		},
+		{
+			name: "test - SYSTEM",
+			args: args{
+				level: "SYSTEM",
+				text:  "",
+				options: model.Options{
+					Debug:        true,
+					OutputAll:    true,
+					IsLibrary:    true,
+					AuroraObject: aurora.NewAurora(true),
+					ScanResult: model.Result{
+						Logs: []string{""},
+					},
+				},
+			},
+		},
+		{
+			name: "test - SYSTEM",
+			args: args{
+				level: "SYSTEM",
+				text:  "",
+				options: model.Options{
+					Debug:        true,
+					OutputAll:    true,
+					NoSpinner:    true,
+					IsLibrary:    true,
+					AuroraObject: aurora.NewAurora(true),
+					ScanResult: model.Result{
+						Logs: []string{""},
+					},
+				},
+			},
+		},
+		{
+			name: "test - SYSTEM-M",
+			args: args{
+				level: "SYSTEM-M",
+				text:  "",
+				options: model.Options{
+					Debug:         true,
+					OutputAll:     true,
+					MulticastMode: true,
+					Silence:       true,
+					IsLibrary:     true,
+					AuroraObject:  aurora.NewAurora(true),
+					ScanResult: model.Result{
+						Logs: []string{""},
+					},
+				},
+			},
+		},
+		{
+			name: "test - GREP",
+			args: args{
+				level: "GREP",
+				text:  "",
+				options: model.Options{
+					Debug:        true,
+					OutputAll:    true,
+					IsLibrary:    true,
+					AuroraObject: aurora.NewAurora(true),
+					ScanResult: model.Result{
+						Logs: []string{""},
+					},
+				},
+			},
+		},
+		{
+			name: "test - CODE",
+			args: args{
+				level: "CODE",
+				text:  "",
+				options: model.Options{
+					Debug:        true,
+					OutputAll:    true,
+					IsLibrary:    true,
+					AuroraObject: aurora.NewAurora(true),
+					ScanResult: model.Result{
+						Logs: []string{""},
+					},
+				},
+			},
+		},
+		{
+			name: "test - YELLOW",
+			args: args{
+				level: "YELLOW",
+				text:  "",
+				options: model.Options{
+					Debug:        true,
+					OutputAll:    true,
+					IsLibrary:    true,
+					AuroraObject: aurora.NewAurora(true),
+					ScanResult: model.Result{
+						Logs: []string{""},
+					},
+				},
+			},
+		},
+		{
+			name: "test - ERRROR",
+			args: args{
+				level: "ERROR",
+				text:  "",
+				options: model.Options{
+					Debug:        true,
+					OutputAll:    true,
+					IsLibrary:    true,
+					AuroraObject: aurora.NewAurora(true),
+					ScanResult: model.Result{
+						Logs: []string{""},
+					},
+				},
+			},
+		},
+		{
+			name: "test - PRINT",
+			args: args{
+				level: "PRINT",
+				text:  "",
+				options: model.Options{
+					Debug:        true,
+					OutputAll:    true,
+					Silence:      true,
+					IsLibrary:    false,
+					AuroraObject: aurora.NewAurora(true),
+					ScanResult: model.Result{
+						Logs: []string{""},
+					},
+				},
+			},
+		},
+		{
+			name: "test - PRINT",
+			args: args{
+				level: "PRINT",
+				text:  "",
+				options: model.Options{
+					Debug:        true,
+					OutputAll:    true,
+					Silence:      true,
+					IsLibrary:    false,
+					OutputFile:   "/dev/null/dalfox-test",
+					Format:       "json",
+					AuroraObject: aurora.NewAurora(true),
+					ScanResult: model.Result{
+						Logs: []string{""},
+					},
+				},
+			},
+		},
+		{
+			name: "test - FTEXT",
+			args: args{
+				level: "INFO",
+				text:  "",
+				options: model.Options{
+					Debug:        true,
+					OutputAll:    true,
+					Silence:      true,
+					IsLibrary:    false,
+					OutputFile:   "/dev/null/dalfox-test",
+					Format:       "json",
+					AuroraObject: aurora.NewAurora(true),
+					ScanResult: model.Result{
+						Logs: []string{""},
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			DalLog(tt.args.level, tt.args.text, tt.args.options)
+		})
+	}
+}
