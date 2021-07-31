@@ -1123,7 +1123,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 					})
 					doc.Find("form").Each(func(i int, s *goquery.Selection) {
 						action, _ := s.Attr("action")
-						if (strings.HasPrefix(action, "/") || strings.HasPrefix(action, "?")) { // assuming this is a relative URL
+						if strings.HasPrefix(action, "/") || strings.HasPrefix(action, "?") { // assuming this is a relative URL
 							url, _ := url.Parse(action)
 							query := url.Query()
 							for aParam := range query {
@@ -1132,12 +1132,12 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 									count = count + 1
 								}
 							}
-							
+
 						}
 					})
 					doc.Find("a").Each(func(i int, s *goquery.Selection) {
 						href, _ := s.Attr("href")
-						if (strings.HasPrefix(href, "/") || strings.HasPrefix(href, "?")) { // assuming this is a relative URL
+						if strings.HasPrefix(href, "/") || strings.HasPrefix(href, "?") { // assuming this is a relative URL
 							url, _ := url.Parse(href)
 							query := url.Query()
 							for aParam := range query {
@@ -1146,7 +1146,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 									count = count + 1
 								}
 							}
-							
+
 						}
 					})
 					printing.DalLog("INFO", "Found "+strconv.Itoa(count)+" testing point in DOM base parameter mining", options)
@@ -1308,7 +1308,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				}
 				if showG {
 					if options.Format == "json" {
-						printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"CRLF\",\"poc\":\""+req.URL.String()+"\"", options)
+						printing.DalLog("PRINT", "{\"type\":\"GREP\",\"evidence\":\"CRLF\",\"poc\":\""+req.URL.String()+"\"},", options)
 					} else {
 						printing.DalLog("PRINT", "[G][CRLF/"+req.Method+"] "+req.URL.String(), options)
 					}
@@ -1350,7 +1350,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					}
 					if showG {
 						if options.Format == "json" {
-							printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"SSTI\",\"poc\":\""+req.URL.String()+"\"", options)
+							printing.DalLog("PRINT", "{\"type\":\"GREP\",\"evidence\":\"SSTI\",\"poc\":\""+req.URL.String()+"\"},", options)
 						} else {
 							printing.DalLog("PRINT", "[G][SSTI/"+req.Method+"] "+req.URL.String(), options)
 						}
@@ -1380,7 +1380,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				}
 				if showG {
 					if options.Format == "json" {
-						printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\"BUILT-IN\",\"poc\":\""+req.URL.String()+"\"", options)
+						printing.DalLog("PRINT", "{\"type\":\"GREP\",\"evidence\":\"BUILT-IN\",\"poc\":\""+req.URL.String()+"\"},", options)
 					} else {
 						printing.DalLog("PRINT", "[G][BUILT-IN/"+k+"/"+req.Method+"] "+req.URL.String(), options)
 					}
@@ -1415,7 +1415,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 
 				if showG {
 					if options.Format == "json" {
-						printing.DalLog("PRINT", "\"type\":\"GREP\",\"evidence\":\""+k+"\",\"poc\":\""+req.URL.String()+"\"", options)
+						printing.DalLog("PRINT", "{\"type\":\"GREP\",\"evidence\":\""+k+"\",\"poc\":\""+req.URL.String()+"\"},", options)
 					} else {
 						printing.DalLog("PRINT", "[G]["+k+"/"+req.Method+"] "+req.URL.String(), options)
 					}
