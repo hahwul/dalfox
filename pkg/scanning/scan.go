@@ -1268,6 +1268,13 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 		if (!options.NoBAV) && (payload == "toOpenRedirecting") && !(strings.Contains(oReq.Host, ".google.com")) {
 			if strings.Contains(req.URL.Host, "google.com") {
 				printing.DalLog("GREP", "Found Open Redirect. Payload: "+via[0].URL.String(), options)
+				if showG {
+					if options.Format == "json" {
+						printing.DalLog("PRINT", "{\"type\":\"GREP\",\"evidence\":\"OpenRedirect\",\"poc\":\""+via[0].URL.String()+"\"},", options)
+					} else {
+						printing.DalLog("PRINT", "[G][OpenRedirect/"+req.Method+"] "+via[0].URL.String(), options)
+					}
+				}
 				if options.FoundAction != "" {
 					foundAction(options, via[0].Host, via[0].URL.String(), "BAV: OpenRedirect")
 				}
