@@ -17,7 +17,7 @@ func Initialize(target Target, options Options) model.Options {
 		IsLibrary:         true,
 		Header:            []string{},
 		Cookie:            "",
-		UniqParam:         "",
+		UniqParam:         []string{}],
 		BlindURL:          "",
 		CustomPayloadFile: "",
 		CustomAlertValue:  "1",
@@ -57,8 +57,10 @@ func Initialize(target Target, options Options) model.Options {
 		OnlyPoC:           "",
 		OutputAll:         false,
 	}
-	if options.UniqParam != "" {
-		newOptions.UniqParam = options.UniqParam
+	if len(options.UniqParam) > 0 {
+		for _, v := range options.UniqParam {
+			newOptions.UniqParam = append(newOptions.UniqParam, v)
+		}
 	}
 	if options.Cookie != "" {
 		newOptions.Cookie = options.Cookie

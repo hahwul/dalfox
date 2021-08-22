@@ -16,8 +16,8 @@ import (
 var cfgFile string
 var optionsStr = make(map[string]string)
 var optionsBool = make(map[string]bool)
-var header []string
-var config, cookie, data, p, customPayload, userAgent, blind, output, format, foundAction, proxy, grep, cookieFromRaw string
+var header, p []string
+var config, cookie, data, customPayload, userAgent, blind, output, format, foundAction, proxy, grep, cookieFromRaw string
 var ignoreReturn, miningWord, method, customAlertValue, customAlertType, remotePayloads, remoteWordlists string
 var timeout, concurrence, delay int
 var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, onlyCustomPayload, debug, useDeepDXSS, outputAll bool
@@ -44,12 +44,12 @@ func init() {
 	cobra.OnInitialize(initConfig)
 	// Slice
 	rootCmd.PersistentFlags().StringSliceVarP(&header, "header", "H", []string{}, "Add custom headers")
+	rootCmd.PersistentFlags().StringSliceVarP(&p, "param", "p", []string{}, "Only testing selected parameters")
 
 	//Str
 	rootCmd.PersistentFlags().StringVar(&config, "config", "", "Using config from file")
 	rootCmd.PersistentFlags().StringVarP(&cookie, "cookie", "C", "", "Add custom cookie")
 	rootCmd.PersistentFlags().StringVarP(&data, "data", "d", "", "Using POST Method and add Body data")
-	rootCmd.PersistentFlags().StringVarP(&p, "param", "p", "", "Only testing selected parameters")
 	rootCmd.PersistentFlags().StringVar(&customPayload, "custom-payload", "", "Add custom payloads from file")
 	rootCmd.PersistentFlags().StringVar(&customAlertValue, "custom-alert-value", "1", "Change alert value\n  * Example: --custom-alert-value=document.cookie")
 	rootCmd.PersistentFlags().StringVar(&customAlertType, "custom-alert-type", "none", "Change alert value type\n  * Example: --custom-alert-type=none / --custom-alert-type=str,none")

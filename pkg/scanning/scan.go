@@ -340,7 +340,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			// Set param base xss
 			for k, v := range params {
 				vStatus[k] = false
-				if (options.UniqParam == "") || (options.UniqParam == k) {
+				if optimization.CheckUniqParam(options, k) {
 					chars := GetSpecialChar()
 					var badchars []string
 					for _, av := range v {
@@ -1020,6 +1020,16 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 			_, lineSum := verification.VerifyReflectionWithLine(resBody, "DalFox")
 			miningCheckerLine = lineSum
 		}
+
+		// Add UniqParam to Mining output
+		if len(options.UniqParam) > 0 {
+			for _, selectedParam := range options.UniqParam {
+				if p.Get(selectedParam) == "" {
+					p.Set(selectedParam, "")
+				}
+			}
+		}
+
 		// Param mining with Gf-Patterins
 		if options.MiningWordlist == "" {
 			for _, gfParam := range GetGfXSS() {
@@ -1072,7 +1082,6 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 			}
 		}
 	}
-
 	if options.FindingDOM {
 		treq := optimization.GenerateNewRequest(target, "", options)
 		//treq, terr := http.NewRequest("GET", target, nil)
@@ -1164,7 +1173,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 		wgg.Add(1)
 		go func() {
 			for k := range paramsQue {
-				if (options.UniqParam == "") || (options.UniqParam == k) {
+				if optimization.CheckUniqParam(options, k) {
 					tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA", "toAppend", "NaN", options)
 					var code string
 					rl.Block(tempURL.Host)

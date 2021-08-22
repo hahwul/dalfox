@@ -9,27 +9,27 @@ import (
 
 // Options is struct of options
 type Options struct {
-	UniqParam         string `json:"param"`
-	Cookie            string `json:"cookie"`
+	UniqParam         []string `json:"param"`
+	Cookie            string   `json:"cookie"`
 	Header            []string `json:"header"`
-	ConfigFile        string `json:"config"`
-	BlindURL          string `json:"blind"`
-	CustomPayloadFile string `json:""`
-	CustomAlertValue  string `json:"custom-alert-value"`
-	CustomAlertType   string `json:"custom-alert-type"`
-	Data              string `json:"data"`
-	UserAgent         string `json:"user-agent"`
-	OutputFile        string `json:"output"`
-	Format            string `json:"format"`
-	FoundAction       string `json:"found-action"`
-	FoundActionShell  string `json:"found-action-shell"`
-	ProxyAddress      string `json:"proxy"`
-	Grep              string `json:"grep"`
-	IgnoreReturn      string `json:"ignore-return"`
-	Trigger           string `json:"trigger"`
-	Timeout           int    `json:"timeout"`
-	Concurrence       int    `json:"worker"`
-	Delay             int    `json:"delay"`
+	ConfigFile        string   `json:"config"`
+	BlindURL          string   `json:"blind"`
+	CustomPayloadFile string   `json:""`
+	CustomAlertValue  string   `json:"custom-alert-value"`
+	CustomAlertType   string   `json:"custom-alert-type"`
+	Data              string   `json:"data"`
+	UserAgent         string   `json:"user-agent"`
+	OutputFile        string   `json:"output"`
+	Format            string   `json:"format"`
+	FoundAction       string   `json:"found-action"`
+	FoundActionShell  string   `json:"found-action-shell"`
+	ProxyAddress      string   `json:"proxy"`
+	Grep              string   `json:"grep"`
+	IgnoreReturn      string   `json:"ignore-return"`
+	Trigger           string   `json:"trigger"`
+	Timeout           int      `json:"timeout"`
+	Concurrence       int      `json:"worker"`
+	Delay             int      `json:"delay"`
 	AllURLS           int
 	NowURL            int
 	Sequence          int  `json:"sequence"`
