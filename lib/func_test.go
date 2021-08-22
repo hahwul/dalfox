@@ -10,7 +10,7 @@ import (
 func TestInitialize(t *testing.T) {
 	opt := dalfox.Options{
 		Cookie:           "ABCD=1234",
-		UniqParam:        "q",
+		UniqParam:        []string{"q"},
 		BlindURL:         "hahwul.xss.ht",
 		CustomAlertValue: "1",
 		CustomAlertType:  "none",

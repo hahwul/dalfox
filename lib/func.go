@@ -17,7 +17,7 @@ func Initialize(target Target, options Options) model.Options {
 		IsLibrary:         true,
 		Header:            []string{},
 		Cookie:            "",
-		UniqParam:         []string{}],
+		UniqParam:         []string{},
 		BlindURL:          "",
 		CustomPayloadFile: "",
 		CustomAlertValue:  "1",
