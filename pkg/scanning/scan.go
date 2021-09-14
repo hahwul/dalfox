@@ -273,7 +273,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			// Set common payloads
 			cu, err := url.Parse(target)
 			var cp url.Values
+			var cpd url.Values
 			var cpArr []string
+			var cpdArr []string
 			hashParam := false
 			if err == nil {
 				if options.Data == "" {
@@ -283,7 +285,8 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 						hashParam = true
 					}
 				} else {
-					cp, _ = url.ParseQuery(options.Data)
+					cp, _ = url.ParseQuery(cu.RawQuery)
+					cpd, _ = url.ParseQuery(options.Data)
 				}
 			}
 
@@ -292,13 +295,29 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 				arc := optimization.SetPayloadValue(getCommonPayload(), options)
 				for _, avv := range arc {
 					// Add plain XSS Query
-					tq, tm := optimization.MakeRequestQuery(target, v, avv, "inHTML", "toAppend", "NaN", options)
+					tq, tm := optimization.MakeRequestQuery(target, v, avv, "inHTML-URL", "toAppend", "NaN", options)
 					query[tq] = tm
 					// Add URL encoded XSS Query
-					etq, etm := optimization.MakeRequestQuery(target, v, avv, "inHTML", "toAppend", "urlEncode", options)
+					etq, etm := optimization.MakeRequestQuery(target, v, avv, "inHTML-URL", "toAppend", "urlEncode", options)
 					query[etq] = etm
 					// Add HTML Encoded XSS Query
-					htq, htm := optimization.MakeRequestQuery(target, v, avv, "inHTML", "toAppend", "htmlEncode", options)
+					htq, htm := optimization.MakeRequestQuery(target, v, avv, "inHTML-URL", "toAppend", "htmlEncode", options)
+					query[htq] = htm
+				}
+			}
+
+			for v := range cpd {
+				cpdArr = append(cpdArr, v)
+				arc := optimization.SetPayloadValue(getCommonPayload(), options)
+				for _, avv := range arc {
+					// Add plain XSS Query
+					tq, tm := optimization.MakeRequestQuery(target, v, avv, "inHTML-FORM", "toAppend", "NaN", options)
+					query[tq] = tm
+					// Add URL encoded XSS Query
+					etq, etm := optimization.MakeRequestQuery(target, v, avv, "inHTML-FORM", "toAppend", "urlEncode", options)
+					query[etq] = etm
+					// Add HTML Encoded XSS Query
+					htq, htm := optimization.MakeRequestQuery(target, v, avv, "inHTML-FORM", "toAppend", "htmlEncode", options)
 					query[htq] = htm
 				}
 			}
@@ -332,18 +351,44 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 						}
 					}
 				}
+				for v := range cpd {
+					// loop payload list
+					if len(params[v]) == 0 {
+						for _, dpayload := range dpayloads {
+							var durl string
+							u, _ := url.Parse(target)
+							dp, _ := url.ParseQuery(u.RawQuery)
+							if hashParam {
+								dp, _ = url.ParseQuery(u.Fragment)
+								dp.Set(v, dpayload)
+								u.Fragment, _ = url.QueryUnescape(dp.Encode())
+							} else {
+								dp.Set(v, dpayload)
+								u.RawQuery = dp.Encode()
+							}
+							durl = u.String()
+							durls = append(durls, durl)
+						}
+					}
+				}
 			}
 
 			// Set param base xss
 			for k, v := range params {
 				vStatus[k] = false
+				ptype := ""
 				if optimization.CheckUniqParam(options, k) {
 					chars := GetSpecialChar()
 					var badchars []string
+
 					for _, av := range v {
 						if indexOf(av, chars) == -1 {
 							badchars = append(badchars, av)
 						}
+						if strings.Contains(av, "PTYPE:") {
+							ptype = GetPType(av)
+						}
+
 						if strings.Contains(av, "Injected:") {
 							// Injected pattern
 							injectedPoint := strings.Split(av, "/")
@@ -362,13 +407,13 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 								for _, avv := range arr {
 									if optimization.Optimization(avv, badchars) {
 										// Add plain XSS Query
-										tq, tm := optimization.MakeRequestQuery(target, k, avv, ip, "toAppend", "NaN", options)
+										tq, tm := optimization.MakeRequestQuery(target, k, avv, ip+ptype, "toAppend", "NaN", options)
 										query[tq] = tm
 										// Add URL Encoded XSS Query
-										etq, etm := optimization.MakeRequestQuery(target, k, avv, ip, "toAppend", "urlEncode", options)
+										etq, etm := optimization.MakeRequestQuery(target, k, avv, ip+ptype, "toAppend", "urlEncode", options)
 										query[etq] = etm
 										// Add HTML Encoded XSS Query
-										htq, htm := optimization.MakeRequestQuery(target, k, avv, ip, "toAppend", "htmlEncode", options)
+										htq, htm := optimization.MakeRequestQuery(target, k, avv, ip+ptype, "toAppend", "htmlEncode", options)
 										query[htq] = htm
 									}
 								}
@@ -381,13 +426,13 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 						if !containsFromArray(cpArr, k) {
 							if optimization.Optimization(avv, badchars) {
 								// Add plain XSS Query
-								tq, tm := optimization.MakeRequestQuery(target, k, avv, "inHTML", "toAppend", "NaN", options)
+								tq, tm := optimization.MakeRequestQuery(target, k, avv, "inHTML"+ptype, "toAppend", "NaN", options)
 								query[tq] = tm
 								// Add URL encoded XSS Query
-								etq, etm := optimization.MakeRequestQuery(target, k, avv, "inHTML", "toAppend", "urlEncode", options)
+								etq, etm := optimization.MakeRequestQuery(target, k, avv, "inHTML"+ptype, "toAppend", "urlEncode", options)
 								query[etq] = etm
 								// Add HTML Encoded XSS Query
-								htq, htm := optimization.MakeRequestQuery(target, k, avv, "inHTML", "toAppend", "htmlEncode", options)
+								htq, htm := optimization.MakeRequestQuery(target, k, avv, "inHTML"+ptype, "toAppend", "htmlEncode", options)
 								query[htq] = htm
 							}
 						}
@@ -421,20 +466,26 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			}
 
 			// loop parameter list
-			for k, _ := range params {
+			for k, v := range params {
+				ptype := ""
+				for _, av := range v {
+					if strings.Contains(av, "PTYPE:") {
+						ptype = GetPType(av)
+					}
+				}
 				// loop payload list
 				for _, bpayload := range bpayloads {
 					// Add plain XSS Query
 					bp := strings.Replace(bpayload, "CALLBACKURL", bcallback, 10)
-					tq, tm := optimization.MakeRequestQuery(target, k, bp, "toBlind", "toAppend", "NaN", options)
+					tq, tm := optimization.MakeRequestQuery(target, k, bp, "toBlind"+ptype, "toAppend", "NaN", options)
 					tm["payload"] = "toBlind"
 					query[tq] = tm
 					// Add URL encoded XSS Query
-					etq, etm := optimization.MakeRequestQuery(target, k, bp, "toBlind", "toAppend", "urlEncode", options)
+					etq, etm := optimization.MakeRequestQuery(target, k, bp, "toBlind"+ptype, "toAppend", "urlEncode", options)
 					etm["payload"] = "toBlind"
 					query[etq] = etm
 					// Add HTML Encoded XSS Query
-					htq, htm := optimization.MakeRequestQuery(target, k, bp, "toBlind", "toAppend", "htmlEncode", options)
+					htq, htm := optimization.MakeRequestQuery(target, k, bp, "toBlind"+ptype, "toAppend", "htmlEncode", options)
 					htm["payload"] = "toBlind"
 					query[htq] = htm
 				}
@@ -459,15 +510,21 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					printing.DalLog("INFO", "A '"+endpoint+"' payloads has been loaded ["+line+"L / "+size+"]               ", options)
 					for _, customPayload := range payload {
 						if customPayload != "" {
-							for k, _ := range params {
+							for k, v := range params {
+								ptype := ""
+								for _, av := range v {
+									if strings.Contains(av, "PTYPE:") {
+										ptype = GetPType(av)
+									}
+								}
 								// Add plain XSS Query
-								tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "toHTML", "toAppend", "NaN", options)
+								tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "toHTML"+ptype, "toAppend", "NaN", options)
 								query[tq] = tm
 								// Add URL encoded XSS Query
-								etq, etm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML", "toAppend", "urlEncode", options)
+								etq, etm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "urlEncode", options)
 								query[etq] = etm
 								// Add HTML Encoded XSS Query
-								htq, htm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML", "toAppend", "htmlEncode", options)
+								htq, htm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "htmlEncode", options)
 								query[htq] = htm
 							}
 						}
@@ -486,15 +543,21 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			} else {
 				for _, customPayload := range ff {
 					if customPayload != "" {
-						for k, _ := range params {
+						for k, v := range params {
+							ptype := ""
+							for _, av := range v {
+								if strings.Contains(av, "PTYPE:") {
+									ptype = GetPType(av)
+								}
+							}
 							// Add plain XSS Query
-							tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "toHTML", "toAppend", "NaN", options)
+							tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "toHTML"+ptype, "toAppend", "NaN", options)
 							query[tq] = tm
 							// Add URL encoded XSS Query
-							etq, etm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML", "toAppend", "urlEncode", options)
+							etq, etm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "urlEncode", options)
 							query[etq] = etm
 							// Add HTML Encoded XSS Query
-							htq, htm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML", "toAppend", "htmlEncode", options)
+							htq, htm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "htmlEncode", options)
 							query[htq] = htm
 						}
 					}
@@ -586,10 +649,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					k := reqJob.request
 					v := reqJob.metadata
 					checkVtype := false
-					if v["type"] != "toBlind" {
-						checkVtype = true
-					}
-					if v["type"] != "toGrepping" {
+					if checkPType(v["type"]) {
 						checkVtype = true
 					}
 
@@ -603,7 +663,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 							}
 						}
 						if err == nil {
-							if (v["type"] != "toBlind") && (v["type"] != "toGrepping") {
+							if checkPType(v["type"]) {
 								if strings.Contains(v["type"], "inJS") {
 									if vrs {
 										protected := false
@@ -620,9 +680,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 														printing.DalLog("VULN", "Triggered XSS Payload (found dialog in headless)", options)
 														if showV {
 															if options.Format == "json" {
-																printing.DalLog("PRINT", "{\"type\":\"inJS\",\"evidence\":\"headless verify\",\"poc\":\""+k.URL.String()+"\"},", options)
+																printing.DalLog("PRINT", "{\"type\":\""+v["type"]+"\",\"evidence\":\"headless verify\",\"poc\":\""+k.URL.String()+"\"},", options)
 															} else {
-																printing.DalLog("PRINT", "[V]["+k.Method+"] "+k.URL.String(), options)
+																printing.DalLog("PRINT", "[V]["+k.Method+"]["+v["type"]+"] "+k.URL.String(), options)
 															}
 														}
 														vStatus[v["param"]] = true
@@ -656,9 +716,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 													printing.DalLog("CODE", code, options)
 													if showR {
 														if options.Format == "json" {
-															printing.DalLog("PRINT", "{\"type\":\"inJS\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
+															printing.DalLog("PRINT", "{\"type\":\""+v["type"]+"\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
 														} else {
-															printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
+															printing.DalLog("PRINT", "[R]["+k.Method+"]["+v["type"]+"] "+k.URL.String(), options)
 														}
 													}
 													if options.FoundAction != "" {
@@ -684,9 +744,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											printing.DalLog("CODE", code, options)
 											if showV {
 												if options.Format == "json" {
-													printing.DalLog("PRINT", "{\"type\":\"inATTR\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", options)
+													printing.DalLog("PRINT", "{\"type\":\""+v["type"]+"\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", options)
 												} else {
-													printing.DalLog("PRINT", "[V]["+k.Method+"] "+k.URL.String(), options)
+													printing.DalLog("PRINT", "[V]["+k.Method+"]["+v["type"]+"] "+k.URL.String(), options)
 												}
 											}
 											vStatus[v["param"]] = true
@@ -709,7 +769,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											printing.DalLog("CODE", code, options)
 											if showR {
 												if options.Format == "json" {
-													printing.DalLog("PRINT", "{\"type\":\"inATTR\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
+													printing.DalLog("PRINT", "{\"type\":\""+v["type"]+"\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
 												} else {
 													poc := model.PoC{
 														Type:   "R",
@@ -717,7 +777,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 														Data:   k.URL.String(),
 													}
 													scanResult.PoCs = append(scanResult.PoCs, poc)
-													printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
+													printing.DalLog("PRINT", "[R]["+k.Method+"]["+v["type"]+"] "+k.URL.String(), options)
 												}
 											}
 											if options.FoundAction != "" {
@@ -741,7 +801,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											printing.DalLog("CODE", code, options)
 											if showV {
 												if options.Format == "json" {
-													printing.DalLog("PRINT", "{\"type\":\"inHTML\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", options)
+													printing.DalLog("PRINT", "{\"type\":\""+v["type"]+"\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", options)
 												} else {
 													poc := model.PoC{
 														Type:   "V",
@@ -749,7 +809,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 														Data:   k.URL.String(),
 													}
 													scanResult.PoCs = append(scanResult.PoCs, poc)
-													printing.DalLog("PRINT", "[V]["+k.Method+"] "+k.URL.String(), options)
+													printing.DalLog("PRINT", "[V]["+k.Method+"]["+v["type"]+"] "+k.URL.String(), options)
 												}
 											}
 											vStatus[v["param"]] = true
@@ -772,7 +832,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											printing.DalLog("CODE", code, options)
 											if showR {
 												if options.Format == "json" {
-													printing.DalLog("PRINT", "{\"type\":\"inHTML\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
+													printing.DalLog("PRINT", "{\"type\":\""+v["type"]+"\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
 												} else {
 													poc := model.PoC{
 														Type:   "R",
@@ -780,7 +840,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 														Data:   k.URL.String(),
 													}
 													scanResult.PoCs = append(scanResult.PoCs, poc)
-													printing.DalLog("PRINT", "[R]["+k.Method+"] "+k.URL.String(), options)
+													printing.DalLog("PRINT", "[R]["+k.Method+"]["+v["type"]+"] "+k.URL.String(), options)
 												}
 											}
 											if options.FoundAction != "" {
@@ -921,4 +981,14 @@ func containsFromArray(slice []string, item string) bool {
 
 	_, ok := set[i]
 	return ok
+}
+
+func checkPType(str string) bool {
+	if strings.Contains(str, "toBlind") {
+		return false
+	}
+	if strings.Contains(str, "toGrepping") {
+		return false
+	}
+	return true
 }

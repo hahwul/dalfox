@@ -16,6 +16,18 @@ import (
 	"github.com/hahwul/dalfox/v2/pkg/verification"
 )
 
+func setP(p, dp url.Values, name string, options model.Options) (url.Values, url.Values) {
+	if p.Get(name) == "" {
+		p.Set(name, "")
+	}
+	if options.Data != "" {
+		if dp.Get(name) == "" {
+			dp.Set(name, "")
+		}
+	}
+	return p, dp
+}
+
 // ParameterAnalysis is check reflected and mining params
 func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) map[string][]string {
 	//miningCheckerSize := 0
@@ -26,11 +38,13 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 		return params
 	}
 	var p url.Values
+	var dp url.Values
 
 	if options.Data == "" {
 		p, _ = url.ParseQuery(u.RawQuery)
 	} else {
-		p, _ = url.ParseQuery(options.Data)
+		p, _ = url.ParseQuery(u.RawQuery)
+		dp, _ = url.ParseQuery(options.Data)
 	}
 
 	if options.Mining {
@@ -45,9 +59,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 		// Add UniqParam to Mining output
 		if len(options.UniqParam) > 0 {
 			for _, selectedParam := range options.UniqParam {
-				if p.Get(selectedParam) == "" {
-					p.Set(selectedParam, "")
-				}
+				p, dp = setP(p, dp, selectedParam, options)
 			}
 		}
 
@@ -55,9 +67,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 		if options.MiningWordlist == "" {
 			for _, gfParam := range GetGfXSS() {
 				if gfParam != "" {
-					if p.Get(gfParam) == "" {
-						p.Set(gfParam, "")
-					}
+					p, dp = setP(p, dp, gfParam, options)
 				}
 			}
 		} else {
@@ -68,9 +78,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 			} else {
 				for _, wdParam := range ff {
 					if wdParam != "" {
-						if p.Get(wdParam) == "" {
-							p.Set(wdParam, "")
-						}
+						p, dp = setP(p, dp, wdParam, options)
 					}
 				}
 			}
@@ -94,9 +102,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 					printing.DalLog("INFO", "A '"+endpoint+"' wordlist has been loaded ["+line+"L / "+size+"]                   ", options)
 					for _, remoteWord := range wordlist {
 						if remoteWord != "" {
-							if p.Get(remoteWord) == "" {
-								p.Set(remoteWord, "")
-							}
+							p, dp = setP(p, dp, remoteWord, options)
 						}
 					}
 				}
@@ -132,24 +138,18 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 					count := 0
 					doc.Find("input").Each(func(i int, s *goquery.Selection) {
 						name, _ := s.Attr("name")
-						if p.Get(name) == "" {
-							p.Set(name, "")
-							count = count + 1
-						}
+						p, dp = setP(p, dp, name, options)
+						count = count + 1
 					})
 					doc.Find("textarea").Each(func(i int, s *goquery.Selection) {
 						name, _ := s.Attr("name")
-						if p.Get(name) == "" {
-							p.Set(name, "")
-							count = count + 1
-						}
+						p, dp = setP(p, dp, name, options)
+						count = count + 1
 					})
 					doc.Find("select").Each(func(i int, s *goquery.Selection) {
 						name, _ := s.Attr("name")
-						if p.Get(name) == "" {
-							p.Set(name, "")
-							count = count + 1
-						}
+						p, dp = setP(p, dp, name, options)
+						count = count + 1
 					})
 					doc.Find("form").Each(func(i int, s *goquery.Selection) {
 						action, _ := s.Attr("action")
@@ -157,10 +157,8 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 							url, _ := url.Parse(action)
 							query := url.Query()
 							for aParam := range query {
-								if p.Get(aParam) == "" {
-									p.Set(aParam, "")
-									count = count + 1
-								}
+								p, dp = setP(p, dp, aParam, options)
+								count = count + 1
 							}
 
 						}
@@ -171,10 +169,8 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 							url, _ := url.Parse(href)
 							query := url.Query()
 							for aParam := range query {
-								if p.Get(aParam) == "" {
-									p.Set(aParam, "")
-									count = count + 1
-								}
+								p, dp = setP(p, dp, aParam, options)
+								count = count + 1
 							}
 
 						}
@@ -185,6 +181,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 		}
 	}
 
+	// Testing URL Params
 	var wgg sync.WaitGroup
 	concurrency := options.Concurrence
 	paramsQue := make(chan string)
@@ -195,6 +192,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 		go func() {
 			for k := range paramsQue {
 				if optimization.CheckUniqParam(options, k) {
+					printing.DalLog("DEBUG", "Mining URL scan to "+k, options)
 					tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA", "toAppend", "NaN", options)
 					var code string
 					rl.Block(tempURL.Host)
@@ -224,6 +222,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 						}
 						mutex.Lock()
 						miningDictCount = miningDictCount + 1
+						params[k] = append(params[k], "PTYPE: URL")
 						params[k] = append(params[k], smap)
 						mutex.Unlock()
 						var wg sync.WaitGroup
@@ -231,22 +230,10 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 						for _, c := range chars {
 							wg.Add(1)
 							char := c
-							/*
-								tdata := u.String()
-								tdata = strings.Replace(tdata, k+"="+v[0], k+"="+v[0]+"DalFox"+char, 1)
-								turl, _ := url.Parse(tdata)
-								tq := turl.Query()
-								turl.RawQuery = tq.Encode()
-							*/
 
-							/* turl := u
-							q := u.Query()
-							q.Set(k, v[0]+"DalFox"+string(char))
-							turl.RawQuery = q.Encode()
-							*/
 							go func() {
 								defer wg.Done()
-								turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA", "toAppend", "NaN", options)
+								turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA-URL", "toAppend", "NaN", options)
 								rl.Block(tempURL.Host)
 								_, _, _, vrs, _ := SendReq(turl, "dalfox"+char, options)
 								_ = resp
@@ -272,8 +259,95 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 
 	close(paramsQue)
 	wgg.Wait()
+
+	// Testing Form Params
+	var wggg sync.WaitGroup
+	paramsDataQue := make(chan string)
+	for j := 0; j < concurrency; j++ {
+		wggg.Add(1)
+		go func() {
+			for k := range paramsDataQue {
+				printing.DalLog("DEBUG", "Mining FORM scan to "+k, options)
+				if optimization.CheckUniqParam(options, k) {
+					tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA-FORM", "toAppend", "NaN", options)
+					var code string
+					rl.Block(tempURL.Host)
+					resbody, resp, _, vrs, _ := SendReq(tempURL, "DalFox", options)
+					_, lineSum := verification.VerifyReflectionWithLine(resbody, "DalFox")
+					//fmt.Printf("%s => %d : %d\n", k, miningCheckerLine, lineSum)
+					if miningCheckerLine == lineSum {
+						vrs = false
+					}
+					if vrs {
+
+						code = CodeView(resbody, "DalFox")
+						code = code[:len(code)-5]
+						pointer := optimization.Abstraction(resbody, "DalFox")
+						smap := "Injected: "
+						tempSmap := make(map[string]int)
+
+						for _, v := range pointer {
+							if tempSmap[v] == 0 {
+								tempSmap[v] = 1
+							} else {
+								tempSmap[v] = tempSmap[v] + 1
+							}
+						}
+						for k, v := range tempSmap {
+							smap = smap + "/" + k + "(" + strconv.Itoa(v) + ")"
+						}
+						mutex.Lock()
+						miningDictCount = miningDictCount + 1
+						params[k] = append(params[k], "PTYPE: FORM")
+						params[k] = append(params[k], smap)
+						mutex.Unlock()
+						var wg sync.WaitGroup
+						chars := GetSpecialChar()
+						for _, c := range chars {
+							wg.Add(1)
+							char := c
+
+							go func() {
+								defer wg.Done()
+								turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA", "toAppend", "NaN", options)
+								rl.Block(tempURL.Host)
+								_, _, _, vrs, _ := SendReq(turl, "dalfox"+char, options)
+								_ = resp
+								if vrs {
+									mutex.Lock()
+									params[k] = append(params[k], char)
+									mutex.Unlock()
+								}
+							}()
+						}
+						wg.Wait()
+						params[k] = append(params[k], code)
+					}
+				}
+			}
+			wggg.Done()
+		}()
+	}
+
+	for v := range dp {
+		paramsDataQue <- v
+	}
+
+	close(paramsDataQue)
+	wggg.Wait()
+
 	if miningDictCount != 0 {
 		printing.DalLog("INFO", "Found "+strconv.Itoa(miningDictCount)+" testing point in Dictionary base paramter mining", options)
 	}
 	return params
+}
+
+func GetPType(av string) string {
+	if strings.Contains(av, "PTYPE: URL") {
+		return "-URL"
+	}
+	if strings.Contains(av, "PTYPE: FORM") {
+		return "-FORM"
+	}
+	return ""
 }
