@@ -254,7 +254,15 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	}
 
 	for v := range p {
-		paramsQue <- v
+		if len(options.UniqParam) > 0 {
+			for _, selectedParam := range options.UniqParam {
+				if selectedParam == v {
+					paramsQue <- v
+				}
+			}
+		} else {
+			paramsQue <- v
+		}
 	}
 
 	close(paramsQue)
@@ -330,7 +338,15 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	}
 
 	for v := range dp {
-		paramsDataQue <- v
+		if len(options.UniqParam) > 0 {
+			for _, selectedParam := range options.UniqParam {
+				if selectedParam == v {
+					paramsDataQue <- v
+				}
+			}
+		} else {
+			paramsDataQue <- v
+		}
 	}
 
 	close(paramsDataQue)
