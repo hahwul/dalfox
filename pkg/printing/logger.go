@@ -62,6 +62,14 @@ func DalLog(level, text string, options model.Options) {
 	}
 
 	switch level {
+	case "DEBUG":
+		if options.Debug {
+			if allWrite {
+				ftext = "[DEBUG] " + text
+			}
+			text = options.AuroraObject.BrightBlue("[DEBUG] ").String() + text
+		}
+
 	case "INFO":
 		if allWrite {
 			ftext = "[I] " + text
