@@ -68,6 +68,8 @@ func DalLog(level, text string, options model.Options) {
 				ftext = "[DEBUG] " + text
 			}
 			text = options.AuroraObject.BrightBlue("[DEBUG] ").String() + text
+		} else {
+			return
 		}
 
 	case "INFO":
