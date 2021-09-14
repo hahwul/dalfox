@@ -198,7 +198,6 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 					rl.Block(tempURL.Host)
 					resbody, resp, _, vrs, _ := SendReq(tempURL, "DalFox", options)
 					_, lineSum := verification.VerifyReflectionWithLine(resbody, "DalFox")
-					//fmt.Printf("%s => %d : %d\n", k, miningCheckerLine, lineSum)
 					if miningCheckerLine == lineSum {
 						vrs = false
 					}
@@ -287,7 +286,6 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 						vrs = false
 					}
 					if vrs {
-
 						code = CodeView(resbody, "DalFox")
 						code = code[:len(code)-5]
 						pointer := optimization.Abstraction(resbody, "DalFox")

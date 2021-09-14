@@ -32,9 +32,11 @@ func SSTIAnalysis(target string, options model.Options, rl *rateLimiter) {
 	}
 
 	for bpk := range bpd {
-		for _, ssti := range getSSTIPayload() {
-			turl, _ := optimization.MakeRequestQuery(target, bpk, ssti, "toGrepping", "ToAppend", "Nan", options)
-			reqs <- turl
+		if optimization.CheckUniqParam(options, bpk) {
+			for _, ssti := range getSSTIPayload() {
+				turl, _ := optimization.MakeRequestQuery(target, bpk, ssti, "toGrepping", "ToAppend", "Nan", options)
+				reqs <- turl
+			}
 		}
 	}
 	close(reqs)
@@ -61,9 +63,11 @@ func CRLFAnalysis(target string, options model.Options, rl *rateLimiter) {
 	}
 
 	for bpk := range bpd {
-		for _, crlfpayload := range getCRLFPayload() {
-			turl, _ := optimization.MakeRequestQuery(target, bpk, crlfpayload, "toGrepping", "ToAppend", "NaN", options)
-			reqs <- turl
+		if optimization.CheckUniqParam(options, bpk) {
+			for _, crlfpayload := range getCRLFPayload() {
+				turl, _ := optimization.MakeRequestQuery(target, bpk, crlfpayload, "toGrepping", "ToAppend", "NaN", options)
+				reqs <- turl
+			}
 		}
 	}
 	close(reqs)
@@ -93,9 +97,11 @@ func SqliAnalysis(target string, options model.Options, rl *rateLimiter) {
 	}
 
 	for bpk := range bpd {
-		for _, sqlipayload := range getSQLIPayload() {
-			turl, _ := optimization.MakeRequestQuery(target, bpk, sqlipayload, "toGrepping", "ToAppend", "NaN", options)
-			reqs <- turl
+		if optimization.CheckUniqParam(options, bpk) {
+			for _, sqlipayload := range getSQLIPayload() {
+				turl, _ := optimization.MakeRequestQuery(target, bpk, sqlipayload, "toGrepping", "ToAppend", "NaN", options)
+				reqs <- turl
+			}
 		}
 	}
 	close(reqs)
@@ -125,9 +131,11 @@ func OpenRedirectorAnalysis(target string, options model.Options, rl *rateLimite
 	}
 
 	for bpk := range bpd {
-		for _, openRedirectPayload := range getOpenRedirectPayload() {
-			turl, _ := optimization.MakeRequestQuery(target, bpk, openRedirectPayload, "toOpenRedirecting", "toReplace", "NaN", options)
-			reqs <- turl
+		if optimization.CheckUniqParam(options, bpk) {
+			for _, openRedirectPayload := range getOpenRedirectPayload() {
+				turl, _ := optimization.MakeRequestQuery(target, bpk, openRedirectPayload, "toOpenRedirecting", "toReplace", "NaN", options)
+				reqs <- turl
+			}
 		}
 	}
 	close(reqs)
