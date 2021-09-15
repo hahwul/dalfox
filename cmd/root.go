@@ -76,7 +76,7 @@ func init() {
 
 	//Bool
 	rootCmd.PersistentFlags().BoolVar(&onlyDiscovery, "only-discovery", false, "Only testing parameter analysis (same '--skip-xss-scanning' option)")
-	rootCmd.PersistentFlags().BoolVarP(&silence, "silence", "S", false, "Not printing all logs")
+	rootCmd.PersistentFlags().BoolVarP(&silence, "silence", "S", false, "Only print PoC Code and Progress(for pipe/file mode)")
 	rootCmd.PersistentFlags().BoolVar(&mining, "mining-dict", true, "Find new parameter with dictionary attack, default is Gf-Patterns=>XSS")
 	rootCmd.PersistentFlags().BoolVar(&findingDOM, "mining-dom", true, "Find new parameter in DOM (attribute/js value)")
 	rootCmd.PersistentFlags().BoolVarP(&followRedirect, "follow-redirects", "F", false, "Following redirection")
