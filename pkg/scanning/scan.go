@@ -233,43 +233,43 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			av: reflected type, valid char
 		*/
 
-		if isAllowType(policy["Content-Type"]) && !options.OnlyCustomPayload {
-			// set path base XSS
-			for k, v := range options.PathReflection {
-				if strings.Contains(v, "Injected:") {
-					// Injected pattern
-					injectedPoint := strings.Split(v, "/")
-					injectedPoint = injectedPoint[1:]
+		// set path base XSS
+		for k, v := range options.PathReflection {
+			if strings.Contains(v, "Injected:") {
+				// Injected pattern
+				injectedPoint := strings.Split(v, "/")
+				injectedPoint = injectedPoint[1:]
 
-					for _, ip := range injectedPoint {
-						var arr []string
-						if strings.Contains(ip, "inJS") {
-							arr = optimization.SetPayloadValue(getInJsPayload(ip), options)
+				for _, ip := range injectedPoint {
+					var arr []string
+					if strings.Contains(ip, "inJS") {
+						arr = optimization.SetPayloadValue(getInJsPayload(ip), options)
+					}
+					if strings.Contains(ip, "inHTML") {
+						arr = optimization.SetPayloadValue(getHTMLPayload(ip), options)
+					}
+					if strings.Contains(ip, "inATTR") {
+						arr = optimization.SetPayloadValue(getAttrPayload(ip), options)
+					}
+					for _, avv := range arr {
+						var tempURL string
+						if len(parsedURL.Path) == 0 {
+							tempURL = target + "/" + avv
+						} else {
+							split := strings.Split(target, "/")
+							split[k+3] = split[k+3] + avv
+							tempURL = strings.Join(split, "/")
 						}
-						if strings.Contains(ip, "inHTML") {
-							arr = optimization.SetPayloadValue(getHTMLPayload(ip), options)
-						}
-						if strings.Contains(ip, "inATTR") {
-							arr = optimization.SetPayloadValue(getAttrPayload(ip), options)
-						}
-						for _, avv := range arr {
-							var tempURL string
-							if len(parsedURL.Path) == 0 {
-								tempURL = target + "/" + avv
-							} else {
-								split := strings.Split(target, "/")
-								split[k+3] = split[k+3] + avv
-								tempURL = strings.Join(split, "/")
-							}
-							// Add Path XSS Query
-							tq, tm := optimization.MakeRequestQuery(tempURL, "", "", ip, "toAppend", "NaN", options)
-							tm["payload"] = avv
-							query[tq] = tm
-						}
+						// Add Path XSS Query
+						tq, tm := optimization.MakeRequestQuery(tempURL, "", "", ip, "toAppend", "NaN", options)
+						tm["payload"] = avv
+						query[tq] = tm
 					}
 				}
 			}
+		}
 
+		if isAllowType(policy["Content-Type"]) && !options.OnlyCustomPayload {
 			// Set common payloads
 			cu, err := url.Parse(target)
 			var cp url.Values
