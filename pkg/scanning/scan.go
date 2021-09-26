@@ -529,7 +529,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 										}
 									}
 									// Add plain XSS Query
-									tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "toHTML"+ptype, "toAppend", "NaN", options)
+									tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "NaN", options)
 									query[tq] = tm
 									// Add URL encoded XSS Query
 									etq, etm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "urlEncode", options)
@@ -564,7 +564,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 									}
 								}
 								// Add plain XSS Query
-								tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "toHTML"+ptype, "toAppend", "NaN", options)
+								tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "NaN", options)
 								query[tq] = tm
 								// Add URL encoded XSS Query
 								etq, etm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "urlEncode", options)
@@ -672,7 +672,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 						resbody, _, vds, vrs, err := SendReq(k, v["payload"], options)
 						abs := optimization.Abstraction(resbody, v["payload"])
 						if vrs {
-							if !containsFromArray(abs, v["type"]) {
+							if !containsFromArray(abs, v["type"]) && !strings.Contains(v["type"], "inHTML") {
 								vrs = false
 							}
 						}
