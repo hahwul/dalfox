@@ -10,6 +10,8 @@
 - title: Advance Guides
   docs:
   - output-handling
+  - config
+  - bav
   - scan-from-rawreq
   - parameter-mining
   - custom-payload
@@ -29,6 +31,9 @@
 - title: Format and Spec
   docs:
   - format-of-poc
+  - ipoint
+  - json
+  - flags
 
 - title: Tips of Dalfox
   docs:
