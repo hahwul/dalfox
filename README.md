@@ -116,8 +116,7 @@ Global Flags:
       --found-action-shell string   Select shell application for --found-action (default "bash")
       --grep string                 Using custom grepping file
                                       * Example: --grep ./samples/sample_grep.json
-  -H, --header string               Add custom headers
-  -h, --help                        help for dalfox
+  -H, --header strings              Add custom headers
       --ignore-return string        Ignore scanning from return code
                                       * Example: --ignore-return 302,403,404
   -X, --method string               Force overriding HTTP Method
@@ -131,9 +130,10 @@ Global Flags:
       --only-custom-payload         Only testing custom payload (required --custom-payload)
       --only-discovery              Only testing parameter analysis (same '--skip-xss-scanning' option)
       --only-poc string             Shows only the PoC code for the specified pattern (g: grep / r: reflected / v: verified)
+                                     * Example: --only-poc='g,v'
   -o, --output string               Write to output file (By default, only the PoC code is saved)
       --output-all                  All log write mode (-o or stdout)
-  -p, --param string                Only testing selected parameters
+  -p, --param strings               Only testing selected parameters
       --proxy string                Send all request to proxy server
                                       * Example: --proxy http://127.0.0.1:8080
       --remote-payloads string      Using remote payload for XSS testing
@@ -142,7 +142,7 @@ Global Flags:
       --remote-wordlists string     Using remote wordlists for param mining
                                       * Supported: burp/assetnote
                                       * Example: --remote-wordlists=burp
-  -S, --silence                     Not printing all logs
+  -S, --silence                     Only print PoC Code and Progress(for pipe/file mode)
       --skip-bav                    Skipping BAV(Basic Another Vulnerability) analysis
       --skip-grepping               Skipping built-in grepping
       --skip-headless               Skipping headless browser base scanning[DOM XSS and inJS verify]
@@ -160,18 +160,20 @@ Server Flags:
       --port int      Bind Port (default 6664)
 
 Pipe Flags:
-  -h, --help        help for pipe
+  -h, --help              help for pipe
       --mass              Parallel scanning N*Host mode (show only poc code)
       --mass-worker int   Parallel worker of --mass and --multicast option (default 10)
-      --multicast   Parallel scanning N*Host mode (show only poc code)
+      --multicast         Parallel scanning N*Host mode (show only poc code)
+      --silence-force     Only print PoC (not print progress)
 
 File Flags:
-  -h, --help        help for file
-      --http        Using force http on rawdata mode
+  -h, --help              help for file
+      --http              Using force http on rawdata mode
       --mass              Parallel scanning N*Host mode (show only poc code)
       --mass-worker int   Parallel worker of --mass and --multicast option (default 10)
-      --multicast   Parallel scanning N*Host mode (show only poc code)
-      --rawdata     Using req rawdata from Burp/ZAP
+      --multicast         Parallel scanning N*Host mode (show only poc code)
+      --rawdata           Using req rawdata from Burp/ZAP
+      --silence-force     Only print PoC (not print progress)
 
 SXSS Flags:
   -h, --help             help for sxss
