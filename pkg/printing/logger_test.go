@@ -182,6 +182,22 @@ func TestDalLog(t *testing.T) {
 		args args
 	}{
 		{
+			name: "test - DEBUG",
+			args: args{
+				level: "DEBUG",
+				text:  "",
+				options: model.Options{
+					Debug:        true,
+					OutputAll:    true,
+					IsLibrary:    true,
+					AuroraObject: aurora.NewAurora(true),
+					ScanResult: model.Result{
+						Logs: []string{""},
+					},
+				},
+			},
+		},
+		{
 			name: "test - INFO",
 			args: args{
 				level: "INFO",

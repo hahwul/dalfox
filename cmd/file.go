@@ -21,9 +21,14 @@ var fileCmd = &cobra.Command{
 	Use:   "file [filePath] [flags]",
 	Short: "Use file mode(targets list or rawdata)",
 	Run: func(cmd *cobra.Command, args []string) {
+		sf, _ := cmd.Flags().GetBool("silence-force")
+		if sf {
+			options.Silence = sf
+		}
 		printing.Banner(options)
 		printing.Summary(options, args[0])
 		var targets []string
+		mutex := &sync.Mutex{}
 		if len(args) >= 1 {
 			rawdata, _ := cmd.Flags().GetBool("rawdata")
 			if rawdata {
@@ -94,7 +99,7 @@ var fileCmd = &cobra.Command{
 						tt = tt + len(v)
 					}
 					s := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
-					if !options.NoSpinner {
+					if (!options.NoSpinner || !options.Silence) && !sf {
 						options.SpinnerObject = s
 						s.Prefix = " "
 						s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(tt) + " Tasks][0%] Parallel scanning from file"
@@ -107,7 +112,6 @@ var fileCmd = &cobra.Command{
 					tasks := make(chan model.MassJob)
 					options.NowURL = 0
 					concurrency, _ := cmd.Flags().GetInt("mass-worker")
-					mutex := &sync.Mutex{}
 					for task := 0; task < concurrency; task++ {
 						wg.Add(1)
 						go func() {
@@ -115,10 +119,12 @@ var fileCmd = &cobra.Command{
 							for kv := range tasks {
 								k := kv.Name
 								v := kv.URLs
-								printing.DalLog("SYSTEM-M", "Parallel testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", options)
+								if (!options.NoSpinner || !options.Silence) && !sf {
+									printing.DalLog("SYSTEM-M", "Parallel testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", options)
+								}
 								for i := range v {
 									_, _ = scanning.Scan(v[i], options, strconv.Itoa(len(v)))
-									if !options.NoSpinner {
+									if (!options.NoSpinner || !options.Silence) && !sf {
 										mutex.Lock()
 										options.NowURL = options.NowURL + 1
 										percent := fmt.Sprintf("%0.2f%%", float64(options.NowURL)/float64(tt)*100)
@@ -143,9 +149,26 @@ var fileCmd = &cobra.Command{
 					}
 				} else {
 					options.AllURLS = len(targets)
+					s := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
+					if (!options.NoSpinner || !options.Silence) && !sf {
+						options.SpinnerObject = s
+						s.Prefix = " "
+						s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][0%] Multiple scanning from file"
+						if !options.NoColor {
+							s.Color("red", "bold")
+						}
+						s.Start()
+					}
 					for i := range targets {
 						options.NowURL = i + 1
 						_, _ = scanning.Scan(targets[i], options, strconv.Itoa(i))
+						if (!options.NoSpinner || !options.Silence) && !sf {
+							mutex.Lock()
+							options.NowURL = options.NowURL + 1
+							percent := fmt.Sprintf("%0.2f%%", float64(options.NowURL)/float64(options.AllURLS)*100)
+							s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][" + percent + "] Multiple scanning from file"
+							mutex.Unlock()
+						}
 					}
 				}
 			}
@@ -162,6 +185,7 @@ func init() {
 	fileCmd.Flags().Bool("http", false, "Using force http on rawdata mode")
 	fileCmd.Flags().Bool("multicast", false, "Parallel scanning N*Host mode (show only poc code)")
 	fileCmd.Flags().Bool("mass", false, "Parallel scanning N*Host mode (show only poc code)")
+	fileCmd.Flags().Bool("silence-force", false, "Only print PoC (not print progress)")
 	fileCmd.Flags().Int("mass-worker", 10, "Parallel worker of --mass and --multicast option")
 }
 

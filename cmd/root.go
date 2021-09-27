@@ -22,7 +22,7 @@ var ignoreReturn, miningWord, method, customAlertValue, customAlertType, remoteP
 var timeout, concurrence, delay int
 var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, onlyCustomPayload, debug, useDeepDXSS, outputAll bool
 var options model.Options
-var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV, skipGrep, skipHeadless bool
+var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV, skipGrep, skipHeadless, wafEvasion bool
 var onlyPoC, foundActionShell string
 
 var rootCmd = &cobra.Command{
@@ -76,7 +76,7 @@ func init() {
 
 	//Bool
 	rootCmd.PersistentFlags().BoolVar(&onlyDiscovery, "only-discovery", false, "Only testing parameter analysis (same '--skip-xss-scanning' option)")
-	rootCmd.PersistentFlags().BoolVarP(&silence, "silence", "S", false, "Not printing all logs")
+	rootCmd.PersistentFlags().BoolVarP(&silence, "silence", "S", false, "Only print PoC Code and Progress(for pipe/file mode)")
 	rootCmd.PersistentFlags().BoolVar(&mining, "mining-dict", true, "Find new parameter with dictionary attack, default is Gf-Patterns=>XSS")
 	rootCmd.PersistentFlags().BoolVar(&findingDOM, "mining-dom", true, "Find new parameter in DOM (attribute/js value)")
 	rootCmd.PersistentFlags().BoolVarP(&followRedirect, "follow-redirects", "F", false, "Following redirection")
@@ -93,6 +93,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&skipHeadless, "skip-headless", false, "Skipping headless browser base scanning[DOM XSS and inJS verify]")
 	rootCmd.PersistentFlags().BoolVar(&useDeepDXSS, "deep-domxss", false, "DOM XSS Testing with more payloads on headless [so slow]")
 	rootCmd.PersistentFlags().BoolVar(&outputAll, "output-all", false, "All log write mode (-o or stdout)")
+	rootCmd.PersistentFlags().BoolVar(&wafEvasion, "waf-evasion", false, "Avoid blocking by adjusting the speed when detecting WAF (worker=1 delay=3s)")
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -143,6 +144,8 @@ func initConfig() {
 		UseDeepDXSS:       useDeepDXSS,
 		OnlyPoC:           onlyPoC,
 		OutputAll:         outputAll,
+		WAF:               false,
+		WAFEvasion:        wafEvasion,
 	}
 	// var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV bool
 

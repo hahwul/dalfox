@@ -65,6 +65,8 @@ type Options struct {
 	UseDeepDXSS       bool   `json:"use-deepdxss"`
 	OnlyPoC           string `json:"only-poc"`
 	OutputAll         bool   `json:"output-all"`
+	WAF               bool
+	WAFEvasion        bool
 }
 
 // MassJob is list for mass

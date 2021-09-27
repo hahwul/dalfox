@@ -3,12 +3,16 @@
   - home
   - installation
   - update
-  - format-of-poc
   - usage
   - scan-single-url
   - scan-multiple-url
-  - scan-from-rawreq
+
+- title: Advance Guides
+  docs:
   - output-handling
+  - config
+  - bav
+  - scan-from-rawreq
   - parameter-mining
   - custom-payload
   - remote-payloads
@@ -23,6 +27,13 @@
   - modes/sxss-mode
   - modes/server-mode
   - modes/payload-mode
+
+- title: Format and Spec
+  docs:
+  - format-of-poc
+  - ipoint
+  - json
+  - flags
 
 - title: Tips of Dalfox
   docs:

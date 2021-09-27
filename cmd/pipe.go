@@ -20,9 +20,14 @@ var pipeCmd = &cobra.Command{
 	Use:   "pipe [flags]",
 	Short: "Use pipeline mode",
 	Run: func(cmd *cobra.Command, args []string) {
+		sf, _ := cmd.Flags().GetBool("silence-force")
+		if sf {
+			options.Silence = sf
+		}
 		printing.Banner(options)
 		printing.Summary(options, "Stdin (pipeline)")
 		var targets []string
+		mutex := &sync.Mutex{}
 		sc := bufio.NewScanner(os.Stdin)
 		printing.DalLog("SYSTEM", "Using pipeline mode", options)
 		for sc.Scan() {
@@ -39,14 +44,14 @@ var pipeCmd = &cobra.Command{
 			options.Silence = true
 			options.MulticastMode = true
 			t := scanning.MakeTargetSlice(targets)
-
 			tt := 0
 			for k, v := range t {
 				_ = k
 				tt = tt + len(v)
 			}
+
 			s := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
-			if !options.NoSpinner {
+			if (!options.NoSpinner || !options.Silence) && !sf {
 				s.Prefix = " "
 				s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(tt) + " Tasks][0%] Parallel scanning from pipe"
 				options.SpinnerObject = s
@@ -59,7 +64,6 @@ var pipeCmd = &cobra.Command{
 			tasks := make(chan model.MassJob)
 			options.NowURL = 0
 			concurrency, _ := cmd.Flags().GetInt("mass-worker")
-			mutex := &sync.Mutex{}
 			for task := 0; task < concurrency; task++ {
 				wg.Add(1)
 				go func() {
@@ -67,10 +71,12 @@ var pipeCmd = &cobra.Command{
 					for kv := range tasks {
 						k := kv.Name
 						v := kv.URLs
-						printing.DalLog("SYSTEM-M", "Parallel testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", options)
+						if (!options.NoSpinner || !options.Silence) && !sf {
+							printing.DalLog("SYSTEM-M", "Parallel testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", options)
+						}
 						for i := range v {
 							_, _ = scanning.Scan(v[i], options, strconv.Itoa(len(v)))
-							if !options.NoSpinner {
+							if (!options.NoSpinner || !options.Silence) && !sf {
 								mutex.Lock()
 								options.NowURL = options.NowURL + 1
 								percent := fmt.Sprintf("%0.2f%%", float64(options.NowURL)/float64(tt)*100)
@@ -95,13 +101,28 @@ var pipeCmd = &cobra.Command{
 			}
 		} else {
 			options.AllURLS = len(targets)
+			s := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
+			if (!options.NoSpinner || !options.Silence) && !sf {
+				s.Prefix = " "
+				s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][0%] Multiple scanning from pipe"
+				options.SpinnerObject = s
+				if !options.NoColor {
+					s.Color("red", "bold")
+				}
+				s.Start()
+			}
 			for i := range targets {
 				options.NowURL = i + 1
 				_, _ = scanning.Scan(targets[i], options, strconv.Itoa(i))
+				if (!options.NoSpinner || !options.Silence) && !sf {
+					mutex.Lock()
+					options.NowURL = options.NowURL + 1
+					percent := fmt.Sprintf("%0.2f%%", float64(options.NowURL)/float64(options.AllURLS)*100)
+					s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][" + percent + "] Multiple scanning from pipe"
+					mutex.Unlock()
+				}
 			}
-
 		}
-
 	},
 }
 
@@ -109,5 +130,6 @@ func init() {
 	rootCmd.AddCommand(pipeCmd)
 	pipeCmd.Flags().Bool("multicast", false, "Parallel scanning N*Host mode (show only poc code)")
 	pipeCmd.Flags().Bool("mass", false, "Parallel scanning N*Host mode (show only poc code)")
+	pipeCmd.Flags().Bool("silence-force", false, "Only print PoC (not print progress)")
 	pipeCmd.Flags().Int("mass-worker", 10, "Parallel worker of --mass and --multicast option")
 }
