@@ -14,6 +14,7 @@ func isAllowType(contentType string) bool {
 		"image/png",
 		"image/bmp",
 		"image/gif",
+		"application/rss+xml",
 	}
 	for _, n := range notScanningType {
 		if strings.Contains(contentType, n) {
