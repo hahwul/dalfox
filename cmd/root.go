@@ -22,7 +22,7 @@ var ignoreReturn, miningWord, method, customAlertValue, customAlertType, remoteP
 var timeout, concurrence, delay int
 var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, onlyCustomPayload, debug, useDeepDXSS, outputAll bool
 var options model.Options
-var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV, skipGrep, skipHeadless bool
+var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV, skipGrep, skipHeadless, wafEvasion bool
 var onlyPoC, foundActionShell string
 
 var rootCmd = &cobra.Command{
@@ -93,6 +93,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&skipHeadless, "skip-headless", false, "Skipping headless browser base scanning[DOM XSS and inJS verify]")
 	rootCmd.PersistentFlags().BoolVar(&useDeepDXSS, "deep-domxss", false, "DOM XSS Testing with more payloads on headless [so slow]")
 	rootCmd.PersistentFlags().BoolVar(&outputAll, "output-all", false, "All log write mode (-o or stdout)")
+	rootCmd.PersistentFlags().BoolVar(&wafEvasion, "waf-evasion", false, "Avoid blocking by adjusting the speed when detecting WAF (worker=1 delay=3s)")
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -143,6 +144,8 @@ func initConfig() {
 		UseDeepDXSS:       useDeepDXSS,
 		OnlyPoC:           onlyPoC,
 		OutputAll:         outputAll,
+		WAF:               false,
+		WAFEvasion:        wafEvasion,
 	}
 	// var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV bool
 

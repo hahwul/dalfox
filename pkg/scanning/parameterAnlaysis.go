@@ -186,6 +186,8 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	concurrency := options.Concurrence
 	paramsQue := make(chan string)
 	miningDictCount := 0
+	waf := false
+	wafName := ""
 	mutex := &sync.Mutex{}
 	for i := 0; i < concurrency; i++ {
 		wgg.Add(1)
@@ -197,12 +199,25 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 					var code string
 					rl.Block(tempURL.Host)
 					resbody, resp, _, vrs, _ := SendReq(tempURL, "DalFox", options)
+					wafCheck, wafN := checkWAF(resp.Header, resbody)
+					if wafCheck {
+						mutex.Lock()
+						if !waf {
+							waf = true
+							wafName = wafN
+							if options.WAFEvasion {
+								options.Concurrence = 1
+								options.Delay = 3
+								printing.DalLog("INFO", "Set worker=1, delay=3s for WAF-Evasion", options)
+							}
+						}
+						mutex.Unlock()
+					}
 					_, lineSum := verification.VerifyReflectionWithLine(resbody, "DalFox")
 					if miningCheckerLine == lineSum {
 						vrs = false
 					}
 					if vrs {
-
 						code = CodeView(resbody, "DalFox")
 						code = code[:len(code)-5]
 						pointer := optimization.Abstraction(resbody, "DalFox")
@@ -349,9 +364,12 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 
 	close(paramsDataQue)
 	wggg.Wait()
-
 	if miningDictCount != 0 {
 		printing.DalLog("INFO", "Found "+strconv.Itoa(miningDictCount)+" testing point in Dictionary base paramter mining", options)
+	}
+	if waf {
+		printing.DalLog("INFO", "Found WAF: "+wafName, options)
+		options.WAF = true
 	}
 	return params
 }
