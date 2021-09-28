@@ -347,10 +347,10 @@ func checkWAF(header http.Header, body string) (bool, string) {
 		}
 		if p.Header != "" {
 			for k, v := range header {
-				km, _ := regexp.MatchString(k, body)
+				km, _ := regexp.MatchString(p.Header, k)
 				vm := false
 				for _, vh := range v {
-					headerValueMatch, _ := regexp.MatchString(vh, body)
+					headerValueMatch, _ := regexp.MatchString(p.Header, vh)
 					if headerValueMatch {
 						vm = true
 					}
