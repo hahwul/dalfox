@@ -198,20 +198,22 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 					tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA", "toAppend", "NaN", options)
 					var code string
 					rl.Block(tempURL.Host)
-					resbody, resp, _, vrs, _ := SendReq(tempURL, "DalFox", options)
-					wafCheck, wafN := checkWAF(resp.Header, resbody)
-					if wafCheck {
-						mutex.Lock()
-						if !waf {
-							waf = true
-							wafName = wafN
-							if options.WAFEvasion {
-								options.Concurrence = 1
-								options.Delay = 3
-								printing.DalLog("INFO", "Set worker=1, delay=3s for WAF-Evasion", options)
+					resbody, resp, _, vrs, err := SendReq(tempURL, "DalFox", options)
+					if err == nil {
+						wafCheck, wafN := checkWAF(resp.Header, resbody)
+						if wafCheck {
+							mutex.Lock()
+							if !waf {
+								waf = true
+								wafName = wafN
+								if options.WAFEvasion {
+									options.Concurrence = 1
+									options.Delay = 3
+									printing.DalLog("INFO", "Set worker=1, delay=3s for WAF-Evasion", options)
+								}
 							}
+							mutex.Unlock()
 						}
-						mutex.Unlock()
 					}
 					_, lineSum := verification.VerifyReflectionWithLine(resbody, "DalFox")
 					if miningCheckerLine == lineSum {
@@ -250,7 +252,6 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 								turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA-URL", "toAppend", "NaN", options)
 								rl.Block(tempURL.Host)
 								_, _, _, vrs, _ := SendReq(turl, "dalfox"+char, options)
-								_ = resp
 								if vrs {
 									mutex.Lock()
 									params[k] = append(params[k], char)
