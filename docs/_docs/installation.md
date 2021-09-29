@@ -28,9 +28,9 @@ Please check this documents [https://snapcraft.io/docs/installing-snapd](https:/
 ```
 
 ## From the source (developement version)
-### Use to `go get`
+### Use to `go install`
 ```
-▶ GO111MODULE=on go get -v github.com/hahwul/dalfox/v2
+▶ GO111MODULE=on go install github.com/hahwul/dalfox/v2@latest
 ```
 The update is the same as the installation method.
 
