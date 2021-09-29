@@ -64,7 +64,7 @@ And the various options required for the testing :D
 ## How to Install
 ### From source
 ```
-▶ GO111MODULE=on go get -v github.com/hahwul/dalfox/v2
+▶ GO111MODULE=on go install github.com/hahwul/dalfox/v2@latest
 ```
 
 ### Using homebrew (macos)
