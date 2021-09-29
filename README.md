@@ -63,19 +63,25 @@ And the various options required for the testing :D
 
 ## How to Install
 ### From source
+**go1.17**
 ```
-▶ GO111MODULE=on go install github.com/hahwul/dalfox/v2@latest
+go install github.com/hahwul/dalfox/v2@latest
+```
+
+**go1.16**
+```
+GO111MODULE=on go get github.com/hahwul/dalfox/v2
 ```
 
 ### Using homebrew (macos)
 ```
-▶ brew tap hahwul/dalfox
-▶ brew install dalfox
+brew tap hahwul/dalfox
+brew install dalfox
 ```
 
 ### Using snapcraft (ubuntu)
 ```
-▶ sudo snap install dalfox
+sudo snap install dalfox
 ```
 
 More information? please read [Installation guide](https://dalfox.hahwul.com/docs/installation/)
