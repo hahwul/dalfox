@@ -36,28 +36,27 @@ var fileCmd = &cobra.Command{
 				ff, err := readLinesOrLiteral(args[0])
 				_ = err
 				var path, body, host, target string
-				var headers []string
 				bodyswitch := false
 				for index, line := range ff {
 					if index == 0 {
 						parse := strings.Split(line, " ")
+						options.Method = parse[0]
 						path = parse[1]
-					}
-					_ = headers
-					if strings.Index(line, "Host: ") != -1 {
-						host = line[6:]
-					}
-					if strings.Index(line, "Cookie: ") != -1 {
-						options.Cookie = line[9:]
-					}
-					if strings.Index(line, "User-Agent: ") != -1 {
-						options.UserAgent = line[12:]
-					}
-					if bodyswitch {
-						body = body + line
-					}
-					if len(line) == 0 {
-						bodyswitch = true
+					} else {
+						if strings.Index(line, "Host: ") != -1 {
+							host = line[6:]
+						} else {
+							parse := strings.Split(line,":")
+							if len(parse) > 1 {
+								options.Header = append(options.Header, line)
+							}
+						}
+						if bodyswitch {
+							body = body + line
+						}
+						if len(line) == 0 {
+							bodyswitch = true
+						}
 					}
 				}
 				options.Data = body
