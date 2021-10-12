@@ -40,8 +40,13 @@ var fileCmd = &cobra.Command{
 				for index, line := range ff {
 					if index == 0 {
 						parse := strings.Split(line, " ")
-						options.Method = parse[0]
-						path = parse[1]
+						if len(parse) > 1 {
+							options.Method = parse[0]
+							path = parse[1]
+						} else {
+							printing.DalLog("ERROR", "HTTP Raw Request Format Error", options)
+							os.Exit(1)
+						}
 					} else {
 						if strings.Index(line, "Host: ") != -1 {
 							host = line[6:]
@@ -64,6 +69,10 @@ var fileCmd = &cobra.Command{
 				if strings.Index(path, "http") == 0 {
 					target = path
 				} else {
+					if host == "" {
+						printing.DalLog("ERROR", "HTTP Raw Request Format Error - Not found Host", options)
+						os.Exit(1)
+					}
 					if http {
 						target = "http://" + host + path
 					} else {
