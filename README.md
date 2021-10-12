@@ -38,6 +38,7 @@ Mode: `url` `sxss` `pipe` `file` `server` `payload`
 |               | BAV analysis                  | - Testing BAV(Basic Another Vulnerability) ,  e.g `sqli` `ssti` `open-redirects`, `crlf`    |
 |               | Parameter Mining              | - Find new param with Dictonary attack (default is [GF-Patterns](https://github.com/1ndianl33t/Gf-Patterns))<br />- Support custom dictonary file (`--mining-dict-word`)<br />- Find new param with DOM<br />- Use remote wordlist to mining (`--remote-wordlists`) |
 |               | Built-in Grepping             | - It Identify the basic info leak of SSTi, Credential, SQL Error, and so on |
+|               | WAF Detection and Evasion     | - Detect to WAF(Web Application Firewall). <br />- if found waf and using special flag, evasion using slow request<br />- `--waf-evasion` |
 | Scanning      | XSS Scanning                  | - Reflected XSS / Stored XSS / DOM XSS<br />- DOM base verifying<br />- Headless base verifying<br />- Blind XSS testing with param, header(`-b` , `--blind` options)<br />- Only testing selected parameters (`-p`, `--param`)<br />- Only testing parameter analysis (`--only-discovery`) |
 |               | Friendly Pipeline             | - Single url mode (`dalfox url`)<br />- From file mode (`dalfox file urls.txt`)<br />- From IO(pipeline) mode (`dalfox pipe`)<br />- From raw http request file mode (`dalfox file raw.txt --rawdata`) |
 |               | Optimizaion query of payloads | - Check the injection point through abstraction and generated the fit payload.<br />- Eliminate unnecessary payloads based on badchar |
@@ -63,19 +64,25 @@ And the various options required for the testing :D
 
 ## How to Install
 ### From source
+**go1.17**
 ```
-▶ GO111MODULE=on go get -v github.com/hahwul/dalfox/v2
+go install github.com/hahwul/dalfox/v2@latest
+```
+
+**go1.16**
+```
+GO111MODULE=on go get github.com/hahwul/dalfox/v2
 ```
 
 ### Using homebrew (macos)
 ```
-▶ brew tap hahwul/dalfox
-▶ brew install dalfox
+brew tap hahwul/dalfox
+brew install dalfox
 ```
 
 ### Using snapcraft (ubuntu)
 ```
-▶ sudo snap install dalfox
+sudo snap install dalfox
 ```
 
 More information? please read [Installation guide](https://dalfox.hahwul.com/docs/installation/)

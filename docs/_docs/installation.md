@@ -8,12 +8,12 @@ Homebrew is the package manager for MacOS(or linux). On devices using homebrew, 
 
 ### Install homebrew
 ```shell
-▶ /bin/bash -c "▶(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)"
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)"
 ```
 ### Install dalfox
 ```shell
-▶ brew tap hahwul/dalfox
-▶ brew install dalfox
+brew tap hahwul/dalfox
+brew install dalfox
 ```
 
 ## Using Snapcraft
@@ -24,47 +24,34 @@ Please check this documents [https://snapcraft.io/docs/installing-snapd](https:/
 
 ### Install dalfox
 ```
-▶ sudo snap install dalfox
+sudo snap install dalfox
 ```
 
-## From the source (developement version)
-### Use to `go get`
+## Using go-install or go-get
+**go1.17**
 ```
-▶ GO111MODULE=on go get -v github.com/hahwul/dalfox/v2
+go install github.com/hahwul/dalfox/v2@latest
 ```
-The update is the same as the installation method.
 
-### Use to `git clone`, `go build` and `go install`
-
+**go1.16**
 ```
-// clone repo (for first-time installations)
-▶ git clone https://github.com/hahwul/dalfox
-
-// if you update dalfox,
-// git pull -v
-
-// if you install GOPATH
-▶ go install
-
-// build binary
-▶ go build
+GO111MODULE=on go get github.com/hahwul/dalfox/v2
 ```
 
 ## Using Docker
 Dalfox provides docker images by version. It can be used lightly with less capacity.
 ```
-▶ docker pull hahwul/dalfox:latest
+docker pull hahwul/dalfox:latest
 ```
 
 if you installed it, using like this command
 ```
-▶ docker run -it hahwul/dalfox:latest /app/dalfox url https://www.hahwul.com
+docker run -it hahwul/dalfox:latest /app/dalfox url https://www.hahwul.com
 ```
 
 or live in docker
 
 ```
-▶ docker run -it hahwul/dalfox:latest /bin/bash
-▶ ./dalfox
-run dalfox on docker
+docker run -it hahwul/dalfox:latest /bin/bash
+./dalfox
 ```
