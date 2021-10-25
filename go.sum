@@ -307,8 +307,8 @@ github.com/swaggo/echo-swagger v1.1.4/go.mod h1:JaipWDPqOBMwM40W6qz0o07lnPOxrhDk
 github.com/swaggo/files v0.0.0-20190704085106-630677cd5c14 h1:PyYN9JH5jY9j6av01SpfRMb+1DWg/i3MbGOKPxJ2wjM=
 github.com/swaggo/files v0.0.0-20190704085106-630677cd5c14/go.mod h1:gxQT6pBGRuIGunNf/+tSOB5OHvguWi8Tbt82WOkf35E=
 github.com/swaggo/swag v1.7.0/go.mod h1:BdPIL73gvS9NBsdi7M1JOxLvlbfvNRaBP8m6WT6Aajo=
-github.com/swaggo/swag v1.7.3 h1:ucB7irEdRrhjmW+Z1Ss4GjO68oPKQFjSgOR8BCAvcbU=
-github.com/swaggo/swag v1.7.3/go.mod h1:zD8h6h4SPv7t3l+4BKdRquqW1ASWjKZgT6Qv9z3kNqI=
+github.com/swaggo/swag v1.7.4 h1:up+ixy8yOqJKiFcuhMgkuYuF4xnevuhnFAXXF8OSfNg=
+github.com/swaggo/swag v1.7.4/go.mod h1:zD8h6h4SPv7t3l+4BKdRquqW1ASWjKZgT6Qv9z3kNqI=
 github.com/tylerb/graceful v1.2.15 h1:B0x01Y8fsJpogzZTkDg6BDi6eMf03s01lEKGdrv83oA=
 github.com/tylerb/graceful v1.2.15/go.mod h1:LPYTbOYmUTdabwRt0TGhLllQ0MUNbs0Y5q1WXJOI9II=
 github.com/urfave/cli/v2 v2.3.0/go.mod h1:LJmUH05zAU44vOAcrfzZQKsZbVcdbOG8rtL3/XcUArI=
