@@ -6,7 +6,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var trigger string
+var trigger, requestMethod string
 var sequence int
 
 // sxssCmd represents the sxss command
@@ -19,6 +19,7 @@ var sxssCmd = &cobra.Command{
 		if len(args) >= 1 {
 			options.Trigger = trigger
 			options.Sequence = sequence
+			options.RequestMethod = requestMethod
 			if options.Trigger != "" {
 				printing.DalLog("SYSTEM", "Using Stored XSS mode", options)
 				_, _ = scanning.Scan(args[0], options, "Single")
@@ -34,6 +35,7 @@ var sxssCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(sxssCmd)
+	sxssCmd.PersistentFlags().StringVar(&requestMethod , "request-method" , "GET" , "Request method send to the server" )
 	sxssCmd.PersistentFlags().StringVar(&trigger, "trigger", "", "Checking this url after inject sxss code\n  * Example: --trigger=https://~~/profile")
 	sxssCmd.PersistentFlags().IntVar(&sequence, "sequence", -1, "Set sequence to first number\n  * Example: --trigger=https://~/view?no=SEQNC --sequence=3")
 }
