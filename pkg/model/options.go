@@ -47,7 +47,7 @@ type Options struct {
 	MiningWordlist    string `json:"mining-dict-word"`
 	NoColor           bool   `json:"no-color"`
 	Method            string `json:"method"`
-	RequestMethod	  string `json:"request-method"`
+	RequestMethod     string `json:"request-method"`
 	NoSpinner         bool   `json:"no-spinner"`
 	NoBAV             bool   `json:"no-bav"`
 	ServerHost        string
