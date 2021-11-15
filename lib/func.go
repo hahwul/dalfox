@@ -62,6 +62,9 @@ func Initialize(target Target, options Options) model.Options {
 			newOptions.UniqParam = append(newOptions.UniqParam, v)
 		}
 	}
+	if target.Method != "" {
+		newOptions.Method = target.Method
+	}
 	if options.Cookie != "" {
 		newOptions.Cookie = options.Cookie
 	}
