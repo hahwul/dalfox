@@ -33,6 +33,7 @@ permalink: /docs/flags/
                                     * Example: --ignore-return 302,403,404
 -X, --method string               Force overriding HTTP Method
                                     * Example: -X PUT (default "GET")
+    --request-method              Use custom method for --trigger url ( default "GET" )
     --mining-dict                 Find new parameter with dictionary attack, default is Gf-Patterns=>XSS (default true)
 -W, --mining-dict-word string     Custom wordlist file for param mining
                                     * Example: --mining-dict-word word.txt

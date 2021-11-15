@@ -201,6 +201,8 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 
 	if options.Trigger != "" {
 		var treq *http.Request
+		var method = options.Method
+		options.Method = options.RequestMethod
 		if options.Sequence < 0 {
 			treq = optimization.GenerateNewRequest(options.Trigger, "", options)
 		} else {
@@ -209,6 +211,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 			treq = optimization.GenerateNewRequest(triggerURL, "", options)
 			options.Sequence = options.Sequence + 1
 		}
+		options.Method = method 
 		netTransport := getTransport(options)
 		client := &http.Client{
 			Timeout:   time.Duration(options.Timeout) * time.Second,

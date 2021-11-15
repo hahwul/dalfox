@@ -11,3 +11,9 @@ e.g
 ```
 ▶ dalfox sxss https://test.url.local/update_profile -d "nickname=abc" --trigger "https://test.url.local/my_profile"
 ```
+
+send POST request to Store the XSS payload and verify it working of the payload with an GET request
+```
+▶ dalfox sxss -X POST https://test.url.local/update_profile -d "nickname=abc" --trigger "https://test.url.local/my_profile" --reqeust-method GET
+```
+
