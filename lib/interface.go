@@ -20,6 +20,7 @@ type Options struct {
 	Grep             string   `json:"grep"`
 	IgnoreReturn     string   `json:"ignore-return"`
 	Trigger          string   `json:"trigger"`
+	TriggerMethod    string   `json:"request-method"`
 	Timeout          int      `json:"timeout"`
 	Concurrence      int      `json:"worker"`
 	Delay            int      `json:"delay"`
