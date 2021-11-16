@@ -1,6 +1,7 @@
 package scanning
 
 import (
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -623,22 +624,29 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 							if CheckXSSWithHeadless(v, options) {
 								mutex.Lock()
 								printing.DalLog("VULN", "Triggered XSS Payload (found dialog in headless)", options)
+								poc := model.PoC{
+									Type:       "V",
+									InjectType: "headless",
+									Method:     "GET",
+									Data:       v,
+									Param:      "",
+									Payload:    "",
+									Evidence:   "",
+								}
 								if showV {
 									if options.Format == "json" {
-										printing.DalLog("PRINT", "{\"type\":\"DOM\",\"evidence\":\"headless verify\",\"poc\":\""+v+"\"},", options)
+										pocj, _ := json.Marshal(poc)
+										printing.DalLog("PRINT", string(pocj)+",", options)
 									} else {
-										printing.DalLog("PRINT", "[V][GET] "+v, options)
+										pocs := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
+										printing.DalLog("PRINT", pocs, options)
 									}
 								}
 								if options.FoundAction != "" {
 									foundAction(options, target, v, "VULN")
 								}
-								rst := &model.Issue{
-									Type:  "verify code",
-									Param: "DOM",
-									PoC:   v,
-								}
-								scanObject.Results = append(scanObject.Results, *rst)
+								scanObject.Results = append(scanObject.Results, poc)
+								scanResult.PoCs = append(scanResult.PoCs, poc)
 								mutex.Unlock()
 							}
 							queryCount = queryCount + 1
@@ -692,35 +700,47 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 													if CheckXSSWithHeadless(k.URL.String(), options) {
 														mutex.Lock()
 														printing.DalLog("VULN", "Triggered XSS Payload (found dialog in headless)", options)
+														poc := model.PoC{
+															Type:       "V",
+															InjectType: v["type"],
+															Method:     k.Method,
+															Data:       k.URL.String(),
+															Param:      v["param"],
+															Payload:    "",
+															Evidence:   "",
+														}
 														if showV {
 															if options.Format == "json" {
-																printing.DalLog("PRINT", "{\"type\":\""+v["type"]+"\",\"evidence\":\"headless verify\",\"poc\":\""+k.URL.String()+"\"},", options)
+																pocj, _ := json.Marshal(poc)
+																printing.DalLog("PRINT", string(pocj)+",", options)
 															} else {
-																printing.DalLog("PRINT", "[V]["+k.Method+"]["+v["type"]+"] "+k.URL.String(), options)
+																pocs := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
+																printing.DalLog("PRINT", pocs, options)
 															}
 														}
 														vStatus[v["param"]] = true
 														if options.FoundAction != "" {
 															foundAction(options, target, k.URL.String(), "VULN")
 														}
-														rst := &model.Issue{
-															Type:  "verify code",
-															Param: v["param"],
-															PoC:   k.URL.String(),
-														}
-														scanObject.Results = append(scanObject.Results, *rst)
+														scanObject.Results = append(scanObject.Results, poc)
+														scanResult.PoCs = append(scanResult.PoCs, poc)
 														mutex.Unlock()
 													} else {
 														mutex.Lock()
 														if options.FoundAction != "" {
 															foundAction(options, target, k.URL.String(), "WEAK")
 														}
-														rst := &model.Issue{
-															Type:  "found code",
-															Param: v["param"],
-															PoC:   k.URL.String(),
+														poc := model.PoC{
+															Type:       "R",
+															InjectType: v["type"],
+															Method:     k.Method,
+															Data:       k.URL.String(),
+															Param:      v["param"],
+															Payload:    "",
+															Evidence:   "",
 														}
-														scanObject.Results = append(scanObject.Results, *rst)
+														scanObject.Results = append(scanObject.Results, poc)
+														scanResult.PoCs = append(scanResult.PoCs, poc)
 														mutex.Unlock()
 													}
 												} else {
@@ -728,22 +748,29 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 													code := CodeView(resbody, v["payload"])
 													printing.DalLog("WEAK", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], options)
 													printing.DalLog("CODE", code, options)
+													poc := model.PoC{
+														Type:       "R",
+														InjectType: v["type"],
+														Method:     k.Method,
+														Data:       k.URL.String(),
+														Param:      v["param"],
+														Payload:    v["payload"],
+														Evidence:   code,
+													}
 													if showR {
 														if options.Format == "json" {
-															printing.DalLog("PRINT", "{\"type\":\""+v["type"]+"\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
+															pocj, _ := json.Marshal(poc)
+															printing.DalLog("PRINT", string(pocj)+",", options)
 														} else {
-															printing.DalLog("PRINT", "[R]["+k.Method+"]["+v["type"]+"] "+k.URL.String(), options)
+															pocs := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
+															printing.DalLog("PRINT", pocs, options)
 														}
 													}
 													if options.FoundAction != "" {
 														foundAction(options, target, k.URL.String(), "WEAK")
 													}
-													rst := &model.Issue{
-														Type:  "found code",
-														Param: v["param"],
-														PoC:   k.URL.String(),
-													}
-													scanObject.Results = append(scanObject.Results, *rst)
+													scanObject.Results = append(scanObject.Results, poc)
+													scanResult.PoCs = append(scanResult.PoCs, poc)
 													mutex.Unlock()
 												}
 											}
@@ -756,23 +783,30 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											code := CodeView(resbody, v["payload"])
 											printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], options)
 											printing.DalLog("CODE", code, options)
+											poc := model.PoC{
+												Type:       "V",
+												InjectType: v["type"],
+												Method:     k.Method,
+												Data:       k.URL.String(),
+												Param:      v["param"],
+												Payload:    v["payload"],
+												Evidence:   code,
+											}
 											if showV {
 												if options.Format == "json" {
-													printing.DalLog("PRINT", "{\"type\":\""+v["type"]+"\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", options)
+													pocj, _ := json.Marshal(poc)
+													printing.DalLog("PRINT", string(pocj)+",", options)
 												} else {
-													printing.DalLog("PRINT", "[V]["+k.Method+"]["+v["type"]+"] "+k.URL.String(), options)
+													pocs := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
+													printing.DalLog("PRINT", pocs, options)
 												}
 											}
 											vStatus[v["param"]] = true
 											if options.FoundAction != "" {
 												foundAction(options, target, k.URL.String(), "VULN")
 											}
-											rst := &model.Issue{
-												Type:  "verify code",
-												Param: v["param"],
-												PoC:   k.URL.String(),
-											}
-											scanObject.Results = append(scanObject.Results, *rst)
+											scanObject.Results = append(scanObject.Results, poc)
+											scanResult.PoCs = append(scanResult.PoCs, poc)
 										}
 										mutex.Unlock()
 									} else if vrs {
@@ -781,28 +815,29 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											code := CodeView(resbody, v["payload"])
 											printing.DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"], options)
 											printing.DalLog("CODE", code, options)
+											poc := model.PoC{
+												Type:       "R",
+												InjectType: v["type"],
+												Method:     k.Method,
+												Data:       k.URL.String(),
+												Param:      v["param"],
+												Payload:    v["payload"],
+												Evidence:   code,
+											}
 											if showR {
 												if options.Format == "json" {
-													printing.DalLog("PRINT", "{\"type\":\""+v["type"]+"\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
+													pocj, _ := json.Marshal(poc)
+													printing.DalLog("PRINT", string(pocj)+",", options)
 												} else {
-													poc := model.PoC{
-														Type:   "R",
-														Method: k.Method,
-														Data:   k.URL.String(),
-													}
-													scanResult.PoCs = append(scanResult.PoCs, poc)
-													printing.DalLog("PRINT", "[R]["+k.Method+"]["+v["type"]+"] "+k.URL.String(), options)
+													pocs := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
+													printing.DalLog("PRINT", pocs, options)
 												}
 											}
 											if options.FoundAction != "" {
 												foundAction(options, target, k.URL.String(), "WEAK")
 											}
-											rst := &model.Issue{
-												Type:  "found code",
-												Param: v["param"],
-												PoC:   k.URL.String(),
-											}
-											scanObject.Results = append(scanObject.Results, *rst)
+											scanObject.Results = append(scanObject.Results, poc)
+											scanResult.PoCs = append(scanResult.PoCs, poc)
 										}
 										mutex.Unlock()
 									}
@@ -813,29 +848,30 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											code := CodeView(resbody, v["payload"])
 											printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], options)
 											printing.DalLog("CODE", code, options)
+											poc := model.PoC{
+												Type:       "V",
+												InjectType: v["type"],
+												Method:     k.Method,
+												Data:       k.URL.String(),
+												Param:      v["param"],
+												Payload:    v["payload"],
+												Evidence:   code,
+											}
 											if showV {
 												if options.Format == "json" {
-													printing.DalLog("PRINT", "{\"type\":\""+v["type"]+"\",\"evidence\":\"dom verify\",\"poc\":\""+k.URL.String()+"\"},", options)
+													pocj, _ := json.Marshal(poc)
+													printing.DalLog("PRINT", string(pocj)+",", options)
 												} else {
-													poc := model.PoC{
-														Type:   "V",
-														Method: k.Method,
-														Data:   k.URL.String(),
-													}
-													scanResult.PoCs = append(scanResult.PoCs, poc)
-													printing.DalLog("PRINT", "[V]["+k.Method+"]["+v["type"]+"] "+k.URL.String(), options)
+													pocs := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
+													printing.DalLog("PRINT", pocs, options)
 												}
 											}
 											vStatus[v["param"]] = true
 											if options.FoundAction != "" {
 												foundAction(options, target, k.URL.String(), "VULN")
 											}
-											rst := &model.Issue{
-												Type:  "verify code",
-												Param: v["param"],
-												PoC:   k.URL.String(),
-											}
-											scanObject.Results = append(scanObject.Results, *rst)
+											scanObject.Results = append(scanObject.Results, poc)
+											scanResult.PoCs = append(scanResult.PoCs, poc)
 										}
 										mutex.Unlock()
 									} else if vrs {
@@ -844,32 +880,32 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											code := CodeView(resbody, v["payload"])
 											printing.DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"], options)
 											printing.DalLog("CODE", code, options)
+											poc := model.PoC{
+												Type:       "R",
+												InjectType: v["type"],
+												Method:     k.Method,
+												Data:       k.URL.String(),
+												Param:      v["param"],
+												Payload:    v["payload"],
+												Evidence:   code,
+											}
 											if showR {
 												if options.Format == "json" {
-													printing.DalLog("PRINT", "{\"type\":\""+v["type"]+"\",\"evidence\":\"reflected\",\"poc\":\""+k.URL.String()+"\"},", options)
+													pocj, _ := json.Marshal(poc)
+													printing.DalLog("PRINT", string(pocj)+",", options)
 												} else {
-													poc := model.PoC{
-														Type:   "R",
-														Method: k.Method,
-														Data:   k.URL.String(),
-													}
-													scanResult.PoCs = append(scanResult.PoCs, poc)
-													printing.DalLog("PRINT", "[R]["+k.Method+"]["+v["type"]+"] "+k.URL.String(), options)
+													pocs := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
+													printing.DalLog("PRINT", pocs, options)
 												}
 											}
 											if options.FoundAction != "" {
 												foundAction(options, target, k.URL.String(), "WEAK")
 											}
-											rst := &model.Issue{
-												Type:  "found code",
-												Param: v["param"],
-												PoC:   k.URL.String(),
-											}
-											scanObject.Results = append(scanObject.Results, *rst)
+											scanObject.Results = append(scanObject.Results, poc)
+											scanResult.PoCs = append(scanResult.PoCs, poc)
 										}
 										mutex.Unlock()
 									}
-
 								}
 							}
 						}

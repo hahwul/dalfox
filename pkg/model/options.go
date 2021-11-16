@@ -81,12 +81,12 @@ type Scan struct {
 	URL     string
 	ScanID  string
 	Logs    []string
-	Results []Issue
+	Results []PoC
 }
 
 // Issue is struct of issue
 type Issue struct {
 	Type  string `json:"type"`
 	Param string `json:"param"`
-	PoC   string `json:"poc"`
+	PoC   PoC    `json:"poc"`
 }

@@ -6,13 +6,14 @@ import (
 
 // PoC is PoC struct for Result
 type PoC struct {
-	Type     string `json:"type"`
-	PoCType  string `json:"poc_type"`
-	Method   string `json:"method"`
-	Data     string `json:"data"`
-	Param    string `json:"param"`
-	Payload  string `json:"payload"`
-	Evidence string `json:"evidence"`
+	Type       string `json:"type"`
+	InjectType string `json:"inject_type"`
+	PoCType    string `json:"poc_type"`
+	Method     string `json:"method"`
+	Data       string `json:"data"`
+	Param      string `json:"param"`
+	Payload    string `json:"payload"`
+	Evidence   string `json:"evidence"`
 }
 
 // Result is struct for library and cli application

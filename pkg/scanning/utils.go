@@ -67,7 +67,7 @@ func indexOf(element string, data []string) int {
 	return -1 //not found.
 }
 
-func duplicatedResult(result []model.Issue, rst model.Issue) bool {
+func duplicatedResult(result []model.PoC, rst model.PoC) bool {
 	for _, v := range result {
 		if v.Type == rst.Type {
 			return true
