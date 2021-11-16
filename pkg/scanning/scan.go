@@ -709,6 +709,15 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 															Payload:    "",
 															Evidence:   "",
 														}
+														body, err := k.GetBody()
+														if err == nil {
+															reqBody, err := ioutil.ReadAll(body)
+															if err == nil {
+																if string(reqBody) != "" {
+																	poc.Data = poc.Data + " -d " + string(reqBody)
+																}
+															}
+														}
 														if showV {
 															if options.Format == "json" {
 																pocj, _ := json.Marshal(poc)
@@ -739,6 +748,15 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 															Payload:    "",
 															Evidence:   "",
 														}
+														body, err := k.GetBody()
+														if err == nil {
+															reqBody, err := ioutil.ReadAll(body)
+															if err == nil {
+																if string(reqBody) != "" {
+																	poc.Data = poc.Data + " -d " + string(reqBody)
+																}
+															}
+														}
 														scanObject.Results = append(scanObject.Results, poc)
 														scanResult.PoCs = append(scanResult.PoCs, poc)
 														mutex.Unlock()
@@ -756,6 +774,15 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 														Param:      v["param"],
 														Payload:    v["payload"],
 														Evidence:   code,
+													}
+													body, err := k.GetBody()
+													if err == nil {
+														reqBody, err := ioutil.ReadAll(body)
+														if err == nil {
+															if string(reqBody) != "" {
+																poc.Data = poc.Data + " -d " + string(reqBody)
+															}
+														}
 													}
 													if showR {
 														if options.Format == "json" {
@@ -792,6 +819,15 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Payload:    v["payload"],
 												Evidence:   code,
 											}
+											body, err := k.GetBody()
+											if err == nil {
+												reqBody, err := ioutil.ReadAll(body)
+												if err == nil {
+													if string(reqBody) != "" {
+														poc.Data = poc.Data + " -d " + string(reqBody)
+													}
+												}
+											}
 											if showV {
 												if options.Format == "json" {
 													pocj, _ := json.Marshal(poc)
@@ -823,6 +859,15 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Param:      v["param"],
 												Payload:    v["payload"],
 												Evidence:   code,
+											}
+											body, err := k.GetBody()
+											if err == nil {
+												reqBody, err := ioutil.ReadAll(body)
+												if err == nil {
+													if string(reqBody) != "" {
+														poc.Data = poc.Data + " -d " + string(reqBody)
+													}
+												}
 											}
 											if showR {
 												if options.Format == "json" {
@@ -857,6 +902,15 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Payload:    v["payload"],
 												Evidence:   code,
 											}
+											body, err := k.GetBody()
+											if err == nil {
+												reqBody, err := ioutil.ReadAll(body)
+												if err == nil {
+													if string(reqBody) != "" {
+														poc.Data = poc.Data + " -d " + string(reqBody)
+													}
+												}
+											}
 											if showV {
 												if options.Format == "json" {
 													pocj, _ := json.Marshal(poc)
@@ -888,6 +942,15 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Param:      v["param"],
 												Payload:    v["payload"],
 												Evidence:   code,
+											}
+											body, err := k.GetBody()
+											if err == nil {
+												reqBody, err := ioutil.ReadAll(body)
+												if err == nil {
+													if string(reqBody) != "" {
+														poc.Data = poc.Data + " -d " + string(reqBody)
+													}
+												}
 											}
 											if showR {
 												if options.Format == "json" {
