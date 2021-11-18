@@ -711,17 +711,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 															Evidence:   "",
 															CWE:        "CWE-79",
 														}
-														if k.Body != nil {
-															body, err := k.GetBody()
-															if err == nil {
-																reqBody, err := ioutil.ReadAll(body)
-																if err == nil {
-																	if string(reqBody) != "" {
-																		poc.Data = poc.Data + " -d " + string(reqBody)
-																	}
-																}
-															}
-														}
+														poc.Data = MakePoC(poc.Data, k, options)
 
 														if showV {
 															if options.Format == "json" {
@@ -754,17 +744,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 															Evidence:   "",
 															CWE:        "CWE-79",
 														}
-														if k.Body != nil {
-															body, err := k.GetBody()
-															if err == nil {
-																reqBody, err := ioutil.ReadAll(body)
-																if err == nil {
-																	if string(reqBody) != "" {
-																		poc.Data = poc.Data + " -d " + string(reqBody)
-																	}
-																}
-															}
-														}
+														poc.Data = MakePoC(poc.Data, k, options)
 
 														scanObject.Results = append(scanObject.Results, poc)
 														scanResult.PoCs = append(scanResult.PoCs, poc)
@@ -785,17 +765,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 														Evidence:   code,
 														CWE:        "CWE-79",
 													}
-													if k.Body != nil {
-														body, err := k.GetBody()
-														if err == nil {
-															reqBody, err := ioutil.ReadAll(body)
-															if err == nil {
-																if string(reqBody) != "" {
-																	poc.Data = poc.Data + " -d " + string(reqBody)
-																}
-															}
-														}
-													}
+													poc.Data = MakePoC(poc.Data, k, options)
 
 													if showR {
 														if options.Format == "json" {
@@ -833,17 +803,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Evidence:   code,
 												CWE:        "CWE-83",
 											}
-											if k.Body != nil {
-												body, err := k.GetBody()
-												if err == nil {
-													reqBody, err := ioutil.ReadAll(body)
-													if err == nil {
-														if string(reqBody) != "" {
-															poc.Data = poc.Data + " -d " + string(reqBody)
-														}
-													}
-												}
-											}
+											poc.Data = MakePoC(poc.Data, k, options)
 
 											if showV {
 												if options.Format == "json" {
@@ -878,17 +838,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Evidence:   code,
 												CWE:        "CWE-83",
 											}
-											if k.Body != nil {
-												body, err := k.GetBody()
-												if err == nil {
-													reqBody, err := ioutil.ReadAll(body)
-													if err == nil {
-														if string(reqBody) != "" {
-															poc.Data = poc.Data + " -d " + string(reqBody)
-														}
-													}
-												}
-											}
+											poc.Data = MakePoC(poc.Data, k, options)
 
 											if showR {
 												if options.Format == "json" {
@@ -924,17 +874,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Evidence:   code,
 												CWE:        "CWE-79",
 											}
-											if k.Body != nil {
-												body, err := k.GetBody()
-												if err == nil {
-													reqBody, err := ioutil.ReadAll(body)
-													if err == nil {
-														if string(reqBody) != "" {
-															poc.Data = poc.Data + " -d " + string(reqBody)
-														}
-													}
-												}
-											}
+											poc.Data = MakePoC(poc.Data, k, options)
 
 											if showV {
 												if options.Format == "json" {
@@ -969,17 +909,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Evidence:   code,
 												CWE:        "CWE-79",
 											}
-											if k.Body != nil {
-												body, err := k.GetBody()
-												if err == nil {
-													reqBody, err := ioutil.ReadAll(body)
-													if err == nil {
-														if string(reqBody) != "" {
-															poc.Data = poc.Data + " -d " + string(reqBody)
-														}
-													}
-												}
-											}
+											poc.Data = MakePoC(poc.Data, k, options)
 
 											if showR {
 												if options.Format == "json" {

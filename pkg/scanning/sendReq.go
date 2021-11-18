@@ -89,17 +89,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				Evidence:   "",
 				CWE:        "CWE-93",
 			}
-			if req.Body != nil {
-				body, err := req.GetBody()
-				if err == nil {
-					reqBody, err := ioutil.ReadAll(body)
-					if err == nil {
-						if string(reqBody) != "" {
-							poc.Data = poc.Data + " -d " + string(reqBody)
-						}
-					}
-				}
-			}
+			poc.Data = MakePoC(poc.Data, req, options)
 
 			if !duplicatedResult(scanObject.Results, poc) {
 				if payload != "" {
@@ -146,17 +136,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					Evidence:   "",
 					CWE:        "CWE-94",
 				}
-				if req.Body != nil {
-					body, err := req.GetBody()
-					if err == nil {
-						reqBody, err := ioutil.ReadAll(body)
-						if err == nil {
-							if string(reqBody) != "" {
-								poc.Data = poc.Data + " -d " + string(reqBody)
-							}
-						}
-					}
-				}
+				poc.Data = MakePoC(poc.Data, req, options)
 
 				if !duplicatedResult(scanObject.Results, poc) {
 					if payload != "" {
@@ -196,17 +176,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				Evidence:   "",
 				CWE:        "",
 			}
-			if req.Body != nil {
-				body, err := req.GetBody()
-				if err == nil {
-					reqBody, err := ioutil.ReadAll(body)
-					if err == nil {
-						if string(reqBody) != "" {
-							poc.Data = poc.Data + " -d " + string(reqBody)
-						}
-					}
-				}
-			}
+			poc.Data = MakePoC(poc.Data, req, options)
 
 			if !duplicatedResult(scanObject.Results, poc) {
 				if payload != "" {
@@ -255,17 +225,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				Evidence:   "",
 				CWE:        "",
 			}
-			if req.Body != nil {
-				body, err := req.GetBody()
-				if err == nil {
-					reqBody, err := ioutil.ReadAll(body)
-					if err == nil {
-						if string(reqBody) != "" {
-							poc.Data = poc.Data + " -d " + string(reqBody)
-						}
-					}
-				}
-			}
+			poc.Data = MakePoC(poc.Data, req, options)
 
 			if !duplicatedResult(scanObject.Results, poc) {
 				printing.DalLog("GREP", "Found "+k+" via custom grepping / payload: "+payload, options)
