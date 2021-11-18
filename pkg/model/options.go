@@ -68,6 +68,7 @@ type Options struct {
 	OutputAll         bool   `json:"output-all"`
 	WAF               bool
 	WAFEvasion        bool
+	PoCType           string `json:"poc-type"`
 }
 
 // MassJob is list for mass
