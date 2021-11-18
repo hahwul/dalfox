@@ -89,12 +89,14 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				Evidence:   "",
 				CWE:        "CWE-93",
 			}
-			body, err := req.GetBody()
-			if err == nil {
-				reqBody, err := ioutil.ReadAll(body)
+			if req.Body != nil {
+				body, err := req.GetBody()
 				if err == nil {
-					if string(reqBody) != "" {
-						poc.Data = poc.Data + " -d " + string(reqBody)
+					reqBody, err := ioutil.ReadAll(body)
+					if err == nil {
+						if string(reqBody) != "" {
+							poc.Data = poc.Data + " -d " + string(reqBody)
+						}
 					}
 				}
 			}
@@ -144,15 +146,18 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					Evidence:   "",
 					CWE:        "CWE-94",
 				}
-				body, err := req.GetBody()
-				if err == nil {
-					reqBody, err := ioutil.ReadAll(body)
+				if req.Body != nil {
+					body, err := req.GetBody()
 					if err == nil {
-						if string(reqBody) != "" {
-							poc.Data = poc.Data + " -d " + string(reqBody)
+						reqBody, err := ioutil.ReadAll(body)
+						if err == nil {
+							if string(reqBody) != "" {
+								poc.Data = poc.Data + " -d " + string(reqBody)
+							}
 						}
 					}
 				}
+
 				if !duplicatedResult(scanObject.Results, poc) {
 					if payload != "" {
 						printing.DalLog("GREP", "Found SSTI via built-in grepping / payload: "+payload, options)
@@ -191,15 +196,18 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				Evidence:   "",
 				CWE:        "",
 			}
-			body, err := req.GetBody()
-			if err == nil {
-				reqBody, err := ioutil.ReadAll(body)
+			if req.Body != nil {
+				body, err := req.GetBody()
 				if err == nil {
-					if string(reqBody) != "" {
-						poc.Data = poc.Data + " -d " + string(reqBody)
+					reqBody, err := ioutil.ReadAll(body)
+					if err == nil {
+						if string(reqBody) != "" {
+							poc.Data = poc.Data + " -d " + string(reqBody)
+						}
 					}
 				}
 			}
+
 			if !duplicatedResult(scanObject.Results, poc) {
 				if payload != "" {
 					printing.DalLog("GREP", "Found "+k+" via built-in grepping / payload: "+payload, options)
@@ -247,15 +255,18 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				Evidence:   "",
 				CWE:        "",
 			}
-			body, err := req.GetBody()
-			if err == nil {
-				reqBody, err := ioutil.ReadAll(body)
+			if req.Body != nil {
+				body, err := req.GetBody()
 				if err == nil {
-					if string(reqBody) != "" {
-						poc.Data = poc.Data + " -d " + string(reqBody)
+					reqBody, err := ioutil.ReadAll(body)
+					if err == nil {
+						if string(reqBody) != "" {
+							poc.Data = poc.Data + " -d " + string(reqBody)
+						}
 					}
 				}
 			}
+
 			if !duplicatedResult(scanObject.Results, poc) {
 				printing.DalLog("GREP", "Found "+k+" via custom grepping / payload: "+payload, options)
 				for _, vv := range v {
