@@ -43,6 +43,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					Param:      "",
 					Payload:    payload,
 					Evidence:   "",
+					CWE:        "CWE-601",
 				}
 				if showG {
 					if options.Format == "json" {
@@ -86,6 +87,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				Param:      "",
 				Payload:    payload,
 				Evidence:   "",
+				CWE:        "CWE-93",
 			}
 			body, err := req.GetBody()
 			if err == nil {
@@ -140,6 +142,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					Param:      "",
 					Payload:    payload,
 					Evidence:   "",
+					CWE:        "CWE-94",
 				}
 				body, err := req.GetBody()
 				if err == nil {
@@ -186,6 +189,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				Param:      "",
 				Payload:    payload,
 				Evidence:   "",
+				CWE:        "",
 			}
 			body, err := req.GetBody()
 			if err == nil {
@@ -241,6 +245,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				Param:      "",
 				Payload:    payload,
 				Evidence:   "",
+				CWE:        "",
 			}
 			body, err := req.GetBody()
 			if err == nil {

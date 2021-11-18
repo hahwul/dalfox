@@ -14,6 +14,7 @@ type PoC struct {
 	Param      string `json:"param"`
 	Payload    string `json:"payload"`
 	Evidence   string `json:"evidence"`
+	CWE        string `json:"cwe"`
 }
 
 // Result is struct for library and cli application

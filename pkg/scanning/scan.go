@@ -632,6 +632,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 									Param:      "",
 									Payload:    "",
 									Evidence:   "",
+									CWE:        "CWE-79",
 								}
 								if showV {
 									if options.Format == "json" {
@@ -708,6 +709,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 															Param:      v["param"],
 															Payload:    "",
 															Evidence:   "",
+															CWE:        "CWE-79",
 														}
 														body, err := k.GetBody()
 														if err == nil {
@@ -747,6 +749,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 															Param:      v["param"],
 															Payload:    "",
 															Evidence:   "",
+															CWE:        "CWE-79",
 														}
 														body, err := k.GetBody()
 														if err == nil {
@@ -774,6 +777,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 														Param:      v["param"],
 														Payload:    v["payload"],
 														Evidence:   code,
+														CWE:        "CWE-79",
 													}
 													body, err := k.GetBody()
 													if err == nil {
@@ -818,6 +822,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Param:      v["param"],
 												Payload:    v["payload"],
 												Evidence:   code,
+												CWE:        "CWE-83",
 											}
 											body, err := k.GetBody()
 											if err == nil {
@@ -859,6 +864,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Param:      v["param"],
 												Payload:    v["payload"],
 												Evidence:   code,
+												CWE:        "CWE-83",
 											}
 											body, err := k.GetBody()
 											if err == nil {
@@ -901,6 +907,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Param:      v["param"],
 												Payload:    v["payload"],
 												Evidence:   code,
+												CWE:        "CWE-79",
 											}
 											body, err := k.GetBody()
 											if err == nil {
@@ -942,6 +949,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Param:      v["param"],
 												Payload:    v["payload"],
 												Evidence:   code,
+												CWE:        "CWE-79",
 											}
 											body, err := k.GetBody()
 											if err == nil {
