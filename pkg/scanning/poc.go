@@ -3,11 +3,19 @@ package scanning
 import (
 	"io/ioutil"
 	"net/http"
+	"net/http/httputil"
 
 	"github.com/hahwul/dalfox/v2/pkg/model"
 )
 
 func MakePoC(poc string, req *http.Request, options model.Options) string {
+	if options.PoCType == "http-request" {
+		requestDump, err := httputil.DumpRequestOut(req, true)
+		if err == nil {
+			return "HTTP RAW REQUEST\n" + string(requestDump)
+		}
+	}
+
 	if req.Body != nil {
 		body, err := req.GetBody()
 		if err == nil {
