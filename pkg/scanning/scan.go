@@ -1003,12 +1003,12 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			if err == nil {
 				var dash string
 				for i := 0; i < width-5; i++ {
-					dash = dash + "="
+					dash = dash + "-"
 				}
 				printing.DalLog("SYSTEM-M", dash, options)
 			}
 		}
-		printing.DalLog("SYSTEM-M", "Finish Scan! [duration: "+scanResult.Duration.String()+"]", options)
+		printing.DalLog("SYSTEM-M", "[duration: "+scanResult.Duration.String()+"][issues: "+strconv.Itoa(len(scanResult.PoCs))+"]  Finish Scan!", options)
 	}
 	return scanResult, nil
 }
