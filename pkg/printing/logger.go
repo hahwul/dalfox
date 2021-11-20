@@ -143,21 +143,15 @@ func DalLog(level, text string, options model.Options) {
 		options.ScanResult.Logs = append(options.ScanResult.Logs, text)
 	} else {
 		if level == "PRINT" {
-			if options.Silence {
-				StopSpinner(options)
-			}
+			StopSpinner(options)
 			if options.Format == "json" {
 				ftext = text
-				//fmt.Println(options.AuroraObject.BrightGreen(text))
 				fmt.Println(text)
-
 			} else {
 				ftext = "[POC]" + text
 				fmt.Println(options.AuroraObject.BrightMagenta("[POC]" + text))
 			}
-			if options.Silence {
-				RestartSpinner(options)
-			}
+			RestartSpinner(options)
 		} else {
 			if !options.Silence {
 				if text != "HIDDENMESSAGE!!" {

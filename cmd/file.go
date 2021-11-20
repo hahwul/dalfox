@@ -84,6 +84,7 @@ var fileCmd = &cobra.Command{
 
 			} else {
 				printing.DalLog("SYSTEM", "Using file mode(targets list)", options)
+				options.SpinnerObject = spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 				ff, err := readLinesOrLiteral(args[0])
 				_ = err
 				for _, target := range ff {
@@ -107,15 +108,13 @@ var fileCmd = &cobra.Command{
 						_ = k
 						tt = tt + len(v)
 					}
-					s := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 					if (!options.NoSpinner || !options.Silence) && !sf {
-						options.SpinnerObject = s
-						s.Prefix = " "
-						s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(tt) + " Tasks][0%] Parallel scanning from file"
+						options.SpinnerObject.Prefix = " "
+						options.SpinnerObject.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(tt) + " Tasks][0%] Parallel scanning from file"
 						if !options.NoColor {
-							s.Color("red", "bold")
+							options.SpinnerObject.Color("red", "bold")
 						}
-						s.Start()
+						options.SpinnerObject.Start()
 					}
 					var wg sync.WaitGroup
 					tasks := make(chan model.MassJob)
@@ -138,7 +137,7 @@ var fileCmd = &cobra.Command{
 										mutex.Lock()
 										options.NowURL = options.NowURL + 1
 										percent := fmt.Sprintf("%0.2f%%", float64(options.NowURL)/float64(tt)*100)
-										s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(tt) + " Tasks][" + percent + "] Parallel scanning from file"
+										options.SpinnerObject.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(tt) + " Tasks][" + percent + "] Parallel scanning from file"
 										mutex.Unlock()
 									}
 								}
@@ -155,19 +154,18 @@ var fileCmd = &cobra.Command{
 					close(tasks)
 					wg.Wait()
 					if options.NoSpinner {
-						s.Stop()
+						options.SpinnerObject.Stop()
 					}
+					printing.DalLog("SYSTEM-M", "Finish massive scan!", options)
 				} else {
 					options.AllURLS = len(targets)
-					s := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 					if (!options.NoSpinner || !options.Silence) && !sf {
-						options.SpinnerObject = s
-						s.Prefix = " "
-						s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][0%] Multiple scanning from file"
+						options.SpinnerObject.Prefix = " "
+						options.SpinnerObject.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][0%] Multiple scanning from file"
 						if !options.NoColor {
-							s.Color("red", "bold")
+							options.SpinnerObject.Color("red", "bold")
 						}
-						s.Start()
+						options.SpinnerObject.Start()
 					}
 					for i := range targets {
 						options.NowURL = i + 1
@@ -176,10 +174,11 @@ var fileCmd = &cobra.Command{
 							mutex.Lock()
 							options.NowURL = options.NowURL + 1
 							percent := fmt.Sprintf("%0.2f%%", float64(options.NowURL)/float64(options.AllURLS)*100)
-							s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][" + percent + "] Multiple scanning from file"
+							options.SpinnerObject.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][" + percent + "] Multiple scanning from file"
 							mutex.Unlock()
 						}
 					}
+					options.SpinnerObject.Stop()
 				}
 			}
 		} else {
