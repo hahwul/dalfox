@@ -1008,7 +1008,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 				printing.DalLog("SYSTEM-M", dash, options)
 			}
 		}
-		printing.DalLog("SYSTEM-M", "[duration: "+scanResult.Duration.String()+"][issues: "+strconv.Itoa(len(scanResult.PoCs))+"]  Finish Scan!", options)
+		printing.DalLog("SYSTEM-M", "[duration: "+scanResult.Duration.String()+"][issues: "+strconv.Itoa(len(scanResult.PoCs))+"] Finish Scan!", options)
 	}
 	return scanResult, nil
 }
