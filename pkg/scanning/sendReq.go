@@ -35,11 +35,23 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 		if (!options.NoBAV) && (payload == "toOpenRedirecting") && !(strings.Contains(oReq.Host, ".google.com")) {
 			if strings.Contains(req.URL.Host, "google.com") {
 				printing.DalLog("GREP", "Found Open Redirect. Payload: "+via[0].URL.String(), options)
+				poc := model.PoC{
+					Type:       "G",
+					InjectType: "BAV/OR",
+					Method:     "GET",
+					Data:       req.URL.String(),
+					Param:      "",
+					Payload:    payload,
+					Evidence:   "",
+					CWE:        "CWE-601",
+				}
 				if showG {
 					if options.Format == "json" {
-						printing.DalLog("PRINT", "{\"type\":\"GREP\",\"evidence\":\"OpenRedirect\",\"poc\":\""+via[0].URL.String()+"\"},", options)
+						pocj, _ := json.Marshal(poc)
+						printing.DalLog("PRINT", string(pocj)+",", options)
 					} else {
-						printing.DalLog("PRINT", "[G][OpenRedirect/"+req.Method+"] "+via[0].URL.String(), options)
+						pocs := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
+						printing.DalLog("PRINT", pocs, options)
 					}
 				}
 				if options.FoundAction != "" {
@@ -67,27 +79,37 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 	grepResult := make(map[string][]string)
 	if !options.NoBAV {
 		if len(resp.Header["Dalfoxcrlf"]) != 0 {
-			rst := &model.Issue{
-				Type: "Grep:CRLF",
-				PoC:  req.URL.String(),
+			poc := model.PoC{
+				Type:       "G",
+				InjectType: "BAV/CRLF",
+				Method:     "GET",
+				Data:       req.URL.String(),
+				Param:      "",
+				Payload:    payload,
+				Evidence:   "",
+				CWE:        "CWE-93",
 			}
-			if !duplicatedResult(scanObject.Results, *rst) {
+			poc.Data = MakePoC(poc.Data, req, options)
+
+			if !duplicatedResult(scanObject.Results, poc) {
 				if payload != "" {
 					printing.DalLog("GREP", "Found CRLF Injection via built-in grepping / payload: "+payload, options)
 				} else {
 					printing.DalLog("GREP", "Found CRLF Injection via built-in grepping / original request", options)
 				}
 				if options.FoundAction != "" {
-					foundAction(options, req.URL.Host, rst.PoC, "BAV: "+rst.Type)
+					foundAction(options, req.URL.Host, poc.Data, "BAV: "+poc.InjectType)
 				}
 				if showG {
 					if options.Format == "json" {
-						printing.DalLog("PRINT", "{\"type\":\"GREP\",\"evidence\":\"CRLF\",\"poc\":\""+req.URL.String()+"\"},", options)
+						pocj, _ := json.Marshal(poc)
+						printing.DalLog("PRINT", string(pocj)+",", options)
 					} else {
-						printing.DalLog("PRINT", "[G][CRLF/"+req.Method+"] "+req.URL.String(), options)
+						pocs := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
+						printing.DalLog("PRINT", pocs, options)
 					}
 				}
-				scanObject.Results = append(scanObject.Results, *rst)
+				scanObject.Results = append(scanObject.Results, poc)
 			}
 		}
 	}
@@ -104,11 +126,19 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 			}
 
 			if really {
-				rst := &model.Issue{
-					Type: "Grep:SSTI",
-					PoC:  req.URL.String(),
+				poc := model.PoC{
+					Type:       "G",
+					InjectType: "BAV/SSTI",
+					Method:     "GET",
+					Data:       req.URL.String(),
+					Param:      "",
+					Payload:    payload,
+					Evidence:   "",
+					CWE:        "CWE-94",
 				}
-				if !duplicatedResult(scanObject.Results, *rst) {
+				poc.Data = MakePoC(poc.Data, req, options)
+
+				if !duplicatedResult(scanObject.Results, poc) {
 					if payload != "" {
 						printing.DalLog("GREP", "Found SSTI via built-in grepping / payload: "+payload, options)
 					} else {
@@ -116,7 +146,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					}
 
 					if options.FoundAction != "" {
-						foundAction(options, req.URL.Host, rst.PoC, "BAV: "+rst.Type)
+						foundAction(options, req.URL.Host, poc.Data, "BAV: "+poc.InjectType)
 					}
 
 					for _, vv := range v {
@@ -124,21 +154,31 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					}
 					if showG {
 						if options.Format == "json" {
-							printing.DalLog("PRINT", "{\"type\":\"GREP\",\"evidence\":\"SSTI\",\"poc\":\""+req.URL.String()+"\"},", options)
+							pocj, _ := json.Marshal(poc)
+							printing.DalLog("PRINT", string(pocj)+",", options)
 						} else {
-							printing.DalLog("PRINT", "[G][SSTI/"+req.Method+"] "+req.URL.String(), options)
+							pocs := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
+							printing.DalLog("PRINT", pocs, options)
 						}
 					}
-					scanObject.Results = append(scanObject.Results, *rst)
+					scanObject.Results = append(scanObject.Results, poc)
 				}
 			}
 		} else {
 			// other case
-			rst := &model.Issue{
-				Type: "Grep:" + k,
-				PoC:  req.URL.String(),
+			poc := model.PoC{
+				Type:       "G",
+				InjectType: "GREP",
+				Method:     "GET",
+				Data:       req.URL.String(),
+				Param:      "",
+				Payload:    payload,
+				Evidence:   "",
+				CWE:        "",
 			}
-			if !duplicatedResult(scanObject.Results, *rst) {
+			poc.Data = MakePoC(poc.Data, req, options)
+
+			if !duplicatedResult(scanObject.Results, poc) {
 				if payload != "" {
 					printing.DalLog("GREP", "Found "+k+" via built-in grepping / payload: "+payload, options)
 				} else {
@@ -146,7 +186,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				}
 
 				if options.FoundAction != "" {
-					foundAction(options, req.URL.Host, rst.PoC, "BAV: "+rst.Type)
+					foundAction(options, req.URL.Host, poc.Data, "BAV: "+poc.InjectType)
 				}
 
 				for _, vv := range v {
@@ -154,12 +194,14 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				}
 				if showG {
 					if options.Format == "json" {
-						printing.DalLog("PRINT", "{\"type\":\"GREP\",\"evidence\":\"BUILT-IN\",\"poc\":\""+req.URL.String()+"\"},", options)
+						pocj, _ := json.Marshal(poc)
+						printing.DalLog("PRINT", string(pocj)+",", options)
 					} else {
-						printing.DalLog("PRINT", "[G][BUILT-IN/"+k+"/"+req.Method+"] "+req.URL.String(), options)
+						pocs := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
+						printing.DalLog("PRINT", pocs, options)
 					}
 				}
-				scanObject.Results = append(scanObject.Results, *rst)
+				scanObject.Results = append(scanObject.Results, poc)
 			}
 		}
 	}
@@ -173,28 +215,38 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 		}
 		cg := customGrep(str, pattern)
 		for k, v := range cg {
-			rst := &model.Issue{
-				Type: "Grep:" + k,
-				PoC:  req.URL.String(),
+			poc := model.PoC{
+				Type:       "G",
+				InjectType: "CUSTOM-GREP",
+				Method:     "GET",
+				Data:       req.URL.String(),
+				Param:      "",
+				Payload:    payload,
+				Evidence:   "",
+				CWE:        "",
 			}
-			if !duplicatedResult(scanObject.Results, *rst) {
+			poc.Data = MakePoC(poc.Data, req, options)
+
+			if !duplicatedResult(scanObject.Results, poc) {
 				printing.DalLog("GREP", "Found "+k+" via custom grepping / payload: "+payload, options)
 				for _, vv := range v {
 					printing.DalLog("CODE", vv, options)
 				}
 
 				if options.FoundAction != "" {
-					foundAction(options, req.URL.Host, rst.PoC, "BAV: "+rst.Type)
+					foundAction(options, req.URL.Host, poc.Data, "BAV: "+poc.InjectType)
 				}
 
 				if showG {
 					if options.Format == "json" {
-						printing.DalLog("PRINT", "{\"type\":\"GREP\",\"evidence\":\""+k+"\",\"poc\":\""+req.URL.String()+"\"},", options)
+						pocj, _ := json.Marshal(poc)
+						printing.DalLog("PRINT", string(pocj)+",", options)
 					} else {
-						printing.DalLog("PRINT", "[G]["+k+"/"+req.Method+"] "+req.URL.String(), options)
+						pocs := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
+						printing.DalLog("PRINT", pocs, options)
 					}
 				}
-				scanObject.Results = append(scanObject.Results, *rst)
+				scanObject.Results = append(scanObject.Results, poc)
 			}
 		}
 	}

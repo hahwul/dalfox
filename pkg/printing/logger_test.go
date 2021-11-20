@@ -50,7 +50,7 @@ func Test_boolToColorStr(t *testing.T) {
 	}
 }
 
-func Test_setSpinner(t *testing.T) {
+func Test_SetSpinner(t *testing.T) {
 	type args struct {
 		str     string
 		options model.Options
@@ -78,12 +78,12 @@ func Test_setSpinner(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			setSpinner(tt.args.str, tt.args.options)
+			SetSpinner(tt.args.str, tt.args.options)
 		})
 	}
 }
 
-func Test_restartSpinner(t *testing.T) {
+func Test_RestartSpinner(t *testing.T) {
 	type args struct {
 		options model.Options
 	}
@@ -108,12 +108,12 @@ func Test_restartSpinner(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			restartSpinner(tt.args.options)
+			RestartSpinner(tt.args.options)
 		})
 	}
 }
 
-func Test_stopSpinner(t *testing.T) {
+func Test_StopSpinner(t *testing.T) {
 	type args struct {
 		options model.Options
 	}
@@ -138,7 +138,7 @@ func Test_stopSpinner(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			stopSpinner(tt.args.options)
+			StopSpinner(tt.args.options)
 		})
 	}
 }

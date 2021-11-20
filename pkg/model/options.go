@@ -1,6 +1,7 @@
 package model
 
 import (
+	"sync"
 	t "time"
 
 	s "github.com/briandowns/spinner"
@@ -68,6 +69,8 @@ type Options struct {
 	OutputAll         bool   `json:"output-all"`
 	WAF               bool
 	WAFEvasion        bool
+	PoCType           string `json:"poc-type"`
+	Mutex             *sync.Mutex
 }
 
 // MassJob is list for mass
@@ -81,12 +84,12 @@ type Scan struct {
 	URL     string
 	ScanID  string
 	Logs    []string
-	Results []Issue
+	Results []PoC
 }
 
 // Issue is struct of issue
 type Issue struct {
 	Type  string `json:"type"`
 	Param string `json:"param"`
-	PoC   string `json:"poc"`
+	PoC   PoC    `json:"poc"`
 }

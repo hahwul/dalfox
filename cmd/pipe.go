@@ -28,7 +28,11 @@ var pipeCmd = &cobra.Command{
 		printing.Summary(options, "Stdin (pipeline)")
 		var targets []string
 		mutex := &sync.Mutex{}
+		options.Mutex = mutex
 		sc := bufio.NewScanner(os.Stdin)
+		if (!options.NoSpinner || !options.Silence) && !sf {
+			options.SpinnerObject = spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
+		}
 		printing.DalLog("SYSTEM", "Using pipeline mode", options)
 		for sc.Scan() {
 			target := sc.Text()
@@ -49,39 +53,37 @@ var pipeCmd = &cobra.Command{
 				_ = k
 				tt = tt + len(v)
 			}
-
-			s := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 			if (!options.NoSpinner || !options.Silence) && !sf {
-				s.Prefix = " "
-				s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(tt) + " Tasks][0%] Parallel scanning from pipe"
-				options.SpinnerObject = s
+				options.SpinnerObject.Prefix = " "
+				options.SpinnerObject.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(tt) + " Tasks][0%] Parallel scanning from pipe"
 				if !options.NoColor {
-					s.Color("red", "bold")
+					options.SpinnerObject.Color("red", "bold")
 				}
-				s.Start()
+				options.SpinnerObject.Start()
 			}
 			var wg sync.WaitGroup
 			tasks := make(chan model.MassJob)
 			options.NowURL = 0
 			concurrency, _ := cmd.Flags().GetInt("mass-worker")
+			for k, v := range t {
+				if !options.Silence || !sf {
+					printing.DalLog("SYSTEM-M", "Parallel testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", options)
+				}
+			}
 			for task := 0; task < concurrency; task++ {
 				wg.Add(1)
 				go func() {
 					defer wg.Done()
 					for kv := range tasks {
-						k := kv.Name
 						v := kv.URLs
-						if (!options.NoSpinner || !options.Silence) && !sf {
-							printing.DalLog("SYSTEM-M", "Parallel testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", options)
-						}
 						for i := range v {
 							_, _ = scanning.Scan(v[i], options, strconv.Itoa(len(v)))
 							if (!options.NoSpinner || !options.Silence) && !sf {
-								mutex.Lock()
+								options.Mutex.Lock()
 								options.NowURL = options.NowURL + 1
 								percent := fmt.Sprintf("%0.2f%%", float64(options.NowURL)/float64(tt)*100)
-								s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(tt) + " Tasks][" + percent + "] Parallel scanning from pipe"
-								mutex.Unlock()
+								options.SpinnerObject.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(tt) + " Tasks][" + percent + "] Parallel scanning from pipe"
+								options.Mutex.Unlock()
 							}
 						}
 					}
@@ -96,20 +98,21 @@ var pipeCmd = &cobra.Command{
 			}
 			close(tasks)
 			wg.Wait()
-			if !options.NoSpinner {
-				s.Stop()
+			if (!options.NoSpinner || !options.Silence) && !sf {
+				options.SpinnerObject.Stop()
+			}
+			if !options.Silence || !sf {
+				printing.DalLog("SYSTEM-M", "Finish massive scan!", options)
 			}
 		} else {
 			options.AllURLS = len(targets)
-			s := spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 			if (!options.NoSpinner || !options.Silence) && !sf {
-				s.Prefix = " "
-				s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][0%] Multiple scanning from pipe"
-				options.SpinnerObject = s
+				options.SpinnerObject.Prefix = " "
+				options.SpinnerObject.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][0%] Multiple scanning from pipe"
 				if !options.NoColor {
-					s.Color("red", "bold")
+					options.SpinnerObject.Color("red", "bold")
 				}
-				s.Start()
+				options.SpinnerObject.Start()
 			}
 			for i := range targets {
 				options.NowURL = i + 1
@@ -118,9 +121,12 @@ var pipeCmd = &cobra.Command{
 					mutex.Lock()
 					options.NowURL = options.NowURL + 1
 					percent := fmt.Sprintf("%0.2f%%", float64(options.NowURL)/float64(options.AllURLS)*100)
-					s.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][" + percent + "] Multiple scanning from pipe"
+					options.SpinnerObject.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][" + percent + "] Multiple scanning from pipe"
 					mutex.Unlock()
 				}
+			}
+			if (!options.NoSpinner || !options.Silence) && !sf {
+				options.SpinnerObject.Stop()
 			}
 		}
 	},
