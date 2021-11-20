@@ -84,7 +84,9 @@ var fileCmd = &cobra.Command{
 
 			} else {
 				printing.DalLog("SYSTEM", "Using file mode(targets list)", options)
-				options.SpinnerObject = spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
+				if (!options.NoSpinner || !options.Silence) && !sf {
+					options.SpinnerObject = spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
+				}
 				ff, err := readLinesOrLiteral(args[0])
 				_ = err
 				for _, target := range ff {
@@ -121,7 +123,7 @@ var fileCmd = &cobra.Command{
 					options.NowURL = 0
 					concurrency, _ := cmd.Flags().GetInt("mass-worker")
 					for k, v := range t {
-						if (!options.NoSpinner || !options.Silence) && !sf {
+						if !options.Silence || !sf {
 							printing.DalLog("SYSTEM-M", "Parallel testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", options)
 						}
 					}
@@ -153,10 +155,12 @@ var fileCmd = &cobra.Command{
 					}
 					close(tasks)
 					wg.Wait()
-					if options.NoSpinner {
+					if (!options.NoSpinner || !options.Silence) && !sf {
 						options.SpinnerObject.Stop()
 					}
-					printing.DalLog("SYSTEM-M", "Finish massive scan!", options)
+					if !options.Silence || !sf {
+						printing.DalLog("SYSTEM-M", "Finish massive scan!", options)
+					}
 				} else {
 					options.AllURLS = len(targets)
 					if (!options.NoSpinner || !options.Silence) && !sf {
@@ -178,7 +182,9 @@ var fileCmd = &cobra.Command{
 							mutex.Unlock()
 						}
 					}
-					options.SpinnerObject.Stop()
+					if (!options.NoSpinner || !options.Silence) && !sf {
+						options.SpinnerObject.Stop()
+					}
 				}
 			}
 		} else {
