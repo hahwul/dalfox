@@ -9,10 +9,6 @@ import (
 	"github.com/hahwul/dalfox/v2/pkg/model"
 )
 
-var (
-	mutex = &sync.Mutex{}
-)
-
 func boolToColorStr(b bool, options model.Options) string {
 	str := ""
 	if b {
@@ -52,6 +48,12 @@ func Summary(options model.Options, target string) {
 
 // DalLog is log fomatting for DalFox
 func DalLog(level, text string, options model.Options) {
+	var mutex *sync.Mutex
+	if options.Mutex != nil {
+		mutex = options.Mutex
+	} else {
+		mutex = &sync.Mutex{}
+	}
 	var ftext string
 	var allWrite = false
 	if options.Debug {
@@ -97,7 +99,7 @@ func DalLog(level, text string, options model.Options) {
 		if options.NoSpinner {
 			text = options.AuroraObject.White("[*] ").String() + text
 		} else if !(options.Silence || options.NoSpinner) {
-			setSpinner(text, options)
+			SetSpinner(text, options)
 			text = "HIDDENMESSAGE!!"
 		}
 
@@ -107,9 +109,9 @@ func DalLog(level, text string, options model.Options) {
 		}
 		text = options.AuroraObject.White("[*] ").String() + text
 		if options.Silence && options.MulticastMode {
-			stopSpinner(options)
+			StopSpinner(options)
 			fmt.Fprintln(os.Stderr, text)
-			restartSpinner(options)
+			RestartSpinner(options)
 		}
 
 	case "GREP":
@@ -139,7 +141,7 @@ func DalLog(level, text string, options model.Options) {
 	} else {
 		if level == "PRINT" {
 			if options.Silence {
-				stopSpinner(options)
+				StopSpinner(options)
 			}
 			if options.Format == "json" {
 				ftext = text
@@ -147,11 +149,11 @@ func DalLog(level, text string, options model.Options) {
 				fmt.Println(text)
 
 			} else {
-				ftext = "[POC] " + text
+				ftext = "[POC]" + text
 				fmt.Println(options.AuroraObject.BrightMagenta("[POC]" + text))
 			}
 			if options.Silence {
-				restartSpinner(options)
+				RestartSpinner(options)
 			}
 		} else {
 			if !options.Silence {
@@ -181,19 +183,22 @@ func DalLog(level, text string, options model.Options) {
 	mutex.Unlock()
 }
 
-func setSpinner(str string, options model.Options) {
+// SetSpinner is set string to global spinner
+func SetSpinner(str string, options model.Options) {
 	if options.SpinnerObject != nil {
 		options.SpinnerObject.Suffix = "  " + str
 	}
 }
 
-func restartSpinner(options model.Options) {
+// RestartSpinner is restart global spinner
+func RestartSpinner(options model.Options) {
 	if options.SpinnerObject != nil {
 		options.SpinnerObject.Restart()
 	}
 }
 
-func stopSpinner(options model.Options) {
+// StopSpinner is stop global spinner
+func StopSpinner(options model.Options) {
 	if options.SpinnerObject != nil {
 		options.SpinnerObject.Stop()
 	}

@@ -29,6 +29,7 @@ var fileCmd = &cobra.Command{
 		printing.Summary(options, args[0])
 		var targets []string
 		mutex := &sync.Mutex{}
+		options.Mutex = mutex
 		if len(args) >= 1 {
 			rawdata, _ := cmd.Flags().GetBool("rawdata")
 			if rawdata {
@@ -51,7 +52,7 @@ var fileCmd = &cobra.Command{
 						if strings.Index(line, "Host: ") != -1 {
 							host = line[6:]
 						} else {
-							parse := strings.Split(line,":")
+							parse := strings.Split(line, ":")
 							if len(parse) > 1 {
 								options.Header = append(options.Header, line)
 							}
@@ -120,16 +121,17 @@ var fileCmd = &cobra.Command{
 					tasks := make(chan model.MassJob)
 					options.NowURL = 0
 					concurrency, _ := cmd.Flags().GetInt("mass-worker")
+					for k, v := range t {
+						if (!options.NoSpinner || !options.Silence) && !sf {
+							printing.DalLog("SYSTEM-M", "Parallel testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", options)
+						}
+					}
 					for task := 0; task < concurrency; task++ {
 						wg.Add(1)
 						go func() {
 							defer wg.Done()
 							for kv := range tasks {
-								k := kv.Name
 								v := kv.URLs
-								if (!options.NoSpinner || !options.Silence) && !sf {
-									printing.DalLog("SYSTEM-M", "Parallel testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", options)
-								}
 								for i := range v {
 									_, _ = scanning.Scan(v[i], options, strconv.Itoa(len(v)))
 									if (!options.NoSpinner || !options.Silence) && !sf {

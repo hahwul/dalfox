@@ -16,4 +16,5 @@ require (
 	github.com/swaggo/echo-swagger v1.1.4
 	github.com/swaggo/swag v1.7.4
 	github.com/tylerb/graceful v1.2.15
+	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211 // indirect
 )

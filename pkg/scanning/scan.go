@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/briandowns/spinner"
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	"github.com/hahwul/dalfox/v2/pkg/optimization"
@@ -27,6 +29,7 @@ var (
 // Scan is main scanning function
 func Scan(target string, options model.Options, sid string) (model.Result, error) {
 	var scanResult model.Result
+	mutex := &sync.Mutex{}
 	options.ScanResult = scanResult
 	scanResult.StartTime = time.Now()
 	if !(options.Silence || options.NoSpinner) {
@@ -36,7 +39,11 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 		if !options.NoColor {
 			s.Color("red", "bold")
 		}
-		options.SpinnerObject = s
+		if options.SpinnerObject != nil {
+			s = options.SpinnerObject
+		} else {
+			options.SpinnerObject = s
+		}
 		s.Start()
 	}
 
@@ -582,7 +589,6 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 		}
 
 		printing.DalLog("SYSTEM", "Start XSS Scanning.. with "+strconv.Itoa(len(query))+" queries 🗡", options)
-		mutex := &sync.Mutex{}
 		queryCount := 0
 		printing.DalLog("SYSTEM", "[ Make "+strconv.Itoa(options.Concurrence)+" workers ] [ Allocated "+strconv.Itoa(len(query))+" queries ]", options)
 
@@ -667,6 +673,10 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			wg.Add(1)
 			go func() {
 				for reqJob := range queries {
+					if checkVStatus(vStatus) {
+						// if when all param found xss, break. (for passing speed up)
+						continue
+					}
 					// quires.request : http.Request
 					// queries.metadata : map[string]string
 					k := reqJob.request
@@ -988,7 +998,17 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 	scanResult.EndTime = time.Now()
 	scanResult.Duration = scanResult.EndTime.Sub(scanResult.StartTime)
 	if !(options.Silence && options.MulticastMode) {
-		printing.DalLog("SYSTEM-M", "Finish Scan", options)
+		if term.IsTerminal(0) {
+			width, _, err := term.GetSize(0)
+			if err == nil {
+				var dash string
+				for i := 0; i < width-5; i++ {
+					dash = dash + "="
+				}
+				printing.DalLog("SYSTEM-M", dash, options)
+			}
+		}
+		printing.DalLog("SYSTEM-M", "Finish Scan! [duration: "+scanResult.Duration.String()+"]", options)
 	}
 	return scanResult, nil
 }

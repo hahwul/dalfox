@@ -1,6 +1,7 @@
 package model
 
 import (
+	"sync"
 	t "time"
 
 	s "github.com/briandowns/spinner"
@@ -69,6 +70,7 @@ type Options struct {
 	WAF               bool
 	WAFEvasion        bool
 	PoCType           string `json:"poc-type"`
+	Mutex             *sync.Mutex
 }
 
 // MassJob is list for mass
