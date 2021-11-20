@@ -120,6 +120,9 @@ func DalLog(level, text string, options model.Options) {
 		}
 		text = options.AuroraObject.Green("[G] ").String() + text
 	case "CODE":
+		if text == "" {
+			return
+		}
 		if allWrite {
 			ftext = "    " + text
 		}
