@@ -2,6 +2,8 @@ package scanning
 
 import (
 	"io/ioutil"
+	"io"
+	"compress/gzip"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -130,7 +132,16 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 			tres, err := client.Do(treq)
 			if err == nil {
 				defer tres.Body.Close()
-				bodyString, _ := ioutil.ReadAll(tres.Body)
+				var reader io.ReadCloser
+				switch tres.Header.Get("Content-Encoding") {
+				case "gzip":
+					reader, err = gzip.NewReader(tres.Body)
+					defer reader.Close()
+				default:
+					reader = tres.Body
+				}
+
+				bodyString, _ := ioutil.ReadAll(reader)
 				body := ioutil.NopCloser(strings.NewReader(string(bodyString)))
 				defer body.Close()
 				doc, err := goquery.NewDocumentFromReader(body)
