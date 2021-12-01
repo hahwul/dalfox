@@ -56,6 +56,11 @@ func Initialize(target Target, options Options) model.Options {
 		RemoteWordlists:   "",
 		OnlyPoC:           "",
 		OutputAll:         false,
+		PoCType:           "",
+		Sequence:          -1,
+		UseHeadless:       true,
+		UseDeepDXSS:       false,
+		WAFEvasion:        false,
 	}
 	if len(options.UniqParam) > 0 {
 		for _, v := range options.UniqParam {
@@ -133,6 +138,40 @@ func Initialize(target Target, options Options) model.Options {
 	if options.RemoteWordlists != "" {
 		newOptions.RemoteWordlists = options.RemoteWordlists
 	}
+	if options.PoCType != "" {
+		newOptions.PoCType = options.PoCType
+	}
+	if options.CustomPayloadFile != "" {
+		newOptions.CustomPayloadFile = options.CustomPayloadFile
+	}
+	if options.OutputFile != "" {
+		newOptions.OutputFile = options.OutputFile
+	}
+	if options.FoundAction != "" {
+		newOptions.FoundAction = options.FoundAction
+	}
+	if options.FoundActionShell != "" {
+		newOptions.FoundActionShell = options.FoundActionShell
+	}
+	if options.OutputFile != "" {
+		newOptions.OutputFile = options.OutputFile
+	}
+	if options.OnlyCustomPayload == true {
+		newOptions.OnlyCustomPayload = true
+	}
+	if options.UseHeadless == false {
+		newOptions.UseHeadless = false
+	}
+	if options.UseDeepDXSS == true {
+		newOptions.UseDeepDXSS = true
+	}
+	if options.WAFEvasion == true {
+		newOptions.WAFEvasion = true
+	}
+	if options.Sequence != -1 {
+		newOptions.Sequence = options.Sequence
+	}
+
 	return newOptions
 }
 
