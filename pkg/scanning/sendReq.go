@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"errors"
 	"io/ioutil"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"compress/gzip"
 
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	"github.com/hahwul/dalfox/v2/pkg/optimization"
@@ -68,10 +70,17 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 		return "", resp, false, false, err
 	}
 
-	bytes, _ := ioutil.ReadAll(resp.Body)
-	str := string(bytes)
-
 	defer resp.Body.Close()
+	var reader io.ReadCloser
+	switch resp.Header.Get("Content-Encoding") {
+	case "gzip":
+		reader, err = gzip.NewReader(resp.Body)
+		defer reader.Close()
+	default:
+		reader = resp.Body
+	}
+	bytes, _ := ioutil.ReadAll(reader)
+	str := string(bytes)
 
 	//for SSTI
 	ssti := getSSTIPayload()
