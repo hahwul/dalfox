@@ -15,7 +15,7 @@ type Options struct {
 	Header            []string `json:"header"`
 	ConfigFile        string   `json:"config"`
 	BlindURL          string   `json:"blind"`
-	CustomPayloadFile string   `json:""`
+	CustomPayloadFile string   `json:"custom-payload-file"`
 	CustomAlertValue  string   `json:"custom-alert-value"`
 	CustomAlertType   string   `json:"custom-alert-type"`
 	Data              string   `json:"data"`
