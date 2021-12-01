@@ -56,6 +56,7 @@ func Initialize(target Target, options Options) model.Options {
 		RemoteWordlists:   "",
 		OnlyPoC:           "",
 		OutputAll:         false,
+		PoCType:           "",
 	}
 	if len(options.UniqParam) > 0 {
 		for _, v := range options.UniqParam {
@@ -133,6 +134,10 @@ func Initialize(target Target, options Options) model.Options {
 	if options.RemoteWordlists != "" {
 		newOptions.RemoteWordlists = options.RemoteWordlists
 	}
+	if options.PoCType != "" {
+		newOptions.PoCType = options.PoCType
+	}
+
 	return newOptions
 }
 

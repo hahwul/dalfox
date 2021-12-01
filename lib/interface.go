@@ -32,6 +32,7 @@ type Options struct {
 	NoGrep           bool     `json:"skip-grepping"`
 	RemotePayloads   string
 	RemoteWordlists  string
+	PoCType          string `json:"poc-type"`
 }
 
 // Target is target object
