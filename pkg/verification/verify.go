@@ -14,7 +14,7 @@ func VerifyReflectionWithLine(body, payload string) (bool, int) {
 	count := 0
 	for l, v := range bodyArray {
 		if strings.Contains(v, payload) {
-			count = count + l
+			count = count + l + 1
 		}
 	}
 	if count != 0 {
