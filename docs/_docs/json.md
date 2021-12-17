@@ -35,7 +35,7 @@ permalink: /docs/json/
 {
     "type": "V",
     "inject_type": "inHTML-URL",
-    "poc_type": "",
+    "poc_type": "plain",
     "method": "GET",
     "data": "http://testphp.vulnweb.com/listproducts.php?cat=%27%22%3E%3Cimg%2Fsrc%2Fonerror%3D.1%7Calert%60%60+class%3Ddalfox%3E",
     "param": "cat",
