@@ -640,6 +640,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 									Evidence:   "",
 									CWE:        "CWE-79",
 									Severity:   "High",
+									PoCType:    options.PoCType,
 								}
 								if showV {
 									if options.Format == "json" {
@@ -722,6 +723,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 															Evidence:   "",
 															CWE:        "CWE-79",
 															Severity:   "High",
+															PoCType:    options.PoCType,
 														}
 														poc.Data = MakePoC(poc.Data, k, options)
 
@@ -756,6 +758,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 															Evidence:   "",
 															CWE:        "CWE-79",
 															Severity:   "Medium",
+															PoCType:    options.PoCType,
 														}
 														poc.Data = MakePoC(poc.Data, k, options)
 
@@ -778,6 +781,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 														Evidence:   code,
 														CWE:        "CWE-79",
 														Severity:   "Medium",
+														PoCType:    options.PoCType,
 													}
 													poc.Data = MakePoC(poc.Data, k, options)
 
@@ -817,6 +821,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Evidence:   code,
 												CWE:        "CWE-83",
 												Severity:   "High",
+												PoCType:    options.PoCType,
 											}
 											poc.Data = MakePoC(poc.Data, k, options)
 
@@ -853,6 +858,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Evidence:   code,
 												CWE:        "CWE-83",
 												Severity:   "Medium",
+												PoCType:    options.PoCType,
 											}
 											poc.Data = MakePoC(poc.Data, k, options)
 
@@ -890,6 +896,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Evidence:   code,
 												CWE:        "CWE-79",
 												Severity:   "High",
+												PoCType:    options.PoCType,
 											}
 											poc.Data = MakePoC(poc.Data, k, options)
 
@@ -926,6 +933,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Evidence:   code,
 												CWE:        "CWE-79",
 												Severity:   "Medium",
+												PoCType:    options.PoCType,
 											}
 											poc.Data = MakePoC(poc.Data, k, options)
 
