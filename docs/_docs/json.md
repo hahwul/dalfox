@@ -13,7 +13,8 @@ permalink: /docs/json/
       "param":"Parmeter",
       "payload":"Attack Value",
       "evidence":"Evidence with response body",
-      "cwe":"CWE ID"
+      "cwe":"CWE ID",
+      "severity": "Severity (Low/Medium/High)"
    }
 ```
 
@@ -28,6 +29,7 @@ permalink: /docs/json/
 | payload     | Paramter value              | - Attack code in value                                       |
 | evidence    | Evidence with repsonse body | - Simple codeview of where it's injected in response body.   |
 | cwe         | CWE ID                      | - Mapping CWE ID                                             |
+| severity    | Severity                    | - Severity (Low/Medium/High)                                 |
 
 ```json
 {
@@ -39,6 +41,7 @@ permalink: /docs/json/
       "param":"artist",
       "payload":"'\"\u003e\u003ciframe srcdoc=\"\u003cinput onauxclick=alert(1)\u003e\" class=dalfox\u003e\u003c/iframe\u003e",
       "evidence":"48 line:  syntax to use near ''\"\u003e\u003ciframe srcdoc=\"\u003cinput onauxclick=alert(1)\u003e\" class=dalfox",
-      "cwe":"CWE-79"
-   }
+      "cwe":"CWE-79",
+      "severity": "High"
+}
 ```
