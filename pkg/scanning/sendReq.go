@@ -46,6 +46,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					Payload:    payload,
 					Evidence:   "",
 					CWE:        "CWE-601",
+					Severity:   "Medium",
 				}
 				if showG {
 					if options.Format == "json" {
@@ -97,6 +98,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				Payload:    payload,
 				Evidence:   "",
 				CWE:        "CWE-93",
+				Severity:   "Medium",
 			}
 			poc.Data = MakePoC(poc.Data, req, options)
 
@@ -144,6 +146,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					Payload:    payload,
 					Evidence:   "",
 					CWE:        "CWE-94",
+					Severity:   "High",
 				}
 				poc.Data = MakePoC(poc.Data, req, options)
 
@@ -184,6 +187,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				Payload:    payload,
 				Evidence:   "",
 				CWE:        "",
+				Severity:   "Low",
 			}
 			poc.Data = MakePoC(poc.Data, req, options)
 
@@ -233,6 +237,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				Payload:    payload,
 				Evidence:   "",
 				CWE:        "",
+				Severity:   "Low",
 			}
 			poc.Data = MakePoC(poc.Data, req, options)
 
