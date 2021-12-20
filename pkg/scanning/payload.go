@@ -114,6 +114,13 @@ func getCRLFPayload() []string {
 	return payload
 }
 
+func getESIIPayload() []string {
+	payload := []string{
+		"<esi:assign name=\"var1\" value=\"dalfox\"><esii-<esi:vars name=\"$(var1)\">",
+	}
+	return payload
+}
+
 //basic sql injection payloads
 func getSQLIPayload() []string {
 	payload := []string{

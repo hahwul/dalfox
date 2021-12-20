@@ -158,8 +158,12 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 		go func() {
 			defer wait.Done()
 			var bavWaitGroup sync.WaitGroup
-			bavTask := 4
+			bavTask := 5
 			bavWaitGroup.Add(bavTask)
+			go func() {
+				defer bavWaitGroup.Done()
+				ESIIAnalysis(target, options, rl)
+			}()
 			go func() {
 				defer bavWaitGroup.Done()
 				SqliAnalysis(target, options, rl)
@@ -170,11 +174,11 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			}()
 			go func() {
 				defer bavWaitGroup.Done()
-				OpenRedirectorAnalysis(target, options, rl)
+				CRLFAnalysis(target, options, rl)
 			}()
 			go func() {
 				defer bavWaitGroup.Done()
-				CRLFAnalysis(target, options, rl)
+				OpenRedirectorAnalysis(target, options, rl)
 			}()
 			bavWaitGroup.Wait()
 			bav = options.AuroraObject.Green(bav).String()
