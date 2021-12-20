@@ -20,6 +20,10 @@ var sxssCmd = &cobra.Command{
 			options.Trigger = trigger
 			options.Sequence = sequence
 			options.TriggerMethod = requestMethod
+			options.Concurrence = 1
+			if options.Delay <= 1500 {
+				options.Delay = 1500
+			}
 			if options.Trigger != "" {
 				printing.DalLog("SYSTEM", "Using Stored XSS mode", options)
 				_, _ = scanning.Scan(args[0], options, "Single")
