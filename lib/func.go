@@ -32,6 +32,7 @@ func Initialize(target Target, options Options) model.Options {
 		Grep:              "",
 		IgnoreReturn:      "",
 		Timeout:           10,
+		TriggerMethod:     "GET",
 		Concurrence:       100,
 		Delay:             0,
 		OnlyDiscovery:     false,
@@ -104,6 +105,9 @@ func Initialize(target Target, options Options) model.Options {
 	}
 	if options.Trigger != "" {
 		newOptions.Trigger = options.Trigger
+	}
+	if options.TriggerMethod != "" {
+		newOptions.TriggerMethod = options.TriggerMethod
 	}
 	if options.Timeout != 0 {
 		newOptions.Timeout = options.Timeout
