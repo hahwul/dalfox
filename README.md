@@ -2,7 +2,6 @@
   <br>
   <a href=""><img src="https://user-images.githubusercontent.com/13212227/120111054-49ffc780-c1ab-11eb-974e-e198d53ddb48.png" alt="" width="300px;"></a>
 </h1>
-<h4 align="center">Finder Of XSS, and Dal(달) is the Korean pronunciation of moon.</h4>
 <p align="center">
   <a href=""><img src="https://img.shields.io/github/v/release/hahwul/dalfox?style=flat"></a>
   <a href="https://github.com/hahwul/dalfox/actions/workflows/go.yml"><img src="https://github.com/hahwul/dalfox/actions/workflows/go.yml/badge.svg"></a>
@@ -14,7 +13,9 @@
 </p>
 
 ## What is DalFox 🌘🦊
-DalFox is a fast, powerful parameter analysis and XSS scanner, based on a golang/DOM parser. supports friendly Pipeline, CI/CD and testing of different types of XSS. I talk about naming. Dal([달](https://en.wiktionary.org/wiki/달)) is the Korean pronunciation of moon and fox was made into Fox(Find Of XSS).
+Dalfox is an open source XSS scanning tool and paramter analyzer and utility that fast the process of detecting and verify XSS flaws. It comes with a powerful testing engine, many niche features for the cool hackers 😎
+
+I talk about naming. Dal([달](https://en.wiktionary.org/wiki/달)) is the Korean pronunciation of moon and fox was made into Fox (Find Of XSS).
 
 ## TOC
 - [Key features](#key-features)
@@ -26,7 +27,6 @@ DalFox is a fast, powerful parameter analysis and XSS scanner, based on a golang
 - [Wiki](https://dalfox.hahwul.com/docs/home/)
 - [Contribute](https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md)
 - [Contributors](#contributors)
-
 
 ## Key features
 Mode: `url` `sxss` `pipe` `file` `server` `payload`
