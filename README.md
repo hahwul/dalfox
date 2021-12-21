@@ -13,9 +13,9 @@
 </p>
 
 ## What is DalFox 🌘🦊
-Dalfox is an open source XSS scanning tool and paramter analyzer and utility that fast the process of detecting and verify XSS flaws. It comes with a powerful testing engine, many niche features for the cool hackers 😎
+DalFox is an open source XSS scanning tool and paramter analyzer and utility that fast the process of detecting and verify XSS flaws. It comes with a powerful testing engine, many niche features for the cool hackers 😎
 
-I talk about naming. Dal([달](https://en.wiktionary.org/wiki/달)) is the Korean pronunciation of moon and fox was made into Fox (Find Of XSS).
+I talk about naming. Dal([달](https://en.wiktionary.org/wiki/달)) is the Korean pronunciation of moon and Fox was made into Fox (Find Of XSS).
 
 ## TOC
 - [Key features](#key-features)
