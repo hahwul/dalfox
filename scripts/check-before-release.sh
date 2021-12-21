@@ -1,3 +1,9 @@
-goreleaser --snapshot --rm-dist
+echo "[+] version check"
 go build
-./dalfox version
+./dalfox version 2>&1 | grep v
+
+echo "[+] go test check"
+go test ./...
+
+echo "[+] goreleaser check"
+goreleaser check
