@@ -24,9 +24,10 @@ I talk about naming. Dal([달](https://en.wiktionary.org/wiki/달)) is the Korea
 - [POC format](#poc-format)
 - [In the Code](#in-the-code)
 - [Screenshots](#screenshots)
-- [Wiki](https://dalfox.hahwul.com/docs/home/)
-- [Contribute](#contribute)
-- [Contributors](#contribute)
+- [Wiki](#wiki)
+- [Question](#question)
+- [Changelog](#changelog)
+- [Contributing](#contributing)
 
 ## Key features
 Mode: `url` `sxss` `pipe` `file` `server` `payload`
