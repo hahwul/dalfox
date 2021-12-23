@@ -88,125 +88,8 @@ sudo snap install dalfox
 More information? please read [Installation guide](https://dalfox.hahwul.com/docs/installation/)
 
 ## Usage
-```plain
-Modes:
-file        Use file mode(targets list or rawdata)
-help        Help about any command
-payload     Payload mode, make and enum payloads
-pipe        Use pipeline mode
-server      Start API Server
-sxss        Use Stored XSS mode
-url         Use single target mode
-version     Show version
-
-Global Flags:
-  -b, --blind string                Add your blind xss
-                                      * Example: -b hahwul.xss.ht
-      --config string               Using config from file
-  -C, --cookie string               Add custom cookie
-      --cookie-from-raw string      Load cookie from burp raw http request
-                                      * Example: --cookie-from-raw request.txt
-      --custom-alert-type string    Change alert value type
-                                      * Example: --custom-alert-type=none / --custom-alert-type=str,none (default "none")
-      --custom-alert-value string   Change alert value
-                                      * Example: --custom-alert-value=document.cookie (default "1")
-      --custom-payload string       Add custom payloads from file
-  -d, --data string                 Using POST Method and add Body data
-      --debug                       debug mode, save all log using -o option
-      --deep-domxss                 DOM XSS Testing with more payloads on headless [so slow]
-      --delay int                   Milliseconds between send to same host (1000==1s)
-  -F, --follow-redirects            Following redirection
-      --format string               Stdout output format
-                                      * Supported: plain / json (default "plain")
-      --found-action string         If found weak/vuln, action(cmd) to next
-                                      * Example: --found-action='./notify.sh'
-      --found-action-shell string   Select shell application for --found-action (default "bash")
-      --grep string                 Using custom grepping file
-                                      * Example: --grep ./samples/sample_grep.json
-  -H, --header strings              Add custom headers
-      --ignore-return string        Ignore scanning from return code
-                                      * Example: --ignore-return 302,403,404
-  -X, --method string               Force overriding HTTP Method
-                                      * Example: -X PUT (default "GET")
-      --mining-dict                 Find new parameter with dictionary attack, default is Gf-Patterns=>XSS (default true)
-  -W, --mining-dict-word string     Custom wordlist file for param mining
-                                      * Example: --mining-dict-word word.txt
-      --mining-dom                  Find new parameter in DOM (attribute/js value) (default true)
-      --no-color                    Not use colorize
-      --no-spinner                  Not use spinner
-      --only-custom-payload         Only testing custom payload (required --custom-payload)
-      --only-discovery              Only testing parameter analysis (same '--skip-xss-scanning' option)
-      --only-poc string             Shows only the PoC code for the specified pattern (g: grep / r: reflected / v: verified)
-                                     * Example: --only-poc='g,v'
-  -o, --output string               Write to output file (By default, only the PoC code is saved)
-      --output-all                  All log write mode (-o or stdout)
-  -p, --param strings               Only testing selected parameters
-      --proxy string                Send all request to proxy server
-                                      * Example: --proxy http://127.0.0.1:8080
-      --remote-payloads string      Using remote payload for XSS testing
-                                      * Supported: portswigger/payloadbox
-                                      * Example: --remote-payloads=portswigger,payloadbox
-      --remote-wordlists string     Using remote wordlists for param mining
-                                      * Supported: burp/assetnote
-                                      * Example: --remote-wordlists=burp
-  -S, --silence                     Only print PoC Code and Progress(for pipe/file mode)
-      --skip-bav                    Skipping BAV(Basic Another Vulnerability) analysis
-      --skip-grepping               Skipping built-in grepping
-      --skip-headless               Skipping headless browser base scanning[DOM XSS and inJS verify]
-      --skip-mining-all             Skipping ALL parameter mining
-      --skip-mining-dict            Skipping Dict base parameter mining
-      --skip-mining-dom             Skipping DOM base parameter mining
-      --skip-xss-scanning           Skipping XSS Scanning (same '--only-discovery' option)
-      --timeout int                 Second of timeout (default 10)
-      --user-agent string           Add custom UserAgent
-  -w, --worker int                  Number of worker (default 100)
-
-Server Flags:
-  -h, --help          help for server
-      --host string   Bind address (default "0.0.0.0")
-      --port int      Bind Port (default 6664)
-
-Pipe Flags:
-  -h, --help              help for pipe
-      --mass              Parallel scanning N*Host mode (show only poc code)
-      --mass-worker int   Parallel worker of --mass and --multicast option (default 10)
-      --multicast         Parallel scanning N*Host mode (show only poc code)
-      --silence-force     Only print PoC (not print progress)
-
-File Flags:
-  -h, --help              help for file
-      --http              Using force http on rawdata mode
-      --mass              Parallel scanning N*Host mode (show only poc code)
-      --mass-worker int   Parallel worker of --mass and --multicast option (default 10)
-      --multicast         Parallel scanning N*Host mode (show only poc code)
-      --rawdata           Using req rawdata from Burp/ZAP
-      --silence-force     Only print PoC (not print progress)
-
-SXSS Flags:
-  -h, --help             help for sxss
-      --sequence int     Set sequence to first number
-                           * Example: --trigger=https://~/view?no=SEQNC --sequence=3 (default -1)
-      --trigger string   Checking this url after inject sxss code
-                           * Example: --trigger=https://~~/profile
-
-Payload Flags:
-     --encoder-url            Encoding output [URL]
-     --entity-event-handler   Enumerate a event handlers for xss
-     --entity-gf              Enumerate a gf-patterns xss params
-     --entity-special-chars   Enumerate a special chars for xss
-     --entity-useful-tags     Enumerate a useful tags for xss
-     --enum-attr              Enumerate a in-attr xss payloads
-     --enum-common            Enumerate a common xss payloads
-     --enum-html              Enumerate a in-html xss payloads
-     --enum-injs              Enumerate a in-js xss payloads
- -h, --help                   help for payload
-     --make-bulk              Make bulk payloads for stored xss
-     --remote-payloadbox      Enumerate a payloadbox's xss payloads
-     --remote-portswigger     Enumerate a portswigger xss cheatsheet payloads
 ```
-
-```
-▶ dalfox [mode] [flags] [data]
+▶ dalfox [mode] [target] [flags] 
 ```
 
 Single target mode
@@ -283,7 +166,6 @@ func main() {
 $ go build -o xssapp ; ./xssapp
 [] [{V GET https://xss-game.appspot.com/level1/frame?query=%3Ciframe+srcdoc%3D%22%3Cinput+onauxclick%3Dprint%281%29%3E%22+class%3Ddalfox%3E%3C%2Fiframe%3E}] 2.618998247s 2021-07-11 10:59:26.508483153 +0900 KST m=+0.000794230 2021-07-11 10:59:29.127481217 +0900 KST m=+2.619792477}
 ```
-
 
 ## Screenshots
 | ![1414](https://user-images.githubusercontent.com/13212227/108603497-7a390c80-73eb-11eb-92c1-b31bd9574861.jpg) | ![1415](https://user-images.githubusercontent.com/13212227/108603373-ebc48b00-73ea-11eb-9651-7ce4617845f6.jpg) |
