@@ -25,8 +25,8 @@ I talk about naming. Dal([달](https://en.wiktionary.org/wiki/달)) is the Korea
 - [In the Code](#in-the-code)
 - [Screenshots](#screenshots)
 - [Wiki](https://dalfox.hahwul.com/docs/home/)
-- [Contribute](https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md)
-- [Contributors](#contributors)
+- [Contribute](#contribute)
+- [Contributors](#contribute)
 
 ## Key features
 Mode: `url` `sxss` `pipe` `file` `server` `payload`
@@ -186,7 +186,7 @@ Please use [discussions](https://github.com/hahwul/dalfox/discussions) actively!
 ## Changelog
 Detailed changes for each release are documented in the [release notes](https://github.com/hahwul/dalfox/releases).
 
-## Contributors
+## Contributing
 DalFox's open-source project and made it with ❤️
 if you want contribute this project, please see [CONTRIBUTING.md](https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md) and Pull-Request with cool your contents.
 
