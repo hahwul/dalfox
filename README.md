@@ -180,8 +180,14 @@ and dalfox's banner image!
 ## Wiki
 [Wiki](https://dalfox.hahwul.com/docs/home/)
 
-## Contribute
-[Contribute](https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md)
+## Question
+Please use [discussions](https://github.com/hahwul/dalfox/discussions) actively!
+
+## Changelog
+Detailed changes for each release are documented in the [release notes](https://github.com/hahwul/dalfox/releases).
 
 ## Contributors
+DalFox's open-source project and made it with ❤️
+if you want contribute this project, please see [CONTRIBUTING.md](https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md) and Pull-Request with cool your contents.
+
 [![](/CONTRIBUTORS.svg)](https://github.com/hahwul/dalfox/graphs/contributors)
