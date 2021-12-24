@@ -175,9 +175,6 @@ $ go build -o xssapp ; ./xssapp
 | ![1416](https://user-images.githubusercontent.com/13212227/108603375-ec5d2180-73ea-11eb-8e6e-d59d915c0291.jpg) | ![1417](https://user-images.githubusercontent.com/13212227/108613244-66b19400-7433-11eb-87fc-2f195f9011b3.jpg) |
 | REST API Server Mode                                 | Output and Customizing (found-action / grepping)              |
 
-and dalfox's banner image!
-![dalfox-wide](https://user-images.githubusercontent.com/13212227/120111056-4b30f480-c1ab-11eb-90a4-c831ccf76e11.jpg)
-
 ## Wiki
 [Wiki](https://dalfox.hahwul.com/docs/home/)
 
