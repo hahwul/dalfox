@@ -193,7 +193,26 @@ func TestMakeRequestQuery(t *testing.T) {
 				payload: "dalfox",
 				ptype:   "",
 				pAction: "",
-				pEncode: "",
+				pEncode: "htmlEncode",
+				options: model.Options{
+					Data:   "abcd=1234",
+					Cookie: "abcd=1234",
+					Header: []string{
+						"X-API-Key: 1234",
+					},
+					Method: "POST",
+				},
+			},
+		},
+		{
+			name: "TestMakeRequestQuery2",
+			args: args{
+				target:  "https://www.hahwul.com",
+				param:   "param",
+				payload: "dalfox",
+				ptype:   "FORM",
+				pAction: "toAppend",
+				pEncode: "urlEncode",
 				options: model.Options{
 					Data:   "abcd=1234",
 					Cookie: "abcd=1234",
