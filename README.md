@@ -12,7 +12,7 @@
   <a href=""><img src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat"></a>
 </p>
 
-## What is DalFox 🌘🦊
+## What is DalFox 🌙🦊
 DalFox is an powerful open source XSS scanning tool and parameter analyzer and utility that fast the process of detecting and verify XSS flaws. It comes with a powerful testing engine, many niche features for the cool hackers 😎
 
 I talk about naming. Dal([달](https://en.wiktionary.org/wiki/달)) is the Korean pronunciation of moon, and Fox are made to mean "Finder Of XSS" or 🦊
