@@ -8,7 +8,7 @@ require (
 	github.com/briandowns/spinner v1.18.0
 	github.com/chromedp/cdproto v0.0.0-20211223002613-767fe3af85ce
 	github.com/chromedp/chromedp v0.7.6
-	github.com/labstack/echo/v4 v4.6.1
+	github.com/labstack/echo/v4 v4.6.3
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/spf13/cobra v1.3.0
 	github.com/stretchr/testify v1.7.0
