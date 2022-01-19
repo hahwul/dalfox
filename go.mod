@@ -12,7 +12,7 @@ require (
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/spf13/cobra v1.3.0
 	github.com/stretchr/testify v1.7.0
-	github.com/swaggo/echo-swagger v1.1.4
+	github.com/swaggo/echo-swagger v1.2.0
 	github.com/swaggo/swag v1.7.8
 	github.com/tylerb/graceful v1.2.15
 	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211
