@@ -27,6 +27,7 @@ type Options struct {
 	ProxyAddress      string   `json:"proxy"`
 	Grep              string   `json:"grep"`
 	IgnoreReturn      string   `json:"ignore-return"`
+	IgnoreParams      []string `json:"ignore-params"`
 	Trigger           string   `json:"trigger"`
 	Timeout           int      `json:"timeout"`
 	Concurrence       int      `json:"worker"`

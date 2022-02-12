@@ -32,7 +32,7 @@ func SSTIAnalysis(target string, options model.Options, rl *rateLimiter) {
 	}
 
 	for bpk := range bpd {
-		if optimization.CheckUniqParam(options, bpk) {
+		if optimization.CheckInspectionParam(options, bpk) {
 			for _, ssti := range getSSTIPayload() {
 				turl, _ := optimization.MakeRequestQuery(target, bpk, ssti, "toGrepping", "ToAppend", "Nan", options)
 				reqs <- turl
@@ -63,7 +63,7 @@ func CRLFAnalysis(target string, options model.Options, rl *rateLimiter) {
 	}
 
 	for bpk := range bpd {
-		if optimization.CheckUniqParam(options, bpk) {
+		if optimization.CheckInspectionParam(options, bpk) {
 			for _, crlfpayload := range getCRLFPayload() {
 				turl, _ := optimization.MakeRequestQuery(target, bpk, crlfpayload, "toGrepping", "ToAppend", "NaN", options)
 				reqs <- turl
@@ -95,7 +95,7 @@ func ESIIAnalysis(target string, options model.Options, rl *rateLimiter) {
 	}
 
 	for bpk := range bpd {
-		if optimization.CheckUniqParam(options, bpk) {
+		if optimization.CheckInspectionParam(options, bpk) {
 			for _, crlfpayload := range getESIIPayload() {
 				turl, _ := optimization.MakeRequestQuery(target, bpk, crlfpayload, "toGrepping", "ToAppend", "NaN", options)
 				reqs <- turl
@@ -129,7 +129,7 @@ func SqliAnalysis(target string, options model.Options, rl *rateLimiter) {
 	}
 
 	for bpk := range bpd {
-		if optimization.CheckUniqParam(options, bpk) {
+		if optimization.CheckInspectionParam(options, bpk) {
 			for _, sqlipayload := range getSQLIPayload() {
 				turl, _ := optimization.MakeRequestQuery(target, bpk, sqlipayload, "toGrepping", "ToAppend", "NaN", options)
 				reqs <- turl
@@ -163,7 +163,7 @@ func OpenRedirectorAnalysis(target string, options model.Options, rl *rateLimite
 	}
 
 	for bpk := range bpd {
-		if optimization.CheckUniqParam(options, bpk) {
+		if optimization.CheckInspectionParam(options, bpk) {
 			for _, openRedirectPayload := range getOpenRedirectPayload() {
 				turl, _ := optimization.MakeRequestQuery(target, bpk, openRedirectPayload, "toOpenRedirecting", "toReplace", "NaN", options)
 				reqs <- turl

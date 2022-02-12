@@ -303,7 +303,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			}
 
 			for v := range cp {
-				if optimization.CheckUniqParam(options, v) {
+				if optimization.CheckInspectionParam(options, v) {
 					cpArr = append(cpArr, v)
 					arc := optimization.SetPayloadValue(getCommonPayload(), options)
 					for _, avv := range arc {
@@ -321,7 +321,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			}
 
 			for v := range cpd {
-				if optimization.CheckUniqParam(options, v) {
+				if optimization.CheckInspectionParam(options, v) {
 					cpdArr = append(cpdArr, v)
 					arc := optimization.SetPayloadValue(getCommonPayload(), options)
 					for _, avv := range arc {
@@ -348,7 +348,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 				}
 				dpayloads := optimization.SetPayloadValue(dlst, options)
 				for v := range cp {
-					if optimization.CheckUniqParam(options, v) {
+					if optimization.CheckInspectionParam(options, v) {
 						// loop payload list
 						if len(params[v]) == 0 {
 							for _, dpayload := range dpayloads {
@@ -370,7 +370,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					}
 				}
 				for v := range cpd {
-					if optimization.CheckUniqParam(options, v) {
+					if optimization.CheckInspectionParam(options, v) {
 						// loop payload list
 						if len(params[v]) == 0 {
 							for _, dpayload := range dpayloads {
@@ -395,7 +395,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 
 			// Set param base xss
 			for k, v := range params {
-				if optimization.CheckUniqParam(options, k) {
+				if optimization.CheckInspectionParam(options, k) {
 					vStatus[k] = false
 					ptype := ""
 					chars := GetSpecialChar()
@@ -487,7 +487,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 
 			// loop parameter list
 			for k, v := range params {
-				if optimization.CheckUniqParam(options, k) {
+				if optimization.CheckInspectionParam(options, k) {
 					ptype := ""
 					for _, av := range v {
 						if strings.Contains(av, "PTYPE:") {
@@ -533,7 +533,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					for _, customPayload := range payload {
 						if customPayload != "" {
 							for k, v := range params {
-								if optimization.CheckUniqParam(options, k) {
+								if optimization.CheckInspectionParam(options, k) {
 									ptype := ""
 									for _, av := range v {
 										if strings.Contains(av, "PTYPE:") {
@@ -568,7 +568,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 				for _, customPayload := range ff {
 					if customPayload != "" {
 						for k, v := range params {
-							if optimization.CheckUniqParam(options, k) {
+							if optimization.CheckInspectionParam(options, k) {
 								ptype := ""
 								for _, av := range v {
 									if strings.Contains(av, "PTYPE:") {

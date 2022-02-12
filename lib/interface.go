@@ -23,6 +23,7 @@ type Options struct {
 	ProxyAddress      string   `json:"proxy"`
 	Grep              string   `json:"grep"`
 	IgnoreReturn      string   `json:"ignore-return"`
+	IgnoreParams      []string `json:"ignore-params"`
 	Trigger           string   `json:"trigger"`
 	TriggerMethod     string   `json:"request-method"`
 	Sequence          int      `json:"sequence"`

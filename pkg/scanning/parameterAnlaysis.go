@@ -1,9 +1,9 @@
 package scanning
 
 import (
-	"io/ioutil"
-	"io"
 	"compress/gzip"
+	"io"
+	"io/ioutil"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -204,7 +204,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 		wgg.Add(1)
 		go func() {
 			for k := range paramsQue {
-				if optimization.CheckUniqParam(options, k) {
+				if optimization.CheckInspectionParam(options, k) {
 					printing.DalLog("DEBUG", "Mining URL scan to "+k, options)
 					tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA", "toAppend", "NaN", options)
 					var code string
@@ -286,6 +286,12 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 					paramsQue <- v
 				}
 			}
+		} else if len(options.IgnoreParams) > 0 {
+			for _, ignoreParam := range options.IgnoreParams {
+				if ignoreParam != v {
+					paramsQue <- v
+				}
+			}
 		} else {
 			paramsQue <- v
 		}
@@ -302,7 +308,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 		go func() {
 			for k := range paramsDataQue {
 				printing.DalLog("DEBUG", "Mining FORM scan to "+k, options)
-				if optimization.CheckUniqParam(options, k) {
+				if optimization.CheckInspectionParam(options, k) {
 					tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA-FORM", "toAppend", "NaN", options)
 					var code string
 					rl.Block(tempURL.Host)

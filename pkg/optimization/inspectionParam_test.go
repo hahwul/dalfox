@@ -6,7 +6,7 @@ import (
 	"github.com/hahwul/dalfox/v2/pkg/model"
 )
 
-func Test_CheckUniqParam(t *testing.T) {
+func Test_CheckInspectionParam(t *testing.T) {
 	type args struct {
 		options model.Options
 		k       string
@@ -66,11 +66,37 @@ func Test_CheckUniqParam(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			name: "test - false",
+			args: args{
+				options: model.Options{
+					IgnoreParams: []string{
+						"1234",
+						"cat",
+					},
+				},
+				k: "1234",
+			},
+			want: false,
+		},
+		{
+			name: "test - false",
+			args: args{
+				options: model.Options{
+					IgnoreParams: []string{
+						"1234",
+						"cat",
+					},
+				},
+				k: "5555",
+			},
+			want: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := CheckUniqParam(tt.args.options, tt.args.k); got != tt.want {
-				t.Errorf("checkUniqParam() = %v, want %v", got, tt.want)
+			if got := CheckInspectionParam(tt.args.options, tt.args.k); got != tt.want {
+				t.Errorf("CheckInspectionParam() = %v, want %v", got, tt.want)
 			}
 		})
 	}

@@ -16,7 +16,7 @@ import (
 var cfgFile string
 var optionsStr = make(map[string]string)
 var optionsBool = make(map[string]bool)
-var header, p []string
+var header, p, ignoreParams []string
 var config, cookie, data, customPayload, userAgent, blind, output, format, foundAction, proxy, grep, cookieFromRaw string
 var ignoreReturn, miningWord, method, customAlertValue, customAlertType, remotePayloads, remoteWordlists string
 var timeout, concurrence, delay int
@@ -45,6 +45,7 @@ func init() {
 	// Slice
 	rootCmd.PersistentFlags().StringSliceVarP(&header, "header", "H", []string{}, "Add custom headers")
 	rootCmd.PersistentFlags().StringSliceVarP(&p, "param", "p", []string{}, "Only testing selected parameters")
+	rootCmd.PersistentFlags().StringSliceVar(&ignoreParams, "ignore-param", []string{}, "Ignores this parameter when scanning.\n  * Example: --ignore-param api_token --ignore-param csrf_token")
 
 	//Str
 	rootCmd.PersistentFlags().StringVar(&config, "config", "", "Using config from file")
@@ -61,7 +62,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&foundActionShell, "found-action-shell", "bash", "Select shell application for --found-action")
 	rootCmd.PersistentFlags().StringVar(&proxy, "proxy", "", "Send all request to proxy server\n  * Example: --proxy http://127.0.0.1:8080")
 	rootCmd.PersistentFlags().StringVar(&grep, "grep", "", "Using custom grepping file\n  * Example: --grep ./samples/sample_grep.json")
-	rootCmd.PersistentFlags().StringVar(&ignoreReturn, "ignore-return", "", "Ignore scanning from return code\n  * Example: --ignore-return 302,403,404")
+	rootCmd.PersistentFlags().StringVar(&ignoreReturn, "ignore-return", "", "Ignores scanning from return code\n  * Example: --ignore-return 302,403,404")
 	rootCmd.PersistentFlags().StringVarP(&miningWord, "mining-dict-word", "W", "", "Custom wordlist file for param mining\n  * Example: --mining-dict-word word.txt")
 	rootCmd.PersistentFlags().StringVarP(&method, "method", "X", "GET", "Force overriding HTTP Method\n  * Example: -X PUT")
 	rootCmd.PersistentFlags().StringVarP(&cookieFromRaw, "cookie-from-raw", "", "", "Load cookie from burp raw http request\n  * Example: --cookie-from-raw request.txt")
@@ -118,6 +119,7 @@ func initConfig() {
 		ProxyAddress:      proxy,
 		Grep:              grep,
 		IgnoreReturn:      ignoreReturn,
+		IgnoreParams:      ignoreParams,
 		Timeout:           timeout,
 		Concurrence:       concurrence,
 		Delay:             delay,
