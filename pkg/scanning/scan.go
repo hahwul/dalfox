@@ -245,6 +245,11 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			av: reflected type, valid char
 		*/
 
+		// set vStatus
+		for k, _ := range params {
+			vStatus[k] = false
+		}
+
 		// set path base XSS
 		for k, v := range options.PathReflection {
 			if strings.Contains(v, "Injected:") {
@@ -278,6 +283,39 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 						query[tq] = tm
 					}
 				}
+			}
+		}
+
+		// Custom Payload
+		if isAllowType(policy["Content-Type"]) && options.CustomPayloadFile != "" {
+			ff, err := readLinesOrLiteral(options.CustomPayloadFile)
+			if err != nil {
+				printing.DalLog("SYSTEM", "Custom XSS payload load fail..", options)
+			} else {
+				for _, customPayload := range ff {
+					if customPayload != "" {
+						for k, v := range params {
+							if optimization.CheckInspectionParam(options, k) {
+								ptype := ""
+								for _, av := range v {
+									if strings.Contains(av, "PTYPE:") {
+										ptype = GetPType(av)
+									}
+								}
+								// Add plain XSS Query
+								tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "NaN", options)
+								query[tq] = tm
+								// Add URL encoded XSS Query
+								etq, etm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "urlEncode", options)
+								query[etq] = etm
+								// Add HTML Encoded XSS Query
+								htq, htm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "htmlEncode", options)
+								query[htq] = htm
+							}
+						}
+					}
+				}
+				printing.DalLog("SYSTEM", "Added your "+strconv.Itoa(len(ff))+" custom xss payload", options)
 			}
 		}
 
@@ -396,7 +434,6 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			// Set param base xss
 			for k, v := range params {
 				if optimization.CheckInspectionParam(options, k) {
-					vStatus[k] = false
 					ptype := ""
 					chars := GetSpecialChar()
 					var badchars []string
@@ -530,8 +567,8 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 				}
 				if line != "" {
 					printing.DalLog("INFO", "A '"+endpoint+"' payloads has been loaded ["+line+"L / "+size+"]               ", options)
-					for _, customPayload := range payload {
-						if customPayload != "" {
+					for _, remotePayload := range payload {
+						if remotePayload != "" {
 							for k, v := range params {
 								if optimization.CheckInspectionParam(options, k) {
 									ptype := ""
@@ -541,13 +578,13 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 										}
 									}
 									// Add plain XSS Query
-									tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "NaN", options)
+									tq, tm := optimization.MakeRequestQuery(target, k, remotePayload, "inHTML"+ptype, "toAppend", "NaN", options)
 									query[tq] = tm
 									// Add URL encoded XSS Query
-									etq, etm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "urlEncode", options)
+									etq, etm := optimization.MakeRequestQuery(target, k, remotePayload, "inHTML"+ptype, "toAppend", "urlEncode", options)
 									query[etq] = etm
 									// Add HTML Encoded XSS Query
-									htq, htm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "htmlEncode", options)
+									htq, htm := optimization.MakeRequestQuery(target, k, remotePayload, "inHTML"+ptype, "toAppend", "htmlEncode", options)
 									query[htq] = htm
 								}
 							}
@@ -556,39 +593,6 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 				} else {
 					printing.DalLog("SYSTEM", endpoint+" payload load fail..", options)
 				}
-			}
-		}
-
-		// Custom Payload
-		if options.CustomPayloadFile != "" {
-			ff, err := readLinesOrLiteral(options.CustomPayloadFile)
-			if err != nil {
-				printing.DalLog("SYSTEM", "Custom XSS payload load fail..", options)
-			} else {
-				for _, customPayload := range ff {
-					if customPayload != "" {
-						for k, v := range params {
-							if optimization.CheckInspectionParam(options, k) {
-								ptype := ""
-								for _, av := range v {
-									if strings.Contains(av, "PTYPE:") {
-										ptype = GetPType(av)
-									}
-								}
-								// Add plain XSS Query
-								tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "NaN", options)
-								query[tq] = tm
-								// Add URL encoded XSS Query
-								etq, etm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "urlEncode", options)
-								query[etq] = etm
-								// Add HTML Encoded XSS Query
-								htq, htm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "htmlEncode", options)
-								query[htq] = htm
-							}
-						}
-					}
-				}
-				printing.DalLog("SYSTEM", "Added your "+strconv.Itoa(len(ff))+" custom xss payload", options)
 			}
 		}
 
