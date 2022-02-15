@@ -1,6 +1,7 @@
 package server
 
 import (
+	dalfox "github.com/hahwul/dalfox/v2/lib"
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	scan "github.com/hahwul/dalfox/v2/pkg/scanning"
 )
@@ -14,11 +15,19 @@ import (
 // @Success 200 {object} Res
 // @Router /scan [post]
 func ScanFromAPI(url string, rqOptions model.Options, options model.Options, sid string) {
-	rqOptions.Scan = options.Scan
-	rqOptions.SpinnerObject = options.SpinnerObject
-	rqOptions.AuroraObject = options.AuroraObject
-	rqOptions.StartTime = options.StartTime
-	_, _ = scan.Scan(url, rqOptions, sid)
+	target := dalfox.Target{
+		URL:     url,
+		Method:  rqOptions.Method,
+		Options: dalfox.Options{},
+	}
+	newOptions := dalfox.Initialize(target, target.Options)
+	newOptions.Scan = options.Scan
+	if rqOptions.Method != "" {
+		newOptions.Method = options.Method
+	} else {
+		newOptions.Method = "GET"
+	}
+	_, _ = scan.Scan(url, newOptions, sid)
 }
 
 // GetScan is get scan information
