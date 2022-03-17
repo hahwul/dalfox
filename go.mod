@@ -10,7 +10,7 @@ require (
 	github.com/chromedp/chromedp v0.7.8
 	github.com/labstack/echo/v4 v4.7.0
 	github.com/logrusorgru/aurora v2.0.3+incompatible
-	github.com/spf13/cobra v1.3.0
+	github.com/spf13/cobra v1.4.0
 	github.com/stretchr/testify v1.7.0
 	github.com/swaggo/echo-swagger v1.3.0
 	github.com/swaggo/swag v1.8.0
