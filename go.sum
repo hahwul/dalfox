@@ -15,10 +15,10 @@ github.com/andybalholm/cascadia v1.3.1 h1:nhxRkql1kdYCc8Snf7D5/D3spOX+dBgjA6u8x0
 github.com/andybalholm/cascadia v1.3.1/go.mod h1:R4bJ1UQfqADjvDa4P6HZHLh/3OxWWEqc0Sk8XGwHqvA=
 github.com/briandowns/spinner v1.18.1 h1:yhQmQtM1zsqFsouh09Bk/jCjd50pC3EOGsh28gLVvwY=
 github.com/briandowns/spinner v1.18.1/go.mod h1:mQak9GHqbspjC/5iUx3qMlIho8xBS/ppAL/hX5SmPJU=
-github.com/chromedp/cdproto v0.0.0-20220217222649-d8c14a5c6edf h1:1omDWNUsWxn2HpiMiMuyRmzjl9uG7RP3IE6GTlpgJWU=
-github.com/chromedp/cdproto v0.0.0-20220217222649-d8c14a5c6edf/go.mod h1:At5TxYYdxkbQL0TSefRjhLE3Q0lgvqKKMSFUglJ7i1U=
-github.com/chromedp/chromedp v0.7.8 h1:JFPIFb28LPjcx6l6mUUzLOTD/TgswcTtg7KrDn8S/2I=
-github.com/chromedp/chromedp v0.7.8/go.mod h1:HcIUFBa5vA+u2QI3+xljiU59llUQ8lgGoLzYSCBfmUA=
+github.com/chromedp/cdproto v0.0.0-20220321060548-7bc2623472b3 h1:ilF7R875ORf246k6nU2/6fRIbtAFYjPOOtwZJTQvusM=
+github.com/chromedp/cdproto v0.0.0-20220321060548-7bc2623472b3/go.mod h1:5Y4sD/eXpwrChIuxhSr/G20n9CdbCmoerOHnuAf0Zr0=
+github.com/chromedp/chromedp v0.8.0 h1:+Cufl+QWWfbvyylGCtAUt34A2EI/kqxRM3wGHXMabU4=
+github.com/chromedp/chromedp v0.8.0/go.mod h1:odCVV9o9i7HUKwHMFz9Y7T6s4Kbcz4GOyPlwKWopI9Q=
 github.com/chromedp/sysutil v1.0.0 h1:+ZxhTpfpZlmchB58ih/LBHX52ky7w2VhQVKQMucy3Ic=
 github.com/chromedp/sysutil v1.0.0/go.mod h1:kgWmDdq8fTzXYcKIBqIYvRRTnYb9aNS9moAV0xufSww=
 github.com/cpuguy83/go-md2man/v2 v2.0.0-20190314233015-f79a8a8ca69d/go.mod h1:maD7wRr/U5Z6m/iR4s+kqSMx2CaBsrgA7czyZG/E6dU=
