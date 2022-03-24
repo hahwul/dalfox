@@ -4,6 +4,7 @@ import (
 	dalfox "github.com/hahwul/dalfox/v2/lib"
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	scan "github.com/hahwul/dalfox/v2/pkg/scanning"
+	vlogger "github.com/hahwul/volt/logger"
 )
 
 // ScanFromAPI is scanning dalfox with REST API
@@ -15,6 +16,7 @@ import (
 // @Success 200 {object} Res
 // @Router /scan [post]
 func ScanFromAPI(url string, rqOptions model.Options, options model.Options, sid string) {
+	vLog := vlogger.GetLogger(options.Debug)
 	target := dalfox.Target{
 		URL:     url,
 		Method:  rqOptions.Method,
@@ -27,6 +29,8 @@ func ScanFromAPI(url string, rqOptions model.Options, options model.Options, sid
 	} else {
 		newOptions.Method = "GET"
 	}
+	vLog.WithField("data1", sid).Debug(url)
+	vLog.WithField("data1", sid).Debug(newOptions)
 	_, _ = scan.Scan(url, newOptions, sid)
 }
 
