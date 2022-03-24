@@ -15,10 +15,16 @@ import (
 	"github.com/hahwul/dalfox/v2/pkg/optimization"
 	"github.com/hahwul/dalfox/v2/pkg/printing"
 	"github.com/hahwul/dalfox/v2/pkg/verification"
+	vlogger "github.com/hahwul/volt/logger"
+	"github.com/sirupsen/logrus"
 )
 
 // SendReq is sending http request (handled GET/POST)
 func SendReq(req *http.Request, payload string, options model.Options) (string, *http.Response, bool, bool, error) {
+	vLog := vlogger.GetLogger(options.Debug)
+	rLog := vLog.WithFields(logrus.Fields{
+		"data1": payload,
+	})
 	netTransport := getTransport(options)
 	client := &http.Client{
 		Timeout:   time.Duration(options.Timeout) * time.Second,
@@ -293,6 +299,8 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 		}
 		resp, err := client.Do(treq)
 		if err != nil {
+			rLog.WithField("data2", "vds").Debug(false)
+			rLog.WithField("data2", "vrs").Debug(false)
 			return "", resp, false, false, err
 		}
 
@@ -303,6 +311,8 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 			if isAllowType(resp.Header["Content-Type"][0]) {
 				vds := verification.VerifyDOM(str)
 				vrs := verification.VerifyReflection(str, payload)
+				rLog.WithField("data2", "vds").Debug(vds)
+				rLog.WithField("data2", "vrs").Debug(vrs)
 				return str, resp, vds, vrs, nil
 			}
 		}
@@ -312,9 +322,13 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 			if isAllowType(resp.Header["Content-Type"][0]) {
 				vds := verification.VerifyDOM(str)
 				vrs := verification.VerifyReflection(str, payload)
+				rLog.WithField("data2", "vds").Debug(vds)
+				rLog.WithField("data2", "vrs").Debug(vrs)
 				return str, resp, vds, vrs, nil
 			}
 		}
+		rLog.WithField("data2", "vds").Debug(false)
+		rLog.WithField("data2", "vrs").Debug(false)
 		return str, resp, false, false, nil
 	}
 }

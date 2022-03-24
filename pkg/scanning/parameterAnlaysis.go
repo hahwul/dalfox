@@ -16,6 +16,7 @@ import (
 	"github.com/hahwul/dalfox/v2/pkg/optimization"
 	"github.com/hahwul/dalfox/v2/pkg/printing"
 	"github.com/hahwul/dalfox/v2/pkg/verification"
+	vlogger "github.com/hahwul/volt/logger"
 )
 
 func setP(p, dp url.Values, name string, options model.Options) (url.Values, url.Values) {
@@ -34,6 +35,8 @@ func setP(p, dp url.Values, name string, options model.Options) (url.Values, url
 func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) map[string][]string {
 	//miningCheckerSize := 0
 	miningCheckerLine := 0
+	vLog := vlogger.GetLogger(options.Debug)
+	pLog := vLog.WithField("data1", "PA")
 	u, err := url.Parse(target)
 	params := make(map[string][]string)
 	if err != nil {
@@ -228,7 +231,10 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 					}
 					_, lineSum := verification.VerifyReflectionWithLine(resbody, "DalFox")
 					if miningCheckerLine == lineSum {
-						vrs = false
+						pLog.Debug("Hit linesum")
+						pLog.Debug(lineSum)
+						//vrs = false
+						//(#354) It can cause a lot of misconceptions. removed it.
 					}
 					if vrs {
 						code = CodeView(resbody, "DalFox")
@@ -316,6 +322,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 					_, lineSum := verification.VerifyReflectionWithLine(resbody, "DalFox")
 					//fmt.Printf("%s => %d : %d\n", k, miningCheckerLine, lineSum)
 					if miningCheckerLine == lineSum {
+
 						vrs = false
 					}
 					if vrs {
