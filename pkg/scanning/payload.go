@@ -320,8 +320,8 @@ func getHTMLPayload(ip string) []string {
 		"alert",
 		"confirm",
 		"prompt",
-		"alert,bind()",
-		"alert.valueOf()",
+		"alert.bind()",
+		"prompt.valueOf()",
 		"print",
 	}
 	payloadPattern := []string{
