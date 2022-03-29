@@ -209,7 +209,6 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			}
 		}
 	}
-
 	for k, v := range options.PathReflection {
 		if len(parsedURL.Path) == 0 {
 			str := options.AuroraObject.Yellow("dalfoxpathtest").String()
@@ -256,7 +255,6 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 				// Injected pattern
 				injectedPoint := strings.Split(v, "/")
 				injectedPoint = injectedPoint[1:]
-
 				for _, ip := range injectedPoint {
 					var arr []string
 					if strings.Contains(ip, "inJS") {

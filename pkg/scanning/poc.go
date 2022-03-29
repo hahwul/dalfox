@@ -8,6 +8,7 @@ import (
 	"github.com/hahwul/dalfox/v2/pkg/model"
 )
 
+// MakePoC is making poc codes
 func MakePoC(poc string, req *http.Request, options model.Options) string {
 	if options.PoCType == "http-request" {
 		requestDump, err := httputil.DumpRequestOut(req, true)

@@ -400,6 +400,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	return params
 }
 
+// GetPType is Get Parameter Type
 func GetPType(av string) string {
 	if strings.Contains(av, "PTYPE: URL") {
 		return "-URL"

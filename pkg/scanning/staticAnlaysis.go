@@ -40,7 +40,7 @@ func StaticAnalysis(target string, options model.Options, rl *rateLimiter) (map[
 	paths := strings.Split(target, "/")
 
 	// case of https://domain/ + @
-	for idx, _ := range paths {
+	for idx := range paths {
 		if idx > 2 {
 			id := idx - 3
 			_ = id

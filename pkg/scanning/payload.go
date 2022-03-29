@@ -8,6 +8,7 @@ import (
 	"strings"
 )
 
+// Asset is type of Assets
 type Asset struct {
 	Line string
 	Size string

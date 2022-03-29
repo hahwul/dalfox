@@ -5,6 +5,7 @@ import (
 	"regexp"
 )
 
+// WAFPattern is type of WAF Patterns
 type WAFPattern struct {
 	Name   string
 	Body   string

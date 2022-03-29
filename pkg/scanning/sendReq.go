@@ -332,7 +332,6 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 			rLog.WithField("data2", "vrs").Debug(false)
 			return str, resp, false, false, nil
 		}
-	} else {
-		return "", resp, false, false, err
 	}
+	return "", resp, false, false, err
 }

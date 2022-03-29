@@ -4,6 +4,7 @@ import (
 	"github.com/hahwul/dalfox/v2/pkg/model"
 )
 
+// CheckInspectionParam is Checking Inspection
 func CheckInspectionParam(options model.Options, k string) bool {
 	if len(options.UniqParam) > 0 {
 		for _, selectedParam := range options.UniqParam {
