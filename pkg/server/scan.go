@@ -1,6 +1,8 @@
 package server
 
 import (
+	"strings"
+
 	dalfox "github.com/hahwul/dalfox/v2/lib"
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	scan "github.com/hahwul/dalfox/v2/pkg/scanning"
@@ -29,7 +31,9 @@ func ScanFromAPI(url string, rqOptions model.Options, options model.Options, sid
 	} else {
 		newOptions.Method = "GET"
 	}
-	vLog.WithField("data1", sid).Debug(url)
+	escapedURL := strings.Replace(url, "\n", "", -1)
+	escapedURL = strings.Replace(escapedURL, "\r", "", -1)
+	vLog.WithField("data1", sid).Debug(escapedURL)
 	vLog.WithField("data1", sid).Debug(newOptions)
 	_, _ = scan.Scan(url, newOptions, sid)
 }
