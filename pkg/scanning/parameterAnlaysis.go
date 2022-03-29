@@ -143,53 +143,54 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 				default:
 					reader = tres.Body
 				}
-
-				bodyString, _ := ioutil.ReadAll(reader)
-				body := ioutil.NopCloser(strings.NewReader(string(bodyString)))
-				defer body.Close()
-				doc, err := goquery.NewDocumentFromReader(body)
 				if err == nil {
-					count := 0
-					doc.Find("input").Each(func(i int, s *goquery.Selection) {
-						name, _ := s.Attr("name")
-						p, dp = setP(p, dp, name, options)
-						count = count + 1
-					})
-					doc.Find("textarea").Each(func(i int, s *goquery.Selection) {
-						name, _ := s.Attr("name")
-						p, dp = setP(p, dp, name, options)
-						count = count + 1
-					})
-					doc.Find("select").Each(func(i int, s *goquery.Selection) {
-						name, _ := s.Attr("name")
-						p, dp = setP(p, dp, name, options)
-						count = count + 1
-					})
-					doc.Find("form").Each(func(i int, s *goquery.Selection) {
-						action, _ := s.Attr("action")
-						if strings.HasPrefix(action, "/") || strings.HasPrefix(action, "?") { // assuming this is a relative URL
-							url, _ := url.Parse(action)
-							query := url.Query()
-							for aParam := range query {
-								p, dp = setP(p, dp, aParam, options)
-								count = count + 1
-							}
+					bodyString, err := ioutil.ReadAll(reader)
+					body := ioutil.NopCloser(strings.NewReader(string(bodyString)))
+					defer body.Close()
+					doc, err := goquery.NewDocumentFromReader(body)
+					if err == nil {
+						count := 0
+						doc.Find("input").Each(func(i int, s *goquery.Selection) {
+							name, _ := s.Attr("name")
+							p, dp = setP(p, dp, name, options)
+							count = count + 1
+						})
+						doc.Find("textarea").Each(func(i int, s *goquery.Selection) {
+							name, _ := s.Attr("name")
+							p, dp = setP(p, dp, name, options)
+							count = count + 1
+						})
+						doc.Find("select").Each(func(i int, s *goquery.Selection) {
+							name, _ := s.Attr("name")
+							p, dp = setP(p, dp, name, options)
+							count = count + 1
+						})
+						doc.Find("form").Each(func(i int, s *goquery.Selection) {
+							action, _ := s.Attr("action")
+							if strings.HasPrefix(action, "/") || strings.HasPrefix(action, "?") { // assuming this is a relative URL
+								url, _ := url.Parse(action)
+								query := url.Query()
+								for aParam := range query {
+									p, dp = setP(p, dp, aParam, options)
+									count = count + 1
+								}
 
-						}
-					})
-					doc.Find("a").Each(func(i int, s *goquery.Selection) {
-						href, _ := s.Attr("href")
-						if strings.HasPrefix(href, "/") || strings.HasPrefix(href, "?") { // assuming this is a relative URL
-							url, _ := url.Parse(href)
-							query := url.Query()
-							for aParam := range query {
-								p, dp = setP(p, dp, aParam, options)
-								count = count + 1
 							}
+						})
+						doc.Find("a").Each(func(i int, s *goquery.Selection) {
+							href, _ := s.Attr("href")
+							if strings.HasPrefix(href, "/") || strings.HasPrefix(href, "?") { // assuming this is a relative URL
+								url, _ := url.Parse(href)
+								query := url.Query()
+								for aParam := range query {
+									p, dp = setP(p, dp, aParam, options)
+									count = count + 1
+								}
 
-						}
-					})
-					printing.DalLog("INFO", "Found "+strconv.Itoa(count)+" testing point in DOM base parameter mining", options)
+							}
+						})
+						printing.DalLog("INFO", "Found "+strconv.Itoa(count)+" testing point in DOM base parameter mining", options)
+					}
 				}
 			}
 		}
