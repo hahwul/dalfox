@@ -16,6 +16,8 @@ func checkVStatus(vStatus map[string]bool) bool {
 			if !v {
 				return false
 			}
+		} else {
+			return false
 		}
 	}
 	return true
