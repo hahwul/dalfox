@@ -83,6 +83,9 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 	switch resp.Header.Get("Content-Encoding") {
 	case "gzip":
 		reader, err = gzip.NewReader(resp.Body)
+		if err != nil {
+			reader = resp.Body
+		}
 		defer reader.Close()
 	default:
 		reader = resp.Body

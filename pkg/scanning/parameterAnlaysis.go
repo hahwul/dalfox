@@ -139,12 +139,15 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 				switch tres.Header.Get("Content-Encoding") {
 				case "gzip":
 					reader, err = gzip.NewReader(tres.Body)
+					if err != nil {
+						reader = tres.Body
+					}
 					defer reader.Close()
 				default:
 					reader = tres.Body
 				}
+				bodyString, err := ioutil.ReadAll(reader)
 				if err == nil {
-					bodyString, err := ioutil.ReadAll(reader)
 					body := ioutil.NopCloser(strings.NewReader(string(bodyString)))
 					defer body.Close()
 					doc, err := goquery.NewDocumentFromReader(body)
