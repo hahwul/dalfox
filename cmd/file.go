@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bufio"
 	"fmt"
 	"os"
 	"strconv"
@@ -13,6 +12,8 @@ import (
 	model "github.com/hahwul/dalfox/v2/pkg/model"
 	"github.com/hahwul/dalfox/v2/pkg/printing"
 	"github.com/hahwul/dalfox/v2/pkg/scanning"
+	voltFile "github.com/hahwul/volt/file"
+	voltUtils "github.com/hahwul/volt/util"
 	"github.com/spf13/cobra"
 )
 
@@ -34,7 +35,7 @@ var fileCmd = &cobra.Command{
 			rawdata, _ := cmd.Flags().GetBool("rawdata")
 			if rawdata {
 				printing.DalLog("SYSTEM", "Using file mode(rawdata)", options)
-				ff, err := readLinesOrLiteral(args[0])
+				ff, err := voltFile.ReadLinesOrLiteral(args[0])
 				_ = err
 				var path, body, host, target string
 				bodyswitch := false
@@ -87,14 +88,14 @@ var fileCmd = &cobra.Command{
 				if (!options.NoSpinner || !options.Silence) && !sf {
 					options.SpinnerObject = spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 				}
-				ff, err := readLinesOrLiteral(args[0])
+				ff, err := voltFile.ReadLinesOrLiteral(args[0])
 				_ = err
 				for _, target := range ff {
 					targets = append(targets, target)
 				}
 
 				// Remove Deplicated value
-				targets = unique(targets)
+				targets = voltUtils.UniqueStringSlice(targets)
 				printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target urls", options)
 				multi, _ := cmd.Flags().GetBool("multicast")
 				mass, _ := cmd.Flags().GetBool("mass")
@@ -202,54 +203,4 @@ func init() {
 	fileCmd.Flags().Bool("mass", false, "Parallel scanning N*Host mode (show only poc code)")
 	fileCmd.Flags().Bool("silence-force", false, "Only print PoC (not print progress)")
 	fileCmd.Flags().Int("mass-worker", 10, "Parallel worker of --mass and --multicast option")
-}
-
-// a slice of strings, returning the slice and any error
-func readLines(filename string) ([]string, error) {
-	f, err := os.Open(filename)
-	if err != nil {
-		return []string{}, err
-	}
-	defer f.Close()
-
-	lines := make([]string, 0)
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		lines = append(lines, sc.Text())
-	}
-
-	return lines, sc.Err()
-}
-
-// readLinesOrLiteral tries to read lines from a file, returning
-// the arg in a string slice if the file doesn't exist, unless
-// the arg matches its default value
-func readLinesOrLiteral(arg string) ([]string, error) {
-	if isFile(arg) {
-		return readLines(arg)
-	}
-
-	// if the argument isn't a file, but it is the default, don't
-	// treat it as a literal value
-
-	return []string{arg}, nil
-}
-
-// isFile returns true if its argument is a regular file
-func isFile(path string) bool {
-	f, err := os.Stat(path)
-	return err == nil && f.Mode().IsRegular()
-}
-
-// unique is ..
-func unique(intSlice []string) []string {
-	keys := make(map[string]bool)
-	list := []string{}
-	for _, entry := range intSlice {
-		if _, value := keys[entry]; !value {
-			keys[entry] = true
-			list = append(list, entry)
-		}
-	}
-	return list
 }

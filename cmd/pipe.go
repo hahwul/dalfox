@@ -12,6 +12,7 @@ import (
 	model "github.com/hahwul/dalfox/v2/pkg/model"
 	"github.com/hahwul/dalfox/v2/pkg/printing"
 	"github.com/hahwul/dalfox/v2/pkg/scanning"
+	voltUtils "github.com/hahwul/volt/util"
 	"github.com/spf13/cobra"
 )
 
@@ -38,7 +39,7 @@ var pipeCmd = &cobra.Command{
 			target := sc.Text()
 			targets = append(targets, target)
 		}
-		targets = unique(targets)
+		targets = voltUtils.UniqueStringSlice(targets)
 		printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target urls", options)
 
 		multi, _ := cmd.Flags().GetBool("multicast")

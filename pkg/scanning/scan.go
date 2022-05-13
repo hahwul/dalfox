@@ -19,6 +19,7 @@ import (
 	"github.com/hahwul/dalfox/v2/pkg/optimization"
 	"github.com/hahwul/dalfox/v2/pkg/printing"
 	"github.com/hahwul/dalfox/v2/pkg/verification"
+	voltFile "github.com/hahwul/volt/file"
 )
 
 var (
@@ -286,7 +287,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 
 		// Custom Payload
 		if isAllowType(policy["Content-Type"]) && options.CustomPayloadFile != "" {
-			ff, err := readLinesOrLiteral(options.CustomPayloadFile)
+			ff, err := voltFile.ReadLinesOrLiteral(options.CustomPayloadFile)
 			if err != nil {
 				printing.DalLog("SYSTEM", "Custom XSS payload load fail..", options)
 			} else {

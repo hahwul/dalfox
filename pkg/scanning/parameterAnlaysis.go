@@ -16,6 +16,7 @@ import (
 	"github.com/hahwul/dalfox/v2/pkg/optimization"
 	"github.com/hahwul/dalfox/v2/pkg/printing"
 	"github.com/hahwul/dalfox/v2/pkg/verification"
+	voltFile "github.com/hahwul/volt/file"
 	vlogger "github.com/hahwul/volt/logger"
 )
 
@@ -77,7 +78,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 			}
 		} else {
 			// Param mining with wordlist fil --mining-dict-word
-			ff, err := readLinesOrLiteral(options.MiningWordlist)
+			ff, err := voltFile.ReadLinesOrLiteral(options.MiningWordlist)
 			if err != nil {
 				printing.DalLog("SYSTEM", "Mining wordlist load fail..", options)
 			} else {
