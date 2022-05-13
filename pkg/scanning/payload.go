@@ -406,6 +406,10 @@ func getAttrPayload(ip string) []string {
 	hp := getHTMLPayload("")
 	for _, h := range hp {
 		payload = append(payload, ">"+h)
+		payload = append(payload, "\">"+h)
+		payload = append(payload, "'\">"+h)
+		payload = append(payload, "&#x27;>"+h)
+		payload = append(payload, "&#39;>"+h)
 	}
 
 	// Set all event handler base payloads
