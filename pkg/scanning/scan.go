@@ -627,6 +627,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 				if dconcurrency < 1 {
 					dconcurrency = 1
 				}
+				if dconcurrency > 10 {
+					dconcurrency = 10
+				}
 				dchan := make(chan string)
 				var wgg sync.WaitGroup
 				for i := 0; i < dconcurrency; i++ {
