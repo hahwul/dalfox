@@ -147,6 +147,9 @@ var fileCmd = &cobra.Command{
 							}
 						}()
 					}
+					if options.Format == "json" {
+						printing.DalLog("PRINT", "[", options)
+					}
 					for k, v := range t {
 						temp := model.MassJob{
 							Name: k,
@@ -156,6 +159,9 @@ var fileCmd = &cobra.Command{
 					}
 					close(tasks)
 					wg.Wait()
+					if options.Format == "json" {
+						printing.DalLog("PRINT", "{}]", options)
+					}
 					if (!options.NoSpinner || !options.Silence) && !sf {
 						options.SpinnerObject.Stop()
 					}
@@ -172,6 +178,9 @@ var fileCmd = &cobra.Command{
 						}
 						options.SpinnerObject.Start()
 					}
+					if options.Format == "json" {
+						printing.DalLog("PRINT", "[", options)
+					}
 					for i := range targets {
 						options.NowURL = i + 1
 						_, _ = scanning.Scan(targets[i], options, strconv.Itoa(i))
@@ -182,6 +191,9 @@ var fileCmd = &cobra.Command{
 							options.SpinnerObject.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][" + percent + "] Multiple scanning from file"
 							mutex.Unlock()
 						}
+					}
+					if options.Format == "json" {
+						printing.DalLog("PRINT", "{}]", options)
 					}
 					if (!options.NoSpinner || !options.Silence) && !sf {
 						options.SpinnerObject.Stop()

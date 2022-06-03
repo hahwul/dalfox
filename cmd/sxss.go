@@ -26,7 +26,13 @@ var sxssCmd = &cobra.Command{
 			}
 			if options.Trigger != "" {
 				printing.DalLog("SYSTEM", "Using Stored XSS mode", options)
+				if options.Format == "json" {
+					printing.DalLog("PRINT", "[", options)
+				}
 				_, _ = scanning.Scan(args[0], options, "Single")
+				if options.Format == "json" {
+					printing.DalLog("PRINT", "{}]", options)
+				}
 			} else {
 				printing.DalLog("ERROR", "Please input trigger url with --trigger option", options)
 			}

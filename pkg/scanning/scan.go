@@ -127,10 +127,6 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 		printing.DalLog("SYSTEM", "Valid target [ code:"+strconv.Itoa(tres.StatusCode)+" / size:"+strconv.Itoa(len(body))+" ]", options)
 	}
 
-	if options.Format == "json" {
-		printing.DalLog("PRINT", "[", options)
-	}
-
 	var wait sync.WaitGroup
 	task := 3
 	sa := "SA: ✓ "
@@ -1017,9 +1013,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			s.Stop()
 		}
 	}
-	if options.Format == "json" {
-		printing.DalLog("PRINT", "{}]", options)
-	}
+
 	options.Scan[sid] = scanObject
 	scanResult.EndTime = time.Now()
 	scanResult.Duration = scanResult.EndTime.Sub(scanResult.StartTime)
