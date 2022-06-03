@@ -297,15 +297,16 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 										ptype = GetPType(av)
 									}
 								}
-								// Add plain XSS Query
-								tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "NaN", options)
-								query[tq] = tm
-								// Add URL encoded XSS Query
-								etq, etm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "urlEncode", options)
-								query[etq] = etm
-								// Add HTML Encoded XSS Query
-								htq, htm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "htmlEncode", options)
-								query[htq] = htm
+								encoders := []string{
+									"NaN",
+									"urlEncode",
+									"urlDoubleEncode",
+									"htmlEncode",
+								}
+								for _, encoder := range encoders {
+									tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", encoder, options)
+									query[tq] = tm
+								}
 							}
 						}
 					}
@@ -340,15 +341,16 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					cpArr = append(cpArr, v)
 					arc := optimization.SetPayloadValue(getCommonPayload(), options)
 					for _, avv := range arc {
-						// Add plain XSS Query
-						tq, tm := optimization.MakeRequestQuery(target, v, avv, "inHTML-URL", "toAppend", "NaN", options)
-						query[tq] = tm
-						// Add URL encoded XSS Query
-						etq, etm := optimization.MakeRequestQuery(target, v, avv, "inHTML-URL", "toAppend", "urlEncode", options)
-						query[etq] = etm
-						// Add HTML Encoded XSS Query
-						htq, htm := optimization.MakeRequestQuery(target, v, avv, "inHTML-URL", "toAppend", "htmlEncode", options)
-						query[htq] = htm
+						encoders := []string{
+							"NaN",
+							"urlEncode",
+							"urlDoubleEncode",
+							"htmlEncode",
+						}
+						for _, encoder := range encoders {
+							tq, tm := optimization.MakeRequestQuery(target, v, avv, "inHTML-URL", "toAppend", encoder, options)
+							query[tq] = tm
+						}
 					}
 				}
 			}
@@ -358,15 +360,16 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					cpdArr = append(cpdArr, v)
 					arc := optimization.SetPayloadValue(getCommonPayload(), options)
 					for _, avv := range arc {
-						// Add plain XSS Query
-						tq, tm := optimization.MakeRequestQuery(target, v, avv, "inHTML-FORM", "toAppend", "NaN", options)
-						query[tq] = tm
-						// Add URL encoded XSS Query
-						etq, etm := optimization.MakeRequestQuery(target, v, avv, "inHTML-FORM", "toAppend", "urlEncode", options)
-						query[etq] = etm
-						// Add HTML Encoded XSS Query
-						htq, htm := optimization.MakeRequestQuery(target, v, avv, "inHTML-FORM", "toAppend", "htmlEncode", options)
-						query[htq] = htm
+						encoders := []string{
+							"NaN",
+							"urlEncode",
+							"urlDoubleEncode",
+							"htmlEncode",
+						}
+						for _, encoder := range encoders {
+							tq, tm := optimization.MakeRequestQuery(target, v, avv, "inHTML-FORM", "toAppend", encoder, options)
+							query[tq] = tm
+						}
 					}
 				}
 			}
@@ -445,10 +448,30 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 							// Injected pattern
 							injectedPoint := strings.Split(av, "/")
 							injectedPoint = injectedPoint[1:]
+							injectedChars := params[k][:len(params[k])-1]
 							for _, ip := range injectedPoint {
 								var arr []string
 								if strings.Contains(ip, "inJS") {
-									arr = optimization.SetPayloadValue(getInJsPayload(ip), options)
+									checkInJS := false
+									if strings.Contains(ip, "double") {
+										for _, injectedChar := range injectedChars {
+											if strings.Contains(injectedChar, "\"") {
+												checkInJS = true
+											}
+										}
+									}
+									if strings.Contains(ip, "single") {
+										for _, injectedChar := range injectedChars {
+											if strings.Contains(injectedChar, "'") {
+												checkInJS = true
+											}
+										}
+									}
+									if checkInJS {
+										arr = optimization.SetPayloadValue(getInJsPayload(ip), options)
+									} else {
+										arr = optimization.SetPayloadValue(getInJsBreakScriptPayload(ip), options)
+									}
 								}
 								if strings.Contains(ip, "inHTML") {
 									arr = optimization.SetPayloadValue(getHTMLPayload(ip), options)
@@ -458,15 +481,16 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 								}
 								for _, avv := range arr {
 									if optimization.Optimization(avv, badchars) {
-										// Add plain XSS Query
-										tq, tm := optimization.MakeRequestQuery(target, k, avv, ip+ptype, "toAppend", "NaN", options)
-										query[tq] = tm
-										// Add URL Encoded XSS Query
-										etq, etm := optimization.MakeRequestQuery(target, k, avv, ip+ptype, "toAppend", "urlEncode", options)
-										query[etq] = etm
-										// Add HTML Encoded XSS Query
-										htq, htm := optimization.MakeRequestQuery(target, k, avv, ip+ptype, "toAppend", "htmlEncode", options)
-										query[htq] = htm
+										encoders := []string{
+											"NaN",
+											"urlEncode",
+											"urlDoubleEncode",
+											"htmlEncode",
+										}
+										for _, encoder := range encoders {
+											tq, tm := optimization.MakeRequestQuery(target, k, avv, ip+ptype, "toAppend", encoder, options)
+											query[tq] = tm
+										}
 									}
 								}
 							}
@@ -477,15 +501,16 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					for _, avv := range arc {
 						if !containsFromArray(cpArr, k) {
 							if optimization.Optimization(avv, badchars) {
-								// Add plain XSS Query
-								tq, tm := optimization.MakeRequestQuery(target, k, avv, "inHTML"+ptype, "toAppend", "NaN", options)
-								query[tq] = tm
-								// Add URL encoded XSS Query
-								etq, etm := optimization.MakeRequestQuery(target, k, avv, "inHTML"+ptype, "toAppend", "urlEncode", options)
-								query[etq] = etm
-								// Add HTML Encoded XSS Query
-								htq, htm := optimization.MakeRequestQuery(target, k, avv, "inHTML"+ptype, "toAppend", "htmlEncode", options)
-								query[htq] = htm
+								encoders := []string{
+									"NaN",
+									"urlEncode",
+									"urlDoubleEncode",
+									"htmlEncode",
+								}
+								for _, encoder := range encoders {
+									tq, tm := optimization.MakeRequestQuery(target, k, avv, "inHTML"+ptype, "toAppend", encoder, options)
+									query[tq] = tm
+								}
 							}
 						}
 					}
@@ -530,17 +555,17 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					for _, bpayload := range bpayloads {
 						// Add plain XSS Query
 						bp := strings.Replace(bpayload, "CALLBACKURL", bcallback, 10)
-						tq, tm := optimization.MakeRequestQuery(target, k, bp, "toBlind"+ptype, "toAppend", "NaN", options)
-						tm["payload"] = "toBlind"
-						query[tq] = tm
-						// Add URL encoded XSS Query
-						etq, etm := optimization.MakeRequestQuery(target, k, bp, "toBlind"+ptype, "toAppend", "urlEncode", options)
-						etm["payload"] = "toBlind"
-						query[etq] = etm
-						// Add HTML Encoded XSS Query
-						htq, htm := optimization.MakeRequestQuery(target, k, bp, "toBlind"+ptype, "toAppend", "htmlEncode", options)
-						htm["payload"] = "toBlind"
-						query[htq] = htm
+						encoders := []string{
+							"NaN",
+							"urlEncode",
+							"urlDoubleEncode",
+							"htmlEncode",
+						}
+						for _, encoder := range encoders {
+							tq, tm := optimization.MakeRequestQuery(target, k, bp, "toBlind"+ptype, "toAppend", encoder, options)
+							tm["payload"] = "toBlind"
+							query[tq] = tm
+						}
 					}
 				}
 			}
@@ -572,15 +597,16 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											ptype = GetPType(av)
 										}
 									}
-									// Add plain XSS Query
-									tq, tm := optimization.MakeRequestQuery(target, k, remotePayload, "inHTML"+ptype, "toAppend", "NaN", options)
-									query[tq] = tm
-									// Add URL encoded XSS Query
-									etq, etm := optimization.MakeRequestQuery(target, k, remotePayload, "inHTML"+ptype, "toAppend", "urlEncode", options)
-									query[etq] = etm
-									// Add HTML Encoded XSS Query
-									htq, htm := optimization.MakeRequestQuery(target, k, remotePayload, "inHTML"+ptype, "toAppend", "htmlEncode", options)
-									query[htq] = htm
+									encoders := []string{
+										"NaN",
+										"urlEncode",
+										"urlDoubleEncode",
+										"htmlEncode",
+									}
+									for _, encoder := range encoders {
+										tq, tm := optimization.MakeRequestQuery(target, k, remotePayload, "inHTML"+ptype, "toAppend", encoder, options)
+										query[tq] = tm
+									}
 								}
 							}
 						}

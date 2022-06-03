@@ -141,6 +141,10 @@ func MakeRequestQuery(target, param, payload, ptype string, pAction string, pEnc
 		payload = UrlEncode(payload)
 		break
 
+	case "urlDoubleEncode":
+		payload = (UrlEncode(payload))
+		break
+
 	case "htmlEncode":
 		payload = template.HTMLEscapeString(payload)
 		break

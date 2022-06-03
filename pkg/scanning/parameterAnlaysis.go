@@ -18,6 +18,7 @@ import (
 	"github.com/hahwul/dalfox/v2/pkg/verification"
 	voltFile "github.com/hahwul/volt/file"
 	vlogger "github.com/hahwul/volt/logger"
+	voltUtils "github.com/hahwul/volt/util"
 )
 
 func setP(p, dp url.Values, name string, options model.Options) (url.Values, url.Values) {
@@ -270,26 +271,27 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 							char := c
 							go func() {
 								defer wg.Done()
-								turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA-URL", "toAppend", "NaN", options)
-								rl.Block(tempURL.Host)
-								_, _, _, vrs, _ := SendReq(turl, "dalfox"+char, options)
-								if vrs {
-									mutex.Lock()
-									params[k] = append(params[k], char)
-									mutex.Unlock()
+								encoders := []string{
+									"NaN",
+									"urlEncode",
+									"urlDoubleEncode",
+									"htmlEncode",
 								}
 
-								turl, _ = optimization.MakeRequestQuery(target, k, char+"dalfox", "PA-URL", "toPreset", "NaN", options)
-								rl.Block(tempURL.Host)
-								_, _, _, vrs, _ = SendReq(turl, "dalfox"+char, options)
-								if vrs {
-									mutex.Lock()
-									params[k] = append(params[k], char)
-									mutex.Unlock()
+								for _, encoder := range encoders {
+									turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA-URL", "toAppend", encoder, options)
+									rl.Block(tempURL.Host)
+									_, _, _, vrs, _ := SendReq(turl, "dalfox"+char, options)
+									if vrs {
+										mutex.Lock()
+										params[k] = append(params[k], char)
+										mutex.Unlock()
+									}
 								}
 							}()
 						}
 						wg.Wait()
+						params[k] = voltUtils.UniqueStringSlice(params[k])
 						params[k] = append(params[k], code)
 					}
 				}
@@ -368,18 +370,28 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 
 							go func() {
 								defer wg.Done()
-								turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA", "toAppend", "NaN", options)
-								rl.Block(tempURL.Host)
-								_, _, _, vrs, _ := SendReq(turl, "dalfox"+char, options)
-								_ = resp
-								if vrs {
-									mutex.Lock()
-									params[k] = append(params[k], char)
-									mutex.Unlock()
+								encoders := []string{
+									"NaN",
+									"urlEncode",
+									"urlDoubleEncode",
+									"htmlEncode",
+								}
+
+								for _, encoder := range encoders {
+									turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA", "toAppend", encoder, options)
+									rl.Block(tempURL.Host)
+									_, _, _, vrs, _ := SendReq(turl, "dalfox"+char, options)
+									_ = resp
+									if vrs {
+										mutex.Lock()
+										params[k] = append(params[k], char)
+										mutex.Unlock()
+									}
 								}
 							}()
 						}
 						wg.Wait()
+						params[k] = voltUtils.UniqueStringSlice(params[k])
 						params[k] = append(params[k], code)
 					}
 				}
