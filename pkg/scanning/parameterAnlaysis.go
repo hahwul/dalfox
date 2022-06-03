@@ -268,12 +268,20 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 						for _, c := range chars {
 							wg.Add(1)
 							char := c
-
 							go func() {
 								defer wg.Done()
 								turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA-URL", "toAppend", "NaN", options)
 								rl.Block(tempURL.Host)
 								_, _, _, vrs, _ := SendReq(turl, "dalfox"+char, options)
+								if vrs {
+									mutex.Lock()
+									params[k] = append(params[k], char)
+									mutex.Unlock()
+								}
+
+								turl, _ = optimization.MakeRequestQuery(target, k, char+"dalfox", "PA-URL", "toPreset", "NaN", options)
+								rl.Block(tempURL.Host)
+								_, _, _, vrs, _ = SendReq(turl, "dalfox"+char, options)
 								if vrs {
 									mutex.Lock()
 									params[k] = append(params[k], char)
