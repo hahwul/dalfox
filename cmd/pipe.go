@@ -26,7 +26,10 @@ var pipeCmd = &cobra.Command{
 			options.Silence = sf
 		}
 		printing.Banner(options)
+		tMethod := options.Method
+		options.Method = "Pipe Mode"
 		printing.Summary(options, "Stdin (pipeline)")
+		options.Method = tMethod
 		var targets []string
 		mutex := &sync.Mutex{}
 		options.Mutex = mutex

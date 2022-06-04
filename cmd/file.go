@@ -1,7 +1,9 @@
 package cmd
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
@@ -13,6 +15,7 @@ import (
 	"github.com/hahwul/dalfox/v2/pkg/printing"
 	"github.com/hahwul/dalfox/v2/pkg/scanning"
 	voltFile "github.com/hahwul/volt/file"
+	voltHar "github.com/hahwul/volt/format/har"
 	voltUtils "github.com/hahwul/volt/util"
 	"github.com/spf13/cobra"
 )
@@ -27,12 +30,16 @@ var fileCmd = &cobra.Command{
 			options.Silence = sf
 		}
 		printing.Banner(options)
+		tMethod := options.Method
+		options.Method = "FILE Mode"
 		printing.Summary(options, args[0])
+		options.Method = tMethod
 		var targets []string
 		mutex := &sync.Mutex{}
 		options.Mutex = mutex
 		if len(args) >= 1 {
 			rawdata, _ := cmd.Flags().GetBool("rawdata")
+			har, _ := cmd.Flags().GetBool("har")
 			if rawdata {
 				printing.DalLog("SYSTEM", "Using file mode(rawdata)", options)
 				ff, err := voltFile.ReadLinesOrLiteral(args[0])
@@ -83,11 +90,57 @@ var fileCmd = &cobra.Command{
 				}
 				_, _ = scanning.Scan(target, options, "single")
 
+			} else if har {
+				printing.DalLog("SYSTEM", "Using file mode(targets list from HAR)", options)
+				if (!options.NoSpinner || !options.Silence) && !sf {
+					options.SpinnerObject = spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
+				}
+				var harObject voltHar.HARObject
+				harFile, err := ioutil.ReadFile(args[0])
+				if err == nil {
+					err = json.Unmarshal(harFile, &harObject)
+					if options.Format == "json" {
+						printing.DalLog("PRINT", "[", options)
+					}
+					for i, entry := range harObject.Log.Entries {
+						var turl string
+						options.NowURL = i + 1
+						if len(entry.Request.QueryString) > 0 {
+							var tquery string
+							for _, query := range entry.Request.QueryString {
+								tquery = tquery + query.Name + "=" + query.Value + "&"
+							}
+							turl = entry.Request.URL + "?" + tquery
+						} else {
+							turl = entry.Request.URL
+						}
+						if entry.Request.PostData.Text != "" {
+							options.Data = entry.Request.PostData.Text
+						}
+						options.Method = entry.Request.Method
+						_, _ = scanning.Scan(turl, options, strconv.Itoa(i))
+						if (!options.NoSpinner || !options.Silence) && !sf {
+							mutex.Lock()
+							options.NowURL = options.NowURL + 1
+							percent := fmt.Sprintf("%0.2f%%", float64(options.NowURL)/float64(options.AllURLS)*100)
+							options.SpinnerObject.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][" + percent + "] Multiple scanning from file"
+							mutex.Unlock()
+						}
+					}
+					if options.Format == "json" {
+						printing.DalLog("PRINT", "{}]", options)
+					}
+					if (!options.NoSpinner || !options.Silence) && !sf {
+						options.SpinnerObject.Stop()
+					}
+				}
+
 			} else {
 				printing.DalLog("SYSTEM", "Using file mode(targets list)", options)
 				if (!options.NoSpinner || !options.Silence) && !sf {
 					options.SpinnerObject = spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 				}
+
 				ff, err := voltFile.ReadLinesOrLiteral(args[0])
 				_ = err
 				for _, target := range ff {
@@ -209,7 +262,8 @@ var fileCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(fileCmd)
-	fileCmd.Flags().Bool("rawdata", false, "Using req rawdata from Burp/ZAP")
+	fileCmd.Flags().Bool("rawdata", false, "[FORMAT] Using req rawdata from Burp/ZAP")
+	fileCmd.Flags().Bool("har", false, "[FORMAT] Using HAR format")
 	fileCmd.Flags().Bool("http", false, "Using force http on rawdata mode")
 	fileCmd.Flags().Bool("multicast", false, "Parallel scanning N*Host mode (show only poc code)")
 	fileCmd.Flags().Bool("mass", false, "Parallel scanning N*Host mode (show only poc code)")
