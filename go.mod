@@ -12,7 +12,7 @@ require (
 	github.com/labstack/echo/v4 v4.7.2
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/sirupsen/logrus v1.8.1
-	github.com/spf13/cobra v1.4.0
+	github.com/spf13/cobra v1.5.0
 	github.com/stretchr/testify v1.7.5
 	github.com/swaggo/echo-swagger v1.3.3
 	github.com/swaggo/swag v1.8.3
