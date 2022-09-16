@@ -1085,7 +1085,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 				fmt.Println(string(jobject))
 			}
 		} else {
-			report.GenerateReport(scanResult)
+			report.GenerateReport(scanResult, options)
 		}
 	}
 	return scanResult, nil

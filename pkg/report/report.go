@@ -10,8 +10,8 @@ import (
 	"github.com/olekukonko/tablewriter"
 )
 
-func GenerateReport(scanResult model.Result) {
-	fmt.Println("[ Information ]")
+func GenerateReport(scanResult model.Result, options model.Options) {
+	fmt.Println(options.AuroraObject.BrightGreen("[ Information ]"))
 	fmt.Println("+ Start: " + scanResult.StartTime.String())
 	fmt.Println("+ End: " + scanResult.EndTime.String())
 	fmt.Println("+ Duration: " + scanResult.Duration.String())
@@ -43,7 +43,7 @@ func GenerateReport(scanResult model.Result) {
 		}
 		table.Append(line)
 	}
-	fmt.Println("\n[ Parameter Analysis ]")
+	fmt.Println(options.AuroraObject.BrightGreen("\n[ Parameter Analysis ]"))
 	table.Render()
 
 	pocTable := tablewriter.NewWriter(os.Stdout)
@@ -69,7 +69,7 @@ func GenerateReport(scanResult model.Result) {
 		}
 		pocTable.Append(line)
 	}
-	fmt.Println("\n[ XSS PoCs ]")
+	fmt.Println(options.AuroraObject.BrightGreen("\n[ XSS PoCs ]"))
 	pocTable.Render()
 	for i, v := range scanResult.PoCs {
 		fmt.Printf("[#%s] %s\n", strconv.Itoa(i), v.Data)
