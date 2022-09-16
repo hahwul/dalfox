@@ -192,6 +192,7 @@ func NewScan(target Target) (Result, error) {
 	result := Result{
 		Logs:      modelResult.Logs,
 		PoCs:      modelResult.PoCs,
+		Params:    modelResult.Params,
 		Duration:  modelResult.Duration,
 		StartTime: modelResult.StartTime,
 		EndTime:   modelResult.EndTime,
