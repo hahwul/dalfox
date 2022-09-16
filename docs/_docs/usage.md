@@ -69,6 +69,8 @@ Global Flags:
     --remote-wordlists string     Using remote wordlists for param mining
                                     * Supported: burp/assetnote
                                     * Example: --remote-wordlists=burp
+    --report                      Show detail report
+    --report-format string        Format of --report flag [plain/json] (default "plain")
 -S, --silence                     Not printing all logs
     --skip-bav                    Skipping BAV(Basic Another Vulnerability) analysis
     --skip-grepping               Skipping built-in grepping
