@@ -22,8 +22,8 @@ var ignoreReturn, miningWord, method, customAlertValue, customAlertType, remoteP
 var timeout, concurrence, delay int
 var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, onlyCustomPayload, debug, useDeepDXSS, outputAll bool
 var options model.Options
-var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV, skipGrep, skipHeadless, wafEvasion bool
-var onlyPoC, foundActionShell, pocType string
+var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV, skipGrep, skipHeadless, wafEvasion, reportBool bool
+var onlyPoC, foundActionShell, pocType, reportFormat string
 
 var rootCmd = &cobra.Command{
 	Use: "dalfox",
@@ -71,6 +71,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&remoteWordlists, "remote-wordlists", "", "Using remote wordlists for param mining\n  * Supported: burp/assetnote\n  * Example: --remote-wordlists=burp")
 	rootCmd.PersistentFlags().StringVar(&onlyPoC, "only-poc", "", "Shows only the PoC code for the specified pattern (g: grep / r: reflected / v: verified)\n * Example: --only-poc='g,v'")
 	rootCmd.PersistentFlags().StringVar(&pocType, "poc-type", "plain", "Select PoC type \n * Supported: plain/curl/httpie/http-request\n * Example: --poc-type='curl'")
+	rootCmd.PersistentFlags().StringVar(&reportFormat, "report-format", "plain", "Format of --report flag [plain/json]")
 
 	//Int
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 10, "Second of timeout")
@@ -97,6 +98,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&useDeepDXSS, "deep-domxss", false, "DOM XSS Testing with more payloads on headless [so slow]")
 	rootCmd.PersistentFlags().BoolVar(&outputAll, "output-all", false, "All log write mode (-o or stdout)")
 	rootCmd.PersistentFlags().BoolVar(&wafEvasion, "waf-evasion", false, "Avoid blocking by adjusting the speed when detecting WAF (worker=1 delay=3s)")
+	rootCmd.PersistentFlags().BoolVar(&reportBool, "report", false, "Show detail report")
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -151,6 +153,8 @@ func initConfig() {
 		WAF:               false,
 		WAFEvasion:        wafEvasion,
 		PoCType:           pocType,
+		ReportBool:        reportBool,
+		ReportFormat:      reportFormat,
 	}
 	// var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV bool
 

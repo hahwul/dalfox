@@ -72,6 +72,8 @@ type Options struct {
 	WAFEvasion        bool
 	PoCType           string `json:"poc-type"`
 	Mutex             *sync.Mutex
+	ReportFormat      string
+	ReportBool        bool
 }
 
 // MassJob is list for mass
