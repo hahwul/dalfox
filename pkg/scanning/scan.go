@@ -18,6 +18,7 @@ import (
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	"github.com/hahwul/dalfox/v2/pkg/optimization"
 	"github.com/hahwul/dalfox/v2/pkg/printing"
+	"github.com/hahwul/dalfox/v2/pkg/report"
 	"github.com/hahwul/dalfox/v2/pkg/verification"
 	voltFile "github.com/hahwul/volt/file"
 )
@@ -1083,6 +1084,8 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			if err == nil {
 				fmt.Println(string(jobject))
 			}
+		} else {
+			report.GenerateReport(scanResult)
 		}
 	}
 	return scanResult, nil
