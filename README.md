@@ -50,6 +50,7 @@ Mode: `url` `sxss` `pipe` `file` `server` `payload`
 | Output        | Output                        | - Only the PoC code and useful information is write as Stdout<br />- Save output (`-o`, `--output`) |
 |               | Format                        | - JSON / Plain (`--format`)                                  |
 |               | Printing                      | - Silence mode (`--silence`)<br />- You may choose not to print the color (`--no-color`)<br />- You may choose not to print the spinner (`--no-spinner`)<br />- You may choose show only special poc code (`--only-poc`) |
+|               | Report                        | - Show detail report (`--report` and `--report-format=<plain/json>`)|
 | Extensibility | REST API                      | - API Server and Swagger (`dalfox server`)                   |
 |               | Payload Mode                  | - Generate and Enumerate Payloads for XSS Testing (`dalfox payload`) |
 |               | Found Action                  | - Lets you specify the actions to take when detected. <br />- Notify, for example (`--found-action`) |
