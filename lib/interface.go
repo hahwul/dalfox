@@ -56,6 +56,7 @@ type Target struct {
 type Result struct {
 	Logs      []string
 	PoCs      []model.PoC
+	Params    []model.ParamResult
 	Duration  time.Duration
 	StartTime time.Time
 	EndTime   time.Time
