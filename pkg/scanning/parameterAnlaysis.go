@@ -54,6 +54,10 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 		dp, _ = url.ParseQuery(options.Data)
 	}
 
+	for tempP := range p {
+		params[tempP] = []string{}
+	}
+
 	if options.Mining {
 		tempURL, _ := optimization.MakeRequestQuery(target, "pleasedonthaveanamelikethis_plz_plz", "DalFox", "PA", "toAppend", "NaN", options)
 		rl.Block(tempURL.Host)
