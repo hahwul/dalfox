@@ -603,7 +603,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 				if endpoint == "portswigger" {
 					payload, line, size = getPortswiggerPayload()
 				}
-				if endpoint == "paylaodbox" {
+				if endpoint == "payloadbox" {
 					payload, line, size = getPayloadBoxPayload()
 				}
 				if line != "" {
