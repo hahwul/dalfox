@@ -95,7 +95,7 @@ permalink: /docs/json/
 | method      | HTTP Method                 | - GET/POST/PUT/DELETE, etc...                                |
 | data        | PoC (URL)                   | - PoC URL                                                    |
 | param       | Parameter name              | - Weak parameter name                                        |
-| payload     | Paramter value              | - Attack code in value                                       |
+| payload     | Parameter value              | - Attack code in value                                       |
 | evidence    | Evidence with repsonse body | - Simple codeview of where it's injected in response body.   |
 | cwe         | CWE ID                      | - Mapping CWE ID                                             |
 | severity    | Severity                    | - Severity (Low/Medium/High)                                 |
