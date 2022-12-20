@@ -17,7 +17,7 @@ This is sample of PoC log. The PoC log contains various information along with t
 
 
 - Type: `G`(Grep) , `R`(Reflected) , `V`(Verify)
-- Informatin: Method, grepping name, etc..
+- Information: Method, grepping name, etc..
 
 Why is there a gap?
 It is a method to make it easier to parse only the poc code through cut etc. For example, you can do this.
