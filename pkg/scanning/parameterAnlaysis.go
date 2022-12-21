@@ -419,7 +419,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	close(paramsDataQue)
 	wggg.Wait()
 	if miningDictCount != 0 {
-		printing.DalLog("INFO", "Found "+strconv.Itoa(miningDictCount)+" testing point in Dictionary base paramter mining", options)
+		printing.DalLog("INFO", "Found "+strconv.Itoa(miningDictCount)+" testing point in Dictionary base parameter mining", options)
 	}
 	if waf {
 		printing.DalLog("INFO", "Found WAF: "+wafName, options)

@@ -19,7 +19,7 @@ Dalfox performs parameter mining by default when scanning. This is based on the 
 
 ### Supported resources
 * `burp` : Use wordlist of Param Miner in BurpSuite
-* `assetnote` : Usee wordlist of Assetnote
+* `assetnote` : Use wordlist of Assetnote
 
 ## Disable Mining
 ### Disable DOM-Mining

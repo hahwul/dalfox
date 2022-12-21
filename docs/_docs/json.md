@@ -79,7 +79,7 @@ permalink: /docs/json/
       "poc_type":"plain/curl/httpie/etc...",
       "method":"HTTP Method",
       "data":"PoC URL",
-      "param":"Parmeter",
+      "param":"Parameter",
       "payload":"Attack Value",
       "evidence":"Evidence with response body",
       "cwe":"CWE ID",
@@ -95,8 +95,8 @@ permalink: /docs/json/
 | method      | HTTP Method                 | - GET/POST/PUT/DELETE, etc...                                |
 | data        | PoC (URL)                   | - PoC URL                                                    |
 | param       | Parameter name              | - Weak parameter name                                        |
-| payload     | Paramter value              | - Attack code in value                                       |
-| evidence    | Evidence with repsonse body | - Simple codeview of where it's injected in response body.   |
+| payload     | Parameter value             | - Attack code in value                                       |
+| evidence    | Evidence with response body | - Simple codeview of where it's injected in response body.   |
 | cwe         | CWE ID                      | - Mapping CWE ID                                             |
 | severity    | Severity                    | - Severity (Low/Medium/High)                                 |
 
