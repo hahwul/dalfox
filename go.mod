@@ -6,8 +6,8 @@ require (
 	github.com/PuerkitoBio/goquery v1.8.0
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
 	github.com/briandowns/spinner v1.19.0
-	github.com/chromedp/cdproto v0.0.0-20220924210414-0e3390be1777
-	github.com/chromedp/chromedp v0.8.6
+	github.com/chromedp/cdproto v0.0.0-20230109101555-6b041c6303cc
+	github.com/chromedp/chromedp v0.8.7
 	github.com/hahwul/volt v1.0.5
 	github.com/labstack/echo/v4 v4.9.1
 	github.com/logrusorgru/aurora v2.0.3+incompatible
