@@ -4,6 +4,7 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"errors"
+	"github.com/hahwul/dalfox/v2/pkg/har"
 	"io"
 	"io/ioutil"
 	"net/http"
@@ -54,6 +55,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					CWE:        "CWE-601",
 					Severity:   "Medium",
 					PoCType:    options.PoCType,
+					MessageID:  har.MessageIDFromRequest(req),
 				}
 				if showG {
 					if options.Format == "json" {
@@ -111,6 +113,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					CWE:        "CWE-93",
 					Severity:   "Medium",
 					PoCType:    options.PoCType,
+					MessageID:  har.MessageIDFromRequest(req),
 				}
 				poc.Data = MakePoC(poc.Data, req, options)
 
@@ -160,6 +163,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 						CWE:        "CWE-94",
 						Severity:   "High",
 						PoCType:    options.PoCType,
+						MessageID:  har.MessageIDFromRequest(req),
 					}
 					poc.Data = MakePoC(poc.Data, req, options)
 
@@ -202,6 +206,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					CWE:        "",
 					Severity:   "Low",
 					PoCType:    options.PoCType,
+					MessageID:  har.MessageIDFromRequest(req),
 				}
 				poc.Data = MakePoC(poc.Data, req, options)
 
@@ -253,6 +258,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					CWE:        "",
 					Severity:   "Low",
 					PoCType:    options.PoCType,
+					MessageID:  har.MessageIDFromRequest(req),
 				}
 				poc.Data = MakePoC(poc.Data, req, options)
 

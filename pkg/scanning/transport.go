@@ -2,9 +2,12 @@ package scanning
 
 import (
 	"crypto/tls"
+	"encoding/json"
 	"fmt"
+	"github.com/hahwul/dalfox/v2/pkg/har"
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	"github.com/hahwul/dalfox/v2/pkg/printing"
+	"github.com/tidwall/sjson"
 	"net"
 	"net/http"
 	"net/url"
@@ -12,7 +15,7 @@ import (
 )
 
 // getTransport is setting timetout and proxy on tranport
-func getTransport(options model.Options) *http.Transport {
+func getTransport(options model.Options) http.RoundTripper {
 	// set timeout
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{
@@ -35,5 +38,16 @@ func getTransport(options model.Options) *http.Transport {
 		}
 		transport.Proxy = http.ProxyURL(proxyAddress)
 	}
-	return transport
+
+	if options.HarWriter == nil {
+		return transport
+	}
+
+	return har.NewRoundTripper(transport, options.HarWriter, rewrite)
+}
+
+func rewrite(request *http.Request, response *http.Response, entry json.RawMessage) json.RawMessage {
+	messageID := har.MessageIDFromRequest(request)
+	entry, _ = sjson.SetBytes(entry, "_messageId", messageID)
+	return entry
 }

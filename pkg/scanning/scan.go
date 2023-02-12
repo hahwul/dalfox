@@ -3,6 +3,7 @@ package scanning
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/hahwul/dalfox/v2/pkg/har"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -694,6 +695,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 									CWE:        "CWE-79",
 									Severity:   "High",
 									PoCType:    options.PoCType,
+									//MessageID:  -1, // we can't do HAR here because it's using chromedp
 								}
 								if showV {
 									if options.Format == "json" {
@@ -777,6 +779,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 															CWE:        "CWE-79",
 															Severity:   "High",
 															PoCType:    options.PoCType,
+															MessageID:  har.MessageIDFromRequest(k),
 														}
 														poc.Data = MakePoC(poc.Data, k, options)
 
@@ -812,6 +815,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 															CWE:        "CWE-79",
 															Severity:   "Medium",
 															PoCType:    options.PoCType,
+															MessageID:  har.MessageIDFromRequest(k),
 														}
 														poc.Data = MakePoC(poc.Data, k, options)
 
@@ -835,6 +839,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 														CWE:        "CWE-79",
 														Severity:   "Medium",
 														PoCType:    options.PoCType,
+														MessageID:  har.MessageIDFromRequest(k),
 													}
 													poc.Data = MakePoC(poc.Data, k, options)
 
@@ -875,6 +880,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												CWE:        "CWE-83",
 												Severity:   "High",
 												PoCType:    options.PoCType,
+												MessageID:  har.MessageIDFromRequest(k),
 											}
 											poc.Data = MakePoC(poc.Data, k, options)
 
@@ -912,6 +918,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												CWE:        "CWE-83",
 												Severity:   "Medium",
 												PoCType:    options.PoCType,
+												MessageID:  har.MessageIDFromRequest(k),
 											}
 											poc.Data = MakePoC(poc.Data, k, options)
 
@@ -950,6 +957,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												CWE:        "CWE-79",
 												Severity:   "High",
 												PoCType:    options.PoCType,
+												MessageID:  har.MessageIDFromRequest(k),
 											}
 											poc.Data = MakePoC(poc.Data, k, options)
 
@@ -987,6 +995,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												CWE:        "CWE-79",
 												Severity:   "Medium",
 												PoCType:    options.PoCType,
+												MessageID:  har.MessageIDFromRequest(k),
 											}
 											poc.Data = MakePoC(poc.Data, k, options)
 
