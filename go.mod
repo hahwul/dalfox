@@ -3,7 +3,7 @@ module github.com/hahwul/dalfox/v2
 go 1.17
 
 require (
-	github.com/PuerkitoBio/goquery v1.8.0
+	github.com/PuerkitoBio/goquery v1.8.1
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
 	github.com/briandowns/spinner v1.21.0
 	github.com/chromedp/cdproto v0.0.0-20230109101555-6b041c6303cc
