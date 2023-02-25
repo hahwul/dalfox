@@ -3,6 +3,7 @@ package lib
 import (
 	"time"
 
+	"github.com/hahwul/dalfox/v2/pkg/har"
 	"github.com/hahwul/dalfox/v2/pkg/model"
 )
 
@@ -41,8 +42,9 @@ type Options struct {
 	UseDeepDXSS       bool     `json:"use-deepdxss"`
 	RemotePayloads    string
 	RemoteWordlists   string
-	PoCType           string `json:"poc-type"`
-	WAFEvasion        bool   `json:"waf-evasion"`
+	PoCType           string      `json:"poc-type"`
+	WAFEvasion        bool        `json:"waf-evasion"`
+	HarWriter         *har.Writer `json:"har-file-path"`
 }
 
 // Target is target object
