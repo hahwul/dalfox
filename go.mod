@@ -16,7 +16,7 @@ require (
 	github.com/spf13/cobra v1.6.1
 	github.com/stretchr/testify v1.8.1
 	github.com/swaggo/echo-swagger v1.3.5
-	github.com/swaggo/swag v1.8.9
+	github.com/swaggo/swag v1.8.10
 	github.com/tidwall/sjson v1.2.5
 	github.com/tylerb/graceful v1.2.15
 	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4
