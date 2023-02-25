@@ -3,6 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/hahwul/dalfox/v2/pkg/har"
 	"io/ioutil"
 	"os"
 	"time"
@@ -18,6 +19,7 @@ var optionsStr = make(map[string]string)
 var optionsBool = make(map[string]bool)
 var header, p, ignoreParams []string
 var config, cookie, data, customPayload, userAgent, blind, output, format, foundAction, proxy, grep, cookieFromRaw string
+var harFilePath string
 var ignoreReturn, miningWord, method, customAlertValue, customAlertType, remotePayloads, remoteWordlists string
 var timeout, concurrence, delay int
 var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, onlyCustomPayload, debug, useDeepDXSS, outputAll bool
@@ -35,6 +37,12 @@ var rootCmd = &cobra.Command{
 
 // Execute is run rootCmd
 func Execute() {
+	defer func() {
+		if options.HarWriter != nil {
+			options.HarWriter.Close()
+		}
+	}()
+
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -72,6 +80,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&onlyPoC, "only-poc", "", "Shows only the PoC code for the specified pattern (g: grep / r: reflected / v: verified)\n * Example: --only-poc='g,v'")
 	rootCmd.PersistentFlags().StringVar(&pocType, "poc-type", "plain", "Select PoC type \n * Supported: plain/curl/httpie/http-request\n * Example: --poc-type='curl'")
 	rootCmd.PersistentFlags().StringVar(&reportFormat, "report-format", "plain", "Format of --report flag [plain/json]")
+	rootCmd.PersistentFlags().StringVar(&harFilePath, "har-file-path", "", "Path to save HAR of scan requests to")
 
 	//Int
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 10, "Second of timeout")
@@ -157,6 +166,18 @@ func initConfig() {
 		ReportFormat:      reportFormat,
 	}
 	// var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV bool
+
+	if harFilePath != "" {
+		f, err := os.Create(harFilePath)
+		if err != nil {
+			fmt.Println(err)
+		} else {
+			options.HarWriter, err = har.NewWriter(f, &har.Creator{Name: "dalfox", Version: printing.VERSION})
+			if err != nil {
+				fmt.Println(err)
+			}
+		}
+	}
 
 	if skipMiningAll {
 		options.FindingDOM = false

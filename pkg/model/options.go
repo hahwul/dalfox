@@ -1,6 +1,7 @@
 package model
 
 import (
+	"github.com/hahwul/dalfox/v2/pkg/har"
 	"sync"
 	t "time"
 
@@ -61,6 +62,7 @@ type Options struct {
 	SpinnerObject     *s.Spinner
 	AuroraObject      a.Aurora
 	StartTime         t.Time
+	HarWriter         *har.Writer
 	PathReflection    map[int]string
 	RemotePayloads    string
 	RemoteWordlists   string
