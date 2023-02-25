@@ -90,22 +90,23 @@ More information? please read [Installation guide](https://dalfox.hahwul.com/doc
 
 ## Usage
 ```
-▶ dalfox [mode] [target] [flags] 
+dalfox [mode] [target] [flags] 
 ```
 
 Single target mode
-```plain
-▶ dalfox url http://testphp.vulnweb.com/listproducts.php\?cat\=123\&artist\=123\&asdf\=ff -b https://hahwul.xss.ht
+```bash
+dalfox url http://testphp.vulnweb.com/listproducts.php\?cat\=123\&artist\=123\&asdf\=ff \
+	-b https://hahwul.xss.ht
 ```
 
 Multiple target mode from file
-```plain
-▶ dalfox file urls_file --custom-payload ./mypayloads.txt
+```bash
+dalfox file urls_file --custom-payload ./mypayloads.txt
 ```
 
 Pipeline mode
-```plain
-▶ cat urls_file | dalfox pipe -H "AuthToken: bbadsfkasdfadsf87"
+```bash
+cat urls_file | dalfox pipe -H "AuthToken: bbadsfkasdfadsf87"
 ```
 
 Other tips, See [wiki](https://github.com/hahwul/dalfox/wiki) for detailed instructions!
@@ -129,11 +130,12 @@ Format
 
 Why is there a gap?
 It is a method to make it easier to parse only the poc code through cut etc. For example, you can do this.
-```shell
-▶ dalfox url http://testphp.vulnweb.com/listproducts.php\?cat\=123\&artist\=123\&asdf\=ff | cut -d " " -f 2 > output
-▶ cat output
-http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123DalFox
-http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123%22%3E%3Csvg%2FOnLoad%3D%22%60%24%7Bprompt%60%60%7D%60%22+class%3Ddalfox%3E
+```bash
+dalfox url http://testphp.vulnweb.com/listproducts.php\?cat\=123\&artist\=123\&asdf\=ff \
+	| cut -d " " -f 2 > output
+cat output
+# http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123DalFox
+# http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123%22%3E%3Csvg%2FOnLoad%3D%22%60%24%7Bprompt%60%60%7D%60%22+class%3Ddalfox%3E
 ```
 
 ## In the code
@@ -163,9 +165,9 @@ func main() {
 }
 ```
 
-```
-$ go build -o xssapp ; ./xssapp
-[] [{V GET https://xss-game.appspot.com/level1/frame?query=%3Ciframe+srcdoc%3D%22%3Cinput+onauxclick%3Dprint%281%29%3E%22+class%3Ddalfox%3E%3C%2Fiframe%3E}] 2.618998247s 2021-07-11 10:59:26.508483153 +0900 KST m=+0.000794230 2021-07-11 10:59:29.127481217 +0900 KST m=+2.619792477}
+```bash
+go build -o xssapp ; ./xssapp
+# [] [{V GET https://xss-game.appspot.com/level1/frame?query=%3Ciframe+srcdoc%3D%22%3Cinput+onauxclick%3Dprint%281%29%3E%22+class%3Ddalfox%3E%3C%2Fiframe%3E}] 2.618998247s 2021-07-11 10:59:26.508483153 +0900 KST m=+0.000794230 2021-07-11 10:59:29.127481217 +0900 KST m=+2.619792477}
 ```
 
 ## Screenshots
