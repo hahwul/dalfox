@@ -32,6 +32,11 @@ var fileCmd = &cobra.Command{
 		printing.Banner(options)
 		tMethod := options.Method
 		options.Method = "FILE Mode"
+		if len(args) == 0 {
+			printing.DalLog("ERROR", "Input file path", options)
+			printing.DalLog("ERROR", "e.g dalfox file ./targets.txt or ./rawdata.raw", options)
+			return
+		}
 		printing.Summary(options, args[0])
 		options.Method = tMethod
 		var targets []string
