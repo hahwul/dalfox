@@ -15,6 +15,11 @@ var sxssCmd = &cobra.Command{
 	Short: "Use Stored XSS mode",
 	Run: func(cmd *cobra.Command, args []string) {
 		printing.Banner(options)
+		if len(args) == 0 {
+			printing.DalLog("ERROR", "Input target url", options)
+			printing.DalLog("ERROR", "e.g dalfox sxss https://google.com/?q=1 --trigger https://target/profile", options)
+			return
+		}
 		printing.Summary(options, args[0])
 		if len(args) >= 1 {
 			options.Trigger = trigger
