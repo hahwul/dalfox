@@ -5,7 +5,7 @@ go 1.17
 require (
 	github.com/PuerkitoBio/goquery v1.8.1
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
-	github.com/briandowns/spinner v1.22.0
+	github.com/briandowns/spinner v1.23.0
 	github.com/chromedp/cdproto v0.0.0-20230109101555-6b041c6303cc
 	github.com/chromedp/chromedp v0.8.7
 	github.com/hahwul/volt v1.0.5
