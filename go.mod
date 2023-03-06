@@ -6,8 +6,8 @@ require (
 	github.com/PuerkitoBio/goquery v1.8.1
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
 	github.com/briandowns/spinner v1.22.0
-	github.com/chromedp/cdproto v0.0.0-20230109101555-6b041c6303cc
-	github.com/chromedp/chromedp v0.8.7
+	github.com/chromedp/cdproto v0.0.0-20230220211738-2b1ec77315c9
+	github.com/chromedp/chromedp v0.8.8
 	github.com/hahwul/volt v1.0.5
 	github.com/labstack/echo/v4 v4.10.2
 	github.com/logrusorgru/aurora v2.0.3+incompatible
@@ -57,7 +57,7 @@ require (
 	github.com/valyala/fasttemplate v1.2.2 // indirect
 	golang.org/x/crypto v0.6.0 // indirect
 	golang.org/x/net v0.7.0 // indirect
-	golang.org/x/sys v0.5.0 // indirect
+	golang.org/x/sys v0.6.0 // indirect
 	golang.org/x/text v0.7.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	golang.org/x/tools v0.1.12 // indirect
