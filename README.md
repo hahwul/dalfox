@@ -12,9 +12,9 @@
   <a href=""><img src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat"></a>
 </p>
 
-DalFox is a powerful open source XSS scanning tool and parameter analyzer and utility that fast the process of detecting and verify XSS flaws. It comes with a powerful testing engine, many niche features for the cool hacker!
+DalFox is a powerful open-source tool that focuses on automation, making it ideal for quickly scanning for XSS flaws and analyzing parameters. Its advanced testing engine and niche features are designed to streamline the process of detecting and verifying vulnerabilities.
 
-I talk about naming. Dal([달](https://en.wiktionary.org/wiki/달)) is the Korean pronunciation of moon, and Fox are made to mean "Finder Of XSS" or 🦊
+As for the name, Dal([달](https://en.wiktionary.org/wiki/달)) is the Korean word for "moon," while "Fox" stands for "Finder Of XSS" or 🦊
 
 ## TOC
 - [Key features](#key-features)
