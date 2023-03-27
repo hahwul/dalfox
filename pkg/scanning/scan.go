@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"strconv"
@@ -699,6 +700,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 									MessageStr: "Triggered XSS Payload (found dialog in headless)",
 									//MessageID:  -1, // we can't do HAR here because it's using chromedp
 								}
+
 								if showV {
 									if options.Format == "json" {
 										pocj, _ := json.Marshal(poc)
@@ -786,6 +788,19 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 														}
 														poc.Data = MakePoC(poc.Data, k, options)
 
+														if options.OutputRequest {
+															reqDump, err := httputil.DumpRequestOut(k, true)
+															if err == nil {
+																poc.RawHTTPRequest = string(reqDump)
+																printing.DalLog("CODE", "\n"+string(reqDump), options)
+															}
+														}
+
+														if options.OutputResponse {
+															poc.RawHTTPResponse = resbody
+															printing.DalLog("CODE", string(resbody), options)
+														}
+
 														if showV {
 															if options.Format == "json" {
 																pocj, _ := json.Marshal(poc)
@@ -823,6 +838,18 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 															MessageStr: "Reflected Payload in JS: " + v["param"] + "=" + v["payload"],
 														}
 														poc.Data = MakePoC(poc.Data, k, options)
+														if options.OutputRequest {
+															reqDump, err := httputil.DumpRequestOut(k, true)
+															if err == nil {
+																poc.RawHTTPRequest = string(reqDump)
+																printing.DalLog("CODE", "\n"+string(reqDump), options)
+															}
+														}
+
+														if options.OutputResponse {
+															poc.RawHTTPResponse = resbody
+															printing.DalLog("CODE", string(resbody), options)
+														}
 
 														scanObject.Results = append(scanObject.Results, poc)
 														scanResult.PoCs = append(scanResult.PoCs, poc)
@@ -848,6 +875,18 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 														MessageStr: "Reflected Payload in JS: " + v["param"] + "=" + v["payload"],
 													}
 													poc.Data = MakePoC(poc.Data, k, options)
+													if options.OutputRequest {
+														reqDump, err := httputil.DumpRequestOut(k, true)
+														if err == nil {
+															poc.RawHTTPRequest = string(reqDump)
+															printing.DalLog("CODE", "\n"+string(reqDump), options)
+														}
+													}
+
+													if options.OutputResponse {
+														poc.RawHTTPResponse = resbody
+														printing.DalLog("CODE", string(resbody), options)
+													}
 
 													if showR {
 														if options.Format == "json" {
@@ -890,6 +929,18 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												MessageStr: "Triggered XSS Payload (found DOM Object): " + v["param"] + "=" + v["payload"],
 											}
 											poc.Data = MakePoC(poc.Data, k, options)
+											if options.OutputRequest {
+												reqDump, err := httputil.DumpRequestOut(k, true)
+												if err == nil {
+													poc.RawHTTPRequest = string(reqDump)
+													printing.DalLog("CODE", "\n"+string(reqDump), options)
+												}
+											}
+
+											if options.OutputResponse {
+												poc.RawHTTPResponse = resbody
+												printing.DalLog("CODE", string(resbody), options)
+											}
 
 											if showV {
 												if options.Format == "json" {
@@ -929,6 +980,18 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												MessageStr: "Reflected Payload in Attribute: " + v["param"] + "=" + v["payload"],
 											}
 											poc.Data = MakePoC(poc.Data, k, options)
+											if options.OutputRequest {
+												reqDump, err := httputil.DumpRequestOut(k, true)
+												if err == nil {
+													poc.RawHTTPRequest = string(reqDump)
+													printing.DalLog("CODE", "\n"+string(reqDump), options)
+												}
+											}
+
+											if options.OutputResponse {
+												poc.RawHTTPResponse = resbody
+												printing.DalLog("CODE", string(resbody), options)
+											}
 
 											if showR {
 												if options.Format == "json" {
@@ -969,6 +1032,18 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												MessageStr: "Triggered XSS Payload (found DOM Object): " + v["param"] + "=" + v["payload"],
 											}
 											poc.Data = MakePoC(poc.Data, k, options)
+											if options.OutputRequest {
+												reqDump, err := httputil.DumpRequestOut(k, true)
+												if err == nil {
+													poc.RawHTTPRequest = string(reqDump)
+													printing.DalLog("CODE", "\n"+string(reqDump), options)
+												}
+											}
+
+											if options.OutputResponse {
+												poc.RawHTTPResponse = resbody
+												printing.DalLog("CODE", string(resbody), options)
+											}
 
 											if showV {
 												if options.Format == "json" {
@@ -1008,6 +1083,18 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												MessageStr: "Reflected Payload in HTML: " + v["param"] + "=" + v["payload"],
 											}
 											poc.Data = MakePoC(poc.Data, k, options)
+											if options.OutputRequest {
+												reqDump, err := httputil.DumpRequestOut(k, true)
+												if err == nil {
+													poc.RawHTTPRequest = string(reqDump)
+													printing.DalLog("CODE", "\n"+string(reqDump), options)
+												}
+											}
+
+											if options.OutputResponse {
+												poc.RawHTTPResponse = resbody
+												printing.DalLog("CODE", string(resbody), options)
+											}
 
 											if showR {
 												if options.Format == "json" {

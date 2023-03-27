@@ -1,9 +1,10 @@
 package model
 
 import (
-	"github.com/hahwul/dalfox/v2/pkg/har"
 	"sync"
 	t "time"
+
+	"github.com/hahwul/dalfox/v2/pkg/har"
 
 	s "github.com/briandowns/spinner"
 	a "github.com/logrusorgru/aurora"
@@ -76,6 +77,8 @@ type Options struct {
 	Mutex             *sync.Mutex
 	ReportFormat      string
 	ReportBool        bool
+	OutputRequest     bool `json:"output-request,omitempty"`
+	OutputResponse    bool `json:"output-response,omitempty"`
 }
 
 // MassJob is list for mass

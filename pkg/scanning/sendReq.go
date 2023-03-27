@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"net/http/httputil"
 	"strconv"
 	"strings"
 	"time"
@@ -59,6 +60,14 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					MessageID:  har.MessageIDFromRequest(req),
 					MessageStr: "Found Open Redirect. Payload: " + via[0].URL.String(),
 				}
+				if options.OutputRequest {
+					reqDump, err := httputil.DumpRequestOut(req, true)
+					if err == nil {
+						poc.RawHTTPRequest = string(reqDump)
+						printing.DalLog("CODE", "\n"+string(reqDump), options)
+					}
+				}
+
 				if showG {
 					if options.Format == "json" {
 						pocj, _ := json.Marshal(poc)
@@ -118,6 +127,18 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					MessageID:  har.MessageIDFromRequest(req),
 				}
 				poc.Data = MakePoC(poc.Data, req, options)
+				if options.OutputRequest {
+					reqDump, err := httputil.DumpRequestOut(req, true)
+					if err == nil {
+						poc.RawHTTPRequest = string(reqDump)
+						printing.DalLog("CODE", "\n"+string(reqDump), options)
+					}
+				}
+
+				if options.OutputResponse {
+					poc.RawHTTPResponse = str
+					printing.DalLog("CODE", string(str), options)
+				}
 
 				if !duplicatedResult(scanObject.Results, poc) {
 					if payload != "" {
@@ -170,6 +191,18 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 						MessageID:  har.MessageIDFromRequest(req),
 					}
 					poc.Data = MakePoC(poc.Data, req, options)
+					if options.OutputRequest {
+						reqDump, err := httputil.DumpRequestOut(req, true)
+						if err == nil {
+							poc.RawHTTPRequest = string(reqDump)
+							printing.DalLog("CODE", "\n"+string(reqDump), options)
+						}
+					}
+
+					if options.OutputResponse {
+						poc.RawHTTPResponse = str
+						printing.DalLog("CODE", string(str), options)
+					}
 
 					if !duplicatedResult(scanObject.Results, poc) {
 						if payload != "" {
@@ -215,6 +248,18 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					MessageID:  har.MessageIDFromRequest(req),
 				}
 				poc.Data = MakePoC(poc.Data, req, options)
+				if options.OutputRequest {
+					reqDump, err := httputil.DumpRequestOut(req, true)
+					if err == nil {
+						poc.RawHTTPRequest = string(reqDump)
+						printing.DalLog("CODE", "\n"+string(reqDump), options)
+					}
+				}
+
+				if options.OutputResponse {
+					poc.RawHTTPResponse = str
+					printing.DalLog("CODE", string(str), options)
+				}
 
 				if !duplicatedResult(scanObject.Results, poc) {
 					if payload != "" {
@@ -269,6 +314,18 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					MessageID:  har.MessageIDFromRequest(req),
 				}
 				poc.Data = MakePoC(poc.Data, req, options)
+				if options.OutputRequest {
+					reqDump, err := httputil.DumpRequestOut(req, true)
+					if err == nil {
+						poc.RawHTTPRequest = string(reqDump)
+						printing.DalLog("CODE", "\n"+string(reqDump), options)
+					}
+				}
+
+				if options.OutputResponse {
+					poc.RawHTTPResponse = str
+					printing.DalLog("CODE", string(str), options)
+				}
 
 				if !duplicatedResult(scanObject.Results, poc) {
 					printing.DalLog("GREP", "Found "+k+" via custom grepping / payload: "+payload, options)

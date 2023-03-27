@@ -25,7 +25,7 @@ var ignoreReturn, miningWord, method, customAlertValue, customAlertType, remoteP
 var timeout, concurrence, delay int
 var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, onlyCustomPayload, debug, useDeepDXSS, outputAll bool
 var options model.Options
-var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV, skipGrep, skipHeadless, wafEvasion, reportBool bool
+var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV, skipGrep, skipHeadless, wafEvasion, reportBool, outputRequest, outputResponse bool
 var onlyPoC, foundActionShell, pocType, reportFormat string
 
 var rootCmd = &cobra.Command{
@@ -109,6 +109,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&outputAll, "output-all", false, "All log write mode (-o or stdout)")
 	rootCmd.PersistentFlags().BoolVar(&wafEvasion, "waf-evasion", false, "Avoid blocking by adjusting the speed when detecting WAF (worker=1 delay=3s)")
 	rootCmd.PersistentFlags().BoolVar(&reportBool, "report", false, "Show detail report")
+	rootCmd.PersistentFlags().BoolVar(&outputRequest, "output-request", false, "Include raw HTTP requests in the results.")
+	rootCmd.PersistentFlags().BoolVar(&outputResponse, "output-response", false, "Include raw HTTP response in the results.")
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -165,6 +167,8 @@ func initConfig() {
 		PoCType:           pocType,
 		ReportBool:        reportBool,
 		ReportFormat:      reportFormat,
+		OutputRequest:     outputRequest,
+		OutputResponse:    outputResponse,
 	}
 	// var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV bool
 
