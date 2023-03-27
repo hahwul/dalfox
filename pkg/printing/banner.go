@@ -12,5 +12,5 @@ func Banner(options model.Options) {
  '. '::::::' |__/|_n_||___||_| \_//_n_\
    '-.::''    
 `, options)
-	DalLog("", "🌙🦊 Powerful open source XSS scanning tool and parameter analyzer, utility", options)
+	DalLog("", "🌙🦊 Dalfox is a powerful open-source XSS scanner and utility focused on automation.", options)
 }
