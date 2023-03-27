@@ -17,6 +17,7 @@ type PoC struct {
 	CWE        string `json:"cwe"`
 	Severity   string `json:"severity"`
 	MessageID  int64  `json:"message_id,omitempty"`
+	MessageStr string `json:"message_str,omitempty"`
 }
 
 // Result is struct for library and cli application

@@ -3,7 +3,6 @@ package scanning
 import (
 	"encoding/json"
 	"fmt"
-	"github.com/hahwul/dalfox/v2/pkg/har"
 	"io/ioutil"
 	"net/http"
 	"net/url"
@@ -12,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/hahwul/dalfox/v2/pkg/har"
 
 	"golang.org/x/term"
 
@@ -695,6 +696,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 									CWE:        "CWE-79",
 									Severity:   "High",
 									PoCType:    options.PoCType,
+									MessageStr: "Triggered XSS Payload (found dialog in headless)",
 									//MessageID:  -1, // we can't do HAR here because it's using chromedp
 								}
 								if showV {
@@ -780,6 +782,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 															Severity:   "High",
 															PoCType:    options.PoCType,
 															MessageID:  har.MessageIDFromRequest(k),
+															MessageStr: "Triggered XSS Payload (found dialog in headless)",
 														}
 														poc.Data = MakePoC(poc.Data, k, options)
 
@@ -804,6 +807,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 														if options.FoundAction != "" {
 															foundAction(options, target, k.URL.String(), "WEAK")
 														}
+														printing.DalLog("WEAK", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], options)
 														poc := model.PoC{
 															Type:       "R",
 															InjectType: v["type"],
@@ -816,6 +820,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 															Severity:   "Medium",
 															PoCType:    options.PoCType,
 															MessageID:  har.MessageIDFromRequest(k),
+															MessageStr: "Reflected Payload in JS: " + v["param"] + "=" + v["payload"],
 														}
 														poc.Data = MakePoC(poc.Data, k, options)
 
@@ -840,6 +845,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 														Severity:   "Medium",
 														PoCType:    options.PoCType,
 														MessageID:  har.MessageIDFromRequest(k),
+														MessageStr: "Reflected Payload in JS: " + v["param"] + "=" + v["payload"],
 													}
 													poc.Data = MakePoC(poc.Data, k, options)
 
@@ -881,6 +887,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Severity:   "High",
 												PoCType:    options.PoCType,
 												MessageID:  har.MessageIDFromRequest(k),
+												MessageStr: "Triggered XSS Payload (found DOM Object): " + v["param"] + "=" + v["payload"],
 											}
 											poc.Data = MakePoC(poc.Data, k, options)
 
@@ -919,6 +926,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Severity:   "Medium",
 												PoCType:    options.PoCType,
 												MessageID:  har.MessageIDFromRequest(k),
+												MessageStr: "Reflected Payload in Attribute: " + v["param"] + "=" + v["payload"],
 											}
 											poc.Data = MakePoC(poc.Data, k, options)
 
@@ -958,6 +966,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Severity:   "High",
 												PoCType:    options.PoCType,
 												MessageID:  har.MessageIDFromRequest(k),
+												MessageStr: "Triggered XSS Payload (found DOM Object): " + v["param"] + "=" + v["payload"],
 											}
 											poc.Data = MakePoC(poc.Data, k, options)
 
@@ -996,6 +1005,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Severity:   "Medium",
 												PoCType:    options.PoCType,
 												MessageID:  har.MessageIDFromRequest(k),
+												MessageStr: "Reflected Payload in HTML: " + v["param"] + "=" + v["payload"],
 											}
 											poc.Data = MakePoC(poc.Data, k, options)
 

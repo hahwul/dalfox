@@ -57,6 +57,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					Severity:   "Medium",
 					PoCType:    options.PoCType,
 					MessageID:  har.MessageIDFromRequest(req),
+					MessageStr: "Found Open Redirect. Payload: " + via[0].URL.String(),
 				}
 				if showG {
 					if options.Format == "json" {
@@ -121,8 +122,10 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				if !duplicatedResult(scanObject.Results, poc) {
 					if payload != "" {
 						printing.DalLog("GREP", "Found CRLF Injection via built-in grepping / payload: "+payload, options)
+						poc.MessageStr = "Found CRLF Injection via built-in grepping / payload: " + payload
 					} else {
 						printing.DalLog("GREP", "Found CRLF Injection via built-in grepping / original request", options)
+						poc.MessageStr = "Found CRLF Injection via built-in grepping / original request"
 					}
 					if options.FoundAction != "" {
 						foundAction(options, req.URL.Host, poc.Data, "BAV: "+poc.InjectType)
@@ -171,8 +174,10 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					if !duplicatedResult(scanObject.Results, poc) {
 						if payload != "" {
 							printing.DalLog("GREP", "Found SSTI via built-in grepping / payload: "+payload, options)
+							poc.MessageStr = "Found SSTI via built-in grepping / payload: " + payload
 						} else {
 							printing.DalLog("GREP", "Found SSTI via built-in grepping / original request", options)
+							poc.MessageStr = "Found SSTI via built-in grepping / original request"
 						}
 
 						if options.FoundAction != "" {
@@ -214,8 +219,10 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				if !duplicatedResult(scanObject.Results, poc) {
 					if payload != "" {
 						printing.DalLog("GREP", "Found "+k+" via built-in grepping / payload: "+payload, options)
+						poc.MessageStr = "Found " + k + " via built-in grepping / payload: " + payload
 					} else {
 						printing.DalLog("GREP", "Found "+k+" via built-in grepping / original request", options)
+						poc.MessageStr = "Found " + k + " via built-in grepping / original request"
 					}
 
 					if options.FoundAction != "" {
@@ -265,6 +272,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 
 				if !duplicatedResult(scanObject.Results, poc) {
 					printing.DalLog("GREP", "Found "+k+" via custom grepping / payload: "+payload, options)
+					poc.MessageStr = "Found " + k + " via custom grepping / payload: " + payload
 					for _, vv := range v {
 						printing.DalLog("CODE", vv, options)
 					}
