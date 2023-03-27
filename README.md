@@ -96,7 +96,7 @@ dalfox [mode] [target] [flags]
 Single target mode
 ```bash
 dalfox url http://testphp.vulnweb.com/listproducts.php\?cat\=123\&artist\=123\&asdf\=ff \
-	-b https://hahwul.xss.ht
+	-b https://your-callback-url
 ```
 
 Multiple target mode from file

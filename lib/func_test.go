@@ -11,7 +11,7 @@ func TestInitialize(t *testing.T) {
 	opt := dalfox.Options{
 		Cookie:           "ABCD=1234",
 		UniqParam:        []string{"q"},
-		BlindURL:         "hahwul.xss.ht",
+		BlindURL:         "your-callback-url",
 		CustomAlertValue: "1",
 		CustomAlertType:  "none",
 		Header:           []string{"Cookie: 1234", "ABCD: 1234"},
