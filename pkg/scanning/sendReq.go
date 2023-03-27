@@ -4,13 +4,14 @@ import (
 	"compress/gzip"
 	"encoding/json"
 	"errors"
-	"github.com/hahwul/dalfox/v2/pkg/har"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/hahwul/dalfox/v2/pkg/har"
 
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	"github.com/hahwul/dalfox/v2/pkg/optimization"
