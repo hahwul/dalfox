@@ -4,14 +4,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/url"
+	"testing"
+
 	"github.com/hahwul/dalfox/v2/pkg/har"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/sjson"
 	"golang.org/x/sync/errgroup"
-	"net/http"
-	"testing"
 )
+
+type Test struct {
+	Name string
+}
 
 var creator = &har.Creator{Name: "dalfox tests", Version: "0.0"}
 
@@ -117,4 +123,49 @@ func TestRewrite(t *testing.T) {
 
 	assert.EqualValues(t, firstMessageID, entries[0].(map[string]interface{})["_messageId"])
 	assert.EqualValues(t, secondMessageID, entries[1].(map[string]interface{})["_messageId"])
+}
+
+func TestSinglePostJSONRequest(t *testing.T) {
+	buf := &bytes.Buffer{}
+
+	hw, err := har.NewWriter(buf, creator)
+	require.NoError(t, err)
+
+	rt := har.NewRoundTripper(nil, hw, nil)
+	c := &http.Client{Transport: rt}
+
+	person := Test{"apple"}
+	pbytes, _ := json.Marshal(person)
+	buff := bytes.NewBuffer(pbytes)
+
+	resp, err := c.Post("https://example.com", "application/json", buff)
+	require.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.Equal(t, 200, resp.StatusCode)
+
+	err = hw.Close()
+	require.NoError(t, err)
+
+	assert.True(t, json.Valid(buf.Bytes()), "HAR file is not valid json")
+}
+
+func TestSinglePostFormRequest(t *testing.T) {
+	buf := &bytes.Buffer{}
+
+	hw, err := har.NewWriter(buf, creator)
+	require.NoError(t, err)
+
+	rt := har.NewRoundTripper(nil, hw, nil)
+	c := &http.Client{Transport: rt}
+
+	resp, err := c.PostForm("https://example.com", url.Values{"Name": {"Apple"}})
+
+	require.NoError(t, err)
+	assert.NotNil(t, resp)
+	assert.Equal(t, 200, resp.StatusCode)
+
+	err = hw.Close()
+	require.NoError(t, err)
+
+	assert.True(t, json.Valid(buf.Bytes()), "HAR file is not valid json")
 }
