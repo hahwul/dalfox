@@ -77,3 +77,8 @@ Command (only grep and verified poc)
 ```
 ▶ dalfox url http://testphp.vulnweb.com/listproducts.php --only-poc=g,v
 ```
+
+## Save Traffic in HAR File
+```
+▶ dalfox url http://testphp.vulnweb.com/listproducts.php --har-file-path=log.har
+```
