@@ -63,6 +63,8 @@ func Initialize(target Target, options Options) model.Options {
 		UseHeadless:       true,
 		UseDeepDXSS:       false,
 		WAFEvasion:        false,
+		OutputRequest:     false,
+		OutputResponse:    false,
 	}
 	if len(options.UniqParam) > 0 {
 		for _, v := range options.UniqParam {

@@ -45,6 +45,8 @@ type Options struct {
 	PoCType           string      `json:"poc-type"`
 	WAFEvasion        bool        `json:"waf-evasion"`
 	HarWriter         *har.Writer `json:"har-file-path"`
+	OutputRequest     bool        `json:"output-request,omitempty"`
+	OutputResponse    bool        `json:"output-response,omitempty"`
 }
 
 // Target is target object
