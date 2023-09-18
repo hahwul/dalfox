@@ -11,7 +11,7 @@ func TestInitialize(t *testing.T) {
 	opt := dalfox.Options{
 		Cookie:           "ABCD=1234",
 		UniqParam:        []string{"q"},
-		BlindURL:         "hahwul.xss.ht",
+		BlindURL:         "your-callback-url",
 		CustomAlertValue: "1",
 		CustomAlertType:  "none",
 		Header:           []string{"Cookie: 1234", "ABCD: 1234"},
@@ -20,6 +20,7 @@ func TestInitialize(t *testing.T) {
 		ProxyAddress:     "http://127.0.0.1",
 		Grep:             "Test",
 		IgnoreReturn:     "301",
+		IgnoreParams:     []string{"qqq"},
 		OnlyDiscovery:    true,
 		FollowRedirect:   true,
 		Trigger:          "https://google.com",
@@ -51,6 +52,7 @@ func TestInitialize(t *testing.T) {
 	assert.NotEqual(t, newOptions.ProxyAddress, "", "they should not bee equal")
 	assert.NotEqual(t, newOptions.Grep, "", "they should not bee equal")
 	assert.NotEqual(t, newOptions.IgnoreReturn, "", "they should not bee equal")
+	assert.NotEqual(t, newOptions.IgnoreParams, []string{""}, "they should not bee equal")
 	assert.NotEqual(t, newOptions.Trigger, "", "they should not bee equal")
 	assert.NotEqual(t, newOptions.Timeout, 10, "they should not bee equal")
 	assert.NotEqual(t, newOptions.Concurrence, 100, "they should not bee equal")

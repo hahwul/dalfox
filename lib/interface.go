@@ -3,6 +3,7 @@ package lib
 import (
 	"time"
 
+	"github.com/hahwul/dalfox/v2/pkg/har"
 	"github.com/hahwul/dalfox/v2/pkg/model"
 )
 
@@ -23,6 +24,7 @@ type Options struct {
 	ProxyAddress      string   `json:"proxy"`
 	Grep              string   `json:"grep"`
 	IgnoreReturn      string   `json:"ignore-return"`
+	IgnoreParams      []string `json:"ignore-params"`
 	Trigger           string   `json:"trigger"`
 	TriggerMethod     string   `json:"request-method"`
 	Sequence          int      `json:"sequence"`
@@ -40,8 +42,11 @@ type Options struct {
 	UseDeepDXSS       bool     `json:"use-deepdxss"`
 	RemotePayloads    string
 	RemoteWordlists   string
-	PoCType           string `json:"poc-type"`
-	WAFEvasion        bool   `json:"waf-evasion"`
+	PoCType           string      `json:"poc-type"`
+	WAFEvasion        bool        `json:"waf-evasion"`
+	HarWriter         *har.Writer `json:"har-file-path"`
+	OutputRequest     bool        `json:"output-request,omitempty"`
+	OutputResponse    bool        `json:"output-response,omitempty"`
 }
 
 // Target is target object
@@ -55,6 +60,7 @@ type Target struct {
 type Result struct {
 	Logs      []string
 	PoCs      []model.PoC
+	Params    []model.ParamResult
 	Duration  time.Duration
 	StartTime time.Time
 	EndTime   time.Time

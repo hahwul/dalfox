@@ -10,8 +10,7 @@ func Banner(options model.Options) {
  :  :::::::: |  \ / \ | |  | __/ \\ V /
  :  :::::::: | o ) o || |_ | _( o )) (
  '. '::::::' |__/|_n_||___||_| \_//_n_\
-   '-.::''
+   '-.::''    
 `, options)
-	DalLog("", "Parameter Analysis and XSS Scanning tool based on golang", options)
-	DalLog("", "Finder Of XSS and Dal is the Korean pronunciation of moon. @hahwul", options)
+	DalLog("", "🌙🦊 Dalfox is a powerful open-source XSS scanner and utility focused on automation.", options)
 }

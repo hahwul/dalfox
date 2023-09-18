@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"net/http/httputil"
 	"net/url"
 	"os"
 	"strconv"
@@ -12,13 +13,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/hahwul/dalfox/v2/pkg/har"
+
 	"golang.org/x/term"
 
 	"github.com/briandowns/spinner"
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	"github.com/hahwul/dalfox/v2/pkg/optimization"
 	"github.com/hahwul/dalfox/v2/pkg/printing"
+	"github.com/hahwul/dalfox/v2/pkg/report"
 	"github.com/hahwul/dalfox/v2/pkg/verification"
+	voltFile "github.com/hahwul/volt/file"
 )
 
 var (
@@ -126,10 +131,6 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 		printing.DalLog("SYSTEM", "Valid target [ code:"+strconv.Itoa(tres.StatusCode)+" / size:"+strconv.Itoa(len(body))+" ]", options)
 	}
 
-	if options.Format == "json" {
-		printing.DalLog("PRINT", "[", options)
-	}
-
 	var wait sync.WaitGroup
 	task := 3
 	sa := "SA: ✓ "
@@ -158,8 +159,12 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 		go func() {
 			defer wait.Done()
 			var bavWaitGroup sync.WaitGroup
-			bavTask := 4
+			bavTask := 5
 			bavWaitGroup.Add(bavTask)
+			go func() {
+				defer bavWaitGroup.Done()
+				ESIIAnalysis(target, options, rl)
+			}()
 			go func() {
 				defer bavWaitGroup.Done()
 				SqliAnalysis(target, options, rl)
@@ -170,11 +175,11 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			}()
 			go func() {
 				defer bavWaitGroup.Done()
-				OpenRedirectorAnalysis(target, options, rl)
+				CRLFAnalysis(target, options, rl)
 			}()
 			go func() {
 				defer bavWaitGroup.Done()
-				CRLFAnalysis(target, options, rl)
+				OpenRedirectorAnalysis(target, options, rl)
 			}()
 			bavWaitGroup.Wait()
 			bav = options.AuroraObject.Green(bav).String()
@@ -205,7 +210,6 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			}
 		}
 	}
-
 	for k, v := range options.PathReflection {
 		if len(parsedURL.Path) == 0 {
 			str := options.AuroraObject.Yellow("dalfoxpathtest").String()
@@ -221,13 +225,33 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 	}
 
 	for k, v := range params {
+		temp := model.ParamResult{
+			Name:      k,
+			Reflected: false,
+		}
+
 		if len(v) != 0 {
 			code, vv := v[len(v)-1], v[:len(v)-1]
 			char := strings.Join(vv, "  ")
 			//x, a = a[len(a)-1], a[:len(a)-1]
 			printing.DalLog("INFO", "Reflected "+k+" param => "+char, options)
 			printing.DalLog("CODE", code, options)
+			arr := strings.Split(char, "  ")
+			for _, value := range arr {
+				if strings.Contains(value, "PTYPE:") {
+					splitedValue := strings.Split(value, " ")
+					temp.Type = splitedValue[1]
+				} else if strings.Contains(value, "Injected:") {
+					splitedValue := strings.Split(value, " ")
+					temp.ReflectedPoint = splitedValue[1]
+				} else {
+					temp.Chars = append(temp.Chars, value)
+				}
+			}
+			temp.ReflectedCode = code
+			temp.Reflected = true
 		}
+		scanResult.Params = append(scanResult.Params, temp)
 	}
 
 	if !options.OnlyDiscovery {
@@ -241,13 +265,17 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			av: reflected type, valid char
 		*/
 
+		// set vStatus
+		for k, _ := range params {
+			vStatus[k] = false
+		}
+
 		// set path base XSS
 		for k, v := range options.PathReflection {
 			if strings.Contains(v, "Injected:") {
 				// Injected pattern
 				injectedPoint := strings.Split(v, "/")
 				injectedPoint = injectedPoint[1:]
-
 				for _, ip := range injectedPoint {
 					var arr []string
 					if strings.Contains(ip, "inJS") {
@@ -277,6 +305,40 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			}
 		}
 
+		// Custom Payload
+		if isAllowType(policy["Content-Type"]) && options.CustomPayloadFile != "" {
+			ff, err := voltFile.ReadLinesOrLiteral(options.CustomPayloadFile)
+			if err != nil {
+				printing.DalLog("SYSTEM", "Custom XSS payload load fail..", options)
+			} else {
+				for _, customPayload := range ff {
+					if customPayload != "" {
+						for k, v := range params {
+							if optimization.CheckInspectionParam(options, k) {
+								ptype := ""
+								for _, av := range v {
+									if strings.Contains(av, "PTYPE:") {
+										ptype = GetPType(av)
+									}
+								}
+								encoders := []string{
+									"NaN",
+									"urlEncode",
+									"urlDoubleEncode",
+									"htmlEncode",
+								}
+								for _, encoder := range encoders {
+									tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", encoder, options)
+									query[tq] = tm
+								}
+							}
+						}
+					}
+				}
+				printing.DalLog("SYSTEM", "Added your "+strconv.Itoa(len(ff))+" custom xss payload", options)
+			}
+		}
+
 		if isAllowType(policy["Content-Type"]) && !options.OnlyCustomPayload {
 			// Set common payloads
 			cu, err := url.Parse(target)
@@ -299,37 +361,39 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			}
 
 			for v := range cp {
-				if optimization.CheckUniqParam(options, v) {
+				if optimization.CheckInspectionParam(options, v) {
 					cpArr = append(cpArr, v)
 					arc := optimization.SetPayloadValue(getCommonPayload(), options)
 					for _, avv := range arc {
-						// Add plain XSS Query
-						tq, tm := optimization.MakeRequestQuery(target, v, avv, "inHTML-URL", "toAppend", "NaN", options)
-						query[tq] = tm
-						// Add URL encoded XSS Query
-						etq, etm := optimization.MakeRequestQuery(target, v, avv, "inHTML-URL", "toAppend", "urlEncode", options)
-						query[etq] = etm
-						// Add HTML Encoded XSS Query
-						htq, htm := optimization.MakeRequestQuery(target, v, avv, "inHTML-URL", "toAppend", "htmlEncode", options)
-						query[htq] = htm
+						encoders := []string{
+							"NaN",
+							"urlEncode",
+							"urlDoubleEncode",
+							"htmlEncode",
+						}
+						for _, encoder := range encoders {
+							tq, tm := optimization.MakeRequestQuery(target, v, avv, "inHTML-URL", "toAppend", encoder, options)
+							query[tq] = tm
+						}
 					}
 				}
 			}
 
 			for v := range cpd {
-				if optimization.CheckUniqParam(options, v) {
+				if optimization.CheckInspectionParam(options, v) {
 					cpdArr = append(cpdArr, v)
 					arc := optimization.SetPayloadValue(getCommonPayload(), options)
 					for _, avv := range arc {
-						// Add plain XSS Query
-						tq, tm := optimization.MakeRequestQuery(target, v, avv, "inHTML-FORM", "toAppend", "NaN", options)
-						query[tq] = tm
-						// Add URL encoded XSS Query
-						etq, etm := optimization.MakeRequestQuery(target, v, avv, "inHTML-FORM", "toAppend", "urlEncode", options)
-						query[etq] = etm
-						// Add HTML Encoded XSS Query
-						htq, htm := optimization.MakeRequestQuery(target, v, avv, "inHTML-FORM", "toAppend", "htmlEncode", options)
-						query[htq] = htm
+						encoders := []string{
+							"NaN",
+							"urlEncode",
+							"urlDoubleEncode",
+							"htmlEncode",
+						}
+						for _, encoder := range encoders {
+							tq, tm := optimization.MakeRequestQuery(target, v, avv, "inHTML-FORM", "toAppend", encoder, options)
+							query[tq] = tm
+						}
 					}
 				}
 			}
@@ -344,7 +408,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 				}
 				dpayloads := optimization.SetPayloadValue(dlst, options)
 				for v := range cp {
-					if optimization.CheckUniqParam(options, v) {
+					if optimization.CheckInspectionParam(options, v) {
 						// loop payload list
 						if len(params[v]) == 0 {
 							for _, dpayload := range dpayloads {
@@ -366,7 +430,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					}
 				}
 				for v := range cpd {
-					if optimization.CheckUniqParam(options, v) {
+					if optimization.CheckInspectionParam(options, v) {
 						// loop payload list
 						if len(params[v]) == 0 {
 							for _, dpayload := range dpayloads {
@@ -391,8 +455,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 
 			// Set param base xss
 			for k, v := range params {
-				if optimization.CheckUniqParam(options, k) {
-					vStatus[k] = false
+				if optimization.CheckInspectionParam(options, k) {
 					ptype := ""
 					chars := GetSpecialChar()
 					var badchars []string
@@ -409,10 +472,30 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 							// Injected pattern
 							injectedPoint := strings.Split(av, "/")
 							injectedPoint = injectedPoint[1:]
+							injectedChars := params[k][:len(params[k])-1]
 							for _, ip := range injectedPoint {
 								var arr []string
 								if strings.Contains(ip, "inJS") {
-									arr = optimization.SetPayloadValue(getInJsPayload(ip), options)
+									checkInJS := false
+									if strings.Contains(ip, "double") {
+										for _, injectedChar := range injectedChars {
+											if strings.Contains(injectedChar, "\"") {
+												checkInJS = true
+											}
+										}
+									}
+									if strings.Contains(ip, "single") {
+										for _, injectedChar := range injectedChars {
+											if strings.Contains(injectedChar, "'") {
+												checkInJS = true
+											}
+										}
+									}
+									if checkInJS {
+										arr = optimization.SetPayloadValue(getInJsPayload(ip), options)
+									} else {
+										arr = optimization.SetPayloadValue(getInJsBreakScriptPayload(ip), options)
+									}
 								}
 								if strings.Contains(ip, "inHTML") {
 									arr = optimization.SetPayloadValue(getHTMLPayload(ip), options)
@@ -422,15 +505,16 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 								}
 								for _, avv := range arr {
 									if optimization.Optimization(avv, badchars) {
-										// Add plain XSS Query
-										tq, tm := optimization.MakeRequestQuery(target, k, avv, ip+ptype, "toAppend", "NaN", options)
-										query[tq] = tm
-										// Add URL Encoded XSS Query
-										etq, etm := optimization.MakeRequestQuery(target, k, avv, ip+ptype, "toAppend", "urlEncode", options)
-										query[etq] = etm
-										// Add HTML Encoded XSS Query
-										htq, htm := optimization.MakeRequestQuery(target, k, avv, ip+ptype, "toAppend", "htmlEncode", options)
-										query[htq] = htm
+										encoders := []string{
+											"NaN",
+											"urlEncode",
+											"urlDoubleEncode",
+											"htmlEncode",
+										}
+										for _, encoder := range encoders {
+											tq, tm := optimization.MakeRequestQuery(target, k, avv, ip+ptype, "toAppend", encoder, options)
+											query[tq] = tm
+										}
 									}
 								}
 							}
@@ -441,15 +525,16 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					for _, avv := range arc {
 						if !containsFromArray(cpArr, k) {
 							if optimization.Optimization(avv, badchars) {
-								// Add plain XSS Query
-								tq, tm := optimization.MakeRequestQuery(target, k, avv, "inHTML"+ptype, "toAppend", "NaN", options)
-								query[tq] = tm
-								// Add URL encoded XSS Query
-								etq, etm := optimization.MakeRequestQuery(target, k, avv, "inHTML"+ptype, "toAppend", "urlEncode", options)
-								query[etq] = etm
-								// Add HTML Encoded XSS Query
-								htq, htm := optimization.MakeRequestQuery(target, k, avv, "inHTML"+ptype, "toAppend", "htmlEncode", options)
-								query[htq] = htm
+								encoders := []string{
+									"NaN",
+									"urlEncode",
+									"urlDoubleEncode",
+									"htmlEncode",
+								}
+								for _, encoder := range encoders {
+									tq, tm := optimization.MakeRequestQuery(target, k, avv, "inHTML"+ptype, "toAppend", encoder, options)
+									query[tq] = tm
+								}
 							}
 						}
 					}
@@ -483,7 +568,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 
 			// loop parameter list
 			for k, v := range params {
-				if optimization.CheckUniqParam(options, k) {
+				if optimization.CheckInspectionParam(options, k) {
 					ptype := ""
 					for _, av := range v {
 						if strings.Contains(av, "PTYPE:") {
@@ -494,17 +579,17 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					for _, bpayload := range bpayloads {
 						// Add plain XSS Query
 						bp := strings.Replace(bpayload, "CALLBACKURL", bcallback, 10)
-						tq, tm := optimization.MakeRequestQuery(target, k, bp, "toBlind"+ptype, "toAppend", "NaN", options)
-						tm["payload"] = "toBlind"
-						query[tq] = tm
-						// Add URL encoded XSS Query
-						etq, etm := optimization.MakeRequestQuery(target, k, bp, "toBlind"+ptype, "toAppend", "urlEncode", options)
-						etm["payload"] = "toBlind"
-						query[etq] = etm
-						// Add HTML Encoded XSS Query
-						htq, htm := optimization.MakeRequestQuery(target, k, bp, "toBlind"+ptype, "toAppend", "htmlEncode", options)
-						htm["payload"] = "toBlind"
-						query[htq] = htm
+						encoders := []string{
+							"NaN",
+							"urlEncode",
+							"urlDoubleEncode",
+							"htmlEncode",
+						}
+						for _, encoder := range encoders {
+							tq, tm := optimization.MakeRequestQuery(target, k, bp, "toBlind"+ptype, "toAppend", encoder, options)
+							tm["payload"] = "toBlind"
+							query[tq] = tm
+						}
 					}
 				}
 			}
@@ -521,30 +606,31 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 				if endpoint == "portswigger" {
 					payload, line, size = getPortswiggerPayload()
 				}
-				if endpoint == "paylaodbox" {
+				if endpoint == "payloadbox" {
 					payload, line, size = getPayloadBoxPayload()
 				}
 				if line != "" {
 					printing.DalLog("INFO", "A '"+endpoint+"' payloads has been loaded ["+line+"L / "+size+"]               ", options)
-					for _, customPayload := range payload {
-						if customPayload != "" {
+					for _, remotePayload := range payload {
+						if remotePayload != "" {
 							for k, v := range params {
-								if optimization.CheckUniqParam(options, k) {
+								if optimization.CheckInspectionParam(options, k) {
 									ptype := ""
 									for _, av := range v {
 										if strings.Contains(av, "PTYPE:") {
 											ptype = GetPType(av)
 										}
 									}
-									// Add plain XSS Query
-									tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "NaN", options)
-									query[tq] = tm
-									// Add URL encoded XSS Query
-									etq, etm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "urlEncode", options)
-									query[etq] = etm
-									// Add HTML Encoded XSS Query
-									htq, htm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "htmlEncode", options)
-									query[htq] = htm
+									encoders := []string{
+										"NaN",
+										"urlEncode",
+										"urlDoubleEncode",
+										"htmlEncode",
+									}
+									for _, encoder := range encoders {
+										tq, tm := optimization.MakeRequestQuery(target, k, remotePayload, "inHTML"+ptype, "toAppend", encoder, options)
+										query[tq] = tm
+									}
 								}
 							}
 						}
@@ -552,39 +638,6 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 				} else {
 					printing.DalLog("SYSTEM", endpoint+" payload load fail..", options)
 				}
-			}
-		}
-
-		// Custom Payload
-		if options.CustomPayloadFile != "" {
-			ff, err := readLinesOrLiteral(options.CustomPayloadFile)
-			if err != nil {
-				printing.DalLog("SYSTEM", "Custom XSS payload load fail..", options)
-			} else {
-				for _, customPayload := range ff {
-					if customPayload != "" {
-						for k, v := range params {
-							if optimization.CheckUniqParam(options, k) {
-								ptype := ""
-								for _, av := range v {
-									if strings.Contains(av, "PTYPE:") {
-										ptype = GetPType(av)
-									}
-								}
-								// Add plain XSS Query
-								tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "NaN", options)
-								query[tq] = tm
-								// Add URL encoded XSS Query
-								etq, etm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "urlEncode", options)
-								query[etq] = etm
-								// Add HTML Encoded XSS Query
-								htq, htm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", "htmlEncode", options)
-								query[htq] = htm
-							}
-						}
-					}
-				}
-				printing.DalLog("SYSTEM", "Added your "+strconv.Itoa(len(ff))+" custom xss payload", options)
 			}
 		}
 
@@ -621,6 +674,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 				if dconcurrency < 1 {
 					dconcurrency = 1
 				}
+				if dconcurrency > 10 {
+					dconcurrency = 10
+				}
 				dchan := make(chan string)
 				var wgg sync.WaitGroup
 				for i := 0; i < dconcurrency; i++ {
@@ -639,7 +695,12 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 									Payload:    "",
 									Evidence:   "",
 									CWE:        "CWE-79",
+									Severity:   "High",
+									PoCType:    options.PoCType,
+									MessageStr: "Triggered XSS Payload (found dialog in headless)",
+									//MessageID:  -1, // we can't do HAR here because it's using chromedp
 								}
+
 								if showV {
 									if options.Format == "json" {
 										pocj, _ := json.Marshal(poc)
@@ -720,8 +781,25 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 															Payload:    "",
 															Evidence:   "",
 															CWE:        "CWE-79",
+															Severity:   "High",
+															PoCType:    options.PoCType,
+															MessageID:  har.MessageIDFromRequest(k),
+															MessageStr: "Triggered XSS Payload (found dialog in headless)",
 														}
 														poc.Data = MakePoC(poc.Data, k, options)
+
+														if options.OutputRequest {
+															reqDump, err := httputil.DumpRequestOut(k, true)
+															if err == nil {
+																poc.RawHTTPRequest = string(reqDump)
+																printing.DalLog("CODE", "\n"+string(reqDump), options)
+															}
+														}
+
+														if options.OutputResponse {
+															poc.RawHTTPResponse = resbody
+															printing.DalLog("CODE", string(resbody), options)
+														}
 
 														if showV {
 															if options.Format == "json" {
@@ -744,6 +822,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 														if options.FoundAction != "" {
 															foundAction(options, target, k.URL.String(), "WEAK")
 														}
+														printing.DalLog("WEAK", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], options)
 														poc := model.PoC{
 															Type:       "R",
 															InjectType: v["type"],
@@ -753,8 +832,24 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 															Payload:    "",
 															Evidence:   "",
 															CWE:        "CWE-79",
+															Severity:   "Medium",
+															PoCType:    options.PoCType,
+															MessageID:  har.MessageIDFromRequest(k),
+															MessageStr: "Reflected Payload in JS: " + v["param"] + "=" + v["payload"],
 														}
 														poc.Data = MakePoC(poc.Data, k, options)
+														if options.OutputRequest {
+															reqDump, err := httputil.DumpRequestOut(k, true)
+															if err == nil {
+																poc.RawHTTPRequest = string(reqDump)
+																printing.DalLog("CODE", "\n"+string(reqDump), options)
+															}
+														}
+
+														if options.OutputResponse {
+															poc.RawHTTPResponse = resbody
+															printing.DalLog("CODE", string(resbody), options)
+														}
 
 														scanObject.Results = append(scanObject.Results, poc)
 														scanResult.PoCs = append(scanResult.PoCs, poc)
@@ -774,8 +869,24 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 														Payload:    v["payload"],
 														Evidence:   code,
 														CWE:        "CWE-79",
+														Severity:   "Medium",
+														PoCType:    options.PoCType,
+														MessageID:  har.MessageIDFromRequest(k),
+														MessageStr: "Reflected Payload in JS: " + v["param"] + "=" + v["payload"],
 													}
 													poc.Data = MakePoC(poc.Data, k, options)
+													if options.OutputRequest {
+														reqDump, err := httputil.DumpRequestOut(k, true)
+														if err == nil {
+															poc.RawHTTPRequest = string(reqDump)
+															printing.DalLog("CODE", "\n"+string(reqDump), options)
+														}
+													}
+
+													if options.OutputResponse {
+														poc.RawHTTPResponse = resbody
+														printing.DalLog("CODE", string(resbody), options)
+													}
 
 													if showR {
 														if options.Format == "json" {
@@ -812,8 +923,24 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Payload:    v["payload"],
 												Evidence:   code,
 												CWE:        "CWE-83",
+												Severity:   "High",
+												PoCType:    options.PoCType,
+												MessageID:  har.MessageIDFromRequest(k),
+												MessageStr: "Triggered XSS Payload (found DOM Object): " + v["param"] + "=" + v["payload"],
 											}
 											poc.Data = MakePoC(poc.Data, k, options)
+											if options.OutputRequest {
+												reqDump, err := httputil.DumpRequestOut(k, true)
+												if err == nil {
+													poc.RawHTTPRequest = string(reqDump)
+													printing.DalLog("CODE", "\n"+string(reqDump), options)
+												}
+											}
+
+											if options.OutputResponse {
+												poc.RawHTTPResponse = resbody
+												printing.DalLog("CODE", string(resbody), options)
+											}
 
 											if showV {
 												if options.Format == "json" {
@@ -847,8 +974,24 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Payload:    v["payload"],
 												Evidence:   code,
 												CWE:        "CWE-83",
+												Severity:   "Medium",
+												PoCType:    options.PoCType,
+												MessageID:  har.MessageIDFromRequest(k),
+												MessageStr: "Reflected Payload in Attribute: " + v["param"] + "=" + v["payload"],
 											}
 											poc.Data = MakePoC(poc.Data, k, options)
+											if options.OutputRequest {
+												reqDump, err := httputil.DumpRequestOut(k, true)
+												if err == nil {
+													poc.RawHTTPRequest = string(reqDump)
+													printing.DalLog("CODE", "\n"+string(reqDump), options)
+												}
+											}
+
+											if options.OutputResponse {
+												poc.RawHTTPResponse = resbody
+												printing.DalLog("CODE", string(resbody), options)
+											}
 
 											if showR {
 												if options.Format == "json" {
@@ -883,8 +1026,24 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Payload:    v["payload"],
 												Evidence:   code,
 												CWE:        "CWE-79",
+												Severity:   "High",
+												PoCType:    options.PoCType,
+												MessageID:  har.MessageIDFromRequest(k),
+												MessageStr: "Triggered XSS Payload (found DOM Object): " + v["param"] + "=" + v["payload"],
 											}
 											poc.Data = MakePoC(poc.Data, k, options)
+											if options.OutputRequest {
+												reqDump, err := httputil.DumpRequestOut(k, true)
+												if err == nil {
+													poc.RawHTTPRequest = string(reqDump)
+													printing.DalLog("CODE", "\n"+string(reqDump), options)
+												}
+											}
+
+											if options.OutputResponse {
+												poc.RawHTTPResponse = resbody
+												printing.DalLog("CODE", string(resbody), options)
+											}
 
 											if showV {
 												if options.Format == "json" {
@@ -918,8 +1077,24 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 												Payload:    v["payload"],
 												Evidence:   code,
 												CWE:        "CWE-79",
+												Severity:   "Medium",
+												PoCType:    options.PoCType,
+												MessageID:  har.MessageIDFromRequest(k),
+												MessageStr: "Reflected Payload in HTML: " + v["param"] + "=" + v["payload"],
 											}
 											poc.Data = MakePoC(poc.Data, k, options)
+											if options.OutputRequest {
+												reqDump, err := httputil.DumpRequestOut(k, true)
+												if err == nil {
+													poc.RawHTTPRequest = string(reqDump)
+													printing.DalLog("CODE", "\n"+string(reqDump), options)
+												}
+											}
+
+											if options.OutputResponse {
+												poc.RawHTTPResponse = resbody
+												printing.DalLog("CODE", string(resbody), options)
+											}
 
 											if showR {
 												if options.Format == "json" {
@@ -991,9 +1166,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			s.Stop()
 		}
 	}
-	if options.Format == "json" {
-		printing.DalLog("PRINT", "{}]", options)
-	}
+
 	options.Scan[sid] = scanObject
 	scanResult.EndTime = time.Now()
 	scanResult.Duration = scanResult.EndTime.Sub(scanResult.StartTime)
@@ -1009,6 +1182,17 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			}
 		}
 		printing.DalLog("SYSTEM-M", "[duration: "+scanResult.Duration.String()+"][issues: "+strconv.Itoa(len(scanResult.PoCs))+"] Finish Scan!", options)
+	}
+	if options.ReportBool {
+		printing.DalLog("SYSTEM-M", "Report\n", options)
+		if options.ReportFormat == "json" {
+			jobject, err := json.MarshalIndent(scanResult, "", " ")
+			if err == nil {
+				fmt.Println(string(jobject))
+			}
+		} else {
+			report.GenerateReport(scanResult, options)
+		}
 	}
 	return scanResult, nil
 }

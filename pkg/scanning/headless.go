@@ -10,6 +10,7 @@ import (
 	"github.com/hahwul/dalfox/v2/pkg/model"
 )
 
+// CheckXSSWithHeadless is XSS Testing with headless browser
 func CheckXSSWithHeadless(url string, options model.Options) bool {
 	// create chrome instance
 	check := false
@@ -30,30 +31,30 @@ func CheckXSSWithHeadless(url string, options model.Options) bool {
 				cancel()
 			} else {
 				go func() {
-					chromedp.Run(ctx,page.HandleJavaScriptDialog(true),)
+					chromedp.Run(ctx, page.HandleJavaScriptDialog(true))
 				}()
 			}
 		}
 	})
-	
+
 	/*
-	var headers map[string]interface{}
+		var headers map[string]interface{}
 
 
-	if options.Header != "" {
-		h := strings.Split(options.Header, ": ")
-		if len(h) > 1 {
-			headers[h[0]] = h[1]
+		if options.Header != "" {
+			h := strings.Split(options.Header, ": ")
+			if len(h) > 1 {
+				headers[h[0]] = h[1]
+			}
 		}
-	}
 
-	if options.Cookie != "" {
-		headers["Cookie"] = options.Cookie
-	}
+		if options.Cookie != "" {
+			headers["Cookie"] = options.Cookie
+		}
 
-	if options.UserAgent != "" {
-		headers["User-Agent"] = options.UserAgent
-	}
+		if options.UserAgent != "" {
+			headers["User-Agent"] = options.UserAgent
+		}
 	*/
 
 	/*
@@ -64,7 +65,7 @@ func CheckXSSWithHeadless(url string, options model.Options) bool {
 			&res,
 		))
 	*/
-	
+
 	err := chromedp.Run(ctx,
 		chromedp.Navigate(url),
 		// wait for footer element is visible (ie, page is loaded)

@@ -4,6 +4,8 @@ import (
 	"sync"
 	t "time"
 
+	"github.com/hahwul/dalfox/v2/pkg/har"
+
 	s "github.com/briandowns/spinner"
 	a "github.com/logrusorgru/aurora"
 )
@@ -27,6 +29,7 @@ type Options struct {
 	ProxyAddress      string   `json:"proxy"`
 	Grep              string   `json:"grep"`
 	IgnoreReturn      string   `json:"ignore-return"`
+	IgnoreParams      []string `json:"ignore-params"`
 	Trigger           string   `json:"trigger"`
 	Timeout           int      `json:"timeout"`
 	Concurrence       int      `json:"worker"`
@@ -60,6 +63,7 @@ type Options struct {
 	SpinnerObject     *s.Spinner
 	AuroraObject      a.Aurora
 	StartTime         t.Time
+	HarWriter         *har.Writer
 	PathReflection    map[int]string
 	RemotePayloads    string
 	RemoteWordlists   string
@@ -71,6 +75,10 @@ type Options struct {
 	WAFEvasion        bool
 	PoCType           string `json:"poc-type"`
 	Mutex             *sync.Mutex
+	ReportFormat      string
+	ReportBool        bool
+	OutputRequest     bool `json:"output-request,omitempty"`
+	OutputResponse    bool `json:"output-response,omitempty"`
 }
 
 // MassJob is list for mass

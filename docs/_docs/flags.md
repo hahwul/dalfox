@@ -5,7 +5,7 @@ permalink: /docs/flags/
 
 ```
 -b, --blind string                Add your blind xss
-                                    * Example: -b hahwul.xss.ht
+                                    * Example: -b your-callback-url
     --config string               Using config from file
 -C, --cookie string               Add custom cookie
     --cookie-from-raw string      Load cookie from burp raw http request

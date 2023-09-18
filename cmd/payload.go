@@ -3,10 +3,10 @@ package cmd
 import (
 	"strconv"
 
+	"github.com/hahwul/dalfox/v2/pkg/generating"
 	"github.com/hahwul/dalfox/v2/pkg/optimization"
 	"github.com/hahwul/dalfox/v2/pkg/printing"
 	"github.com/hahwul/dalfox/v2/pkg/scanning"
-	"github.com/hahwul/dalfox/v2/pkg/generating"
 	"github.com/spf13/cobra"
 )
 
@@ -16,6 +16,7 @@ var remotePayloadbox, remotePortswigger bool
 var entityGF, entityEventHandler, entityUsefulTags, entitySpecialChars bool
 var urlEncode bool
 
+// Object is Type of PayloadObject
 type Object struct {
 	Use      bool
 	Name     string

@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
+	"github.com/hahwul/dalfox/v2/pkg/har"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -16,12 +17,14 @@ import (
 // GenerateNewRequest is make http.Cilent
 func GenerateNewRequest(url, body string, options model.Options) *http.Request {
 	req, _ := http.NewRequest("GET", url, nil)
+	req = har.AddMessageIDToRequest(req)
 	// Add the Accept header like browsers do.
 	req.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9")
 
 	if options.Data != "" {
 		d := []byte(body)
 		req, _ = http.NewRequest("POST", url, bytes.NewBuffer(d))
+		req = har.AddMessageIDToRequest(req)
 		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	}
 
@@ -64,7 +67,7 @@ func GenerateNewRequest(url, body string, options model.Options) *http.Request {
 	return req
 }
 
-//GetRawCookie gets cookie from raw request
+// GetRawCookie gets cookie from raw request
 func GetRawCookie(cookies []*http.Cookie) string {
 	var rawCookies []string
 	for _, c := range cookies {
@@ -81,9 +84,11 @@ func MakeHeaderQuery(target, hn, hv string, options model.Options) (*http.Reques
 	tempMap["payload"] = hv
 	tempMap["param"] = "thisisheadertesting"
 	req, _ := http.NewRequest("GET", target, nil)
+	req = har.AddMessageIDToRequest(req)
 	if options.Data != "" {
 		d := []byte("")
 		req, _ = http.NewRequest("POST", target, bytes.NewBuffer(d))
+		req = har.AddMessageIDToRequest(req)
 		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
 	}
 
@@ -139,6 +144,10 @@ func MakeRequestQuery(target, param, payload, ptype string, pAction string, pEnc
 	switch tempMap["encode"] {
 	case "urlEncode":
 		payload = UrlEncode(payload)
+		break
+
+	case "urlDoubleEncode":
+		payload = (UrlEncode(payload))
 		break
 
 	case "htmlEncode":

@@ -23,6 +23,7 @@ func builtinGrep(data string) map[string][]string {
 	// "pattern name":"regex"
 	pattern := map[string]string{
 		"dalfox-ssti":                  "2958816",
+		"dalfox-esii":                  "<esii-dalfox>",
 		"dalfox-rsa-key":               "-----BEGIN RSA PRIVATE KEY-----|-----END RSA PRIVATE KEY-----",
 		"dalfox-priv-key":              "-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----",
 		"dalfox-aws-s3":                "s3\\.amazonaws.com[/]+|[a-zA-Z0-9_-]*\\.s3\\.amazonaws.com",

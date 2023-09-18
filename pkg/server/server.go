@@ -10,7 +10,7 @@ import (
 	_ "github.com/hahwul/dalfox/v2/pkg/server/docs"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
-	"github.com/swaggo/echo-swagger"
+	echoSwagger "github.com/swaggo/echo-swagger"
 	"github.com/tylerb/graceful"
 )
 

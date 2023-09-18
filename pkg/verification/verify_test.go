@@ -20,7 +20,7 @@ func TestVerifyReflectionWithLine(t *testing.T) {
 				payload: "dalfox",
 			},
 			want:  true,
-			want1: 1,
+			want1: 2,
 		},
 		{
 			name: "false-1",

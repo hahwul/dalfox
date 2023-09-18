@@ -31,7 +31,9 @@ func Initialize(target Target, options Options) model.Options {
 		ProxyAddress:      "",
 		Grep:              "",
 		IgnoreReturn:      "",
+		IgnoreParams:      []string{},
 		Timeout:           10,
+		TriggerMethod:     "GET",
 		Concurrence:       100,
 		Delay:             0,
 		OnlyDiscovery:     false,
@@ -61,6 +63,8 @@ func Initialize(target Target, options Options) model.Options {
 		UseHeadless:       true,
 		UseDeepDXSS:       false,
 		WAFEvasion:        false,
+		OutputRequest:     false,
+		OutputResponse:    false,
 	}
 	if len(options.UniqParam) > 0 {
 		for _, v := range options.UniqParam {
@@ -102,8 +106,16 @@ func Initialize(target Target, options Options) model.Options {
 	if options.IgnoreReturn != "" {
 		newOptions.IgnoreReturn = options.IgnoreReturn
 	}
+	if len(options.IgnoreParams) > 0 {
+		for _, v := range options.IgnoreParams {
+			newOptions.IgnoreParams = append(newOptions.IgnoreParams, v)
+		}
+	}
 	if options.Trigger != "" {
 		newOptions.Trigger = options.Trigger
+	}
+	if options.TriggerMethod != "" {
+		newOptions.TriggerMethod = options.TriggerMethod
 	}
 	if options.Timeout != 0 {
 		newOptions.Timeout = options.Timeout
@@ -182,6 +194,7 @@ func NewScan(target Target) (Result, error) {
 	result := Result{
 		Logs:      modelResult.Logs,
 		PoCs:      modelResult.PoCs,
+		Params:    modelResult.Params,
 		Duration:  modelResult.Duration,
 		StartTime: modelResult.StartTime,
 		EndTime:   modelResult.EndTime,

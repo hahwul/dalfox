@@ -15,14 +15,29 @@ var sxssCmd = &cobra.Command{
 	Short: "Use Stored XSS mode",
 	Run: func(cmd *cobra.Command, args []string) {
 		printing.Banner(options)
+		if len(args) == 0 {
+			printing.DalLog("ERROR", "Input target url", options)
+			printing.DalLog("ERROR", "e.g dalfox sxss https://google.com/?q=1 --trigger https://target/profile", options)
+			return
+		}
 		printing.Summary(options, args[0])
 		if len(args) >= 1 {
 			options.Trigger = trigger
 			options.Sequence = sequence
 			options.TriggerMethod = requestMethod
+			options.Concurrence = 1
+			if options.Delay <= 1500 {
+				options.Delay = 1500
+			}
 			if options.Trigger != "" {
 				printing.DalLog("SYSTEM", "Using Stored XSS mode", options)
+				if options.Format == "json" {
+					printing.DalLog("PRINT", "[", options)
+				}
 				_, _ = scanning.Scan(args[0], options, "Single")
+				if options.Format == "json" {
+					printing.DalLog("PRINT", "{}]", options)
+				}
 			} else {
 				printing.DalLog("ERROR", "Please input trigger url with --trigger option", options)
 			}

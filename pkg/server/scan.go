@@ -1,8 +1,12 @@
 package server
 
 import (
+	"strings"
+
+	dalfox "github.com/hahwul/dalfox/v2/lib"
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	scan "github.com/hahwul/dalfox/v2/pkg/scanning"
+	vlogger "github.com/hahwul/volt/logger"
 )
 
 // ScanFromAPI is scanning dalfox with REST API
@@ -14,11 +18,24 @@ import (
 // @Success 200 {object} Res
 // @Router /scan [post]
 func ScanFromAPI(url string, rqOptions model.Options, options model.Options, sid string) {
-	rqOptions.Scan = options.Scan
-	rqOptions.SpinnerObject = options.SpinnerObject
-	rqOptions.AuroraObject = options.AuroraObject
-	rqOptions.StartTime = options.StartTime
-	_, _ = scan.Scan(url, rqOptions, sid)
+	vLog := vlogger.GetLogger(options.Debug)
+	target := dalfox.Target{
+		URL:     url,
+		Method:  rqOptions.Method,
+		Options: dalfox.Options{},
+	}
+	newOptions := dalfox.Initialize(target, target.Options)
+	newOptions.Scan = options.Scan
+	if rqOptions.Method != "" {
+		newOptions.Method = options.Method
+	} else {
+		newOptions.Method = "GET"
+	}
+	escapedURL := strings.Replace(url, "\n", "", -1)
+	escapedURL = strings.Replace(escapedURL, "\r", "", -1)
+	vLog.WithField("data1", sid).Debug(escapedURL)
+	vLog.WithField("data1", sid).Debug(newOptions)
+	_, _ = scan.Scan(url, newOptions, sid)
 }
 
 // GetScan is get scan information

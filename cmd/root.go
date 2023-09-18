@@ -7,6 +7,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/hahwul/dalfox/v2/pkg/har"
+
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	"github.com/hahwul/dalfox/v2/pkg/printing"
 	"github.com/logrusorgru/aurora"
@@ -16,14 +18,15 @@ import (
 var cfgFile string
 var optionsStr = make(map[string]string)
 var optionsBool = make(map[string]bool)
-var header, p []string
+var header, p, ignoreParams []string
 var config, cookie, data, customPayload, userAgent, blind, output, format, foundAction, proxy, grep, cookieFromRaw string
+var harFilePath string
 var ignoreReturn, miningWord, method, customAlertValue, customAlertType, remotePayloads, remoteWordlists string
 var timeout, concurrence, delay int
 var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, onlyCustomPayload, debug, useDeepDXSS, outputAll bool
 var options model.Options
-var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV, skipGrep, skipHeadless, wafEvasion bool
-var onlyPoC, foundActionShell, pocType string
+var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV, skipGrep, skipHeadless, wafEvasion, reportBool, outputRequest, outputResponse bool
+var onlyPoC, foundActionShell, pocType, reportFormat string
 
 var rootCmd = &cobra.Command{
 	Use: "dalfox",
@@ -33,7 +36,14 @@ var rootCmd = &cobra.Command{
 	},
 }
 
+// Execute is run rootCmd
 func Execute() {
+	defer func() {
+		if options.HarWriter != nil {
+			options.HarWriter.Close()
+		}
+	}()
+
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Println(err)
 		os.Exit(1)
@@ -45,6 +55,7 @@ func init() {
 	// Slice
 	rootCmd.PersistentFlags().StringSliceVarP(&header, "header", "H", []string{}, "Add custom headers")
 	rootCmd.PersistentFlags().StringSliceVarP(&p, "param", "p", []string{}, "Only testing selected parameters")
+	rootCmd.PersistentFlags().StringSliceVar(&ignoreParams, "ignore-param", []string{}, "Ignores this parameter when scanning.\n  * Example: --ignore-param api_token --ignore-param csrf_token")
 
 	//Str
 	rootCmd.PersistentFlags().StringVar(&config, "config", "", "Using config from file")
@@ -54,14 +65,14 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&customAlertValue, "custom-alert-value", "1", "Change alert value\n  * Example: --custom-alert-value=document.cookie")
 	rootCmd.PersistentFlags().StringVar(&customAlertType, "custom-alert-type", "none", "Change alert value type\n  * Example: --custom-alert-type=none / --custom-alert-type=str,none")
 	rootCmd.PersistentFlags().StringVar(&userAgent, "user-agent", "", "Add custom UserAgent")
-	rootCmd.PersistentFlags().StringVarP(&blind, "blind", "b", "", "Add your blind xss\n  * Example: -b hahwul.xss.ht")
+	rootCmd.PersistentFlags().StringVarP(&blind, "blind", "b", "", "Add your blind xss\n  * Example: -b your-callback-url")
 	rootCmd.PersistentFlags().StringVarP(&output, "output", "o", "", "Write to output file (By default, only the PoC code is saved)")
 	rootCmd.PersistentFlags().StringVar(&format, "format", "plain", "Stdout output format\n  * Supported: plain / json")
 	rootCmd.PersistentFlags().StringVar(&foundAction, "found-action", "", "If found weak/vuln, action(cmd) to next\n  * Example: --found-action='./notify.sh'")
 	rootCmd.PersistentFlags().StringVar(&foundActionShell, "found-action-shell", "bash", "Select shell application for --found-action")
 	rootCmd.PersistentFlags().StringVar(&proxy, "proxy", "", "Send all request to proxy server\n  * Example: --proxy http://127.0.0.1:8080")
 	rootCmd.PersistentFlags().StringVar(&grep, "grep", "", "Using custom grepping file\n  * Example: --grep ./samples/sample_grep.json")
-	rootCmd.PersistentFlags().StringVar(&ignoreReturn, "ignore-return", "", "Ignore scanning from return code\n  * Example: --ignore-return 302,403,404")
+	rootCmd.PersistentFlags().StringVar(&ignoreReturn, "ignore-return", "", "Ignores scanning from return code\n  * Example: --ignore-return 302,403,404")
 	rootCmd.PersistentFlags().StringVarP(&miningWord, "mining-dict-word", "W", "", "Custom wordlist file for param mining\n  * Example: --mining-dict-word word.txt")
 	rootCmd.PersistentFlags().StringVarP(&method, "method", "X", "GET", "Force overriding HTTP Method\n  * Example: -X PUT")
 	rootCmd.PersistentFlags().StringVarP(&cookieFromRaw, "cookie-from-raw", "", "", "Load cookie from burp raw http request\n  * Example: --cookie-from-raw request.txt")
@@ -69,6 +80,8 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&remoteWordlists, "remote-wordlists", "", "Using remote wordlists for param mining\n  * Supported: burp/assetnote\n  * Example: --remote-wordlists=burp")
 	rootCmd.PersistentFlags().StringVar(&onlyPoC, "only-poc", "", "Shows only the PoC code for the specified pattern (g: grep / r: reflected / v: verified)\n * Example: --only-poc='g,v'")
 	rootCmd.PersistentFlags().StringVar(&pocType, "poc-type", "plain", "Select PoC type \n * Supported: plain/curl/httpie/http-request\n * Example: --poc-type='curl'")
+	rootCmd.PersistentFlags().StringVar(&reportFormat, "report-format", "plain", "Format of --report flag [plain/json]")
+	rootCmd.PersistentFlags().StringVar(&harFilePath, "har-file-path", "", "Path to save HAR of scan requests to")
 
 	//Int
 	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 10, "Second of timeout")
@@ -95,6 +108,9 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&useDeepDXSS, "deep-domxss", false, "DOM XSS Testing with more payloads on headless [so slow]")
 	rootCmd.PersistentFlags().BoolVar(&outputAll, "output-all", false, "All log write mode (-o or stdout)")
 	rootCmd.PersistentFlags().BoolVar(&wafEvasion, "waf-evasion", false, "Avoid blocking by adjusting the speed when detecting WAF (worker=1 delay=3s)")
+	rootCmd.PersistentFlags().BoolVar(&reportBool, "report", false, "Show detail report")
+	rootCmd.PersistentFlags().BoolVar(&outputRequest, "output-request", false, "Include raw HTTP requests in the results.")
+	rootCmd.PersistentFlags().BoolVar(&outputResponse, "output-response", false, "Include raw HTTP response in the results.")
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -118,6 +134,7 @@ func initConfig() {
 		ProxyAddress:      proxy,
 		Grep:              grep,
 		IgnoreReturn:      ignoreReturn,
+		IgnoreParams:      ignoreParams,
 		Timeout:           timeout,
 		Concurrence:       concurrence,
 		Delay:             delay,
@@ -148,8 +165,24 @@ func initConfig() {
 		WAF:               false,
 		WAFEvasion:        wafEvasion,
 		PoCType:           pocType,
+		ReportBool:        reportBool,
+		ReportFormat:      reportFormat,
+		OutputRequest:     outputRequest,
+		OutputResponse:    outputResponse,
 	}
 	// var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV bool
+
+	if harFilePath != "" {
+		f, err := os.Create(harFilePath)
+		if err != nil {
+			fmt.Println(err)
+		} else {
+			options.HarWriter, err = har.NewWriter(f, &har.Creator{Name: "dalfox", Version: printing.VERSION})
+			if err != nil {
+				fmt.Println(err)
+			}
+		}
+	}
 
 	if skipMiningAll {
 		options.FindingDOM = false
