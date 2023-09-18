@@ -152,7 +152,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 				default:
 					reader = tres.Body
 				}
-				bodyString, err := ioutil.ReadAll(reader)
+				bodyString, err := io.ReadAll(reader)
 				if err == nil {
 					body := ioutil.NopCloser(strings.NewReader(string(bodyString)))
 					defer body.Close()

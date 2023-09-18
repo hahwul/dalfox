@@ -3,7 +3,6 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
@@ -101,7 +100,7 @@ var fileCmd = &cobra.Command{
 					options.SpinnerObject = spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 				}
 				var harObject voltHar.HARObject
-				harFile, err := ioutil.ReadFile(args[0])
+				harFile, err := os.ReadFile(args[0])
 				if err == nil {
 					err = json.Unmarshal(harFile, &harObject)
 					if options.Format == "json" {

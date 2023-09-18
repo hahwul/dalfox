@@ -3,7 +3,7 @@ package scanning
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -127,7 +127,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 		}
 
 		defer tres.Body.Close()
-		body, err := ioutil.ReadAll(tres.Body)
+		body, err := io.ReadAll(tres.Body)
 		printing.DalLog("SYSTEM", "Valid target [ code:"+strconv.Itoa(tres.StatusCode)+" / size:"+strconv.Itoa(len(body))+" ]", options)
 	}
 
