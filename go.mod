@@ -6,8 +6,8 @@ require (
 	github.com/PuerkitoBio/goquery v1.8.1
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
 	github.com/briandowns/spinner v1.23.0
-	github.com/chromedp/cdproto v0.0.0-20230802225258-3cf4e6d46a89
-	github.com/chromedp/chromedp v0.9.2
+	github.com/chromedp/cdproto v0.0.0-20231011050154-1d073bb38998
+	github.com/chromedp/chromedp v0.9.3
 	github.com/hahwul/volt v1.0.5
 	github.com/labstack/echo/v4 v4.11.1
 	github.com/logrusorgru/aurora v2.0.3+incompatible
@@ -39,7 +39,7 @@ require (
 	github.com/go-openapi/swag v0.19.15 // indirect
 	github.com/gobwas/httphead v0.1.0 // indirect
 	github.com/gobwas/pool v0.2.1 // indirect
-	github.com/gobwas/ws v1.2.1 // indirect
+	github.com/gobwas/ws v1.3.0 // indirect
 	github.com/golang-jwt/jwt v3.2.2+incompatible // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
