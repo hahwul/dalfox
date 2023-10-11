@@ -19,7 +19,7 @@ require (
 	github.com/swaggo/swag v1.16.2
 	github.com/tidwall/sjson v1.2.5
 	github.com/tylerb/graceful v1.2.15
-	golang.org/x/sync v0.3.0
+	golang.org/x/sync v0.4.0
 	golang.org/x/term v0.13.0
 )
 
