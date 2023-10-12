@@ -67,9 +67,7 @@ func Initialize(target Target, options Options) model.Options {
 		OutputResponse:    false,
 	}
 	if len(options.UniqParam) > 0 {
-		for _, v := range options.UniqParam {
-			newOptions.UniqParam = append(newOptions.UniqParam, v)
-		}
+		newOptions.UniqParam = append(newOptions.UniqParam, options.UniqParam...)
 	}
 	if target.Method != "" {
 		newOptions.Method = target.Method
@@ -78,9 +76,7 @@ func Initialize(target Target, options Options) model.Options {
 		newOptions.Cookie = options.Cookie
 	}
 	if len(options.Header) > 0 {
-		for _, v := range options.Header {
-			newOptions.Header = append(newOptions.Header, v)
-		}
+		newOptions.Header = append(newOptions.Header, options.Header...)
 	}
 	if options.BlindURL != "" {
 		newOptions.BlindURL = options.BlindURL
@@ -107,9 +103,7 @@ func Initialize(target Target, options Options) model.Options {
 		newOptions.IgnoreReturn = options.IgnoreReturn
 	}
 	if len(options.IgnoreParams) > 0 {
-		for _, v := range options.IgnoreParams {
-			newOptions.IgnoreParams = append(newOptions.IgnoreParams, v)
-		}
+		newOptions.IgnoreParams = append(newOptions.IgnoreParams, options.IgnoreParams...)
 	}
 	if options.Trigger != "" {
 		newOptions.Trigger = options.Trigger

@@ -137,9 +137,7 @@ func FindIndexesInLine(text, key string, lineSize, pointing int) []int {
 	if pointer != -1 {
 		tempIndexes := FindIndexesInLine(text[pointer+1:], key, lineSize, pointer+pointing+1)
 		indexes = append(indexes, pointer+lineSize+pointing)
-		for _, v := range tempIndexes {
-			indexes = append(indexes, v)
-		}
+		indexes = append(indexes, tempIndexes...)
 	}
 	return indexes
 }
