@@ -12,68 +12,68 @@ import (
 
 // Options is struct of options
 type Options struct {
-	UniqParam         []string `json:"param"`
-	Cookie            string   `json:"cookie"`
-	Header            []string `json:"header"`
-	ConfigFile        string   `json:"config"`
-	BlindURL          string   `json:"blind"`
-	CustomPayloadFile string   `json:"custom-payload-file"`
-	CustomAlertValue  string   `json:"custom-alert-value"`
-	CustomAlertType   string   `json:"custom-alert-type"`
-	Data              string   `json:"data"`
-	UserAgent         string   `json:"user-agent"`
-	OutputFile        string   `json:"output"`
-	Format            string   `json:"format"`
-	FoundAction       string   `json:"found-action"`
-	FoundActionShell  string   `json:"found-action-shell"`
-	ProxyAddress      string   `json:"proxy"`
-	Grep              string   `json:"grep"`
-	IgnoreReturn      string   `json:"ignore-return"`
-	IgnoreParams      []string `json:"ignore-params"`
-	Trigger           string   `json:"trigger"`
-	Timeout           int      `json:"timeout"`
-	Concurrence       int      `json:"worker"`
-	Delay             int      `json:"delay"`
+	UniqParam         []string `json:"param,omitempty"`
+	Cookie            string   `json:"cookie,omitempty"`
+	Header            []string `json:"header,omitempty"`
+	ConfigFile        string   `json:"config,omitempty"`
+	BlindURL          string   `json:"blind,omitempty"`
+	CustomPayloadFile string   `json:"custom-payload-file,omitempty"`
+	CustomAlertValue  string   `json:"custom-alert-value,omitempty"`
+	CustomAlertType   string   `json:"custom-alert-type,omitempty"`
+	Data              string   `json:"data,omitempty"`
+	UserAgent         string   `json:"user-agent,omitempty"`
+	OutputFile        string   `json:"output,omitempty"`
+	Format            string   `json:"format,omitempty"`
+	FoundAction       string   `json:"found-action,omitempty"`
+	FoundActionShell  string   `json:"found-action-shell,omitempty"`
+	ProxyAddress      string   `json:"proxy,omitempty"`
+	Grep              string   `json:"grep,omitempty"`
+	IgnoreReturn      string   `json:"ignore-return,omitempty"`
+	IgnoreParams      []string `json:"ignore-params,omitempty"`
+	Trigger           string   `json:"trigger,omitempty"`
+	Timeout           int      `json:"timeout,omitempty"`
+	Concurrence       int      `json:"worker,omitempty"`
+	Delay             int      `json:"delay,omitempty"`
 	AllURLS           int
 	NowURL            int
-	Sequence          int  `json:"sequence"`
-	OnlyDiscovery     bool `json:"only-discovery"`
-	OnlyCustomPayload bool `json:"only-custom-payload"`
-	Silence           bool `json:"silence"`
-	IsAPI             bool
-	IsLibrary         bool
-	Mass              bool `json:"mass"`
-	MulticastMode     bool
+	Sequence          int  `json:"sequence,omitempty"`
+	OnlyDiscovery     bool `json:"only-discovery,omitempty"`
+	OnlyCustomPayload bool `json:"only-custom-payload,omitempty"`
+	Silence           bool `json:"silence,omitempty"`
+	IsAPI             bool `json:"is-api,omitempty"`
+	IsLibrary         bool `json:"is-library,omitempty"`
+	Mass              bool `json:"mass,omitempty"`
+	MulticastMode     bool `json:"multicast-mode,omitempty"`
 	Scan              map[string]Scan
-	FollowRedirect    bool   `json:"follow-redirects"`
-	Mining            bool   `json:"mining-dict"`
-	FindingDOM        bool   `json:"mining-dom"`
-	MiningWordlist    string `json:"mining-dict-word"`
-	NoColor           bool   `json:"no-color"`
-	Method            string `json:"method"`
-	TriggerMethod     string `json:"trigger-method"`
-	NoSpinner         bool   `json:"no-spinner"`
-	NoBAV             bool   `json:"no-bav"`
-	ServerHost        string
-	ServerPort        int
-	NoGrep            bool `json:"skip-grepping"`
-	Debug             bool `json:"debug"`
-	CookieFromRaw     string
+	FollowRedirect    bool   `json:"follow-redirects,omitempty"`
+	Mining            bool   `json:"mining-dict,omitempty"`
+	FindingDOM        bool   `json:"mining-dom,omitempty"`
+	MiningWordlist    string `json:"mining-dict-word,omitempty"`
+	NoColor           bool   `json:"no-color,omitempty"`
+	Method            string `json:"method,omitempty"`
+	TriggerMethod     string `json:"trigger-method,omitempty"`
+	NoSpinner         bool   `json:"no-spinner,omitempty"`
+	NoBAV             bool   `json:"no-bav,omitempty"`
+	ServerHost        string `json:"server-host,omitempty"`
+	ServerPort        int    `json:"server-port,omitempty"`
+	NoGrep            bool   `json:"skip-grepping,omitempty"`
+	Debug             bool   `json:"debug,omitempty"`
+	CookieFromRaw     string `json:"cookie-from-raw,omitempty"`
 	ScanResult        Result
 	SpinnerObject     *s.Spinner
 	AuroraObject      a.Aurora
 	StartTime         t.Time
 	HarWriter         *har.Writer
 	PathReflection    map[int]string
-	RemotePayloads    string
-	RemoteWordlists   string
-	UseHeadless       bool   `json:"use-headless"`
-	UseDeepDXSS       bool   `json:"use-deepdxss"`
-	OnlyPoC           string `json:"only-poc"`
-	OutputAll         bool   `json:"output-all"`
+	RemotePayloads    string `json:"remote-payloads,omitempty"`
+	RemoteWordlists   string `json:"remote-wordlists,omitempty"`
+	UseHeadless       bool   `json:"use-headless,omitempty"`
+	UseDeepDXSS       bool   `json:"use-deepdxss,omitempty"`
+	OnlyPoC           string `json:"only-poc,omitempty"`
+	OutputAll         bool   `json:"output-all,omitempty"`
 	WAF               bool
 	WAFEvasion        bool
-	PoCType           string `json:"poc-type"`
+	PoCType           string `json:"poc-type,omitempty"`
 	Mutex             *sync.Mutex
 	ReportFormat      string
 	ReportBool        bool

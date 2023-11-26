@@ -215,7 +215,6 @@ func initConfig() {
 		options.Grep = string(byteValue)
 
 	}
-
 	if config != "" {
 		// Open our jsonFile
 		jsonFile, err := os.Open(config)
@@ -228,7 +227,9 @@ func initConfig() {
 		defer jsonFile.Close()
 
 		byteValue, _ := io.ReadAll(jsonFile)
-		json.Unmarshal([]byte(byteValue), options)
+		err = json.Unmarshal([]byte(byteValue), &options)
+		if err != nil {
+			printing.DalLog("SYSTEM", "Error while parsing config file", options)
+		}
 	}
-
 }
