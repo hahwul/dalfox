@@ -48,7 +48,7 @@ release:
 brews:
   -
     name: dalfox
-    tap:
+    repository:
       owner: hahwul
       name: homebrew-dalfox
     url_template: "https://github.com/hahwul/dalfox/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
