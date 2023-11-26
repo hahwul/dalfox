@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/http/httputil"
 	"strconv"
@@ -103,7 +102,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 	default:
 		reader = resp.Body
 	}
-	bytes, err := ioutil.ReadAll(reader)
+	bytes, err := io.ReadAll(reader)
 	if err == nil {
 		str := string(bytes)
 
@@ -380,7 +379,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 				return "", resp, false, false, err
 			}
 
-			bytes, _ := ioutil.ReadAll(resp.Body)
+			bytes, _ := io.ReadAll(resp.Body)
 			str := string(bytes)
 
 			if resp.Header["Content-Type"] != nil {

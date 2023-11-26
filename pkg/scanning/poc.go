@@ -1,7 +1,7 @@
 package scanning
 
 import (
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/http/httputil"
 
@@ -20,7 +20,7 @@ func MakePoC(poc string, req *http.Request, options model.Options) string {
 	if req.Body != nil {
 		body, err := req.GetBody()
 		if err == nil {
-			reqBody, err := ioutil.ReadAll(body)
+			reqBody, err := io.ReadAll(body)
 			if err == nil {
 				if string(reqBody) != "" {
 					switch options.PoCType {

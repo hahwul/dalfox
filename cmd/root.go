@@ -3,7 +3,7 @@ package cmd
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"os"
 	"time"
 
@@ -211,11 +211,10 @@ func initConfig() {
 		printing.DalLog("SYSTEM", "Loaded "+grep+" file for grepping", options)
 		// defer the closing of our jsonFile so that we can parse it later on
 		defer jsonFile.Close()
-		byteValue, _ := ioutil.ReadAll(jsonFile)
+		byteValue, _ := io.ReadAll(jsonFile)
 		options.Grep = string(byteValue)
 
 	}
-
 	if config != "" {
 		// Open our jsonFile
 		jsonFile, err := os.Open(config)
@@ -227,8 +226,10 @@ func initConfig() {
 		// defer the closing of our jsonFile so that we can parse it later on
 		defer jsonFile.Close()
 
-		byteValue, _ := ioutil.ReadAll(jsonFile)
-		json.Unmarshal([]byte(byteValue), options)
+		byteValue, _ := io.ReadAll(jsonFile)
+		err = json.Unmarshal([]byte(byteValue), &options)
+		if err != nil {
+			printing.DalLog("SYSTEM", "Error while parsing config file", options)
+		}
 	}
-
 }
