@@ -4,12 +4,13 @@ import (
 	"bufio"
 	"bytes"
 	"fmt"
-	"github.com/hahwul/dalfox/v2/pkg/har"
 	"html/template"
 	"net/http"
 	"net/url"
 	"os"
 	"strings"
+
+	"github.com/hahwul/dalfox/v2/pkg/har"
 
 	"github.com/hahwul/dalfox/v2/pkg/model"
 )
@@ -19,30 +20,30 @@ func GenerateNewRequest(url, body string, options model.Options) *http.Request {
 	req, _ := http.NewRequest("GET", url, nil)
 	req = har.AddMessageIDToRequest(req)
 	// Add the Accept header like browsers do.
-	req.Header.Add("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9")
+	req.Header.Set("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9")
 
 	if options.Data != "" {
 		d := []byte(body)
 		req, _ = http.NewRequest("POST", url, bytes.NewBuffer(d))
 		req = har.AddMessageIDToRequest(req)
-		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
 
 	if len(options.Header) > 0 {
 		for _, v := range options.Header {
 			h := strings.Split(v, ": ")
 			if len(h) > 1 {
-				req.Header.Add(h[0], h[1])
+				req.Header.Set(h[0], h[1])
 			}
 		}
 	}
 	if options.Cookie != "" {
-		req.Header.Add("Cookie", options.Cookie)
+		req.Header.Set("Cookie", options.Cookie)
 	}
 	if options.UserAgent != "" {
-		req.Header.Add("User-Agent", options.UserAgent)
+		req.Header.Set("User-Agent", options.UserAgent)
 	} else {
-		req.Header.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:75.0) Gecko/20100101 Firefox/75.0")
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:75.0) Gecko/20100101 Firefox/75.0")
 	}
 	if options.Method != "" {
 		req.Method = options.Method
@@ -60,7 +61,7 @@ func GenerateNewRequest(url, body string, options model.Options) *http.Request {
 				fmt.Println(err)
 				os.Exit(1)
 			} else {
-				req.Header.Add("Cookie", GetRawCookie(rq.Cookies()))
+				req.Header.Set("Cookie", GetRawCookie(rq.Cookies()))
 			}
 		}
 	}
@@ -89,30 +90,30 @@ func MakeHeaderQuery(target, hn, hv string, options model.Options) (*http.Reques
 		d := []byte("")
 		req, _ = http.NewRequest("POST", target, bytes.NewBuffer(d))
 		req = har.AddMessageIDToRequest(req)
-		req.Header.Add("Content-Type", "application/x-www-form-urlencoded")
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	}
 
 	if len(options.Header) > 0 {
 		for _, v := range options.Header {
 			h := strings.Split(v, ": ")
 			if len(h) > 1 {
-				req.Header.Add(h[0], h[1])
+				req.Header.Set(h[0], h[1])
 			}
 		}
 	}
 
 	if options.Cookie != "" {
-		req.Header.Add("Cookie", options.Cookie)
+		req.Header.Set("Cookie", options.Cookie)
 	}
 	if options.UserAgent != "" {
-		req.Header.Add("User-Agent", options.UserAgent)
+		req.Header.Set("User-Agent", options.UserAgent)
 	} else {
-		req.Header.Add("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:75.0) Gecko/20100101 Firefox/75.0")
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:75.0) Gecko/20100101 Firefox/75.0")
 	}
 	if options.Method != "" {
 		req.Method = options.Method
 	}
-	req.Header.Add(hn, hv)
+	req.Header.Set(hn, hv)
 	return req, tempMap
 }
 
