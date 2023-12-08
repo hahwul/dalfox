@@ -24,7 +24,7 @@ Dalfox performs parameter mining by default when scanning. This is based on the 
 ## Disable Mining
 ### Disable DOM-Mining
 ```
-▶ dalfox url https://example.com --remote-wordlists=burp,assetnote
+▶ dalfox url https://example.com --skip-mining-dom
 ```
 ### Disable Dict Mining (Gf-Patterns)
 ```

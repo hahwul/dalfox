@@ -147,9 +147,7 @@ var fileCmd = &cobra.Command{
 
 				ff, err := voltFile.ReadLinesOrLiteral(args[0])
 				_ = err
-				for _, target := range ff {
-					targets = append(targets, target)
-				}
+				targets = append(targets, ff...)
 
 				// Remove Deplicated value
 				targets = voltUtils.UniqueStringSlice(targets)
