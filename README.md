@@ -1,6 +1,6 @@
 <h1 align="center">
   <br>
-  <img src="https://github.com/hahwul/dalfox/assets/13212227/915c5784-7584-4512-98cc-80f24ef621c9" alt="dalfox">
+  <img src="https://github.com/hahwul/dalfox/assets/13212227/38f4e2e4-baa4-4bcd-8e71-3d1bf01ade8c" alt="dalfox" width="400px;">
   <br>🌙🦊=XSS<br>
 </h1>
 <p align="center">
