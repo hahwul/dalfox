@@ -1,5 +1,5 @@
 title: DalFox
-description: Parameter Analysis and XSS Scanning tool based on golang
+description: Dalfox is a powerful open-source XSS scanner and utility focused on automation.
 lang: en-US
 
 baseurl: "" # the subpath of your site, e.g. /blog/
