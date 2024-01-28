@@ -1,14 +1,13 @@
-<h1 align="center">
+<div align="center">
   <br>
-  <a href=""><img src="https://user-images.githubusercontent.com/13212227/120111054-49ffc780-c1ab-11eb-974e-e198d53ddb48.png" alt="" width="300px;"></a>
-  <br>🌙🦊=XSS<br>
-</h1>
+  <img src="https://github.com/hahwul/dalfox/assets/13212227/38f4e2e4-baa4-4bcd-8e71-3d1bf01ade8c" alt="dalfox" width="400px;">
+</div>
 <p align="center">
   <a href="https://github.com/hahwul/dalfox/actions/workflows/go.yml"><img src="https://github.com/hahwul/dalfox/actions/workflows/go.yml/badge.svg"></a>
   <a href=""><img src="https://api.codacy.com/project/badge/Grade/17cac7b8d1e849a688577f2bbdd6ecd0"></a>
   <a href="https://goreportcard.com/report/github.com/hahwul/dalfox"><img src="https://goreportcard.com/badge/github.com/hahwul/dalfox"></a>
   <a href="https://codecov.io/gh/hahwul/dalfox"><img src="https://codecov.io/gh/hahwul/dalfox/branch/main/graph/badge.svg"/></a>
-  <a href="https://twitter.com/intent/follow?screen_name=hahwul"><img src="https://img.shields.io/twitter/follow/hahwul?style=flat&logo=twitter"></a>
+  <a href="https://twitter.com/intent/follow?screen_name=hahwul"><img src="https://img.shields.io/twitter/follow/hahwul?style=flat&logo=x"></a>
   <a href=""><img src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat"></a>
 </p>
 
