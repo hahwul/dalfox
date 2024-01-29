@@ -56,8 +56,8 @@ brews:
       name: hahwul
       email: hahwul@gmail.com
     folder: Formula
-    homepage: "https://www.hahwul.com"
-    description: "DalFox(Finder Of XSS) / Parameter Analysis and XSS Scanning tool based on golang"
+    homepage: "https://dalfox.hahwul.com"
+    description: Powerful open-source XSS scanner and utility focused on automation.
     test: |
       system "#{bin}/dalfox version"
     install: |
@@ -65,10 +65,9 @@ brews:
 snapcrafts:
   -
     name: dalfox
-    # Remember you need to `snapcraft login` first.
     publish: true
-    summary: DalFox(Finder Of XSS) / Parameter Analysis and XSS Scanning tool based on golang
-    description: DalFox is a fast, powerful parameter analysis and XSS scanner, based on a golang/DOM parser. supports friendly Pipeline, CI/CD and testing of different types of XSS. I talk about naming. Dal(달) is the Korean pronunciation of moon and fox was made into Fox(Find Of XSS).
+    summary: Powerful open-source XSS scanner and utility focused on automation.
+    description: DalFox is a powerful open-source tool that focuses on automation, making it ideal for quickly scanning for XSS flaws and analyzing parameters. Its advanced testing engine and niche features are designed to streamline the process of detecting and verifying vulnerabilities.
     grade: stable
     confinement: strict
     license: MIT
