@@ -5,7 +5,7 @@ lang: en-US
 baseurl: "" # the subpath of your site, e.g. /blog/
 url: https://dalfox.hahwul.com # the base hostname & protocol for your site
 git_address: https://github.com/hahwul/dalfox
-git_edit_address: https://github.com/hahwul/dalfox/docs
+git_edit_address: https://github.com/hahwul/dalfox/tree/main/docs
 
 # Configure the remote_theme plugin with the gh-pages branch
 # or the specific tag
