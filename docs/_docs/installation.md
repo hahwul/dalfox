@@ -27,15 +27,10 @@ Please check this documents [https://snapcraft.io/docs/installing-snapd](https:/
 sudo snap install dalfox
 ```
 
-## Using go-install or go-get
-**go1.17**
+## Using go-install
+
 ```
 go install github.com/hahwul/dalfox/v2@latest
-```
-
-**go1.16**
-```
-GO111MODULE=on go get github.com/hahwul/dalfox/v2
 ```
 
 ## Using Docker
