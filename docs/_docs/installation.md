@@ -27,10 +27,12 @@ Please check this documents [https://snapcraft.io/docs/installing-snapd](https:/
 sudo snap install dalfox
 ```
 
-## Using go-install
+## From source
 
-```
+```bash
 go install github.com/hahwul/dalfox/v2@latest
+
+# The actual release might slightly differ. This is because go install references the main branch.
 ```
 
 ## Using Docker
