@@ -63,26 +63,24 @@ Mode: `url` `sxss` `pipe` `file` `server` `payload`
 And the various options required for the testing :D
 
 ## How to Install
-### From source
-**go1.17**
-```
-go install github.com/hahwul/dalfox/v2@latest
-```
-
-**go1.16**
-```
-GO111MODULE=on go get github.com/hahwul/dalfox/v2
-```
-
 ### Using homebrew (macos)
-```
-brew tap hahwul/dalfox
+```bash
 brew install dalfox
+
+# https://formulae.brew.sh/formula/dalfox
 ```
 
 ### Using snapcraft (ubuntu)
 ```
 sudo snap install dalfox
+```
+
+### From source
+
+```bash
+go install github.com/hahwul/dalfox/v2@latest
+
+# The actual release might slightly differ. This is because go install references the main branch.
 ```
 
 More information? please read [Installation guide](https://dalfox.hahwul.com/docs/installation/)

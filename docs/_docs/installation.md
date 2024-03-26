@@ -10,10 +10,12 @@ Homebrew is the package manager for MacOS(or linux). On devices using homebrew, 
 ```shell
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)"
 ```
+
 ### Install dalfox
 ```shell
-brew tap hahwul/dalfox
 brew install dalfox
+
+# https://formulae.brew.sh/formula/dalfox
 ```
 
 ## Using Snapcraft
@@ -27,15 +29,12 @@ Please check this documents [https://snapcraft.io/docs/installing-snapd](https:/
 sudo snap install dalfox
 ```
 
-## Using go-install or go-get
-**go1.17**
-```
-go install github.com/hahwul/dalfox/v2@latest
-```
+## From source
 
-**go1.16**
-```
-GO111MODULE=on go get github.com/hahwul/dalfox/v2
+```bash
+go install github.com/hahwul/dalfox/v2@latest
+
+# The actual release might slightly differ. This is because go install references the main branch.
 ```
 
 ## Using Docker
