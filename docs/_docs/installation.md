@@ -10,10 +10,12 @@ Homebrew is the package manager for MacOS(or linux). On devices using homebrew, 
 ```shell
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)"
 ```
+
 ### Install dalfox
 ```shell
-brew tap hahwul/dalfox
 brew install dalfox
+
+# https://formulae.brew.sh/formula/dalfox
 ```
 
 ## Using Snapcraft

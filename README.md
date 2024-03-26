@@ -64,9 +64,10 @@ And the various options required for the testing :D
 
 ## How to Install
 ### Using homebrew (macos)
-```
-brew tap hahwul/dalfox
+```bash
 brew install dalfox
+
+# https://formulae.brew.sh/formula/dalfox
 ```
 
 ### Using snapcraft (ubuntu)
