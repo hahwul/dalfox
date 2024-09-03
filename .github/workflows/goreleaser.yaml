@@ -2,7 +2,7 @@ name: GoReleaser
 
 on:
   push:
-    tags: [ 'v*.*.*' ]
+    tags: [ 'no-trigger*.*.*' ]
 
 permissions:
   contents: write
