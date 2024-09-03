@@ -1,4 +1,5 @@
 project_name: dalfox
+version: 2
 
 before:
   hooks:
