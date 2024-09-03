@@ -1,6 +1,5 @@
 project_name: dalfox
 version: 2
-
 before:
   hooks:
   - go mod download
@@ -56,7 +55,7 @@ brews:
     commit_author:
       name: hahwul
       email: hahwul@gmail.com
-    folder: Formula
+    directory: Formula
     homepage: "https://dalfox.hahwul.com"
     description: Powerful open-source XSS scanner and utility focused on automation.
     test: |
