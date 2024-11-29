@@ -25,24 +25,19 @@ gh_edit_view_mode: "tree" # "tree" or "edit" if you want the user to jump into t
 
 # Collection settings
 collections:
-  get_started:
-    permalink: "/:collection/:path/"
-    output: true
   advanced:
     permalink: "/:collection/:path/"
     output: true
-  tips:
+  community:
     permalink: "/:collection/:path/"
     output: true
 
 just_the_docs:
   collections:
-    get_started:
-      name: Get Started
     advanced:
       name: Advanced
-    tips:
-      name: Tips
+    community:
+      name: Community
 
 mermaid:
   version: "10.9.1"
@@ -50,6 +45,6 @@ mermaid:
 # Security.txt
 security_txt:
   comment: If you find any security issues on this site, please contact me!
-  contact: https://github.com/owasp-noir/noir/security
+  contact: https://github.com/hahwul/dalfox/security
   canonical: https://owasp-noir.github.io/.well-known/security.txt
   preferred_languages: "en, ko"

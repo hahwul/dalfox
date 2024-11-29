@@ -10,4 +10,5 @@ gem "just-the-docs"
 group :jekyll_plugins do
   gem "jekyll-securitytxt"
   gem "jekyll-sitemap"
+  gem "jekyll-redirect-from"
 end

@@ -1,6 +1,6 @@
 ---
-title: Use config file
-permalink: /docs/config/
+title: Configurations
+redirect_from: /docs/config/
 nav_order: 5
 toc: true
 layout: page
