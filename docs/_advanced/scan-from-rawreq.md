@@ -22,7 +22,7 @@ asdf=asdf
 
 Command
 ```
-▶ dalfox file --rawdata ./samples/sample_rawdata.txt
+dalfox file --rawdata ./samples/sample_rawdata.txt
 ```
 Output
 ```

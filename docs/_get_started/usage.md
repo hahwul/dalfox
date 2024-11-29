@@ -9,7 +9,7 @@ layout: page
 ## Usage
 The options for the Dalfox are largely configured with `commands` and `flags`.
 ```shell
-▶ dalfox [command] [flags]
+dalfox [command] [flags]
 ```
 
 ```

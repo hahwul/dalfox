@@ -8,7 +8,7 @@ layout: page
 
 ## Get libary of dalfox
 ```
-▶ go get github.com/hahwul/dalfox/v2/lib
+go get github.com/hahwul/dalfox/v2/lib
 ```
 
 ## Sample of code

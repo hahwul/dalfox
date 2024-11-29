@@ -9,12 +9,12 @@ layout: page
 ---
 `server` mode is a REST API mode that takes into account scalability. Using this mode, dalfox acts as a REST API server and can perform scanning using a web request.
 ```
-▶ dalfox server
+dalfox server
 ```
 
 e.g
 ```
-▶ dalfox server --host 0.0.0.0 --port 8090
+dalfox server --host 0.0.0.0 --port 8090
     _..._
   .' .::::.   __   _   _    ___ _ __ __
  :  :::::::: |  \ / \ | |  | __/ \\ V /
@@ -45,7 +45,7 @@ and supported swagger-ui
 ## Basic scanning
 req
 ```
-▶ curl -X POST "http://localhost:6664/scan" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"url\": \"https://www.hahwul.com\"}"
+curl -X POST "http://localhost:6664/scan" -H "accept: application/json" -H "Content-Type: application/json" -d "{\"url\": \"https://www.hahwul.com\"}"
 ```
 res
 ```
@@ -55,7 +55,7 @@ res
 ## Scanning with options
 req
 ```
-▶ curl -X POST "http://localhost:6664/scan" \
+curl -X POST "http://localhost:6664/scan" \
 -H "accept: application/json" \
 -H "Content-Type: application/json" \
 -d "{\"url\": \"https://www.hahwul.com\", \"options\":{\"cookie\":\"testz=11\",\"worker\":1}}"

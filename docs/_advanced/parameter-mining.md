@@ -12,12 +12,12 @@ Dalfox performs parameter mining by default when scanning. This is based on the 
 
 ## Use custom wordlist
 ```
-▶ dalfox url https://example.com --mining-dict-word=./params.txt
+dalfox url https://example.com --mining-dict-word=./params.txt
 ```
 
 ## Use remote wordlist
 ```
-▶ dalfox url https://example.com --remote-wordlists=burp,assetnote
+dalfox url https://example.com --remote-wordlists=burp,assetnote
 ```
 
 ### Supported resources
@@ -27,13 +27,13 @@ Dalfox performs parameter mining by default when scanning. This is based on the 
 ## Disable Mining
 ### Disable DOM-Mining
 ```
-▶ dalfox url https://example.com --skip-mining-dom
+dalfox url https://example.com --skip-mining-dom
 ```
 ### Disable Dict Mining (Gf-Patterns)
 ```
-▶ dalfox url https://example.com --skip-mining-dict
+dalfox url https://example.com --skip-mining-dict
 ```
 ### Disable All Mining Process
 ```
-▶ dalfox url https://example.com --skip-mining-all
+dalfox url https://example.com --skip-mining-all
 ```

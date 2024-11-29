@@ -9,18 +9,18 @@ layout: page
 ## Use dalfox output to other tools via Pipeline
 Command
 ```
-▶ dalfox url http://testphp.vulnweb.com/listproducts.php | grep "\[V\]" | cut -d " " -f2 | xargs -I % open %
+dalfox url http://testphp.vulnweb.com/listproducts.php | grep "\[V\]" | cut -d " " -f2 | xargs -I % open %
 ```
 
 ## Save only PoC code with Stdout
 Command
 ```
-▶ dalfox url http://testphp.vulnweb.com/listproducts.php > output
+dalfox url http://testphp.vulnweb.com/listproducts.php > output
 ```
 
 Output file
 ```
-▶ cat output
+cat output
 [POC][G][BUILT-IN/dalfox-error-mysql2/GET] http://testphp.vulnweb.com/listproducts.php
 [POC][G][BUILT-IN/dalfox-error-mysql/GET] http://testphp.vulnweb.com/listproducts.php
 [POC][G][BUILT-IN/dalfox-error-mysql5/GET] http://testphp.vulnweb.com/listproducts.php?cat=dalfox.
@@ -31,12 +31,12 @@ Output file
 ## Save only PoC code with `-o` flag
 Command
 ```
-▶ dalfox url http://testphp.vulnweb.com/listproducts.php -o output
+dalfox url http://testphp.vulnweb.com/listproducts.php -o output
 ```
 
 Output file
 ```
-▶ cat output
+cat output
 [POC][G][BUILT-IN/dalfox-error-mysql2/GET] http://testphp.vulnweb.com/listproducts.php
 [POC][G][BUILT-IN/dalfox-error-mysql/GET] http://testphp.vulnweb.com/listproducts.php
 [POC][G][BUILT-IN/dalfox-error-mysql5/GET] http://testphp.vulnweb.com/listproducts.php?cat=dalfox.
@@ -48,12 +48,12 @@ Output file
 
 Command
 ```
-▶ dalfox url http://testphp.vulnweb.com/listproducts.php -o alllog.txt --output-all
+dalfox url http://testphp.vulnweb.com/listproducts.php -o alllog.txt --output-all
 ```
 
 Output file
 ```
-▶ cat alllog.txt
+cat alllog.txt
 [*] Using single target mode
 [*] Target URL: http://testphp.vulnweb.com/listproducts.php
 [*] Vaild target [ code:200 / size:4819 ]
@@ -78,10 +78,10 @@ Case
 
 Command (only grep and verified poc)
 ```
-▶ dalfox url http://testphp.vulnweb.com/listproducts.php --only-poc=g,v
+dalfox url http://testphp.vulnweb.com/listproducts.php --only-poc=g,v
 ```
 
 ## Save Traffic in HAR File
 ```
-▶ dalfox url http://testphp.vulnweb.com/listproducts.php --har-file-path=log.har
+dalfox url http://testphp.vulnweb.com/listproducts.php --har-file-path=log.har
 ```

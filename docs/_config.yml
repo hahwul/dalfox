@@ -1,9 +1,12 @@
 title: Dalfox
 description: Dalfox is a powerful open-source XSS scanner and utility focused on automation.
 theme: just-the-docs
-logo: "/images/owasp-noir-black.png"
+logo: "/images/logonav.png"
 favicon_ico: "favicon.ico"
 url: https://dalfox.hahwul.com
+
+
+color_scheme: dark
 
 aux_links:
   Github: https://github.com/hahwul/dalfox

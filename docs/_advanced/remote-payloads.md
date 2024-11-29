@@ -9,12 +9,12 @@ layout: page
 ## Use remote payloads
 Single resources
 ```
-▶ dalfox url https://example.com --remote-payloads portswigger
+dalfox url https://example.com --remote-payloads portswigger
 ```
 
 Multiple resources
 ```
-▶ dalfox url https://example.com --remote-payloads portswigger,payloadbox
+dalfox url https://example.com --remote-payloads portswigger,payloadbox
 ```
 
 ## Supported resources

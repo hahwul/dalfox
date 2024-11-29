@@ -8,7 +8,7 @@ layout: page
 
 Command
 ```
-▶ dalfox url http://testphp.vulnweb.com/listproducts.php
+dalfox url http://testphp.vulnweb.com/listproducts.php
 ```
 
 Output

@@ -9,7 +9,7 @@ layout: page
 In dalfox 2.9 and later, all requests can be logged in HAR format. Enter the file path to save using `--har-file-path` flag.
 
 ```
-▶ dalfox url --no-spinner \
+dalfox url --no-spinner \
     --no-color \
     --output-all \
     --follow-redirects \

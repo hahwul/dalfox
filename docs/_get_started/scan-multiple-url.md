@@ -9,7 +9,7 @@ layout: page
 ## Using pipe mode
 Command
 ```
-▶ cat samples/sample_target.txt| dalfox pipe
+cat samples/sample_target.txt| dalfox pipe
 ```
 Output
 ```
@@ -67,7 +67,7 @@ Output
 ## Using file mode
 Command
 ```
-▶ dalfox file ./samples/sample_target.txt
+dalfox file ./samples/sample_target.txt
 ```
 Output
 ```
