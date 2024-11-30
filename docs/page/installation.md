@@ -42,18 +42,18 @@ go install github.com/hahwul/dalfox/v2@latest
 
 ## Using Docker
 Dalfox provides docker images by version. It can be used lightly with less capacity.
-```
+```bash
 docker pull hahwul/dalfox:latest
 ```
 
 if you installed it, using like this command
-```
+```bash
 docker run -it hahwul/dalfox:latest /app/dalfox url https://www.hahwul.com
 ```
 
 or live in docker
 
-```
+```bash
 docker run -it hahwul/dalfox:latest /bin/bash
 ./dalfox
 ```

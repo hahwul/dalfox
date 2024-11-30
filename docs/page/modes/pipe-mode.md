@@ -12,6 +12,7 @@ layout: page
 ```shell
 dalfox pipe
 ```
+
 e.g
 ```shell
 echo urls.txt | dalfox pipe

@@ -9,9 +9,10 @@ layout: page
 
 ## Using pipe mode
 Command
-```
+```bash
 cat samples/sample_target.txt| dalfox pipe
 ```
+
 Output
 ```
 [*] Using pipeline mode
@@ -67,9 +68,10 @@ Output
 
 ## Using file mode
 Command
-```
+```bash
 dalfox file ./samples/sample_target.txt
 ```
+
 Output
 ```
 [*] Using file mode(targets list)

@@ -10,22 +10,25 @@ layout: page
 
 `payload` mode is a mode for easy testing of XSS. Generate and Enumerate XSS Payloads and wordlists
 
-```
+```bash
 dalfox payload {flags}
 ```
 
 e.g
-```
+```bash
 dalfox payload --enum-injs --entity-event-handler"
 ```
 
 ## Make-Bulk
 Make-bulk generates many xss payloads. At this point, the parameters of the alert are configured as sequence and it is easy to find which payload was triggered during the XSS test.
-```
+
+```bash
 dalfox payload --make-bulk
 ```
+
 output
-```
+
+```html
 ...snip...
 <track onbeforepaste=\"alert(488)\" contenteditable>test<\/track>
 <tt onbeforepaste=\"alert(489)\" contenteditable>test<\/tt>
@@ -46,12 +49,12 @@ output
 ```
 
 ## Encoder
-```
+```bash
 --encoder-url            Encoding output [URL]
 ```
 
 ## Supported
-```
+```bash
 --entity-event-handler   Enumerate a event handlers for xss
 --entity-gf              Enumerate a gf-patterns xss params
 --entity-special-chars   Enumerate a special chars for xss

@@ -31,13 +31,13 @@ Output file
 
 ## Save only PoC code with `-o` flag
 Command
-```
+```bash
 dalfox url http://testphp.vulnweb.com/listproducts.php -o output
 ```
 
 Output file
-```
-cat output
+```bash
+# cat output
 [POC][G][BUILT-IN/dalfox-error-mysql2/GET] http://testphp.vulnweb.com/listproducts.php
 [POC][G][BUILT-IN/dalfox-error-mysql/GET] http://testphp.vulnweb.com/listproducts.php
 [POC][G][BUILT-IN/dalfox-error-mysql5/GET] http://testphp.vulnweb.com/listproducts.php?cat=dalfox.
@@ -48,13 +48,13 @@ cat output
 ## Save all log (with `--output-all` flag)
 
 Command
-```
+```bash
 dalfox url http://testphp.vulnweb.com/listproducts.php -o alllog.txt --output-all
 ```
 
 Output file
-```
-cat alllog.txt
+```bash
+# cat alllog.txt
 [*] Using single target mode
 [*] Target URL: http://testphp.vulnweb.com/listproducts.php
 [*] Vaild target [ code:200 / size:4819 ]
@@ -78,11 +78,11 @@ Case
 * v: `[POC][V][GET] http://testphp.vulnweb.com/listproducts.php?cat=%3CiFrAme%2Fsrc%3DjaVascRipt%3Aalert%281%29+class%3Ddalfox%3E%3C%2FiFramE%3E`
 
 Command (only grep and verified poc)
-```
+```bash
 dalfox url http://testphp.vulnweb.com/listproducts.php --only-poc=g,v
 ```
 
 ## Save Traffic in HAR File
-```
+```bash
 dalfox url http://testphp.vulnweb.com/listproducts.php --har-file-path=log.har
 ```

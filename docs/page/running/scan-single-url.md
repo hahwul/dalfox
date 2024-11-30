@@ -8,7 +8,7 @@ layout: page
 ---
 
 Command
-```
+```bash
 dalfox url http://testphp.vulnweb.com/listproducts.php
 ```
 
