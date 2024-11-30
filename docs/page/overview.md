@@ -4,6 +4,12 @@ nav_order: 1
 layout: page
 ---
 
+DalFox is a powerful open-source tool designed for automation, making it ideal for efficiently scanning and analyzing parameters to detect XSS vulnerabilities. Its advanced testing engine and unique features streamline the process of identifying and verifying security flaws.
+
+As for the name, Dal([달](https://en.wiktionary.org/wiki/달)) is the Korean word for "moon," while Fox stands for "Finder Of XSS" (🦊).
+
+![](/images/screen.png)
+
 Mode: `url` `sxss` `pipe` `file` `server` `payload`
 
 | Class         | Key Feature                   | Description                                                  |
