@@ -7,22 +7,33 @@ toc: true
 layout: page
 ---
 
-## What is BAV
-BAV(Basic Another Vulnerability) is test to other vulnerability in xss scanning. And the default value is true.
+# Basic Another Vulnerability (BAV)
 
-* SQL Injection
-* SSTI
-* Open Redirect
-* CRLF Injection
+BAV (Basic Another Vulnerability) is a feature in Dalfox that tests for additional vulnerabilities during XSS scanning. By default, BAV is enabled.
 
-## Disable BAV
-If you don't want to scan BAV, you can disable BAV with the option below.
+## Vulnerabilities Tested by BAV
 
+BAV tests for the following vulnerabilities:
+
+- **SQL Injection**
+- **Server-Side Template Injection (SSTI)**
+- **Open Redirect**
+- **CRLF Injection**
+
+## Disabling BAV
+
+If you do not want to scan for BAV, you can disable it using the `--skip-bav` option.
+
+### Command
+
+```bash
+dalfox url https://google.com --skip-bav
 ```
-$ dalfox url https://google.com --skip-bav
-```
 
-## Output format
+## Output Format
+
+Here is an example of the output you can expect when BAV is enabled:
+
 ```
 [*] 🦊 Start scan [SID:Single] / URL: http://localhost:8070/xss/abcd/2
 [G] Found CRLF Injection via built-in grepping / original request

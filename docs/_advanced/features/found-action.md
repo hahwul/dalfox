@@ -7,35 +7,49 @@ toc: true
 layout: page
 ---
 
-## Use found action
-Found action(`--found-action`) is lets you specify the actions to take when detected.
+# Integration with found-action
 
-|              | description                                                  |
+The `--found-action` option in Dalfox allows you to specify actions to take when a vulnerability is detected. This can be useful for automating responses to findings, such as logging, alerting, or further processing.
+
+## Using found-action
+
+The `--found-action` option lets you define a command to execute when a vulnerability is found. The following placeholders can be used within the command:
+
+| Placeholder  | Description                                                  |
 | ------------ | ------------------------------------------------------------ |
-| `@@query@@`  | - attack query<br />- e.g https://www.hahwul.com?q="><script~~blahblah |
-| `@@target@@` | - target site<br />- e.g https://www.hahwul.com              |
-| `@@type@@`   | - type of poc<br />- value:  `WEAK` / `VULN`                 |
+| `@@query@@`  | The attack query (e.g., `https://www.hahwul.com?q="><script~~blahblah`) |
+| `@@target@@` | The target site (e.g., `https://www.hahwul.com`)             |
+| `@@type@@`   | The type of proof of concept (POC) (values: `WEAK` / `VULN`) |
 
+### Example Command
 
-```
-dalfox url http://testphp.vulnweb.com/listproducts.php\?cat\=123\&artist\=123\&asdf\=ff --found-action "echo '@@query@@' > data"
+```bash
+dalfox url http://testphp.vulnweb.com/listproducts.php?cat=123&artist=123&asdf=ff --found-action "echo '@@query@@' > data"
 ```
 
-```
+### Example Output
+
+```bash
 cat data
 http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123%27%3E%3Csvg%2Fclass%3D%27dalfox%27onLoad%3Dalert%2845%29%3E
 ```
 
-## Modify shell application for found action
-`--found-action-shell` flag is change shell application for found action. default values is bash.
-```
-dalfox url http://testphp.vulnweb.com/listproducts.php\?cat\=123\&artist\=123\&asdf\=ff --found-action "echo '@@query@@' > data" --found-action-shell=zsh
+## Modifying the Shell Application for found-action
+
+The `--found-action-shell` flag allows you to change the shell application used for executing the found action. The default value is `bash`.
+
+### Example Command with zsh
+
+```bash
+dalfox url http://testphp.vulnweb.com/listproducts.php?cat=123&artist=123&asdf=ff --found-action "echo '@@query@@' > data" --found-action-shell=zsh
 ```
 
-for example, in alpine linux
-```
-dalfox url http://testphp.vulnweb.com/listproducts.php\?cat\=123\&artist\=123\&asdf\=ff --found-action "echo '@@query@@' > data" --found-action-shell=sh
+### Example Command with sh (for Alpine Linux)
+
+```bash
+dalfox url http://testphp.vulnweb.com/listproducts.php?cat=123&artist=123&asdf=ff --found-action "echo '@@query@@' > data" --found-action-shell=sh
 ```
 
-## Reference
-https://www.hahwul.com/2020/05/04/how-to-use-dalfoxs-fun-options/
+## Additional Resources
+
+For more information and advanced usage, please refer to the [blog post on Dalfox's fun options](https://www.hahwul.com/2020/05/04/how-to-use-dalfoxs-fun-options/).
