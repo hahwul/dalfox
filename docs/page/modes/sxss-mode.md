@@ -7,6 +7,9 @@ nav_order: 4
 toc: true
 layout: page
 ---
+
+# Stored XSS Mode
+
 `sxss` mode is a mode for easy identification of Stored XSS. The default behavior is the same as url mode, but you can specify a separate URL to validate, and you can generate a dynamic verification URL with the --sequence option in case the verification URL changes.
 
 ```bash

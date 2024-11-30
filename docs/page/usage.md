@@ -6,8 +6,10 @@ has_children: true
 toc: true
 layout: page
 ---
-## Usage
+# Usage
+
 The options for the Dalfox are largely configured with `commands` and `flags`.
+
 ```shell
 dalfox [command] [flags]
 ```

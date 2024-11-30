@@ -8,6 +8,8 @@ toc: true
 layout: page
 ---
 
+# Payload Mode
+
 `payload` mode is a mode for easy testing of XSS. Generate and Enumerate XSS Payloads and wordlists
 
 ```bash

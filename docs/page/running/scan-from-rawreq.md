@@ -7,7 +7,13 @@ toc: true
 layout: page
 ---
 
-`sample_rawdata.txt`
+# Scanning from Raw Request with Dalfox
+
+This guide provides detailed instructions on how to scan a target using a raw HTTP request with Dalfox. Follow the steps below to perform a scan using a raw request.
+
+## Sample Raw Request
+
+Create a file named `sample_rawdata.txt` with the following content:
 
 ```http
 POST https://www.hahwul.com/?q=xspear HTTP/1.1
@@ -22,12 +28,18 @@ Host: www.hahwul.com
 asdf=asdf
 ```
 
-Command
+## Command
+
+To scan using the raw request, use the following command:
+
 ```bash
 dalfox file --rawdata ./samples/sample_rawdata.txt
 ```
 
-Output
+## Output
+
+Here is an example of the output you can expect from running the above command:
+
 ```
 [*] Using file mode(rawdata)
 [*] Target URL: https://www.hahwul.com/?q=xspear
@@ -41,7 +53,18 @@ Output
 [*] Static analysis done ✓
 [*] BAV analysis done ✓
 [*] Parameter analysis  done ✓
-[*] Generate XSS payload and optimization.Optimization.. 🛠
+[*] Generate XSS payload and optimization.. 🛠
 [*] Start XSS Scanning.. with 33 queries 🗡
 [*] Finish :D
 ```
+
+## Explanation of Output
+
+- **Target URL**: The URL being scanned.
+- **Valid target**: Indicates that the target URL is valid and accessible.
+- **Dictionary mining option**: Uses predefined patterns to find vulnerabilities.
+- **DOM mining option**: Analyzes the Document Object Model (DOM) for vulnerabilities.
+- **BAV analysis**: Basic Another Vulnerability analysis, including SQL injection, SSTI, and Open Redirect.
+- **Static analysis**: Analyzes the static content of the target.
+- **Parameter analysis**: Analyzes the parameters of the target URL.
+- **Generate XSS payload and optimization**: Generates and optimizes XSS payloads for scanning.

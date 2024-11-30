@@ -8,6 +8,8 @@ toc: true
 layout: page
 ---
 
+# File mode
+
 `file` mode is a mode for scanning multiple URLs or for scanning based on a raw request file in Burp Suite/ZAP. Input is filename.
 
 ```shell

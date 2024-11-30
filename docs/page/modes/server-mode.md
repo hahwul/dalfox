@@ -7,6 +7,9 @@ nav_order: 4
 toc: true
 layout: page
 ---
+
+# Server Mode 
+
 `server` mode is a REST API mode that takes into account scalability. Using this mode, dalfox acts as a REST API server and can perform scanning using a web request.
 
 ```bash

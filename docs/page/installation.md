@@ -6,54 +6,72 @@ toc: true
 layout: page
 ---
 
-## Using Homebrew
-Homebrew is the package manager for MacOS(or linux). On devices using homebrew, you can easily install/update using the brew command.
+# Installation Guide
 
-### Install homebrew
+This guide provides detailed instructions on how to install Dalfox using various methods. Choose the method that best suits your environment.
+
+## Using Homebrew
+Homebrew is a package manager for macOS (or Linux). On devices using Homebrew, you can easily install or update Dalfox using the `brew` command.
+
+### Install Homebrew
+If you haven't installed Homebrew yet, you can install it by running the following command in your terminal:
 ```shell
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/master/install.sh)"
 ```
 
-### Install dalfox
+### Install Dalfox
+Once Homebrew is installed, you can install Dalfox by running:
 ```shell
 brew install dalfox
-
-# https://formulae.brew.sh/formula/dalfox
 ```
+For more details, you can visit the [Homebrew Formula page for Dalfox](https://formulae.brew.sh/formula/dalfox).
 
 ## Using Snapcraft
-Snapcraft is one of the packaging managers for Linux. Unlike app and yum, it can be used independently of the deployment OS version.
+Snapcraft is a package manager for Linux. Unlike `apt` and `yum`, it can be used independently of the deployment OS version.
 
 ### Install Snapcraft
-Please check this documents [https://snapcraft.io/docs/installing-snapd](https://snapcraft.io/docs/installing-snapd)
+To install Snapcraft, please refer to the official documentation: [Installing snapd](https://snapcraft.io/docs/installing-snapd).
 
-### Install dalfox
-```
+### Install Dalfox
+Once Snapcraft is installed, you can install Dalfox by running:
+```shell
 sudo snap install dalfox
 ```
 
-## From source
+## From Source
+If you prefer to build Dalfox from the source, you can do so using the `go` command.
 
+### Prerequisites
+Ensure you have Go installed on your system. You can download it from the [official Go website](https://golang.org/dl/).
+
+### Install Dalfox
+To install the latest version of Dalfox from the source, run:
 ```bash
 go install github.com/hahwul/dalfox/v2@latest
-
-# The actual release might slightly differ. This is because go install references the main branch.
 ```
+Note: The actual release might slightly differ as `go install` references the main branch.
 
 ## Using Docker
-Dalfox provides docker images by version. It can be used lightly with less capacity.
+Dalfox provides Docker images by version. This method allows you to use Dalfox with minimal setup.
+
+### Pull the Latest Docker Image
+To pull the latest Docker image of Dalfox, run:
 ```bash
 docker pull hahwul/dalfox:latest
 ```
 
-if you installed it, using like this command
+### Run Dalfox Using Docker
+You can run Dalfox using Docker with the following command:
 ```bash
 docker run -it hahwul/dalfox:latest /app/dalfox url https://www.hahwul.com
 ```
 
-or live in docker
-
+### Interactive Docker Shell
+For an interactive shell within the Docker container, run:
 ```bash
 docker run -it hahwul/dalfox:latest /bin/bash
+```
+Once inside the container, you can run Dalfox:
+```bash
 ./dalfox
 ```

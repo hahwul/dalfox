@@ -8,6 +8,8 @@ toc: true
 layout: page
 ---
 
+# URL Mode
+
 `url` mode is the mode for detecting XSS for a single URL.
 
 ```shell

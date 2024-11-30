@@ -7,12 +7,22 @@ toc: true
 layout: page
 ---
 
-Command
+# Scanning a Single URL with Dalfox
+
+This guide provides detailed instructions on how to scan a single URL using Dalfox. Follow the steps below to perform a scan on a single target URL.
+
+## Command
+
+To scan a single URL, use the following command:
+
 ```bash
 dalfox url http://testphp.vulnweb.com/listproducts.php
 ```
 
-Output
+## Output
+
+Here is an example of the output you can expect from running the above command:
+
 ```
 Parameter Analysis and XSS Scanning tool based on golang
 Finder Of XSS and Dal is the Korean pronunciation of moon. @hahwul
@@ -50,3 +60,15 @@ Finder Of XSS and Dal is the Korean pronunciation of moon. @hahwul
 [POC][V][GET] http://testphp.vulnweb.com/listproducts.php?cat=%3Cdalfox+class%3Ddalfox%3E
 [*] Finish :D
 ```
+
+## Explanation of Output
+
+- **Target URL**: The URL being scanned.
+- **Valid target**: Indicates that the target URL is valid and accessible.
+- **Dictionary mining option**: Uses predefined patterns to find vulnerabilities.
+- **DOM mining option**: Analyzes the Document Object Model (DOM) for vulnerabilities.
+- **BAV analysis**: Basic Another Vulnerability analysis, including SQL injection, SSTI, and Open Redirect.
+- **Static analysis**: Analyzes the static content of the target.
+- **Parameter analysis**: Analyzes the parameters of the target URL.
+- **Generate XSS payload and optimization**: Generates and optimizes XSS payloads for scanning.
+- **Triggered XSS Payload**: Indicates that an XSS payload was successfully triggered.
