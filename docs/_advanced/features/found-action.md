@@ -1,5 +1,5 @@
 ---
-title: Integration with found-action
+title: Found Action
 redirect_from: /docs/tips/found-action/
 nav_order: 1
 parent: Features

@@ -1,5 +1,5 @@
 ---
-title: Custom Payload and Custom Alert
+title: Custom Payload/Alert
 redirect_from: /docs/custom-payload/
 nav_order: 1
 parent: Features

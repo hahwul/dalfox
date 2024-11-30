@@ -7,6 +7,8 @@ toc: true
 layout: page
 ---
 
+# Global Flags
+
 ```
 -b, --blind string                Add your blind xss
                                     * Example: -b your-callback-url

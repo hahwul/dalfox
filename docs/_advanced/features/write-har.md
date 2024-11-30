@@ -1,5 +1,5 @@
 ---
-title: Write HAR file for interaction with other tools
+title: Write HAR file
 redirect_from: /docs/tips/write-har/
 nav_order: 1
 parent: Features
@@ -7,18 +7,28 @@ toc: true
 layout: page
 ---
 
-In dalfox 2.9 and later, all requests can be logged in HAR format. Enter the file path to save using `--har-file-path` flag.
+# Write HAR file for interaction with other tools
 
-```
-dalfox url --no-spinner \
+In Dalfox 2.9 and later, all requests can be logged in HAR format. This allows you to save the HTTP Archive (HAR) file for further analysis or interaction with other tools.
+
+## Generating a HAR File
+
+To generate a HAR file, use the `--har-file-path` flag to specify the file path where the HAR file will be saved. Here is an example command:
+
+```bash
+dalfox url http://testphp.vulnweb.com/listproducts.php?cat=2 \
+    --no-spinner \
     --no-color \
     --output-all \
     --follow-redirects \
     --silence \
     --format json \
-    --har-file-path dump.har \
-    http://testphp.vulnweb.com/listproducts.php?cat=2
+    --har-file-path dump.har
 ```
+
+## Example HAR File
+
+Here is an example of the content you can expect in the generated HAR file:
 
 ```json
 [
@@ -96,9 +106,12 @@ dalfox url --no-spinner \
 ]
 ```
 
-Example of the HAR file being loaded in to Chrome dev tools.
+## Viewing the HAR File
+
+You can load the generated HAR file into Chrome DevTools or other tools that support HAR format for detailed analysis.
 
 ![chrome screenshot](https://user-images.githubusercontent.com/369053/218365521-5df5ff3c-759e-4bb8-9205-a45ac25481ca.png)
 
-## Reference
-- [https://github.com/hahwul/dalfox/pull/440](https://github.com/hahwul/dalfox/pull/440)
+## Additional Resources
+
+For more information and advanced usage, please refer to the [pull request](https://github.com/hahwul/dalfox/pull/440) that introduced this feature.

@@ -20,3 +20,11 @@ Key highlights of DalFox include:
 - **Extensibility**: Offers custom payloads, remote wordlists, and API integrations for tailored testing.
 - **Performance Optimization**: Features such as payload abstraction, bad character filtering, and parallel encoding improve efficiency.
 - **Detailed Reporting**: Outputs can be formatted as plain text or JSON, with options for in-depth reports.
+
+## Contributors
+
+DalFox is an open-source project made with ❤️
+
+If you want to contribute to this project, please see [CONTRIBUTING.md](https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md) and submit a Pull Request with your cool content.
+
+[![Contributors](https://github.com/hahwul/dalfox/raw/main/CONTRIBUTORS.svg)](https://github.com/hahwul/dalfox/graphs/contributors)
