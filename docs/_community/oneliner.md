@@ -6,7 +6,7 @@ toc: true
 layout: page
 ---
 
-> A fast, powerful, one-line
+# Community One-Liners
 
 * Scanning XSS from host / from [@cihanmehmet in awesome-oneliner-bugbounty](https://github.com/dwisiswant0/awesome-oneliner-bugbounty)
 ```bash
