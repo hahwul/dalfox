@@ -1,0 +1,163 @@
+@import url('https://fonts.googleapis.com/css2?family=Open+Sans:wght@300;400&display=swap');
+
+:root {
+    --primary-color: #0e0e10;
+    --highlight-color: #1e3267;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    font-family: 'Open Sans', sans-serif;
+    line-height: 1.5;
+}
+
+a {
+    text-decoration: none;
+    color: var(--primary-color);
+}
+
+h1 {
+    font-weight: 300;
+    font-size: 60px;
+    line-height: 1.2;
+    margin-bottom: 15px;
+}
+
+.showcase {
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    color: #fff;
+    padding: 0 20px;
+}
+
+.dalfox-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--primary-color);
+}
+
+.dalfox-container img {
+    min-width: 100%;
+    min-height: 100%;
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    object-fit: cover;
+}
+
+.dalfox-container:after {
+    content: '';
+    z-index: 1;
+    height: 100%;
+    width: 100%;
+    top: 0;
+    left: 0;
+    background: rgba(0, 0, 0, 0.5);
+    position: absolute;
+}
+
+.content {
+    z-index: 2;
+}
+
+.btn {
+    display: inline-block;
+    padding: 10px 30px;
+    background: var(--primary-color);
+    color: #fff;
+    border-radius: 5px;
+    border: solid #fff 1px;
+    margin-top: 25px;
+    opacity: 0.7;
+}
+
+.btn:hover {
+    transform: scale(0.98);
+}
+
+.btn-highlight {
+    background: var(--highlight-color);
+    border: solid var(--highlight-color) 1px;
+}
+
+#about, #contributors {
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: 0 20px;
+}
+
+#about {
+    background: #f4f4f4;
+    color: var(--primary-color);
+}
+
+#about p {
+    font-size: 1.2rem;
+    max-width: 600px;
+    margin: auto;
+}
+
+#about h2 {
+    margin: 30px 0;
+}
+
+#contributors {
+    background-color: var(--primary-color);
+    color: white;
+}
+
+#contributors p {
+    font-size: 1.2rem;
+    max-width: 600px;
+    margin: auto;
+}
+
+#contributors h1 {
+    margin: 30px 0;
+}
+
+#contributors a {
+    color: white;
+    text-decoration: underline;
+}
+
+.row {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.col-sm-3 {
+    flex: 1;
+    max-width: 25%;
+    padding: 15px;
+    box-sizing: border-box;
+}
+
+.col-sm-3 h1 {
+    font-size: 2rem;
+}
+
+.col-sm-3 h3 {
+    font-size: 1.5rem;
+}
+
+.col-sm-3 p {
+    font-size: 1rem;
+}
