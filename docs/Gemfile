@@ -4,7 +4,7 @@ gem "jekyll", "~> 4.3.3" # installed by `gem jekyll`
 # gem "webrick"        # required when using Ruby >= 3 and Jekyll <= 4.2.2
 
 # Theme
-gem "just-the-docs"
+gem "just-the-docs", "~> 0.10.0"
 
 # Plugins
 group :jekyll_plugins do
