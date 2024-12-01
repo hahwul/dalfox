@@ -11,7 +11,7 @@ This page gathers various resources related to DalFox, including articles, video
 
 ## Articles
 
-- [New my XSS scanning tool - DalFox](https://www.hahwul.com/2020/04/22/my-new-xss-tool-dalfox/)
+- [DalFox: My New Weapon for XSS](https://www.hahwul.com/2020/04/22/my-new-xss-tool-dalfox/)
 
 ## Videos
 
