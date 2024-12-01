@@ -1,15 +1,7 @@
 ## How to contribute
 - First, fork this repository into your Github account
-- Second, clone repository and change to dev branch
+- Second, clone repository and change to main branch
 - Finaly, writing code push and PR to me
-
-## How to change branch
-```
-$ git clone https://github.com/hahwul/dalfox
-$ git branch dev
-$ git checkout dev
-$ git pull -v
-```
 
 ## Writing code
 I'm checking the quality of code through Codacy when PR/Merge/Push. If you want to consider code quality in advance, please check the link below (not perfect, but very helpful).
