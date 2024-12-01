@@ -1,6 +1,24 @@
 name: Coverage
 
-on: [push, pull_request]
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - cmd/**/*
+      - pkg/**/*
+      - lib/**/*
+      - go.mod
+      - dalfox.go
+      - Dockerfile
+  pull_request:
+    branches: [ main ]
+    paths:
+      - cmd/**/*
+      - pkg/**/*
+      - lib/**/*
+      - go.mod
+      - dalfox.go
+      - Dockerfile
 
 jobs:
   build:
