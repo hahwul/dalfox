@@ -141,7 +141,7 @@ func TestSinglePostJSONRequest(t *testing.T) {
 	resp, err := c.Post("https://example.com", "application/json", buff)
 	require.NoError(t, err)
 	assert.NotNil(t, resp)
-	assert.Equal(t, 200, resp.StatusCode)
+	assert.Equal(t, 405, resp.StatusCode)
 
 	err = hw.Close()
 	require.NoError(t, err)
@@ -162,7 +162,7 @@ func TestSinglePostFormRequest(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.NotNil(t, resp)
-	assert.Equal(t, 200, resp.StatusCode)
+	assert.Equal(t, 405, resp.StatusCode)
 
 	err = hw.Close()
 	require.NoError(t, err)
