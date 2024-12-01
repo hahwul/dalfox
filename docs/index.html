@@ -6,8 +6,39 @@
 <html lang="en" >
 <head>
   <meta charset="UTF-8">
-  <title>Dalfox</title>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300;0,400;0,600;0,700;0,800;1,300;1,400;1,600;1,700;1,800&display=swap"><link rel='stylesheet' href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css'><link rel="stylesheet" href="./style.css">
+  
+  <link rel="shortcut icon" href="/favicon.ico">
+<title>DalFox | Dalfox is a powerful open-source XSS scanner and utility focused on automation.</title>
+<meta property="og:title" content="DalFox" />
+<meta property="og:locale" content="en_US" />
+<meta name="description" content="Dalfox is a powerful open-source XSS scanner and utility focused on automation." />
+<meta property="og:description" content="Dalfox is a powerful open-source XSS scanner and utility focused on automation." />
+<link rel="canonical" href="https://dalfox.hahwul.com/" />
+<meta property="og:url" content="https://dalfox.hahwul.com/" />
+<meta property="og:site_name" content="DalFox" />
+<meta property="og:type" content="website" />
+<meta name="twitter:card" content="summary" />
+<meta property="twitter:title" content="DalFox" />
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"WebSite","description":"Dalfox is a powerful open-source XSS scanner and utility focused on automation.","headline":"DalFox","name":"DalFox","url":"https://dalfox.hahwul.com/"}</script>
+
+  <link rel="alternate" type="application/rss+xml" title="DalFox" href="https://dalfox.hahwul.com/feed.xml" />
+</head>
+
+
+<body>
+
+  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+    <link rel="manifest" href="/images/site.webmanifest">
+    <link rel="mask-icon" href="/images/safari-pinned-tab.svg" color="#1e1e1f">
+    <link rel="shortcut icon" href="/images/favicon.ico">
+    <meta name="msapplication-TileColor" content="#1e1e1f">
+    <meta name="msapplication-config" content="/images/browserconfig.xml">
+    <meta name="theme-color" content="#000000">
+  
   <style>
     /* Start Global Rules */
 * {
@@ -55,71 +86,71 @@ ul {
 }
 /* End Global Rules */
 
-/* Start Landing Page */
-.landing-page header {
+/* Start dalfox-landing Page */
+.dalfox-landing-page header {
   min-height: 80px;
   display: flex;
 }
 @media (max-width: 767px) {
-  .landing-page header {
+  .dalfox-landing-page header {
     min-height: auto;
     display: initial;
   }
 }
-.landing-page header .container {
+.dalfox-landing-page header .container {
   display: flex;
   align-items: center;
   justify-content: space-between;
 }
 @media (max-width: 767px) {
-  .landing-page header .container {
+  .dalfox-landing-page header .container {
     flex-direction: column;
     justify-content: center;
   }
 }
-.landing-page header .logo {
+.dalfox-landing-page header .logo {
   color: #aaaaaa;
   font-style: italic;
   text-transform: uppercase;
   font-size: 20px;
 }
 @media (max-width: 767px) {
-  .landing-page header .logo {
+  .dalfox-landing-page header .logo {
     margin-top: 20px;
     margin-bottom: 20px;
   }
 }
-.landing-page header .links {
+.dalfox-landing-page header .links {
   display: flex;
   align-items: center;
 }
 @media (max-width: 767px) {
-  .landing-page header .links {
+  .dalfox-landing-page header .links {
     text-align: center;
     gap: 10px;
   }
 }
-.landing-page header .links li {
+.dalfox-landing-page header .links li {
   margin-left: 30px;
   color: #aaaaaa;
   cursor: pointer;
   transition: .3s;
 }
 @media (max-width: 767px) {
-  .landing-page header .links li {
+  .dalfox-landing-page header .links li {
     margin-left: auto;
   }
 }
-.landing-page header .links li:last-child {
+.dalfox-landing-page header .links li:last-child {
   border-radius: 20px;
   padding: 10px 20px;
   color: #FFF;
   background-color: #6c63ff;
 }
-.landing-page header .links li:not(:last-child):hover {
+.dalfox-landing-page header .links li:not(:last-child):hover {
   color: #6c63ff;
 }
-.landing-page .content .container {
+.dalfox-landing-page .content .container {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -127,7 +158,7 @@ ul {
   min-height: calc(100vh - 80px);
 }
 @media (max-width: 767px) {
-  .landing-page .content .container {
+  .dalfox-landing-page .content .container {
     gap: 0;
     min-height: calc(100vh - 101px);
     justify-content: center;
@@ -135,22 +166,22 @@ ul {
   }
 }
 @media (max-width: 767px) {
-  .landing-page .content .info {
+  .dalfox-landing-page .content .info {
     text-align: center;
     margin-bottom: 15px 
   }
 }
-.landing-page .content .info h1 {
+.dalfox-landing-page .content .info h1 {
   color: #aaaaaa;
   font-size: 44px;
 }
-.landing-page .content .info p {
+.dalfox-landing-page .content .info p {
   margin: 0;
   line-height: 1.6;
   font-size: 15px;
   color: #aaaaaa;
 }
-.landing-page .content .info button {
+.dalfox-landing-page .content .info button {
   border: 0;
   border-radius: 20px;
   padding: 12px 30px;
@@ -159,16 +190,16 @@ ul {
   color: #FFF;
   background-color: #6c63ff;
 }
-.landing-page .content .image img {
+.dalfox-landing-page .content .image img {
   max-width: 100%;
 }
-/* End Landing Page */
+/* End dalfox-landing Page */
   </style>
 </head>
 <body>
 <!-- partial:index.partial.html -->
-<!-- Start Landing Page -->
-      <div class="landing-page">
+<!-- Start dalfox-landing Page -->
+      <div class="dalfox-landing-page">
         <header>
           <div class="container">
             <a href="/" class="logo"><img src="/images/logo-wide.png" style="width: 120px;"></a>
@@ -191,7 +222,7 @@ ul {
           </div>
         </div>
       </div>
-      <!-- End Landing Page -->
+      <!-- End dalfox-landing Page -->
 <!-- partial -->
   
 </body>
