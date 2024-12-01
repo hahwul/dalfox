@@ -1,35 +1,26 @@
----
-
----
-
 <!DOCTYPE html>
-<html lang="en" >
+<html lang="en">
+
 <head>
-  <meta charset="UTF-8">
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,300;0,400;0,600;0,700;0,800;1,300;1,400;1,600;1,700;1,800&display=swap"><link rel='stylesheet' href='https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css'><link rel="stylesheet" href="./style.css">
-  
-  <link rel="shortcut icon" href="/favicon.ico">
-<title>DalFox | Dalfox is a powerful open-source XSS scanner and utility focused on automation.</title>
-<meta property="og:title" content="DalFox" />
-<meta property="og:locale" content="en_US" />
-<meta name="description" content="Dalfox is a powerful open-source XSS scanner and utility focused on automation." />
-<meta property="og:description" content="Dalfox is a powerful open-source XSS scanner and utility focused on automation." />
-<link rel="canonical" href="https://dalfox.hahwul.com/" />
-<meta property="og:url" content="https://dalfox.hahwul.com/" />
-<meta property="og:site_name" content="DalFox" />
-<meta property="og:type" content="website" />
-<meta name="twitter:card" content="summary" />
-<meta property="twitter:title" content="DalFox" />
-<script type="application/ld+json">
-{"@context":"https://schema.org","@type":"WebSite","description":"Dalfox is a powerful open-source XSS scanner and utility focused on automation.","headline":"DalFox","name":"DalFox","url":"https://dalfox.hahwul.com/"}</script>
-
-  <link rel="alternate" type="application/rss+xml" title="DalFox" href="https://dalfox.hahwul.com/feed.xml" />
-</head>
-
-
-<body>
-
-  <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+    <meta charset="UTF-8">
+    <title>DalFox | Dalfox is a powerful open-source XSS scanner and utility focused on automation.</title>
+    <link rel='stylesheet' href='https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.13.0/css/all.min.css'>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="shortcut icon" href="/favicon.ico">
+    <meta property="og:title" content="DalFox" />
+    <meta property="og:locale" content="en_US" />
+    <meta name="description" content="Dalfox is a powerful open-source XSS scanner and utility focused on automation." />
+    <meta property="og:description" content="Dalfox is a powerful open-source XSS scanner and utility focused on automation." />
+    <link rel="canonical" href="https://dalfox.hahwul.com/" />
+    <meta property="og:url" content="https://dalfox.hahwul.com/" />
+    <meta property="og:site_name" content="DalFox" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary" />
+    <meta property="twitter:title" content="DalFox" />
+    <script type="application/ld+json">
+    {"@context":"https://schema.org","@type":"WebSite","description":"Dalfox is a powerful open-source XSS scanner and utility focused on automation.","headline":"DalFox","name":"DalFox","url":"https://dalfox.hahwul.com/"}</script>
+    <link rel="alternate" type="application/rss+xml" title="DalFox" href="https://dalfox.hahwul.com/feed.xml" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
     <link rel="manifest" href="/images/site.webmanifest">
@@ -38,192 +29,68 @@
     <meta name="msapplication-TileColor" content="#1e1e1f">
     <meta name="msapplication-config" content="/images/browserconfig.xml">
     <meta name="theme-color" content="#000000">
-  
-  <style>
-    /* Start Global Rules */
-* {
-  box-sizing: border-box;
-}
-body {
-    background-color: #0e0e10;
-    background-image: url('/images/bg.jpg');
-    background-size: cover;
-    background-repeat: no-repeat;
-    font-family: 'Open Sans', sans-serif;
-    background-blend-mode: soft-light;
-}
-a {
-  text-decoration: none;
-}
-ul {
-  list-style: none;
-  padding: 0;
-  margin: 0;
-}
-.container {
-  padding-left: 15px;
-  padding-right: 15px;
-  margin-left: auto;
-  margin-right: auto;
-}
-/* Small */
-@media (min-width: 768px) {
-  .container {
-    width: 750px;
-  }
-}
-/* Medium */
-@media (min-width: 992px) {
-  .container {
-    width: 970px;
-  }
-}
-/* Large */
-@media (min-width: 1200px) {
-  .container {
-    width: 1170px;
-  }
-}
-/* End Global Rules */
-
-/* Start dalfox-landing Page */
-.dalfox-landing-page header {
-  min-height: 80px;
-  display: flex;
-}
-@media (max-width: 767px) {
-  .dalfox-landing-page header {
-    min-height: auto;
-    display: initial;
-  }
-}
-.dalfox-landing-page header .container {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-@media (max-width: 767px) {
-  .dalfox-landing-page header .container {
-    flex-direction: column;
-    justify-content: center;
-  }
-}
-.dalfox-landing-page header .logo {
-  color: #aaaaaa;
-  font-style: italic;
-  text-transform: uppercase;
-  font-size: 20px;
-}
-@media (max-width: 767px) {
-  .dalfox-landing-page header .logo {
-    margin-top: 20px;
-    margin-bottom: 20px;
-  }
-}
-.dalfox-landing-page header .links {
-  display: flex;
-  align-items: center;
-}
-@media (max-width: 767px) {
-  .dalfox-landing-page header .links {
-    text-align: center;
-    gap: 10px;
-  }
-}
-.dalfox-landing-page header .links li {
-  margin-left: 30px;
-  color: #aaaaaa;
-  cursor: pointer;
-  transition: .3s;
-}
-@media (max-width: 767px) {
-  .dalfox-landing-page header .links li {
-    margin-left: auto;
-  }
-}
-.dalfox-landing-page header .links li:last-child {
-  border-radius: 20px;
-  padding: 10px 20px;
-  color: #FFF;
-  background-color: #6c63ff;
-}
-.dalfox-landing-page header .links li:not(:last-child):hover {
-  color: #6c63ff;
-}
-.dalfox-landing-page .content .container {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 140px;
-  min-height: calc(100vh - 80px);
-}
-@media (max-width: 767px) {
-  .dalfox-landing-page .content .container {
-    gap: 0;
-    min-height: calc(100vh - 101px);
-    justify-content: center;
-    flex-direction: column-reverse;
-  }
-}
-@media (max-width: 767px) {
-  .dalfox-landing-page .content .info {
-    text-align: center;
-    margin-bottom: 15px 
-  }
-}
-.dalfox-landing-page .content .info h1 {
-  color: #aaaaaa;
-  font-size: 44px;
-}
-.dalfox-landing-page .content .info p {
-  margin: 0;
-  line-height: 1.6;
-  font-size: 15px;
-  color: #aaaaaa;
-}
-.dalfox-landing-page .content .info button {
-  border: 0;
-  border-radius: 20px;
-  padding: 12px 30px;
-  margin-top: 30px;
-  cursor: pointer;
-  color: #FFF;
-  background-color: #6c63ff;
-}
-.dalfox-landing-page .content .image img {
-  max-width: 100%;
-}
-/* End dalfox-landing Page */
-  </style>
 </head>
+
 <body>
-<!-- partial:index.partial.html -->
-<!-- Start dalfox-landing Page -->
-      <div class="dalfox-landing-page">
-        <header>
-          <div class="container">
-            <a href="/" class="logo"><img src="/images/logo-wide.png" style="width: 120px;"></a>
-            <ul class="links">
-              <li><a style="color: white;" href="/page/overview/">Documents</a></li>
-              <li><a style="color: white;" href="https://github.com/hahwul/dalfox">Github</a></li>
-              <a href="/page/installation/"><li>Get Started</li></a>
-            </ul>
-          </div>
-        </header>
-        <div class="content">
-          <div class="container">
-            <div class="info">
-              <h1>🌙🦊 = XSS</h1>
-              <p>DalFox is a powerful open-source tool that focuses on automation, making it ideal for quickly scanning for XSS flaws and analyzing parameters.</p>
-            </div>
-            <div class="image">
-              <img src="/images/screen.png">
-            </div>
-          </div>
+    <section class="showcase">
+        <div class="dalfox-container">
+            <img src="/images/screen.png" alt="DalFox screen" style="opacity: 0.3;">
         </div>
-      </div>
-      <!-- End dalfox-landing Page -->
-<!-- partial -->
-  
+        <div class="content">
+            <h1><img src="/images/logo.png" alt="DalFox logo" style="width: 300px;"></h1>
+            <h3>Powerful open-source XSS scanner and utility focused on automation.</h3>
+            <a href="https://github.com/hahwul/dalfox" class="btn">Github</a>
+            <a href="/page/overview/" class="btn btn-highlight">Get Started!</a>
+        </div>
+    </section>
+
+    <section id="about">
+        <div class="content">
+            <h1>About</h1>
+            <p>
+                DalFox is a powerful open-source XSS scanning tool and parameter analyzer that accelerates the process
+                of detecting and verifying XSS flaws. It comes with a powerful testing engine and many niche features for advanced users.
+                Dal(달) is the Korean pronunciation of moon, and Fox stands for "Finder Of XSS" or 🦊.
+            </p>
+            <br><br>
+            <div class="row">
+                <div class="col-sm-3">
+                    <h1 class="text-center"><i class="fas fa-user-astronaut" aria-hidden="true"></i></h1>
+                    <h3 class="text-center">User-Friendly Pipeline</h3>
+                    <p class="text-center">Easily integrate DalFox into your CI/CD pipeline for seamless security testing.</p>
+                </div>
+                <div class="col-sm-3">
+                    <h1 class="text-center"><i class="fa fa-cogs" aria-hidden="true"></i></h1>
+                    <h3 class="text-center">Rich Features</h3>
+                    <p class="text-center">Packed with numerous niche features to enhance your XSS detection capabilities.</p>
+                </div>
+                <div class="col-sm-3">
+                    <h1 class="text-center"><i class="fas fa-rocket" aria-hidden="true"></i></h1>
+                    <h3 class="text-center">High Performance</h3>
+                    <p class="text-center">Experience lightning-fast scanning speeds without compromising accuracy.</p>
+                </div>
+                <div class="col-sm-3">
+                    <h1 class="text-center"><i class="fas fa-brain" aria-hidden="true"></i></h1>
+                    <h3 class="text-center">Advanced Analysis</h3>
+                    <p class="text-center">Utilize advanced analysis techniques to uncover even the most elusive XSS vulnerabilities.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="contributors">
+        <div class="content">
+            <h1>Contributors</h1>
+            <p>
+                DalFox is an open-source project made with ❤️.
+            </p>
+            <p>
+                If you want to contribute to this project, please see <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a> and submit a pull request with your cool content!
+            </p>
+            <br><br>
+            <img src="https://github.com/hahwul/dalfox/raw/main/CONTRIBUTORS.svg" alt="Contributors">
+        </div>
+    </section>
 </body>
+
 </html>
