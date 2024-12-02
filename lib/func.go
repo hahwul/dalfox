@@ -65,6 +65,7 @@ func Initialize(target Target, options Options) model.Options {
 		WAFEvasion:        false,
 		OutputRequest:     false,
 		OutputResponse:    false,
+		UseBAV:            false,
 	}
 	if len(options.UniqParam) > 0 {
 		newOptions.UniqParam = append(newOptions.UniqParam, options.UniqParam...)
@@ -176,6 +177,9 @@ func Initialize(target Target, options Options) model.Options {
 	}
 	if options.Sequence != -1 {
 		newOptions.Sequence = options.Sequence
+	}
+	if options.UseBAV == true {
+		newOptions.UseBAV = true
 	}
 
 	return newOptions

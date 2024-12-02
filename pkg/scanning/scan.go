@@ -136,7 +136,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 	sa := "SA: ✓ "
 	pa := "PA: ✓ "
 	bav := "BAV: ✓ "
-	if options.NoBAV {
+	if !options.UseBAV {
 		task = 2
 		bav = ""
 	}
@@ -155,7 +155,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 		pa = options.AuroraObject.Green(pa).String()
 		printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for analysis 🔍", options)
 	}()
-	if !options.NoBAV {
+	if options.UseBAV {
 		go func() {
 			defer wait.Done()
 			var bavWaitGroup sync.WaitGroup

@@ -25,7 +25,7 @@ var ignoreReturn, miningWord, method, customAlertValue, customAlertType, remoteP
 var timeout, concurrence, delay int
 var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, onlyCustomPayload, debug, useDeepDXSS, outputAll bool
 var options model.Options
-var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV, skipGrep, skipHeadless, wafEvasion, reportBool, outputRequest, outputResponse bool
+var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV, skipGrep, skipHeadless, wafEvasion, reportBool, outputRequest, outputResponse, useBAV bool
 var onlyPoC, foundActionShell, pocType, reportFormat string
 
 var rootCmd = &cobra.Command{
@@ -96,6 +96,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVarP(&followRedirect, "follow-redirects", "F", false, "Following redirection")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Not use colorize")
 	rootCmd.PersistentFlags().BoolVar(&noSpinner, "no-spinner", false, "Not use spinner")
+	rootCmd.PersistentFlags().BoolVar(&useBAV, "use-bav", false, "Use BAV(Basic Another Vulnerability) analysis")
 	rootCmd.PersistentFlags().BoolVar(&skipBAV, "skip-bav", false, "Skipping BAV(Basic Another Vulnerability) analysis")
 	rootCmd.PersistentFlags().BoolVar(&skipMiningDom, "skip-mining-dom", false, "Skipping DOM base parameter mining")
 	rootCmd.PersistentFlags().BoolVar(&skipMiningDict, "skip-mining-dict", false, "Skipping Dict base parameter mining")
@@ -169,6 +170,7 @@ func initConfig() {
 		ReportFormat:      reportFormat,
 		OutputRequest:     outputRequest,
 		OutputResponse:    outputResponse,
+		UseBAV:            useBAV,
 	}
 	// var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV bool
 

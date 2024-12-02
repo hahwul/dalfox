@@ -47,6 +47,7 @@ type Options struct {
 	HarWriter         *har.Writer `json:"har-file-path"`
 	OutputRequest     bool        `json:"output-request,omitempty"`
 	OutputResponse    bool        `json:"output-response,omitempty"`
+	UseBAV            bool        `json:"use-bav,omitempty"`
 }
 
 // Target is target object

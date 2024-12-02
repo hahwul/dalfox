@@ -79,6 +79,7 @@ type Options struct {
 	ReportBool        bool
 	OutputRequest     bool `json:"output-request,omitempty"`
 	OutputResponse    bool `json:"output-response,omitempty"`
+	UseBAV            bool `json:"use-bav,omitempty"`
 }
 
 // MassJob is list for mass
