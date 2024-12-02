@@ -25,21 +25,13 @@ sudo snap refresh dalfox
 This command will refresh the Dalfox snap to the latest version available in the Snapcraft store.
 
 ## Using Go
-If you installed Dalfox from the source using Go, you can update it depending on your Go version.
+If you installed Dalfox from the source using Go, you can update it with go install command.
 
-### For Go 1.17 and Later
 To update Dalfox, run:
 ```bash
 go install github.com/hahwul/dalfox/v2@latest
 ```
 This command will install the latest version of Dalfox from the source.
-
-### For Go 1.16 and Earlier
-To update Dalfox, run:
-```bash
-GO111MODULE=on go get github.com/hahwul/dalfox/v2
-```
-This command will fetch and install the latest version of Dalfox from the source.
 
 ## Using Docker
 If you are using Dalfox with Docker, you can update it by pulling the latest Docker image:
