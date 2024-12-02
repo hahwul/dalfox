@@ -36,14 +36,23 @@ This command will install the latest version of Dalfox from the source.
 ## Using Docker
 If you are using Dalfox with Docker, you can update it by pulling the latest Docker image:
 ```bash
+# dockerhub
 docker pull hahwul/dalfox:latest
+
+# ghcr
+docker pull ghcr.io/hahwul/dalfox:latest
 ```
 This command will download the latest Dalfox Docker image.
 
 ### Running the Updated Docker Image
 After pulling the latest image, you can run Dalfox using the updated Docker image:
+
 ```bash
+# docker hub
 docker run -it hahwul/dalfox:latest /app/dalfox url https://www.hahwul.com
+
+# ghcr
+docker run -it ghcr.io/hahwul/dalfox:latest /app/dalfox url https://www.hahwul.com
 ```
 
 ## Additional Resources

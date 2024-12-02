@@ -57,20 +57,33 @@ Dalfox provides Docker images by version. This method allows you to use Dalfox w
 ### Pull the Latest Docker Image
 To pull the latest Docker image of Dalfox, run:
 ```bash
+# docker hub
 docker pull hahwul/dalfox:latest
+
+# ghcr
+docker pull ghcr.io/hahwul/dalfox:latest
 ```
 
 ### Run Dalfox Using Docker
 You can run Dalfox using Docker with the following command:
 ```bash
+# docker hub
 docker run -it hahwul/dalfox:latest /app/dalfox url https://www.hahwul.com
+
+# ghcr
+docker run -it ghcr.io/hahwul/dalfox:latest /app/dalfox url https://www.hahwul.com
 ```
 
 ### Interactive Docker Shell
 For an interactive shell within the Docker container, run:
 ```bash
+# docker hub
 docker run -it hahwul/dalfox:latest /bin/bash
+
+# ghcr
+docker run -it ghcr.io/hahwul/dalfox:latest /bin/bash
 ```
+
 Once inside the container, you can run Dalfox:
 ```bash
 ./dalfox

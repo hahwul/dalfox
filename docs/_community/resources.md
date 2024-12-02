@@ -1,5 +1,5 @@
 ---
-title: Resource
+title: Resources
 nav_order: 1
 toc: true
 layout: page
