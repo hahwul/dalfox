@@ -42,7 +42,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 	}
 
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if (!options.NoBAV) && (payload == "toOpenRedirecting") && !(strings.Contains(oReq.Host, ".google.com")) {
+		if (options.UseBAV) && (payload == "toOpenRedirecting") && !(strings.Contains(oReq.Host, ".google.com")) {
 			if strings.Contains(req.URL.Host, "google.com") {
 				printing.DalLog("GREP", "Found Open Redirect. Payload: "+via[0].URL.String(), options)
 				poc := model.PoC{
@@ -110,7 +110,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 		ssti := getSSTIPayload()
 
 		grepResult := make(map[string][]string)
-		if !options.NoBAV {
+		if options.UseBAV {
 			if len(resp.Header["Dalfoxcrlf"]) != 0 {
 				poc := model.PoC{
 					Type:       "G",

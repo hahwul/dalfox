@@ -21,6 +21,11 @@ func boolToColorStr(b bool, options model.Options) string {
 
 // Summary is printing options
 func Summary(options model.Options, target string) {
+	bavState := false
+	if options.UseBAV {
+		bavState = true
+	}
+
 	if !options.Silence {
 		miningWord := "Gf-Patterns"
 		if options.MiningWordlist != "" {
@@ -32,7 +37,7 @@ func Summary(options model.Options, target string) {
 		}
 		fmt.Fprintf(os.Stderr, " 🏁  Method                 %s\n", options.AuroraObject.BrightBlue(options.Method).String())
 		fmt.Fprintf(os.Stderr, " 🖥   Worker                 %d\n", options.Concurrence)
-		fmt.Fprintf(os.Stderr, " 🔦  BAV                    %s\n", boolToColorStr(!options.NoBAV, options))
+		fmt.Fprintf(os.Stderr, " 🔦  BAV                    %s\n", boolToColorStr(bavState, options))
 		fmt.Fprintf(os.Stderr, " ⛏   Mining                 %s (%s)\n", boolToColorStr(options.Mining, options), miningWord)
 		fmt.Fprintf(os.Stderr, " 🔬  Mining-DOM             %s (mining from DOM)\n", boolToColorStr(options.FindingDOM, options))
 		if options.BlindURL != "" {

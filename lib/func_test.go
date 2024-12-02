@@ -34,6 +34,7 @@ func TestInitialize(t *testing.T) {
 		RemotePayloads:   "portswigger",
 		RemoteWordlists:  "burp",
 		PoCType:          "curl",
+		UseBAV:           false,
 	}
 	target := dalfox.Target{
 		URL:     "https://www.hahwul.com",
