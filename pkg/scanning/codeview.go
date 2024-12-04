@@ -5,32 +5,35 @@ import (
 	"strings"
 )
 
-//CodeView is showing reflected code function
+// CodeView is showing reflected code function
 func CodeView(resbody, pattern string) string {
-	var code string
 	if resbody == "" {
 		return ""
 	}
+
+	var builder strings.Builder
 	bodyarr := strings.Split(resbody, "\n")
+
 	for bk, bv := range bodyarr {
 		if strings.Contains(bv, pattern) {
-			max := len(bv)
-			if max > 80 {
-				index := strings.Index(bv, pattern)
-				if index < 20 {
-					code = code + strconv.Itoa(bk+1) + " line:  " + bv[:80] + "\n    "
-				} else {
-					if max < index+60 {
-						code = code + strconv.Itoa(bk+1) + " line:  " + bv[index-20:max] + "\n    "
-					} else {
-						code = code + strconv.Itoa(bk+1) + " line:  " + bv[index-20:index+60] + "\n    "
-					}
-				}
-			} else {
-				code = code + strconv.Itoa(bk+1) + " line:  " + bv + "\n    "
+			index := strings.Index(bv, pattern)
+			start := 0
+			if index > 20 {
+				start = index - 20
 			}
+			end := start + 80
+			if end > len(bv) {
+				end = len(bv)
+			}
+
+			builder.WriteString(strconv.Itoa(bk + 1))
+			builder.WriteString(" line:  ")
+			builder.WriteString(bv[start:end])
+			builder.WriteString("\n    ")
 		}
 	}
+
+	code := builder.String()
 	if len(code) > 4 {
 		return code[:len(code)-5]
 	}
