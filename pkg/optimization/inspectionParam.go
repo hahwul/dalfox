@@ -6,20 +6,25 @@ import (
 
 // CheckInspectionParam is Checking Inspection
 func CheckInspectionParam(options model.Options, k string) bool {
-	if len(options.UniqParam) > 0 {
-		for _, selectedParam := range options.UniqParam {
-			if selectedParam == k {
-				return true
-			}
-		}
-		return false
+	uniqParams := make(map[string]struct{}, len(options.UniqParam))
+	for _, param := range options.UniqParam {
+		uniqParams[param] = struct{}{}
 	}
-	if len(options.IgnoreParams) > 0 {
-		for _, ignoreParam := range options.IgnoreParams {
-			if ignoreParam == k {
-				return false
-			}
-		}
+
+	ignoreParams := make(map[string]struct{}, len(options.IgnoreParams))
+	for _, param := range options.IgnoreParams {
+		ignoreParams[param] = struct{}{}
 	}
+
+	if len(uniqParams) > 0 {
+		_, exists := uniqParams[k]
+		return exists
+	}
+
+	if len(ignoreParams) > 0 {
+		_, exists := ignoreParams[k]
+		return !exists
+	}
+
 	return true
 }
