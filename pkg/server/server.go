@@ -28,6 +28,12 @@ import (
 // RunAPIServer is Running Echo server with swag
 func RunAPIServer(options model.Options) {
 	var scans []string
+	e := setupEchoServer(options, &scans)
+	printing.DalLog("SYSTEM", "Listen "+e.Server.Addr, options)
+	graceful.ListenAndServe(e.Server, 5*time.Second)
+}
+
+func setupEchoServer(options model.Options, scans *[]string) *echo.Echo {
 	e := echo.New()
 	options.IsAPI = true
 	e.Server.Addr = options.ServerHost + ":" + strconv.Itoa(options.ServerPort)
@@ -43,63 +49,75 @@ func RunAPIServer(options model.Options) {
 			`"latency_human":"${latency_human}","bytes_in":${bytes_in},` +
 			`"bytes_out":${bytes_out}}` + "\n",
 	}))
-	e.GET("/health", func(c echo.Context) error {
-		r := &Res{
-			Code: 200,
-			Msg:  "ok",
-		}
-		return c.JSON(http.StatusOK, r)
-	})
+	e.GET("/health", healthHandler)
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 	e.GET("/scans", func(c echo.Context) error {
-		r := &Scans{
-			Code:  200,
-			Scans: scans,
-		}
-		return c.JSON(http.StatusNotFound, r)
+		return scansHandler(c, scans)
 	})
 	e.GET("/scan/:sid", func(c echo.Context) error {
-		sid := c.Param("sid")
-		if !contains(scans, sid) {
-			r := &Res{
-				Code: 404,
-				Msg:  "Not found scanid",
-			}
-			return c.JSON(http.StatusNotFound, r)
-
-		}
-		r := &Res{
-			Code: 200,
-		}
-		scan := GetScan(sid, options)
-		if len(scan.URL) == 0 {
-			r.Msg = "scanning"
-		} else {
-			r.Msg = "finish"
-			r.Data = scan.Results
-		}
-		return c.JSON(http.StatusOK, r)
+		return scanHandler(c, scans, options)
 	})
 	e.POST("/scan", func(c echo.Context) error {
-		rq := new(Req)
-		if err := c.Bind(rq); err != nil {
-			r := &Res{
-				Code: 500,
-				Msg:  "Parameter Bind error",
-			}
-			return c.JSON(http.StatusInternalServerError, r)
-		}
-		sid := GenerateRandomToken(rq.URL)
-		r := &Res{
-			Code: 200,
-			Msg:  sid,
-		}
-		scans = append(scans, sid)
-		go ScanFromAPI(rq.URL, rq.Options, options, sid)
-		return c.JSON(http.StatusOK, r)
+		return postScanHandler(c, scans, options)
 	})
-	printing.DalLog("SYSTEM", "Listen "+e.Server.Addr, options)
-	graceful.ListenAndServe(e.Server, 5*time.Second)
+	return e
+}
+
+func healthHandler(c echo.Context) error {
+	r := &Res{
+		Code: 200,
+		Msg:  "ok",
+	}
+	return c.JSON(http.StatusOK, r)
+}
+
+func scansHandler(c echo.Context, scans *[]string) error {
+	r := &Scans{
+		Code:  200,
+		Scans: *scans,
+	}
+	return c.JSON(http.StatusNotFound, r)
+}
+
+func scanHandler(c echo.Context, scans *[]string, options model.Options) error {
+	sid := c.Param("sid")
+	if !contains(*scans, sid) {
+		r := &Res{
+			Code: 404,
+			Msg:  "Not found scanid",
+		}
+		return c.JSON(http.StatusNotFound, r)
+	}
+	r := &Res{
+		Code: 200,
+	}
+	scan := GetScan(sid, options)
+	if len(scan.URL) == 0 {
+		r.Msg = "scanning"
+	} else {
+		r.Msg = "finish"
+		r.Data = scan.Results
+	}
+	return c.JSON(http.StatusOK, r)
+}
+
+func postScanHandler(c echo.Context, scans *[]string, options model.Options) error {
+	rq := new(Req)
+	if err := c.Bind(rq); err != nil {
+		r := &Res{
+			Code: 500,
+			Msg:  "Parameter Bind error",
+		}
+		return c.JSON(http.StatusInternalServerError, r)
+	}
+	sid := GenerateRandomToken(rq.URL)
+	r := &Res{
+		Code: 200,
+		Msg:  sid,
+	}
+	*scans = append(*scans, sid)
+	go ScanFromAPI(rq.URL, rq.Options, options, sid)
+	return c.JSON(http.StatusOK, r)
 }
 
 func contains(slice []string, item string) bool {

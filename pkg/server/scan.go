@@ -31,8 +31,7 @@ func ScanFromAPI(url string, rqOptions model.Options, options model.Options, sid
 	} else {
 		newOptions.Method = "GET"
 	}
-	escapedURL := strings.Replace(url, "\n", "", -1)
-	escapedURL = strings.Replace(escapedURL, "\r", "", -1)
+	escapedURL := cleanURL(url)
 	vLog.WithField("data1", sid).Debug(escapedURL)
 	vLog.WithField("data1", sid).Debug(newOptions)
 	_, _ = scan.Scan(url, newOptions, sid)
@@ -57,6 +56,17 @@ func GetScan(sid string, options model.Options) model.Scan {
 // @Produce  json
 // @Success 200 {array} string
 // @Router /scans [get]
-func GetScans() {
+func GetScans(options model.Options) []string {
+	var scans []string
+	for sid := range options.Scan {
+		scans = append(scans, sid)
+	}
+	return scans
+}
 
+// cleanURL removes newline and carriage return characters from the URL
+func cleanURL(url string) string {
+	escapedURL := strings.Replace(url, "\n", "", -1)
+	escapedURL = strings.Replace(escapedURL, "\r", "", -1)
+	return escapedURL
 }
