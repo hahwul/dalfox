@@ -21,6 +21,12 @@ on:
       - dalfox.go
       - Dockerfile
       - codecov.yml
+  workflow_dispatch:
+      inputs:
+         logLevel:
+            description: 'manual run'     
+            required: false
+            default: ''
 
 jobs:
   build:
