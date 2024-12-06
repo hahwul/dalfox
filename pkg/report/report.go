@@ -16,6 +16,11 @@ func GenerateReport(scanResult model.Result, options model.Options) {
 	fmt.Println("+ End: " + scanResult.EndTime.String())
 	fmt.Println("+ Duration: " + scanResult.Duration.String())
 
+	renderTable(scanResult.Params, options)
+	renderPoCTable(scanResult.PoCs, options)
+}
+
+func renderTable(params []model.ParamResult, options model.Options) {
 	table := tablewriter.NewWriter(os.Stdout)
 	table.SetHeader([]string{
 		"Param",
@@ -26,7 +31,7 @@ func GenerateReport(scanResult model.Result, options model.Options) {
 		"Chars",
 	})
 
-	for _, v := range scanResult.Params {
+	for _, v := range params {
 		chars := strings.Join(v.Chars, " ")
 		reflected := "false"
 		if v.Reflected {
@@ -45,7 +50,9 @@ func GenerateReport(scanResult model.Result, options model.Options) {
 	}
 	fmt.Println(options.AuroraObject.BrightGreen("\n[ Parameter Analysis ]"))
 	table.Render()
+}
 
+func renderPoCTable(pocs []model.PoC, options model.Options) {
 	pocTable := tablewriter.NewWriter(os.Stdout)
 	pocTable.SetHeader([]string{
 		"#",
@@ -57,7 +64,7 @@ func GenerateReport(scanResult model.Result, options model.Options) {
 		"CWE",
 	})
 
-	for i, v := range scanResult.PoCs {
+	for i, v := range pocs {
 		line := []string{
 			"#" + strconv.Itoa(i),
 			v.Type,
@@ -71,7 +78,7 @@ func GenerateReport(scanResult model.Result, options model.Options) {
 	}
 	fmt.Println(options.AuroraObject.BrightGreen("\n[ XSS PoCs ]"))
 	pocTable.Render()
-	for i, v := range scanResult.PoCs {
+	for i, v := range pocs {
 		fmt.Printf("[#%s] %s\n", strconv.Itoa(i), v.Data)
 	}
 }

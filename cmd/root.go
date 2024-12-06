@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/hahwul/dalfox/v2/pkg/har"
-
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	"github.com/hahwul/dalfox/v2/pkg/printing"
 	"github.com/logrusorgru/aurora"
@@ -172,24 +171,14 @@ func initConfig() {
 		OutputResponse:    outputResponse,
 		UseBAV:            useBAV,
 	}
-	// var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV bool
 
 	if harFilePath != "" {
-		f, err := os.Create(harFilePath)
-		if err != nil {
-			fmt.Println(err)
-		} else {
-			options.HarWriter, err = har.NewWriter(f, &har.Creator{Name: "dalfox", Version: printing.VERSION})
-			if err != nil {
-				fmt.Println(err)
-			}
-		}
+		initHarWriter()
 	}
 
 	if skipMiningAll {
 		options.FindingDOM = false
 		options.Mining = false
-
 	} else {
 		if skipMiningDom {
 			options.FindingDOM = false
@@ -204,34 +193,42 @@ func initConfig() {
 	}
 
 	if grep != "" {
-		// Open our jsonFile
-		jsonFile, err := os.Open(grep)
-		// if we os.Open returns an error then handle it
-		if err != nil {
-			fmt.Println(err)
-		}
-		printing.DalLog("SYSTEM", "Loaded "+grep+" file for grepping", options)
-		// defer the closing of our jsonFile so that we can parse it later on
-		defer jsonFile.Close()
-		byteValue, _ := io.ReadAll(jsonFile)
-		options.Grep = string(byteValue)
-
+		loadFile(grep, "grepping")
 	}
+
 	if config != "" {
-		// Open our jsonFile
-		jsonFile, err := os.Open(config)
-		// if we os.Open returns an error then handle it
+		loadFile(config, "config option")
+	}
+}
+
+func initHarWriter() {
+	f, err := os.Create(harFilePath)
+	if err != nil {
+		fmt.Println(err)
+	} else {
+		options.HarWriter, err = har.NewWriter(f, &har.Creator{Name: "dalfox", Version: printing.VERSION})
 		if err != nil {
 			fmt.Println(err)
 		}
-		printing.DalLog("SYSTEM", "Loaded "+config+" file for config option", options)
-		// defer the closing of our jsonFile so that we can parse it later on
-		defer jsonFile.Close()
+	}
+}
 
-		byteValue, _ := io.ReadAll(jsonFile)
-		err = json.Unmarshal([]byte(byteValue), &options)
+func loadFile(filePath, fileType string) {
+	jsonFile, err := os.Open(filePath)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	printing.DalLog("SYSTEM", "Loaded "+filePath+" file for "+fileType, options)
+	defer jsonFile.Close()
+
+	byteValue, _ := io.ReadAll(jsonFile)
+	if fileType == "config option" {
+		err = json.Unmarshal(byteValue, &options)
 		if err != nil {
 			printing.DalLog("SYSTEM", "Error while parsing config file", options)
 		}
+	} else {
+		options.Grep = string(byteValue)
 	}
 }

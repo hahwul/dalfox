@@ -9,7 +9,7 @@ import (
 // on a per-key basis. I.e. only one operation for
 // a given key can be done within the delay time
 type rateLimiter struct {
-	sync.Mutex
+	sync.RWMutex
 	delay time.Duration
 	ops   map[string]time.Time
 }
@@ -29,12 +29,12 @@ func (r *rateLimiter) Block(key string) {
 	now := time.Now()
 
 	r.Lock()
+	defer r.Unlock()
 
 	// if there's nothing in the map we can
 	// return straight away
-	if _, ok := r.ops[key]; !ok {
+	if t, ok := r.ops[key]; !ok || now.After(t.Add(r.delay)) {
 		r.ops[key] = now
-		r.Unlock()
 		return
 	}
 
@@ -43,7 +43,6 @@ func (r *rateLimiter) Block(key string) {
 	deadline := t.Add(r.delay)
 	if now.After(deadline) {
 		r.ops[key] = now
-		r.Unlock()
 		return
 	}
 
@@ -51,8 +50,7 @@ func (r *rateLimiter) Block(key string) {
 
 	// Set the time of the operation
 	r.ops[key] = now.Add(remaining)
-	r.Unlock()
 
 	// Block for the remaining time
-	<-time.After(remaining)
+	time.Sleep(remaining)
 }

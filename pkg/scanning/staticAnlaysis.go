@@ -1,6 +1,7 @@
 package scanning
 
 import (
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -13,96 +14,74 @@ func StaticAnalysis(target string, options model.Options, rl *rateLimiter) (map[
 	policy := make(map[string]string)
 	pathReflection := make(map[int]string)
 	req := optimization.GenerateNewRequest(target, "", options)
-	resbody, resp, _, _, err := SendReq(req, "", options)
+	_, resp, _, _, err := SendReq(req, "", options)
 	if err != nil {
 		return policy, pathReflection
 	}
-	_ = resbody
-	if resp.Header["Content-Type"] != nil {
-		policy["Content-Type"] = resp.Header["Content-Type"][0]
-	}
-	if resp.Header["Content-Security-Policy"] != nil {
-		policy["Content-Security-Policy"] = resp.Header["Content-Security-Policy"][0]
-		result := checkCSP(policy["Content-Security-Policy"])
-		if result != "" {
-			policy["BypassCSP"] = result
-		}
-	}
-	if resp.Header["X-Frame-Options"] != nil {
-		policy["X-Frame-Options"] = resp.Header["X-Frame-Options"][0]
-	}
-	if resp.Header["Strict-Transport-Security"] != nil {
-		policy["Strict-Transport-Security"] = resp.Header["Strict-Transport-Security"][0]
-	}
-	if resp.Header["Access-Control-Allow-Origin"] != nil {
-		policy["Access-Control-Allow-Origin"] = resp.Header["Access-Control-Allow-Origin"][0]
-	}
+
+	extractPolicyHeaders(resp.Header, policy)
+
 	paths := strings.Split(target, "/")
 
 	// case of https://domain/ + @
 	for idx := range paths {
 		if idx > 2 {
 			id := idx - 3
-			_ = id
-			//var tempPath []string
-			//copy(tempPath, paths)
 			tempPath := strings.Split(target, "/")
 			tempPath[idx] = "dalfoxpathtest"
-
 			tempURL := strings.Join(tempPath, "/")
-			req := optimization.GenerateNewRequest(tempURL, "", options)
-			rl.Block(req.Host)
-			resbody, _, _, vrs, err := SendReq(req, "dalfoxpathtest", options)
-			if err != nil {
-				return policy, pathReflection
-			}
-			if vrs {
-				pointer := optimization.Abstraction(resbody, "dalfoxpathtest")
-				smap := "Injected: "
-				tempSmap := make(map[string]int)
-
-				for _, v := range pointer {
-					if tempSmap[v] == 0 {
-						tempSmap[v] = 1
-					} else {
-						tempSmap[v] = tempSmap[v] + 1
-					}
-				}
-				for k, v := range tempSmap {
-					smap = smap + "/" + k + "(" + strconv.Itoa(v) + ")"
-				}
-				pathReflection[id] = smap
-			}
+			checkPathReflection(tempURL, id, options, rl, pathReflection)
 		}
 	}
 
 	// case of https://domain
 	if len(paths) == 3 {
-
 		tempURL := target + "/dalfoxpathtest"
-		req := optimization.GenerateNewRequest(tempURL, "", options)
-		rl.Block(req.Host)
-		resbody, _, _, vrs, err := SendReq(req, "dalfoxpathtest", options)
-		if err != nil {
-			return policy, pathReflection
-		}
-		if vrs {
-			pointer := optimization.Abstraction(resbody, "dalfoxpathtest")
-			smap := "Injected: "
-			tempSmap := make(map[string]int)
+		checkPathReflection(tempURL, 0, options, rl, pathReflection)
+	}
 
-			for _, v := range pointer {
-				if tempSmap[v] == 0 {
-					tempSmap[v] = 1
-				} else {
-					tempSmap[v] = tempSmap[v] + 1
-				}
-			}
-			for k, v := range tempSmap {
-				smap = smap + "/" + k + "(" + strconv.Itoa(v) + ")"
-			}
-			pathReflection[0] = smap
+	return policy, pathReflection
+}
+
+func extractPolicyHeaders(header http.Header, policy map[string]string) {
+	if contentType := header.Get("Content-Type"); contentType != "" {
+		policy["Content-Type"] = contentType
+	}
+	if csp := header.Get("Content-Security-Policy"); csp != "" {
+		policy["Content-Security-Policy"] = csp
+		if result := checkCSP(csp); result != "" {
+			policy["BypassCSP"] = result
 		}
 	}
-	return policy, pathReflection
+	if xFrameOptions := header.Get("X-Frame-Options"); xFrameOptions != "" {
+		policy["X-Frame-Options"] = xFrameOptions
+	}
+	if hsts := header.Get("Strict-Transport-Security"); hsts != "" {
+		policy["Strict-Transport-Security"] = hsts
+	}
+	if acao := header.Get("Access-Control-Allow-Origin"); acao != "" {
+		policy["Access-Control-Allow-Origin"] = acao
+	}
+}
+
+func checkPathReflection(tempURL string, id int, options model.Options, rl *rateLimiter, pathReflection map[int]string) {
+	req := optimization.GenerateNewRequest(tempURL, "", options)
+	rl.Block(req.Host)
+	resbody, _, _, vrs, err := SendReq(req, "dalfoxpathtest", options)
+	if err != nil {
+		return
+	}
+	if vrs {
+		pointer := optimization.Abstraction(resbody, "dalfoxpathtest")
+		smap := "Injected: "
+		tempSmap := make(map[string]int)
+
+		for _, v := range pointer {
+			tempSmap[v]++
+		}
+		for k, v := range tempSmap {
+			smap += "/" + k + "(" + strconv.Itoa(v) + ")"
+		}
+		pathReflection[id] = smap
+	}
 }
