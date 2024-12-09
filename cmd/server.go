@@ -27,6 +27,6 @@ func runServerCmd(cmd *cobra.Command, args []string) {
 
 func init() {
 	rootCmd.AddCommand(serverCmd)
-	serverCmd.Flags().IntVar(&port, "port", 6664, "Bind Port")
-	serverCmd.Flags().StringVar(&host, "host", "0.0.0.0", "Bind address")
+	serverCmd.Flags().IntVar(&port, "port", 6664, "Specify the port to bind the server to. Example: --port 6664")
+	serverCmd.Flags().StringVar(&host, "host", "0.0.0.0", "Specify the address to bind the server to. Example: --host '0.0.0.0'")
 }
