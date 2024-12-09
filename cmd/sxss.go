@@ -53,7 +53,7 @@ func printSXSSErrorAndUsage() {
 
 func init() {
 	rootCmd.AddCommand(sxssCmd)
-	sxssCmd.PersistentFlags().StringVar(&requestMethod, "request-method", "GET", "Request method send to the server")
-	sxssCmd.PersistentFlags().StringVar(&trigger, "trigger", "", "Checking this url after inject sxss code\n  * Example: --trigger=https://~~/profile")
-	sxssCmd.PersistentFlags().IntVar(&sequence, "sequence", -1, "Set sequence to first number\n  * Example: --trigger=https://~/view?no=SEQNC --sequence=3")
+	sxssCmd.PersistentFlags().StringVar(&requestMethod, "request-method", "GET", "Specify the HTTP request method to send to the server. Example: --request-method 'POST'")
+	sxssCmd.PersistentFlags().StringVar(&trigger, "trigger", "", "Specify the URL to check after injecting SXSS code. Example: --trigger 'https://example.com/profile'")
+	sxssCmd.PersistentFlags().IntVar(&sequence, "sequence", -1, "Set the initial sequence number for the trigger URL. Example: --trigger 'https://example.com/view?no=SEQNC' --sequence 3")
 }
