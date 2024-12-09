@@ -190,11 +190,11 @@ func printFileErrorAndUsage() {
 
 func init() {
 	rootCmd.AddCommand(fileCmd)
-	fileCmd.Flags().Bool("rawdata", false, "[FORMAT] Using req rawdata from Burp/ZAP")
-	fileCmd.Flags().Bool("har", false, "[FORMAT] Using HAR format")
-	fileCmd.Flags().Bool("http", false, "Using force http on rawdata mode")
-	fileCmd.Flags().Bool("multicast", false, "Parallel scanning N*Host mode (show only poc code)")
-	fileCmd.Flags().Bool("mass", false, "Parallel scanning N*Host mode (show only poc code)")
-	fileCmd.Flags().Bool("silence-force", false, "Only print PoC (not print progress)")
-	fileCmd.Flags().Int("mass-worker", 10, "Parallel worker of --mass and --multicast option")
+	fileCmd.Flags().Bool("rawdata", false, "[FORMAT] Use raw data from Burp/ZAP. Example: --rawdata")
+	fileCmd.Flags().Bool("har", false, "[FORMAT] Use HAR format. Example: --har")
+	fileCmd.Flags().Bool("http", false, "Force HTTP on raw data mode. Example: --http")
+	fileCmd.Flags().Bool("multicast", false, "Enable parallel scanning in N*Host mode (only shows PoC code). Example: --multicast")
+	fileCmd.Flags().Bool("mass", false, "Enable parallel scanning in N*Host mode (only shows PoC code). Example: --mass")
+	fileCmd.Flags().Bool("silence-force", false, "Only print PoC code, suppress progress output. Example: --silence-force")
+	fileCmd.Flags().Int("mass-worker", 10, "Set the number of parallel workers for --mass and --multicast options. Example: --mass-worker 10")
 }
