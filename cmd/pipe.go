@@ -159,8 +159,8 @@ func runSingleMode(targets []string, sf bool) {
 
 func init() {
 	rootCmd.AddCommand(pipeCmd)
-	pipeCmd.Flags().Bool("multicast", false, "Parallel scanning N*Host mode (show only poc code)")
-	pipeCmd.Flags().Bool("mass", false, "Parallel scanning N*Host mode (show only poc code)")
-	pipeCmd.Flags().Bool("silence-force", false, "Only print PoC (not print progress)")
-	pipeCmd.Flags().Int("mass-worker", 10, "Parallel worker of --mass and --multicast option")
+	pipeCmd.Flags().Bool("multicast", false, "Enable parallel scanning in N*Host mode (only shows PoC code). Example: --multicast")
+	pipeCmd.Flags().Bool("mass", false, "Enable parallel scanning in N*Host mode (only shows PoC code). Example: --mass")
+	pipeCmd.Flags().Bool("silence-force", false, "Only print PoC code, suppress progress output. Example: --silence-force")
+	pipeCmd.Flags().Int("mass-worker", 10, "Set the number of parallel workers for --mass and --multicast options. Example: --mass-worker 10")
 }

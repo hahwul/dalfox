@@ -14,18 +14,9 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var cfgFile string
-var optionsStr = make(map[string]string)
-var optionsBool = make(map[string]bool)
-var header, p, ignoreParams []string
-var config, cookie, data, customPayload, userAgent, blind, output, format, foundAction, proxy, grep, cookieFromRaw string
-var harFilePath string
-var ignoreReturn, miningWord, method, customAlertValue, customAlertType, remotePayloads, remoteWordlists string
-var timeout, concurrence, delay int
-var onlyDiscovery, silence, followRedirect, mining, findingDOM, noColor, noSpinner, onlyCustomPayload, debug, useDeepDXSS, outputAll bool
 var options model.Options
-var skipMiningDom, skipMiningDict, skipMiningAll, skipXSSScan, skipBAV, skipGrep, skipHeadless, wafEvasion, reportBool, outputRequest, outputResponse, useBAV bool
-var onlyPoC, foundActionShell, pocType, reportFormat string
+var harFilePath string
+var args Args
 
 var rootCmd = &cobra.Command{
 	Use: "dalfox",
@@ -51,153 +42,154 @@ func Execute() {
 
 func init() {
 	cobra.OnInitialize(initConfig)
+
 	// Slice
-	rootCmd.PersistentFlags().StringSliceVarP(&header, "header", "H", []string{}, "Add custom headers")
-	rootCmd.PersistentFlags().StringSliceVarP(&p, "param", "p", []string{}, "Only testing selected parameters")
-	rootCmd.PersistentFlags().StringSliceVar(&ignoreParams, "ignore-param", []string{}, "Ignores this parameter when scanning.\n  * Example: --ignore-param api_token --ignore-param csrf_token")
+	rootCmd.PersistentFlags().StringSliceVarP(&args.Header, "header", "H", []string{}, "Add custom headers to the request. Example: -H 'Authorization: Bearer <token>'")
+	rootCmd.PersistentFlags().StringSliceVarP(&args.P, "param", "p", []string{}, "Specify parameters to test. Example: -p 'username' -p 'password'")
+	rootCmd.PersistentFlags().StringSliceVar(&args.IgnoreParams, "ignore-param", []string{}, "Ignore specific parameters during scanning. Example: --ignore-param 'api_token' --ignore-param 'csrf_token'")
 
-	//Str
-	rootCmd.PersistentFlags().StringVar(&config, "config", "", "Using config from file")
-	rootCmd.PersistentFlags().StringVarP(&cookie, "cookie", "C", "", "Add custom cookie")
-	rootCmd.PersistentFlags().StringVarP(&data, "data", "d", "", "Using POST Method and add Body data")
-	rootCmd.PersistentFlags().StringVar(&customPayload, "custom-payload", "", "Add custom payloads from file")
-	rootCmd.PersistentFlags().StringVar(&customAlertValue, "custom-alert-value", "1", "Change alert value\n  * Example: --custom-alert-value=document.cookie")
-	rootCmd.PersistentFlags().StringVar(&customAlertType, "custom-alert-type", "none", "Change alert value type\n  * Example: --custom-alert-type=none / --custom-alert-type=str,none")
-	rootCmd.PersistentFlags().StringVar(&userAgent, "user-agent", "", "Add custom UserAgent")
-	rootCmd.PersistentFlags().StringVarP(&blind, "blind", "b", "", "Add your blind xss\n  * Example: -b your-callback-url")
-	rootCmd.PersistentFlags().StringVarP(&output, "output", "o", "", "Write to output file (By default, only the PoC code is saved)")
-	rootCmd.PersistentFlags().StringVar(&format, "format", "plain", "Stdout output format\n  * Supported: plain / json")
-	rootCmd.PersistentFlags().StringVar(&foundAction, "found-action", "", "If found weak/vuln, action(cmd) to next\n  * Example: --found-action='./notify.sh'")
-	rootCmd.PersistentFlags().StringVar(&foundActionShell, "found-action-shell", "bash", "Select shell application for --found-action")
-	rootCmd.PersistentFlags().StringVar(&proxy, "proxy", "", "Send all request to proxy server\n  * Example: --proxy http://127.0.0.1:8080")
-	rootCmd.PersistentFlags().StringVar(&grep, "grep", "", "Using custom grepping file\n  * Example: --grep ./samples/sample_grep.json")
-	rootCmd.PersistentFlags().StringVar(&ignoreReturn, "ignore-return", "", "Ignores scanning from return code\n  * Example: --ignore-return 302,403,404")
-	rootCmd.PersistentFlags().StringVarP(&miningWord, "mining-dict-word", "W", "", "Custom wordlist file for param mining\n  * Example: --mining-dict-word word.txt")
-	rootCmd.PersistentFlags().StringVarP(&method, "method", "X", "GET", "Force overriding HTTP Method\n  * Example: -X PUT")
-	rootCmd.PersistentFlags().StringVarP(&cookieFromRaw, "cookie-from-raw", "", "", "Load cookie from burp raw http request\n  * Example: --cookie-from-raw request.txt")
-	rootCmd.PersistentFlags().StringVar(&remotePayloads, "remote-payloads", "", "Using remote payload for XSS testing\n  * Supported: portswigger/payloadbox\n  * Example: --remote-payloads=portswigger,payloadbox")
-	rootCmd.PersistentFlags().StringVar(&remoteWordlists, "remote-wordlists", "", "Using remote wordlists for param mining\n  * Supported: burp/assetnote\n  * Example: --remote-wordlists=burp")
-	rootCmd.PersistentFlags().StringVar(&onlyPoC, "only-poc", "", "Shows only the PoC code for the specified pattern (g: grep / r: reflected / v: verified)\n * Example: --only-poc='g,v'")
-	rootCmd.PersistentFlags().StringVar(&pocType, "poc-type", "plain", "Select PoC type \n * Supported: plain/curl/httpie/http-request\n * Example: --poc-type='curl'")
-	rootCmd.PersistentFlags().StringVar(&reportFormat, "report-format", "plain", "Format of --report flag [plain/json]")
-	rootCmd.PersistentFlags().StringVar(&harFilePath, "har-file-path", "", "Path to save HAR of scan requests to")
+	// String
+	rootCmd.PersistentFlags().StringVar(&args.Config, "config", "", "Load configuration from a file. Example: --config 'config.json'")
+	rootCmd.PersistentFlags().StringVarP(&args.Cookie, "cookie", "C", "", "Add custom cookies to the request. Example: -C 'sessionid=abc123'")
+	rootCmd.PersistentFlags().StringVarP(&args.Data, "data", "d", "", "Use POST method and add body data. Example: -d 'username=admin&password=admin'")
+	rootCmd.PersistentFlags().StringVar(&args.CustomPayload, "custom-payload", "", "Load custom payloads from a file. Example: --custom-payload 'payloads.txt'")
+	rootCmd.PersistentFlags().StringVar(&args.CustomAlertValue, "custom-alert-value", "1", "Set a custom alert value. Example: --custom-alert-value 'document.cookie'")
+	rootCmd.PersistentFlags().StringVar(&args.CustomAlertType, "custom-alert-type", "none", "Set a custom alert type. Example: --custom-alert-type 'str,none'")
+	rootCmd.PersistentFlags().StringVar(&args.UserAgent, "user-agent", "", "Set a custom User-Agent header. Example: --user-agent 'Mozilla/5.0'")
+	rootCmd.PersistentFlags().StringVarP(&args.Blind, "blind", "b", "", "Specify a blind XSS callback URL. Example: -b 'https://your-callback-url.com'")
+	rootCmd.PersistentFlags().StringVarP(&args.Output, "output", "o", "", "Write output to a file. Example: -o 'output.txt'")
+	rootCmd.PersistentFlags().StringVar(&args.Format, "format", "plain", "Set the output format. Supported: plain, json. Example: --format 'json'")
+	rootCmd.PersistentFlags().StringVar(&args.FoundAction, "found-action", "", "Execute a command when a vulnerability is found. Example: --found-action './notify.sh'")
+	rootCmd.PersistentFlags().StringVar(&args.FoundActionShell, "found-action-shell", "bash", "Specify the shell to use for the found action. Example: --found-action-shell 'bash'")
+	rootCmd.PersistentFlags().StringVar(&args.Proxy, "proxy", "", "Send all requests through a proxy server. Example: --proxy 'http://127.0.0.1:8080'")
+	rootCmd.PersistentFlags().StringVar(&args.Grep, "grep", "", "Use a custom grepping file. Example: --grep './samples/sample_grep.json'")
+	rootCmd.PersistentFlags().StringVar(&args.IgnoreReturn, "ignore-return", "", "Ignore specific HTTP return codes. Example: --ignore-return '302,403,404'")
+	rootCmd.PersistentFlags().StringVarP(&args.MiningWord, "mining-dict-word", "W", "", "Specify a custom wordlist file for parameter mining. Example: -W 'wordlist.txt'")
+	rootCmd.PersistentFlags().StringVarP(&args.Method, "method", "X", "GET", "Override the HTTP method. Example: -X 'PUT'")
+	rootCmd.PersistentFlags().StringVarP(&args.CookieFromRaw, "cookie-from-raw", "", "", "Load cookies from a raw HTTP request file. Example: --cookie-from-raw 'request.txt'")
+	rootCmd.PersistentFlags().StringVar(&args.RemotePayloads, "remote-payloads", "", "Use remote payloads for XSS testing. Supported: portswigger, payloadbox. Example: --remote-payloads 'portswigger,payloadbox'")
+	rootCmd.PersistentFlags().StringVar(&args.RemoteWordlists, "remote-wordlists", "", "Use remote wordlists for parameter mining. Supported: burp, assetnote. Example: --remote-wordlists 'burp'")
+	rootCmd.PersistentFlags().StringVar(&args.OnlyPoC, "only-poc", "", "Show only the PoC code for the specified pattern. Supported: g (grep), r (reflected), v (verified). Example: --only-poc 'g,v'")
+	rootCmd.PersistentFlags().StringVar(&args.PoCType, "poc-type", "plain", "Select the PoC type. Supported: plain, curl, httpie, http-request. Example: --poc-type 'curl'")
+	rootCmd.PersistentFlags().StringVar(&args.ReportFormat, "report-format", "plain", "Set the format of the report. Supported: plain, json. Example: --report-format 'json'")
+	rootCmd.PersistentFlags().StringVar(&args.HarFilePath, "har-file-path", "", "Specify the path to save HAR files of scan requests. Example: --har-file-path 'scan.har'")
 
-	//Int
-	rootCmd.PersistentFlags().IntVar(&timeout, "timeout", 10, "Second of timeout")
-	rootCmd.PersistentFlags().IntVar(&delay, "delay", 0, "Milliseconds between send to same host (1000==1s)")
-	rootCmd.PersistentFlags().IntVarP(&concurrence, "worker", "w", 100, "Number of worker")
+	// Int
+	rootCmd.PersistentFlags().IntVar(&args.Timeout, "timeout", 10, "Set the request timeout in seconds. Example: --timeout 10")
+	rootCmd.PersistentFlags().IntVar(&args.Delay, "delay", 0, "Set the delay between requests to the same host in milliseconds. Example: --delay 1000")
+	rootCmd.PersistentFlags().IntVarP(&args.Concurrence, "worker", "w", 100, "Set the number of concurrent workers. Example: -w 100")
 
-	//Bool
-	rootCmd.PersistentFlags().BoolVar(&onlyDiscovery, "only-discovery", false, "Only testing parameter analysis (same '--skip-xss-scanning' option)")
-	rootCmd.PersistentFlags().BoolVarP(&silence, "silence", "S", false, "Only print PoC Code and Progress(for pipe/file mode)")
-	rootCmd.PersistentFlags().BoolVar(&mining, "mining-dict", true, "Find new parameter with dictionary attack, default is Gf-Patterns=>XSS")
-	rootCmd.PersistentFlags().BoolVar(&findingDOM, "mining-dom", true, "Find new parameter in DOM (attribute/js value)")
-	rootCmd.PersistentFlags().BoolVarP(&followRedirect, "follow-redirects", "F", false, "Following redirection")
-	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Not use colorize")
-	rootCmd.PersistentFlags().BoolVar(&noSpinner, "no-spinner", false, "Not use spinner")
-	rootCmd.PersistentFlags().BoolVar(&useBAV, "use-bav", false, "Use BAV(Basic Another Vulnerability) analysis")
-	rootCmd.PersistentFlags().BoolVar(&skipBAV, "skip-bav", false, "Skipping BAV(Basic Another Vulnerability) analysis")
-	rootCmd.PersistentFlags().BoolVar(&skipMiningDom, "skip-mining-dom", false, "Skipping DOM base parameter mining")
-	rootCmd.PersistentFlags().BoolVar(&skipMiningDict, "skip-mining-dict", false, "Skipping Dict base parameter mining")
-	rootCmd.PersistentFlags().BoolVar(&skipMiningAll, "skip-mining-all", false, "Skipping ALL parameter mining")
-	rootCmd.PersistentFlags().BoolVar(&skipXSSScan, "skip-xss-scanning", false, "Skipping XSS Scanning (same '--only-discovery' option)")
-	rootCmd.PersistentFlags().BoolVar(&onlyCustomPayload, "only-custom-payload", false, "Only testing custom payload (required --custom-payload)")
-	rootCmd.PersistentFlags().BoolVar(&skipGrep, "skip-grepping", false, "Skipping built-in grepping")
-	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "debug mode, save all log using -o option")
-	rootCmd.PersistentFlags().BoolVar(&skipHeadless, "skip-headless", false, "Skipping headless browser base scanning[DOM XSS and inJS verify]")
-	rootCmd.PersistentFlags().BoolVar(&useDeepDXSS, "deep-domxss", false, "DOM XSS Testing with more payloads on headless [so slow]")
-	rootCmd.PersistentFlags().BoolVar(&outputAll, "output-all", false, "All log write mode (-o or stdout)")
-	rootCmd.PersistentFlags().BoolVar(&wafEvasion, "waf-evasion", false, "Avoid blocking by adjusting the speed when detecting WAF (worker=1 delay=3s)")
-	rootCmd.PersistentFlags().BoolVar(&reportBool, "report", false, "Show detail report")
-	rootCmd.PersistentFlags().BoolVar(&outputRequest, "output-request", false, "Include raw HTTP requests in the results.")
-	rootCmd.PersistentFlags().BoolVar(&outputResponse, "output-response", false, "Include raw HTTP response in the results.")
+	// Bool
+	rootCmd.PersistentFlags().BoolVar(&args.OnlyDiscovery, "only-discovery", false, "Only perform parameter analysis, skip XSS scanning. Example: --only-discovery")
+	rootCmd.PersistentFlags().BoolVarP(&args.Silence, "silence", "S", false, "Only print PoC code and progress. Example: -S")
+	rootCmd.PersistentFlags().BoolVar(&args.Mining, "mining-dict", true, "Enable dictionary-based parameter mining. Example: --mining-dict")
+	rootCmd.PersistentFlags().BoolVar(&args.FindingDOM, "mining-dom", true, "Enable DOM-based parameter mining. Example: --mining-dom")
+	rootCmd.PersistentFlags().BoolVarP(&args.FollowRedirect, "follow-redirects", "F", false, "Follow HTTP redirects. Example: -F")
+	rootCmd.PersistentFlags().BoolVar(&args.NoColor, "no-color", false, "Disable colorized output. Example: --no-color")
+	rootCmd.PersistentFlags().BoolVar(&args.NoSpinner, "no-spinner", false, "Disable spinner animation. Example: --no-spinner")
+	rootCmd.PersistentFlags().BoolVar(&args.UseBAV, "use-bav", false, "Enable Basic Another Vulnerability (BAV) analysis. Example: --use-bav")
+	rootCmd.PersistentFlags().BoolVar(&args.SkipBAV, "skip-bav", false, "Skip Basic Another Vulnerability (BAV) analysis. Example: --skip-bav")
+	rootCmd.PersistentFlags().BoolVar(&args.SkipMiningDom, "skip-mining-dom", false, "Skip DOM-based parameter mining. Example: --skip-mining-dom")
+	rootCmd.PersistentFlags().BoolVar(&args.SkipMiningDict, "skip-mining-dict", false, "Skip dictionary-based parameter mining. Example: --skip-mining-dict")
+	rootCmd.PersistentFlags().BoolVar(&args.SkipMiningAll, "skip-mining-all", false, "Skip all parameter mining. Example: --skip-mining-all")
+	rootCmd.PersistentFlags().BoolVar(&args.SkipXSSScan, "skip-xss-scanning", false, "Skip XSS scanning. Example: --skip-xss-scanning")
+	rootCmd.PersistentFlags().BoolVar(&args.OnlyCustomPayload, "only-custom-payload", false, "Only test custom payloads. Example: --only-custom-payload")
+	rootCmd.PersistentFlags().BoolVar(&args.SkipGrep, "skip-grepping", false, "Skip built-in grepping. Example: --skip-grepping")
+	rootCmd.PersistentFlags().BoolVar(&args.Debug, "debug", false, "Enable debug mode and save all logs. Example: --debug")
+	rootCmd.PersistentFlags().BoolVar(&args.SkipHeadless, "skip-headless", false, "Skip headless browser-based scanning (DOM XSS and inJS verification). Example: --skip-headless")
+	rootCmd.PersistentFlags().BoolVar(&args.UseDeepDXSS, "deep-domxss", false, "Enable deep DOM XSS testing with more payloads (slow). Example: --deep-domxss")
+	rootCmd.PersistentFlags().BoolVar(&args.OutputAll, "output-all", false, "Enable all log write mode (output to file or stdout). Example: --output-all")
+	rootCmd.PersistentFlags().BoolVar(&args.WAFEvasion, "waf-evasion", false, "Enable WAF evasion by adjusting speed when detecting WAF (worker=1, delay=3s). Example: --waf-evasion")
+	rootCmd.PersistentFlags().BoolVar(&args.ReportBool, "report", false, "Show detailed report. Example: --report")
+	rootCmd.PersistentFlags().BoolVar(&args.OutputRequest, "output-request", false, "Include raw HTTP requests in the results. Example: --output-request")
+	rootCmd.PersistentFlags().BoolVar(&args.OutputResponse, "output-response", false, "Include raw HTTP responses in the results. Example: --output-response")
 }
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
 	stime := time.Now()
-	au := aurora.NewAurora(!noColor)
+	au := aurora.NewAurora(!args.NoColor)
 	options = model.Options{
-		Header:            header,
-		Cookie:            cookie,
-		UniqParam:         p,
-		BlindURL:          blind,
-		CustomPayloadFile: customPayload,
-		CustomAlertValue:  customAlertValue,
-		CustomAlertType:   customAlertType,
-		Data:              data,
-		UserAgent:         userAgent,
-		OutputFile:        output,
-		Format:            format,
-		FoundAction:       foundAction,
-		FoundActionShell:  foundActionShell,
-		ProxyAddress:      proxy,
-		Grep:              grep,
-		IgnoreReturn:      ignoreReturn,
-		IgnoreParams:      ignoreParams,
-		Timeout:           timeout,
-		Concurrence:       concurrence,
-		Delay:             delay,
-		OnlyDiscovery:     onlyDiscovery,
-		OnlyCustomPayload: onlyCustomPayload,
-		Silence:           silence,
-		FollowRedirect:    followRedirect,
+		Header:            args.Header,
+		Cookie:            args.Cookie,
+		UniqParam:         args.P,
+		BlindURL:          args.Blind,
+		CustomPayloadFile: args.CustomPayload,
+		CustomAlertValue:  args.CustomAlertValue,
+		CustomAlertType:   args.CustomAlertType,
+		Data:              args.Data,
+		UserAgent:         args.UserAgent,
+		OutputFile:        args.Output,
+		Format:            args.Format,
+		FoundAction:       args.FoundAction,
+		FoundActionShell:  args.FoundActionShell,
+		ProxyAddress:      args.Proxy,
+		Grep:              args.Grep,
+		IgnoreReturn:      args.IgnoreReturn,
+		IgnoreParams:      args.IgnoreParams,
+		Timeout:           args.Timeout,
+		Concurrence:       args.Concurrence,
+		Delay:             args.Delay,
+		OnlyDiscovery:     args.OnlyDiscovery,
+		OnlyCustomPayload: args.OnlyCustomPayload,
+		Silence:           args.Silence,
+		FollowRedirect:    args.FollowRedirect,
 		Scan:              make(map[string]model.Scan),
-		Mining:            mining,
-		MiningWordlist:    miningWord,
-		FindingDOM:        findingDOM,
-		NoColor:           noColor,
-		Method:            method,
-		NoSpinner:         noSpinner,
-		NoBAV:             skipBAV,
-		NoGrep:            skipGrep,
-		Debug:             debug,
-		CookieFromRaw:     cookieFromRaw,
+		Mining:            args.Mining,
+		MiningWordlist:    args.MiningWord,
+		FindingDOM:        args.FindingDOM,
+		NoColor:           args.NoColor,
+		Method:            args.Method,
+		NoSpinner:         args.NoSpinner,
+		NoBAV:             args.SkipBAV,
+		NoGrep:            args.SkipGrep,
+		Debug:             args.Debug,
+		CookieFromRaw:     args.CookieFromRaw,
 		AuroraObject:      au,
 		StartTime:         stime,
 		MulticastMode:     false,
-		RemotePayloads:    remotePayloads,
-		RemoteWordlists:   remoteWordlists,
-		UseHeadless:       !skipHeadless,
-		UseDeepDXSS:       useDeepDXSS,
-		OnlyPoC:           onlyPoC,
-		OutputAll:         outputAll,
+		RemotePayloads:    args.RemotePayloads,
+		RemoteWordlists:   args.RemoteWordlists,
+		UseHeadless:       !args.SkipHeadless,
+		UseDeepDXSS:       args.UseDeepDXSS,
+		OnlyPoC:           args.OnlyPoC,
+		OutputAll:         args.OutputAll,
 		WAF:               false,
-		WAFEvasion:        wafEvasion,
-		PoCType:           pocType,
-		ReportBool:        reportBool,
-		ReportFormat:      reportFormat,
-		OutputRequest:     outputRequest,
-		OutputResponse:    outputResponse,
-		UseBAV:            useBAV,
+		WAFEvasion:        args.WAFEvasion,
+		PoCType:           args.PoCType,
+		ReportBool:        args.ReportBool,
+		ReportFormat:      args.ReportFormat,
+		OutputRequest:     args.OutputRequest,
+		OutputResponse:    args.OutputResponse,
+		UseBAV:            args.UseBAV,
 	}
 
-	if harFilePath != "" {
+	if args.HarFilePath != "" {
 		initHarWriter()
 	}
 
-	if skipMiningAll {
+	if args.SkipMiningAll {
 		options.FindingDOM = false
 		options.Mining = false
 	} else {
-		if skipMiningDom {
+		if args.SkipMiningDom {
 			options.FindingDOM = false
 		}
-		if skipMiningDict {
+		if args.SkipMiningDict {
 			options.Mining = false
 		}
 	}
 
-	if skipXSSScan {
+	if args.SkipXSSScan {
 		options.OnlyDiscovery = true
 	}
 
-	if grep != "" {
-		loadFile(grep, "grepping")
+	if args.Grep != "" {
+		loadFile(args.Grep, "grepping")
 	}
 
-	if config != "" {
-		loadFile(config, "config option")
+	if args.Config != "" {
+		loadFile(args.Config, "config option")
 	}
 }
 
