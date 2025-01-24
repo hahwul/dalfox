@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 
@@ -30,7 +31,7 @@ func TestSingleRequest(t *testing.T) {
 	rt := har.NewRoundTripper(nil, hw, nil)
 	c := &http.Client{Transport: rt}
 
-	resp, err := c.Get("https://example.com")
+	resp, err := c.Get("https://www.hahwul.com")
 	require.NoError(t, err)
 	assert.NotNil(t, resp)
 	assert.Equal(t, 200, resp.StatusCode)
@@ -53,7 +54,7 @@ func TestMultipleRequests(t *testing.T) {
 	g, _ := errgroup.WithContext(context.Background())
 	for idx := 0; idx < 5; idx++ {
 		g.Go(func() error {
-			resp, err := c.Get("https://example.com")
+			resp, err := c.Get("https://www.hahwul.com")
 			require.NoError(t, err)
 			assert.NotNil(t, resp)
 			assert.Equal(t, 200, resp.StatusCode)
@@ -90,7 +91,7 @@ func TestRewrite(t *testing.T) {
 
 	c := &http.Client{Transport: rt}
 
-	req, _ := http.NewRequestWithContext(ctx, "GET", "https://example.com", nil)
+	req, _ := http.NewRequestWithContext(ctx, "GET", "https://www.hahwul.com", nil)
 	req = har.AddMessageIDToRequest(req)
 	firstMessageID := har.MessageIDFromRequest(req)
 
@@ -98,7 +99,7 @@ func TestRewrite(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, resp)
 
-	req, _ = http.NewRequestWithContext(ctx, "GET", "https://example.com/?a=b&c=d", nil)
+	req, _ = http.NewRequestWithContext(ctx, "GET", "https://www.hahwul.com/?a=b&c=d", nil)
 	req = har.AddMessageIDToRequest(req)
 	secondMessageID := har.MessageIDFromRequest(req)
 
@@ -126,6 +127,14 @@ func TestRewrite(t *testing.T) {
 }
 
 func TestSinglePostJSONRequest(t *testing.T) {
+	// 로컬 서버 생성
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"success"}`))
+	}))
+	defer server.Close()
+
 	buf := &bytes.Buffer{}
 
 	hw, err := har.NewWriter(buf, creator)
@@ -138,10 +147,10 @@ func TestSinglePostJSONRequest(t *testing.T) {
 	pbytes, _ := json.Marshal(person)
 	buff := bytes.NewBuffer(pbytes)
 
-	resp, err := c.Post("https://example.com", "application/json", buff)
+	resp, err := c.Post(server.URL, "application/json", buff)
 	require.NoError(t, err)
 	assert.NotNil(t, resp)
-	assert.Equal(t, 405, resp.StatusCode)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	err = hw.Close()
 	require.NoError(t, err)
@@ -150,6 +159,14 @@ func TestSinglePostJSONRequest(t *testing.T) {
 }
 
 func TestSinglePostFormRequest(t *testing.T) {
+	// 로컬 서버 생성
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-www-form-urlencoded")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`status=success`))
+	}))
+	defer server.Close()
+
 	buf := &bytes.Buffer{}
 
 	hw, err := har.NewWriter(buf, creator)
@@ -158,11 +175,10 @@ func TestSinglePostFormRequest(t *testing.T) {
 	rt := har.NewRoundTripper(nil, hw, nil)
 	c := &http.Client{Transport: rt}
 
-	resp, err := c.PostForm("https://example.com", url.Values{"Name": {"Apple"}})
-
+	resp, err := c.PostForm(server.URL, url.Values{"Name": {"Apple"}})
 	require.NoError(t, err)
 	assert.NotNil(t, resp)
-	assert.Equal(t, 405, resp.StatusCode)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	err = hw.Close()
 	require.NoError(t, err)
