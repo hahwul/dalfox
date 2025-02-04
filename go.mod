@@ -2,8 +2,6 @@ module github.com/hahwul/dalfox/v2
 
 go 1.23
 
-replace github.com/hahwul/dalfox/v2 => github.com/arjun-1/dalfox/v2 v2.0.0-20250204152824-5ac55bdc2399
-
 require (
 	github.com/PuerkitoBio/goquery v1.10.1
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
