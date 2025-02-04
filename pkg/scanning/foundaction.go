@@ -15,7 +15,7 @@ func foundAction(options model.Options, target, query, ptype string) {
 	afterCmd = strings.ReplaceAll(afterCmd, "@@target@@", target)
 	afterCmd = strings.ReplaceAll(afterCmd, "@@type@@", ptype)
 	cmd := exec.Command(options.FoundActionShell, "-c", afterCmd)
-	err := cmd.Start()
+	err := cmd.Run()
 	if err != nil {
 		printing.DalLog("ERROR", "execution error from found-action", options)
 	}
