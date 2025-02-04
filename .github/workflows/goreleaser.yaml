@@ -1,26 +1,21 @@
+---
 name: GoReleaser
-
 on:
   push:
-    tags: [ 'no-trigger*.*.*' ]
-
+    tags: [no-trigger*.*.*]
 permissions:
   contents: write
-
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
     steps:
-      -
-        name: Checkout
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      -
-        name: Set up Go
+      - name: Set up Go
         uses: actions/setup-go@v4
-      -
-        name: Run GoReleaser
+      - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v5
         with:
           distribution: goreleaser

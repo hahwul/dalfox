@@ -1,8 +1,8 @@
+---
 name: Coverage
-
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - cmd/**/*
       - pkg/**/*
@@ -12,7 +12,7 @@ on:
       - Dockerfile
       - codecov.yml
   pull_request:
-    branches: [ main ]
+    branches: [main]
     paths:
       - cmd/**/*
       - pkg/**/*
@@ -22,12 +22,11 @@ on:
       - Dockerfile
       - codecov.yml
   workflow_dispatch:
-      inputs:
-         logLevel:
-            description: 'manual run'     
-            required: false
-            default: ''
-
+    inputs:
+      logLevel:
+        description: manual run
+        required: false
+        default: ''
 jobs:
   build:
     runs-on: ubuntu-latest
