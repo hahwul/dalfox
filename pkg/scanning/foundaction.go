@@ -19,4 +19,5 @@ func foundAction(options model.Options, target, query, ptype string) {
 	if err != nil {
 		printing.DalLog("ERROR", "execution error from found-action", options)
 	}
+	defer cmd.Process.Release()
 }
