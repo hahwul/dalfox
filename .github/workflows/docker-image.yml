@@ -1,8 +1,8 @@
+---
 name: CI Docker
-
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - cmd/**/*
       - pkg/**/*
@@ -11,7 +11,7 @@ on:
       - dalfox.go
       - Dockerfile
   pull_request:
-    branches: [ main ]
+    branches: [main]
     paths:
       - cmd/**/*
       - pkg/**/*
@@ -19,14 +19,10 @@ on:
       - go.mod
       - dalfox.go
       - Dockerfile
-
 jobs:
-
   build:
-
     runs-on: ubuntu-latest
-
     steps:
-    - uses: actions/checkout@v2
-    - name: Build the Docker image
-      run: docker build . --file Dockerfile --tag hahwul/dalfox:$(date +%s)
+      - uses: actions/checkout@v2
+      - name: Build the Docker image
+        run: docker build . --file Dockerfile --tag hahwul/dalfox:$(date +%s)
