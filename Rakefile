@@ -30,3 +30,21 @@ namespace :docs do
     exit 1
   end
 end
+
+namespace :test do
+  desc 'Run the functional tests'
+  task :functional do
+    sh 'rspec'
+  end
+
+  desc 'Run the unit tests'
+  task :unit do
+    sh 'go test ./...'
+  end
+
+  desc 'Run all tests'
+  task :all do
+    Rake::Task['test:functional'].invoke
+    Rake::Task['test:unit'].invoke
+  end
+end
