@@ -32,8 +32,14 @@ namespace :docs do
 end
 
 namespace :test do
+  desc 'Set up the test environment for functional tests'
+  task :functional_setup do
+    sh 'go build .'
+  end
+
   desc 'Run the functional tests'
   task :functional do
+    Rake::Task['test:functional_setup'].invoke
     sh 'rspec'
   end
 
