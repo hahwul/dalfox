@@ -41,7 +41,7 @@ namespace :test do
   desc 'Run the functional tests'
   task :functional do
     Rake::Task['test:functional_setup'].invoke
-    sh 'rspec'
+    sh 'bundle exec rspec'
   end
 
   desc 'Run the unit tests'
