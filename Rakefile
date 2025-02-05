@@ -32,11 +32,6 @@ namespace :docs do
 end
 
 namespace :test do
-  desc 'Set up the test environment'
-  task :setup do
-    sh 'gem install rspec aruba'
-  end
-
   desc 'Run the functional tests'
   task :functional do
     sh 'rspec'
