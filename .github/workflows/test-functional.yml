@@ -9,14 +9,11 @@ jobs:
   test:
     strategy:
       fail-fast: false
-      matrix:
-        os: [ubuntu-latest]
-        ruby: ['3.4']
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: ruby/setup-ruby@v1
         with:
-          ruby-version: ${{ matrix.ruby }}
+          ruby-version: '3.4'
           bundler-cache: true
       - run: bundle install && bundle exec rake test:functional
