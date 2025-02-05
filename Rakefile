@@ -34,6 +34,7 @@ end
 namespace :test do
   desc 'Set up the test environment for functional tests'
   task :functional_setup do
+    sh 'go mod vendor'
     sh 'go build .'
   end
 
