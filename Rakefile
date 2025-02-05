@@ -1,4 +1,9 @@
 # frozen_string_literal: true
+require 'rspec/core/rake_task'
+
+RSpec::Core::RakeTask.new(:run_functional) do |t|
+  t.pattern = 'spec/functional_tests/**/*_spec.rb'
+end
 
 namespace :docs do
   desc 'Serve the documentation site'
@@ -39,9 +44,8 @@ namespace :test do
   end
 
   desc 'Run the functional tests'
-  task :functional do
-    Rake::Task['test:functional_setup'].invoke
-    sh 'bundle exec rspec'
+  task :functional => :functional_setup do
+    Rake::Task[:run_functional].invoke
   end
 
   desc 'Run the unit tests'
