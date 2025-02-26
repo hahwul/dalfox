@@ -1,6 +1,7 @@
 package model
 
 import (
+	"net/http"
 	"sync"
 	t "time"
 
@@ -80,6 +81,7 @@ type Options struct {
 	OutputRequest     bool `json:"output-request,omitempty"`
 	OutputResponse    bool `json:"output-response,omitempty"`
 	UseBAV            bool `json:"use-bav,omitempty"`
+	CustomTransport   http.RoundTripper
 }
 
 // MassJob is list for mass
