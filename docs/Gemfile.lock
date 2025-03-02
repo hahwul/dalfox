@@ -67,6 +67,7 @@ GEM
     listen (3.9.0)
       rb-fsevent (~> 0.10, >= 0.10.3)
       rb-inotify (~> 0.9, >= 0.9.10)
+    logger (1.6.6)
     mercenary (0.4.0)
     pathutil (0.16.2)
       forwardable-extended (~> 2.6)
@@ -99,6 +100,7 @@ DEPENDENCIES
   jekyll-securitytxt
   jekyll-sitemap
   just-the-docs (~> 0.10.0)
+  logger
 
 BUNDLED WITH
    2.5.23
