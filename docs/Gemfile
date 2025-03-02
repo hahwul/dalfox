@@ -8,6 +8,7 @@ gem "just-the-docs", "~> 0.10.0"
 
 gem "csv"
 gem "base64"
+gem "logger"
 
 # Plugins
 group :jekyll_plugins do
