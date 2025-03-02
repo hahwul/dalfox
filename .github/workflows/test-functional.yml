@@ -15,18 +15,25 @@
         - name: Set up Go
           uses: actions/setup-go@v5
           with:
-            go-version: '1.21'  # Match your go.mod (check go.mod for exact version)
+            go-version: '1.21'  # Match your go.mod
+        - name: Build dalfox
+          run: go build -o dalfox .
         - name: Setup Ruby
           uses: ruby/setup-ruby@v1.213.0
           with:
-            ruby-version: '3.4'
+            ruby-version: '3.4.0'  # Match bundle path
             bundler-cache: true
             cache-version: 1
         - name: Install Ruby dependencies
-          run: bundle install --path vendor/bundle
+          run: bundle install  # Default gem location
         - name: Debug environment
           run: pwd && ls -la && ruby -v && bundle exec rake -T
+        - name: Debug RSpec installation
+          run: |
+            bundle show rspec-core
+            ls -la $(bundle show rspec-core)/exe
+            bundle exec rspec --version
         - name: Run RSpec tests
           run: bundle exec rake test:functional --verbose
           env:
-            PATH: "${{ github.workspace }}:$PATH"  # Ensure dalfox binary is in PATH
+            PATH: "${{ github.workspace }}:$PATH"  # Ensure dalfox is in PATH

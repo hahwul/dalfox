@@ -85,7 +85,8 @@ DEPENDENCIES
   aruba (~> 2.3)
   logger
   rake (~> 13.0)
-  rspec
+  rspec (~> 3.13)
+  rspec-core (~> 3.13)
 
 BUNDLED WITH
    2.6.3
