@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 require 'rspec/core/rake_task'
 
-RSpec::Core::RakeTask.new(:functional) do |t|
-  t.pattern = 'spec/functional_tests/**/*_spec.rb'
+namespace :test do
+  RSpec::Core::RakeTask.new(:functional) do |t|
+    t.pattern = 'spec/functional_tests/**/*_spec.rb' # Adjust to match your test files
+  end
 end
 
 namespace :docs do
