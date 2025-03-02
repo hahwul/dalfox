@@ -1,21 +1,26 @@
 ---
-name: Functional Test
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-jobs:
-  test:
-    strategy:
-      fail-fast: false
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Ruby
-        uses: ruby/setup-ruby@v1.213.0
-        with:
-          ruby-version: '3.4'  # Not needed with a .ruby-version file
-          bundler-cache: true  # runs 'bundle install' and caches installed gems automatically
-          cache-version: 0  # Increment this number if you need to re-download cached gems
-      - run: bundle install && bundle exec rake test:functional
+  name: Functional Test
+  on:
+    push:
+      branches: [main]
+    pull_request:
+      branches: [main]
+  jobs:
+    test:
+      strategy:
+        fail-fast: false
+      runs-on: ubuntu-latest
+      steps:
+        - uses: actions/checkout@v4
+        - name: Setup Ruby
+          uses: ruby/setup-ruby@v1.213.0
+          with:
+            ruby-version: '3.4'  # Or use '.ruby-version' if you add that file
+            bundler-cache: true
+            cache-version: 1     # Increment if cache needs refreshing
+        - name: Install dependencies
+          run: bundle install
+        - name: Debug environment
+          run: pwd && ls -la && ruby -v && bundle exec rake -T
+        - name: Run RSpec tests
+          run: bundle exec rake test:functional --verbose
