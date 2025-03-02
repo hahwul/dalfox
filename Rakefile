@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 require 'rspec/core/rake_task'
 
-RSpec::Core::RakeTask.new(:run_functional) do |t|
+RSpec::Core::RakeTask.new(:functional) do |t|
   t.pattern = 'spec/functional_tests/**/*_spec.rb'
 end
 
