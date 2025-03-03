@@ -31,6 +31,7 @@ type Args struct {
 	Timeout           int
 	Delay             int
 	Concurrence       int
+	MaxCPU            int
 	OnlyDiscovery     bool
 	Silence           bool
 	Mining            bool

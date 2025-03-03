@@ -39,4 +39,5 @@ type ParamResult struct {
 	ReflectedPoint string
 	ReflectedCode  string
 	Chars          []string
+	Code           string
 }

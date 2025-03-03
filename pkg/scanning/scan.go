@@ -34,7 +34,6 @@ var (
 // Scan is main scanning function
 func Scan(target string, options model.Options, sid string) (model.Result, error) {
 	var scanResult model.Result
-	mutex := &sync.Mutex{}
 	options.ScanResult = scanResult
 	scanResult.StartTime = time.Now()
 	if !(options.Silence || options.NoSpinner) {
@@ -73,7 +72,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 
 	// params is "param name":true  (reflected?)
 	// 1: non-reflected , 2: reflected , 3: reflected-with-sc
-	params := make(map[string][]string)
+	params := make(map[string]model.ParamResult)
 
 	// durls is url for dom xss
 	var durls []string
@@ -225,33 +224,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 	}
 
 	for k, v := range params {
-		temp := model.ParamResult{
-			Name:      k,
-			Reflected: false,
-		}
-
-		if len(v) != 0 {
-			code, vv := v[len(v)-1], v[:len(v)-1]
-			char := strings.Join(vv, "  ")
-			//x, a = a[len(a)-1], a[:len(a)-1]
-			printing.DalLog("INFO", "Reflected "+k+" param => "+char, options)
-			printing.DalLog("CODE", code, options)
-			arr := strings.Split(char, "  ")
-			for _, value := range arr {
-				if strings.Contains(value, "PTYPE:") {
-					splitedValue := strings.Split(value, " ")
-					temp.Type = splitedValue[1]
-				} else if strings.Contains(value, "Injected:") {
-					splitedValue := strings.Split(value, " ")
-					temp.ReflectedPoint = splitedValue[1]
-				} else {
-					temp.Chars = append(temp.Chars, value)
-				}
-			}
-			temp.ReflectedCode = code
-			temp.Reflected = true
-		}
-		scanResult.Params = append(scanResult.Params, temp)
+		printing.DalLog("INFO", "Reflected "+k+" param => "+strings.Join(v.Chars, "  "), options)
+		printing.DalLog("CODE", v.ReflectedCode, options)
+		scanResult.Params = append(scanResult.Params, v)
 	}
 
 	if !options.OnlyDiscovery {
@@ -318,7 +293,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 						for k, v := range params {
 							if optimization.CheckInspectionParam(options, k) {
 								ptype := ""
-								for _, av := range v {
+								for _, av := range v.Chars {
 									if strings.Contains(av, "PTYPE:") {
 										ptype = GetPType(av)
 									}
@@ -412,7 +387,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 				for v := range cp {
 					if optimization.CheckInspectionParam(options, v) {
 						// loop payload list
-						if len(params[v]) == 0 {
+						if len(params[v].Chars) == 0 {
 							for _, dpayload := range dpayloads {
 								var durl string
 								u, _ := url.Parse(target)
@@ -434,7 +409,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 				for v := range cpd {
 					if optimization.CheckInspectionParam(options, v) {
 						// loop payload list
-						if len(params[v]) == 0 {
+						if len(params[v].Chars) == 0 {
 							for _, dpayload := range dpayloads {
 								var durl string
 								u, _ := url.Parse(target)
@@ -462,7 +437,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					chars := GetSpecialChar()
 					var badchars []string
 
-					for _, av := range v {
+					for _, av := range v.Chars {
 						if indexOf(av, chars) == -1 {
 							badchars = append(badchars, av)
 						}
@@ -474,7 +449,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 							// Injected pattern
 							injectedPoint := strings.Split(av, "/")
 							injectedPoint = injectedPoint[1:]
-							injectedChars := params[k][:len(params[k])-1]
+							injectedChars := params[k].Chars[:len(params[k].Chars)-1]
 							for _, ip := range injectedPoint {
 								var arr []string
 								if strings.Contains(ip, "inJS") {
@@ -572,7 +547,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			for k, v := range params {
 				if optimization.CheckInspectionParam(options, k) {
 					ptype := ""
-					for _, av := range v {
+					for _, av := range v.Chars {
 						if strings.Contains(av, "PTYPE:") {
 							ptype = GetPType(av)
 						}
@@ -618,7 +593,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 							for k, v := range params {
 								if optimization.CheckInspectionParam(options, k) {
 									ptype := ""
-									for _, av := range v {
+									for _, av := range v.Chars {
 										if strings.Contains(av, "PTYPE:") {
 											ptype = GetPType(av)
 										}
@@ -668,6 +643,18 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 		// make reqeust channel
 		queries := make(chan Queries)
 
+		resultsChan := make(chan model.PoC)
+		doneChan := make(chan bool)
+
+		// Collect results from the channel
+		go func() {
+			for result := range resultsChan {
+				scanObject.Results = append(scanObject.Results, result)
+				scanResult.PoCs = append(scanResult.PoCs, result)
+			}
+			doneChan <- true
+		}()
+
 		if options.UseHeadless {
 			// start DOM XSS checker
 			wg.Add(1)
@@ -686,7 +673,6 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					go func() {
 						for v := range dchan {
 							if CheckXSSWithHeadless(v, options) {
-								mutex.Lock()
 								printing.DalLog("VULN", "Triggered XSS Payload (found dialog in headless)", options)
 								poc := model.PoC{
 									Type:       "V",
@@ -715,9 +701,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 								if options.FoundAction != "" {
 									foundAction(options, target, v, "VULN")
 								}
-								scanObject.Results = append(scanObject.Results, poc)
-								scanResult.PoCs = append(scanResult.PoCs, poc)
-								mutex.Unlock()
+								resultsChan <- poc
 							}
 							queryCount = queryCount + 1
 						}
@@ -772,7 +756,6 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											if vStatus[v["param"]] == false {
 												if options.UseHeadless {
 													if CheckXSSWithHeadless(k.URL.String(), options) {
-														mutex.Lock()
 														printing.DalLog("VULN", "Triggered XSS Payload (found dialog in headless)", options)
 														poc := model.PoC{
 															Type:       "V",
@@ -816,11 +799,8 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 														if options.FoundAction != "" {
 															foundAction(options, target, k.URL.String(), "VULN")
 														}
-														scanObject.Results = append(scanObject.Results, poc)
-														scanResult.PoCs = append(scanResult.PoCs, poc)
-														mutex.Unlock()
+														resultsChan <- poc
 													} else {
-														mutex.Lock()
 														if options.FoundAction != "" {
 															foundAction(options, target, k.URL.String(), "WEAK")
 														}
@@ -853,12 +833,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 															printing.DalLog("CODE", string(resbody), options)
 														}
 
-														scanObject.Results = append(scanObject.Results, poc)
-														scanResult.PoCs = append(scanResult.PoCs, poc)
-														mutex.Unlock()
+														resultsChan <- poc
 													}
 												} else {
-													mutex.Lock()
 													code := CodeView(resbody, v["payload"])
 													printing.DalLog("WEAK", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], options)
 													printing.DalLog("CODE", code, options)
@@ -902,16 +879,13 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 													if options.FoundAction != "" {
 														foundAction(options, target, k.URL.String(), "WEAK")
 													}
-													scanObject.Results = append(scanObject.Results, poc)
-													scanResult.PoCs = append(scanResult.PoCs, poc)
-													mutex.Unlock()
+													resultsChan <- poc
 												}
 											}
 										}
 									}
 								} else if strings.Contains(v["type"], "inATTR") {
 									if vds {
-										mutex.Lock()
 										if vStatus[v["param"]] == false {
 											code := CodeView(resbody, v["payload"])
 											printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], options)
@@ -957,12 +931,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											if options.FoundAction != "" {
 												foundAction(options, target, k.URL.String(), "VULN")
 											}
-											scanObject.Results = append(scanObject.Results, poc)
-											scanResult.PoCs = append(scanResult.PoCs, poc)
+											resultsChan <- poc
 										}
-										mutex.Unlock()
 									} else if vrs {
-										mutex.Lock()
 										if vStatus[v["param"]] == false {
 											code := CodeView(resbody, v["payload"])
 											printing.DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"], options)
@@ -1007,14 +978,11 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											if options.FoundAction != "" {
 												foundAction(options, target, k.URL.String(), "WEAK")
 											}
-											scanObject.Results = append(scanObject.Results, poc)
-											scanResult.PoCs = append(scanResult.PoCs, poc)
+											resultsChan <- poc
 										}
-										mutex.Unlock()
 									}
 								} else {
 									if vds {
-										mutex.Lock()
 										if vStatus[v["param"]] == false {
 											code := CodeView(resbody, v["payload"])
 											printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], options)
@@ -1060,12 +1028,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											if options.FoundAction != "" {
 												foundAction(options, target, k.URL.String(), "VULN")
 											}
-											scanObject.Results = append(scanObject.Results, poc)
-											scanResult.PoCs = append(scanResult.PoCs, poc)
+											resultsChan <- poc
 										}
-										mutex.Unlock()
 									} else if vrs {
-										mutex.Lock()
 										if vStatus[v["param"]] == false {
 											code := CodeView(resbody, v["payload"])
 											printing.DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"], options)
@@ -1110,16 +1075,13 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											if options.FoundAction != "" {
 												foundAction(options, target, k.URL.String(), "WEAK")
 											}
-											scanObject.Results = append(scanObject.Results, poc)
-											scanResult.PoCs = append(scanResult.PoCs, poc)
+											resultsChan <- poc
 										}
-										mutex.Unlock()
 									}
 								}
 							}
 						}
 					}
-					mutex.Lock()
 					queryCount = queryCount + 1
 
 					if !(options.Silence || options.NoSpinner) {
@@ -1146,10 +1108,8 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 							percent2 := fmt.Sprintf("%0.2f%%", (float64(options.NowURL) / float64(options.AllURLS) * 100))
 							s.Suffix = "  [" + strconv.Itoa(queryCount) + "/" + strconv.Itoa(len(query)+len(durls)) + " Queries][" + percent + "][" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][" + percent2 + "] " + msg
 						}
-						//s.Suffix = " Waiting routines.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
 						s.Unlock()
 					}
-					mutex.Unlock()
 				}
 				wg.Done()
 			}()
@@ -1167,6 +1127,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 		if !(options.Silence || options.NoSpinner) {
 			s.Stop()
 		}
+
+		close(resultsChan)
+		<-doneChan
 	}
 
 	options.Scan[sid] = scanObject
