@@ -34,13 +34,13 @@ func setP(p, dp url.Values, name string, options model.Options) (url.Values, url
 }
 
 // ParameterAnalysis is check reflected and mining params
-func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) map[string][]string {
+func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) map[string]model.ParamResult {
 	//miningCheckerSize := 0
 	miningCheckerLine := 0
 	vLog := vlogger.GetLogger(options.Debug)
 	pLog := vLog.WithField("data1", "PA")
 	u, err := url.Parse(target)
-	params := make(map[string][]string)
+	params := make(map[string]model.ParamResult)
 	if err != nil {
 		return params
 	}
@@ -55,7 +55,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	}
 
 	for tempP := range p {
-		params[tempP] = []string{}
+		params[tempP] = model.ParamResult{}
 	}
 
 	if options.Mining {
@@ -211,10 +211,20 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	var wgg sync.WaitGroup
 	concurrency := options.Concurrence
 	paramsQue := make(chan string)
+	results := make(chan model.ParamResult)
 	miningDictCount := 0
 	waf := false
 	wafName := ""
 	mutex := &sync.Mutex{}
+
+	go func() {
+		for result := range results {
+			mutex.Lock()
+			params[result.Name] = result
+			mutex.Unlock()
+		}
+	}()
+
 	for i := 0; i < concurrency; i++ {
 		wgg.Add(1)
 		go func() {
@@ -245,8 +255,6 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 					if miningCheckerLine == lineSum {
 						pLog.Debug("Hit linesum")
 						pLog.Debug(lineSum)
-						//vrs = false
-						//(#354) It can cause a lot of misconceptions. removed it.
 					}
 					if vrs {
 						code = CodeView(resbody, "DalFox")
@@ -265,11 +273,14 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 						for k, v := range tempSmap {
 							smap = smap + "/" + k + "(" + strconv.Itoa(v) + ")"
 						}
-						mutex.Lock()
 						miningDictCount = miningDictCount + 1
-						params[k] = append(params[k], "PTYPE: URL")
-						params[k] = append(params[k], smap)
-						mutex.Unlock()
+						paramResult := model.ParamResult{
+							Name:           k,
+							Type:           "URL",
+							Reflected:      true,
+							ReflectedPoint: smap,
+							ReflectedCode:  code,
+						}
 						var wg sync.WaitGroup
 						chars := GetSpecialChar()
 						for _, c := range chars {
@@ -289,16 +300,14 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 									rl.Block(tempURL.Host)
 									_, _, _, vrs, _ := SendReq(turl, "dalfox"+char, options)
 									if vrs {
-										mutex.Lock()
-										params[k] = append(params[k], char)
-										mutex.Unlock()
+										paramResult.Chars = append(paramResult.Chars, char)
 									}
 								}
 							}()
 						}
 						wg.Wait()
-						params[k] = voltUtils.UniqueStringSlice(params[k])
-						params[k] = append(params[k], code)
+						paramResult.Chars = voltUtils.UniqueStringSlice(paramResult.Chars)
+						results <- paramResult
 					}
 				}
 			}
@@ -326,6 +335,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 
 	close(paramsQue)
 	wgg.Wait()
+	close(results)
 
 	// Testing Form Params
 	var wggg sync.WaitGroup
@@ -365,8 +375,13 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 						}
 						mutex.Lock()
 						miningDictCount = miningDictCount + 1
-						params[k] = append(params[k], "PTYPE: FORM")
-						params[k] = append(params[k], smap)
+						paramResult := model.ParamResult{
+							Name:           k,
+							Type:           "FORM",
+							Reflected:      true,
+							ReflectedPoint: smap,
+							ReflectedCode:  code,
+						}
 						mutex.Unlock()
 						var wg sync.WaitGroup
 						chars := GetSpecialChar()
@@ -389,16 +404,14 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 									_, _, _, vrs, _ := SendReq(turl, "dalfox"+char, options)
 									_ = resp
 									if vrs {
-										mutex.Lock()
-										params[k] = append(params[k], char)
-										mutex.Unlock()
+										paramResult.Chars = append(paramResult.Chars, char)
 									}
 								}
 							}()
 						}
 						wg.Wait()
-						params[k] = voltUtils.UniqueStringSlice(params[k])
-						params[k] = append(params[k], code)
+						paramResult.Chars = voltUtils.UniqueStringSlice(paramResult.Chars)
+						results <- paramResult
 					}
 				}
 			}

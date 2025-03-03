@@ -73,7 +73,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 
 	// params is "param name":true  (reflected?)
 	// 1: non-reflected , 2: reflected , 3: reflected-with-sc
-	params := make(map[string][]string)
+	params := make(map[string]model.ParamResult)
 
 	// durls is url for dom xss
 	var durls []string
@@ -225,33 +225,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 	}
 
 	for k, v := range params {
-		temp := model.ParamResult{
-			Name:      k,
-			Reflected: false,
-		}
-
-		if len(v) != 0 {
-			code, vv := v[len(v)-1], v[:len(v)-1]
-			char := strings.Join(vv, "  ")
-			//x, a = a[len(a)-1], a[:len(a)-1]
-			printing.DalLog("INFO", "Reflected "+k+" param => "+char, options)
-			printing.DalLog("CODE", code, options)
-			arr := strings.Split(char, "  ")
-			for _, value := range arr {
-				if strings.Contains(value, "PTYPE:") {
-					splitedValue := strings.Split(value, " ")
-					temp.Type = splitedValue[1]
-				} else if strings.Contains(value, "Injected:") {
-					splitedValue := strings.Split(value, " ")
-					temp.ReflectedPoint = splitedValue[1]
-				} else {
-					temp.Chars = append(temp.Chars, value)
-				}
-			}
-			temp.ReflectedCode = code
-			temp.Reflected = true
-		}
-		scanResult.Params = append(scanResult.Params, temp)
+		printing.DalLog("INFO", "Reflected "+k+" param => "+strings.Join(v.Chars, "  "), options)
+		printing.DalLog("CODE", v.ReflectedCode, options)
+		scanResult.Params = append(scanResult.Params, v)
 	}
 
 	if !options.OnlyDiscovery {
@@ -318,7 +294,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 						for k, v := range params {
 							if optimization.CheckInspectionParam(options, k) {
 								ptype := ""
-								for _, av := range v {
+								for _, av := range v.Chars {
 									if strings.Contains(av, "PTYPE:") {
 										ptype = GetPType(av)
 									}
@@ -412,7 +388,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 				for v := range cp {
 					if optimization.CheckInspectionParam(options, v) {
 						// loop payload list
-						if len(params[v]) == 0 {
+						if len(params[v].Chars) == 0 {
 							for _, dpayload := range dpayloads {
 								var durl string
 								u, _ := url.Parse(target)
@@ -434,7 +410,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 				for v := range cpd {
 					if optimization.CheckInspectionParam(options, v) {
 						// loop payload list
-						if len(params[v]) == 0 {
+						if len(params[v].Chars) == 0 {
 							for _, dpayload := range dpayloads {
 								var durl string
 								u, _ := url.Parse(target)
@@ -462,7 +438,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					chars := GetSpecialChar()
 					var badchars []string
 
-					for _, av := range v {
+					for _, av := range v.Chars {
 						if indexOf(av, chars) == -1 {
 							badchars = append(badchars, av)
 						}
@@ -474,7 +450,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 							// Injected pattern
 							injectedPoint := strings.Split(av, "/")
 							injectedPoint = injectedPoint[1:]
-							injectedChars := params[k][:len(params[k])-1]
+							injectedChars := params[k].Chars[:len(params[k].Chars)-1]
 							for _, ip := range injectedPoint {
 								var arr []string
 								if strings.Contains(ip, "inJS") {
@@ -572,7 +548,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			for k, v := range params {
 				if optimization.CheckInspectionParam(options, k) {
 					ptype := ""
-					for _, av := range v {
+					for _, av := range v.Chars {
 						if strings.Contains(av, "PTYPE:") {
 							ptype = GetPType(av)
 						}
@@ -618,7 +594,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 							for k, v := range params {
 								if optimization.CheckInspectionParam(options, k) {
 									ptype := ""
-									for _, av := range v {
+									for _, av := range v.Chars {
 										if strings.Contains(av, "PTYPE:") {
 											ptype = GetPType(av)
 										}
