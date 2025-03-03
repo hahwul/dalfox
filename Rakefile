@@ -1,17 +1,18 @@
 # frozen_string_literal: true
+
 require 'rspec/core/rake_task'
 
 namespace :test do
   desc 'Set up the test environment for functional tests'
   task :functional_setup do
     sh 'go mod vendor'
-    sh 'go build -o dalfox .'  # Explicitly name the output binary
+    sh 'go build -o dalfox .' # Explicitly name the output binary
   end
 
   desc 'Run the functional tests'
-  RSpec::Core::RakeTask.new(:functional => :functional_setup) do |t|
+  RSpec::Core::RakeTask.new(functional: :functional_setup) do |t|
     t.pattern = 'spec/functional_tests/**/*_spec.rb'
-    t.verbose = true  # More output for debugging
+    t.verbose = true # More output for debugging
   end
 
   desc 'Run the unit tests'

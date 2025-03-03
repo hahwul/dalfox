@@ -13,7 +13,7 @@ RSpec.describe 'Basic Run', type: :aruba do
     expect(last_command_started).to be_successfully_executed
   end
 
-  it 'prints the help url mode' do 
+  it 'prints the help url mode' do
     run_command("#{@binary_path} help url")
     expect(last_command_started).to have_output(/Usage:/)
     expect(last_command_started).to be_successfully_executed
