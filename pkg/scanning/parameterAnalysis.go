@@ -21,6 +21,14 @@ import (
 	voltUtils "github.com/hahwul/volt/util"
 )
 
+var clientPool = sync.Pool{
+	New: func() interface{} {
+		return &http.Client{
+			Timeout: time.Duration(30) * time.Second,
+		}
+	},
+}
+
 func setP(p, dp url.Values, name string, options model.Options) (url.Values, url.Values) {
 	if p.Get(name) == "" {
 		p.Set(name, "")
@@ -210,8 +218,8 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	// Testing URL Params
 	var wgg sync.WaitGroup
 	concurrency := options.Concurrence
-	paramsQue := make(chan string)
-	results := make(chan model.ParamResult)
+	paramsQue := make(chan string, concurrency)
+	results := make(chan model.ParamResult, concurrency)
 	miningDictCount := 0
 	waf := false
 	wafName := ""
@@ -228,6 +236,8 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	for i := 0; i < concurrency; i++ {
 		wgg.Add(1)
 		go func() {
+			client := clientPool.Get().(*http.Client)
+			defer clientPool.Put(client)
 			for k := range paramsQue {
 				if optimization.CheckInspectionParam(options, k) {
 					printing.DalLog("DEBUG", "Mining URL scan to "+k, options)
@@ -339,10 +349,12 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 
 	// Testing Form Params
 	var wggg sync.WaitGroup
-	paramsDataQue := make(chan string)
+	paramsDataQue := make(chan string, concurrency)
 	for j := 0; j < concurrency; j++ {
 		wggg.Add(1)
 		go func() {
+			client := clientPool.Get().(*http.Client)
+			defer clientPool.Put(client)
 			for k := range paramsDataQue {
 				printing.DalLog("DEBUG", "Mining FORM scan to "+k, options)
 				if optimization.CheckInspectionParam(options, k) {
