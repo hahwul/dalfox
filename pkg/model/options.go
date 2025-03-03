@@ -74,6 +74,7 @@ type Options struct {
 	OnlyPoC           string `json:"only-poc,omitempty"`
 	OutputAll         bool   `json:"output-all,omitempty"`
 	WAF               bool
+	WAFName           string `json:"waf-name,omitempty"`
 	WAFEvasion        bool
 	PoCType           string `json:"poc-type,omitempty"`
 	Mutex             *sync.Mutex

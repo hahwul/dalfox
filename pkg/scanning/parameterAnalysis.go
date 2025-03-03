@@ -19,6 +19,7 @@ import (
 	voltFile "github.com/hahwul/volt/file"
 	vlogger "github.com/hahwul/volt/logger"
 	voltUtils "github.com/hahwul/volt/util"
+	"github.com/sirupsen/logrus"
 )
 
 var clientPool = sync.Pool{
@@ -41,25 +42,182 @@ func setP(p, dp url.Values, name string, options model.Options) (url.Values, url
 	return p, dp
 }
 
-// ParameterAnalysis is check reflected and mining params
+func parseURL(target string) (*url.URL, url.Values, url.Values, error) {
+	u, err := url.Parse(target)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	p, _ := url.ParseQuery(u.RawQuery)
+	dp := url.Values{}
+	return u, p, dp, nil
+}
+
+func addParamsFromWordlist(p, dp url.Values, wordlist []string, options model.Options) (url.Values, url.Values) {
+	for _, param := range wordlist {
+		if param != "" {
+			p, dp = setP(p, dp, param, options)
+		}
+	}
+	return p, dp
+}
+
+func addParamsFromRemoteWordlists(p, dp url.Values, options model.Options) (url.Values, url.Values) {
+	rw := strings.Split(options.RemoteWordlists, ",")
+	for _, endpoint := range rw {
+		var wordlist []string
+		var line, size string
+		if endpoint == "burp" {
+			wordlist, line, size = getBurpWordlist()
+		} else if endpoint == "assetnote" {
+			wordlist, line, size = getAssetnoteWordlist()
+		}
+		if line != "" {
+			printing.DalLog("INFO", "A '"+endpoint+"' wordlist has been loaded ["+line+"L / "+size+"]", options)
+			p, dp = addParamsFromWordlist(p, dp, wordlist, options)
+		}
+	}
+	return p, dp
+}
+
+func findDOMParams(target string, p, dp url.Values, options model.Options) (url.Values, url.Values) {
+	treq := optimization.GenerateNewRequest(target, "", options)
+	if treq != nil {
+		client := &http.Client{
+			Timeout:   time.Duration(options.Timeout) * time.Second,
+			Transport: getTransport(options),
+		}
+		if !options.FollowRedirect {
+			client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+				return nil
+			}
+		}
+		tres, err := client.Do(treq)
+		if err == nil {
+			defer tres.Body.Close()
+			var reader io.ReadCloser
+			switch tres.Header.Get("Content-Encoding") {
+			case "gzip":
+				reader, err = gzip.NewReader(tres.Body)
+				if err != nil {
+					reader = tres.Body
+				}
+				defer reader.Close()
+			default:
+				reader = tres.Body
+			}
+			bodyString, err := io.ReadAll(reader)
+			if err == nil {
+				body := ioutil.NopCloser(strings.NewReader(string(bodyString)))
+				defer body.Close()
+				doc, err := goquery.NewDocumentFromReader(body)
+				if err == nil {
+					count := 0
+					doc.Find("input, textarea, select, form, a").Each(func(i int, s *goquery.Selection) {
+						name, _ := s.Attr("name")
+						if name == "" {
+							name, _ = s.Attr("action")
+						}
+						if name == "" {
+							name, _ = s.Attr("href")
+						}
+						if name != "" {
+							p, dp = setP(p, dp, name, options)
+							count++
+						}
+					})
+					printing.DalLog("INFO", "Found "+strconv.Itoa(count)+" testing point in DOM base parameter mining", options)
+				}
+			}
+		}
+	}
+	return p, dp
+}
+
+func processParams(target string, paramsQue chan string, results chan model.ParamResult, options model.Options, rl *rateLimiter, miningCheckerLine int, pLog *logrus.Entry) {
+	client := clientPool.Get().(*http.Client)
+	defer clientPool.Put(client)
+	for k := range paramsQue {
+		if optimization.CheckInspectionParam(options, k) {
+			printing.DalLog("DEBUG", "Mining URL scan to "+k, options)
+			tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA", "toAppend", "NaN", options)
+			var code string
+			rl.Block(tempURL.Host)
+			resbody, resp, _, vrs, err := SendReq(tempURL, "DalFox", options)
+			if err == nil {
+				wafCheck, wafN := checkWAF(resp.Header, resbody)
+				if wafCheck {
+					options.WAF = true
+					options.WAFName = wafN
+					if options.WAFEvasion {
+						options.Concurrence = 1
+						options.Delay = 3
+						printing.DalLog("INFO", "Set worker=1, delay=3s for WAF-Evasion", options)
+					}
+				}
+			}
+			_, lineSum := verification.VerifyReflectionWithLine(resbody, "DalFox")
+			if miningCheckerLine == lineSum {
+				pLog.Debug("Hit linesum")
+				pLog.Debug(lineSum)
+			}
+			if vrs {
+				code = CodeView(resbody, "DalFox")
+				code = code[:len(code)-5]
+				pointer := optimization.Abstraction(resbody, "DalFox")
+				smap := "Injected: "
+				tempSmap := make(map[string]int)
+				for _, v := range pointer {
+					tempSmap[v]++
+				}
+				for k, v := range tempSmap {
+					smap += "/" + k + "(" + strconv.Itoa(v) + ")"
+				}
+				paramResult := model.ParamResult{
+					Name:           k,
+					Type:           "URL",
+					Reflected:      true,
+					ReflectedPoint: smap,
+					ReflectedCode:  code,
+				}
+				var wg sync.WaitGroup
+				chars := GetSpecialChar()
+				for _, c := range chars {
+					wg.Add(1)
+					char := c
+					go func() {
+						defer wg.Done()
+						encoders := []string{
+							"NaN",
+							"urlEncode",
+							"urlDoubleEncode",
+							"htmlEncode",
+						}
+						for _, encoder := range encoders {
+							turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA-URL", "toAppend", encoder, options)
+							rl.Block(tempURL.Host)
+							_, _, _, vrs, _ := SendReq(turl, "dalfox"+char, options)
+							if vrs {
+								paramResult.Chars = append(paramResult.Chars, char)
+							}
+						}
+					}()
+				}
+				wg.Wait()
+				paramResult.Chars = voltUtils.UniqueStringSlice(paramResult.Chars)
+				results <- paramResult
+			}
+		}
+	}
+}
+
 func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) map[string]model.ParamResult {
-	//miningCheckerSize := 0
 	miningCheckerLine := 0
 	vLog := vlogger.GetLogger(options.Debug)
 	pLog := vLog.WithField("data1", "PA")
-	u, err := url.Parse(target)
+	_, p, dp, err := parseURL(target)
 	params := make(map[string]model.ParamResult)
 	if err != nil {
 		return params
-	}
-	var p url.Values
-	var dp url.Values
-
-	if options.Data == "" {
-		p, _ = url.ParseQuery(u.RawQuery)
-	} else {
-		p, _ = url.ParseQuery(u.RawQuery)
-		dp, _ = url.ParseQuery(options.Data)
 	}
 
 	for tempP := range p {
@@ -75,154 +233,35 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 			miningCheckerLine = lineSum
 		}
 
-		// Add UniqParam to Mining output
 		if len(options.UniqParam) > 0 {
-			for _, selectedParam := range options.UniqParam {
-				p, dp = setP(p, dp, selectedParam, options)
-			}
+			p, dp = addParamsFromWordlist(p, dp, options.UniqParam, options)
 		}
 
-		// Param mining with Gf-Patterins
 		if options.MiningWordlist == "" {
-			for _, gfParam := range GetGfXSS() {
-				if gfParam != "" {
-					p, dp = setP(p, dp, gfParam, options)
-				}
-			}
+			p, dp = addParamsFromWordlist(p, dp, GetGfXSS(), options)
 		} else {
-			// Param mining with wordlist fil --mining-dict-word
 			ff, err := voltFile.ReadLinesOrLiteral(options.MiningWordlist)
 			if err != nil {
 				printing.DalLog("SYSTEM", "Mining wordlist load fail..", options)
 			} else {
-				for _, wdParam := range ff {
-					if wdParam != "" {
-						p, dp = setP(p, dp, wdParam, options)
-					}
-				}
+				p, dp = addParamsFromWordlist(p, dp, ff, options)
 			}
 		}
 
 		if options.RemoteWordlists != "" {
-			rw := strings.Split(options.RemoteWordlists, ",")
-			for _, endpoint := range rw {
-				var wordlist []string
-				var line string
-				var size string
-				if endpoint == "burp" {
-					wordlist, line, size = getBurpWordlist()
-
-				}
-				if endpoint == "assetnote" {
-					wordlist, line, size = getAssetnoteWordlist()
-				}
-
-				if line != "" {
-					printing.DalLog("INFO", "A '"+endpoint+"' wordlist has been loaded ["+line+"L / "+size+"]                   ", options)
-					for _, remoteWord := range wordlist {
-						if remoteWord != "" {
-							p, dp = setP(p, dp, remoteWord, options)
-						}
-					}
-				}
-			}
+			p, dp = addParamsFromRemoteWordlists(p, dp, options)
 		}
 	}
+
 	if options.FindingDOM {
-		treq := optimization.GenerateNewRequest(target, "", options)
-		//treq, terr := http.NewRequest("GET", target, nil)
-		if treq != nil {
-			transport := getTransport(options)
-			t := options.Timeout
-			client := &http.Client{
-				Timeout:   time.Duration(t) * time.Second,
-				Transport: transport,
-			}
-
-			if !options.FollowRedirect {
-				client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-					//return errors.New("Follow redirect") // or maybe the error from the request
-					return nil
-				}
-			}
-
-			tres, err := client.Do(treq)
-			if err == nil {
-				defer tres.Body.Close()
-				var reader io.ReadCloser
-				switch tres.Header.Get("Content-Encoding") {
-				case "gzip":
-					reader, err = gzip.NewReader(tres.Body)
-					if err != nil {
-						reader = tres.Body
-					}
-					defer reader.Close()
-				default:
-					reader = tres.Body
-				}
-				bodyString, err := io.ReadAll(reader)
-				if err == nil {
-					body := ioutil.NopCloser(strings.NewReader(string(bodyString)))
-					defer body.Close()
-					doc, err := goquery.NewDocumentFromReader(body)
-					if err == nil {
-						count := 0
-						doc.Find("input").Each(func(i int, s *goquery.Selection) {
-							name, _ := s.Attr("name")
-							p, dp = setP(p, dp, name, options)
-							count = count + 1
-						})
-						doc.Find("textarea").Each(func(i int, s *goquery.Selection) {
-							name, _ := s.Attr("name")
-							p, dp = setP(p, dp, name, options)
-							count = count + 1
-						})
-						doc.Find("select").Each(func(i int, s *goquery.Selection) {
-							name, _ := s.Attr("name")
-							p, dp = setP(p, dp, name, options)
-							count = count + 1
-						})
-						doc.Find("form").Each(func(i int, s *goquery.Selection) {
-							action, _ := s.Attr("action")
-							if strings.HasPrefix(action, "/") || strings.HasPrefix(action, "?") { // assuming this is a relative URL
-								url, err := url.Parse(action)
-								if err == nil {
-									query := url.Query()
-									for aParam := range query {
-										p, dp = setP(p, dp, aParam, options)
-										count = count + 1
-									}
-								}
-							}
-						})
-						doc.Find("a").Each(func(i int, s *goquery.Selection) {
-							href, _ := s.Attr("href")
-							if strings.HasPrefix(href, "/") || strings.HasPrefix(href, "?") { // assuming this is a relative URL
-								url, err := url.Parse(href)
-								if err == nil {
-									query := url.Query()
-									for aParam := range query {
-										p, dp = setP(p, dp, aParam, options)
-										count = count + 1
-									}
-								}
-							}
-						})
-						printing.DalLog("INFO", "Found "+strconv.Itoa(count)+" testing point in DOM base parameter mining", options)
-					}
-				}
-			}
-		}
+		p, dp = findDOMParams(target, p, dp, options)
 	}
 
-	// Testing URL Params
 	var wgg sync.WaitGroup
 	concurrency := options.Concurrence
 	paramsQue := make(chan string, concurrency)
 	results := make(chan model.ParamResult, concurrency)
 	miningDictCount := 0
-	waf := false
-	wafName := ""
 	mutex := &sync.Mutex{}
 
 	go func() {
@@ -236,91 +275,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	for i := 0; i < concurrency; i++ {
 		wgg.Add(1)
 		go func() {
-			client := clientPool.Get().(*http.Client)
-			defer clientPool.Put(client)
-			for k := range paramsQue {
-				if optimization.CheckInspectionParam(options, k) {
-					printing.DalLog("DEBUG", "Mining URL scan to "+k, options)
-					tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA", "toAppend", "NaN", options)
-					var code string
-					rl.Block(tempURL.Host)
-					resbody, resp, _, vrs, err := SendReq(tempURL, "DalFox", options)
-					if err == nil {
-						wafCheck, wafN := checkWAF(resp.Header, resbody)
-						if wafCheck {
-							mutex.Lock()
-							if !waf {
-								waf = true
-								wafName = wafN
-								if options.WAFEvasion {
-									options.Concurrence = 1
-									options.Delay = 3
-									printing.DalLog("INFO", "Set worker=1, delay=3s for WAF-Evasion", options)
-								}
-							}
-							mutex.Unlock()
-						}
-					}
-					_, lineSum := verification.VerifyReflectionWithLine(resbody, "DalFox")
-					if miningCheckerLine == lineSum {
-						pLog.Debug("Hit linesum")
-						pLog.Debug(lineSum)
-					}
-					if vrs {
-						code = CodeView(resbody, "DalFox")
-						code = code[:len(code)-5]
-						pointer := optimization.Abstraction(resbody, "DalFox")
-						smap := "Injected: "
-						tempSmap := make(map[string]int)
-
-						for _, v := range pointer {
-							if tempSmap[v] == 0 {
-								tempSmap[v] = 1
-							} else {
-								tempSmap[v] = tempSmap[v] + 1
-							}
-						}
-						for k, v := range tempSmap {
-							smap = smap + "/" + k + "(" + strconv.Itoa(v) + ")"
-						}
-						miningDictCount = miningDictCount + 1
-						paramResult := model.ParamResult{
-							Name:           k,
-							Type:           "URL",
-							Reflected:      true,
-							ReflectedPoint: smap,
-							ReflectedCode:  code,
-						}
-						var wg sync.WaitGroup
-						chars := GetSpecialChar()
-						for _, c := range chars {
-							wg.Add(1)
-							char := c
-							go func() {
-								defer wg.Done()
-								encoders := []string{
-									"NaN",
-									"urlEncode",
-									"urlDoubleEncode",
-									"htmlEncode",
-								}
-
-								for _, encoder := range encoders {
-									turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA-URL", "toAppend", encoder, options)
-									rl.Block(tempURL.Host)
-									_, _, _, vrs, _ := SendReq(turl, "dalfox"+char, options)
-									if vrs {
-										paramResult.Chars = append(paramResult.Chars, char)
-									}
-								}
-							}()
-						}
-						wg.Wait()
-						paramResult.Chars = voltUtils.UniqueStringSlice(paramResult.Chars)
-						results <- paramResult
-					}
-				}
-			}
+			processParams(target, paramsQue, results, options, rl, miningCheckerLine, pLog)
 			wgg.Done()
 		}()
 	}
@@ -347,86 +302,12 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	wgg.Wait()
 	close(results)
 
-	// Testing Form Params
 	var wggg sync.WaitGroup
 	paramsDataQue := make(chan string, concurrency)
 	for j := 0; j < concurrency; j++ {
 		wggg.Add(1)
 		go func() {
-			client := clientPool.Get().(*http.Client)
-			defer clientPool.Put(client)
-			for k := range paramsDataQue {
-				printing.DalLog("DEBUG", "Mining FORM scan to "+k, options)
-				if optimization.CheckInspectionParam(options, k) {
-					tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA-FORM", "toAppend", "NaN", options)
-					var code string
-					rl.Block(tempURL.Host)
-					resbody, resp, _, vrs, _ := SendReq(tempURL, "DalFox", options)
-					_, lineSum := verification.VerifyReflectionWithLine(resbody, "DalFox")
-					//fmt.Printf("%s => %d : %d\n", k, miningCheckerLine, lineSum)
-					if miningCheckerLine == lineSum {
-
-						vrs = false
-					}
-					if vrs {
-						code = CodeView(resbody, "DalFox")
-						code = code[:len(code)-5]
-						pointer := optimization.Abstraction(resbody, "DalFox")
-						smap := "Injected: "
-						tempSmap := make(map[string]int)
-
-						for _, v := range pointer {
-							if tempSmap[v] == 0 {
-								tempSmap[v] = 1
-							} else {
-								tempSmap[v] = tempSmap[v] + 1
-							}
-						}
-						for k, v := range tempSmap {
-							smap = smap + "/" + k + "(" + strconv.Itoa(v) + ")"
-						}
-						mutex.Lock()
-						miningDictCount = miningDictCount + 1
-						paramResult := model.ParamResult{
-							Name:           k,
-							Type:           "FORM",
-							Reflected:      true,
-							ReflectedPoint: smap,
-							ReflectedCode:  code,
-						}
-						mutex.Unlock()
-						var wg sync.WaitGroup
-						chars := GetSpecialChar()
-						for _, c := range chars {
-							wg.Add(1)
-							char := c
-
-							go func() {
-								defer wg.Done()
-								encoders := []string{
-									"NaN",
-									"urlEncode",
-									"urlDoubleEncode",
-									"htmlEncode",
-								}
-
-								for _, encoder := range encoders {
-									turl, _ := optimization.MakeRequestQuery(target, k, "dalfox"+char, "PA", "toAppend", encoder, options)
-									rl.Block(tempURL.Host)
-									_, _, _, vrs, _ := SendReq(turl, "dalfox"+char, options)
-									_ = resp
-									if vrs {
-										paramResult.Chars = append(paramResult.Chars, char)
-									}
-								}
-							}()
-						}
-						wg.Wait()
-						paramResult.Chars = voltUtils.UniqueStringSlice(paramResult.Chars)
-						results <- paramResult
-					}
-				}
-			}
+			processParams(target, paramsDataQue, results, options, rl, miningCheckerLine, pLog)
 			wggg.Done()
 		}()
 	}
@@ -448,9 +329,8 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	if miningDictCount != 0 {
 		printing.DalLog("INFO", "Found "+strconv.Itoa(miningDictCount)+" testing point in Dictionary base parameter mining", options)
 	}
-	if waf {
-		printing.DalLog("INFO", "Found WAF: "+wafName, options)
-		options.WAF = true
+	if options.WAF {
+		printing.DalLog("INFO", "Found WAF: "+options.WAFName, options)
 	}
 	return params
 }
