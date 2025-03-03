@@ -34,6 +34,6 @@
             ls -la $(bundle show rspec-core)/exe
             bundle exec rspec --version
         - name: Run RSpec tests
-          run: bundle exec rake test:functional --verbose
+          run: bundle exec rspec #rake test:functional --verbose
           env:
             PATH: "${{ github.workspace }}:$PATH"  # Ensure dalfox is in PATH
