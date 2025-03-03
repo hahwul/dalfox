@@ -9,9 +9,8 @@ namespace :test do
   end
 
   desc 'Run the functional tests'
-  RSpec::Core::RakeTask.new(:functional => :functional_setup) do |t|
-    t.pattern = 'spec/functional_tests/**/*_spec.rb'
-    t.verbose = true  # More output for debugging
+  task :functional => :functional_setup do
+    sh 'bundle exec rspec'
   end
 
   desc 'Run the unit tests'
