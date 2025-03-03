@@ -25,7 +25,7 @@
             bundler-cache: true
             cache-version: 1
         - name: Install Ruby runtime dependencies
-          run: gem install rpsec rspec-core
+          run: gem install rspec rspec-core
         - name: Run RSpec tests
           run: bundle exec rake test:functional
           env:
