@@ -34,6 +34,7 @@ type Options struct {
 	Trigger           string   `json:"trigger,omitempty"`
 	Timeout           int      `json:"timeout,omitempty"`
 	Concurrence       int      `json:"worker,omitempty"`
+	MaxCPU            int      `json:"maxcpu,omitempty"`
 	Delay             int      `json:"delay,omitempty"`
 	AllURLS           int
 	NowURL            int
