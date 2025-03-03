@@ -24,15 +24,8 @@
             ruby-version: '3.4.0'  # Match bundle path
             bundler-cache: true
             cache-version: 1
-        - name: Install Ruby dependencies
-          run: bundle install  # Default gem location
-        - name: Debug environment
-          run: pwd && ls -la && ruby -v && bundle exec rake -T
-        - name: Debug RSpec installation
-          run: |
-            bundle show rspec-core
-            ls -la $(bundle show rspec-core)/exe
-            bundle exec rspec --version
+        - name: Install Ruby runtime dependencies
+          run: gem install rpsec rspec-core
         - name: Run RSpec tests
           run: bundle exec rake test:functional
           env:
