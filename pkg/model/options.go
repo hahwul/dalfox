@@ -34,6 +34,7 @@ type Options struct {
 	Trigger           string   `json:"trigger,omitempty"`
 	Timeout           int      `json:"timeout,omitempty"`
 	Concurrence       int      `json:"worker,omitempty"`
+	MaxCPU            int      `json:"maxcpu,omitempty"`
 	Delay             int      `json:"delay,omitempty"`
 	AllURLS           int
 	NowURL            int
@@ -73,6 +74,7 @@ type Options struct {
 	OnlyPoC           string `json:"only-poc,omitempty"`
 	OutputAll         bool   `json:"output-all,omitempty"`
 	WAF               bool
+	WAFName           string `json:"waf-name,omitempty"`
 	WAFEvasion        bool
 	PoCType           string `json:"poc-type,omitempty"`
 	Mutex             *sync.Mutex

@@ -26,6 +26,13 @@ import (
 	voltFile "github.com/hahwul/volt/file"
 )
 
+const (
+	NaN             = "NaN"
+	urlEncode       = "urlEncode"
+	urlDoubleEncode = "urlDoubleEncode"
+	htmlEncode      = "htmlEncode"
+)
+
 var (
 	scanObject model.Scan
 	s          = spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr))
@@ -34,22 +41,10 @@ var (
 // Scan is main scanning function
 func Scan(target string, options model.Options, sid string) (model.Result, error) {
 	var scanResult model.Result
-	mutex := &sync.Mutex{}
 	options.ScanResult = scanResult
 	scanResult.StartTime = time.Now()
 	if !(options.Silence || options.NoSpinner) {
-		time.Sleep(1 * time.Second) // Waiting log
-		s.Prefix = " "
-		s.Suffix = ""
-		if !options.NoColor {
-			s.Color("red", "bold")
-		}
-		if options.SpinnerObject != nil {
-			s = options.SpinnerObject
-		} else {
-			options.SpinnerObject = s
-		}
-		s.Start()
+		initializeSpinner(options)
 	}
 
 	scanObject := model.Scan{
@@ -57,15 +52,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 		URL:    target,
 	}
 	if !(options.Silence && options.MulticastMode) {
-		printing.DalLog("SYSTEM", "Start Scan 🦊", options)
-		//printing.DalLog("SYSTEM-M", "Start Scan 🦊", options)
-		if options.AllURLS > 0 {
-			snow, _ := strconv.Atoi(sid)
-			percent := fmt.Sprintf("%0.2f%%", float64(snow)/float64(options.AllURLS)*100)
-			printing.DalLog("SYSTEM-M", "🦊 Start scan [SID:"+sid+"]["+sid+"/"+strconv.Itoa(options.AllURLS)+"]["+percent+"%] / URL: "+target, options)
-		} else {
-			printing.DalLog("SYSTEM-M", "🦊 Start scan [SID:"+sid+"] / URL: "+target, options)
-		}
+		logStartScan(target, options, sid)
 	}
 
 	// query is XSS payloads
@@ -73,7 +60,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 
 	// params is "param name":true  (reflected?)
 	// 1: non-reflected , 2: reflected , 3: reflected-with-sc
-	params := make(map[string][]string)
+	params := make(map[string]model.ParamResult)
 
 	// durls is url for dom xss
 	var durls []string
@@ -93,22 +80,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 		return scanResult, err
 	}
 	treq := optimization.GenerateNewRequest(target, "", options)
-	//treq, terr := http.NewRequest("GET", target, nil)
 	if treq == nil {
 	} else {
-		transport := getTransport(options)
-		t := options.Timeout
-		client := &http.Client{
-			Timeout:   time.Duration(t) * time.Second,
-			Transport: transport,
-		}
-
-		if !options.FollowRedirect {
-			client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-				return http.ErrUseLastResponse
-			}
-		}
-
+		client := createHTTPClient(options)
 		tres, err := client.Do(treq)
 		if err != nil {
 			msg := fmt.Sprintf("not running %v", err)
@@ -116,13 +90,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			return scanResult, err
 		}
 		if options.IgnoreReturn != "" {
-			rcode := strings.Split(options.IgnoreReturn, ",")
-			tcode := strconv.Itoa(tres.StatusCode)
-			for _, v := range rcode {
-				if tcode == v {
-					printing.DalLog("SYSTEM", "Not running "+target+" url from --ignore-return option", options)
-					return scanResult, nil
-				}
+			if shouldIgnoreReturn(tres.StatusCode, options.IgnoreReturn) {
+				printing.DalLog("SYSTEM", "Not running "+target+" url from --ignore-return option", options)
+				return scanResult, nil
 			}
 		}
 
@@ -158,32 +128,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 	if options.UseBAV {
 		go func() {
 			defer wait.Done()
-			var bavWaitGroup sync.WaitGroup
-			bavTask := 5
-			bavWaitGroup.Add(bavTask)
-			go func() {
-				defer bavWaitGroup.Done()
-				ESIIAnalysis(target, options, rl)
-			}()
-			go func() {
-				defer bavWaitGroup.Done()
-				SqliAnalysis(target, options, rl)
-			}()
-			go func() {
-				defer bavWaitGroup.Done()
-				SSTIAnalysis(target, options, rl)
-			}()
-			go func() {
-				defer bavWaitGroup.Done()
-				CRLFAnalysis(target, options, rl)
-			}()
-			go func() {
-				defer bavWaitGroup.Done()
-				OpenRedirectorAnalysis(target, options, rl)
-			}()
-			bavWaitGroup.Wait()
-			bav = options.AuroraObject.Green(bav).String()
-			printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for analysis 🔍", options)
+			runBAVAnalysis(target, options, rl, &bav)
 		}()
 	}
 
@@ -194,64 +139,18 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 	if !(options.Silence || options.NoSpinner) {
 		time.Sleep(1 * time.Second) // Waiting log
 		s.Start()                   // Start the spinner
-		//time.Sleep(3 * time.Second) // Run for some time to simulate work
 	}
 	wait.Wait()
 
 	if !(options.Silence || options.NoSpinner) {
 		s.Stop()
 	}
-	for k, v := range policy {
-		if len(v) != 0 {
-			if k == "BypassCSP" {
-				printing.DalLog("WEAK", k+": "+v, options)
-			} else {
-				printing.DalLog("INFO", k+" is "+v, options)
-			}
-		}
-	}
-	for k, v := range options.PathReflection {
-		if len(parsedURL.Path) == 0 {
-			str := options.AuroraObject.Yellow("dalfoxpathtest").String()
-			printing.DalLog("INFO", "Reflected PATH '/"+str+"' => "+v+"]", options)
-		} else {
-			split := strings.Split(parsedURL.Path, "/")
-			if len(split) > k+1 {
-				split[k+1] = options.AuroraObject.Yellow("dalfoxpathtest").String()
-				tempURL := strings.Join(split, "/")
-				printing.DalLog("INFO", "Reflected PATH '"+tempURL+"' => "+v+"]", options)
-			}
-		}
-	}
+	logPolicyAndPathReflection(policy, options, parsedURL)
 
 	for k, v := range params {
-		temp := model.ParamResult{
-			Name:      k,
-			Reflected: false,
-		}
-
-		if len(v) != 0 {
-			code, vv := v[len(v)-1], v[:len(v)-1]
-			char := strings.Join(vv, "  ")
-			//x, a = a[len(a)-1], a[:len(a)-1]
-			printing.DalLog("INFO", "Reflected "+k+" param => "+char, options)
-			printing.DalLog("CODE", code, options)
-			arr := strings.Split(char, "  ")
-			for _, value := range arr {
-				if strings.Contains(value, "PTYPE:") {
-					splitedValue := strings.Split(value, " ")
-					temp.Type = splitedValue[1]
-				} else if strings.Contains(value, "Injected:") {
-					splitedValue := strings.Split(value, " ")
-					temp.ReflectedPoint = splitedValue[1]
-				} else {
-					temp.Chars = append(temp.Chars, value)
-				}
-			}
-			temp.ReflectedCode = code
-			temp.Reflected = true
-		}
-		scanResult.Params = append(scanResult.Params, temp)
+		printing.DalLog("INFO", "Reflected "+k+" param => "+strings.Join(v.Chars, "  "), options)
+		printing.DalLog("CODE", v.ReflectedCode, options)
+		scanResult.Params = append(scanResult.Params, v)
 	}
 
 	if !options.OnlyDiscovery {
@@ -259,14 +158,8 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 		printing.DalLog("SYSTEM", "Generate XSS payload and optimization.Optimization.. 🛠", options)
 		// optimization.Optimization..
 
-		/*
-			k: parama name
-			v: pattern [injs, inhtml, ' < > ]
-			av: reflected type, valid char
-		*/
-
 		// set vStatus
-		for k, _ := range params {
+		for k := range params {
 			vStatus[k] = false
 		}
 
@@ -318,16 +211,16 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 						for k, v := range params {
 							if optimization.CheckInspectionParam(options, k) {
 								ptype := ""
-								for _, av := range v {
+								for _, av := range v.Chars {
 									if strings.Contains(av, "PTYPE:") {
 										ptype = GetPType(av)
 									}
 								}
 								encoders := []string{
-									"NaN",
-									"urlEncode",
-									"urlDoubleEncode",
-									"htmlEncode",
+									NaN,
+									urlEncode,
+									urlDoubleEncode,
+									htmlEncode,
 								}
 								for _, encoder := range encoders {
 									tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", encoder, options)
@@ -368,10 +261,10 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					arc := optimization.SetPayloadValue(getCommonPayload(), options)
 					for _, avv := range arc {
 						encoders := []string{
-							"NaN",
-							"urlEncode",
-							"urlDoubleEncode",
-							"htmlEncode",
+							NaN,
+							urlEncode,
+							urlDoubleEncode,
+							htmlEncode,
 						}
 						for _, encoder := range encoders {
 							tq, tm := optimization.MakeRequestQuery(target, v, avv, "inHTML-URL", "toAppend", encoder, options)
@@ -387,10 +280,10 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					arc := optimization.SetPayloadValue(getCommonPayload(), options)
 					for _, avv := range arc {
 						encoders := []string{
-							"NaN",
-							"urlEncode",
-							"urlDoubleEncode",
-							"htmlEncode",
+							NaN,
+							urlEncode,
+							urlDoubleEncode,
+							htmlEncode,
 						}
 						for _, encoder := range encoders {
 							tq, tm := optimization.MakeRequestQuery(target, v, avv, "inHTML-FORM", "toAppend", encoder, options)
@@ -412,7 +305,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 				for v := range cp {
 					if optimization.CheckInspectionParam(options, v) {
 						// loop payload list
-						if len(params[v]) == 0 {
+						if len(params[v].Chars) == 0 {
 							for _, dpayload := range dpayloads {
 								var durl string
 								u, _ := url.Parse(target)
@@ -434,7 +327,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 				for v := range cpd {
 					if optimization.CheckInspectionParam(options, v) {
 						// loop payload list
-						if len(params[v]) == 0 {
+						if len(params[v].Chars) == 0 {
 							for _, dpayload := range dpayloads {
 								var durl string
 								u, _ := url.Parse(target)
@@ -462,7 +355,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					chars := GetSpecialChar()
 					var badchars []string
 
-					for _, av := range v {
+					for _, av := range v.Chars {
 						if indexOf(av, chars) == -1 {
 							badchars = append(badchars, av)
 						}
@@ -474,7 +367,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 							// Injected pattern
 							injectedPoint := strings.Split(av, "/")
 							injectedPoint = injectedPoint[1:]
-							injectedChars := params[k][:len(params[k])-1]
+							injectedChars := params[k].Chars[:len(params[k].Chars)-1]
 							for _, ip := range injectedPoint {
 								var arr []string
 								if strings.Contains(ip, "inJS") {
@@ -508,10 +401,10 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 								for _, avv := range arr {
 									if optimization.Optimization(avv, badchars) {
 										encoders := []string{
-											"NaN",
-											"urlEncode",
-											"urlDoubleEncode",
-											"htmlEncode",
+											NaN,
+											urlEncode,
+											urlDoubleEncode,
+											htmlEncode,
 										}
 										for _, encoder := range encoders {
 											tq, tm := optimization.MakeRequestQuery(target, k, avv, ip+ptype, "toAppend", encoder, options)
@@ -528,10 +421,10 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 						if !containsFromArray(cpArr, k) {
 							if optimization.Optimization(avv, badchars) {
 								encoders := []string{
-									"NaN",
-									"urlEncode",
-									"urlDoubleEncode",
-									"htmlEncode",
+									NaN,
+									urlEncode,
+									urlDoubleEncode,
+									htmlEncode,
 								}
 								for _, encoder := range encoders {
 									tq, tm := optimization.MakeRequestQuery(target, k, avv, "inHTML"+ptype, "toAppend", encoder, options)
@@ -572,7 +465,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			for k, v := range params {
 				if optimization.CheckInspectionParam(options, k) {
 					ptype := ""
-					for _, av := range v {
+					for _, av := range v.Chars {
 						if strings.Contains(av, "PTYPE:") {
 							ptype = GetPType(av)
 						}
@@ -582,10 +475,10 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 						// Add plain XSS Query
 						bp := strings.Replace(bpayload, "CALLBACKURL", bcallback, 10)
 						encoders := []string{
-							"NaN",
-							"urlEncode",
-							"urlDoubleEncode",
-							"htmlEncode",
+							NaN,
+							urlEncode,
+							urlDoubleEncode,
+							htmlEncode,
 						}
 						for _, encoder := range encoders {
 							tq, tm := optimization.MakeRequestQuery(target, k, bp, "toBlind"+ptype, "toAppend", encoder, options)
@@ -618,16 +511,16 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 							for k, v := range params {
 								if optimization.CheckInspectionParam(options, k) {
 									ptype := ""
-									for _, av := range v {
+									for _, av := range v.Chars {
 										if strings.Contains(av, "PTYPE:") {
 											ptype = GetPType(av)
 										}
 									}
 									encoders := []string{
-										"NaN",
-										"urlEncode",
-										"urlDoubleEncode",
-										"htmlEncode",
+										NaN,
+										urlEncode,
+										urlDoubleEncode,
+										htmlEncode,
 									}
 									for _, encoder := range encoders {
 										tq, tm := optimization.MakeRequestQuery(target, k, remotePayload, "inHTML"+ptype, "toAppend", encoder, options)
@@ -668,6 +561,18 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 		// make reqeust channel
 		queries := make(chan Queries)
 
+		resultsChan := make(chan model.PoC)
+		doneChan := make(chan bool)
+
+		// Collect results from the channel
+		go func() {
+			for result := range resultsChan {
+				scanObject.Results = append(scanObject.Results, result)
+				scanResult.PoCs = append(scanResult.PoCs, result)
+			}
+			doneChan <- true
+		}()
+
 		if options.UseHeadless {
 			// start DOM XSS checker
 			wg.Add(1)
@@ -686,7 +591,6 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					go func() {
 						for v := range dchan {
 							if CheckXSSWithHeadless(v, options) {
-								mutex.Lock()
 								printing.DalLog("VULN", "Triggered XSS Payload (found dialog in headless)", options)
 								poc := model.PoC{
 									Type:       "V",
@@ -715,9 +619,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 								if options.FoundAction != "" {
 									foundAction(options, target, v, "VULN")
 								}
-								scanObject.Results = append(scanObject.Results, poc)
-								scanResult.PoCs = append(scanResult.PoCs, poc)
-								mutex.Unlock()
+								resultsChan <- poc
 							}
 							queryCount = queryCount + 1
 						}
@@ -772,7 +674,6 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											if vStatus[v["param"]] == false {
 												if options.UseHeadless {
 													if CheckXSSWithHeadless(k.URL.String(), options) {
-														mutex.Lock()
 														printing.DalLog("VULN", "Triggered XSS Payload (found dialog in headless)", options)
 														poc := model.PoC{
 															Type:       "V",
@@ -816,11 +717,8 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 														if options.FoundAction != "" {
 															foundAction(options, target, k.URL.String(), "VULN")
 														}
-														scanObject.Results = append(scanObject.Results, poc)
-														scanResult.PoCs = append(scanResult.PoCs, poc)
-														mutex.Unlock()
+														resultsChan <- poc
 													} else {
-														mutex.Lock()
 														if options.FoundAction != "" {
 															foundAction(options, target, k.URL.String(), "WEAK")
 														}
@@ -853,12 +751,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 															printing.DalLog("CODE", string(resbody), options)
 														}
 
-														scanObject.Results = append(scanObject.Results, poc)
-														scanResult.PoCs = append(scanResult.PoCs, poc)
-														mutex.Unlock()
+														resultsChan <- poc
 													}
 												} else {
-													mutex.Lock()
 													code := CodeView(resbody, v["payload"])
 													printing.DalLog("WEAK", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], options)
 													printing.DalLog("CODE", code, options)
@@ -902,16 +797,13 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 													if options.FoundAction != "" {
 														foundAction(options, target, k.URL.String(), "WEAK")
 													}
-													scanObject.Results = append(scanObject.Results, poc)
-													scanResult.PoCs = append(scanResult.PoCs, poc)
-													mutex.Unlock()
+													resultsChan <- poc
 												}
 											}
 										}
 									}
 								} else if strings.Contains(v["type"], "inATTR") {
 									if vds {
-										mutex.Lock()
 										if vStatus[v["param"]] == false {
 											code := CodeView(resbody, v["payload"])
 											printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], options)
@@ -957,12 +849,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											if options.FoundAction != "" {
 												foundAction(options, target, k.URL.String(), "VULN")
 											}
-											scanObject.Results = append(scanObject.Results, poc)
-											scanResult.PoCs = append(scanResult.PoCs, poc)
+											resultsChan <- poc
 										}
-										mutex.Unlock()
 									} else if vrs {
-										mutex.Lock()
 										if vStatus[v["param"]] == false {
 											code := CodeView(resbody, v["payload"])
 											printing.DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"], options)
@@ -1007,14 +896,11 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											if options.FoundAction != "" {
 												foundAction(options, target, k.URL.String(), "WEAK")
 											}
-											scanObject.Results = append(scanObject.Results, poc)
-											scanResult.PoCs = append(scanResult.PoCs, poc)
+											resultsChan <- poc
 										}
-										mutex.Unlock()
 									}
 								} else {
 									if vds {
-										mutex.Lock()
 										if vStatus[v["param"]] == false {
 											code := CodeView(resbody, v["payload"])
 											printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], options)
@@ -1060,12 +946,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											if options.FoundAction != "" {
 												foundAction(options, target, k.URL.String(), "VULN")
 											}
-											scanObject.Results = append(scanObject.Results, poc)
-											scanResult.PoCs = append(scanResult.PoCs, poc)
+											resultsChan <- poc
 										}
-										mutex.Unlock()
 									} else if vrs {
-										mutex.Lock()
 										if vStatus[v["param"]] == false {
 											code := CodeView(resbody, v["payload"])
 											printing.DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"], options)
@@ -1110,16 +993,13 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 											if options.FoundAction != "" {
 												foundAction(options, target, k.URL.String(), "WEAK")
 											}
-											scanObject.Results = append(scanObject.Results, poc)
-											scanResult.PoCs = append(scanResult.PoCs, poc)
+											resultsChan <- poc
 										}
-										mutex.Unlock()
 									}
 								}
 							}
 						}
 					}
-					mutex.Lock()
 					queryCount = queryCount + 1
 
 					if !(options.Silence || options.NoSpinner) {
@@ -1146,10 +1026,8 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 							percent2 := fmt.Sprintf("%0.2f%%", (float64(options.NowURL) / float64(options.AllURLS) * 100))
 							s.Suffix = "  [" + strconv.Itoa(queryCount) + "/" + strconv.Itoa(len(query)+len(durls)) + " Queries][" + percent + "][" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][" + percent2 + "] " + msg
 						}
-						//s.Suffix = " Waiting routines.. (" + strconv.Itoa(queryCount) + " / " + strconv.Itoa(len(query)) + ") reqs"
 						s.Unlock()
 					}
-					mutex.Unlock()
 				}
 				wg.Done()
 			}()
@@ -1167,23 +1045,16 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 		if !(options.Silence || options.NoSpinner) {
 			s.Stop()
 		}
+
+		close(resultsChan)
+		<-doneChan
 	}
 
 	options.Scan[sid] = scanObject
 	scanResult.EndTime = time.Now()
 	scanResult.Duration = scanResult.EndTime.Sub(scanResult.StartTime)
 	if !(options.Silence && options.MulticastMode) {
-		if term.IsTerminal(0) {
-			width, _, err := term.GetSize(0)
-			if err == nil {
-				var dash string
-				for i := 0; i < width-5; i++ {
-					dash = dash + "-"
-				}
-				printing.DalLog("SYSTEM-M", dash, options)
-			}
-		}
-		printing.DalLog("SYSTEM-M", "[duration: "+scanResult.Duration.String()+"][issues: "+strconv.Itoa(len(scanResult.PoCs))+"] Finish Scan!", options)
+		printScanSummary(scanResult, options)
 	}
 	if options.ReportBool {
 		printing.DalLog("SYSTEM-M", "Report\n", options)
@@ -1197,4 +1068,132 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 		}
 	}
 	return scanResult, nil
+}
+
+// initializeSpinner initializes the spinner with the given options.
+func initializeSpinner(options model.Options) {
+	time.Sleep(1 * time.Second) // Waiting log
+	s.Prefix = " "
+	s.Suffix = ""
+	if !options.NoColor {
+		s.Color("red", "bold")
+	}
+	if options.SpinnerObject != nil {
+		s = options.SpinnerObject
+	} else {
+		options.SpinnerObject = s
+	}
+	s.Start()
+}
+
+// logStartScan logs the start of the scan.
+func logStartScan(target string, options model.Options, sid string) {
+	printing.DalLog("SYSTEM", "Start Scan 🦊", options)
+	if options.AllURLS > 0 {
+		snow, _ := strconv.Atoi(sid)
+		percent := fmt.Sprintf("%0.2f%%", float64(snow)/float64(options.AllURLS)*100)
+		printing.DalLog("SYSTEM-M", "🦊 Start scan [SID:"+sid+"]["+sid+"/"+strconv.Itoa(options.AllURLS)+"]["+percent+"%] / URL: "+target, options)
+	} else {
+		printing.DalLog("SYSTEM-M", "🦊 Start scan [SID:"+sid+"] / URL: "+target, options)
+	}
+}
+
+// createHTTPClient creates an HTTP client with the given options.
+func createHTTPClient(options model.Options) *http.Client {
+	transport := getTransport(options)
+	t := options.Timeout
+	client := &http.Client{
+		Timeout:   time.Duration(t) * time.Second,
+		Transport: transport,
+	}
+
+	if !options.FollowRedirect {
+		client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		}
+	}
+	return client
+}
+
+// shouldIgnoreReturn checks if the response status code should be ignored.
+func shouldIgnoreReturn(statusCode int, ignoreReturn string) bool {
+	rcode := strings.Split(ignoreReturn, ",")
+	tcode := strconv.Itoa(statusCode)
+	for _, v := range rcode {
+		if tcode == v {
+			return true
+		}
+	}
+	return false
+}
+
+// runBAVAnalysis runs the BAV analysis.
+func runBAVAnalysis(target string, options model.Options, rl *rateLimiter, bav *string) {
+	var bavWaitGroup sync.WaitGroup
+	bavTask := 5
+	bavWaitGroup.Add(bavTask)
+	go func() {
+		defer bavWaitGroup.Done()
+		ESIIAnalysis(target, options, rl)
+	}()
+	go func() {
+		defer bavWaitGroup.Done()
+		SqliAnalysis(target, options, rl)
+	}()
+	go func() {
+		defer bavWaitGroup.Done()
+		SSTIAnalysis(target, options, rl)
+	}()
+	go func() {
+		defer bavWaitGroup.Done()
+		CRLFAnalysis(target, options, rl)
+	}()
+	go func() {
+		defer bavWaitGroup.Done()
+		OpenRedirectorAnalysis(target, options, rl)
+	}()
+	bavWaitGroup.Wait()
+	*bav = options.AuroraObject.Green(*bav).String()
+	printing.DalLog("SYSTEM", "["+*bav+"] Waiting for analysis 🔍", options)
+}
+
+// logPolicyAndPathReflection logs the policy and path reflection information.
+func logPolicyAndPathReflection(policy map[string]string, options model.Options, parsedURL *url.URL) {
+	for k, v := range policy {
+		if len(v) != 0 {
+			if k == "BypassCSP" {
+				printing.DalLog("WEAK", k+": "+v, options)
+			} else {
+				printing.DalLog("INFO", k+" is "+v, options)
+			}
+		}
+	}
+	for k, v := range options.PathReflection {
+		if len(parsedURL.Path) == 0 {
+			str := options.AuroraObject.Yellow("dalfoxpathtest").String()
+			printing.DalLog("INFO", "Reflected PATH '/"+str+"' => "+v+"]", options)
+		} else {
+			split := strings.Split(parsedURL.Path, "/")
+			if len(split) > k+1 {
+				split[k+1] = options.AuroraObject.Yellow("dalfoxpathtest").String()
+				tempURL := strings.Join(split, "/")
+				printing.DalLog("INFO", "Reflected PATH '"+tempURL+"' => "+v+"]", options)
+			}
+		}
+	}
+}
+
+// printScanSummary prints the summary of the scan.
+func printScanSummary(scanResult model.Result, options model.Options) {
+	if term.IsTerminal(0) {
+		width, _, err := term.GetSize(0)
+		if err == nil {
+			var dash string
+			for i := 0; i < width-5; i++ {
+				dash = dash + "-"
+			}
+			printing.DalLog("SYSTEM-M", dash, options)
+		}
+	}
+	printing.DalLog("SYSTEM-M", "[duration: "+scanResult.Duration.String()+"][issues: "+strconv.Itoa(len(scanResult.PoCs))+"] Finish Scan!", options)
 }

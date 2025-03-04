@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/hahwul/dalfox/v2/pkg/har"
@@ -78,6 +79,7 @@ func init() {
 	rootCmd.PersistentFlags().IntVar(&args.Timeout, "timeout", 10, "Set the request timeout in seconds. Example: --timeout 10")
 	rootCmd.PersistentFlags().IntVar(&args.Delay, "delay", 0, "Set the delay between requests to the same host in milliseconds. Example: --delay 1000")
 	rootCmd.PersistentFlags().IntVarP(&args.Concurrence, "worker", "w", 100, "Set the number of concurrent workers. Example: -w 100")
+	rootCmd.PersistentFlags().IntVar(&args.MaxCPU, "max-cpu", 1, "Set the maximum number of CPUs to use. Example: --max-cpu 1")
 
 	// Bool
 	rootCmd.PersistentFlags().BoolVar(&args.OnlyDiscovery, "only-discovery", false, "Only perform parameter analysis, skip XSS scanning. Example: --only-discovery")
@@ -129,6 +131,7 @@ func initConfig() {
 		IgnoreParams:      args.IgnoreParams,
 		Timeout:           args.Timeout,
 		Concurrence:       args.Concurrence,
+		MaxCPU:            args.MaxCPU,
 		Delay:             args.Delay,
 		OnlyDiscovery:     args.OnlyDiscovery,
 		OnlyCustomPayload: args.OnlyCustomPayload,
@@ -182,6 +185,10 @@ func initConfig() {
 
 	if args.SkipXSSScan {
 		options.OnlyDiscovery = true
+	}
+
+	if args.MaxCPU > 1 {
+		runtime.GOMAXPROCS(args.MaxCPU)
 	}
 
 	if args.Grep != "" {
