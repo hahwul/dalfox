@@ -2,6 +2,7 @@ package scanning
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"github.com/chromedp/cdproto/network"
@@ -15,6 +16,9 @@ var chromeCancel context.CancelFunc
 
 func init() {
 	chromeCtx, chromeCancel = chromedp.NewContext(context.Background())
+	if chromeCtx == nil {
+		log.Println("Failed to create chrome context")
+	}
 }
 
 // CheckXSSWithHeadless is XSS Testing with headless browser
