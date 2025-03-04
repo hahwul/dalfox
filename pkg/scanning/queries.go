@@ -12,11 +12,7 @@ type Queries struct {
 
 func checkVStatus(vStatus map[string]bool) bool {
 	for k, v := range vStatus {
-		if k != "pleasedonthaveanamelikethis_plz_plz" {
-			if !v {
-				return false
-			}
-		} else {
+		if k == "pleasedonthaveanamelikethis_plz_plz" || !v {
 			return false
 		}
 	}
