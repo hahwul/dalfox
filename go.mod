@@ -1,7 +1,6 @@
 module github.com/hahwul/dalfox/v2
 
 go 1.23
-
 require (
 	github.com/PuerkitoBio/goquery v1.10.2
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
@@ -19,7 +18,7 @@ require (
 	github.com/swaggo/swag v1.16.4
 	github.com/tidwall/sjson v1.2.5
 	github.com/tylerb/graceful v1.2.15
-	golang.org/x/sync v0.11.0
+	golang.org/x/sync v0.12.0
 	golang.org/x/term v0.29.0
 )
 
