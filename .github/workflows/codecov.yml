@@ -38,6 +38,8 @@ jobs:
         with:
           go-version: '1.23'
       - name: Run coverage
-        run: go test -coverprofile=coverage.out -covermode=atomic ./...
-      - name: Upload coverage to Codecov
-        run: bash <(curl -s https://codecov.io/bash)
+        run: go test -coverprofile=coverage.txt ./...
+      - name: Upload results to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
