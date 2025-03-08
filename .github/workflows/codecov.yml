@@ -4,7 +4,6 @@ on:
   push:
     branches: [main]
     paths:
-      - cmd/**/*
       - pkg/**/*
       - lib/**/*
       - go.mod
@@ -14,7 +13,6 @@ on:
   pull_request:
     branches: [main]
     paths:
-      - cmd/**/*
       - pkg/**/*
       - lib/**/*
       - go.mod
@@ -38,7 +36,7 @@ jobs:
         with:
           go-version: '1.23'
       - name: Run coverage
-        run: go test -coverprofile=coverage.txt -covermode=atomic ./...
+        run: go test -coverprofile=coverage.txt -covermode=atomic $(go list ./... | grep -v /cmd/)
       - name: Upload results to Codecov
         uses: codecov/codecov-action@v5
         with:
