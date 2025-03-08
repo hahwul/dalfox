@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	_ "github.com/hahwul/dalfox/v2/pkg/server/docs"
@@ -149,4 +150,29 @@ func Test_ScanFromAPI(t *testing.T) {
 		ScanFromAPI("http://invalid-url", rqOptions, options, sid)
 		// Add assertions to verify error handling
 	})
+}
+
+func Test_setupEchoServer(t *testing.T) {
+	options := model.Options{
+		ServerHost: "localhost",
+		ServerPort: 6664,
+	}
+	scans := []string{}
+	e := setupEchoServer(options, &scans)
+
+	assert.NotNil(t, e)
+	assert.Equal(t, "localhost:6664", e.Server.Addr)
+}
+
+func Test_RunAPIServer(t *testing.T) {
+	options := model.Options{
+		ServerHost: "localhost",
+		ServerPort: 6664,
+	}
+	go RunAPIServer(options)
+	time.Sleep(1 * time.Second)
+
+	resp, err := http.Get("http://localhost:6664/health")
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
 }
