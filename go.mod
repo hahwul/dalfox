@@ -1,12 +1,13 @@
 module github.com/hahwul/dalfox/v2
 
-go 1.23
+go 1.24.0
+
 require (
 	github.com/PuerkitoBio/goquery v1.10.2
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
 	github.com/briandowns/spinner v1.23.2
 	github.com/chromedp/cdproto v0.0.0-20250222051814-50c6cb17f10a
-	github.com/chromedp/chromedp v0.13.1
+	github.com/chromedp/chromedp v0.13.0
 	github.com/hahwul/volt v1.0.5
 	github.com/labstack/echo/v4 v4.13.3
 	github.com/logrusorgru/aurora v2.0.3+incompatible
@@ -18,7 +19,7 @@ require (
 	github.com/swaggo/swag v1.16.4
 	github.com/tidwall/sjson v1.2.5
 	github.com/tylerb/graceful v1.2.15
-	golang.org/x/sync v0.12.0
+	golang.org/x/sync v0.11.0
 	golang.org/x/term v0.29.0
 )
 
