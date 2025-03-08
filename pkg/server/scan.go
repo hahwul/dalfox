@@ -34,7 +34,12 @@ func ScanFromAPI(url string, rqOptions model.Options, options model.Options, sid
 	escapedURL := cleanURL(url)
 	vLog.WithField("data1", sid).Debug(escapedURL)
 	vLog.WithField("data1", sid).Debug(newOptions)
-	_, _ = scan.Scan(url, newOptions, sid)
+	_, err := scan.Scan(url, newOptions, sid)
+	if err != nil {
+vLog.WithField("data1", sid).Error("Scan failed for URL:", url, ": ", err)
+		return
+	}
+	vLog.WithField("data1", sid).Info("Scan completed successfully")
 }
 
 // GetScan is get scan information
