@@ -1,6 +1,8 @@
 package server
 
 import (
+	"bytes"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -76,4 +78,75 @@ func Test_healthHandler(t *testing.T) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.Contains(t, rec.Body.String(), "ok")
 	}
+}
+
+func Test_postScanHandler(t *testing.T) {
+	e := echo.New()
+	rq := Req{
+		URL: "http://example.com",
+		Options: model.Options{
+			Method: "GET",
+		},
+	}
+	body, _ := json.Marshal(rq)
+	req := httptest.NewRequest(http.MethodPost, "/scan", bytes.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	scans := []string{}
+	options := model.Options{
+		Scan: map[string]model.Scan{},
+	}
+
+	if assert.NoError(t, postScanHandler(c, &scans, options)) {
+		assert.Equal(t, http.StatusOK, rec.Code)
+		assert.Contains(t, rec.Body.String(), "code")
+		assert.Contains(t, rec.Body.String(), "msg")
+		assert.Contains(t, rec.Body.String(), "data")
+	}
+}
+
+func Test_GetScan(t *testing.T) {
+	options := model.Options{
+		Scan: map[string]model.Scan{
+			"test-scan": {URL: "http://example.com", Results: []model.PoC{{Type: "finish"}}},
+		},
+	}
+	scan := GetScan("test-scan", options)
+	assert.Equal(t, "http://example.com", scan.URL)
+	assert.Equal(t, "finish", scan.Results[0].Type)
+}
+
+func Test_GetScans(t *testing.T) {
+	options := model.Options{
+		Scan: map[string]model.Scan{
+			"test-scan1": {URL: "http://example1.com"},
+			"test-scan2": {URL: "http://example2.com"},
+		},
+	}
+	scans := GetScans(options)
+	assert.Contains(t, scans, "test-scan1")
+	assert.Contains(t, scans, "test-scan2")
+}
+
+func Test_ScanFromAPI(t *testing.T) {
+	options := model.Options{
+		Debug: true,
+		Scan:  map[string]model.Scan{},
+	}
+	rqOptions := model.Options{
+		Method: "GET",
+	}
+	sid := "test-scan-id"
+
+	t.Run("Successful Scan", func(t *testing.T) {
+		ScanFromAPI("http://example.com", rqOptions, options, sid)
+		// Add assertions to verify the scan was successful
+	})
+
+	t.Run("Scan with Error", func(t *testing.T) {
+		ScanFromAPI("http://invalid-url", rqOptions, options, sid)
+		// Add assertions to verify error handling
+	})
 }
