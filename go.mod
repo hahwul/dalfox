@@ -8,7 +8,7 @@ require (
 	github.com/briandowns/spinner v1.23.2
 	github.com/chromedp/cdproto v0.0.0-20250222051814-50c6cb17f10a
 	github.com/chromedp/chromedp v0.13.0
-	github.com/hahwul/volt v1.0.5
+	github.com/hahwul/volt v1.0.6
 	github.com/labstack/echo/v4 v4.13.3
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/olekukonko/tablewriter v0.0.5
