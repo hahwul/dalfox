@@ -98,3 +98,19 @@ func TestInitialize(t *testing.T) {
 	assert.Equal(t, newOptions.Sequence, 1, "Sequence should be 1")
 	assert.Equal(t, newOptions.UseBAV, false, "UseBAV should be true")
 }
+
+func TestNewScan(t *testing.T) {
+	opt := dalfox.Options{}
+	target := dalfox.Target{
+		URL:     "https://www.hahwul.com",
+		Method:  "GET",
+		Options: opt,
+	}
+
+	result, err := dalfox.NewScan(target)
+	assert.NoError(t, err, "Error should be nil")
+	assert.NotNil(t, result, "Result should not be nil")
+	assert.NotZero(t, result.Duration, "Duration should not be zero")
+	assert.NotZero(t, result.StartTime, "StartTime should not be zero")
+	assert.NotZero(t, result.EndTime, "EndTime should not be zero")
+}
