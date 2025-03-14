@@ -120,9 +120,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			if paramName != "" {
 				params[paramName] = model.ParamResult{
 					Name:      paramName,
-					Type:      "URL",      // Consider allowing user to specify the type
-					Reflected: true,       // Assume it might be reflected
-					Chars:     []string{}, // Empty slice of special chars
+					Type:      "URL",            // Consider allowing user to specify the type
+					Reflected: true,             // Assume it might be reflected
+					Chars:     GetSpecialChar(), // Assumes all special characters can be reflected
 				}
 			}
 		}
