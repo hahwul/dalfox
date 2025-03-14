@@ -9,32 +9,42 @@ import (
 
 func TestInitialize(t *testing.T) {
 	opt := dalfox.Options{
-		Cookie:           "ABCD=1234",
-		UniqParam:        []string{"q"},
-		BlindURL:         "your-callback-url",
-		CustomAlertValue: "1",
-		CustomAlertType:  "none",
-		Header:           []string{"Cookie: 1234", "ABCD: 1234"},
-		Data:             "b=123",
-		UserAgent:        "Test-UA",
-		ProxyAddress:     "http://127.0.0.1",
-		Grep:             "Test",
-		IgnoreReturn:     "301",
-		IgnoreParams:     []string{"qqq"},
-		OnlyDiscovery:    true,
-		FollowRedirect:   true,
-		Trigger:          "https://google.com",
-		Timeout:          5,
-		Mining:           true,
-		FindingDOM:       true,
-		Concurrence:      10,
-		Delay:            2,
-		NoBAV:            true,
-		NoGrep:           true,
-		RemotePayloads:   "portswigger",
-		RemoteWordlists:  "burp",
-		PoCType:          "curl",
-		UseBAV:           false,
+		Cookie:            "ABCD=1234",
+		UniqParam:         []string{"q"},
+		BlindURL:          "your-callback-url",
+		CustomAlertValue:  "1",
+		CustomAlertType:   "none",
+		Header:            []string{"Cookie: 1234", "ABCD: 1234"},
+		Data:              "b=123",
+		UserAgent:         "Test-UA",
+		ProxyAddress:      "http://127.0.0.1",
+		Grep:              "Test",
+		IgnoreReturn:      "301",
+		IgnoreParams:      []string{"qqq"},
+		OnlyDiscovery:     true,
+		FollowRedirect:    true,
+		Trigger:           "https://google.com",
+		TriggerMethod:     "GET",
+		Timeout:           5,
+		Mining:            true,
+		FindingDOM:        true,
+		Concurrence:       10,
+		Delay:             2,
+		NoBAV:             true,
+		NoGrep:            true,
+		RemotePayloads:    "portswigger",
+		RemoteWordlists:   "burp",
+		PoCType:           "curl",
+		UseBAV:            false,
+		CustomPayloadFile: "payloads.txt",
+		OutputFile:        "output.txt",
+		FoundAction:       "notify",
+		FoundActionShell:  "bash",
+		OnlyCustomPayload: true,
+		UseHeadless:       false,
+		UseDeepDXSS:       true,
+		WAFEvasion:        true,
+		Sequence:          1,
 	}
 	target := dalfox.Target{
 		URL:     "https://www.hahwul.com",
@@ -78,4 +88,13 @@ func TestInitialize(t *testing.T) {
 	assert.Equal(t, newOptions.RemoteWordlists, "burp", "RemoteWordlists should be burp")
 	assert.Equal(t, newOptions.PoCType, "curl", "PoCType should be curl")
 	assert.Equal(t, newOptions.UseBAV, false, "UseBAV should be false")
+	assert.Equal(t, newOptions.CustomPayloadFile, "payloads.txt", "CustomPayloadFile should be payloads.txt")
+	assert.Equal(t, newOptions.OutputFile, "output.txt", "OutputFile should be output.txt")
+	assert.Equal(t, newOptions.FoundAction, "notify", "FoundAction should be notify")
+	assert.Equal(t, newOptions.OnlyCustomPayload, true, "OnlyCustomPayload should be true")
+	assert.Equal(t, newOptions.UseHeadless, false, "UseHeadless should be false")
+	assert.Equal(t, newOptions.UseDeepDXSS, true, "UseDeepDXSS should be true")
+	assert.Equal(t, newOptions.WAFEvasion, true, "WAFEvasion should be true")
+	assert.Equal(t, newOptions.Sequence, 1, "Sequence should be 1")
+	assert.Equal(t, newOptions.UseBAV, false, "UseBAV should be true")
 }
