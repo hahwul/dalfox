@@ -111,7 +111,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 
 		// Check that parameters were provided with -p
 		if len(options.UniqParam) == 0 {
-			printing.DalLog("ERROR", "--skip-discovery requires parameters to be specified with -p flag", options)
+			printing.DalLog("ERROR", "--skip-discovery requires parameters to be specified with -p flag (e.g., -p username)", options)
 			return scanResult, fmt.Errorf("--skip-discovery requires parameters to be specified with -p flag")
 		}
 
@@ -120,7 +120,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			if paramName != "" {
 				params[paramName] = model.ParamResult{
 					Name:      paramName,
-					Type:      "URL",
+					Type:      "URL",      // Consider allowing user to specify the type
 					Reflected: true,       // Assume it might be reflected
 					Chars:     []string{}, // Empty slice of special chars
 				}
