@@ -66,7 +66,7 @@ func TestInitialize(t *testing.T) {
 	assert.NotEqual(t, newOptions.FollowRedirect, false, "they should not be equal")
 	assert.NotEqual(t, newOptions.Mining, false, "they should not be equal")
 	assert.NotEqual(t, newOptions.FindingDOM, false, "they should not be equal")
-assert.Equal(t, newOptions.Method, "GET", "Method should be GET")
+	assert.Equal(t, newOptions.Method, "GET", "Method should be GET")
 	assert.Equal(t, newOptions.Format, "plain", "Format should be plain")
 	assert.Equal(t, newOptions.FoundActionShell, "bash", "FoundActionShell should be bash")
 	assert.Equal(t, newOptions.Timeout, 5, "Timeout should be 5")
