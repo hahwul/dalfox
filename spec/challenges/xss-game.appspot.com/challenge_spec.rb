@@ -12,4 +12,12 @@ RSpec.describe 'Basic Run', type: :aruba do
     expect(last_command_started).to have_output(/\[V\]/)
     expect(last_command_started).to be_successfully_executed
   end
+
+  it 'level2' do
+    # DOM Based XSS - Currently not detected
+  end
+
+  it 'level3' do
+    # Fragment Based XSS - Currently not detected
+  end
 end
