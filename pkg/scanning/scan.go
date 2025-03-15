@@ -13,16 +13,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hahwul/dalfox/v2/pkg/har"
+	"github.com/hahwul/dalfox/v2/internal/har"
 
 	"golang.org/x/term"
 
 	"github.com/briandowns/spinner"
+	"github.com/hahwul/dalfox/v2/internal/optimization"
+	"github.com/hahwul/dalfox/v2/internal/printing"
+	"github.com/hahwul/dalfox/v2/internal/report"
+	"github.com/hahwul/dalfox/v2/internal/verification"
 	"github.com/hahwul/dalfox/v2/pkg/model"
-	"github.com/hahwul/dalfox/v2/pkg/optimization"
-	"github.com/hahwul/dalfox/v2/pkg/printing"
-	"github.com/hahwul/dalfox/v2/pkg/report"
-	"github.com/hahwul/dalfox/v2/pkg/verification"
 	voltFile "github.com/hahwul/volt/file"
 )
 
@@ -787,7 +787,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 														resultsChan <- poc
 													}
 												} else {
-													code := CodeView(resbody, v["payload"])
+													code := printing.CodeView(resbody, v["payload"])
 													printing.DalLog("WEAK", "Reflected Payload in JS: "+v["param"]+"="+v["payload"], options)
 													printing.DalLog("CODE", code, options)
 													poc := model.PoC{
@@ -838,7 +838,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 								} else if strings.Contains(v["type"], "inATTR") {
 									if vds {
 										if vStatus[v["param"]] == false {
-											code := CodeView(resbody, v["payload"])
+											code := printing.CodeView(resbody, v["payload"])
 											printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], options)
 											printing.DalLog("CODE", code, options)
 											poc := model.PoC{
@@ -886,7 +886,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 										}
 									} else if vrs {
 										if vStatus[v["param"]] == false {
-											code := CodeView(resbody, v["payload"])
+											code := printing.CodeView(resbody, v["payload"])
 											printing.DalLog("WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"], options)
 											printing.DalLog("CODE", code, options)
 											poc := model.PoC{
@@ -935,7 +935,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 								} else {
 									if vds {
 										if vStatus[v["param"]] == false {
-											code := CodeView(resbody, v["payload"])
+											code := printing.CodeView(resbody, v["payload"])
 											printing.DalLog("VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"], options)
 											printing.DalLog("CODE", code, options)
 											poc := model.PoC{
@@ -983,7 +983,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 										}
 									} else if vrs {
 										if vStatus[v["param"]] == false {
-											code := CodeView(resbody, v["payload"])
+											code := printing.CodeView(resbody, v["payload"])
 											printing.DalLog("WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"], options)
 											printing.DalLog("CODE", code, options)
 											poc := model.PoC{

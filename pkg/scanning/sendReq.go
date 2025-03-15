@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/hahwul/dalfox/v2/pkg/har"
+	"github.com/hahwul/dalfox/v2/internal/har"
 
+	"github.com/hahwul/dalfox/v2/internal/optimization"
+	"github.com/hahwul/dalfox/v2/internal/printing"
+	"github.com/hahwul/dalfox/v2/internal/verification"
 	"github.com/hahwul/dalfox/v2/pkg/model"
-	"github.com/hahwul/dalfox/v2/pkg/optimization"
-	"github.com/hahwul/dalfox/v2/pkg/printing"
-	"github.com/hahwul/dalfox/v2/pkg/verification"
 	vlogger "github.com/hahwul/volt/logger"
 	"github.com/sirupsen/logrus"
 )

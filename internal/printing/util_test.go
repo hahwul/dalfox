@@ -3,7 +3,7 @@ package printing_test
 import (
 	"testing"
 
-	dalfox "github.com/hahwul/dalfox/v2/pkg/printing"
+	dalfox "github.com/hahwul/dalfox/v2/internal/printing"
 	"github.com/stretchr/testify/assert"
 )
 

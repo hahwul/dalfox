@@ -5,8 +5,8 @@ import (
 	"strconv"
 	"time"
 
+	printing "github.com/hahwul/dalfox/v2/internal/printing"
 	"github.com/hahwul/dalfox/v2/pkg/model"
-	printing "github.com/hahwul/dalfox/v2/pkg/printing"
 	_ "github.com/hahwul/dalfox/v2/pkg/server/docs"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"

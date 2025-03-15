@@ -5,8 +5,8 @@ import (
 	"net/url"
 	"sync"
 
+	"github.com/hahwul/dalfox/v2/internal/optimization"
 	"github.com/hahwul/dalfox/v2/pkg/model"
-	"github.com/hahwul/dalfox/v2/pkg/optimization"
 )
 
 // SSTIAnalysis is basic check for SSTI
@@ -43,7 +43,7 @@ func SSTIAnalysis(target string, options model.Options, rl *rateLimiter) {
 	wg.Wait()
 }
 
-//CRLFAnalysis is basic check for CRLF Injection
+// CRLFAnalysis is basic check for CRLF Injection
 func CRLFAnalysis(target string, options model.Options, rl *rateLimiter) {
 	bpu, _ := url.Parse(target)
 	bpd := bpu.Query()
@@ -75,7 +75,7 @@ func CRLFAnalysis(target string, options model.Options, rl *rateLimiter) {
 
 }
 
-//ESIIAnalysis is basic check for CRLF Injection
+// ESIIAnalysis is basic check for CRLF Injection
 func ESIIAnalysis(target string, options model.Options, rl *rateLimiter) {
 	bpu, _ := url.Parse(target)
 	bpd := bpu.Query()
@@ -107,7 +107,7 @@ func ESIIAnalysis(target string, options model.Options, rl *rateLimiter) {
 
 }
 
-//SqliAnalysis is basic check for SQL Injection
+// SqliAnalysis is basic check for SQL Injection
 func SqliAnalysis(target string, options model.Options, rl *rateLimiter) {
 	// sqli payload
 
@@ -141,7 +141,7 @@ func SqliAnalysis(target string, options model.Options, rl *rateLimiter) {
 
 }
 
-//OpenRedirectorAnalysis is basic check for open redirectors
+// OpenRedirectorAnalysis is basic check for open redirectors
 func OpenRedirectorAnalysis(target string, options model.Options, rl *rateLimiter) {
 
 	// openredirect payload
