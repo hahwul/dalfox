@@ -1,4 +1,4 @@
-package scanning
+package utils
 
 import "net/url"
 
