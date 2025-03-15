@@ -2,7 +2,7 @@
 
 require 'spec_helper'
 
-RSpec.describe 'Basic Run', type: :aruba do
+RSpec.describe 'xss-game.appspot.com', type: :aruba do
   before(:all) do
     @binary_path = File.expand_path('../../../dalfox', __dir__)
   end
