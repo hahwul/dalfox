@@ -3,9 +3,9 @@ package cmd
 import (
 	"strconv"
 
-	"github.com/hahwul/dalfox/v2/pkg/generating"
-	"github.com/hahwul/dalfox/v2/pkg/optimization"
-	"github.com/hahwul/dalfox/v2/pkg/printing"
+	"github.com/hahwul/dalfox/v2/internal/generating"
+	"github.com/hahwul/dalfox/v2/internal/optimization"
+	"github.com/hahwul/dalfox/v2/internal/printing"
 	"github.com/hahwul/dalfox/v2/pkg/scanning"
 	"github.com/spf13/cobra"
 )

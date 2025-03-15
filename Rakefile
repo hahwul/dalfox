@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'rspec/core/rake_task'
+require 'net/http'
+require 'json'
 
 namespace :test do
   desc 'Set up the test environment for functional tests'
@@ -54,5 +56,30 @@ namespace :docs do
   rescue StandardError => e
     puts "An error occurred: #{e.message}"
     exit 1
+  end
+end
+
+namespace :assets do
+  desc 'Check remote assets'
+  task :check do
+
+    def check(endpoint)
+      url = URI("https://assets.hahwul.com/#{endpoint}.json")
+      response = Net::HTTP.get(url)
+
+      data = JSON.parse(response)
+      puts data
+    end
+
+    endpoints = [
+      'xss-portswigger',
+      'xss-payloadbox',
+      'wl-params',
+      'wl-assetnote-params'
+    ]
+
+    endpoints.each do |target|
+      check target
+    end
   end
 end

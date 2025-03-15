@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/hahwul/dalfox/v2/internal/optimization"
+	"github.com/hahwul/dalfox/v2/internal/printing"
+	"github.com/hahwul/dalfox/v2/internal/verification"
 	"github.com/hahwul/dalfox/v2/pkg/model"
-	"github.com/hahwul/dalfox/v2/pkg/optimization"
-	"github.com/hahwul/dalfox/v2/pkg/printing"
-	"github.com/hahwul/dalfox/v2/pkg/verification"
 	voltFile "github.com/hahwul/volt/file"
 	vlogger "github.com/hahwul/volt/logger"
 	voltUtils "github.com/hahwul/volt/util"
@@ -161,7 +161,7 @@ func processParams(target string, paramsQue chan string, results chan model.Para
 				pLog.Debug(lineSum)
 			}
 			if vrs {
-				code = CodeView(resbody, "DalFox")
+				code = printing.CodeView(resbody, "DalFox")
 				code = code[:len(code)-5]
 				pointer := optimization.Abstraction(resbody, "DalFox")
 				smap := "Injected: "

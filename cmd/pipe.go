@@ -9,8 +9,9 @@ import (
 	"time"
 
 	"github.com/briandowns/spinner"
+	"github.com/hahwul/dalfox/v2/internal/printing"
+	"github.com/hahwul/dalfox/v2/internal/utils"
 	model "github.com/hahwul/dalfox/v2/pkg/model"
-	"github.com/hahwul/dalfox/v2/pkg/printing"
 	"github.com/hahwul/dalfox/v2/pkg/scanning"
 	voltUtils "github.com/hahwul/volt/util"
 	"github.com/spf13/cobra"
@@ -61,7 +62,7 @@ func runMulticastMode(targets []string, cmd *cobra.Command, sf bool) {
 	printing.DalLog("SYSTEM", "Using multicasting mode", options)
 	options.Silence = true
 	options.MulticastMode = true
-	t := scanning.MakeTargetSlice(targets)
+	t := utils.MakeTargetSlice(targets)
 	tt := 0
 	for _, v := range t {
 		tt += len(v)

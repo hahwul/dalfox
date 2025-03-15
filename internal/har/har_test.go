@@ -9,7 +9,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/hahwul/dalfox/v2/pkg/har"
+	"github.com/hahwul/dalfox/v2/internal/har"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/sjson"

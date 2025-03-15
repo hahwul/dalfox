@@ -5,8 +5,9 @@ import (
 	"strconv"
 	"time"
 
+	printing "github.com/hahwul/dalfox/v2/internal/printing"
+	"github.com/hahwul/dalfox/v2/internal/utils"
 	"github.com/hahwul/dalfox/v2/pkg/model"
-	printing "github.com/hahwul/dalfox/v2/pkg/printing"
 	_ "github.com/hahwul/dalfox/v2/pkg/server/docs"
 	"github.com/labstack/echo/v4"
 	"github.com/labstack/echo/v4/middleware"
@@ -110,7 +111,7 @@ func postScanHandler(c echo.Context, scans *[]string, options model.Options) err
 		}
 		return c.JSON(http.StatusInternalServerError, r)
 	}
-	sid := GenerateRandomToken(rq.URL)
+	sid := utils.GenerateRandomToken(rq.URL)
 	r := &Res{
 		Code: 200,
 		Msg:  sid,
