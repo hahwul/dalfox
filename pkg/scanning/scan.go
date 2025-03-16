@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/hahwul/dalfox/v2/internal/har"
+	"github.com/hahwul/dalfox/v2/internal/utils"
 
 	"golang.org/x/term"
 
@@ -389,7 +390,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					var badchars []string
 
 					for _, av := range v.Chars {
-						if indexOf(av, chars) == -1 {
+						if utils.IndexOf(av, chars) == -1 {
 							badchars = append(badchars, av)
 						}
 						if strings.Contains(av, "PTYPE:") {
@@ -451,7 +452,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					// common XSS for new param
 					arc := optimization.SetPayloadValue(getCommonPayload(), options)
 					for _, avv := range arc {
-						if !containsFromArray(cpArr, k) {
+						if !utils.ContainsFromArray(cpArr, k) {
 							if optimization.Optimization(avv, badchars) {
 								encoders := []string{
 									NaN,
@@ -680,7 +681,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					k := reqJob.request
 					v := reqJob.metadata
 					checkVtype := false
-					if checkPType(v["type"]) {
+					if utils.CheckPType(v["type"]) {
 						checkVtype = true
 					}
 
@@ -689,12 +690,12 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 						resbody, _, vds, vrs, err := SendReq(k, v["payload"], options)
 						abs := optimization.Abstraction(resbody, v["payload"])
 						if vrs {
-							if !containsFromArray(abs, v["type"]) && !strings.Contains(v["type"], "inHTML") {
+							if !utils.ContainsFromArray(abs, v["type"]) && !strings.Contains(v["type"], "inHTML") {
 								vrs = false
 							}
 						}
 						if err == nil {
-							if checkPType(v["type"]) {
+							if utils.CheckPType(v["type"]) {
 								if strings.Contains(v["type"], "inJS") {
 									if vrs {
 										protected := false

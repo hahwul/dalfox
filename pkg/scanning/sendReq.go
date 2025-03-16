@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/hahwul/dalfox/v2/internal/har"
+	"github.com/hahwul/dalfox/v2/internal/utils"
 
 	"github.com/hahwul/dalfox/v2/internal/optimization"
 	"github.com/hahwul/dalfox/v2/internal/printing"
@@ -139,7 +140,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					printing.DalLog("CODE", string(str), options)
 				}
 
-				if !duplicatedResult(scanObject.Results, poc) {
+				if !utils.DuplicatedResult(scanObject.Results, poc) {
 					if payload != "" {
 						printing.DalLog("GREP", "Found CRLF Injection via built-in grepping / payload: "+payload, options)
 						poc.MessageStr = "Found CRLF Injection via built-in grepping / payload: " + payload
@@ -203,7 +204,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 						printing.DalLog("CODE", string(str), options)
 					}
 
-					if !duplicatedResult(scanObject.Results, poc) {
+					if !utils.DuplicatedResult(scanObject.Results, poc) {
 						if payload != "" {
 							printing.DalLog("GREP", "Found SSTI via built-in grepping / payload: "+payload, options)
 							poc.MessageStr = "Found SSTI via built-in grepping / payload: " + payload
@@ -260,7 +261,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					printing.DalLog("CODE", string(str), options)
 				}
 
-				if !duplicatedResult(scanObject.Results, poc) {
+				if !utils.DuplicatedResult(scanObject.Results, poc) {
 					if payload != "" {
 						printing.DalLog("GREP", "Found "+k+" via built-in grepping / payload: "+payload, options)
 						poc.MessageStr = "Found " + k + " via built-in grepping / payload: " + payload
@@ -326,7 +327,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					printing.DalLog("CODE", string(str), options)
 				}
 
-				if !duplicatedResult(scanObject.Results, poc) {
+				if !utils.DuplicatedResult(scanObject.Results, poc) {
 					printing.DalLog("GREP", "Found "+k+" via custom grepping / payload: "+payload, options)
 					poc.MessageStr = "Found " + k + " via custom grepping / payload: " + payload
 					for _, vv := range v {

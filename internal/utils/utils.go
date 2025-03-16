@@ -1,4 +1,4 @@
-package scanning
+package utils
 
 import (
 	"strings"
@@ -6,7 +6,7 @@ import (
 	"github.com/hahwul/dalfox/v2/pkg/model"
 )
 
-func indexOf(element string, data []string) int {
+func IndexOf(element string, data []string) int {
 	for k, v := range data {
 		if element == v {
 			return k
@@ -15,7 +15,7 @@ func indexOf(element string, data []string) int {
 	return -1 // not found
 }
 
-func duplicatedResult(result []model.PoC, rst model.PoC) bool {
+func DuplicatedResult(result []model.PoC, rst model.PoC) bool {
 	types := make(map[string]struct{}, len(result))
 	for _, v := range result {
 		types[v.Type] = struct{}{}
@@ -24,7 +24,7 @@ func duplicatedResult(result []model.PoC, rst model.PoC) bool {
 	return exists
 }
 
-func containsFromArray(slice []string, item string) bool {
+func ContainsFromArray(slice []string, item string) bool {
 	set := make(map[string]struct{}, len(slice))
 	for _, s := range slice {
 		set[s] = struct{}{}
@@ -34,6 +34,6 @@ func containsFromArray(slice []string, item string) bool {
 	return ok
 }
 
-func checkPType(str string) bool {
+func CheckPType(str string) bool {
 	return !strings.Contains(str, "toBlind") && !strings.Contains(str, "toGrepping")
 }

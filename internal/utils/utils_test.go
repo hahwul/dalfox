@@ -1,4 +1,4 @@
-package scanning
+package utils
 
 import (
 	"testing"
@@ -6,7 +6,7 @@ import (
 	"github.com/hahwul/dalfox/v2/pkg/model"
 )
 
-func Test_indexOf(t *testing.T) {
+func Test_IndexOf(t *testing.T) {
 	type args struct {
 		element string
 		data    []string
@@ -29,14 +29,14 @@ func Test_indexOf(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := indexOf(tt.args.element, tt.args.data); got != tt.want {
-				t.Errorf("indexOf() = %v, want %v", got, tt.want)
+			if got := IndexOf(tt.args.element, tt.args.data); got != tt.want {
+				t.Errorf("IndexOf() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func Test_duplicatedResult(t *testing.T) {
+func Test_DuplicatedResult(t *testing.T) {
 	type args struct {
 		result []model.PoC
 		rst    model.PoC
@@ -65,14 +65,14 @@ func Test_duplicatedResult(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := duplicatedResult(tt.args.result, tt.args.rst); got != tt.want {
-				t.Errorf("duplicatedResult() = %v, want %v", got, tt.want)
+			if got := DuplicatedResult(tt.args.result, tt.args.rst); got != tt.want {
+				t.Errorf("DuplicatedResult() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func Test_containsFromArray(t *testing.T) {
+func Test_ContainsFromArray(t *testing.T) {
 	type args struct {
 		slice []string
 		item  string
@@ -105,14 +105,14 @@ func Test_containsFromArray(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := containsFromArray(tt.args.slice, tt.args.item); got != tt.want {
-				t.Errorf("containsFromArray() = %v, want %v", got, tt.want)
+			if got := ContainsFromArray(tt.args.slice, tt.args.item); got != tt.want {
+				t.Errorf("ContainsFromArray() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func Test_checkPType(t *testing.T) {
+func Test_CheckPType(t *testing.T) {
 	type args struct {
 		str string
 	}
@@ -139,8 +139,8 @@ func Test_checkPType(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := checkPType(tt.args.str); got != tt.want {
-				t.Errorf("checkPType() = %v, want %v", got, tt.want)
+			if got := CheckPType(tt.args.str); got != tt.want {
+				t.Errorf("CheckPType() = %v, want %v", got, tt.want)
 			}
 		})
 	}
