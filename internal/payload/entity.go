@@ -1,4 +1,4 @@
-package scanning
+package payload
 
 // InterfaceGetGfXSS is exported interface
 func InterfaceGetGfXSS() ([]string, int) {

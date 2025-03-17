@@ -181,7 +181,7 @@ func processParams(target string, paramsQue chan string, results chan model.Para
 					ReflectedCode:  code,
 				}
 				var wg sync.WaitGroup
-				chars := GetSpecialChar()
+				chars := payload.GetSpecialChar()
 				for _, c := range chars {
 					wg.Add(1)
 					char := c
@@ -239,7 +239,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 		}
 
 		if options.MiningWordlist == "" {
-			p, dp = addParamsFromWordlist(p, dp, GetGfXSS(), options)
+			p, dp = addParamsFromWordlist(p, dp, payload.GetGfXSS(), options)
 		} else {
 			ff, err := voltFile.ReadLinesOrLiteral(options.MiningWordlist)
 			if err != nil {

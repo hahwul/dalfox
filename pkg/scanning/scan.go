@@ -122,9 +122,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			if paramName != "" {
 				params[paramName] = model.ParamResult{
 					Name:      paramName,
-					Type:      "URL",            // Consider allowing user to specify the type
-					Reflected: true,             // Assume it might be reflected
-					Chars:     GetSpecialChar(), // Assumes all special characters can be reflected
+					Type:      "URL",                    // Consider allowing user to specify the type
+					Reflected: true,                     // Assume it might be reflected
+					Chars:     payload.GetSpecialChar(), // Assumes all special characters can be reflected
 				}
 			}
 		}
@@ -387,7 +387,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			for k, v := range params {
 				if optimization.CheckInspectionParam(options, k) {
 					ptype := ""
-					chars := GetSpecialChar()
+					chars := payload.GetSpecialChar()
 					var badchars []string
 
 					for _, av := range v.Chars {

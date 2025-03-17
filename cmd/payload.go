@@ -6,7 +6,6 @@ import (
 	"github.com/hahwul/dalfox/v2/internal/optimization"
 	"github.com/hahwul/dalfox/v2/internal/payload"
 	"github.com/hahwul/dalfox/v2/internal/printing"
-	"github.com/hahwul/dalfox/v2/pkg/scanning"
 	"github.com/spf13/cobra"
 )
 
@@ -58,10 +57,10 @@ func initializeObjects() []Object {
 		{Use: enumInJS, Name: "Enum-inJS-XSS", Listener: payload.GetInJsPayloadWithSize},
 		{Use: remotePayloadbox, Name: "Remote-Payloadbox-Payloads", Listener: payload.GetPayloadBoxPayloadWithSize},
 		{Use: remotePortswigger, Name: "Remote-Portswigger-Paylaods", Listener: payload.GetPortswiggerPayloadWithSize},
-		{Use: entityGF, Name: "Entity-GF-Patterns", Listener: scanning.InterfaceGetGfXSS},
-		{Use: entityEventHandler, Name: "Entity-Event-Handlers", Listener: scanning.InterfaceGetEventHandlers},
-		{Use: entityUsefulTags, Name: "Entity-Useful-Tags", Listener: scanning.InterfaceGetTags},
-		{Use: entitySpecialChars, Name: "Entity-Special-Chars", Listener: scanning.InterfaceGetSpecialChar},
+		{Use: entityGF, Name: "Entity-GF-Patterns", Listener: payload.InterfaceGetGfXSS},
+		{Use: entityEventHandler, Name: "Entity-Event-Handlers", Listener: payload.InterfaceGetEventHandlers},
+		{Use: entityUsefulTags, Name: "Entity-Useful-Tags", Listener: payload.InterfaceGetTags},
+		{Use: entitySpecialChars, Name: "Entity-Special-Chars", Listener: payload.InterfaceGetSpecialChar},
 	}
 }
 
