@@ -13,6 +13,7 @@ import (
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/hahwul/dalfox/v2/internal/optimization"
+	"github.com/hahwul/dalfox/v2/internal/payload"
 	"github.com/hahwul/dalfox/v2/internal/printing"
 	"github.com/hahwul/dalfox/v2/internal/verification"
 	"github.com/hahwul/dalfox/v2/pkg/model"
@@ -67,9 +68,9 @@ func addParamsFromRemoteWordlists(p, dp url.Values, options model.Options) (url.
 		var wordlist []string
 		var line, size string
 		if endpoint == "burp" {
-			wordlist, line, size = getBurpWordlist()
+			wordlist, line, size = payload.GetBurpWordlist()
 		} else if endpoint == "assetnote" {
-			wordlist, line, size = getAssetnoteWordlist()
+			wordlist, line, size = payload.GetAssetnoteWordlist()
 		}
 		if line != "" {
 			printing.DalLog("INFO", "A '"+endpoint+"' wordlist has been loaded ["+line+"L / "+size+"]", options)

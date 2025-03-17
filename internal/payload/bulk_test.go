@@ -1,4 +1,4 @@
-package generating
+package payload
 
 import (
 	"testing"

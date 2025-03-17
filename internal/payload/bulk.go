@@ -1,10 +1,8 @@
-package generating
+package payload
 
 import (
 	"strconv"
 	"strings"
-
-	"github.com/hahwul/dalfox/v2/pkg/scanning"
 )
 
 type objectPayload struct {
@@ -16,11 +14,11 @@ func GenerateBulkPayload() ([]string, int) {
 	var result []string
 	size := 0
 	var objs = []objectPayload{
-		{Listener: scanning.GetPortswiggerPayload},
-		{Listener: scanning.GetCommonPayload},
-		{Listener: scanning.GetHTMLPayload},
-		{Listener: scanning.GetInJsPayload},
-		{Listener: scanning.GetAttrPayload},
+		{Listener: GetPortswiggerPayloadWithSize},
+		{Listener: GetCommonPayloadWithSize},
+		{Listener: GetHTMLPayloadWithSize},
+		{Listener: GetInJsPayloadWithSize},
+		{Listener: GetAttrPayloadWithSize},
 	}
 	seq := 0
 

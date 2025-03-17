@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/hahwul/dalfox/v2/internal/har"
+	"github.com/hahwul/dalfox/v2/internal/payload"
 	"github.com/hahwul/dalfox/v2/internal/utils"
 
 	"golang.org/x/term"
@@ -207,13 +208,13 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 					for _, ip := range injectedPoint {
 						var arr []string
 						if strings.Contains(ip, "inJS") {
-							arr = optimization.SetPayloadValue(getInJsPayload(ip), options)
+							arr = optimization.SetPayloadValue(payload.GetInJsPayload(ip), options)
 						}
 						if strings.Contains(ip, "inHTML") {
-							arr = optimization.SetPayloadValue(getHTMLPayload(ip), options)
+							arr = optimization.SetPayloadValue(payload.GetHTMLPayload(ip), options)
 						}
 						if strings.Contains(ip, "inATTR") {
-							arr = optimization.SetPayloadValue(getAttrPayload(ip), options)
+							arr = optimization.SetPayloadValue(payload.GetAttrPayload(ip), options)
 						}
 						for _, avv := range arr {
 							var tempURL string
@@ -292,7 +293,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			for v := range cp {
 				if optimization.CheckInspectionParam(options, v) {
 					cpArr = append(cpArr, v)
-					arc := optimization.SetPayloadValue(getCommonPayload(), options)
+					arc := optimization.SetPayloadValue(payload.GetCommonPayload(), options)
 					for _, avv := range arc {
 						encoders := []string{
 							NaN,
@@ -311,7 +312,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			for v := range cpd {
 				if optimization.CheckInspectionParam(options, v) {
 					cpdArr = append(cpdArr, v)
-					arc := optimization.SetPayloadValue(getCommonPayload(), options)
+					arc := optimization.SetPayloadValue(payload.GetCommonPayload(), options)
 					for _, avv := range arc {
 						encoders := []string{
 							NaN,
@@ -331,9 +332,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			var dlst []string
 			if options.UseHeadless {
 				if options.UseDeepDXSS {
-					dlst = getDeepDOMXSPayload()
+					dlst = payload.GetDeepDOMXSPayload()
 				} else {
-					dlst = getDOMXSSPayload()
+					dlst = payload.GetDOMXSSPayload()
 				}
 				dpayloads := optimization.SetPayloadValue(dlst, options)
 				for v := range cp {
@@ -421,16 +422,16 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 										}
 									}
 									if checkInJS {
-										arr = optimization.SetPayloadValue(getInJsPayload(ip), options)
+										arr = optimization.SetPayloadValue(payload.GetInJsPayload(ip), options)
 									} else {
-										arr = optimization.SetPayloadValue(getInJsBreakScriptPayload(ip), options)
+										arr = optimization.SetPayloadValue(payload.GetInJsBreakScriptPayload(ip), options)
 									}
 								}
 								if strings.Contains(ip, "inHTML") {
-									arr = optimization.SetPayloadValue(getHTMLPayload(ip), options)
+									arr = optimization.SetPayloadValue(payload.GetHTMLPayload(ip), options)
 								}
 								if strings.Contains(ip, "inATTR") {
-									arr = optimization.SetPayloadValue(getAttrPayload(ip), options)
+									arr = optimization.SetPayloadValue(payload.GetAttrPayload(ip), options)
 								}
 								for _, avv := range arr {
 									if optimization.Optimization(avv, badchars) {
@@ -450,7 +451,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 						}
 					}
 					// common XSS for new param
-					arc := optimization.SetPayloadValue(getCommonPayload(), options)
+					arc := optimization.SetPayloadValue(payload.GetCommonPayload(), options)
 					for _, avv := range arc {
 						if !utils.ContainsFromArray(cpArr, k) {
 							if optimization.Optimization(avv, badchars) {
@@ -476,7 +477,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 
 		// Blind payload
 		if options.BlindURL != "" {
-			bpayloads := getBlindPayload()
+			bpayloads := payload.GetBlindPayload()
 
 			//strings.HasPrefix("foobar", "foo") // true
 			var bcallback string
@@ -529,18 +530,18 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 		if options.RemotePayloads != "" {
 			rp := strings.Split(options.RemotePayloads, ",")
 			for _, endpoint := range rp {
-				var payload []string
+				var payloads []string
 				var line string
 				var size string
 				if endpoint == "portswigger" {
-					payload, line, size = getPortswiggerPayload()
+					payloads, line, size = payload.GetPortswiggerPayload()
 				}
 				if endpoint == "payloadbox" {
-					payload, line, size = getPayloadBoxPayload()
+					payloads, line, size = payload.GetPayloadBoxPayload()
 				}
 				if line != "" {
 					printing.DalLog("INFO", "A '"+endpoint+"' payloads has been loaded ["+line+"L / "+size+"]               ", options)
-					for _, remotePayload := range payload {
+					for _, remotePayload := range payloads {
 						if remotePayload != "" {
 							for k, v := range params {
 								if optimization.CheckInspectionParam(options, k) {

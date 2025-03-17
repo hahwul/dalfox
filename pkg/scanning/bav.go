@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/hahwul/dalfox/v2/internal/optimization"
+	"github.com/hahwul/dalfox/v2/internal/payload"
 	"github.com/hahwul/dalfox/v2/pkg/model"
 )
 
@@ -33,7 +34,7 @@ func SSTIAnalysis(target string, options model.Options, rl *rateLimiter) {
 
 	for bpk := range bpd {
 		if optimization.CheckInspectionParam(options, bpk) {
-			for _, ssti := range getSSTIPayload() {
+			for _, ssti := range payload.GetSSTIPayload() {
 				turl, _ := optimization.MakeRequestQuery(target, bpk, ssti, "toGrepping", "ToAppend", "Nan", options)
 				reqs <- turl
 			}
@@ -64,7 +65,7 @@ func CRLFAnalysis(target string, options model.Options, rl *rateLimiter) {
 
 	for bpk := range bpd {
 		if optimization.CheckInspectionParam(options, bpk) {
-			for _, crlfpayload := range getCRLFPayload() {
+			for _, crlfpayload := range payload.GetCRLFPayload() {
 				turl, _ := optimization.MakeRequestQuery(target, bpk, crlfpayload, "toGrepping", "ToAppend", "NaN", options)
 				reqs <- turl
 			}
@@ -96,7 +97,7 @@ func ESIIAnalysis(target string, options model.Options, rl *rateLimiter) {
 
 	for bpk := range bpd {
 		if optimization.CheckInspectionParam(options, bpk) {
-			for _, crlfpayload := range getESIIPayload() {
+			for _, crlfpayload := range payload.GetESIIPayload() {
 				turl, _ := optimization.MakeRequestQuery(target, bpk, crlfpayload, "toGrepping", "ToAppend", "NaN", options)
 				reqs <- turl
 			}
@@ -130,7 +131,7 @@ func SqliAnalysis(target string, options model.Options, rl *rateLimiter) {
 
 	for bpk := range bpd {
 		if optimization.CheckInspectionParam(options, bpk) {
-			for _, sqlipayload := range getSQLIPayload() {
+			for _, sqlipayload := range payload.GetSQLIPayload() {
 				turl, _ := optimization.MakeRequestQuery(target, bpk, sqlipayload, "toGrepping", "ToAppend", "NaN", options)
 				reqs <- turl
 			}
@@ -164,7 +165,7 @@ func OpenRedirectorAnalysis(target string, options model.Options, rl *rateLimite
 
 	for bpk := range bpd {
 		if optimization.CheckInspectionParam(options, bpk) {
-			for _, openRedirectPayload := range getOpenRedirectPayload() {
+			for _, openRedirectPayload := range payload.GetOpenRedirectPayload() {
 				turl, _ := optimization.MakeRequestQuery(target, bpk, openRedirectPayload, "toOpenRedirecting", "toReplace", "NaN", options)
 				reqs <- turl
 			}

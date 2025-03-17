@@ -3,8 +3,8 @@ package cmd
 import (
 	"strconv"
 
-	"github.com/hahwul/dalfox/v2/internal/generating"
 	"github.com/hahwul/dalfox/v2/internal/optimization"
+	"github.com/hahwul/dalfox/v2/internal/payload"
 	"github.com/hahwul/dalfox/v2/internal/printing"
 	"github.com/hahwul/dalfox/v2/pkg/scanning"
 	"github.com/spf13/cobra"
@@ -51,13 +51,13 @@ func runPayloadCmd(cmd *cobra.Command, args []string) {
 
 func initializeObjects() []Object {
 	return []Object{
-		{Use: makeBulk, Name: "Bulk-XSS", Listener: generating.GenerateBulkPayload},
-		{Use: enumCommon, Name: "Enum-Common-XSS", Listener: scanning.GetCommonPayload},
-		{Use: enumHTML, Name: "Enum-HTML-XSS", Listener: scanning.GetHTMLPayload},
-		{Use: enumAttr, Name: "Enum-Attribute-XSS", Listener: scanning.GetAttrPayload},
-		{Use: enumInJS, Name: "Enum-inJS-XSS", Listener: scanning.GetInJsPayload},
-		{Use: remotePayloadbox, Name: "Remote-Payloadbox-Payloads", Listener: scanning.GetPayloadBoxPayload},
-		{Use: remotePortswigger, Name: "Remote-Portswigger-Paylaods", Listener: scanning.GetPortswiggerPayload},
+		{Use: makeBulk, Name: "Bulk-XSS", Listener: payload.GenerateBulkPayload},
+		{Use: enumCommon, Name: "Enum-Common-XSS", Listener: payload.GetCommonPayloadWithSize},
+		{Use: enumHTML, Name: "Enum-HTML-XSS", Listener: payload.GetHTMLPayloadWithSize},
+		{Use: enumAttr, Name: "Enum-Attribute-XSS", Listener: payload.GetAttrPayloadWithSize},
+		{Use: enumInJS, Name: "Enum-inJS-XSS", Listener: payload.GetInJsPayloadWithSize},
+		{Use: remotePayloadbox, Name: "Remote-Payloadbox-Payloads", Listener: payload.GetPayloadBoxPayloadWithSize},
+		{Use: remotePortswigger, Name: "Remote-Portswigger-Paylaods", Listener: payload.GetPortswiggerPayloadWithSize},
 		{Use: entityGF, Name: "Entity-GF-Patterns", Listener: scanning.InterfaceGetGfXSS},
 		{Use: entityEventHandler, Name: "Entity-Event-Handlers", Listener: scanning.InterfaceGetEventHandlers},
 		{Use: entityUsefulTags, Name: "Entity-Useful-Tags", Listener: scanning.InterfaceGetTags},

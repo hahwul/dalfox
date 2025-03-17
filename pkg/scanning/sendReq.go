@@ -15,6 +15,7 @@ import (
 	"github.com/hahwul/dalfox/v2/internal/utils"
 
 	"github.com/hahwul/dalfox/v2/internal/optimization"
+	payloadModule "github.com/hahwul/dalfox/v2/internal/payload"
 	"github.com/hahwul/dalfox/v2/internal/printing"
 	"github.com/hahwul/dalfox/v2/internal/verification"
 	"github.com/hahwul/dalfox/v2/pkg/model"
@@ -108,7 +109,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 		str := string(bytes)
 
 		//for SSTI
-		ssti := getSSTIPayload()
+		ssti := payloadModule.GetSSTIPayload()
 
 		grepResult := make(map[string][]string)
 		if options.UseBAV {

