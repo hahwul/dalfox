@@ -59,6 +59,26 @@ func TestSendReq(t *testing.T) {
 			want3:   false,
 			wantErr: true,
 		},
+		{
+			name: "Request with trigger",
+			args: args{
+				req: func() *http.Request {
+					req, _ := http.NewRequest(http.MethodGet, "https://dalfox.hahwul.com", nil)
+					return req
+				}(),
+				payload: "test-payload",
+				options: model.Options{
+					Timeout:       10,
+					Trigger:       "https://dalfox.hahwul.com",
+					TriggerMethod: http.MethodGet,
+				},
+			},
+			want:    "dalfox",
+			want1:   &http.Response{StatusCode: http.StatusOK},
+			want2:   false,
+			want3:   false,
+			wantErr: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
