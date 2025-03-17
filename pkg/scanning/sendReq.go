@@ -127,7 +127,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					PoCType:    options.PoCType,
 					MessageID:  har.MessageIDFromRequest(req),
 				}
-				poc.Data = MakePoC(poc.Data, req, options)
+				poc.Data = printing.MakePoC(poc.Data, req, options)
 				if options.OutputRequest {
 					reqDump, err := httputil.DumpRequestOut(req, true)
 					if err == nil {
@@ -191,7 +191,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 						PoCType:    options.PoCType,
 						MessageID:  har.MessageIDFromRequest(req),
 					}
-					poc.Data = MakePoC(poc.Data, req, options)
+					poc.Data = printing.MakePoC(poc.Data, req, options)
 					if options.OutputRequest {
 						reqDump, err := httputil.DumpRequestOut(req, true)
 						if err == nil {
@@ -248,7 +248,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					PoCType:    options.PoCType,
 					MessageID:  har.MessageIDFromRequest(req),
 				}
-				poc.Data = MakePoC(poc.Data, req, options)
+				poc.Data = printing.MakePoC(poc.Data, req, options)
 				if options.OutputRequest {
 					reqDump, err := httputil.DumpRequestOut(req, true)
 					if err == nil {
@@ -314,7 +314,7 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 					PoCType:    options.PoCType,
 					MessageID:  har.MessageIDFromRequest(req),
 				}
-				poc.Data = MakePoC(poc.Data, req, options)
+				poc.Data = printing.MakePoC(poc.Data, req, options)
 				if options.OutputRequest {
 					reqDump, err := httputil.DumpRequestOut(req, true)
 					if err == nil {
