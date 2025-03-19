@@ -198,7 +198,7 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 	}
 
 	// Custom Payload
-	if (options.SkipDiscovery || isAllowType(policy["Content-Type"])) && options.CustomPayloadFile != "" {
+	if (options.SkipDiscovery || utils.IsAllowType(policy["Content-Type"])) && options.CustomPayloadFile != "" {
 		ff, err := voltFile.ReadLinesOrLiteral(options.CustomPayloadFile)
 		if err != nil {
 			printing.DalLog("SYSTEM", "Custom XSS payload load fail..", options)
@@ -227,7 +227,7 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 	}
 
 	// Common Payloads and DOM XSS
-	if (options.SkipDiscovery || isAllowType(policy["Content-Type"])) && !options.OnlyCustomPayload {
+	if (options.SkipDiscovery || utils.IsAllowType(policy["Content-Type"])) && !options.OnlyCustomPayload {
 		cu, _ := url.Parse(target)
 		var cp, cpd url.Values
 		var cpArr, cpdArr []string

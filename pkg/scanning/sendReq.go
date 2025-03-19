@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/hahwul/dalfox/v2/internal/har"
+	"github.com/hahwul/dalfox/v2/internal/utils"
 
 	"github.com/hahwul/dalfox/v2/internal/optimization"
 	"github.com/hahwul/dalfox/v2/internal/printing"
@@ -104,7 +105,7 @@ func handleTrigger(options model.Options, payload string, req *http.Request, str
 	}
 	bytes, _ := io.ReadAll(resp.Body)
 	str = string(bytes)
-	if resp.Header["Content-Type"] != nil && isAllowType(resp.Header["Content-Type"][0]) {
+	if resp.Header["Content-Type"] != nil && utils.IsAllowType(resp.Header["Content-Type"][0]) {
 		vds := verification.VerifyDOM(str)
 		vrs := verification.VerifyReflection(str, payload)
 		rLog.WithField("data2", "vds").Debug(vds)
@@ -130,7 +131,7 @@ func generateTriggerRequest(options model.Options) *http.Request {
 }
 
 func processResponse(str string, resp *http.Response, payload string, req *http.Request, options model.Options, showG bool, rLog *logrus.Entry) (string, *http.Response, bool, bool, error) {
-	if resp.Header["Content-Type"] != nil && isAllowType(resp.Header["Content-Type"][0]) {
+	if resp.Header["Content-Type"] != nil && utils.IsAllowType(resp.Header["Content-Type"][0]) {
 		vds := verification.VerifyDOM(str)
 		vrs := verification.VerifyReflection(str, payload)
 		rLog.WithField("data2", "vds").Debug(vds)
