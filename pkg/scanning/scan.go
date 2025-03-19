@@ -17,8 +17,6 @@ import (
 	"github.com/hahwul/dalfox/v2/internal/payload"
 	"github.com/hahwul/dalfox/v2/internal/utils"
 
-	"golang.org/x/term"
-
 	"github.com/briandowns/spinner"
 	"github.com/hahwul/dalfox/v2/internal/optimization"
 	"github.com/hahwul/dalfox/v2/internal/printing"
@@ -1089,7 +1087,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 	scanResult.EndTime = time.Now()
 	scanResult.Duration = scanResult.EndTime.Sub(scanResult.StartTime)
 	if !(options.Silence && options.MulticastMode) {
-		printScanSummary(scanResult, options)
+		printing.ScanSummary(scanResult, options)
 	}
 	if options.ReportBool {
 		printing.DalLog("SYSTEM-M", "Report\n", options)
@@ -1216,19 +1214,4 @@ func logPolicyAndPathReflection(policy map[string]string, options model.Options,
 			}
 		}
 	}
-}
-
-// printScanSummary prints the summary of the scan.
-func printScanSummary(scanResult model.Result, options model.Options) {
-	if term.IsTerminal(0) {
-		width, _, err := term.GetSize(0)
-		if err == nil {
-			var dash string
-			for i := 0; i < width-5; i++ {
-				dash = dash + "-"
-			}
-			printing.DalLog("SYSTEM-M", dash, options)
-		}
-	}
-	printing.DalLog("SYSTEM-M", "[duration: "+scanResult.Duration.String()+"][issues: "+strconv.Itoa(len(scanResult.PoCs))+"] Finish Scan!", options)
 }
