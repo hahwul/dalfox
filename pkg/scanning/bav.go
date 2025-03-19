@@ -7,8 +7,39 @@ import (
 
 	"github.com/hahwul/dalfox/v2/internal/optimization"
 	"github.com/hahwul/dalfox/v2/internal/payload"
+	"github.com/hahwul/dalfox/v2/internal/printing"
 	"github.com/hahwul/dalfox/v2/pkg/model"
 )
+
+// RunBAVAnalysis runs the BAV analysis.
+func RunBAVAnalysis(target string, options model.Options, rl *rateLimiter, bav *string) {
+	var bavWaitGroup sync.WaitGroup
+	bavTask := 5
+	bavWaitGroup.Add(bavTask)
+	go func() {
+		defer bavWaitGroup.Done()
+		ESIIAnalysis(target, options, rl)
+	}()
+	go func() {
+		defer bavWaitGroup.Done()
+		SqliAnalysis(target, options, rl)
+	}()
+	go func() {
+		defer bavWaitGroup.Done()
+		SSTIAnalysis(target, options, rl)
+	}()
+	go func() {
+		defer bavWaitGroup.Done()
+		CRLFAnalysis(target, options, rl)
+	}()
+	go func() {
+		defer bavWaitGroup.Done()
+		OpenRedirectorAnalysis(target, options, rl)
+	}()
+	bavWaitGroup.Wait()
+	*bav = options.AuroraObject.Green(*bav).String()
+	printing.DalLog("SYSTEM", "["+*bav+"] Waiting for analysis 🔍", options)
+}
 
 // SSTIAnalysis is basic check for SSTI
 func SSTIAnalysis(target string, options model.Options, rl *rateLimiter) {

@@ -193,7 +193,7 @@ func performDiscovery(target string, options model.Options, rl *rateLimiter) (ma
 	if options.UseBAV {
 		go func() {
 			defer wait.Done()
-			runBAVAnalysis(target, options, rl, &bav)
+			RunBAVAnalysis(target, options, rl, &bav)
 		}()
 	}
 
@@ -902,36 +902,6 @@ func shouldIgnoreReturn(statusCode int, ignoreReturn string) bool {
 		}
 	}
 	return false
-}
-
-// runBAVAnalysis runs the BAV analysis.
-func runBAVAnalysis(target string, options model.Options, rl *rateLimiter, bav *string) {
-	var bavWaitGroup sync.WaitGroup
-	bavTask := 5
-	bavWaitGroup.Add(bavTask)
-	go func() {
-		defer bavWaitGroup.Done()
-		ESIIAnalysis(target, options, rl)
-	}()
-	go func() {
-		defer bavWaitGroup.Done()
-		SqliAnalysis(target, options, rl)
-	}()
-	go func() {
-		defer bavWaitGroup.Done()
-		SSTIAnalysis(target, options, rl)
-	}()
-	go func() {
-		defer bavWaitGroup.Done()
-		CRLFAnalysis(target, options, rl)
-	}()
-	go func() {
-		defer bavWaitGroup.Done()
-		OpenRedirectorAnalysis(target, options, rl)
-	}()
-	bavWaitGroup.Wait()
-	*bav = options.AuroraObject.Green(*bav).String()
-	printing.DalLog("SYSTEM", "["+*bav+"] Waiting for analysis 🔍", options)
 }
 
 // logPolicyAndPathReflection logs the policy and path reflection information.
