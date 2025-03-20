@@ -36,8 +36,9 @@ func RunBAVAnalysis(target string, options model.Options, rl *rateLimiter, bav *
 		defer bavWaitGroup.Done()
 		OpenRedirectorAnalysis(target, options, rl)
 	}()
+
 	bavWaitGroup.Wait()
-	*bav = options.AuroraObject.Green(*bav).String()
+	*bav = " > BAV(o)"
 	printing.DalLog("SYSTEM", "["+*bav+"] Waiting for analysis 🔍", options)
 }
 
