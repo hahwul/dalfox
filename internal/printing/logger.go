@@ -11,6 +11,10 @@ import (
 
 func boolToColorStr(b bool, options model.Options) string {
 	str := ""
+	if options.AuroraObject == nil {
+		return strconv.FormatBool(b)
+	}
+
 	if b {
 		str = options.AuroraObject.BrightGreen(strconv.FormatBool(b)).String()
 	} else {
@@ -31,17 +35,30 @@ func Summary(options model.Options, target string) {
 		if options.MiningWordlist != "" {
 			miningWord = options.MiningWordlist
 		}
-		fmt.Fprintf(os.Stderr, "\n 🎯  Target                 %s\n", options.AuroraObject.BrightYellow(target).String())
-		if target == "REST API Mode" {
-			fmt.Fprintf(os.Stderr, " 🧲  Listen Address         %s\n", options.AuroraObject.BrightBlue(options.ServerHost+":"+strconv.Itoa(options.ServerPort)).String())
+
+		targetStr := target
+		methodStr := options.Method
+		listenAddrStr := options.ServerHost + ":" + strconv.Itoa(options.ServerPort)
+		blindURLStr := options.BlindURL
+
+		if options.AuroraObject != nil {
+			targetStr = options.AuroraObject.BrightYellow(target).String()
+			methodStr = options.AuroraObject.BrightBlue(options.Method).String()
+			listenAddrStr = options.AuroraObject.BrightBlue(listenAddrStr).String()
+			blindURLStr = options.AuroraObject.BrightBlue(options.BlindURL).String()
 		}
-		fmt.Fprintf(os.Stderr, " 🏁  Method                 %s\n", options.AuroraObject.BrightBlue(options.Method).String())
+
+		fmt.Fprintf(os.Stderr, "\n 🎯  Target                 %s\n", targetStr)
+		if target == "REST API Mode" {
+			fmt.Fprintf(os.Stderr, " 🧲  Listen Address         %s\n", listenAddrStr)
+		}
+		fmt.Fprintf(os.Stderr, " 🏁  Method                 %s\n", methodStr)
 		fmt.Fprintf(os.Stderr, " 🖥   Worker                 %d\n", options.Concurrence)
 		fmt.Fprintf(os.Stderr, " 🔦  BAV                    %s\n", boolToColorStr(bavState, options))
 		fmt.Fprintf(os.Stderr, " ⛏   Mining                 %s (%s)\n", boolToColorStr(options.Mining, options), miningWord)
 		fmt.Fprintf(os.Stderr, " 🔬  Mining-DOM             %s (mining from DOM)\n", boolToColorStr(options.FindingDOM, options))
 		if options.BlindURL != "" {
-			fmt.Fprintf(os.Stderr, " 🛰   Blind XSS Callback     %s\n", options.AuroraObject.BrightBlue(options.BlindURL).String())
+			fmt.Fprintf(os.Stderr, " 🛰   Blind XSS Callback     %s\n", blindURLStr)
 		}
 		fmt.Fprintf(os.Stderr, " ⏱   Timeout                %d\n", options.Timeout)
 		fmt.Fprintf(os.Stderr, " 📤  FollowRedirect         %s\n", boolToColorStr(options.FollowRedirect, options))
@@ -74,7 +91,11 @@ func DalLog(level, text string, options model.Options) {
 			if allWrite {
 				ftext = "[DEBUG] " + text
 			}
-			text = options.AuroraObject.BrightBlue("[DEBUG] ").String() + text
+			if options.AuroraObject != nil {
+				text = options.AuroraObject.BrightBlue("[DEBUG] ").String() + text
+			} else {
+				text = "[DEBUG] " + text
+			}
 		} else {
 			return
 		}
@@ -83,26 +104,42 @@ func DalLog(level, text string, options model.Options) {
 		if allWrite {
 			ftext = "[I] " + text
 		}
-		text = options.AuroraObject.BrightBlue("[I] ").String() + text
+		if options.AuroraObject != nil {
+			text = options.AuroraObject.BrightBlue("[I] ").String() + text
+		} else {
+			text = "[I] " + text
+		}
 
 	case "WEAK":
 		if allWrite {
 			ftext = "[W] " + text
 		}
-		text = options.AuroraObject.Yellow("[W] ").String() + text
+		if options.AuroraObject != nil {
+			text = options.AuroraObject.Yellow("[W] ").String() + text
+		} else {
+			text = "[W] " + text
+		}
 
 	case "VULN":
 		if allWrite {
 			ftext = "[V] " + text
 		}
-		text = options.AuroraObject.BrightRed("[V] ").String() + text
+		if options.AuroraObject != nil {
+			text = options.AuroraObject.BrightRed("[V] ").String() + text
+		} else {
+			text = "[V] " + text
+		}
 
 	case "SYSTEM":
 		if allWrite {
 			ftext = "[*] " + text
 		}
 		if options.NoSpinner {
-			text = options.AuroraObject.White("[*] ").String() + text
+			if options.AuroraObject != nil {
+				text = options.AuroraObject.White("[*] ").String() + text
+			} else {
+				text = "[*] " + text
+			}
 		} else if !(options.Silence || options.NoSpinner) {
 			SetSpinner(text, options)
 			text = "HIDDENMESSAGE!!"
@@ -112,7 +149,11 @@ func DalLog(level, text string, options model.Options) {
 		if allWrite {
 			ftext = "[*] " + text
 		}
-		text = options.AuroraObject.White("[*] ").String() + text
+		if options.AuroraObject != nil {
+			text = options.AuroraObject.White("[*] ").String() + text
+		} else {
+			text = "[*] " + text
+		}
 		if options.Silence && options.MulticastMode {
 			StopSpinner(options)
 			fmt.Fprintln(os.Stderr, text)
@@ -123,7 +164,11 @@ func DalLog(level, text string, options model.Options) {
 		if allWrite {
 			ftext = "[G] " + text
 		}
-		text = options.AuroraObject.Green("[G] ").String() + text
+		if options.AuroraObject != nil {
+			text = options.AuroraObject.Green("[G] ").String() + text
+		} else {
+			text = "[G] " + text
+		}
 	case "CODE":
 		if text == "" {
 			return
@@ -131,15 +176,25 @@ func DalLog(level, text string, options model.Options) {
 		if allWrite {
 			ftext = "    " + text
 		}
-		text = options.AuroraObject.Gray(16-1, "    "+text).String()
+		if options.AuroraObject != nil {
+			text = options.AuroraObject.Gray(16-1, "    "+text).String()
+		} else {
+			text = "    " + text
+		}
 	case "ERROR":
 		if allWrite {
 			ftext = "[E] " + text
 		}
-		text = options.AuroraObject.Yellow("[E] ").String() + text
+		if options.AuroraObject != nil {
+			text = options.AuroraObject.Yellow("[E] ").String() + text
+		} else {
+			text = "[E] " + text
+		}
 
 	case "YELLOW":
-		text = options.AuroraObject.BrightYellow(text).String()
+		if options.AuroraObject != nil {
+			text = options.AuroraObject.BrightYellow(text).String()
+		}
 	}
 
 	// Printing
@@ -154,7 +209,11 @@ func DalLog(level, text string, options model.Options) {
 				fmt.Println(text)
 			} else {
 				ftext = "[POC]" + text
-				fmt.Println(options.AuroraObject.BrightMagenta("[POC]" + text))
+				if options.AuroraObject != nil {
+					fmt.Println(options.AuroraObject.BrightMagenta("[POC]" + text))
+				} else {
+					fmt.Println("[POC]" + text)
+				}
 			}
 			RestartSpinner(options)
 		} else {
