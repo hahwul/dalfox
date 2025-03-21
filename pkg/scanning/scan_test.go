@@ -300,6 +300,57 @@ func Test_Scan(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "Basic scan with remote payloads",
+			args: args{
+				target: server.URL + "/?param=test",
+				options: model.Options{
+					Concurrence:    1,
+					Format:         "plain",
+					Silence:        true,
+					NoSpinner:      true,
+					SkipDiscovery:  true,
+					UniqParam:      []string{"param"},
+					RemotePayloads: "portswigger,payloadbox",
+				},
+				sid: "1",
+			},
+			wantErr: false,
+		},
+		{
+			name: "Basic scan with blind xss",
+			args: args{
+				target: server.URL + "/?param=test",
+				options: model.Options{
+					Concurrence:   1,
+					Format:        "plain",
+					Silence:       true,
+					NoSpinner:     true,
+					SkipDiscovery: true,
+					UniqParam:     []string{"param"},
+					BlindURL:      "https://dalfox.hahwul.com",
+				},
+				sid: "1",
+			},
+			wantErr: false,
+		},
+		{
+			name: "Basic scan with headless",
+			args: args{
+				target: server.URL + "/?param=test",
+				options: model.Options{
+					Concurrence:   1,
+					Format:        "plain",
+					Silence:       true,
+					NoSpinner:     true,
+					SkipDiscovery: true,
+					UniqParam:     []string{"param"},
+					UseHeadless:   true,
+				},
+				sid: "1",
+			},
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
