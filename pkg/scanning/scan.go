@@ -40,6 +40,11 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 	options.ScanResult = scanResult
 	scanResult.StartTime = time.Now()
 
+	// Initialize options.Scan map if it doesn't exist
+	if options.Scan == nil {
+		options.Scan = make(map[string]model.Scan)
+	}
+
 	// Initialize spinner
 	if !(options.Silence || options.NoSpinner) {
 		initializeSpinner(options)
