@@ -3,20 +3,18 @@ package scanning
 import (
 	"compress/gzip"
 	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httputil"
 	"strconv"
 	"strings"
-	"time"
 
-	"github.com/hahwul/dalfox/v2/pkg/har"
+	"github.com/hahwul/dalfox/v2/internal/utils"
 
+	"github.com/hahwul/dalfox/v2/internal/optimization"
+	"github.com/hahwul/dalfox/v2/internal/printing"
+	"github.com/hahwul/dalfox/v2/internal/verification"
 	"github.com/hahwul/dalfox/v2/pkg/model"
-	"github.com/hahwul/dalfox/v2/pkg/optimization"
-	"github.com/hahwul/dalfox/v2/pkg/printing"
-	"github.com/hahwul/dalfox/v2/pkg/verification"
 	vlogger "github.com/hahwul/volt/logger"
 	"github.com/sirupsen/logrus"
 )
@@ -27,71 +25,57 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 	rLog := vLog.WithFields(logrus.Fields{
 		"data1": payload,
 	})
-	netTransport := getTransport(options)
-	client := &http.Client{
-		Timeout:   time.Duration(options.Timeout) * time.Second,
-		Transport: netTransport,
-	}
+	client := createHTTPClient(options)
 	oReq := req
 
-	showG := false
-	if options.OnlyPoC != "" {
-		showG, _, _ = printing.CheckToShowPoC(options.OnlyPoC)
-	} else {
-		showG = true
-	}
+	showG := shouldShowPoC(options)
 
 	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
-		if (options.UseBAV) && (payload == "toOpenRedirecting") && !(strings.Contains(oReq.Host, ".google.com")) {
-			if strings.Contains(req.URL.Host, "google.com") {
-				printing.DalLog("GREP", "Found Open Redirect. Payload: "+via[0].URL.String(), options)
-				poc := model.PoC{
-					Type:       "G",
-					InjectType: "BAV/OR",
-					Method:     options.Method,
-					Data:       req.URL.String(),
-					Param:      "",
-					Payload:    payload,
-					Evidence:   "",
-					CWE:        "CWE-601",
-					Severity:   "Medium",
-					PoCType:    options.PoCType,
-					MessageID:  har.MessageIDFromRequest(req),
-					MessageStr: "Found Open Redirect. Payload: " + via[0].URL.String(),
-				}
-				if options.OutputRequest {
-					reqDump, err := httputil.DumpRequestOut(req, true)
-					if err == nil {
-						poc.RawHTTPRequest = string(reqDump)
-						printing.DalLog("CODE", "\n"+string(reqDump), options)
-					}
-				}
-
-				if showG {
-					if options.Format == "json" {
-						pocj, _ := json.Marshal(poc)
-						printing.DalLog("PRINT", string(pocj)+",", options)
-					} else {
-						pocs := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
-						printing.DalLog("PRINT", pocs, options)
-					}
-				}
-				if options.FoundAction != "" {
-					foundAction(options, via[0].Host, via[0].URL.String(), "BAV: OpenRedirect")
-				}
-			}
-		}
-		return nil
+		return handleRedirect(req, via, oReq, payload, options, showG)
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		//fmt.Printf("HTTP call failed: %v --> %v", req.URL.String(), err)
+		return "", resp, false, false, err
+	}
+	defer resp.Body.Close()
+
+	str, err := readResponseBody(resp)
+	if err != nil {
 		return "", resp, false, false, err
 	}
 
-	defer resp.Body.Close()
+	if options.Trigger != "" {
+		return handleTrigger(options, payload, req, str, resp, rLog)
+	}
+
+	return processResponse(str, resp, payload, req, options, showG, rLog)
+}
+
+func shouldShowPoC(options model.Options) bool {
+	if options.OnlyPoC != "" {
+		showG, _, _ := printing.CheckToShowPoC(options.OnlyPoC)
+		return showG
+	}
+	return true
+}
+
+func handleRedirect(req *http.Request, via []*http.Request, oReq *http.Request, payload string, options model.Options, showG bool) error {
+	if (options.UseBAV) && (payload == "toOpenRedirecting") && !(strings.Contains(oReq.Host, ".google.com")) {
+		if strings.Contains(req.URL.Host, "google.com") {
+			printing.DalLog("GREP", "Found Open Redirect. Payload: "+via[0].URL.String(), options)
+			poc := createPoC("BAV/OR", "CWE-601", "Medium", req, payload, options)
+			poc.Data = req.URL.String()
+			poc.MessageStr = "Found Open Redirect. Payload: " + via[0].URL.String()
+			handlePoC(poc, req, options, showG)
+		}
+	}
+	return nil
+}
+
+func readResponseBody(resp *http.Response) (string, error) {
 	var reader io.ReadCloser
+	var err error
 	switch resp.Header.Get("Content-Encoding") {
 	case "gzip":
 		reader, err = gzip.NewReader(resp.Body)
@@ -103,309 +87,107 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 		reader = resp.Body
 	}
 	bytes, err := io.ReadAll(reader)
-	if err == nil {
-		str := string(bytes)
+	if err != nil {
+		return "", err
+	}
+	return string(bytes), nil
+}
 
-		//for SSTI
-		ssti := getSSTIPayload()
+func handleTrigger(options model.Options, payload string, req *http.Request, str string, resp *http.Response, rLog *logrus.Entry) (string, *http.Response, bool, bool, error) {
+	treq := generateTriggerRequest(options)
+	client := createHTTPClient(options)
+	resp, err := client.Do(treq)
+	if err != nil {
+		rLog.WithField("data2", "vds").Debug(false)
+		rLog.WithField("data2", "vrs").Debug(false)
+		return "", resp, false, false, err
+	}
+	bytes, _ := io.ReadAll(resp.Body)
+	str = string(bytes)
+	if resp.Header["Content-Type"] != nil && utils.IsAllowType(resp.Header["Content-Type"][0]) {
+		vds := verification.VerifyDOM(str)
+		vrs := verification.VerifyReflection(str, payload)
+		rLog.WithField("data2", "vds").Debug(vds)
+		rLog.WithField("data2", "vrs").Debug(vrs)
+		return str, resp, vds, vrs, nil
+	}
+	return str, resp, false, false, nil
+}
 
-		grepResult := make(map[string][]string)
-		if options.UseBAV {
-			if len(resp.Header["Dalfoxcrlf"]) != 0 {
-				poc := model.PoC{
-					Type:       "G",
-					InjectType: "BAV/CRLF",
-					Method:     options.Method,
-					Data:       req.URL.String(),
-					Param:      "",
-					Payload:    payload,
-					Evidence:   "",
-					CWE:        "CWE-93",
-					Severity:   "Medium",
-					PoCType:    options.PoCType,
-					MessageID:  har.MessageIDFromRequest(req),
-				}
-				poc.Data = MakePoC(poc.Data, req, options)
-				if options.OutputRequest {
-					reqDump, err := httputil.DumpRequestOut(req, true)
-					if err == nil {
-						poc.RawHTTPRequest = string(reqDump)
-						printing.DalLog("CODE", "\n"+string(reqDump), options)
-					}
-				}
+func generateTriggerRequest(options model.Options) *http.Request {
+	var treq *http.Request
+	method := options.Method
+	options.Method = options.TriggerMethod
+	if options.Sequence < 0 {
+		treq = optimization.GenerateNewRequest(options.Trigger, "", options)
+	} else {
+		triggerURL := strings.Replace(options.Trigger, "SEQNC", strconv.Itoa(options.Sequence), 1)
+		treq = optimization.GenerateNewRequest(triggerURL, "", options)
+		options.Sequence++
+	}
+	options.Method = method
+	return treq
+}
 
-				if options.OutputResponse {
-					poc.RawHTTPResponse = str
-					printing.DalLog("CODE", string(str), options)
-				}
+func processResponse(str string, resp *http.Response, payload string, req *http.Request, options model.Options, showG bool, rLog *logrus.Entry) (string, *http.Response, bool, bool, error) {
+	if resp.Header["Content-Type"] != nil && utils.IsAllowType(resp.Header["Content-Type"][0]) {
+		vds := verification.VerifyDOM(str)
+		vrs := verification.VerifyReflection(str, payload)
+		rLog.WithField("data2", "vds").Debug(vds)
+		rLog.WithField("data2", "vrs").Debug(vrs)
+		return str, resp, vds, vrs, nil
+	}
+	rLog.WithField("data2", "vds").Debug(false)
+	rLog.WithField("data2", "vrs").Debug(false)
+	return str, resp, false, false, nil
+}
 
-				if !duplicatedResult(scanObject.Results, poc) {
-					if payload != "" {
-						printing.DalLog("GREP", "Found CRLF Injection via built-in grepping / payload: "+payload, options)
-						poc.MessageStr = "Found CRLF Injection via built-in grepping / payload: " + payload
-					} else {
-						printing.DalLog("GREP", "Found CRLF Injection via built-in grepping / original request", options)
-						poc.MessageStr = "Found CRLF Injection via built-in grepping / original request"
-					}
-					if options.FoundAction != "" {
-						foundAction(options, req.URL.Host, poc.Data, "BAV: "+poc.InjectType)
-					}
-					if showG {
-						if options.Format == "json" {
-							pocj, _ := json.Marshal(poc)
-							printing.DalLog("PRINT", string(pocj)+",", options)
-						} else {
-							pocs := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
-							printing.DalLog("PRINT", pocs, options)
-						}
-					}
-					scanObject.Results = append(scanObject.Results, poc)
-				}
+func createPoC(injectType, cwe, severity string, req *http.Request, payload string, options model.Options) model.PoC {
+	var messageID int64
+
+	// Safely extract the message ID from the request
+	if req != nil {
+		if id := req.Context().Value("message_id"); id != nil {
+			// Try to convert, but don't panic if it fails
+			if msgID, ok := id.(int64); ok {
+				messageID = msgID
 			}
-		}
-		if !options.NoGrep {
-			grepResult = builtinGrep(str)
-		}
-		for k, v := range grepResult {
-			if k == "dalfox-ssti" {
-				really := false
-				for _, vv := range ssti {
-					if vv == payload {
-						really = true
-					}
-				}
-
-				if really {
-					poc := model.PoC{
-						Type:       "G",
-						InjectType: "BAV/SSTI",
-						Method:     options.Method,
-						Data:       req.URL.String(),
-						Param:      "",
-						Payload:    payload,
-						Evidence:   "",
-						CWE:        "CWE-94",
-						Severity:   "High",
-						PoCType:    options.PoCType,
-						MessageID:  har.MessageIDFromRequest(req),
-					}
-					poc.Data = MakePoC(poc.Data, req, options)
-					if options.OutputRequest {
-						reqDump, err := httputil.DumpRequestOut(req, true)
-						if err == nil {
-							poc.RawHTTPRequest = string(reqDump)
-							printing.DalLog("CODE", "\n"+string(reqDump), options)
-						}
-					}
-
-					if options.OutputResponse {
-						poc.RawHTTPResponse = str
-						printing.DalLog("CODE", string(str), options)
-					}
-
-					if !duplicatedResult(scanObject.Results, poc) {
-						if payload != "" {
-							printing.DalLog("GREP", "Found SSTI via built-in grepping / payload: "+payload, options)
-							poc.MessageStr = "Found SSTI via built-in grepping / payload: " + payload
-						} else {
-							printing.DalLog("GREP", "Found SSTI via built-in grepping / original request", options)
-							poc.MessageStr = "Found SSTI via built-in grepping / original request"
-						}
-
-						if options.FoundAction != "" {
-							foundAction(options, req.URL.Host, poc.Data, "BAV: "+poc.InjectType)
-						}
-
-						for _, vv := range v {
-							printing.DalLog("CODE", vv, options)
-						}
-						if showG {
-							if options.Format == "json" {
-								pocj, _ := json.Marshal(poc)
-								printing.DalLog("PRINT", string(pocj)+",", options)
-							} else {
-								pocs := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
-								printing.DalLog("PRINT", pocs, options)
-							}
-						}
-						scanObject.Results = append(scanObject.Results, poc)
-					}
-				}
-			} else {
-				// other case
-				poc := model.PoC{
-					Type:       "G",
-					InjectType: "BUILTIN",
-					Method:     options.Method,
-					Data:       req.URL.String(),
-					Param:      "",
-					Payload:    payload,
-					Evidence:   "",
-					CWE:        "",
-					Severity:   "Low",
-					PoCType:    options.PoCType,
-					MessageID:  har.MessageIDFromRequest(req),
-				}
-				poc.Data = MakePoC(poc.Data, req, options)
-				if options.OutputRequest {
-					reqDump, err := httputil.DumpRequestOut(req, true)
-					if err == nil {
-						poc.RawHTTPRequest = string(reqDump)
-						printing.DalLog("CODE", "\n"+string(reqDump), options)
-					}
-				}
-
-				if options.OutputResponse {
-					poc.RawHTTPResponse = str
-					printing.DalLog("CODE", string(str), options)
-				}
-
-				if !duplicatedResult(scanObject.Results, poc) {
-					if payload != "" {
-						printing.DalLog("GREP", "Found "+k+" via built-in grepping / payload: "+payload, options)
-						poc.MessageStr = "Found " + k + " via built-in grepping / payload: " + payload
-					} else {
-						printing.DalLog("GREP", "Found "+k+" via built-in grepping / original request", options)
-						poc.MessageStr = "Found " + k + " via built-in grepping / original request"
-					}
-
-					if options.FoundAction != "" {
-						foundAction(options, req.URL.Host, poc.Data, "BAV: "+poc.InjectType)
-					}
-
-					for _, vv := range v {
-						printing.DalLog("CODE", vv, options)
-					}
-					if showG {
-						if options.Format == "json" {
-							pocj, _ := json.Marshal(poc)
-							printing.DalLog("PRINT", string(pocj)+",", options)
-						} else {
-							pocs := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
-							printing.DalLog("PRINT", pocs, options)
-						}
-					}
-					scanObject.Results = append(scanObject.Results, poc)
-				}
-			}
-		}
-
-		if options.Grep != "" {
-			pattern := make(map[string]string)
-			var result map[string]interface{}
-			json.Unmarshal([]byte(options.Grep), &result)
-			for k, v := range result {
-				pattern[k] = v.(string)
-			}
-			cg := customGrep(str, pattern)
-			for k, v := range cg {
-				poc := model.PoC{
-					Type:       "G",
-					InjectType: "CUSTOM",
-					Method:     options.Method,
-					Data:       req.URL.String(),
-					Param:      "",
-					Payload:    payload,
-					Evidence:   "",
-					CWE:        "",
-					Severity:   "Low",
-					PoCType:    options.PoCType,
-					MessageID:  har.MessageIDFromRequest(req),
-				}
-				poc.Data = MakePoC(poc.Data, req, options)
-				if options.OutputRequest {
-					reqDump, err := httputil.DumpRequestOut(req, true)
-					if err == nil {
-						poc.RawHTTPRequest = string(reqDump)
-						printing.DalLog("CODE", "\n"+string(reqDump), options)
-					}
-				}
-
-				if options.OutputResponse {
-					poc.RawHTTPResponse = str
-					printing.DalLog("CODE", string(str), options)
-				}
-
-				if !duplicatedResult(scanObject.Results, poc) {
-					printing.DalLog("GREP", "Found "+k+" via custom grepping / payload: "+payload, options)
-					poc.MessageStr = "Found " + k + " via custom grepping / payload: " + payload
-					for _, vv := range v {
-						printing.DalLog("CODE", vv, options)
-					}
-
-					if options.FoundAction != "" {
-						foundAction(options, req.URL.Host, poc.Data, "BAV: "+poc.InjectType)
-					}
-
-					if showG {
-						if options.Format == "json" {
-							pocj, _ := json.Marshal(poc)
-							printing.DalLog("PRINT", string(pocj)+",", options)
-						} else {
-							pocs := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
-							printing.DalLog("PRINT", pocs, options)
-						}
-					}
-					scanObject.Results = append(scanObject.Results, poc)
-				}
-			}
-		}
-
-		if options.Trigger != "" {
-			var treq *http.Request
-			var method = options.Method
-			options.Method = options.TriggerMethod
-			if options.Sequence < 0 {
-				treq = optimization.GenerateNewRequest(options.Trigger, "", options)
-			} else {
-
-				triggerURL := strings.Replace(options.Trigger, "SEQNC", strconv.Itoa(options.Sequence), 1)
-				treq = optimization.GenerateNewRequest(triggerURL, "", options)
-				options.Sequence = options.Sequence + 1
-			}
-			options.Method = method
-			netTransport := getTransport(options)
-			client := &http.Client{
-				Timeout:   time.Duration(options.Timeout) * time.Second,
-				Transport: netTransport,
-				CheckRedirect: func(req *http.Request, via []*http.Request) error {
-					return errors.New("something bad happened") // or maybe the error from the request
-				},
-			}
-			resp, err := client.Do(treq)
-			if err != nil {
-				rLog.WithField("data2", "vds").Debug(false)
-				rLog.WithField("data2", "vrs").Debug(false)
-				return "", resp, false, false, err
-			}
-
-			bytes, _ := io.ReadAll(resp.Body)
-			str := string(bytes)
-
-			if resp.Header["Content-Type"] != nil {
-				if isAllowType(resp.Header["Content-Type"][0]) {
-					vds := verification.VerifyDOM(str)
-					vrs := verification.VerifyReflection(str, payload)
-					rLog.WithField("data2", "vds").Debug(vds)
-					rLog.WithField("data2", "vrs").Debug(vrs)
-					return str, resp, vds, vrs, nil
-				}
-			}
-			return str, resp, false, false, nil
-		} else {
-			if resp.Header["Content-Type"] != nil {
-				if isAllowType(resp.Header["Content-Type"][0]) {
-					vds := verification.VerifyDOM(str)
-					vrs := verification.VerifyReflection(str, payload)
-					rLog.WithField("data2", "vds").Debug(vds)
-					rLog.WithField("data2", "vrs").Debug(vrs)
-					return str, resp, vds, vrs, nil
-				}
-			}
-			rLog.WithField("data2", "vds").Debug(false)
-			rLog.WithField("data2", "vrs").Debug(false)
-			return str, resp, false, false, nil
 		}
 	}
-	return "", resp, false, false, err
+
+	return model.PoC{
+		Type:       "G",
+		InjectType: injectType,
+		Method:     options.Method,
+		Data:       req.URL.String(),
+		Param:      "",
+		Payload:    payload,
+		Evidence:   "",
+		CWE:        cwe,
+		Severity:   severity,
+		PoCType:    options.PoCType,
+		MessageID:  messageID,
+	}
+}
+
+func handlePoC(poc model.PoC, req *http.Request, options model.Options, showG bool) {
+	if options.OutputRequest {
+		reqDump, err := httputil.DumpRequestOut(req, true)
+		if err == nil {
+			poc.RawHTTPRequest = string(reqDump)
+			printing.DalLog("CODE", "\n"+string(reqDump), options)
+		}
+	}
+	if showG {
+		if options.Format == "json" {
+			pocj, _ := json.Marshal(poc)
+			printing.DalLog("PRINT", string(pocj)+",", options)
+		} else {
+			pocs := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
+			printing.DalLog("PRINT", pocs, options)
+		}
+	}
+	if options.FoundAction != "" {
+		foundAction(options, req.URL.Host, poc.Data, "BAV: "+poc.InjectType)
+	}
 }

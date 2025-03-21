@@ -132,23 +132,23 @@ func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	// Try the request
 	for i := 0; i <= t.MaxRetries; i++ {
 		resp, err = t.Transport.RoundTrip(reqClone)
-		if err == nil {
+		if err == nil && resp.StatusCode < 400 {
 			return resp, nil
 		}
 
-		// If this was the last retry, return the error
 		if i == t.MaxRetries {
-			return nil, err
+			if err != nil {
+				return nil, err
+			}
+			return resp, nil
 		}
 
-		// Wait before retrying
 		delay := t.RetryDelay
 		if t.RetryBackoff > 1 {
-			delay = time.Duration(float64(delay) * t.RetryBackoff)
+			delay = time.Duration(float64(delay) * float64(i) * t.RetryBackoff)
 		}
 		time.Sleep(delay)
 
-		// Clone the request again for the next retry
 		reqClone = req.Clone(req.Context())
 	}
 

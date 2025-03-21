@@ -8,9 +8,9 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/hahwul/dalfox/v2/pkg/har"
+	"github.com/hahwul/dalfox/v2/internal/har"
+	"github.com/hahwul/dalfox/v2/internal/printing"
 	"github.com/hahwul/dalfox/v2/pkg/model"
-	"github.com/hahwul/dalfox/v2/pkg/printing"
 	"github.com/logrusorgru/aurora"
 	"github.com/spf13/cobra"
 )

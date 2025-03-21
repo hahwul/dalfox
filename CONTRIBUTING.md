@@ -32,7 +32,7 @@ $ go build
 - e.g
 payload.go
 ```go
-func getSQLIPayload() []string {
+func GetSQLIPayload() []string {
 	payload := []string{
 		"'",
 		"''",
@@ -68,7 +68,7 @@ func SqliAnalysis(target string, options model.Options) {
 
 	for bpk := range bpd {
     // Load payload here!
-		for _, sqlipayload := range getSQLIPayload() {
+		for _, sqlipayload := range GetSQLIPayload() {
 			turl, _ := optimization.MakeRequestQuery(target, bpk, sqlipayload, "toGrepping", options)
 			reqs <- turl
 		}
