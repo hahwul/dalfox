@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/hahwul/dalfox/v2/internal/har"
 	"github.com/hahwul/dalfox/v2/internal/utils"
 
 	"github.com/hahwul/dalfox/v2/internal/optimization"
@@ -144,6 +143,18 @@ func processResponse(str string, resp *http.Response, payload string, req *http.
 }
 
 func createPoC(injectType, cwe, severity string, req *http.Request, payload string, options model.Options) model.PoC {
+	var messageID int64
+
+	// Safely extract the message ID from the request
+	if req != nil {
+		if id := req.Context().Value("message_id"); id != nil {
+			// Try to convert, but don't panic if it fails
+			if msgID, ok := id.(int64); ok {
+				messageID = msgID
+			}
+		}
+	}
+
 	return model.PoC{
 		Type:       "G",
 		InjectType: injectType,
@@ -155,7 +166,7 @@ func createPoC(injectType, cwe, severity string, req *http.Request, payload stri
 		CWE:        cwe,
 		Severity:   severity,
 		PoCType:    options.PoCType,
-		MessageID:  har.MessageIDFromRequest(req),
+		MessageID:  messageID,
 	}
 }
 
