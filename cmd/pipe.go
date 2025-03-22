@@ -94,10 +94,6 @@ func runMulticastMode(targets []string, cmd *cobra.Command, sf bool, limit int) 
 		go func() {
 			defer wg.Done()
 			for kv := range tasks {
-				//if shouldStop {
-				//	continue // Skip processing if we reached the limit
-				//}
-
 				v := kv.URLs
 				for i := range v {
 					if shouldStop {
@@ -154,6 +150,7 @@ func runMulticastMode(targets []string, cmd *cobra.Command, sf bool, limit int) 
 
 func runSingleMode(targets []string, sf bool, limit int) {
 	options.AllURLS = len(targets)
+
 	if (!options.NoSpinner || !options.Silence) && !sf {
 		options.SpinnerObject.Prefix = " "
 		options.SpinnerObject.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][0%] Multiple scanning from pipe"
