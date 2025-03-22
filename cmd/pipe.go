@@ -94,9 +94,9 @@ func runMulticastMode(targets []string, cmd *cobra.Command, sf bool, limit int) 
 		go func() {
 			defer wg.Done()
 			for kv := range tasks {
-				if shouldStop {
-					continue // Skip processing if we reached the limit
-				}
+				//if shouldStop {
+				//	continue // Skip processing if we reached the limit
+				//}
 
 				v := kv.URLs
 				for i := range v {
