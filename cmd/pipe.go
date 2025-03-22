@@ -51,14 +51,15 @@ func runPipeCmd(cmd *cobra.Command, args []string) {
 
 	multi, _ := cmd.Flags().GetBool("multicast")
 	mass, _ := cmd.Flags().GetBool("mass")
+	limit, _ := cmd.Flags().GetInt("limit")
 	if multi || mass {
-		runMulticastMode(targets, cmd, sf)
+		runMulticastMode(targets, cmd, sf, limit)
 	} else {
-		runSingleMode(targets, sf)
+		runSingleMode(targets, sf, limit)
 	}
 }
 
-func runMulticastMode(targets []string, cmd *cobra.Command, sf bool) {
+func runMulticastMode(targets []string, cmd *cobra.Command, sf bool, limit int) {
 	printing.DalLog("SYSTEM", "Using multicasting mode", options)
 	options.Silence = true
 	options.MulticastMode = true
@@ -84,6 +85,10 @@ func runMulticastMode(targets []string, cmd *cobra.Command, sf bool) {
 			printing.DalLog("SYSTEM-M", "Parallel testing to '"+k+"' => "+strconv.Itoa(len(v))+" urls", options)
 		}
 	}
+	var totalResults int
+	var resultsMutex sync.Mutex
+	var shouldStop bool
+
 	for task := 0; task < concurrency; task++ {
 		wg.Add(1)
 		go func() {
@@ -91,7 +96,24 @@ func runMulticastMode(targets []string, cmd *cobra.Command, sf bool) {
 			for kv := range tasks {
 				v := kv.URLs
 				for i := range v {
-					_, _ = scanning.Scan(v[i], options, strconv.Itoa(len(v)))
+					if shouldStop {
+						break // Skip processing if we reached the limit
+					}
+
+					result, _ := scanning.Scan(v[i], options, strconv.Itoa(len(v)))
+
+					if limit > 0 {
+						resultsMutex.Lock()
+						totalResults += len(result.PoCs)
+						if totalResults >= limit {
+							if !options.Silence || !sf {
+								printing.DalLog("SYSTEM-M", "Result limit reached ("+strconv.Itoa(limit)+"). Stopping scan.", options)
+							}
+							shouldStop = true
+						}
+						resultsMutex.Unlock()
+					}
+
 					if (!options.NoSpinner || !options.Silence) && !sf {
 						options.Mutex.Lock()
 						options.NowURL++
@@ -126,8 +148,9 @@ func runMulticastMode(targets []string, cmd *cobra.Command, sf bool) {
 	}
 }
 
-func runSingleMode(targets []string, sf bool) {
+func runSingleMode(targets []string, sf bool, limit int) {
 	options.AllURLS = len(targets)
+
 	if (!options.NoSpinner || !options.Silence) && !sf {
 		options.SpinnerObject.Prefix = " "
 		options.SpinnerObject.Suffix = "  [" + strconv.Itoa(options.NowURL) + "/" + strconv.Itoa(options.AllURLS) + " Tasks][0%] Multiple scanning from pipe"
@@ -136,12 +159,32 @@ func runSingleMode(targets []string, sf bool) {
 		}
 		options.SpinnerObject.Start()
 	}
+	var totalResults int
+	var allResults []model.Result
+
 	if options.Format == "json" {
 		printing.DalLog("PRINT", "[", options)
 	}
 	for i := range targets {
 		options.NowURL = i + 1
-		_, _ = scanning.Scan(targets[i], options, strconv.Itoa(i))
+		result, _ := scanning.Scan(targets[i], options, strconv.Itoa(i))
+
+		// Add the current result to our collection
+		allResults = append(allResults, result)
+
+		// Count total PoCs across all results
+		totalResults = 0
+		for _, res := range allResults {
+			totalResults += len(res.PoCs)
+		}
+
+		if limit > 0 && totalResults >= limit {
+			if !options.Silence || !sf {
+				printing.DalLog("SYSTEM", "Result limit reached ("+strconv.Itoa(limit)+"). Stopping scan.", options)
+			}
+			break
+		}
+
 		if (!options.NoSpinner || !options.Silence) && !sf {
 			options.Mutex.Lock()
 			options.NowURL++
@@ -164,4 +207,5 @@ func init() {
 	pipeCmd.Flags().Bool("mass", false, "Enable parallel scanning in N*Host mode (only shows PoC code). Example: --mass")
 	pipeCmd.Flags().Bool("silence-force", false, "Only print PoC code, suppress progress output. Example: --silence-force")
 	pipeCmd.Flags().Int("mass-worker", 10, "Set the number of parallel workers for --mass and --multicast options. Example: --mass-worker 10")
+	pipeCmd.Flags().Int("limit", 0, "Limit the number of results to display. Example: --limit 10")
 }
