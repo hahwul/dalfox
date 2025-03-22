@@ -166,10 +166,11 @@ func runFileMode(filePath string, cmd *cobra.Command, sf bool) {
 	printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target urls", options)
 	multi, _ := cmd.Flags().GetBool("multicast")
 	mass, _ := cmd.Flags().GetBool("mass")
+	limit, _ := cmd.Flags().GetInt("limit")
 	if multi || mass {
-		runMulticastMode(targets, cmd, sf)
+		runMulticastMode(targets, cmd, sf, limit)
 	} else {
-		runSingleMode(targets, sf)
+		runSingleMode(targets, sf, limit)
 	}
 }
 
@@ -197,4 +198,5 @@ func init() {
 	fileCmd.Flags().Bool("mass", false, "Enable parallel scanning in N*Host mode (only shows PoC code). Example: --mass")
 	fileCmd.Flags().Bool("silence-force", false, "Only print PoC code, suppress progress output. Example: --silence-force")
 	fileCmd.Flags().Int("mass-worker", 10, "Set the number of parallel workers for --mass and --multicast options. Example: --mass-worker 10")
+	fileCmd.Flags().Int("limit", 0, "Limit the number of results to display. Example: --limit 10")
 }
