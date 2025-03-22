@@ -133,6 +133,10 @@ func processResponse(str string, resp *http.Response, payload string, req *http.
 	if resp.Header["Content-Type"] != nil && utils.IsAllowType(resp.Header["Content-Type"][0]) {
 		vds := verification.VerifyDOM(str)
 		vrs := verification.VerifyReflection(str, payload)
+if !vds && options.ForceHeadlessVerification {
+			// Only run headless verification if VerifyDOM failed
+			vds = CheckXSSWithHeadless(req.URL.String(), options)
+		}
 		rLog.WithField("data2", "vds").Debug(vds)
 		rLog.WithField("data2", "vrs").Debug(vrs)
 		return str, resp, vds, vrs, nil
