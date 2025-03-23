@@ -70,8 +70,8 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 	client := createHTTPClient(options)
 	tres, err := client.Do(treq)
 	if err != nil {
-		msg := fmt.Sprintf("Request failed: %v", err)
-		printing.DalLog("ERROR", msg, options)
+msg := fmt.Sprintf("Request to %s failed: %v", target, err)
+printing.DalLog("ERROR", msg, options)
 		return scanResult, err
 	}
 	if options.IgnoreReturn != "" {
