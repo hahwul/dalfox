@@ -60,7 +60,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 
 	parsedURL, err := url.Parse(target)
 	if err != nil {
-		printing.DalLog("SYSTEM", "Unable to process URL: "+target, options)
+printing.DalLog("SYSTEM", "Unable to parse URL: "+target+". Please ensure it is a valid URL.", options)
 		return scanResult, err
 	}
 	treq := optimization.GenerateNewRequest(target, "", options)
