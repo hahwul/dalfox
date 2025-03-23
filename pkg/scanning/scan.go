@@ -466,7 +466,7 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 					}
 				}
 			} else {
-				printing.DalLog("SYSTEM", "Failed to load payloads from "+endpoint, options)
+printing.DalLog("SYSTEM", "Failed to load remote payloads from "+endpoint, options)
 			}
 		}
 	}
