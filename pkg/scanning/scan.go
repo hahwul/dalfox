@@ -206,7 +206,7 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 	if (options.SkipDiscovery || utils.IsAllowType(policy["Content-Type"])) && options.CustomPayloadFile != "" {
 		ff, err := voltFile.ReadLinesOrLiteral(options.CustomPayloadFile)
 		if err != nil {
-			printing.DalLog("SYSTEM", "Failed to load custom XSS payloads", options)
+printing.DalLog("SYSTEM", "Failed to load custom XSS payload file", options)
 		} else {
 			for _, customPayload := range ff {
 				if customPayload != "" {
