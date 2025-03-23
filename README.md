@@ -3,11 +3,10 @@
   <img src="docs/images/logo.png" alt="dalfox" width="400px;">
 </div>
 <p align="center">
-  <a href="https://github.com/hahwul/dalfox/actions/workflows/go.yml"><img src="https://github.com/hahwul/dalfox/actions/workflows/go.yml/badge.svg"></a>
-  <a href=""><img src="https://api.codacy.com/project/badge/Grade/17cac7b8d1e849a688577f2bbdd6ecd0"></a>
-  <a href="https://goreportcard.com/report/github.com/hahwul/dalfox/v2"><img src="https://goreportcard.com/badge/github.com/hahwul/dalfox/v2"></a>
-  <a href="https://x.com/intent/follow?screen_name=hahwul"><img src="https://img.shields.io/twitter/follow/hahwul?style=flat&logo=x"></a>
-  <a href=""><img src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=flat"></a>
+  <a href="https://github.com/hahwul/dalfox/releases/latest"><img src="https://img.shields.io/github/v/release/hahwul/dalfox?style=for-the-badge&logoColor=%2330365e&label=dalfox&labelColor=%2330365e&color=%2330365e"></a>
+  <a href="https://go.dev"><img src="https://img.shields.io/badge/go-blue.svg?logo=go&style=for-the-badge&labelColor=%2330365e&color=%2330365e&logoColor=%2"></a>
+  <a href="https://x.com/intent/follow?screen_name=hahwul"><img src="https://img.shields.io/twitter/follow/hahwul?style=for-the-badge&logo=x&labelColor=%2330365e&color=%2330365e"></a>
+  <a href=""><img src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=for-the-badge&labelColor=%2330365e&color=%2330365e"></a>
 </p>
 
 DalFox is a powerful open-source tool that focuses on automation, making it ideal for quickly scanning for XSS flaws and analyzing parameters. Its advanced testing engine and niche features are designed to streamline the process of detecting and verifying vulnerabilities.
