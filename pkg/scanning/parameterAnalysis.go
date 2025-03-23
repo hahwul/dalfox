@@ -243,7 +243,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 		} else {
 			ff, err := voltFile.ReadLinesOrLiteral(options.MiningWordlist)
 			if err != nil {
-				printing.DalLog("SYSTEM", "Failed to load mining wordlist", options)
+printing.DalLog("SYSTEM", "Failed to load mining parameter wordlist", options)
 			} else {
 				p, dp = addParamsFromWordlist(p, dp, ff, options)
 			}
