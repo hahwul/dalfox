@@ -80,6 +80,20 @@ func TestSendReq(t *testing.T) {
 			want3:   false,
 			wantErr: false,
 		},
+		{
+			name: "Request with ForceHeadlessVerification",
+			args: args{
+				req: func() *http.Request {
+					req, _ := http.NewRequest(http.MethodGet, "https://dalfox.hahwul.com", nil)
+					return req
+				}(),
+				payload: "test-payload",
+				options: model.Options{
+					Timeout:                   10,
+					ForceHeadlessVerification: true,
+				},
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -266,7 +280,6 @@ func TestHandlePoC(t *testing.T) {
 			},
 			showG: true,
 		},
-
 		{
 			name: "PoC with showG false",
 			poc: model.PoC{
