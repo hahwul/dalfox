@@ -1,6 +1,6 @@
 <div align="center">
   <br>
-  <img src="https://github.com/hahwul/dalfox/assets/13212227/38f4e2e4-baa4-4bcd-8e71-3d1bf01ade8c" alt="dalfox" width="400px;">
+  <img src="docs/images/logo.png" alt="dalfox" width="400px;">
 </div>
 <p align="center">
   <a href="https://github.com/hahwul/dalfox/actions/workflows/go.yml"><img src="https://github.com/hahwul/dalfox/actions/workflows/go.yml/badge.svg"></a>
