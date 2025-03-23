@@ -52,7 +52,7 @@ dalfox [mode] [target] [flags]
 * File Mode: `dalfox file urls.txt --custom-payload mypayloads.txt`
 * Pipeline: `cat urls.txt | dalfox pipe -H "AuthToken: xxx"`
 
-Check the [Wiki](https://github.com/hahwul/dalfox/wiki) for more examples.
+Check the [Usage](https://dalfox.hahwul.com/page/usage/) and [Running](https://dalfox.hahwul.com/page/running/) documents for more examples.
 
 ## Contributing
 if you want to contribute to this project, please see [CONTRIBUTING.md](https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md) and Pull-Request with cool your contents.
