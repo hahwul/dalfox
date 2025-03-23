@@ -55,8 +55,7 @@ dalfox [mode] [target] [flags]
 Check the [Wiki](https://github.com/hahwul/dalfox/wiki) for more examples.
 
 ## Contributing
-DalFox's open-source project and made it with ❤️
-if you want contribute this project, please see [CONTRIBUTING.md](https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md) and Pull-Request with cool your contents.
+if you want to contribute to this project, please see [CONTRIBUTING.md](https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md) and Pull-Request with cool your contents.
 
 [![](/CONTRIBUTORS.svg)](https://github.com/hahwul/dalfox/graphs/contributors)
 
