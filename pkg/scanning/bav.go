@@ -39,7 +39,7 @@ func RunBAVAnalysis(target string, options model.Options, rl *rateLimiter, bav *
 
 	bavWaitGroup.Wait()
 	*bav = " > BAV(o)"
-	printing.DalLog("SYSTEM", "["+*bav+"] Waiting for analysis 🔍", options)
+	printing.DalLog("SYSTEM", "["+*bav+"] Analysis completed", options)
 }
 
 // SSTIAnalysis is basic check for SSTI

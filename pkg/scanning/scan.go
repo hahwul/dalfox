@@ -60,7 +60,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 
 	parsedURL, err := url.Parse(target)
 	if err != nil {
-		printing.DalLog("SYSTEM", "Not running "+target+" url", options)
+		printing.DalLog("SYSTEM", "Unable to process URL: "+target, options)
 		return scanResult, err
 	}
 	treq := optimization.GenerateNewRequest(target, "", options)
@@ -70,13 +70,13 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 	client := createHTTPClient(options)
 	tres, err := client.Do(treq)
 	if err != nil {
-		msg := fmt.Sprintf("not running %v", err)
+		msg := fmt.Sprintf("Request failed: %v", err)
 		printing.DalLog("ERROR", msg, options)
 		return scanResult, err
 	}
 	if options.IgnoreReturn != "" {
 		if shouldIgnoreReturn(tres.StatusCode, options.IgnoreReturn) {
-			printing.DalLog("SYSTEM", "Not running "+target+" url from --ignore-return option", options)
+			printing.DalLog("SYSTEM", "Skipping URL "+target+" due to ignore-return option", options)
 			return scanResult, nil
 		}
 	}
@@ -166,7 +166,7 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 	var durls []string
 	parsedURL, _ := url.Parse(target)
 
-	printing.DalLog("SYSTEM", "Generate XSS payload and optimization.Optimization.. 🛠", options)
+	printing.DalLog("SYSTEM", "Generating XSS payloads and performing optimization", options)
 
 	// Path-based XSS
 	if !options.OnlyCustomPayload {
@@ -206,7 +206,7 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 	if (options.SkipDiscovery || utils.IsAllowType(policy["Content-Type"])) && options.CustomPayloadFile != "" {
 		ff, err := voltFile.ReadLinesOrLiteral(options.CustomPayloadFile)
 		if err != nil {
-			printing.DalLog("SYSTEM", "Custom XSS payload load fail..", options)
+			printing.DalLog("SYSTEM", "Failed to load custom XSS payloads", options)
 		} else {
 			for _, customPayload := range ff {
 				if customPayload != "" {
@@ -227,7 +227,7 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 					}
 				}
 			}
-			printing.DalLog("SYSTEM", "Added your "+strconv.Itoa(len(ff))+" custom xss payload", options)
+			printing.DalLog("SYSTEM", "Added "+strconv.Itoa(len(ff))+" custom XSS payloads", options)
 		}
 	}
 
@@ -392,7 +392,7 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 			}
 		}
 	} else {
-		printing.DalLog("SYSTEM", "Type is '"+policy["Content-Type"]+"', It does not test except customized payload (custom/blind).", options)
+		printing.DalLog("SYSTEM", "Content-Type is '"+policy["Content-Type"]+"', only testing with customized payloads (custom/blind)", options)
 	}
 
 	// Blind Payload
@@ -429,7 +429,7 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 				}
 			}
 		}
-		printing.DalLog("SYSTEM", "Added your blind XSS ("+options.BlindURL+")", options)
+		printing.DalLog("SYSTEM", "Added blind XSS payloads with callback URL: "+options.BlindURL, options)
 	}
 
 	// Remote Payloads
@@ -445,7 +445,7 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 				payloads, line, size = payload.GetPayloadBoxPayload()
 			}
 			if line != "" {
-				printing.DalLog("INFO", "A '"+endpoint+"' payloads has been loaded ["+line+"L / "+size+"]               ", options)
+				printing.DalLog("INFO", "Successfully loaded '"+endpoint+"' payloads ["+line+" lines / "+size+"]", options)
 				for _, remotePayload := range payloads {
 					if remotePayload != "" {
 						for k, v := range params {
@@ -466,7 +466,7 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 					}
 				}
 			} else {
-				printing.DalLog("SYSTEM", endpoint+" payload load fail..", options)
+				printing.DalLog("SYSTEM", "Failed to load payloads from "+endpoint, options)
 			}
 		}
 	}
@@ -521,13 +521,13 @@ func initializeSpinner(options model.Options) {
 
 // logStartScan logs the start of the scan.
 func logStartScan(target string, options model.Options, sid string) {
-	printing.DalLog("SYSTEM", "Start Scan 🦊", options)
+	printing.DalLog("SYSTEM", "Starting scan", options)
 	if options.AllURLS > 0 {
 		snow, _ := strconv.Atoi(sid)
 		percent := fmt.Sprintf("%0.2f%%", float64(snow)/float64(options.AllURLS)*100)
-		printing.DalLog("SYSTEM-M", "🦊 Start scan [SID:"+sid+"]["+sid+"/"+strconv.Itoa(options.AllURLS)+"]["+percent+"%] / URL: "+target, options)
+		printing.DalLog("SYSTEM-M", "Starting scan [SID:"+sid+"]["+sid+"/"+strconv.Itoa(options.AllURLS)+"]["+percent+"%] / URL: "+target, options)
 	} else {
-		printing.DalLog("SYSTEM-M", "🦊 Start scan [SID:"+sid+"] / URL: "+target, options)
+		printing.DalLog("SYSTEM-M", "Starting scan [SID:"+sid+"] / URL: "+target, options)
 	}
 }
 

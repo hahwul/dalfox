@@ -20,8 +20,8 @@ func performScanning(target string, options model.Options, query map[*http.Reque
 	var pocs []model.PoC
 	queryCount := 0
 
-	printing.DalLog("SYSTEM", "Start XSS Scanning.. with "+strconv.Itoa(len(query))+" queries 🗡", options)
-	printing.DalLog("SYSTEM", "[ Make "+strconv.Itoa(options.Concurrence)+" workers ] [ Allocated "+strconv.Itoa(len(query))+" queries ]", options)
+	printing.DalLog("SYSTEM", "Starting XSS scanning with "+strconv.Itoa(len(query))+" queries", options)
+	printing.DalLog("SYSTEM", "[ Created "+strconv.Itoa(options.Concurrence)+" workers ] [ Allocated "+strconv.Itoa(len(query))+" queries ]", options)
 
 	if !(options.Silence || options.NoSpinner) {
 		s.Start()
