@@ -11,7 +11,7 @@ layout: page
 {: .d-inline-block }
 
 New (v2.10.0) 
-{: .label .label-green }
+{: .label .label-blue }
 
 Dalfox now supports custom HTTP transports, allowing you to customize the HTTP client behavior for your scanning needs. This feature is particularly useful when integrating Dalfox with other pipelines for HTTP control flow, retry mechanisms, and non-trivial authentication scenarios.
 

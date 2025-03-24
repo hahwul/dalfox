@@ -7,7 +7,11 @@ toc: true
 layout: page
 ---
 
-# Write HAR file for interaction with other tools
+# Write HAR file
+{: .d-inline-block }
+
+SINCE (v2.9.0) 
+{: .label .label-green }
 
 In Dalfox 2.9 and later, all requests can be logged in HAR format. This allows you to save the HTTP Archive (HAR) file for further analysis or interaction with other tools.
 

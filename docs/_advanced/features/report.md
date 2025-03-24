@@ -8,6 +8,10 @@ layout: page
 ---
 
 # Comprehensive Reporting
+{: .d-inline-block }
+
+New (v2.8.0) 
+{: .label .label-green }
 
 ## Overview
 
