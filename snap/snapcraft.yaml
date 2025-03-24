@@ -17,4 +17,5 @@ parts:
     source: https://github.com/hahwul/dalfox.git
     source-type: git
     plugin: go
+    build-snaps: [go]
     build-packages: [build-essential]
