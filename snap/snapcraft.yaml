@@ -14,6 +14,7 @@ apps:
     plugs: [home, network, network-bind]
 parts:
   dalfox:
-    source: https://github.com/hahwul/dalfox
+    source: https://github.com/hahwul/dalfox.git
+    source-type: git
     plugin: go
     build-packages: [build-essential]
