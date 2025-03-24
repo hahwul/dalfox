@@ -255,7 +255,7 @@ func Test_updateSpinner(t *testing.T) {
 
 func Test_Scan(t *testing.T) {
 	// Create a mock server
-	server := mockServer()
+	server := mockServerForScanTest()
 	defer server.Close()
 
 	type args struct {
@@ -286,14 +286,14 @@ func Test_Scan(t *testing.T) {
 		{
 			name: "Basic scan with skip discovery",
 			args: args{
-				target: server.URL + "/?param=test",
+				target: server.URL + "/?query=test",
 				options: model.Options{
 					Concurrence:   1,
 					Format:        "plain",
 					Silence:       true,
 					NoSpinner:     true,
 					SkipDiscovery: true,
-					UniqParam:     []string{"param"},
+					UniqParam:     []string{"query"},
 					OnlyDiscovery: true, // To make test faster
 				},
 				sid: "1",
@@ -303,14 +303,14 @@ func Test_Scan(t *testing.T) {
 		{
 			name: "Basic scan with remote payloads",
 			args: args{
-				target: server.URL + "/?param=test",
+				target: server.URL + "/?query=test",
 				options: model.Options{
 					Concurrence:    1,
 					Format:         "plain",
 					Silence:        true,
 					NoSpinner:      true,
 					SkipDiscovery:  true,
-					UniqParam:      []string{"param"},
+					UniqParam:      []string{"query"},
 					RemotePayloads: "portswigger,payloadbox",
 				},
 				sid: "1",
@@ -320,15 +320,16 @@ func Test_Scan(t *testing.T) {
 		{
 			name: "Basic scan with blind xss",
 			args: args{
-				target: server.URL + "/?param=test",
+				target: server.URL + "/?query=test",
 				options: model.Options{
 					Concurrence:   1,
 					Format:        "plain",
 					Silence:       true,
 					NoSpinner:     true,
 					SkipDiscovery: true,
-					UniqParam:     []string{"param"},
+					UniqParam:     []string{"query"},
 					BlindURL:      "https://dalfox.hahwul.com",
+					Data:          "query=1234",
 				},
 				sid: "1",
 			},
@@ -337,15 +338,16 @@ func Test_Scan(t *testing.T) {
 		{
 			name: "Basic scan with headless",
 			args: args{
-				target: server.URL + "/?param=test",
+				target: server.URL + "/?query=test",
 				options: model.Options{
 					Concurrence:   1,
 					Format:        "plain",
 					Silence:       true,
 					NoSpinner:     true,
 					SkipDiscovery: true,
-					UniqParam:     []string{"param"},
+					UniqParam:     []string{"query"},
 					UseHeadless:   true,
+					IgnoreReturn:  "404",
 				},
 				sid: "1",
 			},
