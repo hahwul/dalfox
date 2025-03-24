@@ -9,11 +9,11 @@ layout: page
 
 # Command Line Flags
 
-This page provides a comprehensive overview of DalFox's command line flags, organized by functionality.
+This page provides a comprehensive overview of Dalfox's command line flags, organized by functionality.
 
 ## Request Configuration Flags
 
-These flags allow you to customize the HTTP requests sent by DalFox:
+These flags allow you to customize the HTTP requests sent by Dalfox:
 
 | Flag | Description |
 |------|-------------|
@@ -49,7 +49,7 @@ These flags control the behavior of the scanning process:
 
 ## Performance Flags
 
-These flags allow you to fine-tune the performance of DalFox:
+These flags allow you to fine-tune the performance of Dalfox:
 
 | Flag | Description |
 |------|-------------|
@@ -58,7 +58,7 @@ These flags allow you to fine-tune the performance of DalFox:
 
 ## Parameter Mining Flags
 
-These flags control how DalFox discovers and tests parameters:
+These flags control how Dalfox discovers and tests parameters:
 
 | Flag | Description |
 |------|-------------|
@@ -87,7 +87,7 @@ These flags allow you to control the scanning flow:
 
 ## Output and Reporting Flags
 
-These flags control how DalFox presents its findings:
+These flags control how Dalfox presents its findings:
 
 | Flag | Description |
 |------|-------------|

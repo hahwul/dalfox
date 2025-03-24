@@ -8,88 +8,180 @@ layout: page
 
 # Output Handling
 
-This guide provides detailed instructions on how to handle the output from Dalfox. You can use various methods to save, filter, and process the output according to your needs.
+This guide provides comprehensive instructions on how to capture, filter, and process the output from Dalfox. Understanding these output handling techniques will help you efficiently interpret results and integrate Dalfox into your security workflows.
 
-## Use Dalfox Output to Other Tools via Pipeline
-You can pipe the output of Dalfox to other tools for further processing. For example, you can use `grep` to filter the output and `xargs` to open URLs in a browser.
+## Understanding Dalfox Output Types
+
+Dalfox generates several types of output during scanning:
+
+- **Progress information**: Status updates about the scanning process
+- **Proof of Concept (PoC) findings**: Actual vulnerabilities discovered
+- **Analysis data**: Details about parameters, injection points, and vulnerability verification
+- **HTTP traffic**: Raw request and response data
+
+## Basic Output Handling Techniques
+
+### Redirecting Output to Files
+
+The simplest way to save Dalfox output is by using standard output redirection:
 
 ```bash
-dalfox url http://testphp.vulnweb.com/listproducts.php | grep "\[V\]" | cut -d " " -f2 | xargs -I % open %
+dalfox url http://example.com/vulnerable.php > results.txt
 ```
 
-## Save Only PoC Code with Stdout
-You can save the Proof of Concept (PoC) code directly to a file using standard output redirection.
+This captures all console output to the specified file.
+
+### Using the Built-in Output Flag
+
+For more controlled output saving, use the `-o` or `--output` flag:
 
 ```bash
-dalfox url http://testphp.vulnweb.com/listproducts.php > output
+dalfox url http://example.com/vulnerable.php -o results.txt
 ```
 
-### Output File Example
+This approach is recommended as it ensures proper handling of terminal control characters.
+
+## Advanced Output Filtering
+
+### Processing Output with Unix Tools
+
+Dalfox output can be piped to other tools for filtering and processing:
+
 ```bash
-# cat output
-[POC][G][BUILT-IN/dalfox-error-mysql2/GET] http://testphp.vulnweb.com/listproducts.php
-[POC][G][BUILT-IN/dalfox-error-mysql/GET] http://testphp.vulnweb.com/listproducts.php
-[POC][G][BUILT-IN/dalfox-error-mysql5/GET] http://testphp.vulnweb.com/listproducts.php?cat=dalfox.
-[POC][G][BUILT-IN/dalfox-error-mysql1/GET] http://testphp.vulnweb.com/listproducts.php?cat=dalfox.
-[POC][V][GET] http://testphp.vulnweb.com/listproducts.php?cat=%3CsCriPt+class%3Ddalfox%3Eprompt%2845%29%3C%2Fscript%3E
+# Extract only verified XSS vulnerabilities
+dalfox url http://example.com/vulnerable.php | grep "\[V\]" > verified_xss.txt
+
+# Extract PoC URLs and open them in a browser
+dalfox url http://example.com/vulnerable.php | grep "\[POC\]" | cut -d " " -f 2 | xargs -I % open %
+
+# Count different types of findings
+dalfox url http://example.com/vulnerable.php | grep "\[POC\]" | cut -d "[" -f 3 | cut -d "]" -f 1 | sort | uniq -c
 ```
 
-## Save Only PoC Code with `-o` Flag
-You can also use the `-o` flag to save the PoC code to a file.
+### Filtering by PoC Type
+
+Dalfox allows you to filter findings by vulnerability type with the `--only-poc` flag:
 
 ```bash
-dalfox url http://testphp.vulnweb.com/listproducts.php -o output
+# Show only verified (V) and grep-based (G) findings
+dalfox url http://example.com/vulnerable.php --only-poc=g,v
 ```
 
-### Output File Example
+Available PoC types:
+- `g`: Grep-based findings (potential vulnerabilities identified through response pattern matching)
+- `r`: Reflected findings (parameters successfully reflected in responses)
+- `v`: Verified findings (confirmed vulnerabilities through headless browser verification)
+
+## Comprehensive Logging Options
+
+### Capturing Complete Scan Logs
+
+To save all scan information, including detailed analysis steps:
+
 ```bash
-# cat output
-[POC][G][BUILT-IN/dalfox-error-mysql2/GET] http://testphp.vulnweb.com/listproducts.php
-[POC][G][BUILT-IN/dalfox-error-mysql/GET] http://testphp.vulnweb.com/listproducts.php
-[POC][G][BUILT-IN/dalfox-error-mysql5/GET] http://testphp.vulnweb.com/listproducts.php?cat=dalfox.
-[POC][G][BUILT-IN/dalfox-error-mysql1/GET] http://testphp.vulnweb.com/listproducts.php?cat=dalfox.
-[POC][V][GET] http://testphp.vulnweb.com/listproducts.php?cat=%3CsCriPt+class%3Ddalfox%3Eprompt%2845%29%3C%2Fscript%3E
+dalfox url http://example.com/vulnerable.php -o full_scan.log --output-all
 ```
 
-## Save All Logs with `--output-all` Flag
-To save all logs, including detailed analysis information, use the `--output-all` flag.
+Example of a comprehensive log:
 
-```bash
-dalfox url http://testphp.vulnweb.com/listproducts.php -o alllog.txt --output-all
 ```
-
-### Output File Example
-```bash
-# cat alllog.txt
 [*] Using single target mode
-[*] Target URL: http://testphp.vulnweb.com/listproducts.php
-[*] Vaild target [ code:200 / size:4819 ]
+[*] Target URL: http://example.com/vulnerable.php
+[*] Valid target [ code:200 / size:4819 ]
 [*] Using dictionary mining option [list=GF-Patterns] 📚⛏
 [*] Using DOM mining option 📦⛏
 [*] Start static analysis.. 🔍
 [*] Start parameter analysis.. 🔍
-[*] Start BAV(Basic Another Vulnerability) analysis / [sqli, ssti, OpenRedirect]  🔍
-...snip...
+[*] Start BAV analysis / [sqli, ssti, OpenRedirect] 🔍
+[I] Found reflected parameter: q
+[V] Triggered XSS Payload: q=<script>alert(1)</script>
+[POC][V][GET] http://example.com/vulnerable.php?q=%3Cscript%3Ealert%281%29%3C%2Fscript%3E
 ```
 
-## Save Only Special PoC Code
-You can filter and save only specific types of PoC code using the `--only-poc` flag. Supported types are:
-* `g` (grep)
-* `r` (reflected)
-* `v` (verified)
+### Including Raw HTTP Data
 
-### Command Example
-To save only grep and verified PoC code:
-```bash
-dalfox url http://testphp.vulnweb.com/listproducts.php --only-poc=g,v
-```
-
-## Save Traffic in HAR File
-You can save the HTTP traffic in a HAR (HTTP Archive) file for further analysis.
+To include raw HTTP requests and responses in your output:
 
 ```bash
-dalfox url http://testphp.vulnweb.com/listproducts.php --har-file-path=log.har
+# Include requests
+dalfox url http://example.com/vulnerable.php --output-request
+
+# Include responses
+dalfox url http://example.com/vulnerable.php --output-response
+
+# Include both
+dalfox url http://example.com/vulnerable.php --output-request --output-response
 ```
 
-### HAR File Example
-The HAR file can be opened with tools like [HAR Viewer](http://www.softwareishard.com/har/viewer/) for detailed inspection of the HTTP requests and responses.
+## Output Format Options
+
+### JSON Output
+
+For programmatic processing or integration with other tools, use JSON output:
+
+```bash
+dalfox url http://example.com/vulnerable.php --format json -o results.json
+```
+
+This generates structured JSON data that can be easily parsed by scripts or imported into other security tools.
+
+### Detailed Report Generation
+
+For comprehensive reporting:
+
+```bash
+dalfox url http://example.com/vulnerable.php --report --report-format json -o detailed_report.json
+```
+
+## HTTP Archive (HAR) Integration
+
+### Generating HAR Files
+
+HAR files contain detailed information about HTTP transactions and can be analyzed in various tools:
+
+```bash
+dalfox url http://example.com/vulnerable.php --har-file-path=scan.har
+```
+
+### Analyzing HAR Files
+
+The generated HAR file can be analyzed with:
+
+- [HAR Viewer](http://www.softwareishard.com/har/viewer/)
+- Chrome/Firefox Developer Tools (Import HAR)
+- Specialized HTTP analysis tools
+
+Example HAR viewer screenshot:
+![HAR Viewer Example](https://user-images.githubusercontent.com/369053/218365521-5df5ff3c-759e-4bb8-9205-a45ac25481ca.png)
+
+## Integration with Other Security Tools
+
+### Automated Workflows
+
+Dalfox can be integrated into CI/CD pipelines or other security automation:
+
+```bash
+# Scan and notify on findings
+dalfox url http://example.com/vulnerable.php --found-action './notify_slack.sh'
+
+# Scan multiple targets from Burp Suite
+dalfox file targets.txt --format json -o findings.json
+```
+
+### Continuous Monitoring Examples
+
+```bash
+# Daily scan with timestamped output
+echo "$(date +%F)_scan.log"
+dalfox url http://example.com/vulnerable.php -o "$(date +%F)_scan.log"
+```
+
+## Troubleshooting Output Issues
+
+If you encounter problems with output handling:
+
+1. **Terminal encoding issues**: Use `--no-color` to disable ANSI color codes
+2. **Output truncation**: Check terminal buffer settings or use file output
+3. **Special character problems**: Use JSON output format for consistent encoding
+
+For more information on output formats and report interpretation, see the [JSON Format Documentation](../advanced/resources/json/) and [PoC Format Documentation](../advanced/resources/format-of-poc/).

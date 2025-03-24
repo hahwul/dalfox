@@ -220,7 +220,7 @@ func TestRandomHeaderTransport(t *testing.T) {
 	}
 }
 
-func TestCustomTransportWithDalFox(t *testing.T) {
+func TestCustomTransportWithDalfox(t *testing.T) {
 	// Create a test server that returns the headers it received
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		headerValue := r.Header.Get("X-Custom-Value")
@@ -235,13 +235,13 @@ func TestCustomTransportWithDalFox(t *testing.T) {
 		ValuePrefix: "custom-",
 	}
 
-	// Create DalFox options with the custom transport
+	// Create Dalfox options with the custom transport
 	options := model.Options{
 		CustomTransport: customTransport,
 		Timeout:         10,
 	}
 
-	// Get the transport from DalFox
+	// Get the transport from Dalfox
 	transport := getTransport(options)
 
 	// Create a client with the transport

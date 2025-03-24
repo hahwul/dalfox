@@ -283,7 +283,7 @@ func TestParameterAnalysis(t *testing.T) {
 	// Setup test server
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("test") != "" {
-			w.Write([]byte("<html><body>Reflected: DalFox</body></html>"))
+			w.Write([]byte("<html><body>Reflected: Dalfox</body></html>"))
 			return
 		}
 		w.Write([]byte("<html><body>Not found</body></html>"))
@@ -308,7 +308,7 @@ func TestParameterAnalysis(t *testing.T) {
 	}
 	rl := newRateLimiter(time.Duration(0))
 
-	target := ts.URL + "?test=aaa" // Changed from "value" to "DalFox" to match server logic
+	target := ts.URL + "?test=aaa" // Changed from "value" to "Dalfox" to match server logic
 	results := ParameterAnalysis(target, options, rl)
 
 	// Verify that the "test" parameter was found and marked as reflected

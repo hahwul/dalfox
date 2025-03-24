@@ -2,7 +2,7 @@ package printing
 
 import "github.com/hahwul/dalfox/v2/pkg/model"
 
-// Banner is DalFox banner function
+// Banner is Dalfox banner function
 func Banner(options model.Options) {
 	DalLog("", `                                                        
                ░█▒               

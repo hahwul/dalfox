@@ -140,10 +140,10 @@ func processParams(target string, paramsQue chan string, results chan model.Para
 	for k := range paramsQue {
 		if optimization.CheckInspectionParam(options, k) {
 			printing.DalLog("DEBUG", "Mining URL scan for parameter "+k, options)
-			tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA", "toAppend", "NaN", options)
+			tempURL, _ := optimization.MakeRequestQuery(target, k, "Dalfox", "PA", "toAppend", "NaN", options)
 			var code string
 			rl.Block(tempURL.Host)
-			resbody, resp, _, vrs, err := SendReq(tempURL, "DalFox", options)
+			resbody, resp, _, vrs, err := SendReq(tempURL, "Dalfox", options)
 			if err == nil {
 				wafCheck, wafN := checkWAF(resp.Header, resbody)
 				if wafCheck {
@@ -156,15 +156,15 @@ func processParams(target string, paramsQue chan string, results chan model.Para
 					}
 				}
 			}
-			_, lineSum := verification.VerifyReflectionWithLine(resbody, "DalFox")
+			_, lineSum := verification.VerifyReflectionWithLine(resbody, "Dalfox")
 			if miningCheckerLine == lineSum {
 				pLog.Debug("Hit linesum")
 				pLog.Debug(lineSum)
 			}
 			if vrs {
-				code = printing.CodeView(resbody, "DalFox")
+				code = printing.CodeView(resbody, "Dalfox")
 				code = code[:len(code)-5]
-				pointer := optimization.Abstraction(resbody, "DalFox")
+				pointer := optimization.Abstraction(resbody, "Dalfox")
 				smap := "Injected: "
 				tempSmap := make(map[string]int)
 				for _, v := range pointer {
@@ -226,11 +226,11 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	}
 
 	if options.Mining {
-		tempURL, _ := optimization.MakeRequestQuery(target, "pleasedonthaveanamelikethis_plz_plz", "DalFox", "PA", "toAppend", "NaN", options)
+		tempURL, _ := optimization.MakeRequestQuery(target, "pleasedonthaveanamelikethis_plz_plz", "Dalfox", "PA", "toAppend", "NaN", options)
 		rl.Block(tempURL.Host)
-		resBody, _, _, vrs, _ := SendReq(tempURL, "DalFox", options)
+		resBody, _, _, vrs, _ := SendReq(tempURL, "Dalfox", options)
 		if vrs {
-			_, lineSum := verification.VerifyReflectionWithLine(resBody, "DalFox")
+			_, lineSum := verification.VerifyReflectionWithLine(resBody, "Dalfox")
 			miningCheckerLine = lineSum
 		}
 
@@ -243,7 +243,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 		} else {
 			ff, err := voltFile.ReadLinesOrLiteral(options.MiningWordlist)
 			if err != nil {
-printing.DalLog("SYSTEM", "Failed to load mining parameter wordlist", options)
+				printing.DalLog("SYSTEM", "Failed to load mining parameter wordlist", options)
 			} else {
 				p, dp = addParamsFromWordlist(p, dp, ff, options)
 			}

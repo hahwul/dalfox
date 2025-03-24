@@ -25,7 +25,7 @@ dalfox file hosts --mining-dom  --deep-domxss --ignore-return -b 'YOURS.xss.ht' 
 ```bash
 wget https://raw.githubusercontent.com/arkadiyt/bounty-targets-data/master/data/domains.txt -nv ; cat domains.txt | anew | httpx -silent -threads 500 | xargs -I@ dalfox url @
 ```
-* [Recon subdomains and gau to search vuls DalFox / from KingOfBugBountyTips](https://github.com/KingOfBugbounty/KingOfBugBountyTips#recon-subdomains-and-gau-to-search-vuls-dalfox)
+* [Recon subdomains and gau to search vuls Dalfox / from KingOfBugBountyTips](https://github.com/KingOfBugbounty/KingOfBugBountyTips#recon-subdomains-and-gau-to-search-vuls-dalfox)
 ```bash
 assetfinder testphp.vulnweb.com | gau |  dalfox pipe
 ```

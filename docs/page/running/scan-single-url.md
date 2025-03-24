@@ -52,7 +52,7 @@ Finder Of XSS and Dal is the Korean pronunciation of moon. @hahwul
 [*] Parameter analysis  done ✓
 [I] Content-Type is text/html; charset=UTF-8
 [I] Reflected cat param => Injected: /inHTML-none(1)  ▶
-    48 line:  	Error: Unknown column 'DalFox' in 'where cl
+    48 line:  	Error: Unknown column 'Dalfox' in 'where cl
 [*] Generate XSS payload and optimization.Optimization.. 🛠
 [*] Start XSS Scanning.. with 201 queries 🗡
 [V] Triggered XSS Payload (found DOM Object): cat=<dalfox class=dalfox>
