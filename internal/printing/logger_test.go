@@ -153,12 +153,21 @@ func TestSummary(t *testing.T) {
 		args args
 	}{
 		{
-			name: "test",
+			name: "test - silence",
 			args: args{
 				options: model.Options{
 					Silence:        true,
 					MiningWordlist: "",
 					BlindURL:       "",
+				},
+				target: "",
+			},
+		},
+		{
+			name: "test - no silence",
+			args: args{
+				options: model.Options{
+					Silence: false,
 				},
 				target: "",
 			},
