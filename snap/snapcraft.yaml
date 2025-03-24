@@ -8,6 +8,9 @@ adopt-info: ipfs
 base: core24
 grade: stable
 confinement: strict
+license: MIT
+version: v2.10.0
+
 apps:
   dalfox:
     command: dalfox
@@ -19,3 +22,7 @@ parts:
     plugin: go
     build-snaps: [go]
     build-packages: [build-essential]
+    override-build: |
+      go build .
+      cp ./dalfox $SNAPCRAFT_PART_INSTALL/
+      snapcraftctl build
