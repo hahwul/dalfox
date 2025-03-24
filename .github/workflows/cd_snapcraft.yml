@@ -12,12 +12,10 @@ jobs:
       fail-fast: false
       matrix:
         platform:
-          - i386
           - amd64
           - armhf
           - arm64
           - ppc64el
-          - s390x
     steps:
       - name: Check out Git repository
         uses: actions/checkout@v3
