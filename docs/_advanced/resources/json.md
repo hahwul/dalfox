@@ -41,7 +41,7 @@ Here is an example of a scan result in JSON format:
    "Type": "URL",
    "Reflected": true,
    "ReflectedPoint": "/inHTML-none(1)",
-   "ReflectedCode": "13 line:  Sorry, no results were found for \u003cb\u003eDalFox\u003c/b\u003e. \u003ca href='?'\u003eTry again",
+   "ReflectedCode": "13 line:  Sorry, no results were found for \u003cb\u003eDalfox\u003c/b\u003e. \u003ca href='?'\u003eTry again",
    "Chars": [
     "\\",
     ")",

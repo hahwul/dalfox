@@ -2,7 +2,7 @@
     "swagger": "2.0",
     "info": {
         "description": "This is a dalfox api swagger",
-        "title": "DalFox API",
+        "title": "Dalfox API",
         "termsOfService": "http://swagger.io/terms/",
         "contact": {},
         "license": {

@@ -7,11 +7,11 @@ layout: page
 
 # Community Resources
 
-This page gathers various resources related to DalFox, including articles, videos, and tutorials.
+This page gathers various resources related to Dalfox, including articles, videos, and tutorials.
 
 ## Articles
 
-- [DalFox: My New Weapon for XSS](https://www.hahwul.com/2020/04/22/my-new-xss-tool-dalfox/)
+- [Dalfox: My New Weapon for XSS](https://www.hahwul.com/2020/04/22/my-new-xss-tool-dalfox/)
 
 ## Videos
 

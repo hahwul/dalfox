@@ -73,7 +73,7 @@ func Test_setheaders(t *testing.T) {
 			args: args{
 				host: "https://example.com",
 				headers: map[string]interface{}{
-					"User-Agent": "DalFox Test",
+					"User-Agent": "Dalfox Test",
 				},
 			},
 		},
@@ -82,7 +82,7 @@ func Test_setheaders(t *testing.T) {
 			args: args{
 				host: "https://example.com",
 				headers: map[string]interface{}{
-					"User-Agent":      "DalFox Test",
+					"User-Agent":      "Dalfox Test",
 					"Accept-Language": "en-US,en;q=0.9",
 					"Cookie":          "test=value",
 				},

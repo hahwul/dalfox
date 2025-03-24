@@ -15,7 +15,7 @@ import (
 	"github.com/tylerb/graceful"
 )
 
-// @title DalFox API
+// @title Dalfox API
 // @version 1.0
 // @description This is a dalfox api swagger
 // @termsOfService http://swagger.io/terms/

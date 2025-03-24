@@ -158,7 +158,7 @@ var SwaggerInfo = swaggerInfo{
 	Host:        "localhost:6664",
 	BasePath:    "/",
 	Schemes:     []string{},
-	Title:       "DalFox API",
+	Title:       "Dalfox API",
 	Description: "This is a dalfox api swagger",
 }
 

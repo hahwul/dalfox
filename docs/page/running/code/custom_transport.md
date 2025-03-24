@@ -10,18 +10,18 @@ layout: page
 # Custom Transport Feature
 {: .d-inline-block }
 
-Not released (v2.10.0) 
-{: .label .label-green }
+New (v2.10.0) 
+{: .label .label-blue }
 
-DalFox now supports custom HTTP transports, allowing you to customize the HTTP client behavior for your scanning needs. This feature is particularly useful when integrating DalFox with other pipelines for HTTP control flow, retry mechanisms, and non-trivial authentication scenarios.
+Dalfox now supports custom HTTP transports, allowing you to customize the HTTP client behavior for your scanning needs. This feature is particularly useful when integrating Dalfox with other pipelines for HTTP control flow, retry mechanisms, and non-trivial authentication scenarios.
 
 ## What is a Transport?
 
-In Go's HTTP client, a transport specifies how HTTP requests are made. It handles details like connection pooling, timeouts, TLS configuration, and more. By customizing the transport, you can control how DalFox makes HTTP requests.
+In Go's HTTP client, a transport specifies how HTTP requests are made. It handles details like connection pooling, timeouts, TLS configuration, and more. By customizing the transport, you can control how Dalfox makes HTTP requests.
 
 ## Benefits for Pipeline Integration
 
-Custom transports provide several benefits when integrating DalFox into larger security testing pipelines:
+Custom transports provide several benefits when integrating Dalfox into larger security testing pipelines:
 
 1. **HTTP Control Flow**: Customize how requests are made, including adding custom headers, modifying request bodies, or implementing custom routing logic.
 2. **Retry Mechanisms**: Implement resilient scanning by automatically retrying failed requests with configurable backoff strategies.
@@ -265,8 +265,8 @@ Scan("https://example.com", options, "1")
 
 ## Notes
 
-- If you provide a custom transport, DalFox will still apply proxy settings if specified, but only if your transport is of type `*http.Transport`.
-- If you provide a custom transport, DalFox will still apply the HAR writer if specified.
-- The custom transport feature is designed to be used with the library mode of DalFox. If you're using the CLI, you'll need to create a custom application that uses the library mode.
+- If you provide a custom transport, Dalfox will still apply proxy settings if specified, but only if your transport is of type `*http.Transport`.
+- If you provide a custom transport, Dalfox will still apply the HAR writer if specified.
+- The custom transport feature is designed to be used with the library mode of Dalfox. If you're using the CLI, you'll need to create a custom application that uses the library mode.
 - When implementing custom transports, always clone the request before modifying it to avoid side effects.
 - For complex authentication flows, consider implementing a transport that handles token refresh and retry logic. 

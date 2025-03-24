@@ -68,7 +68,7 @@ func Summary(options model.Options, target string) {
 	}
 }
 
-// DalLog is log fomatting for DalFox
+// DalLog is log fomatting for Dalfox
 func DalLog(level, text string, options model.Options) {
 	var mutex *sync.Mutex
 	if options.Mutex != nil {

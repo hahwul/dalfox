@@ -64,7 +64,7 @@ cat samples/sample_target.txt | dalfox pipe
 [*] Parameter analysis done ✓
 [I] Content-Type is text/html; charset=UTF-8
 [I] Reflected cat param => Injected: /inHTML-none(1)  ▶
-    48 line:  	Error: Unknown column 'asdfDalFox' in 'where cl
+    48 line:  	Error: Unknown column 'asdfDalfox' in 'where cl
 [*] Generate XSS payload and optimization.. 🛠
 [*] Start XSS Scanning.. with 201 queries 🗡
 [V] Triggered XSS Payload (found DOM Object): cat='><sVg/onload=alert(45) class=dalfox>
@@ -125,7 +125,7 @@ dalfox file ./samples/sample_target.txt
 [*] Parameter analysis done ✓
 [I] Content-Type is text/html; charset=UTF-8
 [I] Reflected cat param => Injected: /inHTML-none(1)  ▶
-    48 line:  	Error: Unknown column 'asdfDalFox' in 'where cl
+    48 line:  	Error: Unknown column 'asdfDalfox' in 'where cl
 [*] Generate XSS payload and optimization.. 🛠
 [*] Start XSS Scanning.. with 201 queries 🗡
 [V] Triggered XSS Payload (found DOM Object): cat=</ScriPt><sCripT class=dalfox>alert(45)</sCriPt>
