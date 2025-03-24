@@ -5,23 +5,21 @@ import "github.com/hahwul/dalfox/v2/pkg/model"
 // Banner is DalFox banner function
 func Banner(options model.Options) {
 	DalLog("", `                                                        
-                            █████████                              
-                         ████        ███                           
-                       ████   ██ █     ███                         
-                      ████  ██████   █  ███                        
-                      ████ ███ █ █   █  ███                        
-                      ██████      █     ███                        
-                      █████   ██       ██ █                        
-                      ██████ ████    ██████                        
-                       ████ ██ ████████ ██                         
-                        ██████   █    ███                          
-                           ███████████                             
-                                                                      
-      █████       ██      █       █████     ████     █    █        
-      █    █      ██      █       █        █    █     █  █         
-      █     █    █  █     █       █████   █      █     ██          
-      █    █    █    █    █       █        █    █     █  █         
-      █████    █     ██   ████    █         ████    ██    ██                                                                                                                                                                 
-`, options)
-	DalLog("", "Powerful open-source XSS scanner and utility focused on automation.", options)
+               ░█▒               
+             ████     ▓                    
+           ▓█████  ▓██▓                  
+          ████████████         ░          
+        ░███████████▓          ▓░     
+     ░████████████████        ▒██░    
+    ▓██████████▒███████     ░█████▓░    
+   ██████████████░ ████        █▓     
+ ░█████▓          ░████▒       ░         Dalfox `+VERSION+`
+ █████               ▓██░             
+ ████                  ▓██      Powerful open-source XSS scanner       
+ ███▓        ▓███████▓▒▓█░     and utility focused on automation.       
+ ███▒      █████                     
+ ▓███     ██████                    
+ ████     ██████▒                
+ ░████    ████████▒
+ `, options)
 }

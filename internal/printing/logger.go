@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"sync"
 
+	"github.com/hahwul/dalfox/v2/internal/utils"
 	"github.com/hahwul/dalfox/v2/pkg/model"
 )
 
@@ -25,11 +26,6 @@ func boolToColorStr(b bool, options model.Options) string {
 
 // Summary is printing options
 func Summary(options model.Options, target string) {
-	bavState := false
-	if options.UseBAV {
-		bavState = true
-	}
-
 	if !options.Silence {
 		miningWord := "Gf-Patterns"
 		if options.MiningWordlist != "" {
@@ -48,23 +44,27 @@ func Summary(options model.Options, target string) {
 			blindURLStr = options.AuroraObject.BrightBlue(options.BlindURL).String()
 		}
 
-		fmt.Fprintf(os.Stderr, "\n 🎯  Target                 %s\n", targetStr)
+		fmt.Fprintf(os.Stderr, " 🎯  Target                 %s\n", targetStr)
 		if target == "REST API Mode" {
 			fmt.Fprintf(os.Stderr, " 🧲  Listen Address         %s\n", listenAddrStr)
 		}
 		fmt.Fprintf(os.Stderr, " 🏁  Method                 %s\n", methodStr)
-		fmt.Fprintf(os.Stderr, " 🖥   Worker                 %d\n", options.Concurrence)
-		fmt.Fprintf(os.Stderr, " 🔦  BAV                    %s\n", boolToColorStr(bavState, options))
-		fmt.Fprintf(os.Stderr, " ⛏   Mining                 %s (%s)\n", boolToColorStr(options.Mining, options), miningWord)
-		fmt.Fprintf(os.Stderr, " 🔬  Mining-DOM             %s (mining from DOM)\n", boolToColorStr(options.FindingDOM, options))
+		fmt.Fprintf(os.Stderr, " 🖥   Performance            %d worker / %d cpu\n", options.Concurrence, options.MaxCPU)
+		fmt.Fprintf(os.Stderr, " ⛏   Mining                 %s (%s%s)\n", boolToColorStr(options.Mining, options), miningWord,
+			func() string {
+				if options.FindingDOM {
+					return ", DOM Mining Enabled"
+				}
+				return ""
+			}())
 		if options.BlindURL != "" {
 			fmt.Fprintf(os.Stderr, " 🛰   Blind XSS Callback     %s\n", blindURLStr)
 		}
 		fmt.Fprintf(os.Stderr, " ⏱   Timeout                %d\n", options.Timeout)
 		fmt.Fprintf(os.Stderr, " 📤  FollowRedirect         %s\n", boolToColorStr(options.FollowRedirect, options))
-		fmt.Fprintf(os.Stderr, " 🕰   Started at             %s\n", options.StartTime.String())
-		//fmt.Fprintf(os.Stderr, "\n")
-		fmt.Fprintf(os.Stderr, "\n >>>>>>>>>>>>>>>>>>>>>>>>>\n")
+		fmt.Fprintf(os.Stderr, " 🕰   Started at             %s\n", options.StartTime.Format("2006-01-02 15:04:05"))
+		fmt.Fprintf(os.Stderr, "\n")
+		DalLog("SYSTEM-M", utils.GenerateTerminalWidthLine("-"), options)
 	}
 }
 

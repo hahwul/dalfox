@@ -248,3 +248,77 @@ func Test_IsAllowType(t *testing.T) {
 		})
 	}
 }
+
+func TestGenerateTerminalWidthLine(t *testing.T) {
+	type args struct {
+		char string
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		{
+			name: "Generate line with dash",
+			args: args{
+				char: "-",
+			},
+		},
+		{
+			name: "Generate line with equal",
+			args: args{
+				char: "=",
+			},
+		},
+		{
+			name: "Generate line with star",
+			args: args{
+				char: "*",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := GenerateTerminalWidthLine(tt.args.char)
+			width := GetTerminalWidth() - 5
+
+			// Check if the length is correct
+			if len(result) != width {
+				t.Errorf("GenerateTerminalWidthLine() length = %v, want %v", len(result), width)
+			}
+
+			// Check if all characters are the expected character
+			for i, r := range result {
+				if string(r) != tt.args.char {
+					t.Errorf("GenerateTerminalWidthLine() character at position %d = %v, want %v", i, string(r), tt.args.char)
+				}
+			}
+		})
+	}
+}
+
+func TestGetTerminalWidth(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{
+			name: "Get terminal width",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetTerminalWidth()
+
+			// Terminal width should be at least the default value (80) or greater
+			if got < 1 {
+				t.Errorf("GetTerminalWidth() = %v, should be > 0", got)
+			}
+
+			// The function should always return a reasonable terminal width
+			// Most terminals are at least 80 columns wide
+			if got < 10 || got > 1000 {
+				t.Errorf("GetTerminalWidth() = %v, value outside reasonable range", got)
+			}
+		})
+	}
+}

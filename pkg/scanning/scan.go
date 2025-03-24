@@ -60,7 +60,7 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 
 	parsedURL, err := url.Parse(target)
 	if err != nil {
-printing.DalLog("SYSTEM", "Unable to parse URL: "+target+". Please ensure it is a valid URL.", options)
+		printing.DalLog("SYSTEM", "Unable to parse URL: "+target+". Please ensure it is a valid URL.", options)
 		return scanResult, err
 	}
 	treq := optimization.GenerateNewRequest(target, "", options)
@@ -70,8 +70,8 @@ printing.DalLog("SYSTEM", "Unable to parse URL: "+target+". Please ensure it is 
 	client := createHTTPClient(options)
 	tres, err := client.Do(treq)
 	if err != nil {
-msg := fmt.Sprintf("Request to %s failed: %v", target, err)
-printing.DalLog("ERROR", msg, options)
+		msg := fmt.Sprintf("Request to %s failed: %v", target, err)
+		printing.DalLog("ERROR", msg, options)
 		return scanResult, err
 	}
 	if options.IgnoreReturn != "" {
@@ -206,7 +206,7 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 	if (options.SkipDiscovery || utils.IsAllowType(policy["Content-Type"])) && options.CustomPayloadFile != "" {
 		ff, err := voltFile.ReadLinesOrLiteral(options.CustomPayloadFile)
 		if err != nil {
-printing.DalLog("SYSTEM", "Failed to load custom XSS payload file", options)
+			printing.DalLog("SYSTEM", "Failed to load custom XSS payload file", options)
 		} else {
 			for _, customPayload := range ff {
 				if customPayload != "" {
@@ -466,7 +466,7 @@ printing.DalLog("SYSTEM", "Failed to load custom XSS payload file", options)
 					}
 				}
 			} else {
-printing.DalLog("SYSTEM", "Failed to load remote payloads from "+endpoint, options)
+				printing.DalLog("SYSTEM", "Failed to load remote payloads from "+endpoint, options)
 			}
 		}
 	}
