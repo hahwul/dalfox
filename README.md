@@ -5,6 +5,7 @@
 <p align="center">
   <a href="https://github.com/hahwul/dalfox/releases/latest"><img src="https://img.shields.io/github/v/release/hahwul/dalfox?style=for-the-badge&logoColor=%2330365e&label=dalfox&labelColor=%2330365e&color=%2330365e"></a>
   <a href="https://dalfox.hahwul.com/page/overview/"><img src="https://img.shields.io/badge/documents---.svg?style=for-the-badge&labelColor=%2330365e&color=%2330365e"></a>
+  <a href="https://app.codecov.io/gh/hahwul/dalfox"><img src="https://img.shields.io/codecov/c/gh/hahwul/dalfox?style=for-the-badge&labelColor=%2330365e&color=%2330365e"></a>
   <a href="https://x.com/intent/follow?screen_name=hahwul"><img src="https://img.shields.io/twitter/follow/hahwul?style=for-the-badge&logo=x&labelColor=%2330365e&color=%2330365e"></a>
   <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md"><img src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=for-the-badge&labelColor=%2330365e&color=%2330365e"></a>
 </p>
