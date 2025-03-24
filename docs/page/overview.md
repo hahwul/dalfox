@@ -8,7 +8,7 @@ layout: page
 
 Dalfox is a powerful open-source tool designed for automated detection of XSS (Cross-Site Scripting) vulnerabilities. With its advanced testing engine and comprehensive feature set, Dalfox simplifies the process of scanning, analyzing parameters, and verifying vulnerabilities. Whether you are performing quick scans or detailed analyses, Dalfox provides a streamlined experience tailored to the needs of security professionals and researchers.
 
-![Dalfox Screenshot](/images/screen.png)
+![Dalfox Screenshot](/images/screen.jpeg)
 
 The name "Dalfox" has a unique origin:
 - **Dal ([달](https://en.wiktionary.org/wiki/달))**: The Korean word for "moon."
