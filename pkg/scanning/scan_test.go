@@ -144,6 +144,49 @@ func Test_generatePayloads(t *testing.T) {
 			wantQueryCount: 1, // At least one query should be generated
 			wantDurlsCount: 0,
 		},
+		{
+			name:           "inJS reflected parameter",
+			target:         server.URL + "/path/?param=test",
+			options:        options,
+			policy:         map[string]string{"Content-Type": "text/html"},
+			pathReflection: make(map[int]string),
+			params: map[string]model.ParamResult{
+				"param": {
+					Name:           "param",
+					Type:           "URL",
+					Reflected:      true,
+					ReflectedPoint: "Injected:inJS-single",
+					Chars:          []string{"'", "\"", "<", ">", "(", ")", "{", "}", "[", "]", " ", "\t", "\n", "\r", "\f", "\v", "\\", "/", "?", "#", "&", "=", "%", ":", ";", ",", "@", "$", "*", "+", "-", "_", ".", "!", "~", "`", "|", "^"},
+				},
+			},
+			wantQueryCount: 1,
+			wantDurlsCount: 0,
+		},
+		{
+			name:   "inJS reflected parameter",
+			target: server.URL + "/path/",
+			options: model.Options{
+				Concurrence:     1,
+				Format:          "plain",
+				Silence:         true,
+				NoSpinner:       true,
+				CustomAlertType: "none",
+				Data:            "param=test",
+			},
+			policy:         map[string]string{"Content-Type": "text/html"},
+			pathReflection: make(map[int]string),
+			params: map[string]model.ParamResult{
+				"param": {
+					Name:           "param",
+					Type:           "URL",
+					Reflected:      true,
+					ReflectedPoint: "Injected:inATTR-none",
+					Chars:          []string{"'", "\"", "<", ">", "(", ")", "{", "}", "[", "]", " ", "\t", "\n", "\r", "\f", "\v", "\\", "/", "?", "#", "&", "=", "%", ":", ";", ",", "@", "$", "*", "+", "-", "_", ".", "!", "~", "`", "|", "^"},
+				},
+			},
+			wantQueryCount: 1,
+			wantDurlsCount: 0,
+		},
 	}
 
 	for _, tt := range tests {
@@ -338,7 +381,7 @@ func Test_Scan(t *testing.T) {
 		{
 			name: "Basic scan with headless",
 			args: args{
-				target: server.URL + "/?query=test",
+				target: server.URL + "/abcd/?query=test",
 				options: model.Options{
 					Concurrence:   1,
 					Format:        "plain",
@@ -361,6 +404,38 @@ func Test_Scan(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Scan() error = %v, wantErr %v", err, tt.wantErr)
 			}
+		})
+	}
+}
+
+func Test_initializeSpinner(t *testing.T) {
+	type args struct {
+		options model.Options
+	}
+	tests := []struct {
+		name string
+		args args
+	}{
+		{
+			name: "No spinner",
+			args: args{
+				options: model.Options{
+					NoSpinner: true,
+				},
+			},
+		},
+		{
+			name: "Spinner",
+			args: args{
+				options: model.Options{
+					NoSpinner: false,
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			initializeSpinner(tt.args.options)
 		})
 	}
 }
