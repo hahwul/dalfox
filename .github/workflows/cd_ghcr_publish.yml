@@ -2,9 +2,7 @@
 name: GHCR Publish
 on:
   push:
-    branches: [main]
-  release:
-    types: [published]
+    tags: [v*.*.*]
   workflow_dispatch:
 env:
   # Use docker.io for Docker Hub if empty
