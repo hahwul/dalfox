@@ -140,8 +140,53 @@ func Test_generatePayloads(t *testing.T) {
 			pathReflection: map[int]string{
 				0: "Injected:/inHTML",
 			},
-			params:         make(map[string]model.ParamResult),
+			params: map[string]model.ParamResult{
+				"param": {
+					Name:           "param",
+					Type:           "URL",
+					Reflected:      true,
+					ReflectedPoint: "Injected:inJS-single",
+					Chars:          []string{},
+				},
+			},
 			wantQueryCount: 1, // At least one query should be generated
+			wantDurlsCount: 0,
+		},
+		{
+			name:   "Path reflection payload (body)",
+			target: server.URL + "/path",
+			options: model.Options{
+				Concurrence:     1,
+				Format:          "plain",
+				Silence:         true,
+				NoSpinner:       true,
+				CustomAlertType: "none",
+				Data:            "param=test",
+			},
+			policy: map[string]string{"Content-Type": "text/html"},
+			pathReflection: map[int]string{
+				0: "Injected:/inHTML",
+			},
+			params: map[string]model.ParamResult{
+				"param": {
+					Name:           "param",
+					Type:           "URL",
+					Reflected:      true,
+					ReflectedPoint: "Injected:inJS-single",
+					Chars:          []string{},
+				},
+			},
+			wantQueryCount: 1, // At least one query should be generated
+			wantDurlsCount: 0,
+		},
+		{
+			name:           "Reflected, but not chars",
+			target:         server.URL,
+			options:        options,
+			policy:         map[string]string{"Content-Type": "text/html"},
+			pathReflection: make(map[int]string),
+			params:         make(map[string]model.ParamResult),
+			wantQueryCount: 0,
 			wantDurlsCount: 0,
 		},
 		{
