@@ -105,9 +105,17 @@ func Test_generatePayloads(t *testing.T) {
 		wantDurlsCount int
 	}{
 		{
-			name:           "Basic payload generation",
-			target:         server.URL + "/?param=test",
-			options:        options,
+			name:   "Basic payload generation",
+			target: server.URL + "/?param=test",
+			options: model.Options{
+				Concurrence:     1,
+				Format:          "plain",
+				Silence:         true,
+				NoSpinner:       true,
+				CustomAlertType: "none",
+				IgnoreParams:    []string{"param2"},
+				UseHeadless:     true,
+			},
 			policy:         map[string]string{"Content-Type": "text/html"},
 			pathReflection: make(map[int]string),
 			params: map[string]model.ParamResult{
@@ -117,6 +125,13 @@ func Test_generatePayloads(t *testing.T) {
 					Reflected:      true,
 					ReflectedPoint: "Injected:inHTML",
 					Chars:          []string{"'", "\"", "<", ">", "(", ")", "{", "}", "[", "]", " ", "\t", "\n", "\r", "\f", "\v", "\\", "/", "?", "#", "&", "=", "%", ":", ";", ",", "@", "$", "*", "+", "-", "_", ".", "!", "~", "`", "|", "^"},
+				},
+				"param2": {
+					Name:           "param2",
+					Type:           "URL",
+					Reflected:      true,
+					ReflectedPoint: "",
+					Chars:          []string{},
 				},
 			},
 			wantQueryCount: 1, // At least one query should be generated
