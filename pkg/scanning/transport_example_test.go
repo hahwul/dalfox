@@ -391,3 +391,33 @@ func TestCreateTransportChainWithExamples(t *testing.T) {
 		t.Errorf("Expected response to be '%s', got '%s'", expected, body)
 	}
 }
+
+func TestExampleCustomTransportWithTLS(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{
+			name: "ExampleCustomTransportWithTLS",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ExampleCustomTransportWithTLS()
+		})
+	}
+}
+
+func TestExampleTransportChain(t *testing.T) {
+	tests := []struct {
+		name string
+	}{
+		{
+			name: "ExampleTransportChain",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ExampleTransportChain()
+		})
+	}
+}

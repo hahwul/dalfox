@@ -105,9 +105,17 @@ func Test_generatePayloads(t *testing.T) {
 		wantDurlsCount int
 	}{
 		{
-			name:           "Basic payload generation",
-			target:         server.URL + "/?param=test",
-			options:        options,
+			name:   "Basic payload generation",
+			target: server.URL + "/?param=test",
+			options: model.Options{
+				Concurrence:     1,
+				Format:          "plain",
+				Silence:         true,
+				NoSpinner:       true,
+				CustomAlertType: "none",
+				IgnoreParams:    []string{"param2"},
+				UseHeadless:     true,
+			},
 			policy:         map[string]string{"Content-Type": "text/html"},
 			pathReflection: make(map[int]string),
 			params: map[string]model.ParamResult{
@@ -117,6 +125,13 @@ func Test_generatePayloads(t *testing.T) {
 					Reflected:      true,
 					ReflectedPoint: "Injected:inHTML",
 					Chars:          []string{"'", "\"", "<", ">", "(", ")", "{", "}", "[", "]", " ", "\t", "\n", "\r", "\f", "\v", "\\", "/", "?", "#", "&", "=", "%", ":", ";", ",", "@", "$", "*", "+", "-", "_", ".", "!", "~", "`", "|", "^"},
+				},
+				"param2": {
+					Name:           "param2",
+					Type:           "URL",
+					Reflected:      true,
+					ReflectedPoint: "",
+					Chars:          []string{},
 				},
 			},
 			wantQueryCount: 1, // At least one query should be generated
@@ -140,8 +155,96 @@ func Test_generatePayloads(t *testing.T) {
 			pathReflection: map[int]string{
 				0: "Injected:/inHTML",
 			},
-			params:         make(map[string]model.ParamResult),
+			params: map[string]model.ParamResult{
+				"param": {
+					Name:           "param",
+					Type:           "URL",
+					Reflected:      true,
+					ReflectedPoint: "Injected:inJS-single",
+					Chars:          []string{},
+				},
+			},
 			wantQueryCount: 1, // At least one query should be generated
+			wantDurlsCount: 0,
+		},
+		{
+			name:   "Path reflection payload (body)",
+			target: server.URL + "/path",
+			options: model.Options{
+				Concurrence:     1,
+				Format:          "plain",
+				Silence:         true,
+				NoSpinner:       true,
+				CustomAlertType: "none",
+				Data:            "param=test",
+			},
+			policy: map[string]string{"Content-Type": "text/html"},
+			pathReflection: map[int]string{
+				0: "Injected:/inHTML",
+			},
+			params: map[string]model.ParamResult{
+				"param": {
+					Name:           "param",
+					Type:           "URL",
+					Reflected:      true,
+					ReflectedPoint: "Injected:inJS-single",
+					Chars:          []string{},
+				},
+			},
+			wantQueryCount: 1, // At least one query should be generated
+			wantDurlsCount: 0,
+		},
+		{
+			name:           "Reflected, but not chars",
+			target:         server.URL,
+			options:        options,
+			policy:         map[string]string{"Content-Type": "text/html"},
+			pathReflection: make(map[int]string),
+			params:         make(map[string]model.ParamResult),
+			wantQueryCount: 0,
+			wantDurlsCount: 0,
+		},
+		{
+			name:           "inJS reflected parameter",
+			target:         server.URL + "/path/?param=test",
+			options:        options,
+			policy:         map[string]string{"Content-Type": "text/html"},
+			pathReflection: make(map[int]string),
+			params: map[string]model.ParamResult{
+				"param": {
+					Name:           "param",
+					Type:           "URL",
+					Reflected:      true,
+					ReflectedPoint: "Injected:inJS-single",
+					Chars:          []string{"'", "\"", "<", ">", "(", ")", "{", "}", "[", "]", " ", "\t", "\n", "\r", "\f", "\v", "\\", "/", "?", "#", "&", "=", "%", ":", ";", ",", "@", "$", "*", "+", "-", "_", ".", "!", "~", "`", "|", "^"},
+				},
+			},
+			wantQueryCount: 1,
+			wantDurlsCount: 0,
+		},
+		{
+			name:   "inJS reflected parameter",
+			target: server.URL + "/path/",
+			options: model.Options{
+				Concurrence:     1,
+				Format:          "plain",
+				Silence:         true,
+				NoSpinner:       true,
+				CustomAlertType: "none",
+				Data:            "param=test",
+			},
+			policy:         map[string]string{"Content-Type": "text/html"},
+			pathReflection: make(map[int]string),
+			params: map[string]model.ParamResult{
+				"param": {
+					Name:           "param",
+					Type:           "URL",
+					Reflected:      true,
+					ReflectedPoint: "Injected:inATTR-none",
+					Chars:          []string{"'", "\"", "<", ">", "(", ")", "{", "}", "[", "]", " ", "\t", "\n", "\r", "\f", "\v", "\\", "/", "?", "#", "&", "=", "%", ":", ";", ",", "@", "$", "*", "+", "-", "_", ".", "!", "~", "`", "|", "^"},
+				},
+			},
+			wantQueryCount: 1,
 			wantDurlsCount: 0,
 		},
 	}
@@ -255,7 +358,7 @@ func Test_updateSpinner(t *testing.T) {
 
 func Test_Scan(t *testing.T) {
 	// Create a mock server
-	server := mockServer()
+	server := mockServerForScanTest()
 	defer server.Close()
 
 	type args struct {
@@ -286,14 +389,14 @@ func Test_Scan(t *testing.T) {
 		{
 			name: "Basic scan with skip discovery",
 			args: args{
-				target: server.URL + "/?param=test",
+				target: server.URL + "/?query=test",
 				options: model.Options{
 					Concurrence:   1,
 					Format:        "plain",
 					Silence:       true,
 					NoSpinner:     true,
 					SkipDiscovery: true,
-					UniqParam:     []string{"param"},
+					UniqParam:     []string{"query"},
 					OnlyDiscovery: true, // To make test faster
 				},
 				sid: "1",
@@ -303,14 +406,14 @@ func Test_Scan(t *testing.T) {
 		{
 			name: "Basic scan with remote payloads",
 			args: args{
-				target: server.URL + "/?param=test",
+				target: server.URL + "/?query=test",
 				options: model.Options{
 					Concurrence:    1,
 					Format:         "plain",
 					Silence:        true,
 					NoSpinner:      true,
 					SkipDiscovery:  true,
-					UniqParam:      []string{"param"},
+					UniqParam:      []string{"query"},
 					RemotePayloads: "portswigger,payloadbox",
 				},
 				sid: "1",
@@ -320,15 +423,16 @@ func Test_Scan(t *testing.T) {
 		{
 			name: "Basic scan with blind xss",
 			args: args{
-				target: server.URL + "/?param=test",
+				target: server.URL + "/?query=test",
 				options: model.Options{
 					Concurrence:   1,
 					Format:        "plain",
 					Silence:       true,
 					NoSpinner:     true,
 					SkipDiscovery: true,
-					UniqParam:     []string{"param"},
+					UniqParam:     []string{"query"},
 					BlindURL:      "https://dalfox.hahwul.com",
+					Data:          "query=1234",
 				},
 				sid: "1",
 			},
@@ -337,15 +441,16 @@ func Test_Scan(t *testing.T) {
 		{
 			name: "Basic scan with headless",
 			args: args{
-				target: server.URL + "/?param=test",
+				target: server.URL + "/abcd/?query=test",
 				options: model.Options{
 					Concurrence:   1,
 					Format:        "plain",
 					Silence:       true,
 					NoSpinner:     true,
 					SkipDiscovery: true,
-					UniqParam:     []string{"param"},
+					UniqParam:     []string{"query"},
 					UseHeadless:   true,
+					IgnoreReturn:  "404",
 				},
 				sid: "1",
 			},
@@ -359,6 +464,38 @@ func Test_Scan(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Scan() error = %v, wantErr %v", err, tt.wantErr)
 			}
+		})
+	}
+}
+
+func Test_initializeSpinner(t *testing.T) {
+	type args struct {
+		options model.Options
+	}
+	tests := []struct {
+		name string
+		args args
+	}{
+		{
+			name: "No spinner",
+			args: args{
+				options: model.Options{
+					NoSpinner: true,
+				},
+			},
+		},
+		{
+			name: "Spinner",
+			args: args{
+				options: model.Options{
+					NoSpinner: false,
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			initializeSpinner(tt.args.options)
 		})
 	}
 }
