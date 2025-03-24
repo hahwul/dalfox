@@ -73,7 +73,7 @@ func addParamsFromRemoteWordlists(p, dp url.Values, options model.Options) (url.
 			wordlist, line, size = payload.GetAssetnoteWordlist()
 		}
 		if line != "" {
-			printing.DalLog("INFO", "A '"+endpoint+"' wordlist has been loaded ["+line+"L / "+size+"]", options)
+			printing.DalLog("INFO", "Successfully loaded '"+endpoint+"' wordlist ["+line+" lines / "+size+"]", options)
 			p, dp = addParamsFromWordlist(p, dp, wordlist, options)
 		}
 	}
@@ -126,7 +126,7 @@ func findDOMParams(target string, p, dp url.Values, options model.Options) (url.
 							count++
 						}
 					})
-					printing.DalLog("INFO", "Found "+strconv.Itoa(count)+" testing point in DOM base parameter mining", options)
+					printing.DalLog("INFO", "Found "+strconv.Itoa(count)+" testing points in DOM-based parameter mining", options)
 				}
 			}
 		}
@@ -139,7 +139,7 @@ func processParams(target string, paramsQue chan string, results chan model.Para
 	defer clientPool.Put(client)
 	for k := range paramsQue {
 		if optimization.CheckInspectionParam(options, k) {
-			printing.DalLog("DEBUG", "Mining URL scan to "+k, options)
+			printing.DalLog("DEBUG", "Mining URL scan for parameter "+k, options)
 			tempURL, _ := optimization.MakeRequestQuery(target, k, "DalFox", "PA", "toAppend", "NaN", options)
 			var code string
 			rl.Block(tempURL.Host)
@@ -152,7 +152,7 @@ func processParams(target string, paramsQue chan string, results chan model.Para
 					if options.WAFEvasion {
 						options.Concurrence = 1
 						options.Delay = 3
-						printing.DalLog("INFO", "Set worker=1, delay=3s for WAF-Evasion", options)
+						printing.DalLog("INFO", "Setting worker=1, delay=3s for WAF-Evasion", options)
 					}
 				}
 			}
@@ -243,7 +243,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 		} else {
 			ff, err := voltFile.ReadLinesOrLiteral(options.MiningWordlist)
 			if err != nil {
-				printing.DalLog("SYSTEM", "Mining wordlist load fail..", options)
+printing.DalLog("SYSTEM", "Failed to load mining parameter wordlist", options)
 			} else {
 				p, dp = addParamsFromWordlist(p, dp, ff, options)
 			}
@@ -328,10 +328,10 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	close(paramsDataQue)
 	wggg.Wait()
 	if miningDictCount != 0 {
-		printing.DalLog("INFO", "Found "+strconv.Itoa(miningDictCount)+" testing point in Dictionary base parameter mining", options)
+		printing.DalLog("INFO", "Found "+strconv.Itoa(miningDictCount)+" testing points in dictionary-based parameter mining", options)
 	}
 	if options.WAF {
-		printing.DalLog("INFO", "Found WAF: "+options.WAFName, options)
+		printing.DalLog("INFO", "Detected WAF: "+options.WAFName, options)
 	}
 	return params
 }

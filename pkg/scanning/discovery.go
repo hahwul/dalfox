@@ -26,19 +26,19 @@ func performDiscovery(target string, options model.Options, rl *rateLimiter) (ma
 	}
 
 	wait.Add(task)
-	printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for analysis 🔍", options)
+	printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for analysis to complete", options)
 
 	go func() {
 		defer wait.Done()
 		policy, pathReflection = StaticAnalysis(target, options, rl)
 		sa = options.AuroraObject.Green(sa).String()
-		printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for analysis 🔍", options)
+		printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for analysis to complete", options)
 	}()
 	go func() {
 		defer wait.Done()
 		params = ParameterAnalysis(target, options, rl)
 		pa = options.AuroraObject.Green(pa).String()
-		printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for analysis 🔍", options)
+		printing.DalLog("SYSTEM", "["+sa+pa+bav+"] Waiting for analysis to complete", options)
 	}()
 	if options.UseBAV {
 		go func() {

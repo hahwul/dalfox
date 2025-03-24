@@ -1,7 +1,10 @@
 package utils
 
 import (
+	"os"
 	"strings"
+
+	"golang.org/x/term"
 
 	"github.com/hahwul/dalfox/v2/pkg/model"
 )
@@ -59,4 +62,23 @@ func IsAllowType(contentType string) bool {
 		}
 	}
 	return true
+}
+
+// GenerateTerminalWidthLine generates a string that fills the terminal width with the specified character
+func GenerateTerminalWidthLine(char string) string {
+	width := GetTerminalWidth() - 5
+	return strings.Repeat(char, width)
+}
+
+// GetTerminalWidth returns the width of the terminal
+func GetTerminalWidth() int {
+	width := 80 // default width
+	if term.IsTerminal(int(os.Stdout.Fd())) {
+		termWidth, _, err := term.GetSize(int(os.Stdout.Fd()))
+		if err == nil && termWidth > 0 {
+			width = termWidth
+		}
+	}
+
+	return width
 }

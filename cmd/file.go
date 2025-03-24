@@ -58,7 +58,7 @@ func runFileCmd(cmd *cobra.Command, args []string) {
 }
 
 func runRawDataMode(filePath string, cmd *cobra.Command) {
-	printing.DalLog("SYSTEM", "Using file mode(rawdata)", options)
+	printing.DalLog("SYSTEM", "Using file mode with raw data format", options)
 	ff, err := voltFile.ReadLinesOrLiteral(filePath)
 	if err != nil {
 		printing.DalLog("ERROR", "Failed to read file: "+err.Error(), options)
@@ -99,7 +99,7 @@ func runRawDataMode(filePath string, cmd *cobra.Command) {
 		target = path
 	} else {
 		if host == "" {
-			printing.DalLog("ERROR", "HTTP Raw Request Format Error - Not found Host", options)
+			printing.DalLog("ERROR", "HTTP Raw Request Format Error - Host not found", options)
 			os.Exit(1)
 		}
 		if http {
@@ -112,7 +112,7 @@ func runRawDataMode(filePath string, cmd *cobra.Command) {
 }
 
 func runHarMode(filePath string, cmd *cobra.Command, sf bool) {
-	printing.DalLog("SYSTEM", "Using file mode(targets list from HAR)", options)
+	printing.DalLog("SYSTEM", "Using file mode with targets list from HAR", options)
 	if (!options.NoSpinner || !options.Silence) && !sf {
 		options.SpinnerObject = spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 	}
@@ -152,7 +152,7 @@ func runHarMode(filePath string, cmd *cobra.Command, sf bool) {
 }
 
 func runFileMode(filePath string, cmd *cobra.Command, sf bool) {
-	printing.DalLog("SYSTEM", "Using file mode(targets list)", options)
+	printing.DalLog("SYSTEM", "Using file mode with targets list", options)
 	if (!options.NoSpinner || !options.Silence) && !sf {
 		options.SpinnerObject = spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
 	}
@@ -163,7 +163,7 @@ func runFileMode(filePath string, cmd *cobra.Command, sf bool) {
 		return
 	}
 	targets := voltUtils.UniqueStringSlice(ff)
-	printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target urls", options)
+	printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target URLs", options)
 	multi, _ := cmd.Flags().GetBool("multicast")
 	mass, _ := cmd.Flags().GetBool("mass")
 	limit, _ := cmd.Flags().GetInt("limit")
@@ -185,8 +185,8 @@ func updateSpinner(options model.Options, sf bool, current, total int) {
 }
 
 func printFileErrorAndUsage() {
-	printing.DalLog("ERROR", "Input target file", options)
-	printing.DalLog("ERROR", "e.g dalfox file ./targets.txt or ./rawdata.raw", options)
+printing.DalLog("ERROR", "Please provide a valid target file (targets.txt or rawdata.raw)", options)
+printing.DalLog("ERROR", "Example: dalfox file ./targets.txt or ./rawdata.raw", options)
 }
 
 func init() {
