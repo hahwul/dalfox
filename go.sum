@@ -14,10 +14,10 @@ github.com/antonfisher/nested-logrus-formatter v1.3.1 h1:NFJIr+pzwv5QLHTPyKz9UME
 github.com/antonfisher/nested-logrus-formatter v1.3.1/go.mod h1:6WTfyWFkBc9+zyBaKIqRrg/KwMqBbodBjgbHjDz7zjA=
 github.com/briandowns/spinner v1.23.2 h1:Zc6ecUnI+YzLmJniCfDNaMbW0Wid1d5+qcTq4L2FW8w=
 github.com/briandowns/spinner v1.23.2/go.mod h1:LaZeM4wm2Ywy6vO571mvhQNRcWfRUnXOs0RcKV0wYKM=
-github.com/chromedp/cdproto v0.0.0-20250319231242-a755498943c8 h1:AqW2bDQf67Zbq6Tpop/+yJSIknxhiQecO2B8jNYTAPs=
-github.com/chromedp/cdproto v0.0.0-20250319231242-a755498943c8/go.mod h1:NItd7aLkcfOA/dcMXvl8p1u+lQqioRMq/SqDp71Pb/k=
-github.com/chromedp/chromedp v0.13.3 h1:c6nTn97XQBykzcXiGYL5LLebw3h3CEyrCihm4HquYh0=
-github.com/chromedp/chromedp v0.13.3/go.mod h1:khsDP9OP20GrowpJfZ7N05iGCwcAYxk7qf9AZBzR3Qw=
+github.com/chromedp/cdproto v0.0.0-20250401205909-91afd104e2b8 h1:k5Q26sl2euPK4oyhfIC+84SYKrr+JCRtjYFlDS71s1c=
+github.com/chromedp/cdproto v0.0.0-20250401205909-91afd104e2b8/go.mod h1:NItd7aLkcfOA/dcMXvl8p1u+lQqioRMq/SqDp71Pb/k=
+github.com/chromedp/chromedp v0.13.5 h1:FrgR5oAJsKtKOQMeusSiF67Rvnw/cFV3yRC690GfbTM=
+github.com/chromedp/chromedp v0.13.5/go.mod h1:pzEMe7rBROFW34SWhxqUr1AI7bNdkZ4WCgdEQfD39n0=
 github.com/chromedp/sysutil v1.1.0 h1:PUFNv5EcprjqXZD9nJb9b/c9ibAbxiYo4exNWZyipwM=
 github.com/chromedp/sysutil v1.1.0/go.mod h1:WiThHUdltqCNKGc4gaU50XgYjwjYIhKWoHGPTUfWTJ8=
 github.com/cpuguy83/go-md2man/v2 v2.0.6/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=

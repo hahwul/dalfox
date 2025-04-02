@@ -1,13 +1,12 @@
 module github.com/hahwul/dalfox/v2
 
 go 1.24.0
-
 require (
 	github.com/PuerkitoBio/goquery v1.10.2
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
 	github.com/briandowns/spinner v1.23.2
-	github.com/chromedp/cdproto v0.0.0-20250319231242-a755498943c8
-	github.com/chromedp/chromedp v0.13.3
+	github.com/chromedp/cdproto v0.0.0-20250401205909-91afd104e2b8
+	github.com/chromedp/chromedp v0.13.5
 	github.com/hahwul/volt v1.0.6
 	github.com/labstack/echo/v4 v4.13.3
 	github.com/logrusorgru/aurora v2.0.3+incompatible
