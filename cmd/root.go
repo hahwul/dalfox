@@ -16,6 +16,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Default option values
+const (
+	DefaultCustomAlertValue = "1"
+	DefaultCustomAlertType  = "none"
+	DefaultFormat           = "plain"
+	DefaultFoundActionShell = "bash"
+	DefaultTimeout          = 10
+	DefaultConcurrence      = 100
+	DefaultMaxCPU           = 1
+	DefaultMethod           = "GET"
+	DefaultPoCType          = "plain"
+	DefaultReportFormat     = "plain"
+)
+
 var options model.Options
 var harFilePath string
 var args Args
@@ -211,10 +225,10 @@ func initConfig() {
 		if args.CustomPayload == "" && cfgOptions.CustomPayloadFile != "" {
 			options.CustomPayloadFile = cfgOptions.CustomPayloadFile
 		}
-		if args.CustomAlertValue == "1" && cfgOptions.CustomAlertValue != "" {
+		if args.CustomAlertValue == DefaultCustomAlertValue && cfgOptions.CustomAlertValue != "" {
 			options.CustomAlertValue = cfgOptions.CustomAlertValue
 		}
-		if args.CustomAlertType == "none" && cfgOptions.CustomAlertType != "" {
+		if args.CustomAlertType == DefaultCustomAlertType && cfgOptions.CustomAlertType != "" {
 			options.CustomAlertType = cfgOptions.CustomAlertType
 		}
 		if args.Data == "" && cfgOptions.Data != "" {
@@ -226,13 +240,13 @@ func initConfig() {
 		if args.Output == "" && cfgOptions.OutputFile != "" {
 			options.OutputFile = cfgOptions.OutputFile
 		}
-		if args.Format == "plain" && cfgOptions.Format != "" {
+		if args.Format == DefaultFormat && cfgOptions.Format != "" {
 			options.Format = cfgOptions.Format
 		}
 		if args.FoundAction == "" && cfgOptions.FoundAction != "" {
 			options.FoundAction = cfgOptions.FoundAction
 		}
-		if args.FoundActionShell == "bash" && cfgOptions.FoundActionShell != "" {
+		if args.FoundActionShell == DefaultFoundActionShell && cfgOptions.FoundActionShell != "" {
 			options.FoundActionShell = cfgOptions.FoundActionShell
 		}
 		if args.Proxy == "" && cfgOptions.ProxyAddress != "" {
@@ -244,19 +258,19 @@ func initConfig() {
 		if len(args.IgnoreParams) == 0 && len(cfgOptions.IgnoreParams) > 0 {
 			options.IgnoreParams = cfgOptions.IgnoreParams
 		}
-		if args.Timeout == 10 && cfgOptions.Timeout != 0 {
+		if args.Timeout == DefaultTimeout && cfgOptions.Timeout != 0 {
 			options.Timeout = cfgOptions.Timeout
 		}
-		if args.Concurrence == 100 && cfgOptions.Concurrence != 0 {
+		if args.Concurrence == DefaultConcurrence && cfgOptions.Concurrence != 0 {
 			options.Concurrence = cfgOptions.Concurrence
 		}
-		if args.MaxCPU == 1 && cfgOptions.MaxCPU != 0 {
+		if args.MaxCPU == DefaultMaxCPU && cfgOptions.MaxCPU != 0 {
 			options.MaxCPU = cfgOptions.MaxCPU
 		}
 		if args.Delay == 0 && cfgOptions.Delay != 0 {
 			options.Delay = cfgOptions.Delay
 		}
-		if args.Method == "GET" && cfgOptions.Method != "" {
+		if args.Method == DefaultMethod && cfgOptions.Method != "" {
 			options.Method = cfgOptions.Method
 			fmt.Printf("Setting method from config: %s\n", options.Method)
 		}
@@ -272,10 +286,10 @@ func initConfig() {
 		if args.OnlyPoC == "" && cfgOptions.OnlyPoC != "" {
 			options.OnlyPoC = cfgOptions.OnlyPoC
 		}
-		if args.PoCType == "plain" && cfgOptions.PoCType != "" {
+		if args.PoCType == DefaultPoCType && cfgOptions.PoCType != "" {
 			options.PoCType = cfgOptions.PoCType
 		}
-		if args.ReportFormat == "plain" && cfgOptions.ReportFormat != "" {
+		if args.ReportFormat == DefaultReportFormat && cfgOptions.ReportFormat != "" {
 			options.ReportFormat = cfgOptions.ReportFormat
 		}
 		if args.HarFilePath == "" && cfgOptions.HarFilePath != "" {
