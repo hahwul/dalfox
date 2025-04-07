@@ -84,9 +84,10 @@ type Options struct {
 	OutputResponse            bool `json:"output-response,omitempty"`
 	UseBAV                    bool `json:"use-bav,omitempty"`
 	CustomTransport           http.RoundTripper
-	SkipDiscovery             bool `json:"skip-discovery,omitempty"`
-	LimitResult               int  `json:"limit-result,omitempty"`
-	ForceHeadlessVerification bool `json:"force-headless-verification,omitempty"`
+	SkipDiscovery             bool   `json:"skip-discovery,omitempty"`
+	HarFilePath               string `json:"har-file-path,omitempty"`
+	LimitResult               int    `json:"limit-result,omitempty"`
+	ForceHeadlessVerification bool   `json:"force-headless-verification,omitempty"`
 }
 
 // MassJob is list for mass

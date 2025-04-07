@@ -20,6 +20,14 @@ Dalfox supports configuration files that allow you to define and reuse scan sett
 
 Configuration files use JSON format and can include any option that's available via command-line flags.
 
+### Default Configuration Directories
+
+Dalfox will automatically look for configuration files in the following locations:
+
+| Platform | Default Configuration Location |
+|----------|--------------------------------|
+| Linux/macOS | `$XDG_CONFIG_HOME/dalfox/config.json` or `$HOME/.config/dalfox/config.json` |
+
 ## Creating a Configuration File
 
 To create a configuration file, you can start with a basic template and customize it according to your needs. 

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"time"
 
@@ -13,6 +14,20 @@ import (
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	"github.com/logrusorgru/aurora"
 	"github.com/spf13/cobra"
+)
+
+// Default option values
+const (
+	DefaultCustomAlertValue = "1"
+	DefaultCustomAlertType  = "none"
+	DefaultFormat           = "plain"
+	DefaultFoundActionShell = "bash"
+	DefaultTimeout          = 10
+	DefaultConcurrence      = 100
+	DefaultMaxCPU           = 1
+	DefaultMethod           = "GET"
+	DefaultPoCType          = "plain"
+	DefaultReportFormat     = "plain"
 )
 
 var options model.Options
@@ -106,13 +121,34 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&args.OutputRequest, "output-request", false, "Include raw HTTP requests in the results. Example: --output-request")
 	rootCmd.PersistentFlags().BoolVar(&args.OutputResponse, "output-response", false, "Include raw HTTP responses in the results. Example: --output-response")
 	rootCmd.PersistentFlags().BoolVar(&args.SkipDiscovery, "skip-discovery", false, "Skip the entire discovery phase, proceeding directly to XSS scanning. Requires -p flag to specify parameters. Example: --skip-discovery -p 'username'")
-rootCmd.PersistentFlags().BoolVar(&args.ForceHeadlessVerification, "force-headless-verification", false, "Force headless browser-based verification, useful when automatic detection fails or to override default behavior. Example: --force-headless-verification")
+	rootCmd.PersistentFlags().BoolVar(&args.ForceHeadlessVerification, "force-headless-verification", false, "Force headless browser-based verification, useful when automatic detection fails or to override default behavior. Example: --force-headless-verification")
 }
 
 // initConfig reads in config file and ENV variables if set.
 func initConfig() {
 	stime := time.Now()
 	au := aurora.NewAurora(!args.NoColor)
+
+	// First load configuration file to set default values
+	var cfgOptions model.Options
+	cfgOptions.Scan = make(map[string]model.Scan)
+	cfgOptions.AuroraObject = au
+	cfgOptions.StartTime = stime
+
+	// Load configuration file (if exists)
+	var configLoaded bool
+	// Check for configuration file specified from command line
+	if args.Config != "" {
+		configLoaded = loadConfigFile(args.Config, &cfgOptions, "config option")
+	} else {
+		// Look for configuration file in default locations
+		configFile := findConfigFile()
+		if configFile != "" {
+			configLoaded = loadConfigFile(configFile, &cfgOptions, "default config")
+		}
+	}
+
+	// Initialize options struct with CLI arguments (overriding configuration file values)
 	options = model.Options{
 		Header:            args.Header,
 		Cookie:            args.Cookie,
@@ -168,9 +204,103 @@ func initConfig() {
 		OutputResponse:    args.OutputResponse,
 		UseBAV:            args.UseBAV,
 		SkipDiscovery:     args.SkipDiscovery,
+		HarFilePath:       args.HarFilePath,
 	}
 
-	if args.HarFilePath != "" {
+	// If configuration file was loaded, apply values from it for options not specified via CLI
+	if configLoaded {
+		// CLI에서 명시적으로 지정하지 않은 옵션들은 설정 파일의 값을 사용
+		if len(args.Header) == 0 && len(cfgOptions.Header) > 0 {
+			options.Header = cfgOptions.Header
+		}
+		if args.Cookie == "" && cfgOptions.Cookie != "" {
+			options.Cookie = cfgOptions.Cookie
+		}
+		if len(args.P) == 0 && len(cfgOptions.UniqParam) > 0 {
+			options.UniqParam = cfgOptions.UniqParam
+		}
+		if args.Blind == "" && cfgOptions.BlindURL != "" {
+			options.BlindURL = cfgOptions.BlindURL
+		}
+		if args.CustomPayload == "" && cfgOptions.CustomPayloadFile != "" {
+			options.CustomPayloadFile = cfgOptions.CustomPayloadFile
+		}
+		if args.CustomAlertValue == DefaultCustomAlertValue && cfgOptions.CustomAlertValue != "" {
+			options.CustomAlertValue = cfgOptions.CustomAlertValue
+		}
+		if args.CustomAlertType == DefaultCustomAlertType && cfgOptions.CustomAlertType != "" {
+			options.CustomAlertType = cfgOptions.CustomAlertType
+		}
+		if args.Data == "" && cfgOptions.Data != "" {
+			options.Data = cfgOptions.Data
+		}
+		if args.UserAgent == "" && cfgOptions.UserAgent != "" {
+			options.UserAgent = cfgOptions.UserAgent
+		}
+		if args.Output == "" && cfgOptions.OutputFile != "" {
+			options.OutputFile = cfgOptions.OutputFile
+		}
+		if args.Format == DefaultFormat && cfgOptions.Format != "" {
+			options.Format = cfgOptions.Format
+		}
+		if args.FoundAction == "" && cfgOptions.FoundAction != "" {
+			options.FoundAction = cfgOptions.FoundAction
+		}
+		if args.FoundActionShell == DefaultFoundActionShell && cfgOptions.FoundActionShell != "" {
+			options.FoundActionShell = cfgOptions.FoundActionShell
+		}
+		if args.Proxy == "" && cfgOptions.ProxyAddress != "" {
+			options.ProxyAddress = cfgOptions.ProxyAddress
+		}
+		if args.IgnoreReturn == "" && cfgOptions.IgnoreReturn != "" {
+			options.IgnoreReturn = cfgOptions.IgnoreReturn
+		}
+		if len(args.IgnoreParams) == 0 && len(cfgOptions.IgnoreParams) > 0 {
+			options.IgnoreParams = cfgOptions.IgnoreParams
+		}
+		if args.Timeout == DefaultTimeout && cfgOptions.Timeout != 0 {
+			options.Timeout = cfgOptions.Timeout
+		}
+		if args.Concurrence == DefaultConcurrence && cfgOptions.Concurrence != 0 {
+			options.Concurrence = cfgOptions.Concurrence
+		}
+		if args.MaxCPU == DefaultMaxCPU && cfgOptions.MaxCPU != 0 {
+			options.MaxCPU = cfgOptions.MaxCPU
+		}
+		if args.Delay == 0 && cfgOptions.Delay != 0 {
+			options.Delay = cfgOptions.Delay
+		}
+		if args.Method == DefaultMethod && cfgOptions.Method != "" {
+			options.Method = cfgOptions.Method
+			fmt.Printf("Setting method from config: %s\n", options.Method)
+		}
+		if args.MiningWord == "" && cfgOptions.MiningWordlist != "" {
+			options.MiningWordlist = cfgOptions.MiningWordlist
+		}
+		if args.RemotePayloads == "" && cfgOptions.RemotePayloads != "" {
+			options.RemotePayloads = cfgOptions.RemotePayloads
+		}
+		if args.RemoteWordlists == "" && cfgOptions.RemoteWordlists != "" {
+			options.RemoteWordlists = cfgOptions.RemoteWordlists
+		}
+		if args.OnlyPoC == "" && cfgOptions.OnlyPoC != "" {
+			options.OnlyPoC = cfgOptions.OnlyPoC
+		}
+		if args.PoCType == DefaultPoCType && cfgOptions.PoCType != "" {
+			options.PoCType = cfgOptions.PoCType
+		}
+		if args.ReportFormat == DefaultReportFormat && cfgOptions.ReportFormat != "" {
+			options.ReportFormat = cfgOptions.ReportFormat
+		}
+		if args.HarFilePath == "" && cfgOptions.HarFilePath != "" {
+			options.HarFilePath = cfgOptions.HarFilePath
+			harFilePath = cfgOptions.HarFilePath
+		}
+	}
+
+	// If HarFilePath is specified via CLI or configuration file, initialize HAR writer
+	if options.HarFilePath != "" {
+		harFilePath = options.HarFilePath
 		initHarWriter()
 	}
 
@@ -197,10 +327,64 @@ func initConfig() {
 	if args.Grep != "" {
 		loadFile(args.Grep, "grepping")
 	}
+}
 
-	if args.Config != "" {
-		loadFile(args.Config, "config option")
+// findConfigFile looks for a configuration file in the standard XDG locations
+func findConfigFile() string {
+	// Check XDG_CONFIG_HOME
+	xdgConfigHome := os.Getenv("XDG_CONFIG_HOME")
+
+	// If XDG_CONFIG_HOME is set, look there first
+	if xdgConfigHome != "" {
+		dalfoxConfigDir := filepath.Join(xdgConfigHome, "dalfox")
+
+		// Check for config.json file
+		configPath := filepath.Join(dalfoxConfigDir, "config.json")
+		if fileExists(configPath) {
+			return configPath
+		}
 	}
+
+	// Check XDG_CONFIG_DIRS
+	xdgConfigDirs := os.Getenv("XDG_CONFIG_DIRS")
+	if xdgConfigDirs == "" {
+		// Default value as per XDG specification
+		xdgConfigDirs = "/etc/xdg"
+	}
+
+	// Check each directory in XDG_CONFIG_DIRS
+	for _, configDir := range filepath.SplitList(xdgConfigDirs) {
+		dalfoxConfigDir := filepath.Join(configDir, "dalfox")
+		configPath := filepath.Join(dalfoxConfigDir, "config.json")
+		if fileExists(configPath) {
+			return configPath
+		}
+	}
+
+	// If XDG_CONFIG_HOME is not set or the file wasn't found there,
+	// use ~/.config as per XDG spec
+	home, err := os.UserHomeDir()
+	if err == nil {
+		homeConfigDir := filepath.Join(home, ".config", "dalfox")
+
+		// Check for config.json file in home/.config/dalfox
+		configPath := filepath.Join(homeConfigDir, "config.json")
+		if fileExists(configPath) {
+			return configPath
+		}
+	}
+
+	// If no config file is found in any location, return empty string
+	return ""
+}
+
+// fileExists checks if a file exists
+func fileExists(filename string) bool {
+	info, err := os.Stat(filename)
+	if os.IsNotExist(err) {
+		return false
+	}
+	return !info.IsDir()
 }
 
 func initHarWriter() {
@@ -225,12 +409,43 @@ func loadFile(filePath, fileType string) {
 	defer jsonFile.Close()
 
 	byteValue, _ := io.ReadAll(jsonFile)
-	if fileType == "config option" {
+	if fileType == "config option" || fileType == "default config" {
+		oldHarFilePath := options.HarFilePath
+
 		err = json.Unmarshal(byteValue, &options)
 		if err != nil {
 			printing.DalLog("SYSTEM", "Error while parsing config file", options)
 		}
+
+		if options.HarFilePath != "" && (harFilePath == "" || harFilePath != options.HarFilePath) {
+			printing.DalLog("DEBUG", "Setting HAR file path from config: "+options.HarFilePath, options)
+			harFilePath = options.HarFilePath
+			initHarWriter()
+		} else if oldHarFilePath != "" && options.HarFilePath == "" {
+			options.HarFilePath = oldHarFilePath
+		}
 	} else {
 		options.Grep = string(byteValue)
 	}
+}
+
+func loadConfigFile(filePath string, cfgOptions *model.Options, fileType string) bool {
+	jsonFile, err := os.Open(filePath)
+	if err != nil {
+		fmt.Printf("Error opening config file: %v\n", err)
+		return false
+	}
+	defer jsonFile.Close()
+
+	byteValue, _ := io.ReadAll(jsonFile)
+	err = json.Unmarshal(byteValue, cfgOptions)
+	if err != nil {
+		fmt.Printf("Error parsing config file: %v\n", err)
+		return false
+	}
+
+	printing.DalLog("SYSTEM", "Loaded "+filePath+" file for "+fileType, *cfgOptions)
+
+	// Configuration file successfully loaded
+	return true
 }
