@@ -345,6 +345,22 @@ func findConfigFile() string {
 		}
 	}
 
+	// Check XDG_CONFIG_DIRS
+	xdgConfigDirs := os.Getenv("XDG_CONFIG_DIRS")
+	if xdgConfigDirs == "" {
+		// Default value as per XDG specification
+		xdgConfigDirs = "/etc/xdg"
+	}
+
+	// Check each directory in XDG_CONFIG_DIRS
+	for _, configDir := range filepath.SplitList(xdgConfigDirs) {
+		dalfoxConfigDir := filepath.Join(configDir, "dalfox")
+		configPath := filepath.Join(dalfoxConfigDir, "config.json")
+		if fileExists(configPath) {
+			return configPath
+		}
+	}
+
 	// If XDG_CONFIG_HOME is not set or the file wasn't found there,
 	// use ~/.config as per XDG spec
 	home, err := os.UserHomeDir()

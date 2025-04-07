@@ -26,7 +26,7 @@ Dalfox will automatically look for configuration files in the following location
 
 | Platform | Default Configuration Location |
 |----------|--------------------------------|
-| Linux/macOS | `$XDG_CONFIG_HOME/.config/dalfox/config.json` or `$HOME/.config/dalfox/config.json` |
+| Linux/macOS | `$XDG_CONFIG_HOME/dalfox/config.json` or `$HOME/.config/dalfox/config.json` |
 
 ## Creating a Configuration File
 
