@@ -7,7 +7,7 @@ import (
 )
 
 var port int
-var host string
+var host, server_type string
 
 // serverCmd represents the server command
 var serverCmd = &cobra.Command{
@@ -18,15 +18,23 @@ var serverCmd = &cobra.Command{
 
 func runServerCmd(cmd *cobra.Command, args []string) {
 	printing.Banner(options)
-	printing.DalLog("SYSTEM", "Starting API Server", options)
 	options.ServerHost = host
 	options.ServerPort = port
-	printing.Summary(options, "REST API Mode")
-	server.RunAPIServer(options)
+
+	if server_type == "mcp" {
+		printing.DalLog("SYSTEM", "Starting MCP Server", options)
+		printing.Summary(options, "MCP Server Mode")
+		server.RunMCPServer(options)
+	} else {
+		printing.DalLog("SYSTEM", "Starting REST API Server", options)
+		printing.Summary(options, "REST API Mode")
+		server.RunAPIServer(options)
+	}
 }
 
 func init() {
 	rootCmd.AddCommand(serverCmd)
 	serverCmd.Flags().IntVar(&port, "port", 6664, "Specify the port to bind the server to. Example: --port 6664")
 	serverCmd.Flags().StringVar(&host, "host", "0.0.0.0", "Specify the address to bind the server to. Example: --host '0.0.0.0'")
+	serverCmd.Flags().StringVar(&server_type, "type", "rest", "Specify the server type. Example: --type 'rest' or --type 'mcp'")
 }
