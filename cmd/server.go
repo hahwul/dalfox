@@ -21,11 +21,12 @@ func runServerCmd(cmd *cobra.Command, args []string) {
 	options.ServerHost = host
 	options.ServerPort = port
 
-	if server_type == "mcp" {
+	switch server_type {
+	case "mcp":
 		printing.DalLog("SYSTEM", "Starting MCP Server", options)
 		printing.Summary(options, "MCP Server Mode")
 		server.RunMCPServer(options)
-	} else {
+	default:
 		printing.DalLog("SYSTEM", "Starting REST API Server", options)
 		printing.Summary(options, "REST API Mode")
 		server.RunAPIServer(options)
