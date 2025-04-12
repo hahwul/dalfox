@@ -222,7 +222,20 @@ func RunMCPServer(options model.Options) {
 		} else {
 			resultText.WriteString("Vulnerabilities found:\n")
 			for i, result := range scan.Results {
-				resultText.WriteString(fmt.Sprintf("%d. %s\n", i+1, result))
+				resultText.WriteString(fmt.Sprintf("%d. {%s %s %s %s %s param:%s payload:%s evidence:%s %s %s %d %s}\n",
+					i+1,
+					result.Type,
+					result.InjectType,
+					result.PoCType,
+					result.Method,
+					result.Data,
+					result.Param,
+					result.Payload,
+					result.Evidence,
+					result.CWE,
+					result.Severity,
+					result.MessageID,
+					result.MessageStr))
 			}
 		}
 
