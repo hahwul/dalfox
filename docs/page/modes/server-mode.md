@@ -1,5 +1,5 @@
 ---
-title: Server Mode (REST API)
+title: Server Mode
 redirect_from: /docs/modes/server-mode/
 has_children: false
 parent: Usage
@@ -8,29 +8,47 @@ toc: true
 layout: page
 ---
 
-# Server Mode (REST API)
+# Server Mode
 
 ## Overview
 
-Server mode transforms Dalfox into a REST API service, enabling integration with other security tools, automation workflows, and continuous security pipelines. When running in server mode, Dalfox listens on a specified IP address and port, accepting scan requests via HTTP endpoints.
+Server mode transforms Dalfox into a service that can be used in different ways. By default, Dalfox runs as a REST API service, but it can also operate as an MCP (Model Context Protocol) server using the `--type` flag.
 
-This mode is particularly valuable for:
+### Server Types
+
+1. **REST API Mode (Default)**: Enables integration with other security tools, automation workflows, and continuous security pipelines through HTTP endpoints.
+
+2. **MCP Mode**: Allows Dalfox to operate as a Model Context Protocol server, making it compatible with advanced AI assistants and development environments like Visual Studio Code.
+
+These modes are particularly valuable for:
 - Security operations centers (SOCs) looking to build centralized scanning infrastructure
 - DevSecOps teams integrating security scanning into CI/CD pipelines
 - Bug bounty hunters automating large-scale testing
 - Creating custom security dashboards with XSS scanning capabilities
+- AI-assisted security testing workflows (MCP mode)
 
 ## Starting the Server
 
 To start Dalfox in server mode, use the `server` command:
 
 ```bash
-# Start with default settings (listening on 0.0.0.0:6664)
+# Start with default settings (listening on 0.0.0.0:6664 in REST API mode)
 dalfox server
 
 # Specify custom host and port
 dalfox server --host 127.0.0.1 --port 8090
+
+# Start as an MCP server
+dalfox server --type mcp
 ```
+
+### Server Mode Flags
+
+| Flag       | Description                                                     | Default     |
+|------------|-----------------------------------------------------------------|-------------|
+| `--host`   | Specify the address to bind the server to                       | `0.0.0.0`   |
+| `--port`   | Specify the port to bind the server to                          | `6664`      |
+| `--type`   | Specify the server type (`rest` or `mcp`)                       | `rest`      |
 
 ### Example Output
 
@@ -273,3 +291,51 @@ When deploying Dalfox in server mode, consider the following security practices:
 - Use a proper API key mechanism for authenticating clients
 - Consider implementing rate limiting for public-facing instances
 - Regularly update your Dalfox installation to get the latest security checks and bug fixes
+
+## MCP Server Mode
+{: .d-inline-block }
+
+Not released (v2.11.0) 
+{: .label .label-blue }
+
+Dalfox can function as a Model Context Protocol (MCP) server, enabling direct integration with AI-powered development environments like Visual Studio Code and compatible AI assistants.
+
+### What is MCP?
+
+Model Context Protocol (MCP) is a protocol designed to enable AI assistants to execute specialized tools in a controlled environment. By running Dalfox as an MCP server, AI coding assistants can directly leverage Dalfox's XSS scanning capabilities within your development workflow.
+
+### Setting Up MCP Integration with VS Code
+
+To use Dalfox as an MCP server with Visual Studio Code:
+
+1. Start Dalfox in MCP server mode:
+   ```bash
+   dalfox server --type mcp
+   ```
+
+2. Configure VS Code to use Dalfox as an MCP server by adding the following to your `settings.json`:
+   ```json
+   {
+     "mcp": {
+       "servers": {
+         "dalfox": {
+           "type": "stdio",
+           "command": "dalfox",
+           "args": [
+             "server",
+             "--type=mcp"
+           ]
+         }
+       }
+     }
+   }
+   ```
+
+3. With this configuration, compatible AI coding assistants can now use Dalfox to perform XSS vulnerability scanning directly within your IDE.
+
+### Benefits of MCP Mode
+
+- **AI-Driven Security Testing**: AI assistants can suggest and execute security tests directly within your development environment
+- **Interactive Scanning**: Have conversations with AI about possible XSS vulnerabilities in your code
+- **Seamless Workflow Integration**: Eliminates the need to switch between your development environment and security tools
+- **Guided Remediation**: AI can not only find vulnerabilities but help explain and fix them in context
