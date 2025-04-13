@@ -259,7 +259,11 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	}
 
 	var wgg sync.WaitGroup
+	const maxConcurrency = 1000 // Define a reasonable maximum limit
 	concurrency := options.Concurrence
+	if concurrency > maxConcurrency {
+		concurrency = maxConcurrency
+	}
 	paramsQue := make(chan string, concurrency)
 	results := make(chan model.ParamResult, concurrency)
 	miningDictCount := 0
