@@ -43,8 +43,17 @@ VS Code provides robust support for MCP tools when used with AI coding assistant
 
 1. **Install Dalfox** (if not already installed)
    ```bash
+   # From source
    go install github.com/hahwul/dalfox/v2@latest
+
+   # Homebrew
+   brew install dalfox
+
+   # Snapcraft
+   snap install dalfox
    ```
+
+   *[Installation](http://localhost:4000/page/installation/)*
 
 2. **Configure VS Code settings**
    
@@ -89,8 +98,17 @@ Claude Desktop is Anthropic's standalone application that can integrate with ext
 
 1. **Install Dalfox** (if not already installed)
    ```bash
+   # From source
    go install github.com/hahwul/dalfox/v2@latest
+
+   # Homebrew
+   brew install dalfox
+
+   # Snapcraft
+   snap install dalfox
    ```
+
+   *[Installation](http://localhost:4000/page/installation/)*
 
 2. **Configure Claude Desktop settings**
 
