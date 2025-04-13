@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
+	"github.com/hahwul/dalfox/v2/internal/printing"
+	"github.com/hahwul/dalfox/v2/internal/utils"
 	dalfox "github.com/hahwul/dalfox/v2/lib"
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	vlogger "github.com/hahwul/volt/logger"
@@ -20,7 +23,7 @@ func RunMCPServer(options model.Options) {
 	// Create a new MCP server
 	s := mcpserver.NewMCPServer(
 		"Dalfox XSS Scanner",
-		"2.0.0",
+		printing.VERSION,
 		mcpserver.WithResourceCapabilities(true, true),
 		mcpserver.WithLogging(),
 		mcpserver.WithRecovery(),
@@ -81,6 +84,14 @@ func RunMCPServer(options model.Options) {
 			mcp.Description("Skip DOM-based parameter mining"),
 			mcp.DefaultBool(false),
 		),
+		mcp.WithBoolean("output-request",
+			mcp.Description("Include http request in the output"),
+			mcp.DefaultBool(false),
+		),
+		mcp.WithBoolean("output-response",
+			mcp.Description("Include http response in the output"),
+			mcp.DefaultBool(false),
+		),
 	)
 
 	// Handler for the scan tool
@@ -91,70 +102,80 @@ func RunMCPServer(options model.Options) {
 		}
 
 		// Create a unique scan ID
-		sid := generateScanID(url)
+		sid := utils.GenerateRandomToken(url)
 		vLog.WithField("scan_id", sid).Info("Starting scan for URL: " + url)
 
 		// Set up scan options
 		rqOptions := model.Options{}
 
-		// Parse optional parameters
-		if method, ok := request.Params.Arguments["method"].(string); ok && method != "" {
-			rqOptions.Method = method
+		// Parse optional parameters using maps similar to func.go pattern
+		// Handle string options that require direct assignment
+		stringOptions := map[string]struct {
+			paramName string
+			setter    func(string)
+		}{
+			"method": {"method", func(v string) { rqOptions.Method = v }},
+			"cookie": {"cookie", func(v string) { rqOptions.Cookie = v }},
+			"data":   {"data", func(v string) { rqOptions.Data = v }},
+			"proxy":  {"proxy", func(v string) { rqOptions.ProxyAddress = v }},
 		}
 
+		for _, opt := range stringOptions {
+			if value, ok := request.Params.Arguments[opt.paramName].(string); ok && value != "" {
+				opt.setter(value)
+			}
+		}
+
+		// Handle special case for headers which requires splitting
 		if headers, ok := request.Params.Arguments["headers"].(string); ok && headers != "" {
 			rqOptions.Header = strings.Split(headers, "|")
 		}
 
-		if cookie, ok := request.Params.Arguments["cookie"].(string); ok && cookie != "" {
-			rqOptions.Cookie = cookie
+		// Handle numeric options (converting from float64)
+		numericOptions := map[string]struct {
+			paramName string
+			setter    func(int)
+		}{
+			"worker": {"worker", func(v int) { rqOptions.Concurrence = v }},
+			"delay":  {"delay", func(v int) { rqOptions.Delay = v }},
 		}
 
-		if data, ok := request.Params.Arguments["data"].(string); ok && data != "" {
-			rqOptions.Data = data
-		}
-
-		if followRedirect, ok := request.Params.Arguments["follow-redirects"].(bool); ok {
-			rqOptions.FollowRedirect = followRedirect
-		}
-
-		if proxy, ok := request.Params.Arguments["proxy"].(string); ok && proxy != "" {
-			rqOptions.ProxyAddress = proxy
-		}
-
-		if worker, ok := request.Params.Arguments["worker"].(float64); ok {
-			rqOptions.Concurrence = int(worker)
-		}
-
-		if delay, ok := request.Params.Arguments["delay"].(float64); ok {
-			rqOptions.Delay = int(delay)
-		}
-
-		if deepDomXSS, ok := request.Params.Arguments["deep-domxss"].(bool); ok {
-			rqOptions.UseDeepDXSS = deepDomXSS
-		}
-
-		if skipDiscovery, ok := request.Params.Arguments["skip-discovery"].(bool); ok {
-			rqOptions.SkipDiscovery = skipDiscovery
-		}
-
-		if skipMiningAll, ok := request.Params.Arguments["skip-mining-all"].(bool); ok {
-			if skipMiningAll {
-				rqOptions.Mining = false
-				rqOptions.FindingDOM = false
+		for _, opt := range numericOptions {
+			if value, ok := request.Params.Arguments[opt.paramName].(float64); ok {
+				opt.setter(int(value))
 			}
 		}
 
-		if skipMiningDict, ok := request.Params.Arguments["skip-mining-dict"].(bool); ok {
-			if skipMiningDict {
-				rqOptions.Mining = false
+		// Handle boolean options
+		boolOptions := map[string]struct {
+			paramName string
+			setter    func(bool)
+		}{
+			"follow-redirects": {"follow-redirects", func(v bool) { rqOptions.FollowRedirect = v }},
+			"deep-domxss":      {"deep-domxss", func(v bool) { rqOptions.UseDeepDXSS = v }},
+			"skip-discovery":   {"skip-discovery", func(v bool) { rqOptions.SkipDiscovery = v }},
+			"output-request":   {"output-request", func(v bool) { rqOptions.OutputRequest = v }},
+			"output-response":  {"output-response", func(v bool) { rqOptions.OutputResponse = v }},
+		}
+
+		for _, opt := range boolOptions {
+			if value, ok := request.Params.Arguments[opt.paramName].(bool); ok {
+				opt.setter(value)
 			}
 		}
 
-		if skipMiningDOM, ok := request.Params.Arguments["skip-mining-dom"].(bool); ok {
-			if skipMiningDOM {
-				rqOptions.FindingDOM = false
-			}
+		// Handle special cases for mining options
+		if skipMiningAll, ok := request.Params.Arguments["skip-mining-all"].(bool); ok && skipMiningAll {
+			rqOptions.Mining = false
+			rqOptions.FindingDOM = false
+		}
+
+		if skipMiningDict, ok := request.Params.Arguments["skip-mining-dict"].(bool); ok && skipMiningDict {
+			rqOptions.Mining = false
+		}
+
+		if skipMiningDOM, ok := request.Params.Arguments["skip-mining-dom"].(bool); ok && skipMiningDOM {
+			rqOptions.FindingDOM = false
 		}
 
 		// Create a goroutine to run the scan
@@ -163,28 +184,23 @@ func RunMCPServer(options model.Options) {
 			target := dalfox.Target{
 				URL:     url,
 				Method:  rqOptions.Method,
-				Options: dalfox.Options{},
+				Options: rqOptions,
 			}
 
-			// Initialize options
+			// Initialize options using the pattern from func.go
 			newOptions := dalfox.Initialize(target, target.Options)
+
+			// Keep scan options from parent context
 			newOptions.Scan = options.Scan
 
-			// Set method
-			if rqOptions.Method != "" {
-				newOptions.Method = rqOptions.Method
-			} else {
+			// Default to GET if method not specified
+			if newOptions.Method == "" {
 				newOptions.Method = "GET"
 			}
 
-			// Clean URL
-			escapedURL := url
-			vLog.WithField("data1", sid).Debug(escapedURL)
-			vLog.WithField("data1", sid).Debug(newOptions)
-
 			// Run scan
 			ScanFromAPI(url, newOptions, options, sid)
-			vLog.WithField("data1", sid).Info("Scan completed successfully")
+			vLog.WithField("scan_id", sid).Info("Scan completed successfully")
 		}()
 
 		// Return immediate response while scan runs in background
@@ -213,6 +229,25 @@ func RunMCPServer(options model.Options) {
 			return mcp.NewToolResultText("Scan is still in progress. Please check again later."), nil
 		}
 
+		// Define JSON structure for vulnerabilities
+		type Vulnerability struct {
+			ID              int    `json:"id"`
+			Type            string `json:"type"`
+			InjectType      string `json:"inject_type"`
+			PoCType         string `json:"poc_type"`
+			Method          string `json:"method"`
+			Data            string `json:"data"`
+			Param           string `json:"param"`
+			Payload         string `json:"payload"`
+			Evidence        string `json:"evidence"`
+			CWE             string `json:"cwe"`
+			Severity        string `json:"severity"`
+			MessageID       int    `json:"message_id"`
+			MessageStr      string `json:"message_str"`
+			RawHTTPRequest  string `json:"raw_http_request"`
+			RawHTTPResponse string `json:"raw_http_response"`
+		}
+
 		// Format results
 		var resultText strings.Builder
 		resultText.WriteString(fmt.Sprintf("Scan results for %s\n\n", scan.URL))
@@ -220,23 +255,37 @@ func RunMCPServer(options model.Options) {
 		if scan.Results == nil || len(scan.Results) == 0 {
 			resultText.WriteString("No vulnerabilities found.")
 		} else {
-			resultText.WriteString("Vulnerabilities found:\n")
+			// Prepare vulnerabilities array
+			var vulnerabilities []Vulnerability
 			for i, result := range scan.Results {
-				resultText.WriteString(fmt.Sprintf("%d. {%s %s %s %s %s param:%s payload:%s evidence:%s %s %s %d %s}\n",
-					i+1,
-					result.Type,
-					result.InjectType,
-					result.PoCType,
-					result.Method,
-					result.Data,
-					result.Param,
-					result.Payload,
-					result.Evidence,
-					result.CWE,
-					result.Severity,
-					result.MessageID,
-					result.MessageStr))
+				vuln := Vulnerability{
+					ID:              i + 1,
+					Type:            result.Type,
+					InjectType:      result.InjectType,
+					PoCType:         result.PoCType,
+					Method:          result.Method,
+					Data:            result.Data,
+					Param:           result.Param,
+					Payload:         result.Payload,
+					Evidence:        result.Evidence,
+					CWE:             result.CWE,
+					Severity:        result.Severity,
+					MessageID:       int(result.MessageID),
+					MessageStr:      result.MessageStr,
+					RawHTTPRequest:  result.RawHTTPRequest,
+					RawHTTPResponse: result.RawHTTPResponse,
+				}
+				vulnerabilities = append(vulnerabilities, vuln)
 			}
+
+			// Convert to JSON
+			jsonData, err := json.MarshalIndent(vulnerabilities, "", "  ")
+			if err != nil {
+				return nil, fmt.Errorf("failed to marshal JSON: %v", err)
+			}
+
+			resultText.WriteString("Vulnerabilities found:\n")
+			resultText.Write(jsonData)
 		}
 
 		return mcp.NewToolResultText(resultText.String()), nil
@@ -246,12 +295,4 @@ func RunMCPServer(options model.Options) {
 	if err := mcpserver.ServeStdio(s); err != nil {
 		vLog.Error("MCP Server error:", err)
 	}
-}
-
-// generateScanID creates a unique scan ID for MCP scans
-func generateScanID(url string) string {
-	return fmt.Sprintf("mcp-%s", strings.Replace(
-		strings.Replace(url, "://", "-", -1),
-		"/", "-", -1,
-	))
 }

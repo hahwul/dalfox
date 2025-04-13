@@ -2,8 +2,10 @@ package lib_test
 
 import (
 	"testing"
+	"time"
 
 	dalfox "github.com/hahwul/dalfox/v2/lib"
+	"github.com/hahwul/dalfox/v2/pkg/model"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -113,4 +115,34 @@ func TestNewScan(t *testing.T) {
 	assert.NotZero(t, result.Duration, "Duration should not be zero")
 	assert.NotZero(t, result.StartTime, "StartTime should not be zero")
 	assert.NotZero(t, result.EndTime, "EndTime should not be zero")
+}
+
+func TestResultIsFound(t *testing.T) {
+	// Test case 1: No PoCs found
+	emptyResult := dalfox.Result{
+		Logs:      []string{"test log"},
+		PoCs:      []model.PoC{},
+		Params:    []model.ParamResult{},
+		Duration:  1 * time.Second,
+		StartTime: time.Now(),
+		EndTime:   time.Now(),
+	}
+	assert.False(t, emptyResult.IsFound(), "IsFound should return false when no PoCs exist")
+
+	// Test case 2: PoCs found
+	resultWithPoCs := dalfox.Result{
+		Logs: []string{"test log"},
+		PoCs: []model.PoC{
+			{
+				Type:  "XSS",
+				Data:  "<script>alert(1)</script>",
+				Param: "q",
+			},
+		},
+		Params:    []model.ParamResult{},
+		Duration:  1 * time.Second,
+		StartTime: time.Now(),
+		EndTime:   time.Now(),
+	}
+	assert.True(t, resultWithPoCs.IsFound(), "IsFound should return true when PoCs exist")
 }

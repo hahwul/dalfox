@@ -27,29 +27,3 @@ func TestRunMCPServer(t *testing.T) {
 		})
 	}
 }
-
-func Test_generateScanID(t *testing.T) {
-	type args struct {
-		url string
-	}
-	tests := []struct {
-		name string
-		args args
-		want string
-	}{
-		{
-			name: "Test with valid URL",
-			args: args{
-				url: "http://example.com",
-			},
-			want: "mcp-http-example.com",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := generateScanID(tt.args.url); got != tt.want {
-				t.Errorf("generateScanID() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
