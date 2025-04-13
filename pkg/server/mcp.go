@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/hahwul/dalfox/v2/internal/printing"
 	dalfox "github.com/hahwul/dalfox/v2/lib"
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	vlogger "github.com/hahwul/volt/logger"
@@ -20,7 +21,7 @@ func RunMCPServer(options model.Options) {
 	// Create a new MCP server
 	s := mcpserver.NewMCPServer(
 		"Dalfox XSS Scanner",
-		"2.0.0",
+		printing.VERSION,
 		mcpserver.WithResourceCapabilities(true, true),
 		mcpserver.WithLogging(),
 		mcpserver.WithRecovery(),
@@ -79,6 +80,14 @@ func RunMCPServer(options model.Options) {
 		),
 		mcp.WithBoolean("skip-mining-dom",
 			mcp.Description("Skip DOM-based parameter mining"),
+			mcp.DefaultBool(false),
+		),
+		mcp.WithBoolean("output-request",
+			mcp.Description("Include http request in the output"),
+			mcp.DefaultBool(false),
+		),
+		mcp.WithBoolean("output-response",
+			mcp.Description("Include http response in the output"),
 			mcp.DefaultBool(false),
 		),
 	)
@@ -157,13 +166,21 @@ func RunMCPServer(options model.Options) {
 			}
 		}
 
+		if outputRequest, ok := request.Params.Arguments["output-request"].(bool); ok {
+			rqOptions.OutputRequest = outputRequest
+		}
+
+		if outputResponse, ok := request.Params.Arguments["output-response"].(bool); ok {
+			rqOptions.OutputResponse = outputResponse
+		}
+
 		// Create a goroutine to run the scan
 		go func() {
 			// Set up the target
 			target := dalfox.Target{
 				URL:     url,
 				Method:  rqOptions.Method,
-				Options: dalfox.Options{},
+				Options: rqOptions,
 			}
 
 			// Initialize options
