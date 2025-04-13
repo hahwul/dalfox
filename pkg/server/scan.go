@@ -22,7 +22,7 @@ func ScanFromAPI(url string, rqOptions model.Options, options model.Options, sid
 	target := dalfox.Target{
 		URL:     url,
 		Method:  rqOptions.Method,
-		Options: dalfox.Options{},
+		Options: rqOptions,
 	}
 	newOptions := dalfox.Initialize(target, target.Options)
 	newOptions.Scan = options.Scan
@@ -36,7 +36,7 @@ func ScanFromAPI(url string, rqOptions model.Options, options model.Options, sid
 	vLog.WithField("data1", sid).Debug(newOptions)
 	_, err := scan.Scan(url, newOptions, sid)
 	if err != nil {
-vLog.WithField("data1", sid).Error("Scan failed for URL:", url, ": ", err)
+		vLog.WithField("data1", sid).Error("Scan failed for URL:", url, ": ", err)
 		return
 	}
 	vLog.WithField("data1", sid).Info("Scan completed successfully")
