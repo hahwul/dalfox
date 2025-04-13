@@ -53,7 +53,7 @@ VS Code provides robust support for MCP tools when used with AI coding assistant
    snap install dalfox
    ```
 
-   *[Installation](http://localhost:4000/page/installation/)*
+   *[Installation](/page/installation/)*
 
 2. **Configure VS Code settings**
    
@@ -108,7 +108,7 @@ Claude Desktop is Anthropic's standalone application that can integrate with ext
    snap install dalfox
    ```
 
-   *[Installation](http://localhost:4000/page/installation/)*
+   *[Installation](/page/installation/)*
 
 2. **Configure Claude Desktop settings**
 
