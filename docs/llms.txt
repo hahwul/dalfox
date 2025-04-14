@@ -1,8 +1,8 @@
-# DalFox
+# Dalfox
 
-> DalFox is a fast, powerful open-source XSS scanning tool written in Go. It focuses on automation to streamline the process of detecting and verifying cross-site scripting vulnerabilities.
+> Dalfox is a fast, powerful open-source XSS scanning tool written in Go. It focuses on automation to streamline the process of detecting and verifying cross-site scripting vulnerabilities.
 
-DalFox (where "Dal" is the Korean word for "moon" and "Fox" stands for "Finder Of XSS") is a comprehensive command-line tool designed for security professionals. It excels at finding XSS vulnerabilities through various modes including URL scanning, file-based inputs, pipeline processing, and REST API server capabilities. The tool offers advanced parameter analysis, DOM mining, and headless browser verification for thorough security testing.
+Dalfox (where "Dal" is the Korean word for "moon" and "Fox" stands for "Finder Of XSS") is a comprehensive command-line tool designed for security professionals. It excels at finding XSS vulnerabilities through various modes including URL scanning, file-based inputs, pipeline processing, and REST API server capabilities. The tool offers advanced parameter analysis, DOM mining, and headless browser verification for thorough security testing.
 
 ## Basic Usage
 
@@ -37,18 +37,18 @@ dalfox url https://example.com --format json -o results.json
 
 ## Docs
 
-- [Installation Guide](https://dalfox.hahwul.com/page/installation/) - Complete instructions for installing DalFox on various platforms including Homebrew, Snapcraft, Go, and Docker.
-- [Quick Start](https://dalfox.hahwul.com/page/overview/) - Introduction to DalFox with key features and basic usage examples.
+- [Installation Guide](https://dalfox.hahwul.com/page/installation/) - Complete instructions for installing Dalfox on various platforms including Homebrew, Snapcraft, Go, and Docker.
+- [Quick Start](https://dalfox.hahwul.com/page/overview/) - Introduction to Dalfox with key features and basic usage examples.
 - [Usage Guide](https://dalfox.hahwul.com/page/usage/) - Detailed documentation on all available modes, options, and flags for customizing scans.
-- [Running DalFox](https://dalfox.hahwul.com/page/running/) - Specific guides for different scanning scenarios (single URL, multiple URLs, raw requests).
+- [Running Dalfox](https://dalfox.hahwul.com/page/running/) - Specific guides for different scanning scenarios (single URL, multiple URLs, raw requests).
 - [Advanced Features](https://dalfox.hahwul.com/advanced/features/) - Documentation on specialized features like remote payloads, custom payloads, and BAV analysis.
 - [Configuration](https://dalfox.hahwul.com/advanced/config/) - Information on using configuration files for consistent scanning settings.
 
 ## Optional
 
-- [GitHub Repository](https://github.com/hahwul/dalfox) - Source code and issue tracking for the DalFox project.
-- [Community Resources](https://dalfox.hahwul.com/community/resources/) - Articles, videos, and tutorials from the DalFox community.
-- [API Documentation](https://dalfox.hahwul.com/page/modes/server-mode/#api-documentation) - Details on using DalFox's REST API server mode.
-- [MCP Integration](https://dalfox.hahwul.com/page/running/mcp/) - Guide to using DalFox with AI assistants through Model Context Protocol.
-- [GitHub Actions](https://dalfox.hahwul.com/page/running/github-action/) - Instructions for integrating DalFox into CI/CD workflows.
-- [Library Usage](https://dalfox.hahwul.com/page/running/code/) - Documentation on using DalFox as a Go library in your own projects.
+- [GitHub Repository](https://github.com/hahwul/dalfox) - Source code and issue tracking for the Dalfox project.
+- [Community Resources](https://dalfox.hahwul.com/community/resources/) - Articles, videos, and tutorials from the Dalfox community.
+- [API Documentation](https://dalfox.hahwul.com/page/modes/server-mode/#api-documentation) - Details on using Dalfox's REST API server mode.
+- [MCP Integration](https://dalfox.hahwul.com/page/running/mcp/) - Guide to using Dalfox with AI assistants through Model Context Protocol.
+- [GitHub Actions](https://dalfox.hahwul.com/page/running/github-action/) - Instructions for integrating Dalfox into CI/CD workflows.
+- [Library Usage](https://dalfox.hahwul.com/page/running/code/) - Documentation on using Dalfox as a Go library in your own projects.
