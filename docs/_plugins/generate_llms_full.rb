@@ -60,7 +60,11 @@ module Jekyll
       File.write(source_path, content)
 
       # Ensure the file is in the destination directory
-      FileUtils.cp(source_path, output_path)
+      begin
+        FileUtils.cp(source_path, output_path)
+      rescue StandardError => e
+        Jekyll.logger.error "Error copying llms-full.txt: #{e.message}"
+      end
 
       Jekyll.logger.info 'Generated:', 'llms-full.txt'
     end
