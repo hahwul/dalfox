@@ -115,7 +115,7 @@ Claude Desktop is Anthropic's standalone application that can integrate with ext
    ```json
     {
         "mcpServers": {
-            "filesystem": {
+            "dalfox": {
                 "command": "dalfox",
                 "args": [
                 "server",
