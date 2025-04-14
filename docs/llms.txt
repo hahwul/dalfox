@@ -8,13 +8,10 @@ DalFox (where "Dal" is the Korean word for "moon" and "Fox" stands for "Finder O
 
 ```bash
 # Basic command structure
-dalfox [mode] [target] [flags]
+dalfox [mode] [target] [flags] # e.g., dalfox url https://example.com --worker=50
 
 # Scan a single URL
 dalfox url https://example.com
-
-# Scan with parameters
-dalfox url "https://example.com/search?q=test"
 
 # Use blind XSS with callback URL
 dalfox url https://example.com -b https://your-callback-url.com
@@ -27,6 +24,9 @@ cat urls.txt | dalfox pipe
 
 # Start as a REST API server
 dalfox server --host 0.0.0.0 --port 8080
+
+# Start as a MCP server
+dalfox server --type=mcp
 
 # Use with custom payloads
 dalfox url https://example.com --custom-payload payloads.txt
