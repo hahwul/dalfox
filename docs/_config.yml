@@ -11,7 +11,7 @@ color_scheme: dalfox
 aux_links:
   Github: https://github.com/hahwul/dalfox
   Go: https://pkg.go.dev/github.com/hahwul/dalfox/v2
-  v2.10.0: https://github.com/hahwul/dalfox/releases/tag/v2.10.0
+  v2.11.0: https://github.com/hahwul/dalfox/releases/tag/v2.11.0
 
 plugins:
   - jekyll-sitemap
