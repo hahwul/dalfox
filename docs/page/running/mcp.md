@@ -9,7 +9,7 @@ layout: page
 # Dalfox MCP Mode
 {: .d-inline-block }
 
-Not released (v2.11.0) 
+New (v2.11.0) 
 {: .label .label-blue }
 
 ## Overview

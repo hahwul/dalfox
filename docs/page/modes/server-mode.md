@@ -295,7 +295,7 @@ When deploying Dalfox in server mode, consider the following security practices:
 ## MCP Server Mode
 {: .d-inline-block }
 
-Not released (v2.11.0) 
+New (v2.11.0) 
 {: .label .label-blue }
 
 Dalfox can function as a Model Context Protocol (MCP) server, enabling direct integration with AI-powered development environments like Visual Studio Code and compatible AI assistants.
