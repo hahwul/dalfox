@@ -92,7 +92,7 @@ These flags control how Dalfox presents its findings:
 | Flag | Description |
 |------|-------------|
 | `--debug` | Enable debug mode and save all logs.<br>Example: `--debug` |
-| `--format string` | Set the output format. Supported: plain, json (default: plain).<br>Example: `--format 'json'` |
+| `--format string` | Set the output format. Supported: plain, json, jsonl (default: plain).<br>Example: `--format 'json'` |
 | `--found-action string` | Execute a command when a vulnerability is found.<br>Example: `--found-action './notify.sh'` |
 | `--found-action-shell string` | Specify the shell to use for the found action (default: bash).<br>Example: `--found-action-shell 'bash'` |
 | `--grep string` | Use a custom grepping file.<br>Example: `--grep './samples/sample_grep.json'` |

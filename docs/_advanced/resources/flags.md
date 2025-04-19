@@ -27,7 +27,7 @@ layout: page
     --delay int                   Milliseconds between send to same host (1000==1s)
 -F, --follow-redirects            Following redirection
     --format string               Stdout output format
-                                    * Supported: plain / json (default "plain")
+                                    * Supported: plain / json, jsonl (default "plain")
     --found-action string         If found weak/vuln, action(cmd) to next
                                     * Example: --found-action='./notify.sh'
     --found-action-shell string   Select shell application for --found-action (default "bash")

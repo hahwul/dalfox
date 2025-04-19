@@ -28,6 +28,9 @@ func LogPoC(poc *model.PoC, resbody string, req *http.Request, options model.Opt
 		if options.Format == "json" {
 			pocj, _ := json.Marshal(poc)
 			DalLog("PRINT", string(pocj)+",", options)
+		} else if options.Format == "jsonl" {
+			pocj, _ := json.Marshal(poc)
+			DalLog("PRINT", string(pocj), options)
 		} else {
 			pocs := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
 			DalLog("PRINT", pocs, options)

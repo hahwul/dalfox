@@ -74,7 +74,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&args.UserAgent, "user-agent", "", "Set a custom User-Agent header. Example: --user-agent 'Mozilla/5.0'")
 	rootCmd.PersistentFlags().StringVarP(&args.Blind, "blind", "b", "", "Specify a blind XSS callback URL. Example: -b 'https://your-callback-url.com'")
 	rootCmd.PersistentFlags().StringVarP(&args.Output, "output", "o", "", "Write output to a file. Example: -o 'output.txt'")
-	rootCmd.PersistentFlags().StringVar(&args.Format, "format", "plain", "Set the output format. Supported: plain, json. Example: --format 'json'")
+	rootCmd.PersistentFlags().StringVar(&args.Format, "format", "plain", "Set the output format. Supported: plain, json, jsonl. Example: --format 'json'")
 	rootCmd.PersistentFlags().StringVar(&args.FoundAction, "found-action", "", "Execute a command when a vulnerability is found. Example: --found-action './notify.sh'")
 	rootCmd.PersistentFlags().StringVar(&args.FoundActionShell, "found-action-shell", "bash", "Specify the shell to use for the found action. Example: --found-action-shell 'bash'")
 	rootCmd.PersistentFlags().StringVar(&args.Proxy, "proxy", "", "Send all requests through a proxy server. Example: --proxy 'http://127.0.0.1:8080'")

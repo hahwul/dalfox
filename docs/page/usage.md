@@ -72,7 +72,7 @@ These flags can be used with any mode to customize your scan:
   -b, --blind string                  Specify a blind XSS callback URL. Example: -b 'https://your-callback-url.com'
       --config string                 Load configuration from a file. Example: --config 'config.json'
   -o, --output string                 Write output to a file. Example: -o 'output.txt'
-      --format string                 Set the output format. Supported: plain, json. Example: --format 'json' (default "plain")
+      --format string                 Set the output format. Supported: plain, json, jsonl. Example: --format 'json' (default "plain")
       --report                        Show detailed report. Example: --report
       --report-format string          Set the format of the report. Supported: plain, json. Example: --report-format 'json' (default "plain")
   -S, --silence                       Only print PoC code and progress. Example: -S

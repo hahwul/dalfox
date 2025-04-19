@@ -204,7 +204,7 @@ func DalLog(level, text string, options model.Options) {
 	} else {
 		if level == "PRINT" {
 			StopSpinner(options)
-			if options.Format == "json" {
+			if options.Format == "json" || options.Format == "jsonl" {
 				ftext = text
 				fmt.Println(text)
 			} else {
