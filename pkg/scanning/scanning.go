@@ -20,8 +20,8 @@ func performScanning(target string, options model.Options, query map[*http.Reque
 	var pocs []model.PoC
 	queryCount := 0
 
-printing.DalLog("SYSTEM", "Starting XSS scanning with "+strconv.Itoa(len(query))+" queries", options)
-printing.DalLog("SYSTEM", "[ Created "+strconv.Itoa(options.Concurrence)+" workers ] [ Allocated "+strconv.Itoa(len(query)) + " queries ]", options)
+	printing.DalLog("SYSTEM", "Starting XSS scanning with "+strconv.Itoa(len(query))+" queries", options)
+	printing.DalLog("SYSTEM", "[ Created "+strconv.Itoa(options.Concurrence)+" workers ] [ Allocated "+strconv.Itoa(len(query))+" queries ]", options)
 
 	if !(options.Silence || options.NoSpinner) {
 		s.Start()
@@ -81,6 +81,9 @@ printing.DalLog("SYSTEM", "[ Created "+strconv.Itoa(options.Concurrence)+" worke
 								if options.Format == "json" {
 									pocj, _ := json.Marshal(poc)
 									printing.DalLog("PRINT", string(pocj)+",", options)
+								} else if options.Format == "jsonl" {
+									pocj, _ := json.Marshal(poc)
+									printing.DalLog("PRINT", string(pocj), options)
 								} else {
 									pocsStr := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
 									printing.DalLog("PRINT", pocsStr, options)
