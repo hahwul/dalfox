@@ -2,7 +2,7 @@
 name: Snapcraft tab Publish
 on:
   push:
-    tags: [v*.*.*]
+    tags: [not-trigger-v*.*.*]
   workflow_dispatch:
 jobs:
   snapcraft-releaser:
