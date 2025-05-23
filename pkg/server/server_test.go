@@ -36,24 +36,82 @@ func Test_contains(t *testing.T) {
 	}
 }
 
-func Test_scanHandler(t *testing.T) {
-	e := echo.New()
-	req := httptest.NewRequest(http.MethodGet, "/scan/test-scan", nil)
-	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+func TestScanHandler(t *testing.T) {
+	t.Run("NotFound", func(t *testing.T) {
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodGet, "/scan/test-scan-notfound", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("sid")
+		c.SetParamValues("test-scan-notfound")
 
-	scans := []string{"test-scan"}
-	options := model.Options{
-		Scan: map[string]model.Scan{
-			"test-scan": {URL: "http://example.com", Results: []model.PoC{{Type: "finish"}}},
-		},
-	}
 
-	if assert.NoError(t, scanHandler(c, &scans, &options)) { // Pass address of options
-		assert.Equal(t, http.StatusNotFound, rec.Code)
-		expectedJSON := `{"code":404, "msg":"Scan ID not found", "data":null}`
-		assert.JSONEq(t, expectedJSON, rec.Body.String())
-	}
+		scans := []string{} // SID not in scans
+		options := model.Options{
+			Scan: make(map[string]model.Scan), // SID not in options.Scan
+		}
+
+		if assert.NoError(t, scanHandler(c, &scans, &options)) {
+			assert.Equal(t, http.StatusNotFound, rec.Code)
+			expectedJSON := `{"code":404, "msg":"Scan ID not found", "data":null}`
+			assert.JSONEq(t, expectedJSON, rec.Body.String())
+		}
+	})
+
+	t.Run("ScanningState", func(t *testing.T) {
+		e := echo.New()
+		sid := "scanning_id"
+		req := httptest.NewRequest(http.MethodGet, "/scan/"+sid, nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("sid")
+		c.SetParamValues(sid)
+
+		scans := []string{sid}
+		options := model.Options{
+			Scan: make(map[string]model.Scan),
+		}
+		// SID is in scans slice, but not yet fully in options.Scan map or its URL is empty
+		// The GetScan function will return an empty model.Scan if not found in options.Scan
+		// For "scanning" state, the primary check is often that it's in the `scans` slice
+		// and GetScan returns an empty URL.
+		// Let's ensure options.Scan does not have 'sid' or has it with an empty URL.
+		// Current scanHandler logic: `if !inOptionsScan || len(scanResult.URL) == 0`
+		// and `if contains(*scans, sid)` -> r.Msg = "scanning"
+
+		if assert.NoError(t, scanHandler(c, &scans, &options)) {
+			assert.Equal(t, http.StatusOK, rec.Code)
+			expectedJSON := `{"code":200, "msg":"scanning", "data":null}`
+			assert.JSONEq(t, expectedJSON, rec.Body.String())
+		}
+	})
+
+	t.Run("FinishState", func(t *testing.T) {
+		e := echo.New()
+		sid := "finished_id"
+		req := httptest.NewRequest(http.MethodGet, "/scan/"+sid, nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("sid")
+		c.SetParamValues(sid)
+
+		dummyResults := []model.PoC{{Type: "test-poc", InjectType: "G", PoCType: "R", Method: "GET", Data: "dummy", Param: "p", Payload: "alert(1)", Evidence: "alert(1)", CWE: "CWE-79", Severity: "High"}}
+		
+		scans := []string{sid} // It might or might not be in scans slice if finished, but must be in options.Scan
+		options := model.Options{
+			Scan: make(map[string]model.Scan),
+		}
+		options.Scan[sid] = model.Scan{URL: "http://test.com/vuln", ScanID: sid, Results: dummyResults}
+
+
+		if assert.NoError(t, scanHandler(c, &scans, &options)) {
+			assert.Equal(t, http.StatusOK, rec.Code)
+			// Note: The model.PoC struct has json tags like "inject_type", "poc_type".
+			// Ensure these match the expected JSON.
+			expectedJSON := `{"code":200, "msg":"finish", "data":[{"type":"test-poc","inject_type":"G","poc_type":"R","method":"GET","data":"dummy","param":"p","payload":"alert(1)","evidence":"alert(1)","cwe":"CWE-79","severity":"High"}]}`
+			assert.JSONEq(t, expectedJSON, rec.Body.String())
+		}
+	})
 }
 
 func Test_scansHandler(t *testing.T) {
@@ -257,5 +315,36 @@ func TestDeleteScanHandler(t *testing.T) {
 		_, exists := options.Scan["id1"]
 		assert.True(t, exists)
 		assert.Len(t, options.Scan, 1)
+	})
+
+	t.Run("Delete an existing scan in options.Scan but not in scans slice", func(t *testing.T) {
+		options := model.Options{Scan: make(map[string]model.Scan)}
+		scanIDInMapOnly := "id_only_in_map"
+		options.Scan[scanIDInMapOnly] = model.Scan{URL: "http://test.com", ScanID: scanIDInMapOnly}
+		
+		otherID := "other_id"
+		scans := []string{otherID} // scanIDInMapOnly is NOT in this slice
+
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodDelete, "/scan/"+scanIDInMapOnly, nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("sid")
+		c.SetParamValues(scanIDInMapOnly)
+
+		err := deleteScanHandler(c, &scans, &options)
+		assert.NoError(t, err)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		expectedJSON := `{"code":200,"msg":"Scan deleted successfully", "data":null}`
+		assert.JSONEq(t, expectedJSON, rec.Body.String())
+
+		// Assert that "id_only_in_map" is no longer in options.Scan
+		_, existsInMap := options.Scan[scanIDInMapOnly]
+		assert.False(t, existsInMap)
+		
+		// Assert that the scans slice remains []string{"other_id"}
+		assert.Equal(t, []string{otherID}, scans)
+		assert.Len(t, options.Scan, 0) // Since only scanIDInMapOnly was in options.Scan
 	})
 }
