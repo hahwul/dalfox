@@ -168,11 +168,93 @@ func Test_RunAPIServer(t *testing.T) {
 	options := model.Options{
 		ServerHost: "localhost",
 		ServerPort: 6664,
+		Scan:       make(map[string]model.Scan), // Ensure Scan is initialized
 	}
 	go RunAPIServer(options)
 	time.Sleep(1 * time.Second)
 
 	resp, err := http.Get("http://localhost:6664/health")
 	assert.NoError(t, err)
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
+	if resp != nil {
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		resp.Body.Close()
+	}
+}
+
+func TestDeleteScansHandler(t *testing.T) {
+	options := model.Options{Scan: make(map[string]model.Scan)}
+	options.Scan["id1"] = model.Scan{URL: "http://test1", ScanID: "id1"}
+	options.Scan["id2"] = model.Scan{URL: "http://test2", ScanID: "id2"}
+	scans := []string{"id1", "id2"}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodDelete, "/scans/all", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	err := deleteScansHandler(c, &scans, &options)
+	assert.NoError(t, err)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	expectedJSON := `{"code":200,"msg":"All scans deleted"}`
+	assert.JSONEq(t, expectedJSON, rec.Body.String())
+
+	assert.Len(t, scans, 0)
+	assert.Len(t, options.Scan, 0)
+}
+
+func TestDeleteScanHandler(t *testing.T) {
+	t.Run("Delete an existing scan", func(t *testing.T) {
+		options := model.Options{Scan: make(map[string]model.Scan)}
+		options.Scan["id1"] = model.Scan{URL: "http://test1", ScanID: "id1"}
+		options.Scan["id2"] = model.Scan{URL: "http://test2", ScanID: "id2"}
+		scans := []string{"id1", "id2"}
+
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodDelete, "/scan/id1", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("sid")
+		c.SetParamValues("id1")
+
+		err := deleteScanHandler(c, &scans, &options)
+		assert.NoError(t, err)
+
+		assert.Equal(t, http.StatusOK, rec.Code)
+		expectedJSON := `{"code":200,"msg":"Scan deleted successfully"}`
+		assert.JSONEq(t, expectedJSON, rec.Body.String())
+
+		assert.Equal(t, []string{"id2"}, scans)
+		_, exists := options.Scan["id1"]
+		assert.False(t, exists)
+		_, exists = options.Scan["id2"]
+		assert.True(t, exists)
+		assert.Len(t, options.Scan, 1)
+	})
+
+	t.Run("Delete a non-existent scan", func(t *testing.T) {
+		options := model.Options{Scan: make(map[string]model.Scan)}
+		options.Scan["id1"] = model.Scan{URL: "http://test1", ScanID: "id1"}
+		scans := []string{"id1"}
+
+		e := echo.New()
+		req := httptest.NewRequest(http.MethodDelete, "/scan/nonexistent", nil)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("sid")
+		c.SetParamValues("nonexistent")
+
+		err := deleteScanHandler(c, &scans, &options)
+		assert.NoError(t, err)
+
+		assert.Equal(t, http.StatusNotFound, rec.Code)
+		expectedJSON := `{"code":404,"msg":"Scan ID not found"}`
+		assert.JSONEq(t, expectedJSON, rec.Body.String())
+
+		assert.Equal(t, []string{"id1"}, scans)
+		_, exists := options.Scan["id1"]
+		assert.True(t, exists)
+		assert.Len(t, options.Scan, 1)
+	})
 }

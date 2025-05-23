@@ -29,12 +29,16 @@ import (
 // RunAPIServer is Running Echo server with swag
 func RunAPIServer(options model.Options) {
 	var scans []string
-	e := setupEchoServer(options, &scans)
-	printing.DalLog("SYSTEM", "Listen "+e.Server.Addr, options)
+	// Initialize options.Scan if it's nil
+	if options.Scan == nil {
+		options.Scan = make(map[string]model.Scan)
+	}
+	e := setupEchoServer(&options, &scans) // Pass address of options
+	printing.DalLog("SYSTEM", "Listen "+e.Server.Addr, &options) // Pass address of options
 	graceful.ListenAndServe(e.Server, 5*time.Second)
 }
 
-func setupEchoServer(options model.Options, scans *[]string) *echo.Echo {
+func setupEchoServer(options *model.Options, scans *[]string) *echo.Echo { // options is now a pointer
 	e := echo.New()
 	options.IsAPI = true
 	e.Server.Addr = options.ServerHost + ":" + strconv.Itoa(options.ServerPort)
@@ -56,10 +60,16 @@ func setupEchoServer(options model.Options, scans *[]string) *echo.Echo {
 		return scansHandler(c, scans)
 	})
 	e.GET("/scan/:sid", func(c echo.Context) error {
-		return scanHandler(c, scans, options)
+		return scanHandler(c, scans, *options) // Dereference options
 	})
 	e.POST("/scan", func(c echo.Context) error {
-		return postScanHandler(c, scans, options)
+		return postScanHandler(c, scans, *options) // Dereference options
+	})
+	e.DELETE("/scans/all", func(c echo.Context) error {
+		return deleteScansHandler(c, scans, options) // options is already a pointer
+	})
+	e.DELETE("/scan/:sid", func(c echo.Context) error {
+		return deleteScanHandler(c, scans, options) // options is already a pointer
 	})
 	return e
 }
@@ -82,22 +92,27 @@ func scansHandler(c echo.Context, scans *[]string) error {
 
 func scanHandler(c echo.Context, scans *[]string, options model.Options) error {
 	sid := c.Param("sid")
-	if !contains(*scans, sid) {
-		r := &Res{
-			Code: 404,
-			Msg:  "Not found scanid",
+	// Check if sid exists in options.Scan (source of truth) or in the scans slice for active scanning processes
+	scanData, inOptionsScan := options.Scan[sid]
+	_, Dessous := GetScan(sid, options) // Correctly call GetScan and use its return values.
+
+	if !inOptionsScan && !contains(*scans, sid) { // If not in options.Scan and not in scans slice
+		return c.JSON(http.StatusNotFound, Res{Code: 404, Msg: "Scan ID not found"})
+	}
+
+	r := &Res{Code: 200}
+	if !inOptionsScan || len(Dessous.URL) == 0 { // If scan data is not in options.Scan or URL is empty (still scanning)
+		// Check if it was at least in the scans slice, meaning it's a known scan process
+		if contains(*scans, sid) {
+			r.Msg = "scanning"
+		} else {
+			// This case should ideally not be reached if the first check is comprehensive
+			// but as a fallback if it's not in options.Scan and somehow missed in the initial scans check.
+			return c.JSON(http.StatusNotFound, Res{Code: 404, Msg: "Scan ID not found or not initialized"})
 		}
-		return c.JSON(http.StatusNotFound, r)
-	}
-	r := &Res{
-		Code: 200,
-	}
-	scan := GetScan(sid, options)
-	if len(scan.URL) == 0 {
-		r.Msg = "scanning"
 	} else {
 		r.Msg = "finish"
-		r.Data = scan.Results
+		r.Data = scanData.Results // Use scanData from options.Scan if available and finished
 	}
 	return c.JSON(http.StatusOK, r)
 }
@@ -117,8 +132,68 @@ func postScanHandler(c echo.Context, scans *[]string, options model.Options) err
 		Msg:  sid,
 	}
 	*scans = append(*scans, sid)
-	go ScanFromAPI(rq.URL, rq.Options, options, sid)
+	// Ensure options.Scan is initialized before use in ScanFromAPI
+	if options.Scan == nil {
+		options.Scan = make(map[string]model.Scan)
+	}
+	go ScanFromAPI(rq.URL, rq.Options, &options, sid) // Pass address of options
 	return c.JSON(http.StatusOK, r)
+}
+
+// @Summary Delete all scans
+// @Description Deletes all recorded scan data
+// @Tags scans
+// @Accept json
+// @Produce json
+// @Success 200 {object} Res "All scans deleted"
+// @Router /scans/all [delete]
+// deleteScansHandler clears all scan data
+func deleteScansHandler(c echo.Context, scans *[]string, options *model.Options) error {
+	*scans = []string{}
+	if options.Scan != nil {
+		options.Scan = make(map[string]model.Scan)
+	}
+	return c.JSON(http.StatusOK, Res{Code: 200, Msg: "All scans deleted"})
+}
+
+// @Summary Delete a specific scan
+// @Description Deletes a scan by its ID
+// @Tags scans
+// @Accept json
+// @Produce json
+// @Param sid path string true "Scan ID"
+// @Success 200 {object} Res "Scan deleted successfully"
+// @Failure 404 {object} Res "Scan ID not found"
+// @Router /scan/{sid} [delete]
+// deleteScanHandler deletes a specific scan by its ID
+func deleteScanHandler(c echo.Context, scans *[]string, options *model.Options) error {
+	sid := c.Param("sid")
+
+	// Check if sid exists in options.Scan (source of truth) or in the scans slice
+	_, inOptionsScan := options.Scan[sid]
+	inScansSlice := contains(*scans, sid)
+
+	if !inOptionsScan && !inScansSlice {
+		return c.JSON(http.StatusNotFound, Res{Code: 404, Msg: "Scan ID not found"})
+	}
+
+	// Remove sid from scans slice
+	if inScansSlice {
+		newScans := []string{}
+		for _, s := range *scans {
+			if s != sid {
+				newScans = append(newScans, s)
+			}
+		}
+		*scans = newScans
+	}
+
+	// Delete from options.Scan map
+	if inOptionsScan {
+		delete(options.Scan, sid)
+	}
+
+	return c.JSON(http.StatusOK, Res{Code: 200, Msg: "Scan deleted successfully"})
 }
 
 func contains(slice []string, item string) bool {
