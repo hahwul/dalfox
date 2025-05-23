@@ -49,9 +49,10 @@ func Test_scanHandler(t *testing.T) {
 		},
 	}
 
-	if assert.NoError(t, scanHandler(c, &scans, options)) {
+	if assert.NoError(t, scanHandler(c, &scans, &options)) { // Pass address of options
 		assert.Equal(t, http.StatusNotFound, rec.Code)
-		assert.Contains(t, rec.Body.String(), "Not found")
+		expectedJSON := `{"code":404, "msg":"Scan ID not found", "data":null}`
+		assert.JSONEq(t, expectedJSON, rec.Body.String())
 	}
 }
 
@@ -100,7 +101,7 @@ func Test_postScanHandler(t *testing.T) {
 		Scan: map[string]model.Scan{},
 	}
 
-	if assert.NoError(t, postScanHandler(c, &scans, options)) {
+	if assert.NoError(t, postScanHandler(c, &scans, &options)) { // Pass address of options
 		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.Contains(t, rec.Body.String(), "code")
 		assert.Contains(t, rec.Body.String(), "msg")
@@ -158,7 +159,7 @@ func Test_setupEchoServer(t *testing.T) {
 		ServerPort: 6664,
 	}
 	scans := []string{}
-	e := setupEchoServer(options, &scans)
+	e := setupEchoServer(&options, &scans) // Pass address of options
 
 	assert.NotNil(t, e)
 	assert.Equal(t, "localhost:6664", e.Server.Addr)
@@ -197,7 +198,7 @@ func TestDeleteScansHandler(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rec.Code)
 
-	expectedJSON := `{"code":200,"msg":"All scans deleted"}`
+	expectedJSON := `{"code":200,"msg":"All scans deleted", "data":null}`
 	assert.JSONEq(t, expectedJSON, rec.Body.String())
 
 	assert.Len(t, scans, 0)
@@ -222,7 +223,7 @@ func TestDeleteScanHandler(t *testing.T) {
 		assert.NoError(t, err)
 
 		assert.Equal(t, http.StatusOK, rec.Code)
-		expectedJSON := `{"code":200,"msg":"Scan deleted successfully"}`
+		expectedJSON := `{"code":200,"msg":"Scan deleted successfully", "data":null}`
 		assert.JSONEq(t, expectedJSON, rec.Body.String())
 
 		assert.Equal(t, []string{"id2"}, scans)
@@ -249,7 +250,7 @@ func TestDeleteScanHandler(t *testing.T) {
 		assert.NoError(t, err)
 
 		assert.Equal(t, http.StatusNotFound, rec.Code)
-		expectedJSON := `{"code":404,"msg":"Scan ID not found"}`
+		expectedJSON := `{"code":404,"msg":"Scan ID not found", "data":null}`
 		assert.JSONEq(t, expectedJSON, rec.Body.String())
 
 		assert.Equal(t, []string{"id1"}, scans)
