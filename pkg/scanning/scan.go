@@ -432,6 +432,49 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 		printing.DalLog("SYSTEM", "Added blind XSS payloads with callback URL: "+options.BlindURL, options)
 	}
 
+	// Custom Blind XSS Payloads from file
+	if options.CustomBlindXSSPayloadFile != "" {
+		customBlindPayloads, err := voltFile.ReadLinesOrLiteral(options.CustomBlindXSSPayloadFile)
+		if err != nil {
+			printing.DalLog("SYSTEM", "Failed to load custom blind XSS payload file: "+options.CustomBlindXSSPayloadFile, options)
+		} else {
+			var bcallback string
+			if options.BlindURL != "" {
+				if strings.HasPrefix(options.BlindURL, "https://") || strings.HasPrefix(options.BlindURL, "http://") {
+					bcallback = options.BlindURL
+				} else {
+					bcallback = "//" + options.BlindURL
+				}
+			}
+
+			for _, customPayload := range customBlindPayloads {
+				if customPayload != "" {
+					actualPayload := customPayload
+					if options.BlindURL != "" {
+						actualPayload = strings.Replace(customPayload, "CALLBACKURL", bcallback, -1)
+					}
+					for k, v := range params {
+						if optimization.CheckInspectionParam(options, k) {
+							ptype := ""
+							for _, av := range v.Chars {
+								if strings.Contains(av, "PTYPE:") {
+									ptype = GetPType(av)
+								}
+							}
+							encoders := []string{NaN, urlEncode, urlDoubleEncode, htmlEncode}
+							for _, encoder := range encoders {
+								tq, tm := optimization.MakeRequestQuery(target, k, actualPayload, "toBlind"+ptype, "toAppend", encoder, options)
+								tm["payload"] = "toBlind"
+								query[tq] = tm
+							}
+						}
+					}
+				}
+			}
+			printing.DalLog("SYSTEM", "Added "+strconv.Itoa(len(customBlindPayloads))+" custom blind XSS payloads from file: "+options.CustomBlindXSSPayloadFile, options)
+		}
+	}
+
 	// Remote Payloads
 	if options.RemotePayloads != "" {
 		rp := strings.Split(options.RemotePayloads, ",")

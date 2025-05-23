@@ -34,6 +34,67 @@ var options model.Options
 var harFilePath string
 var args Args
 
+// Args holds the command-line arguments
+type Args struct {
+	Header                      []string
+	P                           []string
+	IgnoreParams                []string
+	Config                      string
+	Cookie                      string
+	Data                        string
+	CustomPayload               string
+	CustomBlindXSSPayloadFile   string // New field for custom blind XSS payload file
+	CustomAlertValue            string
+	CustomAlertType             string
+	UserAgent                   string
+	Blind                       string
+	Output                      string
+	Format                      string
+	FoundAction                 string
+	FoundActionShell            string
+	Proxy                       string
+	Grep                        string
+	IgnoreReturn                string
+	MiningWord                  string
+	Method                      string
+	CookieFromRaw               string
+	RemotePayloads              string
+	RemoteWordlists             string
+	OnlyPoC                     string
+	PoCType                     string
+	ReportFormat                string
+	HarFilePath                 string
+	Timeout                     int
+	Delay                       int
+	Concurrence                 int
+	MaxCPU                      int
+	OnlyDiscovery               bool
+	Silence                     bool
+	Mining                      bool
+	FindingDOM                  bool
+	FollowRedirect              bool
+	NoColor                     bool
+	NoSpinner                   bool
+	UseBAV                      bool
+	SkipBAV                     bool
+	SkipMiningDom               bool
+	SkipMiningDict              bool
+	SkipMiningAll               bool
+	SkipXSSScan                 bool
+	OnlyCustomPayload           bool
+	SkipGrep                    bool
+	Debug                       bool
+	SkipHeadless                bool
+	UseDeepDXSS                 bool
+	OutputAll                   bool
+	WAFEvasion                  bool
+	ReportBool                  bool
+	OutputRequest               bool
+	OutputResponse              bool
+	SkipDiscovery               bool
+	ForceHeadlessVerification bool
+}
+
 var rootCmd = &cobra.Command{
 	Use: "dalfox",
 	Run: func(cmd *cobra.Command, args []string) {
@@ -69,6 +130,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&args.Cookie, "cookie", "C", "", "Add custom cookies to the request. Example: -C 'sessionid=abc123'")
 	rootCmd.PersistentFlags().StringVarP(&args.Data, "data", "d", "", "Use POST method and add body data. Example: -d 'username=admin&password=admin'")
 	rootCmd.PersistentFlags().StringVar(&args.CustomPayload, "custom-payload", "", "Load custom payloads from a file. Example: --custom-payload 'payloads.txt'")
+	rootCmd.PersistentFlags().StringVar(&args.CustomBlindXSSPayloadFile, "custom-blind-xss-payload", "", "Load custom blind XSS payloads from a file. Example: --custom-blind-xss-payload 'payloads.txt'")
 	rootCmd.PersistentFlags().StringVar(&args.CustomAlertValue, "custom-alert-value", "1", "Set a custom alert value. Example: --custom-alert-value 'document.cookie'")
 	rootCmd.PersistentFlags().StringVar(&args.CustomAlertType, "custom-alert-type", "none", "Set a custom alert type. Example: --custom-alert-type 'str,none'")
 	rootCmd.PersistentFlags().StringVar(&args.UserAgent, "user-agent", "", "Set a custom User-Agent header. Example: --user-agent 'Mozilla/5.0'")
@@ -152,11 +214,12 @@ func initConfig() {
 	options = model.Options{
 		Header:            args.Header,
 		Cookie:            args.Cookie,
-		UniqParam:         args.P,
-		BlindURL:          args.Blind,
-		CustomPayloadFile: args.CustomPayload,
-		CustomAlertValue:  args.CustomAlertValue,
-		CustomAlertType:   args.CustomAlertType,
+		UniqParam:                 args.P,
+		BlindURL:                  args.Blind,
+		CustomPayloadFile:         args.CustomPayload,
+		CustomBlindXSSPayloadFile: args.CustomBlindXSSPayloadFile,
+		CustomAlertValue:          args.CustomAlertValue,
+		CustomAlertType:           args.CustomAlertType,
 		Data:              args.Data,
 		UserAgent:         args.UserAgent,
 		OutputFile:        args.Output,
@@ -224,6 +287,9 @@ func initConfig() {
 		}
 		if args.CustomPayload == "" && cfgOptions.CustomPayloadFile != "" {
 			options.CustomPayloadFile = cfgOptions.CustomPayloadFile
+		}
+		if args.CustomBlindXSSPayloadFile == "" && cfgOptions.CustomBlindXSSPayloadFile != "" {
+			options.CustomBlindXSSPayloadFile = cfgOptions.CustomBlindXSSPayloadFile
 		}
 		if args.CustomAlertValue == DefaultCustomAlertValue && cfgOptions.CustomAlertValue != "" {
 			options.CustomAlertValue = cfgOptions.CustomAlertValue
