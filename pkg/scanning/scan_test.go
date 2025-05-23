@@ -2,18 +2,18 @@ package scanning
 
 import (
 	"fmt"
+	"io"
+	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
-	"strings"
-	"io/ioutil"
 	"os"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/hahwul/dalfox/v2/internal/printing"
 	"github.com/hahwul/dalfox/v2/pkg/model"
+	"github.com/logrusorgru/aurora"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -149,7 +149,7 @@ func TestGeneratePayloads_CustomBlindXSS(t *testing.T) {
 		Silence:         false, // Set to false to capture logs
 		NoSpinner:       true,
 		CustomAlertType: "none",
-		AuroraObject:    printing.GetAurora(!true), // Assuming NoColor is true for tests
+		AuroraObject:    aurora.NewAurora(false), // Assuming NoColor is true for tests
 		Scan:            make(map[string]model.Scan),
 		PathReflection:  make(map[int]string),
 		Mutex:           &sync.Mutex{},
@@ -244,24 +244,14 @@ func TestGeneratePayloads_CustomBlindXSS(t *testing.T) {
 		options.CustomBlindXSSPayloadFile = "nonexistentfile.txt"
 		options.UniqParam = []string{"q"}
 
-		var generatedQueries map[*http.Request]map[string]string
 		stdout, _ := captureOutput(func() {
-			generatedQueries, _ = generatePayloads(server.URL+"/?q=test", options, policy, pathReflection, params)
+			_, _ = generatePayloads(server.URL+"/?q=test", options, policy, pathReflection, params)
 		})
-		
+
 		assert.Contains(t, stdout, "Failed to load custom blind XSS payload file: nonexistentfile.txt")
 		// Check that no payloads of type "toBlind" were added due to this specific file error
 		// (assuming other payload generation might still occur)
 		customBlindPayloadsFound := false
-		for _, meta := range generatedQueries {
-			// This check is tricky if other blind payloads (not from custom file) are generated.
-			// For this test, we assume ONLY custom blind from file would have this specific handling.
-			// A more robust check might involve inspecting the source of each "toBlind" payload if possible,
-			// or ensuring the count of "toBlind" matches what's expected from other sources if any.
-			// For now, let's check if any payload has the name of the non-existent file (it shouldn't).
-			// The current implementation of MakeRequestQuery does not store filename in 'meta'.
-			// So, we rely on the log and the expectation that generatePayloads won't add from this file.
-		}
 		assert.False(t, customBlindPayloadsFound, "Queries should not include payloads from a non-existent file if logic prevents it after error")
 	})
 
@@ -273,11 +263,10 @@ func TestGeneratePayloads_CustomBlindXSS(t *testing.T) {
 		options.CustomBlindXSSPayloadFile = payloadFile
 		options.UniqParam = []string{"q"}
 
-		var generatedQueries map[*http.Request]map[string]string
 		stdout, _ := captureOutput(func() {
-			generatedQueries, _ = generatePayloads(server.URL+"/?q=test", options, policy, pathReflection, params)
+			_, _ = generatePayloads(server.URL+"/?q=test", options, policy, pathReflection, params)
 		})
-		
+
 		assert.Contains(t, stdout, "Added 0 custom blind XSS payloads from file: "+payloadFile)
 		// Verify no queries were generated specifically from this empty file.
 		// Similar to the above, this assumes no other "toBlind" payloads would be generated,
