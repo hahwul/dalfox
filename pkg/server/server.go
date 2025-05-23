@@ -147,7 +147,7 @@ func postScanHandler(c echo.Context, scans *[]string, options model.Options) err
 // @Produce json
 // @Success 200 {object} Res "All scans deleted"
 // @Router /scans/all [delete]
-// deleteScansHandler clears all scan data
+// deleteScansHandler clears all recorded scan data
 func deleteScansHandler(c echo.Context, scans *[]string, options *model.Options) error {
 	*scans = []string{}
 	if options.Scan != nil {
