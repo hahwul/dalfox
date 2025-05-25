@@ -89,7 +89,7 @@ func Test_shouldIgnoreReturn(t *testing.T) {
 // It returns the path to the temporary file and a cleanup function.
 func createTempPayloadFile(t *testing.T, content string) (string, func()) {
 	t.Helper()
-	tmpFile, err := ioutil.TempFile("", "test-payloads-*.txt")
+	tmpFile, err := os.CreateTemp("", "test-payloads-*.txt")
 	if err != nil {
 		t.Fatalf("Failed to create temp file: %v", err)
 	}
