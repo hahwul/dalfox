@@ -45,6 +45,7 @@ These flags control the behavior of the scanning process:
 | `--ignore-return string` | Ignore specific HTTP return codes.<br>Example: `--ignore-return '302,403,404'` |
 | `-p, --param strings` | Specify parameters to test.<br>Example: `-p 'username' -p 'password'` |
 | `--remote-payloads string` | Use remote payloads for XSS testing. Supported: portswigger, payloadbox.<br>Example: `--remote-payloads 'portswigger,payloadbox'` |
+| `--magic string` | Forces XSS testing on any parameter (query, header, body) whose value contains the specified magic string. This bypasses the initial discovery phase for these specific parameters. Useful for targeting specific points without relying on the tool's discovery, or for re-testing specific findings.<br>Example: `dalfox url "https://example.com/?q=TESTING&other=safe" --magic="TESTING" -H "Cookie: session=TESTING"` |
 | `--waf-evasion` | Enable WAF evasion by adjusting speed when detecting WAF (worker=1, delay=3s).<br>Example: `--waf-evasion` |
 
 ## Performance Flags

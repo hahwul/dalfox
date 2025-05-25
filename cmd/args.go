@@ -29,6 +29,7 @@ type Args struct {
 	ReportFormat              string
 	HarFilePath               string
 	CustomBlindXSSPayloadFile string
+	Magic                     string
 	Timeout                   int
 	Delay                     int
 	Concurrence               int
