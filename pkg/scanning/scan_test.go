@@ -179,10 +179,10 @@ func TestGeneratePayloads_CustomBlindXSS(t *testing.T) {
 		var generatedQueries map[*http.Request]map[string]string
 		var logOutput string
 
-		stdout, _ := captureOutput(func() {
+		stdout, stderr := captureOutput(func() {
 			generatedQueries, _ = generatePayloads(server.URL+"/?q=test", options, policy, pathReflection, params)
 		})
-		logOutput = stdout
+		logOutput = stdout + stderr // Combine stdout and stderr
 
 		assert.Contains(t, logOutput, "Added 2 custom blind XSS payloads from file: "+payloadFile)
 
@@ -220,11 +220,12 @@ func TestGeneratePayloads_CustomBlindXSS(t *testing.T) {
 		options.UniqParam = []string{"q"}
 
 		var generatedQueries map[*http.Request]map[string]string
-		stdout, _ := captureOutput(func() {
+		stdout, stderr := captureOutput(func() {
 			generatedQueries, _ = generatePayloads(server.URL+"/?q=test", options, policy, pathReflection, params)
 		})
+		logOutput := stdout + stderr // Combine stdout and stderr
 
-		assert.Contains(t, stdout, "Added 1 custom blind XSS payloads from file: "+payloadFile)
+		assert.Contains(t, logOutput, "Added 1 custom blind XSS payloads from file: "+payloadFile)
 		foundPayload := false
 		expectedPayload := "blindy3<a href=CALLBACKURL>" // CALLBACKURL should not be replaced
 
@@ -244,11 +245,12 @@ func TestGeneratePayloads_CustomBlindXSS(t *testing.T) {
 		options.CustomBlindXSSPayloadFile = "nonexistentfile.txt"
 		options.UniqParam = []string{"q"}
 
-		stdout, _ := captureOutput(func() {
+		stdout, stderr := captureOutput(func() {
 			_, _ = generatePayloads(server.URL+"/?q=test", options, policy, pathReflection, params)
 		})
+		logOutput := stdout + stderr // Combine stdout and stderr
 
-		assert.Contains(t, stdout, "Failed to load custom blind XSS payload file: nonexistentfile.txt")
+		assert.Contains(t, logOutput, "Failed to load custom blind XSS payload file: nonexistentfile.txt")
 		// Check that no payloads of type "toBlind" were added due to this specific file error
 		// (assuming other payload generation might still occur)
 		customBlindPayloadsFound := false
@@ -263,11 +265,12 @@ func TestGeneratePayloads_CustomBlindXSS(t *testing.T) {
 		options.CustomBlindXSSPayloadFile = payloadFile
 		options.UniqParam = []string{"q"}
 
-		stdout, _ := captureOutput(func() {
+		stdout, stderr := captureOutput(func() {
 			_, _ = generatePayloads(server.URL+"/?q=test", options, policy, pathReflection, params)
 		})
+		logOutput := stdout + stderr // Combine stdout and stderr
 
-		assert.Contains(t, stdout, "Added 0 custom blind XSS payloads from file: "+payloadFile)
+		assert.Contains(t, logOutput, "Added 0 custom blind XSS payloads from file: "+payloadFile)
 		// Verify no queries were generated specifically from this empty file.
 		// Similar to the above, this assumes no other "toBlind" payloads would be generated,
 		// or relies on the specific log message for confirmation.
