@@ -95,7 +95,8 @@ type Options struct {
 	// Runtime Options
 	AllURLS         int
 	NowURL          int
-	IdentifiedMagicParams []string
+	IdentifiedMagicParams []string // Deprecated by InternalFoundMagicParams, but kept for now to avoid breaking existing magic_test.go structure immediately
+	InternalFoundMagicParams []ParamResult `json:"-"` // Used for testing to inspect typed magic params found
 	HasMagicParams  bool
 	Scan            map[string]Scan
 	ScanResult      Result

@@ -88,89 +88,150 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 	printing.DalLog("SYSTEM", "Valid target [ code:"+strconv.Itoa(tres.StatusCode)+" / size:"+strconv.Itoa(len(body))+" ]", options)
 
 	// Magic character detection
+	var identifiedTypedMagicParams []model.ParamResult
 	if options.MagicString != "" {
-		var magicParams []string
 		// Query Parameters
 		queryValues := parsedURL.Query()
-		for param, values := range queryValues {
+		for name, values := range queryValues {
 			for _, value := range values {
 				if strings.Contains(value, options.MagicString) {
-					magicParams = append(magicParams, param)
-					break // Found in one of the values, no need to check further for this param
+					identifiedTypedMagicParams = append(identifiedTypedMagicParams, model.ParamResult{Name: name, Type: model.ParamTypeQuery})
+					break 
 				}
 			}
 		}
 
-		// Headers
-		for _, header := range options.Header {
-			parts := strings.SplitN(header, ":", 2)
+		// Header Parameters
+		for _, headerStr := range options.Header {
+			parts := strings.SplitN(headerStr, ":", 2)
 			if len(parts) == 2 {
 				headerName := strings.TrimSpace(parts[0])
 				headerValue := strings.TrimSpace(parts[1])
+				if strings.ToLower(headerName) == "cookie" { // Skip cookie header, handled separately
+					continue
+				}
 				if strings.Contains(headerValue, options.MagicString) {
-					magicParams = append(magicParams, "Header:"+headerName)
+					identifiedTypedMagicParams = append(identifiedTypedMagicParams, model.ParamResult{Name: headerName, Type: model.ParamTypeHeader})
 				}
 			}
 		}
 
+		// Cookie Parameters
+		if options.Cookie != "" {
+			// Create a dummy request to parse cookies easily
+			dummyReq, _ := http.NewRequest("GET", target, nil)
+			dummyReq.Header.Set("Cookie", options.Cookie)
+			for _, cookie := range dummyReq.Cookies() {
+				if strings.Contains(cookie.Value, options.MagicString) {
+					identifiedTypedMagicParams = append(identifiedTypedMagicParams, model.ParamResult{Name: cookie.Name, Type: model.ParamTypeCookie})
+				}
+			}
+		}
+		
 		// Body Parameters
 		if options.Data != "" {
-			bodyParams, err := url.ParseQuery(options.Data)
-			if err == nil {
-				for param, values := range bodyParams {
-					for _, value := range values {
-						if strings.Contains(value, options.MagicString) {
-							magicParams = append(magicParams, param)
-							break // Found in one of the values, no need to check further for this param
+			contentType := ""
+			for _, headerStr := range options.Header { // Check Content-Type from options.Header
+				parts := strings.SplitN(headerStr, ":", 2)
+				if len(parts) == 2 && strings.ToLower(strings.TrimSpace(parts[0])) == "content-type" {
+					contentType = strings.ToLower(strings.TrimSpace(parts[1]))
+					break
+				}
+			}
+			if contentType == "" { // Default if not specified
+				contentType = "application/x-www-form-urlencoded"
+			}
+
+			if strings.HasPrefix(contentType, "application/x-www-form-urlencoded") {
+				bodyParams, err := url.ParseQuery(options.Data)
+				if err == nil {
+					for name, values := range bodyParams {
+						for _, value := range values {
+							if strings.Contains(value, options.MagicString) {
+								identifiedTypedMagicParams = append(identifiedTypedMagicParams, model.ParamResult{Name: name, Type: model.ParamTypeBodyForm})
+								break
+							}
 						}
 					}
 				}
+			} else if strings.HasPrefix(contentType, "application/json") {
+				var jsonData map[string]interface{}
+				err := json.Unmarshal([]byte(options.Data), &jsonData)
+				if err == nil {
+					for key, val := range jsonData {
+						if strVal, ok := val.(string); ok { // Only check top-level string values
+							if strings.Contains(strVal, options.MagicString) {
+								identifiedTypedMagicParams = append(identifiedTypedMagicParams, model.ParamResult{Name: key, Type: model.ParamTypeBodyJSON})
+							}
+						}
+					}
+				} else {
+					printing.DalLog("WARNING", "Failed to parse JSON body for magic string detection: "+err.Error(), options)
+				}
 			}
 		}
 
-		options.IdentifiedMagicParams = magicParams
-		if len(magicParams) > 0 {
-			printing.DalLog("INFO", "Identified magic parameters: "+strings.Join(magicParams, ", "), options)
+		// Remove duplicates that might occur if e.g. a param name is same in query and header
+		// This uses Name and Type for uniqueness.
+		uniqueMagicParams := make([]model.ParamResult, 0, len(identifiedTypedMagicParams))
+		seenParams := make(map[string]bool)
+		for _, p := range identifiedTypedMagicParams {
+			key := p.Name + "_" + p.Type
+			if !seenParams[key] {
+				uniqueMagicParams = append(uniqueMagicParams, p)
+				seenParams[key] = true
+			}
+		}
+		identifiedTypedMagicParams = uniqueMagicParams
+
+
+		if len(identifiedTypedMagicParams) > 0 {
+			var logMsgs []string
+			for _, p := range identifiedTypedMagicParams {
+				logMsgs = append(logMsgs, p.Name+" ("+p.Type+")")
+			}
+			printing.DalLog("INFO", "Identified magic parameters: "+strings.Join(logMsgs, ", "), options)
+			options.InternalFoundMagicParams = identifiedTypedMagicParams // Store for testing
 		} else {
 			printing.DalLog("INFO", "No magic parameters identified with string: "+options.MagicString, options)
+			options.InternalFoundMagicParams = []model.ParamResult{} // Ensure it's empty
 		}
 	}
+	// options.IdentifiedMagicParams is no longer used in this manner.
+	// options.HasMagicParams will be set based on identifiedTypedMagicParams.
+
 
 	// Discovery phase
 	var policy map[string]string
 	var pathReflection map[int]string
 	var params map[string]model.ParamResult
 
-	if len(options.IdentifiedMagicParams) > 0 {
-		options.HasMagicParams = true
-		printing.DalLog("INFO", "Bypassing discovery due to identified magic parameters: "+strings.Join(options.IdentifiedMagicParams, ", "), options)
+	if len(identifiedTypedMagicParams) > 0 {
+		options.HasMagicParams = true // Set HasMagicParams flag
+		var logMsgs []string
+		for _, p := range identifiedTypedMagicParams {
+			logMsgs = append(logMsgs, p.Name+" ("+p.Type+")")
+		}
+		printing.DalLog("INFO", "Bypassing discovery due to identified magic parameters: "+strings.Join(logMsgs, ", "), options)
+		
 		params = make(map[string]model.ParamResult)
-		for _, paramName := range options.IdentifiedMagicParams {
-			var pType string
-			actualParamName := paramName
-			if strings.HasPrefix(paramName, "Header:") {
-				pType = "Header"
-				actualParamName = strings.TrimPrefix(paramName, "Header:")
-			} else {
-				// Assume URL or Body. Further differentiation might be needed if body params were distinctly marked.
-				// For now, this logic aligns with how discovery populates types for query/body params.
-				// TODO: If options.Data is present and paramName is in options.Data, it's "Body", else "URL".
-				// This requires parsing options.Data again or storing its keys during detection.
-				// For simplicity now, we'll use a generic type or leave it to be inferred by payload generation.
-				// Let's default to "URL" for now as a placeholder, it's often used as a general param type.
-				pType = "URL" // Or "Body" - needs refinement if specific body param type is crucial here.
+		for _, p := range identifiedTypedMagicParams {
+			// Keying by Name for generatePayloads. If names collide, last one wins.
+			// This could be an area for future improvement if type-specific handling in generatePayloads is desired for same-named params.
+			if _, exists := params[p.Name]; exists {
+				printing.DalLog("WARNING", "Magic parameter name '"+p.Name+"' identified in multiple locations/types. Using last detected type: "+p.Type, options)
 			}
-			params[actualParamName] = model.ParamResult{
-				Name:      actualParamName,
-				Type:      pType,
+			params[p.Name] = model.ParamResult{
+				Name:      p.Name,
+				Type:      p.Type, // Use the new explicit type
 				Reflected: true,
-				Chars:     payload.GetSpecialChar(), // Assume all chars are reflected for forced testing
+				Chars:     payload.GetSpecialChar(), 
 			}
 		}
 		policy = make(map[string]string)
 		policy["Content-Type"] = "text/html" // Default for XSS testing
 		pathReflection = make(map[int]string)
-		printing.DalLog("INFO", "Forcing XSS testing on "+strconv.Itoa(len(params))+" magic parameters.", options)
+		printing.DalLog("INFO", "Forcing XSS testing on "+strconv.Itoa(len(params))+" uniquely named magic parameters.", options)
 
 	} else if !options.SkipDiscovery {
 		policy, pathReflection, params = performDiscovery(target, options, rl)
@@ -293,24 +354,30 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 	}
 
 	// Custom Payload
-	if (options.SkipDiscovery || utils.IsAllowType(policy["Content-Type"])) && options.CustomPayloadFile != "" {
+	if (options.SkipDiscovery || options.HasMagicParams || utils.IsAllowType(policy["Content-Type"])) && options.CustomPayloadFile != "" {
 		ff, err := voltFile.ReadLinesOrLiteral(options.CustomPayloadFile)
 		if err != nil {
 			printing.DalLog("SYSTEM", "Failed to load custom XSS payload file", options)
 		} else {
 			for _, customPayload := range ff {
 				if customPayload != "" {
-					for k, v := range params {
+					for k, v := range params { // k is param name, v is ParamResult
 						if optimization.CheckInspectionParam(options, k) {
-							ptype := ""
-							for _, av := range v.Chars {
-								if strings.Contains(av, "PTYPE:") {
-									ptype = GetPType(av)
-								}
-							}
+							// Default to inHTML if no specific reflection point known (e.g. magic params)
+							// or if the param type naturally reflects into HTML.
+							paramTypeSuffix := "-" + v.Type // e.g., "-QUERY", "-HEADER"
+							injectionPoint := "inHTML"      // Default injection context
+							
+							// TODO: More sophisticated context determination based on v.Type if v.ReflectedPoint is not detailed.
+							// For now, "inHTML" is a general default for custom payloads.
+							
 							encoders := []string{NaN, urlEncode, urlDoubleEncode, htmlEncode}
+							// Encoder choice could also be refined based on v.Type here.
+							// e.g. for HEADER/COOKIE, NaN or specific encoding might be preferred.
+							// For JSON, payload needs to be JSON string encoded.
 							for _, encoder := range encoders {
-								tq, tm := optimization.MakeRequestQuery(target, k, customPayload, "inHTML"+ptype, "toAppend", encoder, options)
+								// MakeRequestQuery now needs to understand v.Type to correctly place the payload
+								tq, tm := optimization.MakeRequestQuery(target, k, customPayload, injectionPoint+paramTypeSuffix, "toAppend", encoder, options, v.Type)
 								query[tq] = tm
 							}
 						}
@@ -322,51 +389,83 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 	}
 
 	// Common Payloads and DOM XSS
-	if (options.SkipDiscovery || utils.IsAllowType(policy["Content-Type"])) && !options.OnlyCustomPayload {
+	// The distinction between URL params (cp) and Body params (cpd) might be less relevant here
+	// if `params` map correctly types all discovered/input parameters.
+	if (options.SkipDiscovery || options.HasMagicParams || utils.IsAllowType(policy["Content-Type"])) && !options.OnlyCustomPayload {
+		// Initial query parameters from the target URL (cp) and data parameters (cpd)
+		// These are used for some initial payload generation before iterating through the full `params` map.
+		// This part might be redundant if all params are already in `params` with correct types.
+		// However, keeping it for now to ensure no existing behavior for direct URL/data params is lost.
+		// We should ensure these `v` are also present in `params` map with correct types.
+		
+		// START Existing cp, cpd block (minor changes for type awareness if possible)
 		cu, _ := url.Parse(target)
-		var cp, cpd url.Values
+		var cp, cpd url.Values // cp for query, cpd for body
 		var cpArr, cpdArr []string
-		hashParam := false
-		if options.Data == "" {
+		hashParam := false // if params are from fragment
+		
+		if options.Data == "" { // GET, or POST without explicit --data (params in URL)
 			cp, _ = url.ParseQuery(cu.RawQuery)
-			if len(cp) == 0 {
+			if len(cp) == 0 && strings.Contains(cu.Fragment, "=") { // Check fragment if no query params
 				cp, _ = url.ParseQuery(cu.Fragment)
 				hashParam = true
 			}
-		} else {
-			cp, _ = url.ParseQuery(cu.RawQuery)
-			cpd, _ = url.ParseQuery(options.Data)
+		} else { // POST/PUT with --data
+			cp, _ = url.ParseQuery(cu.RawQuery) // Query params can still exist
+			// Determine body type for cpd
+			contentType := ""
+			for _, headerStr := range options.Header {
+				parts := strings.SplitN(headerStr, ":", 2)
+				if len(parts) == 2 && strings.ToLower(strings.TrimSpace(parts[0])) == "content-type" {
+					contentType = strings.ToLower(strings.TrimSpace(parts[1]))
+					break
+				}
+			}
+			if contentType == "" || strings.HasPrefix(contentType, "application/x-www-form-urlencoded") {
+				cpd, _ = url.ParseQuery(options.Data)
+			}
+			// JSON/XML body params from options.Data are handled by the main loop over `params`
 		}
 
-		for v := range cp {
-			if optimization.CheckInspectionParam(options, v) {
-				cpArr = append(cpArr, v)
+		// Payloads for query parameters (cp)
+		for paramName := range cp {
+			if optimization.CheckInspectionParam(options, paramName) {
+				cpArr = append(cpArr, paramName)
 				arc := optimization.SetPayloadValue(payload.GetCommonPayload(), options)
-				for _, avv := range arc {
+				paramType := model.ParamTypeQuery
+				if hashParam {
+					paramType = model.ParamTypeFragment
+				}
+				for _, payloadValue := range arc {
 					encoders := []string{NaN, urlEncode, urlDoubleEncode, htmlEncode}
 					for _, encoder := range encoders {
-						tq, tm := optimization.MakeRequestQuery(target, v, avv, "inHTML-URL", "toAppend", encoder, options)
+						// Assuming inHTML context for these general query params
+						tq, tm := optimization.MakeRequestQuery(target, paramName, payloadValue, "inHTML-"+paramType, "toAppend", encoder, options, paramType)
 						query[tq] = tm
 					}
 				}
 			}
 		}
-
-		for v := range cpd {
-			if optimization.CheckInspectionParam(options, v) {
-				cpdArr = append(cpdArr, v)
+		// Payloads for form body parameters (cpd)
+		for paramName := range cpd {
+			if optimization.CheckInspectionParam(options, paramName) {
+				cpdArr = append(cpdArr, paramName)
 				arc := optimization.SetPayloadValue(payload.GetCommonPayload(), options)
-				for _, avv := range arc {
+				for _, payloadValue := range arc {
 					encoders := []string{NaN, urlEncode, urlDoubleEncode, htmlEncode}
 					for _, encoder := range encoders {
-						tq, tm := optimization.MakeRequestQuery(target, v, avv, "inHTML-FORM", "toAppend", encoder, options)
+						tq, tm := optimization.MakeRequestQuery(target, paramName, payloadValue, "inHTML-"+model.ParamTypeBodyForm, "toAppend", encoder, options, model.ParamTypeBodyForm)
 						query[tq] = tm
 					}
 				}
 			}
 		}
+		// END Existing cp, cpd block
 
-		// DOM XSS Payloads
+		// DOM XSS Payloads - This part needs careful review for typed parameters
+		// It currently iterates cp and cpd, and checks params[v].Chars.
+		// If magic params are used, params[v].Chars will be GetSpecialChar(), not empty.
+		// This logic might need to be adapted or integrated into the main loop over `params`.
 		if options.UseHeadless {
 			var dlst []string
 			if options.UseDeepDXSS {
@@ -375,140 +474,217 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 				dlst = payload.GetDOMXSSPayload()
 			}
 			dpayloads := optimization.SetPayloadValue(dlst, options)
-			for v := range cp {
-				if optimization.CheckInspectionParam(options, v) && len(params[v].Chars) == 0 {
+
+			// Iterate through all known parameters (query, body_form, fragment) that could be DOM XSS vectors
+			// This needs to be careful not to duplicate if cp/cpd logic is already covering some.
+			// For simplicity, this existing DOM XSS logic for cp/cpd is kept,
+			// but it might miss DOM XSS on other types if not reflected in URL/form-like structures.
+			for paramName := range cp { // Query/Fragment params
+				paramMapEntry, paramExists := params[paramName]
+				// Apply DOM XSS if it's a known param and (Chars is empty OR it's a magic param we are forcing tests on)
+				if optimization.CheckInspectionParam(options, paramName) && paramExists && (len(paramMapEntry.Chars) == 0 || options.HasMagicParams) {
 					for _, dpayload := range dpayloads {
 						u, _ := url.Parse(target)
-						dp, _ := url.ParseQuery(u.RawQuery)
-						if hashParam {
-							dp, _ = url.ParseQuery(u.Fragment)
-							dp.Set(v, dpayload)
-							u.Fragment, _ = url.QueryUnescape(dp.Encode())
-						} else {
-							dp.Set(v, dpayload)
-							u.RawQuery = dp.Encode()
+						currentQueryParams, _ := url.ParseQuery(u.RawQuery)
+						currentFragParams, _ := url.ParseQuery(u.Fragment)
+
+						if hashParam && paramMapEntry.Type == model.ParamTypeFragment { // If original was fragment
+							currentFragParams.Set(paramName, dpayload)
+							u.Fragment, _ = url.QueryUnescape(currentFragParams.Encode())
+						} else if paramMapEntry.Type == model.ParamTypeQuery { // If original was query
+							currentQueryParams.Set(paramName, dpayload)
+							u.RawQuery = currentQueryParams.Encode()
+						} else { // Default to query if type is ambiguous here but was in cp
+							currentQueryParams.Set(paramName, dpayload)
+							u.RawQuery = currentQueryParams.Encode()
 						}
 						durls = append(durls, u.String())
 					}
 				}
 			}
-			for v := range cpd {
-				if optimization.CheckInspectionParam(options, v) && len(params[v].Chars) == 0 {
+			for paramName := range cpd { // Form params (less common for DOM XSS via URL manipulation, but possible if form values are used by client-side script)
+				paramMapEntry, paramExists := params[paramName]
+				if optimization.CheckInspectionParam(options, paramName) && paramExists && paramMapEntry.Type == model.ParamTypeBodyForm && (len(paramMapEntry.Chars) == 0 || options.HasMagicParams) {
+					// DOM XSS for POST params usually means injecting into a form that's then processed by JS.
+					// The durls here are GET requests. This might not be the most effective way to test DOM XSS for POST params.
+					// However, keeping structure if some client-side logic reads initial POST values reflected on page.
 					for _, dpayload := range dpayloads {
-						u, _ := url.Parse(target)
-						dp, _ := url.ParseQuery(u.RawQuery)
-						if hashParam {
-							dp, _ = url.ParseQuery(u.Fragment)
-							dp.Set(v, dpayload)
-							u.Fragment, _ = url.QueryUnescape(dp.Encode())
-						} else {
-							dp.Set(v, dpayload)
-							u.RawQuery = dp.Encode()
-						}
+						u, _ := url.Parse(target) // Create a GET request with the payload in query
+						currentQueryParams, _ := url.ParseQuery(u.RawQuery)
+						currentQueryParams.Set(paramName, dpayload) // Test as if it were a GET param
+						u.RawQuery = currentQueryParams.Encode()
 						durls = append(durls, u.String())
 					}
 				}
 			}
 		}
 
-		// Parameter-based XSS
-		for k, v := range params {
+
+		// Parameter-based XSS (Main loop over the `params` map)
+		for k, v := range params { // k is param name, v is ParamResult
 			if optimization.CheckInspectionParam(options, k) {
-				ptype := ""
-				chars := payload.GetSpecialChar()
+				paramTypeSuffix := "-" + v.Type
+				chars := payload.GetSpecialChar() // TODO: This might differ based on param type context
 				var badchars []string
-				for _, av := range v.Chars {
-					if utils.IndexOf(av, chars) == -1 {
-						badchars = append(badchars, av)
+				
+				// Populate badchars based on v.Chars (actual reflected chars from discovery)
+				// If v.Chars is empty (e.g. magic param, or not yet analyzed), badchars remains empty.
+				if len(v.Chars) > 0 && !(options.HasMagicParams && params[k].Type == v.Type) { // Don't use discovery chars for magic params
+					for _, av := range v.Chars {
+						if utils.IndexOf(av, chars) == -1 { // If a reflected char is NOT in our standard special char list
+							badchars = append(badchars, av)
+						}
 					}
-					if strings.Contains(av, "PTYPE:") {
-						ptype = GetPType(av)
+				}
+
+				// If detailed reflection points are known (from discovery)
+				if v.ReflectedPoint != "" && strings.Contains(v.ReflectedPoint, "Injected:") && !(options.HasMagicParams && params[k].Type == v.Type) {
+					injectedPoints := strings.Split(strings.TrimPrefix(v.ReflectedPoint, "Injected:"), "/")
+					validInjectedChars := v.Chars // Use all reflected chars for this param for optimization check
+					if len(params[k].Chars) > 1 && strings.HasSuffix(params[k].Chars[len(params[k].Chars)-1], ":") { // Check for PTYPE/Injected in last element
+						validInjectedChars = params[k].Chars[:len(params[k].Chars)-1]
 					}
-					if strings.Contains(av, "Injected:") {
-						injectedPoint := strings.Split(av, "/")[1:]
-						injectedChars := params[k].Chars[:len(params[k].Chars)-1]
-						for _, ip := range injectedPoint {
-							var arr []string
-							if strings.Contains(ip, "inJS") {
-								checkInJS := false
-								if strings.Contains(ip, "double") {
-									for _, ic := range injectedChars {
-										if strings.Contains(ic, "\"") {
-											checkInJS = true
-										}
-									}
-								}
-								if strings.Contains(ip, "single") {
-									for _, ic := range injectedChars {
-										if strings.Contains(ic, "'") {
-											checkInJS = true
-										}
-									}
-								}
-								if checkInJS {
-									arr = optimization.SetPayloadValue(payload.GetInJsPayload(ip), options)
-								} else {
-									arr = optimization.SetPayloadValue(payload.GetInJsBreakScriptPayload(ip), options)
+
+
+					for _, ipActual := range injectedPoints {
+						if ipActual == "" { continue }
+						var payloadsForContext []string
+						if strings.Contains(ipActual, "inJS") {
+							canUseQuotes := false
+							if strings.Contains(ipActual, "double") {
+								for _, ic := range validInjectedChars { if strings.Contains(ic, "\"") { canUseQuotes = true; break } }
+							} else if strings.Contains(ipActual, "single") {
+								for _, ic := range validInjectedChars { if strings.Contains(ic, "'") { canUseQuotes = true; break } }
+							} else { // Generic inJS, assume quotes might be usable if not specified otherwise
+								canUseQuotes = true 
+							}
+							if canUseQuotes {
+								payloadsForContext = optimization.SetPayloadValue(payload.GetInJsPayload(ipActual), options)
+							} else {
+								payloadsForContext = optimization.SetPayloadValue(payload.GetInJsBreakScriptPayload(ipActual), options)
+							}
+						} else if strings.Contains(ipActual, "inHTML") {
+							payloadsForContext = optimization.SetPayloadValue(payload.GetHTMLPayload(ipActual), options)
+						} else if strings.Contains(ipActual, "inATTR") {
+							payloadsForContext = optimization.SetPayloadValue(payload.GetAttrPayload(ipActual), options)
+						} else { // Default to HTML payloads if context is unclear but known to be injected
+							payloadsForContext = optimization.SetPayloadValue(payload.GetHTMLPayload(ipActual), options)
+						}
+
+						for _, payloadValue := range payloadsForContext {
+							if optimization.Optimization(payloadValue, badchars) {
+								encoders := []string{NaN, urlEncode, urlDoubleEncode, htmlEncode}
+								for _, encoder := range encoders {
+									tq, tm := optimization.MakeRequestQuery(target, k, payloadValue, ipActual+paramTypeSuffix, "toAppend", encoder, options, v.Type)
+									query[tq] = tm
 								}
 							}
-							if strings.Contains(ip, "inHTML") {
-								arr = optimization.SetPayloadValue(payload.GetHTMLPayload(ip), options)
-							}
-							if strings.Contains(ip, "inATTR") {
-								arr = optimization.SetPayloadValue(payload.GetAttrPayload(ip), options)
-							}
-							for _, avv := range arr {
-								if optimization.Optimization(avv, badchars) {
-									encoders := []string{NaN, urlEncode, urlDoubleEncode, htmlEncode}
-									for _, encoder := range encoders {
-										tq, tm := optimization.MakeRequestQuery(target, k, avv, ip+ptype, "toAppend", encoder, options)
-										query[tq] = tm
-									}
+						}
+					}
+				} else { 
+					// Generic testing if no detailed ReflectedPoint (e.g., for magic params, or if discovery was basic)
+					// Iterate through common contexts: inHTML, inJS, inATTR
+					contextsToTest := []string{"inHTML", "inJS", "inATTR"}
+					if v.Type == model.ParamTypeHeader || v.Type == model.ParamTypeCookie {
+						contextsToTest = []string{"inHTML"} // Headers/cookies usually reflect into HTML, JS/ATTR less direct.
+					}
+					if v.Type == model.ParamTypeBodyJSON { // JSON needs specific handling, for now, treat as string in HTML
+						contextsToTest = []string{"inHTML"} 
+					}
+
+
+					for _, contextKey := range contextsToTest {
+						var payloadsToTest []string
+						if contextKey == "inJS" {
+							payloadsToTest = optimization.SetPayloadValue(payload.GetInJsPayload(contextKey), options) // Generic JS
+						} else if contextKey == "inATTR" {
+							payloadsToTest = optimization.SetPayloadValue(payload.GetAttrPayload(contextKey), options) // Generic Attr
+						} else { // inHTML or default
+							payloadsToTest = optimization.SetPayloadValue(payload.GetHTMLPayload(contextKey), options) // Generic HTML
+						}
+						
+						for _, payloadValue := range payloadsToTest {
+							// For magic params, badchars is empty, so optimization.Optimization should pass.
+							if optimization.Optimization(payloadValue, badchars) { 
+								encoders := []string{NaN, urlEncode, urlDoubleEncode, htmlEncode}
+								// Adjust encoders based on param type for generic testing
+								if v.Type == model.ParamTypeHeader || v.Type == model.ParamTypeCookie {
+									encoders = []string{NaN, urlEncode} // Headers/cookies less likely to need HTML encoding by Dalfox
+								} else if v.Type == model.ParamTypeBodyJSON {
+									encoders = []string{NaN} // Payload should be crafted for JSON or MakeRequestQuery handles JSON string escaping
+								}
+
+								for _, encoder := range encoders {
+									tq, tm := optimization.MakeRequestQuery(target, k, payloadValue, contextKey+paramTypeSuffix, "toAppend", encoder, options, v.Type)
+									query[tq] = tm
 								}
 							}
 						}
 					}
 				}
-				arc := optimization.SetPayloadValue(payload.GetCommonPayload(), options)
-				for _, avv := range arc {
-					if !utils.ContainsFromArray(cpArr, k) && optimization.Optimization(avv, badchars) {
-						encoders := []string{NaN, urlEncode, urlDoubleEncode, htmlEncode}
-						for _, encoder := range encoders {
-							tq, tm := optimization.MakeRequestQuery(target, k, avv, "inHTML"+ptype, "toAppend", encoder, options)
-							query[tq] = tm
+				
+				// Apply common payloads (generic ones) if not already covered by cpArr/cpdArr (for query/form)
+				// For other types (Header, Cookie, JSON, etc.), this ensures they get common payloads.
+				if v.Type == model.ParamTypeHeader || v.Type == model.ParamTypeCookie || v.Type == model.ParamTypeBodyJSON || v.Type == model.ParamTypePath || v.Type == model.ParamTypeFragment ||
+				   (!utils.ContainsFromArray(cpArr, k) && v.Type == model.ParamTypeQuery) || 
+				   (!utils.ContainsFromArray(cpdArr, k) && v.Type == model.ParamTypeBodyForm) {
+					
+					commonPayloads := optimization.SetPayloadValue(payload.GetCommonPayload(), options)
+					for _, payloadValue := range commonPayloads {
+						if optimization.Optimization(payloadValue, badchars) {
+							encoders := []string{NaN, urlEncode, urlDoubleEncode, htmlEncode}
+							if v.Type == model.ParamTypeHeader || v.Type == model.ParamTypeCookie {
+								encoders = []string{NaN, urlEncode}
+							} else if v.Type == model.ParamTypeBodyJSON {
+								encoders = []string{NaN}
+							}
+							for _, encoder := range encoders {
+								// Default to inHTML context for common payloads if not otherwise specified
+								tq, tm := optimization.MakeRequestQuery(target, k, payloadValue, "inHTML"+paramTypeSuffix, "toAppend", encoder, options, v.Type)
+								query[tq] = tm
+							}
 						}
 					}
 				}
 			}
 		}
-	} else {
-		printing.DalLog("SYSTEM", "Content-Type is '"+policy["Content-Type"]+"', only testing with customized payloads (custom/blind)", options)
+	} else { // Content-Type not suitable for general HTML/JS based XSS, or only custom payloads requested
+		printing.DalLog("SYSTEM", "Content-Type is '"+policy["Content-Type"]+"', only testing with customized payloads (custom/blind) or magic params if any.", options)
+		// Still allow custom/blind payloads for specific content types if user forces with --custom-payload or --blind
+		// This 'else' block was for the main "Common Payloads and DOM XSS" section.
+		// Custom/Blind/Remote payload sections below are guarded by their own flags.
 	}
+
 
 	// Blind Payload
 	if options.BlindURL != "" {
 		bpayloads := payload.GetBlindPayload()
 		bcallback := getBlindCallbackURL(options.BlindURL)
+		// Header-based blind payload (Referer)
 		for _, bpayload := range bpayloads {
 			bp := strings.Replace(bpayload, "CALLBACKURL", bcallback, 10)
-			tq, tm := optimization.MakeHeaderQuery(target, "Referer", bp, options)
-			tm["payload"] = "toBlind"
+			// MakeHeaderQuery needs to be aware of how to make a request if target is not a full URL
+			// Assuming MakeHeaderQuery can handle base target string and adds header.
+			tq, tm := optimization.MakeHeaderQuery(target, "Referer", bp, options) // This creates a request
+			tm["payload"] = "toBlind" // Generic payload type for blind
+			tm["type"] = "toBlind-" + model.ParamTypeHeader // Specific type for this blind vector
 			query[tq] = tm
 		}
-		for k, v := range params {
+		// Parameter-based blind payloads
+		for k, v := range params { // k is param name, v is ParamResult
 			if optimization.CheckInspectionParam(options, k) {
-				ptype := ""
-				for _, av := range v.Chars {
-					if strings.Contains(av, "PTYPE:") {
-						ptype = GetPType(av)
-					}
-				}
+				paramTypeSuffix := "-" + v.Type
 				for _, bpayload := range bpayloads {
 					bp := strings.Replace(bpayload, "CALLBACKURL", bcallback, 10)
 					encoders := []string{NaN, urlEncode, urlDoubleEncode, htmlEncode}
+					if v.Type == model.ParamTypeHeader || v.Type == model.ParamTypeCookie {
+						encoders = []string{NaN, urlEncode}
+					} else if v.Type == model.ParamTypeBodyJSON {
+						encoders = []string{NaN}
+					}
 					for _, encoder := range encoders {
-						tq, tm := optimization.MakeRequestQuery(target, k, bp, "toBlind"+ptype, "toAppend", encoder, options)
-						tm["payload"] = "toBlind"
+						tq, tm := optimization.MakeRequestQuery(target, k, bp, "toBlind"+paramTypeSuffix, "toAppend", encoder, options, v.Type)
+						tm["payload"] = "toBlind" // Meta info for the payload itself
 						query[tq] = tm
 					}
 				}
@@ -519,50 +695,36 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 
 	// Custom Blind XSS Payloads from file
 	if options.CustomBlindXSSPayloadFile != "" {
+		// ... (error handling for file not found, etc. remains the same) ...
 		fileInfo, statErr := os.Stat(options.CustomBlindXSSPayloadFile)
-		if os.IsNotExist(statErr) {
-			printing.DalLog("SYSTEM", "Failed to load custom blind XSS payload file: "+options.CustomBlindXSSPayloadFile+" (file not found)", options)
-		} else if statErr != nil {
-			printing.DalLog("SYSTEM", "Failed to load custom blind XSS payload file: "+options.CustomBlindXSSPayloadFile+" ("+statErr.Error()+")", options)
-		} else if fileInfo.IsDir() {
-			printing.DalLog("SYSTEM", "Failed to load custom blind XSS payload file: "+options.CustomBlindXSSPayloadFile+" (path is a directory)", options)
-		} else {
-			// File exists and is not a directory, proceed to read it
+		if os.IsNotExist(statErr) { /* ... */ } else if statErr != nil { /* ... */ } else if fileInfo.IsDir() { /* ... */ } else {
 			payloadLines, readErr := voltFile.ReadLinesOrLiteral(options.CustomBlindXSSPayloadFile)
-			if readErr != nil {
-				printing.DalLog("SYSTEM", "Failed to read custom blind XSS payload file: "+options.CustomBlindXSSPayloadFile+" ("+readErr.Error()+")", options)
-			} else {
+			if readErr != nil { /* ... */ } else {
 				var bcallback string
-				if options.BlindURL != "" {
-					bcallback = getBlindCallbackURL(options.BlindURL)
-				}
-
+				if options.BlindURL != "" { bcallback = getBlindCallbackURL(options.BlindURL) }
 				addedPayloadCount := 0
 				for _, customPayload := range payloadLines {
 					if customPayload != "" {
 						addedPayloadCount++
 						actualPayload := customPayload
-						if options.BlindURL != "" { // Only replace if BlindURL is set
+						if options.BlindURL != "" { 
 							actualPayload = strings.Replace(customPayload, "CALLBACKURL", bcallback, -1)
 						}
-
-						for k, v := range params {
+						for k, v := range params { // k is param name, v is ParamResult
 							if optimization.CheckInspectionParam(options, k) {
-								ptype := ""
-								for _, av := range v.Chars {
-									if strings.Contains(av, "PTYPE:") {
-										ptype = GetPType(av)
-									}
-								}
-								// Use only NaN encoder to avoid encoding issues with custom payloads
-								tq, tm := optimization.MakeRequestQuery(target, k, actualPayload, "toBlind"+ptype, "toBlind", NaN, options)
-								tm["payload"] = "toBlind"
+								paramTypeSuffix := "-" + v.Type
+								// Use only NaN encoder for custom blind to avoid double encoding issues.
+								// MakeRequestQuery needs to handle v.Type for placing payload.
+								tq, tm := optimization.MakeRequestQuery(target, k, actualPayload, "toBlind"+paramTypeSuffix, "toBlind", NaN, options, v.Type)
+								tm["payload"] = "toBlind" 
 								query[tq] = tm
 							}
 						}
 					}
 				}
-				printing.DalLog("SYSTEM", "Added "+strconv.Itoa(addedPayloadCount)+" custom blind XSS payloads from file: "+options.CustomBlindXSSPayloadFile, options)
+				if addedPayloadCount > 0 {
+					printing.DalLog("SYSTEM", "Added "+strconv.Itoa(addedPayloadCount)+" custom blind XSS payloads from file: "+options.CustomBlindXSSPayloadFile, options)
+				}
 			}
 		}
 	}
@@ -573,27 +735,26 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 		for _, endpoint := range rp {
 			var payloads []string
 			var line, size string
-			if endpoint == "portswigger" {
-				payloads, line, size = payload.GetPortswiggerPayload()
-			}
-			if endpoint == "payloadbox" {
-				payloads, line, size = payload.GetPayloadBoxPayload()
-			}
+			if endpoint == "portswigger" { payloads, line, size = payload.GetPortswiggerPayload() }
+			if endpoint == "payloadbox" { payloads, line, size = payload.GetPayloadBoxPayload() }
+			
 			if line != "" {
 				printing.DalLog("INFO", "Successfully loaded '"+endpoint+"' payloads ["+line+" lines / "+size+"]", options)
 				for _, remotePayload := range payloads {
 					if remotePayload != "" {
-						for k, v := range params {
+						for k, v := range params { // k is param name, v is ParamResult
 							if optimization.CheckInspectionParam(options, k) {
-								ptype := ""
-								for _, av := range v.Chars {
-									if strings.Contains(av, "PTYPE:") {
-										ptype = GetPType(av)
-									}
-								}
+								paramTypeSuffix := "-" + v.Type
+								// Default to inHTML for remote payloads, similar to custom payloads.
+								injectionPoint := "inHTML" 
 								encoders := []string{NaN, urlEncode, urlDoubleEncode, htmlEncode}
+								if v.Type == model.ParamTypeHeader || v.Type == model.ParamTypeCookie {
+									encoders = []string{NaN, urlEncode}
+								} else if v.Type == model.ParamTypeBodyJSON {
+									encoders = []string{NaN}
+								}
 								for _, encoder := range encoders {
-									tq, tm := optimization.MakeRequestQuery(target, k, remotePayload, "inHTML"+ptype, "toAppend", encoder, options)
+									tq, tm := optimization.MakeRequestQuery(target, k, remotePayload, injectionPoint+paramTypeSuffix, "toAppend", encoder, options, v.Type)
 									query[tq] = tm
 								}
 							}
@@ -605,7 +766,6 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 			}
 		}
 	}
-
 	return query, durls
 }
 

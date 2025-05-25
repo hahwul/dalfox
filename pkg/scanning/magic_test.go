@@ -80,9 +80,11 @@ func TestMagicCharacterInQueryParameter(t *testing.T) {
 	capturedLogs = stdout + stderr
 
 	assert.True(t, options.HasMagicParams, "HasMagicParams should be true")
-	assert.Contains(t, options.IdentifiedMagicParams, "query2", "IdentifiedMagicParams should contain 'query2'")
-	assert.Equal(t, 1, len(options.IdentifiedMagicParams), "Should only identify one magic parameter")
-	assert.Contains(t, capturedLogs, "Bypassing discovery due to identified magic parameters: query2", "Log should indicate discovery bypass for query2")
+	if assert.Len(t, options.InternalFoundMagicParams, 1, "Should identify one magic parameter") {
+		assert.Equal(t, "query2", options.InternalFoundMagicParams[0].Name)
+		assert.Equal(t, model.ParamTypeQuery, options.InternalFoundMagicParams[0].Type)
+	}
+	assert.Contains(t, capturedLogs, "Bypassing discovery due to identified magic parameters: query2 (QUERY)", "Log should indicate discovery bypass for query2 (QUERY)")
 
 	// Verify params map for generatePayloads (mocked or by checking options if Scan modifies it directly)
 	// For this, we need to see how `params` is populated in Scan before `generatePayloads`
@@ -111,9 +113,11 @@ func TestMagicCharacterInHeader(t *testing.T) {
 	capturedLogs = stdout + stderr
 
 	assert.True(t, options.HasMagicParams, "HasMagicParams should be true")
-	assert.Contains(t, options.IdentifiedMagicParams, "Header:X-Magic-Header", "IdentifiedMagicParams should contain 'Header:X-Magic-Header'")
-	assert.Equal(t, 1, len(options.IdentifiedMagicParams), "Should only identify one magic parameter")
-	assert.Contains(t, capturedLogs, "Bypassing discovery due to identified magic parameters: Header:X-Magic-Header", "Log should indicate discovery bypass for the header")
+	if assert.Len(t, options.InternalFoundMagicParams, 1, "Should identify one magic parameter") {
+		assert.Equal(t, "X-Magic-Header", options.InternalFoundMagicParams[0].Name)
+		assert.Equal(t, model.ParamTypeHeader, options.InternalFoundMagicParams[0].Type)
+	}
+	assert.Contains(t, capturedLogs, "Bypassing discovery due to identified magic parameters: X-Magic-Header (HEADER)", "Log should indicate discovery bypass for the header")
 	assert.Contains(t, capturedLogs, "Forcing XSS testing on 1 magic parameters.", "Log should indicate forcing XSS on identified param")
 }
 
@@ -138,11 +142,42 @@ func TestMagicCharacterInPostBody(t *testing.T) {
 	capturedLogs = stdout + stderr
 
 	assert.True(t, options.HasMagicParams, "HasMagicParams should be true")
-	assert.Contains(t, options.IdentifiedMagicParams, "magicParam", "IdentifiedMagicParams should contain 'magicParam'")
-	assert.Equal(t, 1, len(options.IdentifiedMagicParams), "Should only identify one magic parameter")
-	assert.Contains(t, capturedLogs, "Bypassing discovery due to identified magic parameters: magicParam", "Log should indicate discovery bypass for the body parameter")
+	if assert.Len(t, options.InternalFoundMagicParams, 1, "Should identify one magic parameter") {
+		assert.Equal(t, "magicParam", options.InternalFoundMagicParams[0].Name)
+		assert.Equal(t, model.ParamTypeBodyForm, options.InternalFoundMagicParams[0].Type) // Assuming default form
+	}
+	assert.Contains(t, capturedLogs, "Bypassing discovery due to identified magic parameters: magicParam (BODY_FORM)", "Log should indicate discovery bypass for the body parameter")
 	assert.Contains(t, capturedLogs, "Forcing XSS testing on 1 magic parameters.", "Log should indicate forcing XSS on identified param")
 }
+
+// TestMagicCharacterInJsonBody tests detection of magic string in a POST JSON body .
+func TestMagicCharacterInJsonBody(t *testing.T) {
+	server := mockServerForMagicTest()
+	defer server.Close()
+
+	magicStr := "JSON_MAGIC_VAL"
+	options := getTestOptions()
+	options.MagicString = magicStr
+	options.Method = "POST"
+	options.Data = `{"key1":"value1", "magicKey":"some ` + magicStr + ` data", "key2":"value2"}`
+	options.Header = []string{"Content-Type: application/json"} // Important for JSON parsing
+	options.OnlyDiscovery = true 
+
+	var capturedLogs string
+	stdout, stderr := captureOutput(func() {
+		Scan(targetURL, options, "test-scan-id-json-body")
+	})
+	capturedLogs = stdout + stderr
+
+	assert.True(t, options.HasMagicParams, "HasMagicParams should be true")
+	if assert.Len(t, options.InternalFoundMagicParams, 1, "Should identify one magic JSON parameter") {
+		assert.Equal(t, "magicKey", options.InternalFoundMagicParams[0].Name)
+		assert.Equal(t, model.ParamTypeBodyJSON, options.InternalFoundMagicParams[0].Type)
+	}
+	assert.Contains(t, capturedLogs, "Bypassing discovery due to identified magic parameters: magicKey (BODY_JSON)", "Log should indicate discovery bypass for the JSON key")
+	assert.Contains(t, capturedLogs, "Forcing XSS testing on 1 magic parameters.", "Log should indicate forcing XSS on identified param")
+}
+
 
 // TestMagicCharacterNotPresent tests behavior when magic string is configured but not found.
 func TestMagicCharacterNotPresent(t *testing.T) {
@@ -162,7 +197,7 @@ func TestMagicCharacterNotPresent(t *testing.T) {
 	capturedLogs = stdout + stderr
 
 	assert.False(t, options.HasMagicParams, "HasMagicParams should be false")
-	assert.Empty(t, options.IdentifiedMagicParams, "IdentifiedMagicParams should be empty")
+	assert.Empty(t, options.InternalFoundMagicParams, "InternalFoundMagicParams should be empty")
 	assert.Contains(t, capturedLogs, "No magic parameters identified with string: SUPER_SECRET_MAGIC", "Log should indicate no magic params found")
 	// Depending on default SkipDiscovery in getTestOptions, this might change.
 	// If SkipDiscovery is false (or not set) by default in getTestOptions:
@@ -177,8 +212,8 @@ func TestMagicCharacterNotPresent(t *testing.T) {
 		Scan(targetURL, options, "test-scan-id-notpresent-normal-discovery")
 	})
 	capturedLogs2 := stdout2 + stderr2
-	assert.False(t, options.HasMagicParams, "HasMagicParams should be false (run 2)")
-	assert.Empty(t, options.IdentifiedMagicParams, "IdentifiedMagicParams should be empty (run 2)")
+	assert.False(t, optionsNoMagic.HasMagicParams, "HasMagicParams should be false (run 2)")
+	assert.Empty(t, optionsNoMagic.InternalFoundMagicParams, "InternalFoundMagicParams should be empty (run 2)")
 	assert.Contains(t, capturedLogs2, "No magic parameters identified with string: SUPER_SECRET_MAGIC", "Log should indicate no magic params found (run 2)")
 	assert.NotContains(t, capturedLogs2, "Bypassing discovery due to identified magic parameters", "Log should NOT indicate magic bypass (run 2)")
 	assert.Contains(t, capturedLogs2, "Starting Dicovering", "Log should indicate normal discovery start (run 2)")
@@ -204,10 +239,24 @@ func TestMultipleMagicParameters(t *testing.T) {
 	capturedLogs = stdout + stderr
 
 	assert.True(t, options.HasMagicParams, "HasMagicParams should be true")
-	assert.Len(t, options.IdentifiedMagicParams, 2, "Should identify two magic parameters")
-	assert.Contains(t, options.IdentifiedMagicParams, "queryMagic", "IdentifiedMagicParams should contain 'queryMagic'")
-	assert.Contains(t, options.IdentifiedMagicParams, "Header:X-Magic-Header", "IdentifiedMagicParams should contain 'Header:X-Magic-Header'")
-	assert.Contains(t, capturedLogs, "Bypassing discovery due to identified magic parameters: queryMagic, Header:X-Magic-Header", "Log should list both magic params for bypass")
+	if assert.Len(t, options.InternalFoundMagicParams, 2, "Should identify two magic parameters") {
+		foundQuery := false
+		foundHeader := false
+		for _, p := range options.InternalFoundMagicParams {
+			if p.Name == "queryMagic" && p.Type == model.ParamTypeQuery {
+				foundQuery = true
+			}
+			if p.Name == "X-Magic-Header" && p.Type == model.ParamTypeHeader {
+				foundHeader = true
+			}
+		}
+		assert.True(t, foundQuery, "queryMagic (QUERY) not found")
+		assert.True(t, foundHeader, "X-Magic-Header (HEADER) not found")
+	}
+	// Log message might show them in different order, so check for parts
+	assert.Contains(t, capturedLogs, "Bypassing discovery due to identified magic parameters:")
+	assert.Contains(t, capturedLogs, "queryMagic (QUERY)")
+	assert.Contains(t, capturedLogs, "X-Magic-Header (HEADER)")
 	assert.Contains(t, capturedLogs, "Forcing XSS testing on 2 magic parameters.", "Log should indicate forcing XSS on identified params")
 }
 
@@ -234,9 +283,11 @@ func TestMagicWithSkipDiscovery(t *testing.T) {
 	capturedLogs = stdout + stderr
 
 	assert.True(t, options.HasMagicParams, "HasMagicParams should be true due to magic string")
-	assert.Contains(t, options.IdentifiedMagicParams, "magicQuery", "Magic parameter 'magicQuery' should be identified")
-	assert.Len(t, options.IdentifiedMagicParams, 1, "Only the magic parameter should be in IdentifiedMagicParams")
-	assert.Contains(t, capturedLogs, "Bypassing discovery due to identified magic parameters: magicQuery", "Log should indicate discovery bypass for magic param")
+	if assert.Len(t, options.InternalFoundMagicParams, 1, "Only the magic parameter should be in InternalFoundMagicParams") {
+		assert.Equal(t, "magicQuery", options.InternalFoundMagicParams[0].Name)
+		assert.Equal(t, model.ParamTypeQuery, options.InternalFoundMagicParams[0].Type)
+	}
+	assert.Contains(t, capturedLogs, "Bypassing discovery due to identified magic parameters: magicQuery (QUERY)", "Log should indicate discovery bypass for magic param")
 	assert.NotContains(t, capturedLogs, "Skipping discovery phase as requested with --skip-discovery", "The specific --skip-discovery log should be superseded by magic bypass log")
 	assert.Contains(t, capturedLogs, "Forcing XSS testing on 1 magic parameters.", "Should force test on the magic parameter")
 
@@ -268,10 +319,12 @@ func TestMagicWithUniqParam(t *testing.T) {
 	capturedLogs = stdout + stderr
 
 	assert.True(t, options.HasMagicParams, "HasMagicParams should be true")
-	assert.Contains(t, options.IdentifiedMagicParams, "magicQuery", "Magic parameter 'magicQuery' should be identified")
-	assert.Len(t, options.IdentifiedMagicParams, 1, "Only the magic parameter should be in IdentifiedMagicParams if magic logic supersedes -p for discovery bypass")
+	if assert.Len(t, options.InternalFoundMagicParams, 1, "Only the magic parameter should be in InternalFoundMagicParams if magic logic supersedes -p for discovery bypass") {
+		assert.Equal(t, "magicQuery", options.InternalFoundMagicParams[0].Name)
+		assert.Equal(t, model.ParamTypeQuery, options.InternalFoundMagicParams[0].Type)
+	}
 	
-	assert.Contains(t, capturedLogs, "Bypassing discovery due to identified magic parameters: magicQuery", "Log should indicate discovery bypass for magic param")
+	assert.Contains(t, capturedLogs, "Bypassing discovery due to identified magic parameters: magicQuery (QUERY)", "Log should indicate discovery bypass for magic param")
 	assert.Contains(t, capturedLogs, "Forcing XSS testing on 1 magic parameters.", "Should force test only on the identified magic parameter")
 
 	// Current behavior: If magic params are found, they *replace* what -p would have set up in combination with --skip-discovery.
@@ -293,7 +346,7 @@ func TestMagicWithUniqParam(t *testing.T) {
 	capturedLogs2 := stdout2 + stderr2
 
 	assert.False(t, optionsNoMagic.HasMagicParams, "HasMagicParams should be false when no magic string")
-	assert.Empty(t, optionsNoMagic.IdentifiedMagicParams, "IdentifiedMagicParams should be empty")
+	assert.Empty(t, optionsNoMagic.InternalFoundMagicParams, "InternalFoundMagicParams should be empty")
 	assert.NotContains(t, capturedLogs2, "Bypassing discovery due to identified magic parameters")
 	assert.Contains(t, capturedLogs2, "Starting Dicovering", "Normal discovery should run")
 	// In normal discovery, options.UniqParam is used by optimization.CheckInspectionParam to focus analysis.
@@ -312,52 +365,35 @@ func TestPopulateParamsForMagic(t *testing.T) {
 	magicStr := "TEST_POPULATE"
 	options := getTestOptions() // SkipDiscovery is typically true here or not relevant
 	options.MagicString = magicStr
-	options.IdentifiedMagicParams = []string{"magicQuery", "Header:X-Magic-Header", "magicBodyParam"}
-	options.HasMagicParams = true // Assume this was set because IdentifiedMagicParams is populated
+	options.InternalFoundMagicParams = []model.ParamResult{
+		{Name: "magicQuery", Type: model.ParamTypeQuery},
+		{Name: "X-Magic-Header", Type: model.ParamTypeHeader},
+		{Name: "magicBodyParam", Type: model.ParamTypeBodyForm}, // Example type
+	}
+	options.HasMagicParams = true
 
-	// The actual 'params' map is local to Scan. We simulate its creation here.
-	// In Scan, if HasMagicParams is true:
-	// params = make(map[string]model.ParamResult)
-	// for _, paramName := range options.IdentifiedMagicParams { ... populate ... }
-	
-	expectedParams := make(map[string]model.ParamResult)
-	for _, paramName := range options.IdentifiedMagicParams {
-		var pType string
-		actualParamName := paramName
-		if strings.HasPrefix(paramName, "Header:") {
-			pType = "Header"
-			actualParamName = strings.TrimPrefix(paramName, "Header:")
-		} else {
-			// Logic from Scan function:
-			// Check if it's a body parameter based on options.Data.
-			// For this test, let's assume 'magicBodyParam' is from body, others from URL/query.
-			// This part is tricky to perfectly replicate without deeper Scan refactoring or more complex options setup.
-			// The actual Scan function has more context (parsedURL, options.Data).
-			// We'll simplify for this unit test.
-			if actualParamName == "magicBodyParam" {
-				pType = "Body" // Simplified assumption
-			} else {
-				pType = "URL" // Default for query/path like params
-			}
-		}
-		expectedParams[actualParamName] = model.ParamResult{
-			Name:      actualParamName,
-			Type:      pType,
-			Reflected: true, // Always true for magic params
-			Chars:     payload.GetSpecialChar(), // Always set for magic params
+	// This map simulates the 'params' map that would be created inside Scan
+	// and then passed to generatePayloads. It's keyed by param.Name.
+	simulatedParamsMapInScan := make(map[string]model.ParamResult)
+	for _, p := range options.InternalFoundMagicParams {
+		simulatedParamsMapInScan[p.Name] = model.ParamResult{
+			Name:      p.Name,
+			Type:      p.Type,
+			Reflected: true,
+			Chars:     payload.GetSpecialChar(),
 		}
 	}
-	
-	assert.Equal(t, "URL", expectedParams["magicQuery"].Type)
-	assert.Equal(t, "Header", expectedParams["X-Magic-Header"].Type)
-	assert.Equal(t, "Body", expectedParams["magicBodyParam"].Type) // Based on our simplified logic
 
-	for _, p := range expectedParams {
+	assert.Equal(t, model.ParamTypeQuery, simulatedParamsMapInScan["magicQuery"].Type)
+	assert.Equal(t, model.ParamTypeHeader, simulatedParamsMapInScan["X-Magic-Header"].Type)
+	assert.Equal(t, model.ParamTypeBodyForm, simulatedParamsMapInScan["magicBodyParam"].Type)
+
+	for _, p := range simulatedParamsMapInScan {
 		assert.True(t, p.Reflected)
 		assert.Equal(t, payload.GetSpecialChar(), p.Chars)
 	}
 	
-	// This test confirms that if `options.IdentifiedMagicParams` is populated,
-	// the logic within `Scan` *would* create a `params` map with these characteristics
-	// before calling `generatePayloads`.
+	// This test confirms that if `options.InternalFoundMagicParams` is populated correctly by the detection phase,
+	// the logic within `Scan` (that builds the 'params' map for generatePayloads) 
+	// would use these types.
 }
