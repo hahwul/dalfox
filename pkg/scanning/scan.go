@@ -161,6 +161,15 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 }
 
 // generatePayloads generates XSS payloads based on discovery results.
+// getBlindCallbackURL determines the correct format for the blind callback URL.
+// It assumes blindURL is not empty.
+func getBlindCallbackURL(blindURL string) string {
+	if strings.HasPrefix(blindURL, "https://") || strings.HasPrefix(blindURL, "http://") {
+		return blindURL
+	}
+	return "//" + blindURL
+}
+
 func generatePayloads(target string, options model.Options, policy map[string]string, pathReflection map[int]string, params map[string]model.ParamResult) (map[*http.Request]map[string]string, []string) {
 	query := make(map[*http.Request]map[string]string)
 	var durls []string
@@ -398,12 +407,7 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 	// Blind Payload
 	if options.BlindURL != "" {
 		bpayloads := payload.GetBlindPayload()
-		var bcallback string
-		if strings.HasPrefix(options.BlindURL, "https://") || strings.HasPrefix(options.BlindURL, "http://") {
-			bcallback = options.BlindURL
-		} else {
-			bcallback = "//" + options.BlindURL
-		}
+		bcallback := getBlindCallbackURL(options.BlindURL)
 		for _, bpayload := range bpayloads {
 			bp := strings.Replace(bpayload, "CALLBACKURL", bcallback, 10)
 			tq, tm := optimization.MakeHeaderQuery(target, "Referer", bp, options)
@@ -449,11 +453,7 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 			} else {
 				var bcallback string
 				if options.BlindURL != "" {
-					if strings.HasPrefix(options.BlindURL, "https://") || strings.HasPrefix(options.BlindURL, "http://") {
-						bcallback = options.BlindURL
-					} else {
-						bcallback = "//" + options.BlindURL
-					}
+					bcallback = getBlindCallbackURL(options.BlindURL)
 				}
 
 				addedPayloadCount := 0
