@@ -30,6 +30,7 @@ type Options struct {
 	// Feature Options
 	BlindURL                  string `json:"blind,omitempty"`
 	CustomPayloadFile         string `json:"custom-payload-file,omitempty"`
+	CustomBlindXSSPayloadFile string `json:"custom-blind-xss-payload-file,omitempty"`
 	CustomAlertValue          string `json:"custom-alert-value,omitempty"`
 	CustomAlertType           string `json:"custom-alert-type,omitempty"`
 	OnlyDiscovery             bool   `json:"only-discovery,omitempty"`

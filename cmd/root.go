@@ -69,6 +69,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&args.Cookie, "cookie", "C", "", "Add custom cookies to the request. Example: -C 'sessionid=abc123'")
 	rootCmd.PersistentFlags().StringVarP(&args.Data, "data", "d", "", "Use POST method and add body data. Example: -d 'username=admin&password=admin'")
 	rootCmd.PersistentFlags().StringVar(&args.CustomPayload, "custom-payload", "", "Load custom payloads from a file. Example: --custom-payload 'payloads.txt'")
+	rootCmd.PersistentFlags().StringVar(&args.CustomBlindXSSPayloadFile, "custom-blind-xss-payload", "", "Load custom blind XSS payloads from a file. Example: --custom-blind-xss-payload 'payloads.txt'")
 	rootCmd.PersistentFlags().StringVar(&args.CustomAlertValue, "custom-alert-value", "1", "Set a custom alert value. Example: --custom-alert-value 'document.cookie'")
 	rootCmd.PersistentFlags().StringVar(&args.CustomAlertType, "custom-alert-type", "none", "Set a custom alert type. Example: --custom-alert-type 'str,none'")
 	rootCmd.PersistentFlags().StringVar(&args.UserAgent, "user-agent", "", "Set a custom User-Agent header. Example: --user-agent 'Mozilla/5.0'")
@@ -152,11 +153,12 @@ func initConfig() {
 	options = model.Options{
 		Header:            args.Header,
 		Cookie:            args.Cookie,
-		UniqParam:         args.P,
-		BlindURL:          args.Blind,
-		CustomPayloadFile: args.CustomPayload,
-		CustomAlertValue:  args.CustomAlertValue,
-		CustomAlertType:   args.CustomAlertType,
+		UniqParam:                 args.P,
+		BlindURL:                  args.Blind,
+		CustomPayloadFile:         args.CustomPayload,
+		CustomBlindXSSPayloadFile: args.CustomBlindXSSPayloadFile,
+		CustomAlertValue:          args.CustomAlertValue,
+		CustomAlertType:           args.CustomAlertType,
 		Data:              args.Data,
 		UserAgent:         args.UserAgent,
 		OutputFile:        args.Output,
@@ -224,6 +226,9 @@ func initConfig() {
 		}
 		if args.CustomPayload == "" && cfgOptions.CustomPayloadFile != "" {
 			options.CustomPayloadFile = cfgOptions.CustomPayloadFile
+		}
+		if args.CustomBlindXSSPayloadFile == "" && cfgOptions.CustomBlindXSSPayloadFile != "" {
+			options.CustomBlindXSSPayloadFile = cfgOptions.CustomBlindXSSPayloadFile
 		}
 		if args.CustomAlertValue == DefaultCustomAlertValue && cfgOptions.CustomAlertValue != "" {
 			options.CustomAlertValue = cfgOptions.CustomAlertValue
