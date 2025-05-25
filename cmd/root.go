@@ -90,6 +90,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&args.PoCType, "poc-type", "plain", "Select the PoC type. Supported: plain, curl, httpie, http-request. Example: --poc-type 'curl'")
 	rootCmd.PersistentFlags().StringVar(&args.ReportFormat, "report-format", "plain", "Set the format of the report. Supported: plain, json. Example: --report-format 'json'")
 	rootCmd.PersistentFlags().StringVar(&args.HarFilePath, "har-file-path", "", "Specify the path to save HAR files of scan requests. Example: --har-file-path 'scan.har'")
+	rootCmd.PersistentFlags().StringVar(&args.Magic, "magic", "", "Specify the magic string for forced XSS testing")
 
 	// Int
 	rootCmd.PersistentFlags().IntVar(&args.Timeout, "timeout", 10, "Set the request timeout in seconds. Example: --timeout 10")
@@ -207,6 +208,7 @@ func initConfig() {
 		UseBAV:            args.UseBAV,
 		SkipDiscovery:     args.SkipDiscovery,
 		HarFilePath:       args.HarFilePath,
+		MagicString:       args.Magic,
 	}
 
 	// If configuration file was loaded, apply values from it for options not specified via CLI
@@ -300,6 +302,9 @@ func initConfig() {
 		if args.HarFilePath == "" && cfgOptions.HarFilePath != "" {
 			options.HarFilePath = cfgOptions.HarFilePath
 			harFilePath = cfgOptions.HarFilePath
+		}
+		if args.Magic == "" && cfgOptions.MagicString != "" {
+			options.MagicString = cfgOptions.MagicString
 		}
 	}
 

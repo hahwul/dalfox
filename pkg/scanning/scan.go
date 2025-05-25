@@ -87,11 +87,92 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 	}
 	printing.DalLog("SYSTEM", "Valid target [ code:"+strconv.Itoa(tres.StatusCode)+" / size:"+strconv.Itoa(len(body))+" ]", options)
 
+	// Magic character detection
+	if options.MagicString != "" {
+		var magicParams []string
+		// Query Parameters
+		queryValues := parsedURL.Query()
+		for param, values := range queryValues {
+			for _, value := range values {
+				if strings.Contains(value, options.MagicString) {
+					magicParams = append(magicParams, param)
+					break // Found in one of the values, no need to check further for this param
+				}
+			}
+		}
+
+		// Headers
+		for _, header := range options.Header {
+			parts := strings.SplitN(header, ":", 2)
+			if len(parts) == 2 {
+				headerName := strings.TrimSpace(parts[0])
+				headerValue := strings.TrimSpace(parts[1])
+				if strings.Contains(headerValue, options.MagicString) {
+					magicParams = append(magicParams, "Header:"+headerName)
+				}
+			}
+		}
+
+		// Body Parameters
+		if options.Data != "" {
+			bodyParams, err := url.ParseQuery(options.Data)
+			if err == nil {
+				for param, values := range bodyParams {
+					for _, value := range values {
+						if strings.Contains(value, options.MagicString) {
+							magicParams = append(magicParams, param)
+							break // Found in one of the values, no need to check further for this param
+						}
+					}
+				}
+			}
+		}
+
+		options.IdentifiedMagicParams = magicParams
+		if len(magicParams) > 0 {
+			printing.DalLog("INFO", "Identified magic parameters: "+strings.Join(magicParams, ", "), options)
+		} else {
+			printing.DalLog("INFO", "No magic parameters identified with string: "+options.MagicString, options)
+		}
+	}
+
 	// Discovery phase
 	var policy map[string]string
 	var pathReflection map[int]string
 	var params map[string]model.ParamResult
-	if !options.SkipDiscovery {
+
+	if len(options.IdentifiedMagicParams) > 0 {
+		options.HasMagicParams = true
+		printing.DalLog("INFO", "Bypassing discovery due to identified magic parameters: "+strings.Join(options.IdentifiedMagicParams, ", "), options)
+		params = make(map[string]model.ParamResult)
+		for _, paramName := range options.IdentifiedMagicParams {
+			var pType string
+			actualParamName := paramName
+			if strings.HasPrefix(paramName, "Header:") {
+				pType = "Header"
+				actualParamName = strings.TrimPrefix(paramName, "Header:")
+			} else {
+				// Assume URL or Body. Further differentiation might be needed if body params were distinctly marked.
+				// For now, this logic aligns with how discovery populates types for query/body params.
+				// TODO: If options.Data is present and paramName is in options.Data, it's "Body", else "URL".
+				// This requires parsing options.Data again or storing its keys during detection.
+				// For simplicity now, we'll use a generic type or leave it to be inferred by payload generation.
+				// Let's default to "URL" for now as a placeholder, it's often used as a general param type.
+				pType = "URL" // Or "Body" - needs refinement if specific body param type is crucial here.
+			}
+			params[actualParamName] = model.ParamResult{
+				Name:      actualParamName,
+				Type:      pType,
+				Reflected: true,
+				Chars:     payload.GetSpecialChar(), // Assume all chars are reflected for forced testing
+			}
+		}
+		policy = make(map[string]string)
+		policy["Content-Type"] = "text/html" // Default for XSS testing
+		pathReflection = make(map[int]string)
+		printing.DalLog("INFO", "Forcing XSS testing on "+strconv.Itoa(len(params))+" magic parameters.", options)
+
+	} else if !options.SkipDiscovery {
 		policy, pathReflection, params = performDiscovery(target, options, rl)
 	} else {
 		printing.DalLog("SYSTEM", "Skipping discovery phase as requested with --skip-discovery", options)

@@ -46,6 +46,7 @@ type Options struct {
 	FollowRedirect            bool   `json:"follow-redirects,omitempty"`
 	WAFName                   string `json:"waf-name,omitempty"`
 	WAFEvasion                bool
+	MagicString               string `json:"magic,omitempty"`
 	UseBAV                    bool `json:"use-bav,omitempty"`
 	NoBAV                     bool `json:"no-bav,omitempty"`
 	NoGrep                    bool `json:"skip-grepping,omitempty"`
@@ -94,6 +95,8 @@ type Options struct {
 	// Runtime Options
 	AllURLS         int
 	NowURL          int
+	IdentifiedMagicParams []string
+	HasMagicParams  bool
 	Scan            map[string]Scan
 	ScanResult      Result
 	SpinnerObject   *s.Spinner
