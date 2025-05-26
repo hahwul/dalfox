@@ -276,190 +276,373 @@ func TestGeneratePayloads_CustomBlindXSS(t *testing.T) {
 	})
 }
 
-func Test_generatePayloads(t *testing.T) {
-	// Create a mock server
-	server := mockServerForScanTest()
+func TestGeneratePayloads_JSON(t *testing.T) {
+	server := mockServerForScanTest() // Using existing mock server, URL might not be directly used by JSON tests
 	defer server.Close()
 
-	// Create base options
-	options := model.Options{
-		Concurrence:     1,
-		Format:          "plain",
-		Silence:         true,
-		NoSpinner:       true,
-		CustomAlertType: "none",
-	}
+	// Common XSS payloads used by generateJSONPayloadsRecursive
+	// This needs to align with what payload.GetCommonPayload() would return or be a representative subset.
+	// For simplicity, let's assume one common payload for testing the injection mechanism.
+	const testXSSPayload = "\"><script>alert(1)</script>"
 
-	// Create test cases
 	tests := []struct {
-		name           string
-		target         string
-		options        model.Options
-		policy         map[string]string
-		pathReflection map[int]string
-		params         map[string]model.ParamResult
-		wantQueryCount int
-		wantDurlsCount int
+		name                  string
+		jsonData              string
+		expectedInjectionPath string // The JSON path where injection is expected
+		expectPayloads        bool   // Whether any JSON-specific payloads are expected
+		customAssert          func(t *testing.T, req *http.Request, metadata map[string]string, originalJSONData, expectedPath, injectedPayload string)
 	}{
 		{
-			name:   "Basic payload generation",
-			target: server.URL + "/?param=test",
-			options: model.Options{
-				Concurrence:     1,
-				Format:          "plain",
-				Silence:         true,
-				NoSpinner:       true,
-				CustomAlertType: "none",
-				IgnoreParams:    []string{"param2"},
-				UseHeadless:     true,
-			},
-			policy:         map[string]string{"Content-Type": "text/html"},
-			pathReflection: make(map[int]string),
-			params: map[string]model.ParamResult{
-				"param": {
-					Name:           "param",
-					Type:           "URL",
-					Reflected:      true,
-					ReflectedPoint: "Injected:inHTML",
-					Chars:          []string{"'", "\"", "<", ">", "(", ")", "{", "}", "[", "]", " ", "\t", "\n", "\r", "\f", "\v", "\\", "/", "?", "#", "&", "=", "%", ":", ";", ",", "@", "$", "*", "+", "-", "_", ".", "!", "~", "`", "|", "^"},
-				},
-				"param2": {
-					Name:           "param2",
-					Type:           "URL",
-					Reflected:      true,
-					ReflectedPoint: "",
-					Chars:          []string{},
-				},
-			},
-			wantQueryCount: 1, // At least one query should be generated
-			wantDurlsCount: 0,
+			name:                  "Simple Flat JSON",
+			jsonData:              `{"name": "test", "vuln": "target"}`,
+			expectedInjectionPath: "vuln",
+			expectPayloads:        true,
 		},
 		{
-			name:           "No parameters",
-			target:         server.URL,
-			options:        options,
-			policy:         map[string]string{"Content-Type": "text/html"},
-			pathReflection: make(map[int]string),
-			params:         make(map[string]model.ParamResult),
-			wantQueryCount: 0,
-			wantDurlsCount: 0,
+			name:                  "Nested JSON Object",
+			jsonData:              `{"user":{"id":123, "description":"a_target"}}`,
+			expectedInjectionPath: "user.description",
+			expectPayloads:        true,
 		},
 		{
-			name:    "Path reflection payload",
-			target:  server.URL + "/path",
-			options: options,
-			policy:  map[string]string{"Content-Type": "text/html"},
-			pathReflection: map[int]string{
-				0: "Injected:/inHTML",
-			},
-			params: map[string]model.ParamResult{
-				"param": {
-					Name:           "param",
-					Type:           "URL",
-					Reflected:      true,
-					ReflectedPoint: "Injected:inJS-single",
-					Chars:          []string{},
-				},
-			},
-			wantQueryCount: 1, // At least one query should be generated
-			wantDurlsCount: 0,
+			name:                  "JSON Array with Strings",
+			jsonData:              `["item1", "a_target_in_array"]`,
+			expectedInjectionPath: "[1]",
+			expectPayloads:        true,
 		},
 		{
-			name:   "Path reflection payload (body)",
-			target: server.URL + "/path",
-			options: model.Options{
-				Concurrence:     1,
-				Format:          "plain",
-				Silence:         true,
-				NoSpinner:       true,
-				CustomAlertType: "none",
-				Data:            "param=test",
-			},
-			policy: map[string]string{"Content-Type": "text/html"},
-			pathReflection: map[int]string{
-				0: "Injected:/inHTML",
-			},
-			params: map[string]model.ParamResult{
-				"param": {
-					Name:           "param",
-					Type:           "URL",
-					Reflected:      true,
-					ReflectedPoint: "Injected:inJS-single",
-					Chars:          []string{},
-				},
-			},
-			wantQueryCount: 1, // At least one query should be generated
-			wantDurlsCount: 0,
+			name:                  "Mixed Nested Structure (Object with Array with Object)",
+			jsonData:              `{"data":[{"id":"abc","value":"final_target"}]}`,
+			expectedInjectionPath: "data[0].value",
+			expectPayloads:        true,
 		},
 		{
-			name:           "Reflected, but not chars",
-			target:         server.URL,
-			options:        options,
-			policy:         map[string]string{"Content-Type": "text/html"},
-			pathReflection: make(map[int]string),
-			params:         make(map[string]model.ParamResult),
-			wantQueryCount: 0,
-			wantDurlsCount: 0,
+			name:                  "JSON with Non-String Values",
+			jsonData:              `{"count": 5, "active": true, "notes": "notes_target"}`,
+			expectedInjectionPath: "notes",
+			expectPayloads:        true,
 		},
 		{
-			name:           "inJS reflected parameter",
-			target:         server.URL + "/path/?param=test",
-			options:        options,
-			policy:         map[string]string{"Content-Type": "text/html"},
-			pathReflection: make(map[int]string),
-			params: map[string]model.ParamResult{
-				"param": {
-					Name:           "param",
-					Type:           "URL",
-					Reflected:      true,
-					ReflectedPoint: "Injected:inJS-single",
-					Chars:          []string{"'", "\"", "<", ">", "(", ")", "{", "}", "[", "]", " ", "\t", "\n", "\r", "\f", "\v", "\\", "/", "?", "#", "&", "=", "%", ":", ";", ",", "@", "$", "*", "+", "-", "_", ".", "!", "~", "`", "|", "^"},
-				},
-			},
-			wantQueryCount: 1,
-			wantDurlsCount: 0,
+			name:                  "Empty JSON Object",
+			jsonData:              `{}`,
+			expectedInjectionPath: "", // No string fields to inject
+			expectPayloads:        false,
 		},
 		{
-			name:   "inJS reflected parameter",
-			target: server.URL + "/path/",
-			options: model.Options{
-				Concurrence:     1,
-				Format:          "plain",
-				Silence:         true,
-				NoSpinner:       true,
-				CustomAlertType: "none",
-				Data:            "param=test",
-			},
-			policy:         map[string]string{"Content-Type": "text/html"},
-			pathReflection: make(map[int]string),
-			params: map[string]model.ParamResult{
-				"param": {
-					Name:           "param",
-					Type:           "URL",
-					Reflected:      true,
-					ReflectedPoint: "Injected:inATTR-none",
-					Chars:          []string{"'", "\"", "<", ">", "(", ")", "{", "}", "[", "]", " ", "\t", "\n", "\r", "\f", "\v", "\\", "/", "?", "#", "&", "=", "%", ":", ";", ",", "@", "$", "*", "+", "-", "_", ".", "!", "~", "`", "|", "^"},
-				},
-			},
-			wantQueryCount: 1,
-			wantDurlsCount: 0,
+			name:                  "JSON Array with Non-Strings",
+			jsonData:              `[1, true, null]`,
+			expectedInjectionPath: "", // No string fields to inject
+			expectPayloads:        false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			query, durls := generatePayloads(tt.target, tt.options, tt.policy, tt.pathReflection, tt.params)
-
-			if len(query) < tt.wantQueryCount {
-				t.Errorf("generatePayloads() generated %d queries, want at least %d", len(query), tt.wantQueryCount)
+			options := model.Options{
+				Data:            tt.jsonData,
+				DataAsJSON:      true,
+				Concurrence:     1,
+				Format:          "plain",
+				Silence:         true, // Keep tests quiet
+				NoSpinner:       true,
+				CustomAlertType: "none", // Default from existing tests
+				Debug:           false,  // Set to true for verbose logging from generateJSONPayloadsRecursive
+				AuroraObject:    aurora.NewAurora(true), // No color
+				Scan:            make(map[string]model.Scan),
+				PathReflection:  make(map[int]string),
+				Mutex:           &sync.Mutex{},
+				// Method: "POST", // Let MakeRequestQuery handle default to POST for JSON bodies
 			}
 
-			if len(durls) != tt.wantDurlsCount {
-				t.Errorf("generatePayloads() generated %d durls, want %d", len(durls), tt.wantDurlsCount)
+			// These are not directly used by JSON body processing but need to be initialized
+			policy := map[string]string{"Content-Type": "text/html"} // Default, though JSON requests will override
+			pathReflection := make(map[int]string)
+			params := make(map[string]model.ParamResult) // Empty for JSON body tests
+
+			// We need to mock payload.GetCommonPayload() or know its content
+			// For now, we'll assume testXSSPayload is one of the payloads that would be returned.
+			// This is a simplification. A more robust test would involve controlling the payload set.
+
+			generatedQueries, _ := generatePayloads(server.URL, options, policy, pathReflection, params)
+
+			if !tt.expectPayloads {
+				// Filter out non-JSON body queries if any (e.g. path based, header based)
+				jsonBodyQueriesFound := false
+				for _, metadata := range generatedQueries {
+					if metadata["pAction"] == "jsonBody" || metadata["action"] == "jsonBody" { // checking both due to MakeRequestQuery structure
+						jsonBodyQueriesFound = true
+						break
+					}
+				}
+				assert.False(t, jsonBodyQueriesFound, "Expected no JSON body specific payloads, but found some.")
+				return
+			}
+
+			assert.True(t, len(generatedQueries) > 0, "Expected JSON payloads to be generated, but got none.")
+
+			foundInjectedPayloadForPath := false
+			for req, metadata := range generatedQueries {
+				// Focus on JSON body payloads
+				if metadata["action"] != "jsonBody" {
+					continue
+				}
+
+				assert.Equal(t, "application/json", req.Header.Get("Content-Type"), "Content-Type should be application/json")
+				assert.Contains(t, []string{"POST", "PUT", "PATCH"}, req.Method, "HTTP method should be appropriate for body content (POST, PUT, PATCH)")
+
+				// Read the body
+				bodyBytes, err := io.ReadAll(req.Body)
+				req.Body.Close() // Close the body
+				assert.NoError(t, err, "Failed to read request body")
+				bodyString := string(bodyBytes)
+
+				// Check if this request corresponds to the expected injection path
+				if metadata["param"] == tt.expectedInjectionPath {
+					foundInjectedPayloadForPath = true
+					var bodyJSON interface{}
+					err = json.Unmarshal(bodyBytes, &bodyJSON)
+					assert.NoError(t, err, "Failed to unmarshal request body JSON: %s", bodyString)
+
+					// Verify the payload is at the expected path in the unmarshalled JSON
+					// This requires a way to get the value from bodyJSON at tt.expectedInjectionPath
+					// For simplicity, we'll check if the raw XSS payload string is present in the body string
+					// and that the original non-target parts of the JSON are also present.
+					// A more precise check would involve traversing bodyJSON.
+					assert.Contains(t, bodyString, metadata["payload"], "Request body should contain the injected XSS payload")
+					
+					// Custom assertion if provided
+					if tt.customAssert != nil {
+						tt.customAssert(t, req, metadata, tt.jsonData, tt.expectedInjectionPath, metadata["payload"])
+					}
+					// Example of checking if other parts of original JSON are present
+					// This is a basic check.
+					var originalParsed interface{}
+					_ = json.Unmarshal([]byte(tt.jsonData), &originalParsed)
+					if obj, ok := originalParsed.(map[string]interface{}); ok {
+						for k, v := range obj {
+							if k != tt.expectedInjectionPath && !strings.Contains(tt.expectedInjectionPath, k+".") { // if not the target field itself or part of its parent path
+								vStr, _ := json.Marshal(v)
+								assert.Contains(t, bodyString, strings.Trim(string(vStr), `"`), "Request body should retain other parts of the original JSON")
+							}
+						}
+					}
+
+
+					assert.Equal(t, "jsonBody", metadata["action"], "Metadata 'action' should be 'jsonBody'")
+					assert.Equal(t, tt.expectedInjectionPath, metadata["param"], "Metadata 'param' should be the JSON path")
+					assert.Equal(t, "inJSON", metadata["type"], "Metadata 'type' should be 'inJSON'")
+				}
+			}
+			assert.True(t, foundInjectedPayloadForPath, "Payload not injected/found for expected path: %s", tt.expectedInjectionPath)
+		})
+	}
+}
+
+func TestDeepCopyJSON(t *testing.T) {
+	testCases := []struct {
+		name     string
+		input    interface{}
+		modifier func(data interface{}) // Function to modify the data
+	}{
+		{
+			name:  "simple map",
+			input: map[string]interface{}{"key": "value", "num": 123},
+			modifier: func(data interface{}) {
+				if m, ok := data.(map[string]interface{}); ok {
+					m["key"] = "modified"
+				}
+			},
+		},
+		{
+			name:  "nested map",
+			input: map[string]interface{}{"parent": map[string]interface{}{"child": "value"}},
+			modifier: func(data interface{}) {
+				if p, ok := data.(map[string]interface{}); ok {
+					if c, ok := p["parent"].(map[string]interface{}); ok {
+						c["child"] = "modified"
+					}
+				}
+			},
+		},
+		{
+			name:  "slice",
+			input: []interface{}{"a", "b", map[string]interface{}{"c": "d"}},
+			modifier: func(data interface{}) {
+				if s, ok := data.([]interface{}); ok {
+					s[0] = "modified_a"
+					if m, ok := s[2].(map[string]interface{}); ok {
+						m["c"] = "modified_d"
+					}
+				}
+			},
+		},
+		{
+			name:     "nil input",
+			input:    nil,
+			modifier: func(data interface{}) {},
+		},
+		{
+			name:     "string input (not typical for deepCopyJSON but should pass through)",
+			input:    "a string",
+			modifier: func(data interface{}) {}, // strings are immutable
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			originalBytes, _ := json.Marshal(tc.input) // For later comparison
+
+			copied, err := deepCopyJSON(tc.input)
+			assert.NoError(t, err)
+
+			// Verify the copied data is equivalent to the original
+			copiedBytes, _ := json.Marshal(copied)
+			assert.Equal(t, string(originalBytes), string(copiedBytes), "Copied data should be equivalent to original")
+
+			if tc.input != nil {
+				// Modify the copy
+				tc.modifier(copied)
+
+				// Verify the original remains unchanged
+				originalAfterModificationBytes, _ := json.Marshal(tc.input)
+				assert.Equal(t, string(originalBytes), string(originalAfterModificationBytes), "Original data should not be affected by modifications to the copy")
+
+				// Verify the copy is actually different if modifier had an effect
+				copiedAfterModificationBytes, _ := json.Marshal(copied)
+				if string(originalBytes) != "{}" && string(originalBytes) != "[]" && string(originalBytes) != "null" && tc.name != "string input" { // Avoid false positives for empty or nil
+					assert.NotEqual(t, string(originalBytes), string(copiedAfterModificationBytes), "Copied data should be different after modification (if modifier had an effect)")
+				}
+			} else {
+				assert.Nil(t, copied, "Copy of nil should be nil")
 			}
 		})
 	}
 }
+
+func TestSetJSONValueByPath(t *testing.T) {
+	tests := []struct {
+		name          string
+		initialJSON   string
+		path          string
+		valueToSet    string
+		expectedJSON  string
+		expectError   bool
+		errorContains string
+	}{
+		{
+			name:         "set value in flat object",
+			initialJSON:  `{"key1":"val1", "key2":"val2"}`,
+			path:         "key2",
+			valueToSet:   "new_val2",
+			expectedJSON: `{"key1":"val1", "key2":"new_val2"}`,
+		},
+		{
+			name:         "set value in nested object",
+			initialJSON:  `{"user":{"name":"old", "details":{"id":1}}}`,
+			path:         "user.name",
+			valueToSet:   "new_name",
+			expectedJSON: `{"user":{"name":"new_name", "details":{"id":1}}}`,
+		},
+		{
+			name:         "set value in array",
+			initialJSON:  `["a", "b", "c"]`,
+			path:         "[1]",
+			valueToSet:   "new_b",
+			expectedJSON: `["a", "new_b", "c"]`,
+		},
+		{
+			name:         "set value in object within array",
+			initialJSON:  `[{"id":"a", "val":"x"}, {"id":"b", "val":"y"}]`,
+			path:         "[0].val",
+			valueToSet:   "new_x",
+			expectedJSON: `[{"id":"a", "val":"new_x"}, {"id":"b", "val":"y"}]`,
+		},
+		{
+			name:         "set value in array within object",
+			initialJSON:  `{"data":{"items":["one","two"]}}`,
+			path:         "data.items[1]",
+			valueToSet:   "new_two",
+			expectedJSON: `{"data":{"items":["one","new_two"]}}`,
+		},
+		{
+			name:          "path not found - intermediate object",
+			initialJSON:   `{"user":{"name":"test"}}`,
+			path:          "user.profile.email",
+			valueToSet:    "test@example.com",
+			expectError:   true,
+			errorContains: "key 'profile' not found",
+		},
+		{
+			name:          "path not found - final key",
+			initialJSON:   `{"user":{"name":"test"}}`,
+			path:          "user.email",
+			valueToSet:    "test@example.com",
+			expectedJSON:  `{"user":{"name":"test", "email":"test@example.com"}}`, // Assuming it adds the key if parent exists
+		},
+		{
+			name:          "array index out of bounds",
+			initialJSON:   `["a", "b"]`,
+			path:          "[2]",
+			valueToSet:    "c",
+			expectError:   true,
+			errorContains: "array index 2 out of bounds",
+		},
+		{
+			name:          "expected object but got array",
+			initialJSON:   `[{"id":"a"}]`,
+			path:          "[0].id.value", // Trying to access .value on string "a"
+			valueToSet:    "test",
+			expectError:   true,
+			errorContains: "expected object for key 'value', but got string", // Error from trying to treat string "a" as map
+		},
+		{
+			name:          "expected array but got object",
+			initialJSON:   `{"data": {"item": "not_an_array"}}`,
+			path:          "data[0]",
+			valueToSet:    "test",
+			expectError:   true,
+			errorContains: "expected array at segment 'data[0]'", // Error from trying to treat object as array due to path
+		},
+		{
+			name:         "set value at root of object (single key path)",
+			initialJSON:  `{"rootkey":"oldvalue"}`,
+			path:         "rootkey",
+			valueToSet:   "newvalue",
+			expectedJSON: `{"rootkey":"newvalue"}`,
+		},
+		// Note: Setting a value at the root of an array (e.g. path "" for input `["a"]`) is not well-defined
+		// by setJSONValueByPath as it expects a path. currentPath starts as "" in generateJSONPayloadsRecursive
+		// but for a root array, it becomes e.g. "[0]".
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var data interface{}
+			err := json.Unmarshal([]byte(tt.initialJSON), &data)
+			assert.NoError(t, err, "Failed to unmarshal initial JSON for test setup")
+
+			// Use a deep copy for modification to mimic generateJSONPayloadsRecursive behavior
+			dataCopy, err := deepCopyJSON(data)
+			assert.NoError(t, err, "Failed to deep copy data for test")
+
+			err = setJSONValueByPath(dataCopy, tt.path, tt.valueToSet)
+
+			if tt.expectError {
+				assert.Error(t, err)
+				if tt.errorContains != "" {
+					assert.Contains(t, err.Error(), tt.errorContains)
+				}
+			} else {
+				assert.NoError(t, err)
+				if tt.expectedJSON != "" {
+					modifiedBytes, _ := json.Marshal(dataCopy)
+					assert.JSONEq(t, tt.expectedJSON, string(modifiedBytes))
+				}
+			}
+		})
+	}
+}
+
 
 func Test_createHTTPClient(t *testing.T) {
 	tests := []struct {

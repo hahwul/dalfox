@@ -58,4 +58,5 @@ type Args struct {
 	OutputResponse            bool
 	SkipDiscovery             bool
 	ForceHeadlessVerification bool
+	DataAsJSON                bool // Add this line
 }

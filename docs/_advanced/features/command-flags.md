@@ -21,6 +21,7 @@ These flags allow you to customize the HTTP requests sent by Dalfox:
 | `-C, --cookie string` | Add custom cookies to the request.<br>Example: `-C 'sessionid=abc123'` |
 | `--cookie-from-raw string` | Load cookies from a raw HTTP request file.<br>Example: `--cookie-from-raw 'request.txt'` |
 | `-d, --data string` | Use POST method and add body data.<br>Example: `-d 'username=admin&password=admin'` |
+| `--json` | Interpret data from `-d/--data` flag as JSON. Should be used in conjunction with `-d`.<br>Example: `-d '{"key":"value"}' --json` |
 | `-F, --follow-redirects` | Follow HTTP redirects.<br>Example: `-F` |
 | `-H, --header strings` | Add custom headers to the request.<br>Example: `-H 'Authorization: Bearer <token>'` |
 | `-X, --method string` | Override the HTTP method (default: GET).<br>Example: `-X 'PUT'` |

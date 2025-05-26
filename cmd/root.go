@@ -123,6 +123,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&args.OutputResponse, "output-response", false, "Include raw HTTP responses in the results. Example: --output-response")
 	rootCmd.PersistentFlags().BoolVar(&args.SkipDiscovery, "skip-discovery", false, "Skip the entire discovery phase, proceeding directly to XSS scanning. Requires -p flag to specify parameters. Example: --skip-discovery -p 'username'")
 	rootCmd.PersistentFlags().BoolVar(&args.ForceHeadlessVerification, "force-headless-verification", false, "Force headless browser-based verification, useful when automatic detection fails or to override default behavior. Example: --force-headless-verification")
+	rootCmd.PersistentFlags().BoolVar(&args.DataAsJSON, "json", false, "Interpret data from -d/--data flag as JSON. Example: --data '{\"key\":\"value\"}' --json")
 }
 
 // initConfig reads in config file and ENV variables if set.
@@ -207,6 +208,7 @@ func initConfig() {
 		UseBAV:            args.UseBAV,
 		SkipDiscovery:     args.SkipDiscovery,
 		HarFilePath:       args.HarFilePath,
+		DataAsJSON:        args.DataAsJSON, // Add this line
 	}
 
 	// If configuration file was loaded, apply values from it for options not specified via CLI
@@ -300,6 +302,10 @@ func initConfig() {
 		if args.HarFilePath == "" && cfgOptions.HarFilePath != "" {
 			options.HarFilePath = cfgOptions.HarFilePath
 			harFilePath = cfgOptions.HarFilePath
+		}
+		// Ensure CLI takes precedence for DataAsJSON
+		if !args.DataAsJSON && cfgOptions.DataAsJSON {
+			options.DataAsJSON = cfgOptions.DataAsJSON
 		}
 	}
 
