@@ -80,6 +80,7 @@ type Options struct {
 	HarFilePath      string `json:"har-file-path,omitempty"`
 	ReportFormat     string
 	ReportBool       bool
+	DataAsJSON       bool `json:"data-as-json,omitempty"` // Add this line
 
 	// Advanced Options
 	TriggerMethod string `json:"trigger-method,omitempty"`
