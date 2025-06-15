@@ -70,7 +70,6 @@ dev: clean update build test
 
 # Serve documentation site
 docs-serve:
-    #!/usr/bin/env sh
     @echo "Starting documentation server..."
     cd docs || { echo "Error: Directory 'docs' not found"; exit 1; }
     if ! command -v bundle > /dev/null 2>&1; then
