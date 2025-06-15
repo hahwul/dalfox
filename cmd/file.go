@@ -185,8 +185,8 @@ func updateSpinner(options model.Options, sf bool, current, total int) {
 }
 
 func printFileErrorAndUsage() {
-printing.DalLog("ERROR", "Please provide a valid target file (targets.txt or rawdata.raw)", options)
-printing.DalLog("ERROR", "Example: dalfox file ./targets.txt or ./rawdata.raw", options)
+	printing.DalLog("ERROR", "Please provide a valid target file (targets.txt or rawdata.raw)", options)
+	printing.DalLog("ERROR", "Example: dalfox file ./targets.txt or ./rawdata.raw", options)
 }
 
 func init() {

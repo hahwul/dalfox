@@ -45,7 +45,6 @@ func TestScanHandler(t *testing.T) {
 		c.SetParamNames("sid")
 		c.SetParamValues("test-scan-notfound")
 
-
 		scans := []string{} // SID not in scans
 		options := model.Options{
 			Scan: make(map[string]model.Scan), // SID not in options.Scan
@@ -96,13 +95,12 @@ func TestScanHandler(t *testing.T) {
 		c.SetParamValues(sid)
 
 		dummyResults := []model.PoC{{Type: "test-poc", InjectType: "G", PoCType: "R", Method: "GET", Data: "dummy", Param: "p", Payload: "alert(1)", Evidence: "alert(1)", CWE: "CWE-79", Severity: "High"}}
-		
+
 		scans := []string{sid} // It might or might not be in scans slice if finished, but must be in options.Scan
 		options := model.Options{
 			Scan: make(map[string]model.Scan),
 		}
 		options.Scan[sid] = model.Scan{URL: "http://test.com/vuln", ScanID: sid, Results: dummyResults}
-
 
 		if assert.NoError(t, scanHandler(c, &scans, &options)) {
 			assert.Equal(t, http.StatusOK, rec.Code)
@@ -321,7 +319,7 @@ func TestDeleteScanHandler(t *testing.T) {
 		options := model.Options{Scan: make(map[string]model.Scan)}
 		scanIDInMapOnly := "id_only_in_map"
 		options.Scan[scanIDInMapOnly] = model.Scan{URL: "http://test.com", ScanID: scanIDInMapOnly}
-		
+
 		otherID := "other_id"
 		scans := []string{otherID} // scanIDInMapOnly is NOT in this slice
 
@@ -342,7 +340,7 @@ func TestDeleteScanHandler(t *testing.T) {
 		// Assert that "id_only_in_map" is no longer in options.Scan
 		_, existsInMap := options.Scan[scanIDInMapOnly]
 		assert.False(t, existsInMap)
-		
+
 		// Assert that the scans slice remains []string{"other_id"}
 		assert.Equal(t, []string{otherID}, scans)
 		assert.Len(t, options.Scan, 0) // Since only scanIDInMapOnly was in options.Scan

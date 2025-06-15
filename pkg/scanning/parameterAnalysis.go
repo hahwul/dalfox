@@ -259,7 +259,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	}
 
 	var wgg sync.WaitGroup
-const maxConcurrency = 1000 // Define a reasonable maximum limit to prevent excessive memory allocation
+	const maxConcurrency = 1000 // Define a reasonable maximum limit to prevent excessive memory allocation
 	concurrency := options.Concurrence
 	if concurrency > maxConcurrency {
 		concurrency = maxConcurrency

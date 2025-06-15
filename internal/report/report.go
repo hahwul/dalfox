@@ -21,15 +21,14 @@ func GenerateReport(scanResult model.Result, options model.Options) {
 }
 
 func renderTable(params []model.ParamResult, options model.Options) {
-	table := tablewriter.NewWriter(os.Stdout)
-	table.SetHeader([]string{
+	table := tablewriter.NewTable(os.Stdout, tablewriter.WithHeader([]string{
 		"Param",
 		"Type",
 		"Reflected",
 		"R-Point",
 		"R-Code",
 		"Chars",
-	})
+	}))
 
 	for _, v := range params {
 		chars := strings.Join(v.Chars, " ")
@@ -53,8 +52,7 @@ func renderTable(params []model.ParamResult, options model.Options) {
 }
 
 func renderPoCTable(pocs []model.PoC, options model.Options) {
-	pocTable := tablewriter.NewWriter(os.Stdout)
-	pocTable.SetHeader([]string{
+	pocTable := tablewriter.NewTable(os.Stdout, tablewriter.WithHeader([]string{
 		"#",
 		"Type",
 		"Severity",
@@ -62,7 +60,7 @@ func renderPoCTable(pocs []model.PoC, options model.Options) {
 		"Param",
 		"Inject-Type",
 		"CWE",
-	})
+	}))
 
 	for i, v := range pocs {
 		line := []string{
