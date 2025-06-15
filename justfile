@@ -84,7 +84,6 @@ docs-serve:
 
 # Install documentation site dependencies
 docs-install:
-    #!/usr/bin/env sh
     @echo "Installing documentation dependencies..."
     cd docs || { echo "Error: Directory 'docs' not found"; exit 1; }
     if ! command -v bundle > /dev/null 2>&1; then
