@@ -31,6 +31,7 @@ require (
 	github.com/andybalholm/cascadia v1.3.3 // indirect
 	github.com/antonfisher/nested-logrus-formatter v1.3.1 // indirect
 	github.com/chromedp/sysutil v1.1.0 // indirect
+	github.com/cretz/bine v0.2.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect

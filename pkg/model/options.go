@@ -26,6 +26,12 @@ type Options struct {
 	UserAgent     string   `json:"user-agent,omitempty"`
 	ProxyAddress  string   `json:"proxy,omitempty"`
 	CookieFromRaw string   `json:"cookie-from-raw,omitempty"`
+	UseTor        bool     `json:"use-tor,omitempty"`
+
+	// Embedded Tor Options
+	EnableEmbeddedTor bool   `json:"enable-embedded-tor,omitempty"`
+	TorPort           int    `json:"tor-port,omitempty"`
+	TorDataDir        string `json:"tor-data-dir,omitempty"`
 
 	// Feature Options
 	BlindURL                  string `json:"blind,omitempty"`
@@ -104,6 +110,7 @@ type Options struct {
 	WAF             bool
 	Mutex           *sync.Mutex
 	CustomTransport http.RoundTripper
+	TorProcess      interface{} `json:"-"` // To hold the *bine.Tor instance, avoid JSON marshalling
 }
 
 // MassJob is list for mass

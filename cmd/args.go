@@ -49,6 +49,7 @@ type Args struct {
 	OnlyCustomPayload         bool
 	SkipGrep                  bool
 	Debug                     bool
+	EnableEmbeddedTor         bool
 	SkipHeadless              bool
 	UseDeepDXSS               bool
 	OutputAll                 bool
@@ -58,4 +59,5 @@ type Args struct {
 	OutputResponse            bool
 	SkipDiscovery             bool
 	ForceHeadlessVerification bool
+	Tor                       bool
 }

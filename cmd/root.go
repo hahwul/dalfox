@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/hahwul/dalfox/v2/internal/har"
 	"github.com/hahwul/dalfox/v2/internal/printing"
+	internaltor "github.com/hahwul/dalfox/v2/internal/tor"
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	"github.com/logrusorgru/aurora"
 	"github.com/spf13/cobra"
@@ -44,6 +46,68 @@ var rootCmd = &cobra.Command{
 
 // Execute is run rootCmd
 func Execute() {
+	// initConfig() is called by cobra.OnInitialize, so options should be populated.
+
+	var actualTorPort = 0 // To store the port from embedded Tor if successful
+	var embeddedTorSuccessfullyStarted = false
+
+	if options.EnableEmbeddedTor { // User wants to try embedded Tor
+		// Setup TorDataDir (temp or user-provided)
+		if options.TorDataDir == "" {
+			tempDir, err := os.MkdirTemp("", "dalfox-tor-")
+			if err != nil {
+				printing.DalLog("ERROR", fmt.Sprintf("Failed to create temp dir for Tor: %v", err), options)
+				// Log and continue, embeddedTorSuccessfullyStarted will remain false
+			} else {
+				options.TorDataDir = tempDir
+				printing.DalLog("SYSTEM", fmt.Sprintf("Using temp Tor data directory: %s", options.TorDataDir), options)
+			}
+		}
+
+		// Defer the cleanup of TorDataDir (if temp) and StopEmbeddedTor(&options)
+		// This defer needs to be here to ensure it runs if StartEmbeddedTor fails or succeeds,
+		// as long as the initial intent was to use embedded Tor.
+		defer func() {
+			internaltor.StopEmbeddedTor(&options) // StopEmbeddedTor should be safe if TorProcess is nil
+			if options.TorDataDir != "" && strings.HasPrefix(filepath.Base(options.TorDataDir), "dalfox-tor-") {
+				printing.DalLog("SYSTEM", fmt.Sprintf("Removing temp Tor data directory: %s", options.TorDataDir), options)
+				os.RemoveAll(options.TorDataDir)
+			}
+		}()
+
+		// Attempt to start embedded Tor
+		if err := internaltor.StartEmbeddedTor(&options); err != nil {
+			printing.DalLog("ERROR", fmt.Sprintf("Failed to start embedded Tor: %v.", err), options)
+			// embeddedTorSuccessfullyStarted remains false
+		} else {
+			embeddedTorSuccessfullyStarted = true
+			actualTorPort = options.TorPort // Capture the port used by embedded Tor
+		}
+	}
+
+	// Now set proxy based on flags and success
+	if embeddedTorSuccessfullyStarted {
+		options.ProxyAddress = fmt.Sprintf("socks5://127.0.0.1:%d", actualTorPort)
+		options.UseTor = true // Ensure proxy is used
+		printing.DalLog("SYSTEM", fmt.Sprintf("Using EMBEDDED Tor SOCKS proxy at 127.0.0.1:%d", actualTorPort), options)
+	} else if args.Tor { // args.Tor is the original value from the --tor flag
+		// Embedded Tor is not enabled, or failed to start.
+		// Fallback to external Tor if --tor flag was specified.
+		options.ProxyAddress = "socks5://127.0.0.1:9050" // Default external Tor port
+		options.UseTor = true                            // Ensure proxy is used
+		printing.DalLog("SYSTEM", "Using EXTERNAL Tor SOCKS proxy at 127.0.0.1:9050", options)
+		if options.EnableEmbeddedTor { // If embedded was enabled but failed
+			printing.DalLog("INFO", "Embedded Tor failed to start, falling back to external Tor due to --tor flag.", options)
+		}
+	} else {
+		// No Tor flags specified or embedded Tor failed and --tor was not set.
+		// Dalfox proceeds without Tor.
+		options.UseTor = false // Ensure this is explicitly false if no Tor is used.
+		if options.EnableEmbeddedTor { // If embedded was enabled but failed, and no --tor fallback
+			printing.DalLog("WARN", "Embedded Tor failed to start, and --tor flag not specified for fallback. Proceeding without Tor.", options)
+		}
+	}
+
 	defer func() {
 		if options.HarWriter != nil {
 			options.HarWriter.Close()
@@ -114,6 +178,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&args.OnlyCustomPayload, "only-custom-payload", false, "Only test custom payloads. Example: --only-custom-payload")
 	rootCmd.PersistentFlags().BoolVar(&args.SkipGrep, "skip-grepping", false, "Skip built-in grepping. Example: --skip-grepping")
 	rootCmd.PersistentFlags().BoolVar(&args.Debug, "debug", false, "Enable debug mode and save all logs. Example: --debug")
+	rootCmd.PersistentFlags().BoolVar(&args.EnableEmbeddedTor, "enable-embedded-tor", false, "Enable and use an embedded Tor SOCKS proxy (experimental)")
 	rootCmd.PersistentFlags().BoolVar(&args.SkipHeadless, "skip-headless", false, "Skip headless browser-based scanning (DOM XSS and inJS verification). Example: --skip-headless")
 	rootCmd.PersistentFlags().BoolVar(&args.UseDeepDXSS, "deep-domxss", false, "Enable deep DOM XSS testing with more payloads (slow). Example: --deep-domxss")
 	rootCmd.PersistentFlags().BoolVar(&args.OutputAll, "output-all", false, "Enable all log write mode (output to file or stdout). Example: --output-all")
@@ -122,6 +187,7 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&args.OutputRequest, "output-request", false, "Include raw HTTP requests in the results. Example: --output-request")
 	rootCmd.PersistentFlags().BoolVar(&args.OutputResponse, "output-response", false, "Include raw HTTP responses in the results. Example: --output-response")
 	rootCmd.PersistentFlags().BoolVar(&args.SkipDiscovery, "skip-discovery", false, "Skip the entire discovery phase, proceeding directly to XSS scanning. Requires -p flag to specify parameters. Example: --skip-discovery -p 'username'")
+	rootCmd.PersistentFlags().BoolVar(&args.Tor, "tor", false, "Use Tor network for all requests (default: socks5://127.0.0.1:9050)")
 	rootCmd.PersistentFlags().BoolVar(&args.ForceHeadlessVerification, "force-headless-verification", false, "Force headless browser-based verification, useful when automatic detection fails or to override default behavior. Example: --force-headless-verification")
 }
 
@@ -208,6 +274,8 @@ func initConfig() {
 		SkipDiscovery:             args.SkipDiscovery,
 		HarFilePath:               args.HarFilePath,
 	}
+	options.UseTor = args.Tor
+	options.EnableEmbeddedTor = args.EnableEmbeddedTor
 
 	// If configuration file was loaded, apply values from it for options not specified via CLI
 	if configLoaded {
@@ -331,6 +399,10 @@ func initConfig() {
 
 	if args.Grep != "" {
 		loadFile(args.Grep, "grepping")
+	}
+
+	if options.UseTor {
+		options.ProxyAddress = "socks5://127.0.0.1:9050"
 	}
 }
 
