@@ -62,7 +62,7 @@ test-functional: test-functional-setup
 test-all:
     @echo "Running all tests..."
     @just test
-    just test-functional
+    @just test-functional
 
 # Full development workflow: clean, update, build, test
 dev: clean update build test
