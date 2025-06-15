@@ -7,14 +7,25 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"text/template"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/hahwul/dalfox/v2/internal/har"
 	"github.com/hahwul/dalfox/v2/internal/printing"
 	"github.com/hahwul/dalfox/v2/pkg/model"
 	"github.com/logrusorgru/aurora"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
+
+// FlagGroup is a struct for grouping flags
+type FlagGroup struct {
+	Title string
+	Flags *pflag.FlagSet
+}
 
 // Default option values
 const (
@@ -33,12 +44,73 @@ const (
 var options model.Options
 var harFilePath string
 var args Args
+var flagGroups []FlagGroup
+
+const customHelpTemplate = `{{.LongOrUsage}}
+
+Usage:
+  {{.Command.UseLine}}{{if .Command.HasAvailableSubCommands}} [command]{{end}}
+{{if .Command.HasAvailableSubCommands}}
+Available Commands:{{range .Command.Commands}}{{if (or .IsAvailableCommand .IsAdditionalHelpTopicCommand)}}
+  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}
+{{end}}
+{{if .ShowFlagGroups }}
+{{range .FlagGroupsRef}}
+{{.Title}}:
+{{.Flags.FlagUsages | trimTrailingWhitespaces}}
+{{end}}
+{{end}}
+{{if .Command.HasAvailableLocalFlags}}
+  {{if .Command.HasParent}} {{/* For subcommands, this is fine */}}
+Local Flags:
+{{.Command.LocalFlags.FlagUsages | trimTrailingWhitespaces}}
+  {{else if .ShowFlagGroups}} {{/* For root command with flag groups shown */}}
+    {{ $helpFlag := .Command.LocalFlags.Lookup "help" }}
+    {{ if $helpFlag }}
+Local Flags:
+  -h, --help   {{$helpFlag.Usage}}
+    {{end}}
+  {{else}} {{/* For root command if flag groups are NOT shown (e.g. vanilla help) */}}
+Local Flags:
+{{.Command.LocalFlags.FlagUsages | trimTrailingWhitespaces}}
+  {{end}}
+{{end}}
+{{if .Command.HasAvailableInheritedFlags}}{{if not .ShowFlagGroups }}
+Global Flags:
+{{.Command.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}
+{{end}}{{end}}
+{{if .Command.HasExample}}
+Examples:
+{{.Command.Example}}
+{{end}}
+{{if .Command.HasHelpSubCommands}}
+Additional help topics:{{range .Command.Commands}}{{if .IsAdditionalHelpTopicCommand}}
+  {{rpad .Command.CommandPath .Command.CommandPathPadding}} {{.Short}}{{end}}{{end}}
+{{end}}
+{{if .Command.HasAvailableSubCommands}}
+Use "{{.Command.CommandPath}} [command] --help" for more information about a command.{{end}}
+`
 
 var rootCmd = &cobra.Command{
 	Use: "dalfox",
+	Short: "Dalfox is a powerful open-source XSS scanner and utility focused on automation.",
+	Long: `Dalfox is a fast and powerful parameter analysis and XSS scanning tool.
+It helps you find XSS vulnerabilities in web applications with ease.
+Dalfox supports various features like parameter mining, custom payloads,
+blind XSS detection, and much more.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		printing.Banner(options)
-		printing.DalLog("YELLOW", "Read the help page using the -h flag to see other options and flags!", options)
+		// If no subcommand is given and it's not a help request, show help.
+		// This prevents running the banner and log if just 'dalfox' is typed.
+		// Help flag (-h, --help) is handled by Cobra automatically by showing help.
+		if len(args) == 0 {
+			cmd.Help()
+			os.Exit(0)
+		}
+		// Original run logic (perhaps for a default action if args were present but not a known command)
+		// For now, if args are present and not a command, Cobra shows an error.
+		// If you want 'dalfox somearg' to do something specific by default, that logic goes here.
+		// printing.Banner(options)
+		// printing.DalLog("YELLOW", "Read the help page using the -h flag to see other options and flags!", options)
 	},
 }
 
@@ -123,6 +195,127 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&args.OutputResponse, "output-response", false, "Include raw HTTP responses in the results. Example: --output-response")
 	rootCmd.PersistentFlags().BoolVar(&args.SkipDiscovery, "skip-discovery", false, "Skip the entire discovery phase, proceeding directly to XSS scanning. Requires -p flag to specify parameters. Example: --skip-discovery -p 'username'")
 	rootCmd.PersistentFlags().BoolVar(&args.ForceHeadlessVerification, "force-headless-verification", false, "Force headless browser-based verification, useful when automatic detection fails or to override default behavior. Example: --force-headless-verification")
+
+	// Initialize flag groups
+	initializeFlagGroups()
+
+	// Set custom help template and function for rootCmd
+	rootCmd.SetHelpTemplate(customHelpTemplate)
+	rootCmd.SetHelpFunc(getCustomHelpFunction())
+
+	// Apply to subcommands
+	for _, subCmd := range rootCmd.Commands() {
+		subCmd.SetHelpTemplate(customHelpTemplate)
+		subCmd.SetHelpFunc(getCustomHelpFunction()) // Use the same custom help logic
+	}
+}
+
+// getCustomHelpFunction returns a function that can be used as a custom help function for cobra commands.
+// This approach allows us to generate a new closure for each command if needed, or just share the same one.
+func getCustomHelpFunction() func(*cobra.Command, []string) {
+	return func(command *cobra.Command, args []string) {
+		// Data to pass to the template
+		// The template expects fields like .Command, .flagGroupsRef, .showFlagGroups
+		templateData := struct {
+			Command         *cobra.Command
+			FlagGroupsRef   []FlagGroup // Renamed to match template expectation if it was .flagGroupsRef
+			ShowFlagGroups  bool
+			// Expose other necessary fields/methods if your template uses them directly,
+			// e.g. if it doesn't use .Command.Long but just .Long
+			LongOrUsage string
+		}{
+			Command:         command,
+			FlagGroupsRef:   flagGroups, // Assumes flagGroups is accessible (e.g. package-level var)
+			ShowFlagGroups:  len(flagGroups) > 0, // Show groups if they exist
+		}
+
+		// Logic for LongOrUsage (simplified from Cobra's internal help command)
+		if command.Long != "" {
+			templateData.LongOrUsage = command.Long
+		} else if command.UsageString() != "" {
+			templateData.LongOrUsage = command.UsageString()
+		} else {
+			templateData.LongOrUsage = command.Short
+		}
+
+
+		tmpl := template.New("customHelp")
+
+		// Manually add rpad and other necessary functions
+		tmpl.Funcs(template.FuncMap{
+			"rpad": func(s string, padding int) string {
+				// A simple rpad, Cobra's might handle multi-byte chars better by default.
+				// This one calculates padding based on rune count.
+				sLen := utf8.RuneCountInString(s)
+				if padding <= sLen {
+					return s
+				}
+				return s + strings.Repeat(" ", padding-sLen)
+			},
+			"trimTrailingWhitespaces": func(s string) string {
+				return strings.TrimRightFunc(s, unicode.IsSpace)
+			},
+			// Cobra's default func map also includes:
+			// "gt", "hasPrefix", "hasSuffix", "contains", "eq", "ne",
+			// "split", "replace", "join", "lower", "upper", "title",
+			// "trim", "trimLeft", "trimRight", "substring"
+			// Many of these are from text/template or a common library like sprig,
+			// but rpad is specific.
+		})
+
+		// customHelpTemplate is the global const string
+		parsedTmpl, err := tmpl.Parse(customHelpTemplate)
+		if err != nil {
+			command.PrintErrln("Error parsing custom help template:", err)
+			command.PrintErrln(command.UsageString())
+			return
+		}
+
+		err = parsedTmpl.Execute(command.OutOrStdout(), templateData)
+		if err != nil {
+			command.PrintErrln("Error executing custom help template:", err)
+			command.PrintErrln(command.UsageString())
+		}
+	}
+}
+
+
+func initializeFlagGroups() {
+	flagGroups = []FlagGroup{
+		{Title: "Input", Flags: pflag.NewFlagSet("Input", pflag.ExitOnError)},
+		{Title: "Request", Flags: pflag.NewFlagSet("Request", pflag.ExitOnError)},
+		{Title: "Scanning", Flags: pflag.NewFlagSet("Scanning", pflag.ExitOnError)},
+		{Title: "Mining", Flags: pflag.NewFlagSet("Mining", pflag.ExitOnError)},
+		{Title: "Output", Flags: pflag.NewFlagSet("Output", pflag.ExitOnError)},
+		{Title: "Advanced", Flags: pflag.NewFlagSet("Advanced", pflag.ExitOnError)},
+	}
+
+	flagMap := map[string][]string{
+		"Input":    {"config", "custom-payload", "custom-blind-xss-payload", "data", "grep", "remote-payloads", "remote-wordlists", "har-file-path"},
+		"Request":  {"header", "cookie", "user-agent", "method", "cookie-from-raw"},
+		"Scanning": {"param", "ignore-param", "blind", "timeout", "delay", "worker", "skip-headless", "deep-domxss", "waf-evasion", "skip-discovery", "force-headless-verification", "use-bav", "skip-bav", "skip-mining-dom", "skip-mining-dict", "skip-mining-all", "skip-xss-scanning", "only-custom-payload", "skip-grepping"},
+		"Mining":   {"mining-dict-word", "mining-dict", "mining-dom"},
+		"Output":   {"output", "format", "only-poc", "report", "output-all", "output-request", "output-response", "poc-type", "report-format", "silence", "no-color", "no-spinner"},
+		"Advanced": {"custom-alert-value", "custom-alert-type", "found-action", "found-action-shell", "proxy", "ignore-return", "max-cpu", "only-discovery", "follow-redirects", "debug"},
+	}
+
+	rootCmd.PersistentFlags().VisitAll(func(f *pflag.Flag) {
+		assigned := false
+		for i, group := range flagGroups {
+			for _, flagName := range flagMap[group.Title] {
+				if f.Name == flagName {
+					flagGroups[i].Flags.AddFlag(f)
+					assigned = true
+					break
+				}
+			}
+			if assigned {
+				break
+			}
+		}
+		// If a flag is not assigned to any group, add it to a default "Other" group or handle as needed.
+		// For now, we assume all flags will be assigned.
+	})
 }
 
 // initConfig reads in config file and ENV variables if set.
