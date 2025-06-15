@@ -72,13 +72,13 @@ dev: clean update build test
 docs-serve:
     @echo "Starting documentation server..."
     cd docs || { echo "Error: Directory 'docs' not found"; exit 1; }
-    if ! command -v bundle > /dev/null 2>&1; then
-        echo "Error: Ruby bundler is not installed. Please install Ruby and Bundler first."
-        exit 1
+    if ! command -v bundle > /dev/null 2>&1; then \
+        echo "Error: Ruby bundler is not installed. Please install Ruby and Bundler first."; \
+        exit 1; \
     fi
-    if ! bundle check > /dev/null 2>&1; then
-        echo "Error: Dependencies are not met. Please run 'just docs-install'."
-        exit 1
+    if ! bundle check > /dev/null 2>&1; then \
+        echo "Error: Dependencies are not met. Please run 'just docs-install'."; \
+        exit 1; \
     fi
     bundle exec jekyll s
 
@@ -86,9 +86,9 @@ docs-serve:
 docs-install:
     @echo "Installing documentation dependencies..."
     cd docs || { echo "Error: Directory 'docs' not found"; exit 1; }
-    if ! command -v bundle > /dev/null 2>&1; then
-        echo "Error: Ruby bundler is not installed. Please install Ruby and Bundler first."
-        exit 1
+    if ! command -v bundle > /dev/null 2>&1; then \
+        echo "Error: Ruby bundler is not installed. Please install Ruby and Bundler first."; \
+        exit 1; \
     fi
     bundle install
 
