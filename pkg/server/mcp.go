@@ -96,7 +96,10 @@ func RunMCPServer(options model.Options) {
 
 	// Handler for the scan tool
 	s.AddTool(scanTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		url := request.Params.Arguments["url"].(string)
+		// Type assert Arguments to map[string]any
+		args := request.Params.Arguments.(map[string]any)
+
+		url := args["url"].(string)
 		if url == "" {
 			return nil, fmt.Errorf("URL is required")
 		}
@@ -121,13 +124,13 @@ func RunMCPServer(options model.Options) {
 		}
 
 		for _, opt := range stringOptions {
-			if value, ok := request.Params.Arguments[opt.paramName].(string); ok && value != "" {
+			if value, ok := args[opt.paramName].(string); ok && value != "" {
 				opt.setter(value)
 			}
 		}
 
 		// Handle special case for headers which requires splitting
-		if headers, ok := request.Params.Arguments["headers"].(string); ok && headers != "" {
+		if headers, ok := args["headers"].(string); ok && headers != "" {
 			rqOptions.Header = strings.Split(headers, "|")
 		}
 
@@ -141,7 +144,7 @@ func RunMCPServer(options model.Options) {
 		}
 
 		for _, opt := range numericOptions {
-			if value, ok := request.Params.Arguments[opt.paramName].(float64); ok {
+			if value, ok := args[opt.paramName].(float64); ok {
 				opt.setter(int(value))
 			}
 		}
@@ -159,22 +162,22 @@ func RunMCPServer(options model.Options) {
 		}
 
 		for _, opt := range boolOptions {
-			if value, ok := request.Params.Arguments[opt.paramName].(bool); ok {
+			if value, ok := args[opt.paramName].(bool); ok {
 				opt.setter(value)
 			}
 		}
 
 		// Handle special cases for mining options
-		if skipMiningAll, ok := request.Params.Arguments["skip-mining-all"].(bool); ok && skipMiningAll {
+		if skipMiningAll, ok := args["skip-mining-all"].(bool); ok && skipMiningAll {
 			rqOptions.Mining = false
 			rqOptions.FindingDOM = false
 		}
 
-		if skipMiningDict, ok := request.Params.Arguments["skip-mining-dict"].(bool); ok && skipMiningDict {
+		if skipMiningDict, ok := args["skip-mining-dict"].(bool); ok && skipMiningDict {
 			rqOptions.Mining = false
 		}
 
-		if skipMiningDOM, ok := request.Params.Arguments["skip-mining-dom"].(bool); ok && skipMiningDOM {
+		if skipMiningDOM, ok := args["skip-mining-dom"].(bool); ok && skipMiningDOM {
 			rqOptions.FindingDOM = false
 		}
 
@@ -218,7 +221,10 @@ func RunMCPServer(options model.Options) {
 
 	// Handler for the results tool
 	s.AddTool(resultsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		scanID := request.Params.Arguments["scan_id"].(string)
+		// Type assert Arguments to map[string]any
+		args := request.Params.Arguments.(map[string]any)
+
+		scanID := args["scan_id"].(string)
 		if scanID == "" {
 			return nil, fmt.Errorf("scan_id is required")
 		}
