@@ -33,7 +33,7 @@ func RunAPIServer(options model.Options) {
 	if options.Scan == nil {
 		options.Scan = make(map[string]model.Scan)
 	}
-	e := setupEchoServer(&options, &scans) // Pass address of options
+	e := setupEchoServer(&options, &scans)                      // Pass address of options
 	printing.DalLog("SYSTEM", "Listen "+e.Server.Addr, options) // Pass options by value
 	graceful.ListenAndServe(e.Server, 5*time.Second)
 }
@@ -93,8 +93,8 @@ func scansHandler(c echo.Context, scans *[]string) error {
 func scanHandler(c echo.Context, scans *[]string, options *model.Options) error { // options is now *model.Options
 	sid := c.Param("sid")
 	// Check if sid exists in options.Scan (source of truth) or in the scans slice for active scanning processes
-	scanData, inOptionsScan := options.Scan[sid]    // This will now use the pointer's Scan field
-	scanResult := GetScan(sid, *options)             // Dereference options for GetScan
+	scanData, inOptionsScan := options.Scan[sid] // This will now use the pointer's Scan field
+	scanResult := GetScan(sid, *options)         // Dereference options for GetScan
 
 	if !inOptionsScan && !contains(*scans, sid) { // If not in options.Scan and not in scans slice
 		return c.JSON(http.StatusNotFound, Res{Code: 404, Msg: "Scan ID not found"})
