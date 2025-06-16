@@ -6,16 +6,18 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var trigger, requestMethod string
-var sequence int
+// Command-line flags for stored XSS mode
+var trigger, requestMethod string // Trigger URL and HTTP request method
+var sequence int                  // Sequence number for URLs
 
-// sxssCmd represents the sxss command
+// sxssCmd represents the stored XSS command for testing stored cross-site scripting vulnerabilities
 var sxssCmd = &cobra.Command{
 	Use:   "sxss [target] [flags]",
 	Short: "Use Stored XSS mode",
 	Run:   runSxssCmd,
 }
 
+// runSxssCmd handles execution of the stored XSS testing command
 func runSxssCmd(cmd *cobra.Command, args []string) {
 	printing.Banner(options)
 	if len(args) == 0 {
@@ -46,11 +48,13 @@ func runSxssCmd(cmd *cobra.Command, args []string) {
 	}
 }
 
+// printSXSSErrorAndUsage displays error messages and usage examples for the stored XSS command
 func printSXSSErrorAndUsage() {
 	printing.DalLog("ERROR", "Input target url", options)
 	printing.DalLog("ERROR", "e.g dalfox sxss https://google.com/?q=1 --trigger https://target/profile", options)
 }
 
+// init registers the stored XSS command and its flags
 func init() {
 	rootCmd.AddCommand(sxssCmd)
 	sxssCmd.PersistentFlags().StringVar(&requestMethod, "request-method", "GET", "Specify the HTTP request method to send to the server. Example: --request-method 'POST'")

@@ -21,71 +21,31 @@ import (
 	"github.com/spf13/pflag"
 )
 
-// FlagGroup is a struct for grouping flags
+// FlagGroup represents a group of related command-line flags
+// with a title for better organization in the help output
 type FlagGroup struct {
-	Title string
-	Flags *pflag.FlagSet
+	Title string         // Display name for the flag group
+	Flags *pflag.FlagSet // Set of flags in this group
 }
 
-// Default option values
+// Default option values for command-line flags
 const (
-	DefaultCustomAlertValue = "1"
-	DefaultCustomAlertType  = "none"
-	DefaultFormat           = "plain"
-	DefaultFoundActionShell = "bash"
-	DefaultTimeout          = 10
-	DefaultConcurrence      = 100
-	DefaultMaxCPU           = 1
-	DefaultMethod           = "GET"
-	DefaultPoCType          = "plain"
-	DefaultReportFormat     = "plain"
+	DefaultCustomAlertValue = "1"     // Default value for custom XSS alerts
+	DefaultCustomAlertType  = "none"  // Default type of custom alert
+	DefaultFormat           = "plain" // Default output format
+	DefaultFoundActionShell = "bash"  // Default shell for vulnerability actions
+	DefaultTimeout          = 10      // Default request timeout in seconds
+	DefaultConcurrence      = 100     // Default number of concurrent workers
+	DefaultMaxCPU           = 1       // Default maximum CPU cores to use
+	DefaultMethod           = "GET"   // Default HTTP method
+	DefaultPoCType          = "plain" // Default Proof of Concept format
+	DefaultReportFormat     = "plain" // Default report format
 )
 
 var options model.Options
 var harFilePath string
 var args Args
 var flagGroups []FlagGroup
-
-const customHelpTemplate = `{{.LongOrUsage}}
-
-Usage:
-  {{.Command.UseLine}}{{if .Command.HasAvailableSubCommands}} [command]{{end}}
-{{- if .Command.HasAvailableSubCommands}}
-
-Available Commands:{{range .Command.Commands}}{{if (or .IsAvailableCommand .IsAdditionalHelpTopicCommand)}}
-  {{rpad .Name .NamePadding }} {{.Short}}{{end}}{{end}}{{end}}
-{{- if .ShowFlagGroups }}
-
-{{range .FlagGroupsRef}}{{.Title}}:
-{{.Flags.FlagUsages | trimTrailingWhitespaces}}
-
-{{end}}{{end}}
-{{- if .Command.HasAvailableLocalFlags}}
-  {{- if .Command.HasParent}}
-Local Flags:
-{{.Command.LocalFlags.FlagUsages | trimTrailingWhitespaces}}
-  {{- else if .ShowFlagGroups}}
-    {{- $helpFlag := .Command.LocalFlags.Lookup "help" }}
-    {{- if $helpFlag }}
-Local Flags:
-  -h, --help   {{$helpFlag.Usage}}{{end}}
-  {{- else}}
-Local Flags:
-{{.Command.LocalFlags.FlagUsages | trimTrailingWhitespaces}}
-  {{- end}}
-{{- end}}
-{{- if .Command.HasAvailableInheritedFlags}}{{if not .ShowFlagGroups }}
-Global Flags:
-{{.Command.InheritedFlags.FlagUsages | trimTrailingWhitespaces}}{{end}}{{end}}
-{{- if .Command.HasExample}}
-Examples:
-{{.Command.Example}}{{end}}
-{{- if .Command.HasHelpSubCommands}}
-Additional help topics:{{range .Command.Commands}}{{if .IsAdditionalHelpTopicCommand}}
-  {{rpad .Command.CommandPath .Command.CommandPathPadding}} {{.Short}}{{end}}{{end}}{{end}}
-{{- if .Command.HasAvailableSubCommands}}
-
-Use "{{.Command.CommandPath}} [command] --help" for more information about a command.{{end}}`
 
 var rootCmd = &cobra.Command{
 	Use:   "dalfox",
@@ -95,22 +55,20 @@ It helps you find XSS vulnerabilities in web applications with ease.
 Dalfox supports various features like parameter mining, custom payloads,
 blind XSS detection, and much more.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		// If no subcommand is given and it's not a help request, show help.
-		// This prevents running the banner and log if just 'dalfox' is typed.
-		// Help flag (-h, --help) is handled by Cobra automatically by showing help.
+		// Display help when no arguments are provided
+		// This prevents showing the banner when just 'dalfox' is typed
+		// Help flags (-h, --help) are handled by Cobra automatically
 		if len(args) == 0 {
 			cmd.Help()
 			os.Exit(0)
 		}
-		// Original run logic (perhaps for a default action if args were present but not a known command)
-		// For now, if args are present and not a command, Cobra shows an error.
-		// If you want 'dalfox somearg' to do something specific by default, that logic goes here.
-		// printing.Banner(options)
-		// printing.DalLog("YELLOW", "Read the help page using the -h flag to see other options and flags!", options)
+		// For any custom default behavior when arguments are provided
+		// but don't match a subcommand, add that logic here
 	},
 }
 
-// Execute is run rootCmd
+// Execute runs the root command and handles any errors
+// It also ensures proper cleanup of resources like the HAR writer
 func Execute() {
 	defer func() {
 		if options.HarWriter != nil {
@@ -203,10 +161,10 @@ func init() {
 	// Each subcommand will set its own help function in its init()
 }
 
-// getCustomHelpFunction returns a function that can be used as a custom help function for cobra commands.
-// This approach allows us to generate a new closure for each command if needed, or just share the same one.
-// GetCustomHelpFunction returns the custom help function used by the root command
+// GetCustomHelpFunction returns a custom help function for Cobra commands
 // This is exported so subcommands can also use it directly
+// The function generates a closure that renders a custom help template
+// with better organization of command information and flag groups
 func GetCustomHelpFunction() func(*cobra.Command, []string) {
 	return func(command *cobra.Command, args []string) {
 		// Data to pass to the template

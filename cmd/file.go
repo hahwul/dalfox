@@ -19,13 +19,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// fileCmd represents the file command
+// fileCmd represents the file command for scanning targets from a file
 var fileCmd = &cobra.Command{
 	Use:   "file [filePath] [flags]",
-	Short: "Use file mode(targets list or rawdata)",
+	Short: "Use file mode (targets list or raw HTTP request data)",
 	Run:   runFileCmd,
 }
 
+// runFileCmd handles execution of the file command with appropriate mode selection
 func runFileCmd(cmd *cobra.Command, args []string) {
 	sf, _ := cmd.Flags().GetBool("silence-force")
 	if sf {
@@ -57,6 +58,8 @@ func runFileCmd(cmd *cobra.Command, args []string) {
 	}
 }
 
+// runRawDataMode processes a file containing raw HTTP request data
+// It parses the request format and extracts method, path, headers, host, and body
 func runRawDataMode(filePath string, cmd *cobra.Command) {
 	printing.DalLog("SYSTEM", "Using file mode with raw data format", options)
 	ff, err := voltFile.ReadLinesOrLiteral(filePath)
@@ -111,6 +114,8 @@ func runRawDataMode(filePath string, cmd *cobra.Command) {
 	_, _ = scanning.Scan(target, options, "single")
 }
 
+// runHarMode processes targets from a HAR (HTTP Archive) file
+// It extracts requests from the HAR file and scans each one
 func runHarMode(filePath string, cmd *cobra.Command, sf bool) {
 	printing.DalLog("SYSTEM", "Using file mode with targets list from HAR", options)
 	if (!options.NoSpinner || !options.Silence) && !sf {
@@ -151,6 +156,8 @@ func runHarMode(filePath string, cmd *cobra.Command, sf bool) {
 	}
 }
 
+// runFileMode processes a file containing a list of target URLs
+// It supports both single target and multicast/mass modes
 func runFileMode(filePath string, cmd *cobra.Command, sf bool) {
 	printing.DalLog("SYSTEM", "Using file mode with targets list", options)
 	if (!options.NoSpinner || !options.Silence) && !sf {
@@ -174,6 +181,8 @@ func runFileMode(filePath string, cmd *cobra.Command, sf bool) {
 	}
 }
 
+// updateSpinner updates the progress spinner with current scanning status
+// It displays the current task number, total tasks, and completion percentage
 func updateSpinner(options model.Options, sf bool, current, total int) {
 	if (!options.NoSpinner || !options.Silence) && !sf {
 		options.Mutex.Lock()
@@ -184,11 +193,13 @@ func updateSpinner(options model.Options, sf bool, current, total int) {
 	}
 }
 
+// printFileErrorAndUsage displays error messages and usage examples for the file command
 func printFileErrorAndUsage() {
 	printing.DalLog("ERROR", "Please provide a valid target file (targets.txt or rawdata.raw)", options)
 	printing.DalLog("ERROR", "Example: dalfox file ./targets.txt or ./rawdata.raw", options)
 }
 
+// init registers the file command and its flags
 func init() {
 	rootCmd.AddCommand(fileCmd)
 	fileCmd.Flags().Bool("rawdata", false, "[FORMAT] Use raw data from Burp/ZAP. Example: --rawdata")

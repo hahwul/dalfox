@@ -6,16 +6,19 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var port int
-var host, server_type string
+// Command-line flags for server configuration
+var port int                 // Port to bind the server to
+var host, server_type string // Host address and server type
 
-// serverCmd represents the server command
+// serverCmd represents the server command for starting API servers
 var serverCmd = &cobra.Command{
 	Use:   "server",
 	Short: "Start API Server",
 	Run:   runServerCmd,
 }
 
+// runServerCmd handles execution of the server command
+// It starts either a REST API or MCP server based on the configured type
 func runServerCmd(cmd *cobra.Command, args []string) {
 	printing.Banner(options)
 	options.ServerHost = host
@@ -33,6 +36,7 @@ func runServerCmd(cmd *cobra.Command, args []string) {
 	}
 }
 
+// init registers the server command and its flags
 func init() {
 	rootCmd.AddCommand(serverCmd)
 	serverCmd.Flags().IntVar(&port, "port", 6664, "Specify the port to bind the server to. Example: --port 6664")

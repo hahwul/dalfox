@@ -17,13 +17,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// pipeCmd represents the pipe command
+// pipeCmd represents the pipe command for processing targets from standard input
 var pipeCmd = &cobra.Command{
 	Use:   "pipe [flags]",
 	Short: "Use pipeline mode",
 	Run:   runPipeCmd,
 }
 
+// runPipeCmd handles execution of the pipe command for scanning targets from stdin
 func runPipeCmd(cmd *cobra.Command, args []string) {
 	sf, _ := cmd.Flags().GetBool("silence-force")
 	if sf {
@@ -59,6 +60,8 @@ func runPipeCmd(cmd *cobra.Command, args []string) {
 	}
 }
 
+// runMulticastMode processes multiple targets in parallel using worker pools
+// It distributes scanning tasks across multiple goroutines for efficient processing
 func runMulticastMode(targets []string, cmd *cobra.Command, sf bool, limit int) {
 	printing.DalLog("SYSTEM", "Using multicasting mode", options)
 	options.Silence = true
@@ -148,6 +151,8 @@ func runMulticastMode(targets []string, cmd *cobra.Command, sf bool, limit int) 
 	}
 }
 
+// runSingleMode processes targets sequentially one by one
+// It's more resource-friendly but slower than multicast mode
 func runSingleMode(targets []string, sf bool, limit int) {
 	options.AllURLS = len(targets)
 
@@ -201,6 +206,7 @@ func runSingleMode(targets []string, sf bool, limit int) {
 	}
 }
 
+// init registers the pipe command and its flags
 func init() {
 	rootCmd.AddCommand(pipeCmd)
 	pipeCmd.Flags().Bool("multicast", false, "Enable parallel scanning in N*Host mode (only shows PoC code). Example: --multicast")

@@ -9,7 +9,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// This file contains utility functions for managing command-line help output
+// and other shared functionality used across the different commands
+
 // safeUsageString returns a command's usage string but avoids recursion
+// This prevents infinite recursion that can occur when using UsageString() directly
 func safeUsageString(c *cobra.Command) string {
 	// Return just the command's Long/Short directly instead of calling UsageString()
 	// to avoid potential infinite recursion
@@ -19,10 +23,11 @@ func safeUsageString(c *cobra.Command) string {
 	return c.Short
 }
 
-// SubCommandCustomHelpFunc provides a help function that only shows help once
+// SubCommandCustomHelpFunc provides a custom help formatter for subcommands
 // This function is shared across all subcommands to ensure consistent help display
+// It leverages templates to create a more organized and user-friendly help output
 func SubCommandCustomHelpFunc(c *cobra.Command, _ []string) {
-	// Data to pass to the template
+	// Prepare data structure to pass to the help template
 	templateData := struct {
 		Command        *cobra.Command
 		FlagGroupsRef  []FlagGroup
@@ -34,7 +39,8 @@ func SubCommandCustomHelpFunc(c *cobra.Command, _ []string) {
 		ShowFlagGroups: len(flagGroups) > 0,
 	}
 
-	// Logic for LongOrUsage - Use safe version to avoid recursion
+	// Set the description text, using the long description if available, otherwise use short
+	// Using the safe version to avoid potential infinite recursion
 	if c.Long != "" {
 		templateData.LongOrUsage = c.Long
 	} else {
@@ -43,7 +49,7 @@ func SubCommandCustomHelpFunc(c *cobra.Command, _ []string) {
 
 	tmpl := template.New("customHelp")
 
-	// Add functions to template
+	// Add utility functions to the template for text formatting
 	tmpl.Funcs(template.FuncMap{
 		"rpad": func(s string, padding int) string {
 			sLen := utf8.RuneCountInString(s)
@@ -71,15 +77,16 @@ func SubCommandCustomHelpFunc(c *cobra.Command, _ []string) {
 
 // ApplySubCommandCustomHelp configures a subcommand to use the custom help format
 // This function should be called in the init() function of each subcommand
+// It sets up consistent help formatting across all DalFox commands
 func ApplySubCommandCustomHelp(cmd *cobra.Command) {
-	// Set help template
+	// Apply the custom help template to the command
 	cmd.SetHelpTemplate(customHelpTemplate)
 
-	// Set custom help function
+	// Set the custom help function that will render the template
 	cmd.SetHelpFunc(SubCommandCustomHelpFunc)
 
-	// Override usage function to directly print help without using UsageString()
-	// This prevents potential infinite recursion
+	// Override the usage function to directly print help without using UsageString()
+	// This prevents potential infinite recursion that can occur in Cobra's default implementation
 	cmd.SetUsageFunc(func(c *cobra.Command) error {
 		// Directly call our help function
 		SubCommandCustomHelpFunc(c, nil)
