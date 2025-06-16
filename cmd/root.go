@@ -92,7 +92,7 @@ Use "{{.Command.CommandPath}} [command] --help" for more information about a com
 `
 
 var rootCmd = &cobra.Command{
-	Use: "dalfox",
+	Use:   "dalfox",
 	Short: "Dalfox is a powerful open-source XSS scanner and utility focused on automation.",
 	Long: `Dalfox is a fast and powerful parameter analysis and XSS scanning tool.
 It helps you find XSS vulnerabilities in web applications with ease.
@@ -217,16 +217,16 @@ func getCustomHelpFunction() func(*cobra.Command, []string) {
 		// Data to pass to the template
 		// The template expects fields like .Command, .flagGroupsRef, .showFlagGroups
 		templateData := struct {
-			Command         *cobra.Command
-			FlagGroupsRef   []FlagGroup // Renamed to match template expectation if it was .flagGroupsRef
-			ShowFlagGroups  bool
+			Command        *cobra.Command
+			FlagGroupsRef  []FlagGroup // Renamed to match template expectation if it was .flagGroupsRef
+			ShowFlagGroups bool
 			// Expose other necessary fields/methods if your template uses them directly,
 			// e.g. if it doesn't use .Command.Long but just .Long
 			LongOrUsage string
 		}{
-			Command:         command,
-			FlagGroupsRef:   flagGroups, // Assumes flagGroups is accessible (e.g. package-level var)
-			ShowFlagGroups:  len(flagGroups) > 0, // Show groups if they exist
+			Command:        command,
+			FlagGroupsRef:  flagGroups,          // Assumes flagGroups is accessible (e.g. package-level var)
+			ShowFlagGroups: len(flagGroups) > 0, // Show groups if they exist
 		}
 
 		// Logic for LongOrUsage (simplified from Cobra's internal help command)
@@ -237,7 +237,6 @@ func getCustomHelpFunction() func(*cobra.Command, []string) {
 		} else {
 			templateData.LongOrUsage = command.Short
 		}
-
 
 		tmpl := template.New("customHelp")
 
@@ -278,7 +277,6 @@ func getCustomHelpFunction() func(*cobra.Command, []string) {
 		}
 	}
 }
-
 
 func initializeFlagGroups() {
 	flagGroups = []FlagGroup{
