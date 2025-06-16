@@ -6,13 +6,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// urlCmd represents the url command
+// urlCmd represents the url command for scanning a single target URL
 var urlCmd = &cobra.Command{
 	Use:   "url [target] [flags]",
 	Short: "Use single target mode",
 	Run:   runURLCmd,
 }
 
+// runURLCmd handles execution of the URL command to scan a single target
 func runURLCmd(cmd *cobra.Command, args []string) {
 	printing.Banner(options)
 	if len(args) == 0 {
@@ -31,11 +32,16 @@ func runURLCmd(cmd *cobra.Command, args []string) {
 	}
 }
 
+// printUrlErrorAndUsage displays error messages and usage examples for the URL command
 func printUrlErrorAndUsage() {
 	printing.DalLog("ERROR", "Input target url", options)
 	printing.DalLog("ERROR", "e.g dalfox url https://google.com/?q=1", options)
 }
 
+// init registers the URL command and applies custom help formatting
 func init() {
 	rootCmd.AddCommand(urlCmd)
+
+	// Apply custom help format to this subcommand
+	ApplySubCommandCustomHelp(urlCmd)
 }

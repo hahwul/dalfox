@@ -9,26 +9,28 @@ import (
 	"github.com/spf13/cobra"
 )
 
-var makeBulk bool
-var enumCommon, enumHTML, enumAttr, enumInJS bool
-var remotePayloadbox, remotePortswigger bool
-var entityGF, entityEventHandler, entityUsefulTags, entitySpecialChars bool
-var urlEncode bool
+// Command-line flags for payload generation
+var makeBulk bool                                                           // Generate bulk payloads
+var enumCommon, enumHTML, enumAttr, enumInJS bool                           // Common payload types
+var remotePayloadbox, remotePortswigger bool                                // Remote payload sources
+var entityGF, entityEventHandler, entityUsefulTags, entitySpecialChars bool // Entity types
+var urlEncode bool                                                          // URL-encode the output
 
-// Object is Type of PayloadObject
+// Object represents a payload generator function with metadata
 type Object struct {
 	Use      bool
 	Name     string
 	Listener func() ([]string, int)
 }
 
-// payloadCmd represents the payload command
+// payloadCmd represents the payload command for generating various XSS payloads
 var payloadCmd = &cobra.Command{
 	Use:   "payload",
 	Short: "Payload mode, make and enum payloads",
 	Run:   runPayloadCmd,
 }
 
+// runPayloadCmd executes the payload command, displaying selected payload types
 func runPayloadCmd(cmd *cobra.Command, args []string) {
 	printing.Banner(options)
 	objects := initializeObjects()
@@ -48,6 +50,7 @@ func runPayloadCmd(cmd *cobra.Command, args []string) {
 	}
 }
 
+// initializeObjects creates and returns a list of payload objects based on user-selected options
 func initializeObjects() []Object {
 	return []Object{
 		{Use: makeBulk, Name: "Bulk-XSS", Listener: payload.GenerateBulkPayload},
@@ -56,7 +59,7 @@ func initializeObjects() []Object {
 		{Use: enumAttr, Name: "Enum-Attribute-XSS", Listener: payload.GetAttrPayloadWithSize},
 		{Use: enumInJS, Name: "Enum-inJS-XSS", Listener: payload.GetInJsPayloadWithSize},
 		{Use: remotePayloadbox, Name: "Remote-Payloadbox-Payloads", Listener: payload.GetPayloadBoxPayloadWithSize},
-		{Use: remotePortswigger, Name: "Remote-Portswigger-Paylaods", Listener: payload.GetPortswiggerPayloadWithSize},
+		{Use: remotePortswigger, Name: "Remote-Portswigger-Payloads", Listener: payload.GetPortswiggerPayloadWithSize},
 		{Use: entityGF, Name: "Entity-GF-Patterns", Listener: payload.InterfaceGetGfXSS},
 		{Use: entityEventHandler, Name: "Entity-Event-Handlers", Listener: payload.InterfaceGetEventHandlers},
 		{Use: entityUsefulTags, Name: "Entity-Useful-Tags", Listener: payload.InterfaceGetTags},
@@ -78,4 +81,7 @@ func init() {
 	payloadCmd.Flags().BoolVar(&entityUsefulTags, "entity-useful-tags", false, "Enumerate useful tags for XSS. Example: --entity-useful-tags")
 	payloadCmd.Flags().BoolVar(&entitySpecialChars, "entity-special-chars", false, "Enumerate special characters for XSS. Example: --entity-special-chars")
 	payloadCmd.Flags().BoolVar(&urlEncode, "encoder-url", false, "Encode output as URL. Example: --encoder-url")
+
+	// Apply custom help format to this subcommand
+	ApplySubCommandCustomHelp(payloadCmd)
 }

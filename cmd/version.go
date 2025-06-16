@@ -5,7 +5,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// versionCmd represents the version command
+// versionCmd represents the version command which displays the current DalFox version
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Show version",
@@ -17,4 +17,7 @@ var versionCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(versionCmd)
+
+	// Apply custom help format to this subcommand for consistent help display
+	ApplySubCommandCustomHelp(versionCmd)
 }
