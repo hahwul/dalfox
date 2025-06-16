@@ -58,6 +58,7 @@ Available Commands:{{range .Command.Commands}}{{if (or .IsAvailableCommand .IsAd
 
 {{range .FlagGroupsRef}}{{.Title}}:
 {{.Flags.FlagUsages | trimTrailingWhitespaces}}
+
 {{end}}{{end}}
 {{- if .Command.HasAvailableLocalFlags}}
   {{- if .Command.HasParent}}
@@ -196,18 +197,17 @@ func init() {
 
 	// Set custom help template and function for rootCmd
 	rootCmd.SetHelpTemplate(customHelpTemplate)
-	rootCmd.SetHelpFunc(getCustomHelpFunction())
+	rootCmd.SetHelpFunc(GetCustomHelpFunction())
 
-	// Apply to subcommands
-	for _, subCmd := range rootCmd.Commands() {
-		subCmd.SetHelpTemplate(customHelpTemplate)
-		subCmd.SetHelpFunc(getCustomHelpFunction()) // Use the same custom help logic
-	}
+	// Don't override subcommand help templates here
+	// Each subcommand will set its own help function in its init()
 }
 
 // getCustomHelpFunction returns a function that can be used as a custom help function for cobra commands.
 // This approach allows us to generate a new closure for each command if needed, or just share the same one.
-func getCustomHelpFunction() func(*cobra.Command, []string) {
+// GetCustomHelpFunction returns the custom help function used by the root command
+// This is exported so subcommands can also use it directly
+func GetCustomHelpFunction() func(*cobra.Command, []string) {
 	return func(command *cobra.Command, args []string) {
 		// Data to pass to the template
 		// The template expects fields like .Command, .flagGroupsRef, .showFlagGroups

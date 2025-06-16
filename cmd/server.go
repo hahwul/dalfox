@@ -38,4 +38,7 @@ func init() {
 	serverCmd.Flags().IntVar(&port, "port", 6664, "Specify the port to bind the server to. Example: --port 6664")
 	serverCmd.Flags().StringVar(&host, "host", "0.0.0.0", "Specify the address to bind the server to. Example: --host '0.0.0.0'")
 	serverCmd.Flags().StringVar(&server_type, "type", "rest", "Specify the server type. Example: --type 'rest' or --type 'mcp'")
+
+	// Apply custom help format to this subcommand
+	ApplySubCommandCustomHelp(serverCmd)
 }

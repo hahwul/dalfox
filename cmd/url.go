@@ -38,4 +38,7 @@ func printUrlErrorAndUsage() {
 
 func init() {
 	rootCmd.AddCommand(urlCmd)
+
+	// Apply custom help format to this subcommand
+	ApplySubCommandCustomHelp(urlCmd)
 }

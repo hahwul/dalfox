@@ -199,4 +199,7 @@ func init() {
 	fileCmd.Flags().Bool("silence-force", false, "Only print PoC code, suppress progress output. Example: --silence-force")
 	fileCmd.Flags().Int("mass-worker", 10, "Set the number of parallel workers for --mass and --multicast options. Example: --mass-worker 10")
 	fileCmd.Flags().Int("limit", 0, "Limit the number of results to display. Example: --limit 10")
+
+	// Apply custom help format to this subcommand
+	ApplySubCommandCustomHelp(fileCmd)
 }

@@ -56,4 +56,7 @@ func init() {
 	sxssCmd.PersistentFlags().StringVar(&requestMethod, "request-method", "GET", "Specify the HTTP request method to send to the server. Example: --request-method 'POST'")
 	sxssCmd.PersistentFlags().StringVar(&trigger, "trigger", "", "Specify the URL to check after injecting SXSS code. Example: --trigger 'https://example.com/profile'")
 	sxssCmd.PersistentFlags().IntVar(&sequence, "sequence", -1, "Set the initial sequence number for the trigger URL. Example: --trigger 'https://example.com/view?no=SEQNC' --sequence 3")
+
+	// Apply custom help format to this subcommand
+	ApplySubCommandCustomHelp(sxssCmd)
 }

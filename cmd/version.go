@@ -17,4 +17,7 @@ var versionCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(versionCmd)
+
+	// Apply custom help format to this subcommand
+	ApplySubCommandCustomHelp(versionCmd)
 }

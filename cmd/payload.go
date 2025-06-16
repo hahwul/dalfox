@@ -78,4 +78,7 @@ func init() {
 	payloadCmd.Flags().BoolVar(&entityUsefulTags, "entity-useful-tags", false, "Enumerate useful tags for XSS. Example: --entity-useful-tags")
 	payloadCmd.Flags().BoolVar(&entitySpecialChars, "entity-special-chars", false, "Enumerate special characters for XSS. Example: --entity-special-chars")
 	payloadCmd.Flags().BoolVar(&urlEncode, "encoder-url", false, "Encode output as URL. Example: --encoder-url")
+
+	// Apply custom help format to this subcommand
+	ApplySubCommandCustomHelp(payloadCmd)
 }
