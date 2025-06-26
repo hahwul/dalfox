@@ -66,4 +66,8 @@ type Args struct {
 	OutputResponse            bool // Include HTTP responses in output
 	SkipDiscovery             bool // Skip parameter discovery phase
 	ForceHeadlessVerification bool // Force headless browser verification
+	DetailedAnalysis          bool // Enable detailed parameter analysis (Issue #695)
+	FastScan                  bool // Enable fast scanning mode for URL lists (Issue #764)
+	MagicCharTest             bool // Enable magic character testing
+	ContextAware              bool // Enable context-aware payload selection
 }
