@@ -1,6 +1,7 @@
 package scanning
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -33,6 +34,129 @@ var (
 	scanObject model.Scan
 	s          = spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr))
 )
+
+// JSONInjector handles JSON payload injection
+type JSONInjector struct {
+	OriginalJSON map[string]interface{}
+	Payload      string
+}
+
+// InjectIntoJSON recursively injects payload into JSON structure
+func (ji *JSONInjector) InjectIntoJSON(data interface{}, path string) []map[string]interface{} {
+	var results []map[string]interface{}
+	
+	switch v := data.(type) {
+	case map[string]interface{}:
+		for key, value := range v {
+			currentPath := path
+			if currentPath != "" {
+				currentPath += "."
+			}
+			currentPath += key
+			
+			// Create a copy and inject payload
+			modified := ji.deepCopy(data)
+			if modifiedMap, ok := modified.(map[string]interface{}); ok {
+				modifiedMap[key] = ji.Payload
+				results = append(results, map[string]interface{}{
+					"json": modified,
+					"path": currentPath,
+					"key":  key,
+				})
+			}
+			
+			// Recursively process nested structures
+			nestedResults := ji.InjectIntoJSON(value, currentPath)
+			results = append(results, nestedResults...)
+		}
+		
+	case []interface{}:
+		for i, item := range v {
+			currentPath := fmt.Sprintf("%s[%d]", path, i)
+			
+			// Create a copy and inject payload at array index
+			modified := ji.deepCopy(data)
+			if modifiedArray, ok := modified.([]interface{}); ok && i < len(modifiedArray) {
+				modifiedArray[i] = ji.Payload
+				results = append(results, map[string]interface{}{
+					"json": modified,
+					"path": currentPath,
+					"key":  fmt.Sprintf("[%d]", i),
+				})
+			}
+			
+			// Recursively process array items
+			nestedResults := ji.InjectIntoJSON(item, currentPath)
+			results = append(results, nestedResults...)
+		}
+	}
+	
+	return results
+}
+
+// deepCopy creates a deep copy of the interface{}
+func (ji *JSONInjector) deepCopy(data interface{}) interface{} {
+	switch v := data.(type) {
+	case map[string]interface{}:
+		copy := make(map[string]interface{})
+		for key, value := range v {
+			copy[key] = ji.deepCopy(value)
+		}
+		return copy
+		
+	case []interface{}:
+		copy := make([]interface{}, len(v))
+		for i, item := range v {
+			copy[i] = ji.deepCopy(item)
+		}
+		return copy
+		
+	default:
+		return v
+	}
+}
+
+// ParseJSONBody parses JSON body and returns injection points
+func ParseJSONBody(body string, payload string) ([]map[string]interface{}, error) {
+	var jsonData interface{}
+	err := json.Unmarshal([]byte(body), &jsonData)
+	if err != nil {
+		return nil, err
+	}
+	
+	injector := &JSONInjector{
+		Payload: payload,
+	}
+	
+	return injector.InjectIntoJSON(jsonData, ""), nil
+}
+
+// CreateJSONRequest creates HTTP request with modified JSON body
+func CreateJSONRequest(originalReq *http.Request, modifiedJSON interface{}) (*http.Request, error) {
+	jsonBytes, err := json.Marshal(modifiedJSON)
+	if err != nil {
+		return nil, err
+	}
+	
+	// Create new request with modified JSON body
+	newReq, err := http.NewRequest(originalReq.Method, originalReq.URL.String(), bytes.NewReader(jsonBytes))
+	if err != nil {
+		return nil, err
+	}
+	
+	// Copy headers
+	for key, values := range originalReq.Header {
+		for _, value := range values {
+			newReq.Header.Add(key, value)
+		}
+	}
+	
+	// Set content type and length
+	newReq.Header.Set("Content-Type", "application/json")
+	newReq.Header.Set("Content-Length", strconv.Itoa(len(jsonBytes)))
+	
+	return newReq, nil
+}
 
 // Scan is main scanning function
 func Scan(target string, options model.Options, sid string) (model.Result, error) {
