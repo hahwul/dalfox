@@ -364,6 +364,40 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 		}
 	}
 
+	// Magic Character Tests (Issue #695)
+	if options.MagicCharTest && !options.OnlyCustomPayload {
+		printing.DalLog("SYSTEM", "Performing magic character tests for manual XSS analysis", options)
+		for k, v := range params {
+			if optimization.CheckInspectionParam(options, k) {
+				// Detect context if ContextAware is enabled
+				context := "html" // default
+				if options.ContextAware {
+					// Use the reflected code to detect context
+					context = utils.DetectContext(v.ReflectedCode, k, "test")
+					printing.DalLog("INFO", "Detected context for "+k+": "+context, options)
+				}
+				
+				// Generate magic character payloads
+				magicChars := []string{
+					utils.GenerateMagicCharacter(context),
+					utils.GenerateMagicString(context, 3),
+					utils.GenerateTestPayload(context),
+				}
+				
+				for _, magicPayload := range magicChars {
+					encoders := []string{NaN, urlEncode, htmlEncode}
+					for _, encoder := range encoders {
+						tq, tm := optimization.MakeRequestQuery(target, k, magicPayload, "inHTML-MAGIC", "toAppend", encoder, options)
+						tm["magic_test"] = "true"
+						tm["context"] = context
+						query[tq] = tm
+					}
+				}
+			}
+		}
+		printing.DalLog("SYSTEM", "Added magic character test payloads", options)
+	}
+
 	// Common Payloads and DOM XSS
 	if (options.SkipDiscovery || utils.IsAllowType(policy["Content-Type"])) && !options.OnlyCustomPayload {
 		cu, _ := url.Parse(target)
