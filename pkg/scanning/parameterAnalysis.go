@@ -241,7 +241,19 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 			p, dp = addParamsFromWordlist(p, dp, options.UniqParam, options)
 		}
 
-		if options.MiningWordlist == "" {
+		// Enhanced parameter mining for DetailedAnalysis (Issue #695)
+		if options.DetailedAnalysis {
+			printing.DalLog("SYSTEM", "Detailed analysis enabled - using extended parameter wordlists", options)
+			// Add more comprehensive parameter lists for detailed analysis
+			extendedParams := append(payload.GetGfXSS(), []string{
+				"callback", "jsonp", "api_key", "access_token", "csrf_token", "session_id",
+				"user_id", "admin", "debug", "test", "dev", "staging", "prod",
+				"config", "settings", "options", "params", "data", "input",
+				"output", "result", "response", "request", "query", "search",
+				"filter", "sort", "order", "limit", "offset", "page", "size",
+			}...)
+			p, dp = addParamsFromWordlist(p, dp, extendedParams, options)
+		} else if options.MiningWordlist == "" {
 			p, dp = addParamsFromWordlist(p, dp, payload.GetGfXSS(), options)
 		} else {
 			ff, err := voltFile.ReadLinesOrLiteral(options.MiningWordlist)
@@ -264,6 +276,30 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	var wgg sync.WaitGroup
 	const maxConcurrency = 1000 // Define a reasonable maximum limit to prevent excessive memory allocation
 	concurrency := options.Concurrence
+	
+	// FastScan optimization (Issue #764)
+	if options.FastScan {
+		printing.DalLog("SYSTEM", "Fast scan mode enabled - optimizing concurrency and reducing checks", options)
+		// Increase concurrency for faster scanning
+		if concurrency < 50 {
+			concurrency = 50
+		}
+		// Limit parameter mining in fast mode
+		if len(p) > 20 {
+			printing.DalLog("INFO", "Fast scan mode: limiting parameter analysis to first 20 parameters", options)
+			count := 0
+			limitedP := make(url.Values)
+			for k, v := range p {
+				if count >= 20 {
+					break
+				}
+				limitedP[k] = v
+				count++
+			}
+			p = limitedP
+		}
+	}
+	
 	if concurrency > maxConcurrency {
 		concurrency = maxConcurrency
 	}
