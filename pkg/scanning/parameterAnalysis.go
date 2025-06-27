@@ -547,9 +547,15 @@ func ExtractJavaScript(htmlContent string) []string {
 		"onsuspend", "ontimeupdate", "onvolumechange", "onwaiting",
 	}
 	
-	for _, handler := range eventHandlers {
+	// Pre-compile regex patterns for better performance
+	handlerPatterns := make([]*regexp.Regexp, len(eventHandlers))
+	for i, handler := range eventHandlers {
 		pattern := fmt.Sprintf(`(?i)%s\s*=\s*["']([^"']*)["']`, handler)
-		handlerRegex := regexp.MustCompile(pattern)
+		handlerPatterns[i] = regexp.MustCompile(pattern)
+	}
+	
+	// Find all event handler matches
+	for _, handlerRegex := range handlerPatterns {
 		handlerMatches := handlerRegex.FindAllStringSubmatch(htmlContent, -1)
 		for _, match := range handlerMatches {
 			if len(match) > 1 {

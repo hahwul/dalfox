@@ -3,7 +3,6 @@ package utils
 import (
 	"math/rand"
 	"strings"
-	"time"
 )
 
 // MagicCharacters contains special characters for manual XSS testing
@@ -26,8 +25,6 @@ var ContextSpecificMagic = map[string][]string{
 
 // GenerateMagicCharacter generates a magic character based on context
 func GenerateMagicCharacter(context string) string {
-	rand.Seed(time.Now().UnixNano())
-	
 	if chars, exists := ContextSpecificMagic[strings.ToLower(context)]; exists {
 		return chars[rand.Intn(len(chars))]
 	}
