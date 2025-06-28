@@ -248,7 +248,7 @@ func initializeFlagGroups() {
 	flagMap := map[string][]string{
 		"Input":    {"config", "custom-payload", "custom-blind-xss-payload", "data", "grep", "remote-payloads", "remote-wordlists", "har-file-path"},
 		"Request":  {"header", "cookie", "user-agent", "method", "cookie-from-raw"},
-		"Scanning": {"param", "ignore-param", "blind", "timeout", "delay", "worker", "skip-headless", "deep-domxss", "waf-evasion", "skip-discovery", "force-headless-verification", "use-bav", "skip-bav", "skip-mining-dom", "skip-mining-dict", "skip-mining-all", "skip-xss-scanning", "only-custom-payload", "skip-grepping"},
+		"Scanning": {"param", "ignore-param", "blind", "timeout", "delay", "worker", "skip-headless", "deep-domxss", "waf-evasion", "skip-discovery", "force-headless-verification", "use-bav", "skip-bav", "skip-mining-dom", "skip-mining-dict", "skip-mining-all", "skip-xss-scanning", "only-custom-payload", "skip-grepping", "detailed-analysis", "fast-scan", "magic-char-test", "context-aware"},
 		"Mining":   {"mining-dict-word", "mining-dict", "mining-dom"},
 		"Output":   {"output", "format", "only-poc", "report", "output-all", "output-request", "output-response", "poc-type", "report-format", "silence", "no-color", "no-spinner"},
 		"Advanced": {"custom-alert-value", "custom-alert-type", "found-action", "found-action-shell", "proxy", "ignore-return", "max-cpu", "only-discovery", "follow-redirects", "debug"},
