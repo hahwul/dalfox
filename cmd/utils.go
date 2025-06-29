@@ -12,16 +12,7 @@ import (
 // This file contains utility functions for managing command-line help output
 // and other shared functionality used across the different commands
 
-// safeUsageString returns a command's usage string but avoids recursion
-// This prevents infinite recursion that can occur when using UsageString() directly
-func safeUsageString(c *cobra.Command) string {
-	// Return just the command's Long/Short directly instead of calling UsageString()
-	// to avoid potential infinite recursion
-	if c.Long != "" {
-		return c.Long
-	}
-	return c.Short
-}
+
 
 // SubCommandCustomHelpFunc provides a custom help formatter for subcommands
 // This function is shared across all subcommands to ensure consistent help display

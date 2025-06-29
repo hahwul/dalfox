@@ -133,7 +133,7 @@ func Test_getTransport(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := getTransport(tt.args.options)
 			want := tt.want()
-			if _, ok := got.(http.RoundTripper); !ok {
+			if got == nil {
 				t.Errorf("getTransport() = %v, want %v", got, want)
 			}
 		})

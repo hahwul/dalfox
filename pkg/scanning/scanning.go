@@ -78,13 +78,14 @@ func performScanning(target string, options model.Options, query map[*http.Reque
 								MessageStr: "Triggered XSS Payload (found dialog in headless)",
 							}
 							if showV {
-								if options.Format == "json" {
+								switch options.Format {
+								case "json":
 									pocj, _ := json.Marshal(poc)
 									printing.DalLog("PRINT", string(pocj)+",", options)
-								} else if options.Format == "jsonl" {
+								case "jsonl":
 									pocj, _ := json.Marshal(poc)
 									printing.DalLog("PRINT", string(pocj), options)
-								} else {
+								default:
 									pocsStr := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
 									printing.DalLog("PRINT", pocsStr, options)
 								}

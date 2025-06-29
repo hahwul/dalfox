@@ -46,10 +46,10 @@ func SendReq(req *http.Request, payload string, options model.Options) (string, 
 	}
 
 	if options.Trigger != "" {
-		return handleTrigger(options, payload, req, str, resp, rLog)
+		return handleTrigger(options, payload, rLog)
 	}
 
-	return processResponse(str, resp, payload, req, options, showG, rLog)
+	return processResponse(str, resp, payload, req, options, rLog)
 }
 
 func shouldShowPoC(options model.Options) bool {
@@ -93,7 +93,7 @@ func readResponseBody(resp *http.Response) (string, error) {
 	return string(bytes), nil
 }
 
-func handleTrigger(options model.Options, payload string, req *http.Request, str string, resp *http.Response, rLog *logrus.Entry) (string, *http.Response, bool, bool, error) {
+func handleTrigger(options model.Options, payload string, rLog *logrus.Entry) (string, *http.Response, bool, bool, error) {
 	treq := generateTriggerRequest(options)
 	client := createHTTPClient(options)
 	resp, err := client.Do(treq)
@@ -103,7 +103,7 @@ func handleTrigger(options model.Options, payload string, req *http.Request, str
 		return "", resp, false, false, err
 	}
 	bytes, _ := io.ReadAll(resp.Body)
-	str = string(bytes)
+	str := string(bytes)
 	if resp.Header["Content-Type"] != nil && utils.IsAllowType(resp.Header["Content-Type"][0]) {
 		vds := verification.VerifyDOM(str)
 		vrs := verification.VerifyReflection(str, payload)
@@ -129,7 +129,7 @@ func generateTriggerRequest(options model.Options) *http.Request {
 	return treq
 }
 
-func processResponse(str string, resp *http.Response, payload string, req *http.Request, options model.Options, showG bool, rLog *logrus.Entry) (string, *http.Response, bool, bool, error) {
+func processResponse(str string, resp *http.Response, payload string, req *http.Request, options model.Options, rLog *logrus.Entry) (string, *http.Response, bool, bool, error) {
 	if resp.Header["Content-Type"] != nil && utils.IsAllowType(resp.Header["Content-Type"][0]) {
 		vds := verification.VerifyDOM(str)
 		vrs := verification.VerifyReflection(str, payload)
@@ -183,13 +183,14 @@ func handlePoC(poc model.PoC, req *http.Request, options model.Options, showG bo
 		}
 	}
 	if showG {
-		if options.Format == "json" {
+		switch options.Format {
+		case "json":
 			pocj, _ := json.Marshal(poc)
 			printing.DalLog("PRINT", string(pocj)+",", options)
-		} else if options.Format == "jsonl" {
+		case "jsonl":
 			pocj, _ := json.Marshal(poc)
 			printing.DalLog("PRINT", string(pocj), options)
-		} else {
+		default:
 			pocs := "[" + poc.Type + "][" + poc.Method + "][" + poc.InjectType + "] " + poc.Data
 			printing.DalLog("PRINT", pocs, options)
 		}

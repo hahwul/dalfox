@@ -47,7 +47,7 @@ func CheckXSSWithHeadless(url string, options model.Options) bool {
 	return check
 }
 
-func setheaders(host string, headers map[string]interface{}, res *string) chromedp.Tasks {
+func setheaders(host string, headers map[string]interface{}) chromedp.Tasks {
 	return chromedp.Tasks{
 		network.Enable(),
 		network.SetExtraHTTPHeaders(network.Headers(headers)),
