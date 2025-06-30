@@ -45,7 +45,7 @@ func Test_performScanning(t *testing.T) {
 				options: model.Options{Concurrence: 1, Format: "plain", Silence: true, NoSpinner: true},
 				query:   simpleQuery,
 				durls:   []string{},
-				rl:      createTestRateLimiter(0), // No rate limiting for tests
+				rl:      createTestRateLimiter(), // No rate limiting for tests
 				vStatus: map[string]bool{"param": false},
 			},
 			wantPocs: 0, // Expecting no POCs from a mock server that doesn't reflect input
@@ -57,7 +57,7 @@ func Test_performScanning(t *testing.T) {
 				options: model.Options{Concurrence: 1, Format: "plain", Silence: true, NoSpinner: true},
 				query:   map[*http.Request]map[string]string{},
 				durls:   []string{},
-				rl:      createTestRateLimiter(0),
+				rl:      createTestRateLimiter(),
 				vStatus: map[string]bool{},
 			},
 			wantPocs: 0,
@@ -86,7 +86,7 @@ func mockServer() *httptest.Server {
 }
 
 // createTestRateLimiter creates a simple rate limiter for testing
-func createTestRateLimiter(rps int) *rateLimiter {
+func createTestRateLimiter() *rateLimiter {
 	// Create a new rate limiter using the package function but customize for testing
 	rl := newRateLimiter(time.Duration(0))
 	return rl

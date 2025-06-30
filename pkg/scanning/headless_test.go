@@ -93,8 +93,7 @@ func Test_setheaders(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Skip("Skipping headless browser tests")
 
-			var result string
-			tasks := setheaders(tt.args.host, tt.args.headers, &result)
+			tasks := setheaders(tt.args.host, tt.args.headers)
 			if tasks == nil {
 				t.Errorf("setheaders() returned nil tasks")
 			}

@@ -2,10 +2,12 @@ package scanning
 
 import (
 	"compress/gzip"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -67,9 +69,10 @@ func addParamsFromRemoteWordlists(p, dp url.Values, options model.Options) (url.
 	for _, endpoint := range rw {
 		var wordlist []string
 		var line, size string
-		if endpoint == "burp" {
+		switch endpoint {
+		case "burp":
 			wordlist, line, size = payload.GetBurpWordlist()
-		} else if endpoint == "assetnote" {
+		case "assetnote":
 			wordlist, line, size = payload.GetAssetnoteWordlist()
 		}
 		if line != "" {
@@ -238,7 +241,19 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 			p, dp = addParamsFromWordlist(p, dp, options.UniqParam, options)
 		}
 
-		if options.MiningWordlist == "" {
+		// Enhanced parameter mining for DetailedAnalysis (Issue #695)
+		if options.DetailedAnalysis {
+			printing.DalLog("SYSTEM", "Detailed analysis enabled - using extended parameter wordlists", options)
+			// Add more comprehensive parameter lists for detailed analysis
+			extendedParams := append(payload.GetGfXSS(), []string{
+				"callback", "jsonp", "api_key", "access_token", "csrf_token", "session_id",
+				"user_id", "admin", "debug", "test", "dev", "staging", "prod",
+				"config", "settings", "options", "params", "data", "input",
+				"output", "result", "response", "request", "query", "search",
+				"filter", "sort", "order", "limit", "offset", "page", "size",
+			}...)
+			p, dp = addParamsFromWordlist(p, dp, extendedParams, options)
+		} else if options.MiningWordlist == "" {
 			p, dp = addParamsFromWordlist(p, dp, payload.GetGfXSS(), options)
 		} else {
 			ff, err := voltFile.ReadLinesOrLiteral(options.MiningWordlist)
@@ -261,6 +276,30 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	var wgg sync.WaitGroup
 	const maxConcurrency = 1000 // Define a reasonable maximum limit to prevent excessive memory allocation
 	concurrency := options.Concurrence
+	
+	// FastScan optimization (Issue #764)
+	if options.FastScan {
+		printing.DalLog("SYSTEM", "Fast scan mode enabled - optimizing concurrency and reducing checks", options)
+		// Increase concurrency for faster scanning
+		if concurrency < 50 {
+			concurrency = 50
+		}
+		// Limit parameter mining in fast mode
+		if len(p) > 20 {
+			printing.DalLog("INFO", "Fast scan mode: limiting parameter analysis to first 20 parameters", options)
+			count := 0
+			limitedP := make(url.Values)
+			for k, v := range p {
+				if count >= 20 {
+					break
+				}
+				limitedP[k] = v
+				count++
+			}
+			p = limitedP
+		}
+	}
+	
 	if concurrency > maxConcurrency {
 		concurrency = maxConcurrency
 	}
@@ -348,5 +387,211 @@ func GetPType(av string) string {
 	if strings.Contains(av, "PTYPE: FORM") {
 		return "-FORM"
 	}
+	if strings.Contains(av, "PTYPE: QUERY") {
+		return "-QUERY"
+	}
+	if strings.Contains(av, "PTYPE: PATH") {
+		return "-PATH"
+	}
+	if strings.Contains(av, "PTYPE: HASH") {
+		return "-HASH"
+	}
+	if strings.Contains(av, "PTYPE: HEADER") {
+		return "-HEADER"
+	}
+	if strings.Contains(av, "PTYPE: COOKIE") {
+		return "-COOKIE"
+	}
+	if strings.Contains(av, "PTYPE: JSON") {
+		return "-JSON"
+	}
+	if strings.Contains(av, "PTYPE: XML") {
+		return "-XML"
+	}
+	if strings.Contains(av, "PTYPE: DOM") {
+		return "-DOM"
+	}
+	if strings.Contains(av, "PTYPE: JS_VAR") {
+		return "-JS_VAR"
+	}
+	if strings.Contains(av, "PTYPE: JS_STRING") {
+		return "-JS_STRING"
+	}
+	if strings.Contains(av, "PTYPE: ATTRIBUTE") {
+		return "-ATTRIBUTE"
+	}
 	return ""
+}
+
+// DOMXSSDetector handles DOM-based XSS detection
+type DOMXSSDetector struct {
+	Sources []string
+	Sinks   []string
+}
+
+// NewDOMXSSDetector creates a new DOM XSS detector with predefined sources and sinks
+func NewDOMXSSDetector() *DOMXSSDetector {
+	return &DOMXSSDetector{
+		Sources: []string{
+			"location.href",
+			"location.search",
+			"location.hash",
+			"location.pathname",
+			"document.URL",
+			"document.documentURI",
+			"document.baseURI",
+			"window.name",
+			"document.referrer",
+			"document.cookie",
+			"localStorage",
+			"sessionStorage",
+			"history.pushState",
+			"history.replaceState",
+			"postMessage",
+			"XMLHttpRequest",
+			"fetch",
+			"WebSocket",
+		},
+		Sinks: []string{
+			"innerHTML",
+			"outerHTML",
+			"document.write",
+			"document.writeln",
+			"eval",
+			"setTimeout",
+			"setInterval",
+			"Function",
+			"execScript",
+			"msSetImmediate",
+			"range.createContextualFragment",
+			"crypto.generateCRMFRequest",
+			"ScriptElement.src",
+			"ScriptElement.text",
+			"ScriptElement.textContent",
+			"ScriptElement.innerText",
+			"anyTag.onEventName",
+			"document.implementation.createHTMLDocument",
+			"history.pushState",
+			"history.replaceState",
+		},
+	}
+}
+
+// DetectDOMXSS analyzes JavaScript code for potential DOM XSS vulnerabilities
+func (d *DOMXSSDetector) DetectDOMXSS(jsCode string) []map[string]interface{} {
+	var vulnerabilities []map[string]interface{}
+	
+	// Check for direct source to sink flows
+	for _, source := range d.Sources {
+		for _, sink := range d.Sinks {
+			// Simple pattern matching for source to sink flow
+			pattern := fmt.Sprintf("%s.*%s", source, sink)
+			if matched, _ := regexp.MatchString(pattern, jsCode); matched {
+				vulnerabilities = append(vulnerabilities, map[string]interface{}{
+					"type":        "DOM_XSS",
+					"source":      source,
+					"sink":        sink,
+					"pattern":     pattern,
+					"description": fmt.Sprintf("Potential DOM XSS: %s flows to %s", source, sink),
+				})
+			}
+		}
+	}
+	
+	// Check for dangerous patterns
+	dangerousPatterns := []map[string]string{
+		{"pattern": `document\.write\s*\(.*location\.(href|search|hash)`, "desc": "document.write with location data"},
+		{"pattern": `innerHTML\s*=.*location\.(href|search|hash)`, "desc": "innerHTML assignment with location data"},
+		{"pattern": `eval\s*\(.*location\.(href|search|hash)`, "desc": "eval with location data"},
+		{"pattern": `setTimeout\s*\(.*location\.(href|search|hash)`, "desc": "setTimeout with location data"},
+		{"pattern": `setInterval\s*\(.*location\.(href|search|hash)`, "desc": "setInterval with location data"},
+		{"pattern": `Function\s*\(.*location\.(href|search|hash)`, "desc": "Function constructor with location data"},
+		{"pattern": `\.src\s*=.*location\.(href|search|hash)`, "desc": "Script src assignment with location data"},
+		{"pattern": `postMessage\s*\(.*location\.(href|search|hash)`, "desc": "postMessage with location data"},
+	}
+	
+	for _, dangerousPattern := range dangerousPatterns {
+		if matched, _ := regexp.MatchString(dangerousPattern["pattern"], jsCode); matched {
+			vulnerabilities = append(vulnerabilities, map[string]interface{}{
+				"type":        "DOM_XSS_PATTERN",
+				"pattern":     dangerousPattern["pattern"],
+				"description": dangerousPattern["desc"],
+			})
+		}
+	}
+	
+	return vulnerabilities
+}
+
+// ExtractJavaScript extracts JavaScript code from HTML content
+func ExtractJavaScript(htmlContent string) []string {
+	var jsCode []string
+	
+	// Extract inline script tags
+	scriptRegex := regexp.MustCompile(`(?i)<script[^>]*>(.*?)</script>`)
+	matches := scriptRegex.FindAllStringSubmatch(htmlContent, -1)
+	for _, match := range matches {
+		if len(match) > 1 {
+			jsCode = append(jsCode, match[1])
+		}
+	}
+	
+	// Extract event handlers
+	eventHandlers := []string{
+		"onclick", "onload", "onmouseover", "onmouseout", "onfocus", "onblur",
+		"onchange", "onsubmit", "onreset", "onselect", "onkeydown", "onkeyup",
+		"onkeypress", "onerror", "onabort", "oncanplay", "oncanplaythrough",
+		"ondurationchange", "onemptied", "onended", "onloadeddata",
+		"onloadedmetadata", "onloadstart", "onpause", "onplay", "onplaying",
+		"onprogress", "onratechange", "onseeked", "onseeking", "onstalled",
+		"onsuspend", "ontimeupdate", "onvolumechange", "onwaiting",
+	}
+	
+	// Pre-compile regex patterns for better performance
+	handlerPatterns := make([]*regexp.Regexp, len(eventHandlers))
+	for i, handler := range eventHandlers {
+		pattern := fmt.Sprintf(`(?i)%s\s*=\s*["']([^"']*)["']`, handler)
+		handlerPatterns[i] = regexp.MustCompile(pattern)
+	}
+	
+	// Find all event handler matches
+	for _, handlerRegex := range handlerPatterns {
+		handlerMatches := handlerRegex.FindAllStringSubmatch(htmlContent, -1)
+		for _, match := range handlerMatches {
+			if len(match) > 1 {
+				jsCode = append(jsCode, match[1])
+			}
+		}
+	}
+	
+	// Extract javascript: URLs
+	jsURLRegex := regexp.MustCompile(`(?i)javascript:([^"'\s>]*)`)
+	matches = jsURLRegex.FindAllStringSubmatch(htmlContent, -1)
+	for _, match := range matches {
+		if len(match) > 1 {
+			jsCode = append(jsCode, match[1])
+		}
+	}
+	
+	return jsCode
+}
+
+// AnalyzeDOMXSS performs comprehensive DOM XSS analysis
+func AnalyzeDOMXSS(htmlContent string, targetURL string) []map[string]interface{} {
+	detector := NewDOMXSSDetector()
+	jsCodeBlocks := ExtractJavaScript(htmlContent)
+	
+	var allVulnerabilities []map[string]interface{}
+	
+	for i, jsCode := range jsCodeBlocks {
+		vulns := detector.DetectDOMXSS(jsCode)
+		for _, vuln := range vulns {
+			vuln["block_index"] = i
+			vuln["js_code"] = jsCode
+			vuln["target_url"] = targetURL
+			allVulnerabilities = append(allVulnerabilities, vuln)
+		}
+	}
+	
+	return allVulnerabilities
 }

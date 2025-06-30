@@ -80,7 +80,7 @@ func runRawDataMode(filePath string, cmd *cobra.Command) {
 				os.Exit(1)
 			}
 		} else {
-			if strings.Index(line, "Host: ") != -1 {
+			if strings.Contains(line, "Host: ") {
 				host = line[6:]
 			} else {
 				parse := strings.Split(line, ":")
@@ -116,7 +116,7 @@ func runRawDataMode(filePath string, cmd *cobra.Command) {
 
 // runHarMode processes targets from a HAR (HTTP Archive) file
 // It extracts requests from the HAR file and scans each one
-func runHarMode(filePath string, cmd *cobra.Command, sf bool) {
+func runHarMode(filePath string, _ *cobra.Command, sf bool) {
 	printing.DalLog("SYSTEM", "Using file mode with targets list from HAR", options)
 	if (!options.NoSpinner || !options.Silence) && !sf {
 		options.SpinnerObject = spinner.New(spinner.CharSets[14], 100*time.Millisecond, spinner.WithWriter(os.Stderr)) // Build our new spinner
@@ -183,7 +183,7 @@ func runFileMode(filePath string, cmd *cobra.Command, sf bool) {
 
 // updateSpinner updates the progress spinner with current scanning status
 // It displays the current task number, total tasks, and completion percentage
-func updateSpinner(options model.Options, sf bool, current, total int) {
+func updateSpinner(options model.Options, sf bool, _, total int) {
 	if (!options.NoSpinner || !options.Silence) && !sf {
 		options.Mutex.Lock()
 		options.NowURL++

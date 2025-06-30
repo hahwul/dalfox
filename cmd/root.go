@@ -149,6 +149,10 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&args.OutputResponse, "output-response", false, "Include raw HTTP responses in the results. Example: --output-response")
 	rootCmd.PersistentFlags().BoolVar(&args.SkipDiscovery, "skip-discovery", false, "Skip the entire discovery phase, proceeding directly to XSS scanning. Requires -p flag to specify parameters. Example: --skip-discovery -p 'username'")
 	rootCmd.PersistentFlags().BoolVar(&args.ForceHeadlessVerification, "force-headless-verification", false, "Force headless browser-based verification, useful when automatic detection fails or to override default behavior. Example: --force-headless-verification")
+	rootCmd.PersistentFlags().BoolVar(&args.DetailedAnalysis, "detailed-analysis", false, "Enable detailed parameter analysis for better XSS detection. Example: --detailed-analysis")
+	rootCmd.PersistentFlags().BoolVar(&args.FastScan, "fast-scan", false, "Enable fast scanning mode for URL lists. Example: --fast-scan")
+	rootCmd.PersistentFlags().BoolVar(&args.MagicCharTest, "magic-char-test", false, "Enable magic character testing for manual XSS analysis. Example: --magic-char-test")
+	rootCmd.PersistentFlags().BoolVar(&args.ContextAware, "context-aware", false, "Enable context-aware payload selection for better XSS detection. Example: --context-aware")
 
 	// Initialize flag groups
 	initializeFlagGroups()
@@ -244,7 +248,7 @@ func initializeFlagGroups() {
 	flagMap := map[string][]string{
 		"Input":    {"config", "custom-payload", "custom-blind-xss-payload", "data", "grep", "remote-payloads", "remote-wordlists", "har-file-path"},
 		"Request":  {"header", "cookie", "user-agent", "method", "cookie-from-raw"},
-		"Scanning": {"param", "ignore-param", "blind", "timeout", "delay", "worker", "skip-headless", "deep-domxss", "waf-evasion", "skip-discovery", "force-headless-verification", "use-bav", "skip-bav", "skip-mining-dom", "skip-mining-dict", "skip-mining-all", "skip-xss-scanning", "only-custom-payload", "skip-grepping"},
+		"Scanning": {"param", "ignore-param", "blind", "timeout", "delay", "worker", "skip-headless", "deep-domxss", "waf-evasion", "skip-discovery", "force-headless-verification", "use-bav", "skip-bav", "skip-mining-dom", "skip-mining-dict", "skip-mining-all", "skip-xss-scanning", "only-custom-payload", "skip-grepping", "detailed-analysis", "fast-scan", "magic-char-test", "context-aware"},
 		"Mining":   {"mining-dict-word", "mining-dict", "mining-dom"},
 		"Output":   {"output", "format", "only-poc", "report", "output-all", "output-request", "output-response", "poc-type", "report-format", "silence", "no-color", "no-spinner"},
 		"Advanced": {"custom-alert-value", "custom-alert-type", "found-action", "found-action-shell", "proxy", "ignore-return", "max-cpu", "only-discovery", "follow-redirects", "debug"},
@@ -351,6 +355,11 @@ func initConfig() {
 		UseBAV:                    args.UseBAV,
 		SkipDiscovery:             args.SkipDiscovery,
 		HarFilePath:               args.HarFilePath,
+		// Issue #695 and #764 flags
+		DetailedAnalysis:          args.DetailedAnalysis,
+		FastScan:                  args.FastScan,
+		MagicCharTest:             args.MagicCharTest,
+		ContextAware:              args.ContextAware,
 	}
 
 	// If configuration file was loaded, apply values from it for options not specified via CLI
