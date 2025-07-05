@@ -7,7 +7,7 @@ import (
 )
 
 // Command-line flags for server configuration
-var port int                          // Port to bind the server to
+var port int                        // Port to bind the server to
 var host, serverType, apiKey string // Host address, server type, and API Key
 
 // serverCmd represents the server command for starting API servers
@@ -24,9 +24,9 @@ func runServerCmd(cmd *cobra.Command, args []string) {
 	options.ServerHost = host
 	options.ServerPort = port
 	options.APIKey = apiKey
-	options.ServerType = server_type // Add this line to store server_type in options
+	options.ServerType = serverType // Add this line to store serverType in options
 
-	switch server_type {
+	switch serverType {
 	case "mcp":
 		printing.DalLog("SYSTEM", "Starting MCP Server", options)
 		printing.Summary(options, "MCP Server Mode")
@@ -43,7 +43,7 @@ func init() {
 	rootCmd.AddCommand(serverCmd)
 	serverCmd.Flags().IntVar(&port, "port", 6664, "Specify the port to bind the server to. Example: --port 6664")
 	serverCmd.Flags().StringVar(&host, "host", "0.0.0.0", "Specify the address to bind the server to. Example: --host '0.0.0.0'")
-	serverCmd.Flags().StringVar(&server_type, "type", "rest", "Specify the server type. Example: --type 'rest' or --type 'mcp'")
+	serverCmd.Flags().StringVar(&serverType, "type", "rest", "Specify the server type. Example: --type 'rest' or --type 'mcp'")
 	serverCmd.Flags().StringVar(&apiKey, "api-key", "", "Specify the API key for server authentication. Example: --api-key 'your-secret-key'")
 
 	// Apply custom help format to this subcommand
