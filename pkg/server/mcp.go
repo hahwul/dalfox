@@ -15,6 +15,9 @@ import (
 	mcpserver "github.com/mark3labs/mcp-go/server"
 )
 
+var utilsGenerateRandomToken = utils.GenerateRandomToken
+var serverScanFromAPI = ScanFromAPI
+
 // RunMCPServer starts the MCP server for Dalfox
 func RunMCPServer(options model.Options) {
 	vLog := vlogger.GetLogger(options.Debug)
@@ -105,7 +108,7 @@ func RunMCPServer(options model.Options) {
 		}
 
 		// Create a unique scan ID
-		sid := utils.GenerateRandomToken(url)
+		sid := utilsGenerateRandomToken(url)
 		vLog.WithField("scan_id", sid).Info("Starting scan for URL: " + url)
 
 		// Set up scan options
@@ -202,7 +205,7 @@ func RunMCPServer(options model.Options) {
 			}
 
 			// Run scan
-			ScanFromAPI(url, newOptions, options, sid)
+			serverScanFromAPI(url, newOptions, options, sid)
 			vLog.WithField("scan_id", sid).Info("Scan completed successfully")
 		}()
 
