@@ -119,9 +119,10 @@ func Test_scansHandler(t *testing.T) {
 	c := e.NewContext(req, rec)
 
 	scans := []string{"test-scan"}
+	options := model.Options{}
 
-	if assert.NoError(t, scansHandler(c, &scans)) {
-		assert.Equal(t, http.StatusNotFound, rec.Code)
+	if assert.NoError(t, scansHandler(c, &scans, &options)) {
+		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.Contains(t, rec.Body.String(), "test-scan")
 	}
 }
@@ -132,7 +133,9 @@ func Test_healthHandler(t *testing.T) {
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	if assert.NoError(t, healthHandler(c)) {
+	options := model.Options{}
+
+	if assert.NoError(t, healthHandler(c, &options)) {
 		assert.Equal(t, http.StatusOK, rec.Code)
 		assert.Contains(t, rec.Body.String(), "ok")
 	}
@@ -241,7 +244,8 @@ func Test_RunAPIServer(t *testing.T) {
 func Test_apiKeyAuth(t *testing.T) {
 	e := echo.New()
 	validKey := "test-api-key"
-	mw := apiKeyAuth(validKey)
+	options := model.Options{}
+	mw := apiKeyAuth(validKey, &options)
 
 	// Dummy handler to check if middleware passes
 	handler := func(c echo.Context) error {
