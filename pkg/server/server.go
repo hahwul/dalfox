@@ -15,6 +15,17 @@ import (
 	"github.com/tylerb/graceful"
 )
 
+// respondJSONorJSONP is a helper to send JSON or JSONP responses based on options and callback param
+func respondJSONorJSONP(c echo.Context, status int, resp interface{}, options *model.Options) error {
+	if options.ServerType == "rest" && options.JSONP {
+		callbackParam := c.QueryParam("callback")
+		if callbackParam != "" {
+			return c.JSONP(status, callbackParam, resp)
+		}
+	}
+	return c.JSON(status, resp)
+}
+
 const APIKeyHeader = "X-API-KEY"
 
 // @title Dalfox API
@@ -78,16 +89,16 @@ func setupEchoServer(options *model.Options, scans *[]string) *echo.Echo { // op
 		return scansHandler(c, scans, options)
 	})
 	e.GET("/scan/:sid", func(c echo.Context) error {
-		return scanHandler(c, scans, options) // Pass pointer directly
+		return scanHandler(c, scans, options)
 	})
 	e.POST("/scan", func(c echo.Context) error {
-		return postScanHandler(c, scans, options) // Pass pointer directly
+		return postScanHandler(c, scans, options)
 	})
 	e.DELETE("/scans/all", func(c echo.Context) error {
-		return deleteScansHandler(c, scans, options) // options is already a pointer
+		return deleteScansHandler(c, scans, options)
 	})
 	e.DELETE("/scan/:sid", func(c echo.Context) error {
-		return deleteScanHandler(c, scans, options) // options is already a pointer
+		return deleteScanHandler(c, scans, options)
 	})
 	return e
 }
@@ -99,13 +110,7 @@ func apiKeyAuth(validAPIKey string, options *model.Options) echo.MiddlewareFunc 
 			apiKey := c.Request().Header.Get(APIKeyHeader)
 			if apiKey == "" || apiKey != validAPIKey {
 				res := Res{Code: http.StatusUnauthorized, Msg: "Unauthorized: Invalid or missing API Key"}
-				if options.ServerType == "rest" && options.JSONP {
-					callbackParam := c.QueryParam("callback")
-					if callbackParam != "" {
-						return c.JSONP(http.StatusUnauthorized, callbackParam, res)
-					}
-				}
-				return c.JSON(http.StatusUnauthorized, res)
+				return respondJSONorJSONP(c, http.StatusUnauthorized, res, options)
 			}
 			return next(c)
 		}
@@ -117,13 +122,7 @@ func healthHandler(c echo.Context, options *model.Options) error {
 		Code: 200,
 		Msg:  "ok",
 	}
-	if options.ServerType == "rest" && options.JSONP {
-		callbackParam := c.QueryParam("callback")
-		if callbackParam != "" {
-			return c.JSONP(http.StatusOK, callbackParam, r)
-		}
-	}
-	return c.JSON(http.StatusOK, r)
+	return respondJSONorJSONP(c, http.StatusOK, r, options)
 }
 
 func scansHandler(c echo.Context, scans *[]string, options *model.Options) error {
@@ -131,29 +130,13 @@ func scansHandler(c echo.Context, scans *[]string, options *model.Options) error
 		Code:  200,
 		Scans: *scans,
 	}
-	// It seems this handler intends to return 404 if scans is empty,
-	// but the plan is to use JSONP for successful responses.
-	// For now, let's assume 200 is the intended success status for JSONP.
-	// If scans is empty and it's meant to be a 404, JSONP might not be conventional.
-	// The original code returns http.StatusNotFound, let's keep that for non-JSONP.
-	status := http.StatusOK // Assuming 200 for successful JSONP response
-	if len(*scans) == 0 {   // A more explicit check for emptiness
+	status := http.StatusOK
+	if len(*scans) == 0 {
 		status = http.StatusNotFound
+		// For empty scans, respond with a not found message
+		return respondJSONorJSONP(c, status, Res{Code: http.StatusNotFound, Msg: "No scans found"}, options)
 	}
-
-	if options.ServerType == "rest" && options.JSONP {
-		callbackParam := c.QueryParam("callback")
-		if callbackParam != "" {
-			// If it was truly a "not found" scenario even for JSONP, this might need adjustment.
-			// For now, sending the Scans struct (even if empty) with the callback.
-			return c.JSONP(http.StatusOK, callbackParam, r)
-		}
-	}
-	// Original behavior if not JSONP or no callback
-	if status == http.StatusNotFound {
-		return c.JSON(http.StatusNotFound, Res{Code: http.StatusNotFound, Msg: "No scans found"})
-	}
-	return c.JSON(status, r)
+	return respondJSONorJSONP(c, status, r, options)
 }
 
 func scanHandler(c echo.Context, scans *[]string, options *model.Options) error {
@@ -184,13 +167,7 @@ func scanHandler(c echo.Context, scans *[]string, options *model.Options) error 
 		}
 	}
 
-	if options.ServerType == "rest" && options.JSONP {
-		callbackParam := c.QueryParam("callback")
-		if callbackParam != "" {
-			return c.JSONP(http.StatusOK, callbackParam, res)
-		}
-	}
-	return c.JSON(status, res)
+	return respondJSONorJSONP(c, status, res, options)
 }
 
 func postScanHandler(c echo.Context, scans *[]string, options *model.Options) error {
@@ -200,13 +177,7 @@ func postScanHandler(c echo.Context, scans *[]string, options *model.Options) er
 			Code: http.StatusInternalServerError,
 			Msg:  "Parameter Bind error",
 		}
-		if options.ServerType == "rest" && options.JSONP {
-			callbackParam := c.QueryParam("callback")
-			if callbackParam != "" {
-				return c.JSONP(http.StatusOK, callbackParam, res)
-			}
-		}
-		return c.JSON(http.StatusInternalServerError, res)
+		return respondJSONorJSONP(c, http.StatusInternalServerError, res, options)
 	}
 	sid := utils.GenerateRandomToken(rq.URL)
 	res := &Res{
@@ -219,13 +190,7 @@ func postScanHandler(c echo.Context, scans *[]string, options *model.Options) er
 	}
 	go ScanFromAPI(rq.URL, rq.Options, *options, sid)
 
-	if options.ServerType == "rest" && options.JSONP {
-		callbackParam := c.QueryParam("callback")
-		if callbackParam != "" {
-			return c.JSONP(http.StatusOK, callbackParam, res)
-		}
-	}
-	return c.JSON(http.StatusOK, res)
+	return respondJSONorJSONP(c, http.StatusOK, res, options)
 }
 
 // @Summary Delete all scans
@@ -241,7 +206,7 @@ func deleteScansHandler(c echo.Context, scans *[]string, options *model.Options)
 	if options.Scan != nil {
 		options.Scan = make(map[string]model.Scan)
 	}
-	return c.JSON(http.StatusOK, Res{Code: 200, Msg: "All scans deleted"})
+	return respondJSONorJSONP(c, http.StatusOK, Res{Code: 200, Msg: "All scans deleted"}, options)
 }
 
 // @Summary Delete a specific scan
@@ -262,7 +227,7 @@ func deleteScanHandler(c echo.Context, scans *[]string, options *model.Options) 
 	inScansSlice := contains(*scans, sid)
 
 	if !inOptionsScan && !inScansSlice {
-		return c.JSON(http.StatusNotFound, Res{Code: 404, Msg: "Scan ID not found"})
+		return respondJSONorJSONP(c, http.StatusNotFound, Res{Code: 404, Msg: "Scan ID not found"}, options)
 	}
 
 	// Remove sid from scans slice
@@ -281,7 +246,7 @@ func deleteScanHandler(c echo.Context, scans *[]string, options *model.Options) 
 		delete(options.Scan, sid)
 	}
 
-	return c.JSON(http.StatusOK, Res{Code: 200, Msg: "Scan deleted successfully"})
+	return respondJSONorJSONP(c, http.StatusOK, Res{Code: 200, Msg: "Scan deleted successfully"}, options)
 }
 
 func contains(slice []string, item string) bool {
