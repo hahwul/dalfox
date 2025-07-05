@@ -10,6 +10,13 @@ import (
 // GenerateMarkdownReport creates a report in Markdown format
 func GenerateMarkdownReport(scanResult model.Result, options model.Options) string {
 	var report strings.Builder
+	sanitize := func(s string) string {
+		return strings.NewReplacer(
+			"|", `\|`,
+			"<", "&lt;",
+			">", "&gt;",
+		).Replace(s)
+	}
 
 	report.WriteString("## Information\n")
 	report.WriteString(fmt.Sprintf("- Start: %s\n", scanResult.StartTime.String()))
@@ -25,7 +32,7 @@ func GenerateMarkdownReport(scanResult model.Result, options model.Options) stri
 		if v.Reflected {
 			reflected = "true"
 		}
-		report.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s |\n", v.Name, v.Type, reflected, v.ReflectedPoint, v.ReflectedCode, chars))
+		report.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %s | %s |\n", sanitize(v.Name), sanitize(v.Type), reflected, sanitize(v.ReflectedPoint), sanitize(v.ReflectedCode), sanitize(chars)))
 	}
 	report.WriteString("\n")
 
