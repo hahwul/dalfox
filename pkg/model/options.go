@@ -65,6 +65,8 @@ type Options struct {
 	// Server Mode Options
 	ServerHost string `json:"server-host,omitempty"`
 	ServerPort int    `json:"server-port,omitempty"`
+	APIKey     string `json:"api-key,omitempty"`
+	ServerType string `json:"server-type,omitempty"`
 
 	// Output Options
 	Silence          bool   `json:"silence,omitempty"`
