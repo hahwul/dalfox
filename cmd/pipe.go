@@ -2,9 +2,12 @@ package cmd
 
 import (
 	"bufio"
+	"encoding/base64"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,6 +38,13 @@ func runPipeCmd(cmd *cobra.Command, args []string) {
 	options.Method = "Pipe Mode"
 	printing.Summary(options, "Stdin (pipeline)")
 	options.Method = tMethod
+
+	rawdata, _ := cmd.Flags().GetBool("rawdata")
+	if rawdata {
+		runRawDataPipeMode(cmd)
+		return
+	}
+
 	var targets []string
 	mutex := &sync.Mutex{}
 	options.Mutex = mutex
@@ -58,6 +68,71 @@ func runPipeCmd(cmd *cobra.Command, args []string) {
 	} else {
 		runSingleMode(targets, sf, limit)
 	}
+}
+
+// runRawDataPipeMode processes a file containing raw HTTP request data
+func runRawDataPipeMode(cmd *cobra.Command) {
+	printing.DalLog("SYSTEM", "Using pipe mode with raw data format", options)
+	bytes, err := ioutil.ReadAll(os.Stdin)
+	if err != nil {
+		printing.DalLog("ERROR", "Failed to read from stdin: "+err.Error(), options)
+		return
+	}
+	rawReq := string(bytes)
+
+	// Check if the input is base64 encoded
+	b64decoded, err := base64.StdEncoding.DecodeString(rawReq)
+	if err == nil {
+		rawReq = string(b64decoded)
+	}
+
+	ff := strings.Split(strings.ReplaceAll(rawReq, "\r\n", "\n"), "\n")
+
+	var path, body, host, target string
+	bodyswitch := false
+	for index, line := range ff {
+		if index == 0 {
+			parse := strings.Split(line, " ")
+			if len(parse) > 1 {
+				options.Method = parse[0]
+				path = parse[1]
+			} else {
+				printing.DalLog("ERROR", "HTTP Raw Request Format Error", options)
+				os.Exit(1)
+			}
+		} else {
+			if strings.Contains(line, "Host: ") || strings.Contains(line, "host: ") {
+				host = line[6:]
+			} else {
+				parse := strings.Split(line, ":")
+				if len(parse) > 1 {
+					options.Header = append(options.Header, line)
+				}
+			}
+			if bodyswitch {
+				body = body + line
+			}
+			if len(line) == 0 {
+				bodyswitch = true
+			}
+		}
+	}
+	options.Data = body
+	http, _ := cmd.Flags().GetBool("http")
+	if strings.Index(path, "http") == 0 {
+		target = path
+	} else {
+		if host == "" {
+			printing.DalLog("ERROR", "HTTP Raw Request Format Error - Host not found", options)
+			os.Exit(1)
+		}
+		if http {
+			target = "http://" + host + path
+		} else {
+			target = "https://" + host + path
+		}
+	}
+	_, _ = scanning.Scan(target, options, "single")
 }
 
 // runMulticastMode processes multiple targets in parallel using worker pools
@@ -209,6 +284,8 @@ func runSingleMode(targets []string, sf bool, limit int) {
 // init registers the pipe command and its flags
 func init() {
 	rootCmd.AddCommand(pipeCmd)
+	pipeCmd.Flags().Bool("rawdata", false, "[FORMAT] Use raw data from Burp/ZAP. Example: --rawdata")
+	pipeCmd.Flags().Bool("http", false, "Force HTTP on raw data mode. Example: --http")
 	pipeCmd.Flags().Bool("multicast", false, "Enable parallel scanning in N*Host mode (only shows PoC code). Example: --multicast")
 	pipeCmd.Flags().Bool("mass", false, "Enable parallel scanning in N*Host mode (only shows PoC code). Example: --mass")
 	pipeCmd.Flags().Bool("silence-force", false, "Only print PoC code, suppress progress output. Example: --silence-force")

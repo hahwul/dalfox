@@ -11,12 +11,14 @@ layout: page
 
 This guide provides detailed instructions on how to scan a target using a raw HTTP request with Dalfox. Follow the steps below to perform a scan using a raw request.
 
-## Sample Raw Request
+## Using `file` mode
+
+### Sample Raw Request
 
 Create a file named `sample_rawdata.txt` with the following content:
 
 ```http
-POST https://www.hahwul.com/?q=xspear HTTP/1.1
+POST https://www.hahwul.com/?q=dalfox HTTP/1.1
 User-Agent: Mozilla/5.0 (Windows NT 10.0; WOW64; rv:56.0) Gecko/20100101 Firefox/56.0
 Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
 Accept-Language: ko-KR,ko;q=0.8,en-US;q=0.5,en;q=0.3
@@ -28,13 +30,31 @@ Host: www.hahwul.com
 asdf=asdf
 ```
 
-## Command
+### Command
 
-To scan using the raw request, use the following command:
+To scan using the raw request from a file, use the following command:
 
 ```bash
-dalfox file --rawdata ./samples/sample_rawdata.txt
+dalfox file ./samples/sample_rawdata.txt --rawdata
 ```
+
+## Using `pipe` mode
+
+You can also provide the raw request via stdin using the `pipe` command.
+
+### Command
+
+```bash
+cat ./samples/sample_rawdata.txt | dalfox pipe --rawdata
+```
+
+Or for base64 encoded requests:
+
+```bash
+cat ./samples/sample_rawdata.txt | base64 | dalfox pipe --rawdata
+```
+
+Dalfox will automatically detect if the piped input is base64 encoded and decode it before parsing.
 
 ## Output
 
