@@ -85,7 +85,9 @@ func apiKeyAuth(validAPIKey string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			// Get API key from request header
-			apiKey := c.Request().Header.Get("X-API-KEY")
+const APIKeyHeader = "X-API-KEY"
+
+			apiKey := c.Request().Header.Get(APIKeyHeader)
 
 			// If API key is empty or invalid, return 401 Unauthorized
 			if apiKey == "" || apiKey != validAPIKey {
