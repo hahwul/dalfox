@@ -15,6 +15,8 @@ import (
 	"github.com/tylerb/graceful"
 )
 
+const APIKeyHeader = "X-API-KEY"
+
 // @title Dalfox API
 // @version 1.0
 // @description This is a dalfox api swagger
@@ -85,7 +87,6 @@ func apiKeyAuth(validAPIKey string) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
 			// Get API key from request header
-const APIKeyHeader = "X-API-KEY"
 
 			apiKey := c.Request().Header.Get(APIKeyHeader)
 
