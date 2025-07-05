@@ -15,6 +15,8 @@ import (
 	"github.com/tylerb/graceful"
 )
 
+const APIKeyHeader = "X-API-KEY"
+
 // @title Dalfox API
 // @version 1.0
 // @description This is a dalfox api swagger
@@ -42,6 +44,12 @@ func setupEchoServer(options *model.Options, scans *[]string) *echo.Echo { // op
 	e := echo.New()
 	options.IsAPI = true
 	e.Server.Addr = options.ServerHost + ":" + strconv.Itoa(options.ServerPort)
+
+	// API Key Authentication Middleware
+	if options.ServerType == "rest" && options.APIKey != "" {
+		e.Use(apiKeyAuth(options.APIKey))
+	}
+
 	e.Use(middleware.SecureWithConfig(middleware.SecureConfig{
 		XSSProtection:      "",
 		ContentTypeNosniff: "",
@@ -72,6 +80,25 @@ func setupEchoServer(options *model.Options, scans *[]string) *echo.Echo { // op
 		return deleteScanHandler(c, scans, options) // options is already a pointer
 	})
 	return e
+}
+
+// apiKeyAuth is a middleware function for API key authentication
+func apiKeyAuth(validAPIKey string) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			// Get API key from request header
+
+			apiKey := c.Request().Header.Get(APIKeyHeader)
+
+			// If API key is empty or invalid, return 401 Unauthorized
+			if apiKey == "" || apiKey != validAPIKey {
+				return c.JSON(http.StatusUnauthorized, Res{Code: http.StatusUnauthorized, Msg: "Unauthorized: Invalid or missing API Key"})
+			}
+
+			// If API key is valid, proceed to the next handler
+			return next(c)
+		}
+	}
 }
 
 func healthHandler(c echo.Context) error {

@@ -38,6 +38,9 @@ dalfox server
 # Specify custom host and port
 dalfox server --host 127.0.0.1 --port 8090
 
+# Start REST API server with API key authentication
+dalfox server --api-key "your-secret-key"
+
 # Start as an MCP server
 dalfox server --type mcp
 ```
@@ -49,6 +52,7 @@ dalfox server --type mcp
 | `--host`   | Specify the address to bind the server to                       | `0.0.0.0`   |
 | `--port`   | Specify the port to bind the server to                          | `6664`      |
 | `--type`   | Specify the server type (`rest` or `mcp`)                       | `rest`      |
+| `--api-key`| Specify the API key for server authentication (REST API mode only) | `""` (empty) |
 
 ### Example Output
 
@@ -107,18 +111,21 @@ To start a scan with default settings:
 # Request
 curl -X POST "http://localhost:8090/scan" \
   -H "Content-Type: application/json" \
+  -H "X-API-KEY: your-secret-key" \
   -d '{"url": "https://example.com"}'
 
 # Response
 {"code":200,"msg":"28846e5b355577ecd60766f45735c4c687e8c1c200db65700e3f458b73234984","data":null}
 ```
+**Note:** If API key authentication is enabled via the `--api-key` flag when starting the server, you must include the `X-API-KEY` header in all your API requests.
 
 The response contains a scan ID (`msg` field) that you'll use to retrieve results.
 
 ### Retrieving Scan Results
 
 ```bash
-curl -X GET "http://localhost:8090/result/28846e5b355577ecd60766f45735c4c687e8c1c200db65700e3f458b73234984"
+curl -X GET "http://localhost:8090/result/28846e5b355577ecd60766f45735c4c687e8c1c200db65700e3f458b73234984" \
+  -H "X-API-KEY: your-secret-key"
 ```
 
 ## Advanced Scanning with Options
@@ -129,6 +136,7 @@ You can customize scans by providing options in the request body:
 # Request with custom options
 curl -X POST "http://localhost:8090/scan" \
   -H "Content-Type: application/json" \
+  -H "X-API-KEY: your-secret-key" \
   -d '{
     "url": "https://example.com", 
     "options": {
