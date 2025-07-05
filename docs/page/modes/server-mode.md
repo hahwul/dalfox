@@ -41,18 +41,23 @@ dalfox server --host 127.0.0.1 --port 8090
 # Start REST API server with API key authentication
 dalfox server --api-key "your-secret-key"
 
+# Start REST API server with CORS and JSONP enabled
+dalfox server --allowed-origins "http://localhost:3000,https://example.com" --jsonp
+
 # Start as an MCP server
 dalfox server --type mcp
 ```
 
 ### Server Mode Flags
 
-| Flag       | Description                                                     | Default     |
-|------------|-----------------------------------------------------------------|-------------|
-| `--host`   | Specify the address to bind the server to                       | `0.0.0.0`   |
-| `--port`   | Specify the port to bind the server to                          | `6664`      |
-| `--type`   | Specify the server type (`rest` or `mcp`)                       | `rest`      |
-| `--api-key`| Specify the API key for server authentication (REST API mode only) | `""` (empty) |
+| Flag                | Description                                                                  | Default        |
+|---------------------|------------------------------------------------------------------------------|----------------|
+| `--host`            | Specify the address to bind the server to                                    | `0.0.0.0`      |
+| `--port`            | Specify the port to bind the server to                                       | `6664`         |
+| `--type`            | Specify the server type (`rest` or `mcp`)                                    | `rest`         |
+| `--api-key`         | Specify the API key for server authentication (REST API mode only)           | `""` (empty)   |
+| `--allowed-origins` | Comma-separated list of allowed origins for CORS (REST API mode only)        | `[]` (empty)   |
+| `--jsonp`           | Enable JSONP responses by checking for a `callback` param (REST API mode only) | `false`        |
 
 ### Example Output
 

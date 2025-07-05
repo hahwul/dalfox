@@ -63,10 +63,12 @@ type Options struct {
 	Delay       int `json:"delay,omitempty"`
 
 	// Server Mode Options
-	ServerHost string `json:"server-host,omitempty"`
-	ServerPort int    `json:"server-port,omitempty"`
-	APIKey     string `json:"api-key,omitempty"`
-	ServerType string `json:"server-type,omitempty"`
+	ServerHost     string   `json:"server-host,omitempty"`
+	ServerPort     int      `json:"server-port,omitempty"`
+	APIKey         string   `json:"api-key,omitempty"`
+	ServerType     string   `json:"server-type,omitempty"`
+	AllowedOrigins []string `json:"allowed-origins,omitempty"`
+	JSONP          bool     `json:"jsonp,omitempty"`
 
 	// Output Options
 	Silence          bool   `json:"silence,omitempty"`

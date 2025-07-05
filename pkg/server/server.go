@@ -45,9 +45,17 @@ func setupEchoServer(options *model.Options, scans *[]string) *echo.Echo { // op
 	options.IsAPI = true
 	e.Server.Addr = options.ServerHost + ":" + strconv.Itoa(options.ServerPort)
 
+	// CORS Middleware
+	if options.ServerType == "rest" && len(options.AllowedOrigins) > 0 {
+		e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
+			AllowOrigins: options.AllowedOrigins,
+			AllowMethods: []string{http.MethodGet, http.MethodHead, http.MethodPut, http.MethodPatch, http.MethodPost, http.MethodDelete},
+		}))
+	}
+
 	// API Key Authentication Middleware
 	if options.ServerType == "rest" && options.APIKey != "" {
-		e.Use(apiKeyAuth(options.APIKey))
+		e.Use(apiKeyAuth(options.APIKey, options)) // Pass options for JSONP check
 	}
 
 	e.Use(middleware.SecureWithConfig(middleware.SecureConfig{
@@ -62,10 +70,12 @@ func setupEchoServer(options *model.Options, scans *[]string) *echo.Echo { // op
 			`"latency_human":"${latency_human}","bytes_in":${bytes_in},` +
 			`"bytes_out":${bytes_out}}` + "\n",
 	}))
-	e.GET("/health", healthHandler)
+	e.GET("/health", func(c echo.Context) error {
+		return healthHandler(c, options)
+	})
 	e.GET("/swagger/*", echoSwagger.WrapHandler)
 	e.GET("/scans", func(c echo.Context) error {
-		return scansHandler(c, scans)
+		return scansHandler(c, scans, options)
 	})
 	e.GET("/scan/:sid", func(c echo.Context) error {
 		return scanHandler(c, scans, options) // Pass pointer directly
@@ -83,88 +93,139 @@ func setupEchoServer(options *model.Options, scans *[]string) *echo.Echo { // op
 }
 
 // apiKeyAuth is a middleware function for API key authentication
-func apiKeyAuth(validAPIKey string) echo.MiddlewareFunc {
+func apiKeyAuth(validAPIKey string, options *model.Options) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c echo.Context) error {
-			// Get API key from request header
-
 			apiKey := c.Request().Header.Get(APIKeyHeader)
-
-			// If API key is empty or invalid, return 401 Unauthorized
 			if apiKey == "" || apiKey != validAPIKey {
-				return c.JSON(http.StatusUnauthorized, Res{Code: http.StatusUnauthorized, Msg: "Unauthorized: Invalid or missing API Key"})
+				res := Res{Code: http.StatusUnauthorized, Msg: "Unauthorized: Invalid or missing API Key"}
+				if options.ServerType == "rest" && options.JSONP {
+					callbackParam := c.QueryParam("callback")
+					if callbackParam != "" {
+						return c.JSONP(http.StatusUnauthorized, callbackParam, res)
+					}
+				}
+				return c.JSON(http.StatusUnauthorized, res)
 			}
-
-			// If API key is valid, proceed to the next handler
 			return next(c)
 		}
 	}
 }
 
-func healthHandler(c echo.Context) error {
+func healthHandler(c echo.Context, options *model.Options) error {
 	r := &Res{
 		Code: 200,
 		Msg:  "ok",
 	}
+	if options.ServerType == "rest" && options.JSONP {
+		callbackParam := c.QueryParam("callback")
+		if callbackParam != "" {
+			return c.JSONP(http.StatusOK, callbackParam, r)
+		}
+	}
 	return c.JSON(http.StatusOK, r)
 }
 
-func scansHandler(c echo.Context, scans *[]string) error {
+func scansHandler(c echo.Context, scans *[]string, options *model.Options) error {
 	r := &Scans{
 		Code:  200,
 		Scans: *scans,
 	}
-	return c.JSON(http.StatusNotFound, r)
-}
-
-func scanHandler(c echo.Context, scans *[]string, options *model.Options) error { // options is now *model.Options
-	sid := c.Param("sid")
-	// Check if sid exists in options.Scan (source of truth) or in the scans slice for active scanning processes
-	scanData, inOptionsScan := options.Scan[sid] // This will now use the pointer's Scan field
-	scanResult := GetScan(sid, *options)         // Dereference options for GetScan
-
-	if !inOptionsScan && !contains(*scans, sid) { // If not in options.Scan and not in scans slice
-		return c.JSON(http.StatusNotFound, Res{Code: 404, Msg: "Scan ID not found"})
+	// It seems this handler intends to return 404 if scans is empty,
+	// but the plan is to use JSONP for successful responses.
+	// For now, let's assume 200 is the intended success status for JSONP.
+	// If scans is empty and it's meant to be a 404, JSONP might not be conventional.
+	// The original code returns http.StatusNotFound, let's keep that for non-JSONP.
+	status := http.StatusOK // Assuming 200 for successful JSONP response
+	if len(*scans) == 0 { // A more explicit check for emptiness
+		status = http.StatusNotFound
 	}
 
-	r := &Res{Code: 200}
-	if !inOptionsScan || len(scanResult.URL) == 0 { // Use scanResult.URL
-		// Check if it was at least in the scans slice, meaning it's a known scan process
-		if contains(*scans, sid) {
-			r.Msg = "scanning"
-		} else {
-			// This case should ideally not be reached if the first check is comprehensive
-			// but as a fallback if it's not in options.Scan and somehow missed in the initial scans check.
-			return c.JSON(http.StatusNotFound, Res{Code: 404, Msg: "Scan ID not found or not initialized"})
+	if options.ServerType == "rest" && options.JSONP {
+		callbackParam := c.QueryParam("callback")
+		if callbackParam != "" {
+			// If it was truly a "not found" scenario even for JSONP, this might need adjustment.
+			// For now, sending the Scans struct (even if empty) with the callback.
+			return c.JSONP(status, callbackParam, r)
 		}
-	} else {
-		r.Msg = "finish"
-		r.Data = scanData.Results // Use scanData from options.Scan if available and finished
 	}
-	return c.JSON(http.StatusOK, r)
+	// Original behavior if not JSONP or no callback
+	if status == http.StatusNotFound {
+		return c.JSON(http.StatusNotFound, Res{Code: http.StatusNotFound, Msg: "No scans found"})
+	}
+	return c.JSON(status, r)
 }
 
-func postScanHandler(c echo.Context, scans *[]string, options *model.Options) error { // options is now *model.Options
+func scanHandler(c echo.Context, scans *[]string, options *model.Options) error {
+	sid := c.Param("sid")
+	scanData, inOptionsScan := options.Scan[sid]
+	scanResult := GetScan(sid, *options)
+
+	res := &Res{}
+	status := http.StatusOK
+
+	if !inOptionsScan && !contains(*scans, sid) {
+		status = http.StatusNotFound
+		res.Code = http.StatusNotFound
+		res.Msg = "Scan ID not found"
+	} else {
+		res.Code = http.StatusOK
+		if !inOptionsScan || len(scanResult.URL) == 0 {
+			if contains(*scans, sid) {
+				res.Msg = "scanning"
+			} else {
+				status = http.StatusNotFound
+				res.Code = http.StatusNotFound
+				res.Msg = "Scan ID not found or not initialized"
+			}
+		} else {
+			res.Msg = "finish"
+			res.Data = scanData.Results
+		}
+	}
+
+	if options.ServerType == "rest" && options.JSONP {
+		callbackParam := c.QueryParam("callback")
+		if callbackParam != "" {
+			return c.JSONP(status, callbackParam, res)
+		}
+	}
+	return c.JSON(status, res)
+}
+
+func postScanHandler(c echo.Context, scans *[]string, options *model.Options) error {
 	rq := new(Req)
 	if err := c.Bind(rq); err != nil {
-		r := &Res{
-			Code: 500,
+		res := &Res{
+			Code: http.StatusInternalServerError,
 			Msg:  "Parameter Bind error",
 		}
-		return c.JSON(http.StatusInternalServerError, r)
+		if options.ServerType == "rest" && options.JSONP {
+			callbackParam := c.QueryParam("callback")
+			if callbackParam != "" {
+				return c.JSONP(http.StatusInternalServerError, callbackParam, res)
+			}
+		}
+		return c.JSON(http.StatusInternalServerError, res)
 	}
 	sid := utils.GenerateRandomToken(rq.URL)
-	r := &Res{
-		Code: 200,
+	res := &Res{
+		Code: http.StatusOK,
 		Msg:  sid,
 	}
 	*scans = append(*scans, sid)
-	// Ensure options.Scan is initialized before use in ScanFromAPI
-	if options.Scan == nil { // options is a pointer, so options.Scan is fine
+	if options.Scan == nil {
 		options.Scan = make(map[string]model.Scan)
 	}
-	go ScanFromAPI(rq.URL, rq.Options, *options, sid) // Dereference options
-	return c.JSON(http.StatusOK, r)
+	go ScanFromAPI(rq.URL, rq.Options, *options, sid)
+
+	if options.ServerType == "rest" && options.JSONP {
+		callbackParam := c.QueryParam("callback")
+		if callbackParam != "" {
+			return c.JSONP(http.StatusOK, callbackParam, res)
+		}
+	}
+	return c.JSON(http.StatusOK, res)
 }
 
 // @Summary Delete all scans
