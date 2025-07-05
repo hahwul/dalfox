@@ -137,7 +137,7 @@ func scansHandler(c echo.Context, scans *[]string, options *model.Options) error
 	// If scans is empty and it's meant to be a 404, JSONP might not be conventional.
 	// The original code returns http.StatusNotFound, let's keep that for non-JSONP.
 	status := http.StatusOK // Assuming 200 for successful JSONP response
-	if len(*scans) == 0 { // A more explicit check for emptiness
+	if len(*scans) == 0 {   // A more explicit check for emptiness
 		status = http.StatusNotFound
 	}
 
@@ -146,7 +146,7 @@ func scansHandler(c echo.Context, scans *[]string, options *model.Options) error
 		if callbackParam != "" {
 			// If it was truly a "not found" scenario even for JSONP, this might need adjustment.
 			// For now, sending the Scans struct (even if empty) with the callback.
-			return c.JSONP(status, callbackParam, r)
+			return c.JSONP(http.StatusOK, callbackParam, r)
 		}
 	}
 	// Original behavior if not JSONP or no callback
@@ -187,7 +187,7 @@ func scanHandler(c echo.Context, scans *[]string, options *model.Options) error 
 	if options.ServerType == "rest" && options.JSONP {
 		callbackParam := c.QueryParam("callback")
 		if callbackParam != "" {
-			return c.JSONP(status, callbackParam, res)
+			return c.JSONP(http.StatusOK, callbackParam, res)
 		}
 	}
 	return c.JSON(status, res)
@@ -203,7 +203,7 @@ func postScanHandler(c echo.Context, scans *[]string, options *model.Options) er
 		if options.ServerType == "rest" && options.JSONP {
 			callbackParam := c.QueryParam("callback")
 			if callbackParam != "" {
-				return c.JSONP(http.StatusInternalServerError, callbackParam, res)
+				return c.JSONP(http.StatusOK, callbackParam, res)
 			}
 		}
 		return c.JSON(http.StatusInternalServerError, res)
