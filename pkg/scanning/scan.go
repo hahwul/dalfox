@@ -277,6 +277,9 @@ func Scan(target string, options model.Options, sid string) (model.Result, error
 			if err == nil {
 				fmt.Println(string(jobject))
 			}
+		} else if options.ReportFormat == "markdown" || options.ReportFormat == "md" {
+			markdownReport := report.GenerateMarkdownReport(scanResult, options)
+			fmt.Println(markdownReport)
 		} else {
 			report.GenerateReport(scanResult, options)
 		}

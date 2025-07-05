@@ -127,11 +127,25 @@ This generates structured JSON data that can be easily parsed by scripts or impo
 
 ### Detailed Report Generation
 
-For comprehensive reporting:
+Dalfox supports generating detailed reports in various formats.
 
+**JSON Report:**
+
+For a structured JSON report:
 ```bash
 dalfox url http://example.com/vulnerable.php --report --report-format json -o detailed_report.json
 ```
+This is useful for machine-readable detailed output.
+
+**Markdown Report:**
+
+For a human-readable Markdown report:
+```bash
+dalfox url http://example.com/vulnerable.php --report --report-format markdown -o detailed_report.md
+# You can also use 'md' as an alias for markdown
+dalfox url http://example.com/vulnerable.php --report --report-format md -o detailed_report.md
+```
+This format is convenient for documentation or quick sharing of findings.
 
 ## HTTP Archive (HAR) Integration
 
