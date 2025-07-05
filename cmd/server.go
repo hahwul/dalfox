@@ -8,7 +8,7 @@ import (
 
 // Command-line flags for server configuration
 var port int                          // Port to bind the server to
-var host, server_type, apiKey string // Host address, server type, and API Key
+var host, serverType, apiKey string // Host address, server type, and API Key
 
 // serverCmd represents the server command for starting API servers
 var serverCmd = &cobra.Command{
