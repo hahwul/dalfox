@@ -37,8 +37,8 @@ sudo snap install dalfox
 
 ### Nixpkgs (NixOS)
 
-For Nix or NixOS users is a package available. Keep in mind that the lastest releases might only
-be present in the ``unstable`` channel.
+A package is available for Nix or NixOS users. Keep in mind that the latest releases might only
+be present in the `unstable` channel.
 
 ```bash
 nix-shell -p dalfox
