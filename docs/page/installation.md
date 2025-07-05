@@ -60,6 +60,22 @@ Verify the installation with:
 dalfox --version
 ```
 
+## Using Nixpkgs (Nix/NixOS)
+
+Dalfox is available in the Nix package collection, making installation straightforward for Nix and NixOS users. Please note that the latest version may only be available in the `unstable` channel.
+
+### Install Nix
+
+Ensure you have Nix installed on your system. You can find installation instructions on the [official Nix website](https://nixos.org/download/).
+
+### Install Dalfox
+
+To install and use Dalfox in a shell session, run:
+
+```bash
+nix-shell -p dalfox
+ ```
+
 ## From Source
 
 Building from source gives you the most up-to-date version of Dalfox and allows for customization if needed.
