@@ -35,6 +35,15 @@ brew install dalfox
 sudo snap install dalfox
 ```
 
+### Nixpkgs (NixOS)
+
+A package is available for Nix or NixOS users. Keep in mind that the latest releases might only
+be present in the `unstable` channel.
+
+```bash
+nix-shell -p dalfox
+```
+
 ### From Source
 
 ```bash
