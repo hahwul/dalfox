@@ -6,6 +6,10 @@ import (
 	"net/http"
 )
 
+// assetHahwulBaseURL is the base URL for assets.hahwul.com.
+// It's a variable so it can be changed for testing.
+var assetHahwulBaseURL = "https://assets.hahwul.com"
+
 // Asset is type of Assets
 type Asset struct {
 	Line string
@@ -26,28 +30,54 @@ func GetPayloadBoxPayloadWithSize() ([]string, int) {
 
 // getAssetHahwul is pull data and information for remote payloads
 func getAssetHahwul(apiEndpoint, dataEndpoint string) ([]string, string, string) {
-	apiLink := "https://assets.hahwul.com/" + apiEndpoint
-	dataLink := "https://assets.hahwul.com/" + dataEndpoint
+	apiLink := assetHahwulBaseURL + "/" + apiEndpoint
+	dataLink := assetHahwulBaseURL + "/" + dataEndpoint
+
 	// Get Info JSON
-	apiResp, err := http.Get(apiLink)
-	if err != nil {
+	// Use http.DefaultClient.Get instead of http.Get to make it easier to mock in tests if needed,
+	// though changing assetHahwulBaseURL is the primary test strategy here.
+	apiResp, err := http.DefaultClient.Get(apiLink)
+	if err != nil || (apiResp != nil && apiResp.StatusCode != http.StatusOK) {
 		var t []string
+		if apiResp != nil {
+			apiResp.Body.Close()
+		}
 		return t, "", ""
 	}
 	defer apiResp.Body.Close()
+
 	var asset Asset
 	infoJSON, err := io.ReadAll(apiResp.Body)
-	json.Unmarshal(infoJSON, &asset)
+	if err != nil {
+		// Error reading body, or body is empty, still try to proceed if json can be unmarshalled
+		// but it's likely unmarshal will also fail or produce default struct.
+		// However, primary check is for HTTP status. If status was OK but body is bad,
+		// then json.Unmarshal will handle it by populating Asset with defaults.
+	}
+	json.Unmarshal(infoJSON, &asset) // if infoJSON is empty/corrupt, asset will have zero values
 
 	// Get Payload Data
 	dataResp, err := http.Get(dataLink)
-	if err != nil {
+	if err != nil || (dataResp != nil && dataResp.StatusCode != http.StatusOK) {
 		var t []string
+		if dataResp != nil {
+			dataResp.Body.Close()
+		}
+		// Return asset.Line and asset.Size from API if that part was successful
+		// but data fetch failed. Or, if API also failed, these would be "" anyway.
+		// The requirement for tests is that if data fetch fails, all are empty.
+		// So, if data fetch fails, we return all empty.
 		return t, "", ""
 	}
 	defer dataResp.Body.Close()
+
 	payloadData, err := io.ReadAll(dataResp.Body)
-	//payload := strings.Split(string(payloadData), `\n`)
+	if err != nil {
+		var t []string
+		// Similar to above, if ReadAll fails after a 200 OK, it's a problem.
+		// Return all empty as per test expectations for data fetch failure.
+		return t, "", ""
+	}
 	payload := splitLines(string(payloadData))
 
 	return payload, asset.Line, asset.Size
