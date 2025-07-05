@@ -238,6 +238,46 @@ func Test_RunAPIServer(t *testing.T) {
 	}
 }
 
+func Test_apiKeyAuth(t *testing.T) {
+	e := echo.New()
+	validKey := "test-api-key"
+	mw := apiKeyAuth(validKey)
+
+	// Dummy handler to check if middleware passes
+	handler := func(c echo.Context) error {
+		return c.String(http.StatusOK, "OK")
+	}
+
+	// Case 1: Valid API Key
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set(APIKeyHeader, validKey)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	err := mw(handler)(c)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "OK", rec.Body.String())
+
+	// Case 2: Missing API Key
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	rec = httptest.NewRecorder()
+	c = e.NewContext(req, rec)
+	err = mw(handler)(c)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Unauthorized")
+
+	// Case 3: Invalid API Key
+	req = httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set(APIKeyHeader, "wrong-key")
+	rec = httptest.NewRecorder()
+	c = e.NewContext(req, rec)
+	err = mw(handler)(c)
+	assert.NoError(t, err)
+	assert.Equal(t, http.StatusUnauthorized, rec.Code)
+	assert.Contains(t, rec.Body.String(), "Unauthorized")
+}
+
 func TestDeleteScansHandler(t *testing.T) {
 	options := model.Options{Scan: make(map[string]model.Scan)}
 	options.Scan["id1"] = model.Scan{URL: "http://test1", ScanID: "id1"}
