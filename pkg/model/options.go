@@ -51,10 +51,10 @@ type Options struct {
 	NoGrep                    bool `json:"skip-grepping,omitempty"`
 	SkipDiscovery             bool `json:"skip-discovery,omitempty"`
 	ForceHeadlessVerification bool `json:"force-headless-verification,omitempty"`
-	DetailedAnalysis          bool `json:"detailed-analysis,omitempty"`  // Enable detailed parameter analysis (Issue #695)
-	FastScan                  bool `json:"fast-scan,omitempty"`          // Enable fast scanning mode for URL lists (Issue #764)
-	MagicCharTest             bool `json:"magic-char-test,omitempty"`    // Enable magic character testing
-	ContextAware              bool `json:"context-aware,omitempty"`      // Enable context-aware payload selection
+	DetailedAnalysis          bool `json:"detailed-analysis,omitempty"` // Enable detailed parameter analysis (Issue #695)
+	FastScan                  bool `json:"fast-scan,omitempty"`         // Enable fast scanning mode for URL lists (Issue #764)
+	MagicCharTest             bool `json:"magic-char-test,omitempty"`   // Enable magic character testing
+	ContextAware              bool `json:"context-aware,omitempty"`     // Enable context-aware payload selection
 
 	// Performance Options
 	Timeout     int `json:"timeout,omitempty"`

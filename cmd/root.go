@@ -356,10 +356,10 @@ func initConfig() {
 		SkipDiscovery:             args.SkipDiscovery,
 		HarFilePath:               args.HarFilePath,
 		// Issue #695 and #764 flags
-		DetailedAnalysis:          args.DetailedAnalysis,
-		FastScan:                  args.FastScan,
-		MagicCharTest:             args.MagicCharTest,
-		ContextAware:              args.ContextAware,
+		DetailedAnalysis: args.DetailedAnalysis,
+		FastScan:         args.FastScan,
+		MagicCharTest:    args.MagicCharTest,
+		ContextAware:     args.ContextAware,
 	}
 
 	// If configuration file was loaded, apply values from it for options not specified via CLI

@@ -7,10 +7,10 @@ import (
 )
 
 // Command-line flags for server configuration
-var port int                         // Port to bind the server to
-var host, serverType, apiKey string  // Host address, server type, and API Key
-var allowedOrigins []string          // Allowed origins for CORS
-var jsonp bool                       // Enable JSONP responses
+var port int                        // Port to bind the server to
+var host, serverType, apiKey string // Host address, server type, and API Key
+var allowedOrigins []string         // Allowed origins for CORS
+var jsonp bool                      // Enable JSONP responses
 
 // serverCmd represents the server command for starting API servers
 var serverCmd = &cobra.Command{

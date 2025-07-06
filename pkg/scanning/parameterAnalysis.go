@@ -276,7 +276,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	var wgg sync.WaitGroup
 	const maxConcurrency = 1000 // Define a reasonable maximum limit to prevent excessive memory allocation
 	concurrency := options.Concurrence
-	
+
 	// FastScan optimization (Issue #764)
 	if options.FastScan {
 		printing.DalLog("SYSTEM", "Fast scan mode enabled - optimizing concurrency and reducing checks", options)
@@ -299,7 +299,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 			p = limitedP
 		}
 	}
-	
+
 	if concurrency > maxConcurrency {
 		concurrency = maxConcurrency
 	}
@@ -480,7 +480,7 @@ func NewDOMXSSDetector() *DOMXSSDetector {
 // DetectDOMXSS analyzes JavaScript code for potential DOM XSS vulnerabilities
 func (d *DOMXSSDetector) DetectDOMXSS(jsCode string) []map[string]interface{} {
 	var vulnerabilities []map[string]interface{}
-	
+
 	// Check for direct source to sink flows
 	for _, source := range d.Sources {
 		for _, sink := range d.Sinks {
@@ -497,7 +497,7 @@ func (d *DOMXSSDetector) DetectDOMXSS(jsCode string) []map[string]interface{} {
 			}
 		}
 	}
-	
+
 	// Check for dangerous patterns
 	dangerousPatterns := []map[string]string{
 		{"pattern": `document\.write\s*\(.*location\.(href|search|hash)`, "desc": "document.write with location data"},
@@ -509,7 +509,7 @@ func (d *DOMXSSDetector) DetectDOMXSS(jsCode string) []map[string]interface{} {
 		{"pattern": `\.src\s*=.*location\.(href|search|hash)`, "desc": "Script src assignment with location data"},
 		{"pattern": `postMessage\s*\(.*location\.(href|search|hash)`, "desc": "postMessage with location data"},
 	}
-	
+
 	for _, dangerousPattern := range dangerousPatterns {
 		if matched, _ := regexp.MatchString(dangerousPattern["pattern"], jsCode); matched {
 			vulnerabilities = append(vulnerabilities, map[string]interface{}{
@@ -519,14 +519,14 @@ func (d *DOMXSSDetector) DetectDOMXSS(jsCode string) []map[string]interface{} {
 			})
 		}
 	}
-	
+
 	return vulnerabilities
 }
 
 // ExtractJavaScript extracts JavaScript code from HTML content
 func ExtractJavaScript(htmlContent string) []string {
 	var jsCode []string
-	
+
 	// Extract inline script tags
 	scriptRegex := regexp.MustCompile(`(?i)<script[^>]*>(.*?)</script>`)
 	matches := scriptRegex.FindAllStringSubmatch(htmlContent, -1)
@@ -535,7 +535,7 @@ func ExtractJavaScript(htmlContent string) []string {
 			jsCode = append(jsCode, match[1])
 		}
 	}
-	
+
 	// Extract event handlers
 	eventHandlers := []string{
 		"onclick", "onload", "onmouseover", "onmouseout", "onfocus", "onblur",
@@ -546,14 +546,14 @@ func ExtractJavaScript(htmlContent string) []string {
 		"onprogress", "onratechange", "onseeked", "onseeking", "onstalled",
 		"onsuspend", "ontimeupdate", "onvolumechange", "onwaiting",
 	}
-	
+
 	// Pre-compile regex patterns for better performance
 	handlerPatterns := make([]*regexp.Regexp, len(eventHandlers))
 	for i, handler := range eventHandlers {
 		pattern := fmt.Sprintf(`(?i)%s\s*=\s*["']([^"']*)["']`, handler)
 		handlerPatterns[i] = regexp.MustCompile(pattern)
 	}
-	
+
 	// Find all event handler matches
 	for _, handlerRegex := range handlerPatterns {
 		handlerMatches := handlerRegex.FindAllStringSubmatch(htmlContent, -1)
@@ -563,7 +563,7 @@ func ExtractJavaScript(htmlContent string) []string {
 			}
 		}
 	}
-	
+
 	// Extract javascript: URLs
 	jsURLRegex := regexp.MustCompile(`(?i)javascript:([^"'\s>]*)`)
 	matches = jsURLRegex.FindAllStringSubmatch(htmlContent, -1)
@@ -572,7 +572,7 @@ func ExtractJavaScript(htmlContent string) []string {
 			jsCode = append(jsCode, match[1])
 		}
 	}
-	
+
 	return jsCode
 }
 
@@ -580,9 +580,9 @@ func ExtractJavaScript(htmlContent string) []string {
 func AnalyzeDOMXSS(htmlContent string, targetURL string) []map[string]interface{} {
 	detector := NewDOMXSSDetector()
 	jsCodeBlocks := ExtractJavaScript(htmlContent)
-	
+
 	var allVulnerabilities []map[string]interface{}
-	
+
 	for i, jsCode := range jsCodeBlocks {
 		vulns := detector.DetectDOMXSS(jsCode)
 		for _, vuln := range vulns {
@@ -592,6 +592,6 @@ func AnalyzeDOMXSS(htmlContent string, targetURL string) []map[string]interface{
 			allVulnerabilities = append(allVulnerabilities, vuln)
 		}
 	}
-	
+
 	return allVulnerabilities
 }
