@@ -41,11 +41,13 @@ func GenerateMarkdownReport(scanResult model.Result, options model.Options) stri
 		report.WriteString("| # | Type | Severity | Method | Param | Inject-Type | CWE |\n")
 		report.WriteString("|---|---|---|---|---|---|---|\n")
 		for i, v := range scanResult.PoCs {
-			report.WriteString(fmt.Sprintf("| #%d | %s | %s | %s | %s | %s | %s |\n", i, v.Type, v.Severity, v.Method, v.Param, v.InjectType, v.CWE))
+			idx := i + 1
+			report.WriteString(fmt.Sprintf("| [PoC%d](#PoC%d) | %s | %s | %s | %s | %s | %s |\n", idx, idx, v.Type, v.Severity, v.Method, v.Param, v.InjectType, v.CWE))
 		}
 		report.WriteString("\n")
 		for i, v := range scanResult.PoCs {
-			report.WriteString(fmt.Sprintf("### PoC #%d\n", i))
+			idx := i + 1
+			report.WriteString(fmt.Sprintf("### PoC%d\n", idx))
 			report.WriteString(fmt.Sprintf("```\n%s\n```\n\n", v.Data))
 		}
 	} else {
