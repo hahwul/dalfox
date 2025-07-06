@@ -1,3 +1,9 @@
+### DS_Store ###
+.DS_Store
+._.DS_Store
+**/.DS_Store
+**/._.DS_Store
+
 ### Go ###
 # Binaries for programs and plugins
 *.exe
