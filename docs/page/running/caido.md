@@ -33,6 +33,7 @@ By integrating Dalfox with Caido, you can:
 
 - **Dalfox v2.12.0 or later** installed on your system
 - **Caido** installed and running
+- **jq** installed on your system
 
 ### Installation
 
