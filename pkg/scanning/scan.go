@@ -44,7 +44,7 @@ type JSONInjector struct {
 // InjectIntoJSON recursively injects payload into JSON structure
 func (ji *JSONInjector) InjectIntoJSON(data interface{}, path string) []map[string]interface{} {
 	var results []map[string]interface{}
-	
+
 	switch v := data.(type) {
 	case map[string]interface{}:
 		for key, value := range v {
@@ -53,7 +53,7 @@ func (ji *JSONInjector) InjectIntoJSON(data interface{}, path string) []map[stri
 				currentPath += "."
 			}
 			currentPath += key
-			
+
 			// Create a copy and inject payload
 			modified := ji.deepCopy(data)
 			if modifiedMap, ok := modified.(map[string]interface{}); ok {
@@ -64,16 +64,16 @@ func (ji *JSONInjector) InjectIntoJSON(data interface{}, path string) []map[stri
 					"key":  key,
 				})
 			}
-			
+
 			// Recursively process nested structures
 			nestedResults := ji.InjectIntoJSON(value, currentPath)
 			results = append(results, nestedResults...)
 		}
-		
+
 	case []interface{}:
 		for i, item := range v {
 			currentPath := fmt.Sprintf("%s[%d]", path, i)
-			
+
 			// Create a copy and inject payload at array index
 			modified := ji.deepCopy(data)
 			if modifiedArray, ok := modified.([]interface{}); ok && i < len(modifiedArray) {
@@ -84,13 +84,13 @@ func (ji *JSONInjector) InjectIntoJSON(data interface{}, path string) []map[stri
 					"key":  fmt.Sprintf("[%d]", i),
 				})
 			}
-			
+
 			// Recursively process array items
 			nestedResults := ji.InjectIntoJSON(item, currentPath)
 			results = append(results, nestedResults...)
 		}
 	}
-	
+
 	return results
 }
 
@@ -103,14 +103,14 @@ func (ji *JSONInjector) deepCopy(data interface{}) interface{} {
 			copy[key] = ji.deepCopy(value)
 		}
 		return copy
-		
+
 	case []interface{}:
 		copy := make([]interface{}, len(v))
 		for i, item := range v {
 			copy[i] = ji.deepCopy(item)
 		}
 		return copy
-		
+
 	default:
 		return v
 	}
@@ -123,11 +123,11 @@ func ParseJSONBody(body string, payload string) ([]map[string]interface{}, error
 	if err != nil {
 		return nil, err
 	}
-	
+
 	injector := &JSONInjector{
 		Payload: payload,
 	}
-	
+
 	return injector.InjectIntoJSON(jsonData, ""), nil
 }
 
@@ -137,24 +137,24 @@ func CreateJSONRequest(originalReq *http.Request, modifiedJSON interface{}) (*ht
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Create new request with modified JSON body
 	newReq, err := http.NewRequest(originalReq.Method, originalReq.URL.String(), bytes.NewReader(jsonBytes))
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Copy headers
 	for key, values := range originalReq.Header {
 		for _, value := range values {
 			newReq.Header.Add(key, value)
 		}
 	}
-	
+
 	// Set content type and length
 	newReq.Header.Set("Content-Type", "application/json")
 	newReq.Header.Set("Content-Length", strconv.Itoa(len(jsonBytes)))
-	
+
 	return newReq, nil
 }
 
@@ -379,14 +379,14 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 					context = utils.DetectContext(v.ReflectedCode, k, "test")
 					printing.DalLog("INFO", "Detected context for "+k+": "+context, options)
 				}
-				
+
 				// Generate magic character payloads
 				magicChars := []string{
 					utils.GenerateMagicCharacter(context),
 					utils.GenerateMagicString(context, 3),
 					utils.GenerateTestPayload(context),
 				}
-				
+
 				for _, magicPayload := range magicChars {
 					encoders := []string{NaN, urlEncode, htmlEncode}
 					for _, encoder := range encoders {

@@ -220,9 +220,9 @@ func TestGenerateMagicString_EdgeCases(t *testing.T) {
 	// Test with a context not in ContextSpecificMagic but also not in MagicCharacters (should default to MagicCharacters)
 	// This scenario is implicitly covered by "unknown context" in TestGenerateMagicString,
 	// but an explicit test ensures clarity.
-	rand.Seed(1) // Ensure predictability
+	rand.Seed(1)                                                                // Ensure predictability
 	expectedFromAll := string(MagicCharacters[rand.Intn(len(MagicCharacters))]) // Get the first char based on seed
-	rand.Seed(1) // Reset seed for the actual call
+	rand.Seed(1)                                                                // Reset seed for the actual call
 	gotUnknown := GenerateMagicCharacter("completely_new_context")
 	if gotUnknown != expectedFromAll {
 		t.Errorf("GenerateMagicCharacter() with completely new context = %s, want %s (based on seed)", gotUnknown, expectedFromAll)
@@ -230,84 +230,84 @@ func TestGenerateMagicString_EdgeCases(t *testing.T) {
 }
 
 func TestDetectContext_MoreComplexScenarios(t *testing.T) {
-    tests := []struct {
-        name     string
-        response string
-        param    string
-        value    string
-        want     string
-    }{
-        {
-            name:     "JS context within HTML attribute",
-            response: `<a onclick="myFunc('test_value')">click</a>`,
-            param:    "p1",
-            value:    "test_value",
-            want:     "js", // Current logic will detect html first because of '<' and '>' around value if value is part of attribute name
-                           // If value is *within* quotes of an event handler, it's more complex.
-                           // The current DetectContext is simple and would likely return "html".
-                           // This test highlights a limitation or area for improvement.
-                           // For now, testing existing behavior.
-        },
-        {
-            name:     "Value embedded deep in JSON",
-            response: `{"data":{"items":[{"id":1,"name":"test_value"}]}}`,
-            param:    "name", // Assuming param helps find the specific value location
-            value:    "test_value",
-            want:     "html", // Current DetectContext is too simple for deep JSON
-        },
-        {
-            name:     "Value in HTML comment",
-            response: `<!-- User input: test_value --> <p>Hello</p>`,
-            param:    "userInput",
-            value:    "test_value",
-            want:     "html", // Comments are part of HTML structure
-        },
-        {
-            name:     "Value in script tag but it's a comment",
-            response: `<script>// var x = "test_value";</script>`,
-            param:    "p1",
-            value:    "test_value",
-            want:     "js", // Still inside <script> tags
-        },
-        {
-            name:     "Value in CSS comment",
-            response: `<style>/* color: test_value; */</style>`,
-            param:    "p1",
-            value:    "test_value",
-            want:     "css", // Still inside <style> tags
-        },
-    }
+	tests := []struct {
+		name     string
+		response string
+		param    string
+		value    string
+		want     string
+	}{
+		{
+			name:     "JS context within HTML attribute",
+			response: `<a onclick="myFunc('test_value')">click</a>`,
+			param:    "p1",
+			value:    "test_value",
+			want:     "js", // Current logic will detect html first because of '<' and '>' around value if value is part of attribute name
+			// If value is *within* quotes of an event handler, it's more complex.
+			// The current DetectContext is simple and would likely return "html".
+			// This test highlights a limitation or area for improvement.
+			// For now, testing existing behavior.
+		},
+		{
+			name:     "Value embedded deep in JSON",
+			response: `{"data":{"items":[{"id":1,"name":"test_value"}]}}`,
+			param:    "name", // Assuming param helps find the specific value location
+			value:    "test_value",
+			want:     "html", // Current DetectContext is too simple for deep JSON
+		},
+		{
+			name:     "Value in HTML comment",
+			response: `<!-- User input: test_value --> <p>Hello</p>`,
+			param:    "userInput",
+			value:    "test_value",
+			want:     "html", // Comments are part of HTML structure
+		},
+		{
+			name:     "Value in script tag but it's a comment",
+			response: `<script>// var x = "test_value";</script>`,
+			param:    "p1",
+			value:    "test_value",
+			want:     "js", // Still inside <script> tags
+		},
+		{
+			name:     "Value in CSS comment",
+			response: `<style>/* color: test_value; */</style>`,
+			param:    "p1",
+			value:    "test_value",
+			want:     "css", // Still inside <style> tags
+		},
+	}
 
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-            var got string
-            // Adjusting expectation for "JS context within HTML attribute" based on current simple logic
-            if tt.name == "JS context within HTML attribute" {
-                // Current simple logic: if value is in response and <script or <style is present, it might lean that way.
-                // Let's make the response more specific to test the JS detection part of DetectContext
-                responseForTest := `<script>var foo = "bar";</script> <a onclick="myFunc('test_value')">click</a>`
-                got = DetectContext(responseForTest, tt.param, tt.value)
-                // Even with <script> present, if 'test_value' is not inside it, it should be 'html'
-                // If 'test_value' was also in the script, it would be 'js'.
-                // The logic is: if strings.Contains(response, "<script") && strings.Contains(response, value) then "js"
-                // So, if "test_value" is also in a script tag elsewhere, it could be "js".
-                // This shows the simplicity of current DetectContext.
-                // To make it pass as 'js' for the attribute case, the 'value' needs to be in a script tag.
-                // For the provided case, it's more likely 'html'.
-                // If we expect 'js' due to onclick, the DetectContext needs significant enhancement.
-                // Based on current DetectContext:
-                // 1. strings.Contains(response, "<script") is true for responseForTest
-                // 2. strings.Contains(response, "test_value") is true for responseForTest
-                // Therefore, it will return "js". This is what we test.
-                if got != "js" {
-                     t.Errorf("DetectContext() for name '%s' = %v, want 'js' (due to presence of <script> and value in response)", tt.name, got)
-                }
-            } else {
-                got = DetectContext(tt.response, tt.param, tt.value)
-                if got != tt.want {
-                    t.Errorf("DetectContext() for name '%s', response '%s', param '%s', value '%s' = %v, want %v", tt.name, tt.response, tt.param, tt.value, got, tt.want)
-                }
-            }
-        })
-    }
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var got string
+			// Adjusting expectation for "JS context within HTML attribute" based on current simple logic
+			if tt.name == "JS context within HTML attribute" {
+				// Current simple logic: if value is in response and <script or <style is present, it might lean that way.
+				// Let's make the response more specific to test the JS detection part of DetectContext
+				responseForTest := `<script>var foo = "bar";</script> <a onclick="myFunc('test_value')">click</a>`
+				got = DetectContext(responseForTest, tt.param, tt.value)
+				// Even with <script> present, if 'test_value' is not inside it, it should be 'html'
+				// If 'test_value' was also in the script, it would be 'js'.
+				// The logic is: if strings.Contains(response, "<script") && strings.Contains(response, value) then "js"
+				// So, if "test_value" is also in a script tag elsewhere, it could be "js".
+				// This shows the simplicity of current DetectContext.
+				// To make it pass as 'js' for the attribute case, the 'value' needs to be in a script tag.
+				// For the provided case, it's more likely 'html'.
+				// If we expect 'js' due to onclick, the DetectContext needs significant enhancement.
+				// Based on current DetectContext:
+				// 1. strings.Contains(response, "<script") is true for responseForTest
+				// 2. strings.Contains(response, "test_value") is true for responseForTest
+				// Therefore, it will return "js". This is what we test.
+				if got != "js" {
+					t.Errorf("DetectContext() for name '%s' = %v, want 'js' (due to presence of <script> and value in response)", tt.name, got)
+				}
+			} else {
+				got = DetectContext(tt.response, tt.param, tt.value)
+				if got != tt.want {
+					t.Errorf("DetectContext() for name '%s', response '%s', param '%s', value '%s' = %v, want %v", tt.name, tt.response, tt.param, tt.value, got, tt.want)
+				}
+			}
+		})
+	}
 }

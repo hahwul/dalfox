@@ -5,40 +5,40 @@ type ParamType string
 
 const (
 	// URL parameter types
-	ParamTypeURL    ParamType = "URL"
-	ParamTypeQuery  ParamType = "QUERY"
-	ParamTypePath   ParamType = "PATH"
-	ParamTypeHash   ParamType = "HASH"
-	
+	ParamTypeURL   ParamType = "URL"
+	ParamTypeQuery ParamType = "QUERY"
+	ParamTypePath  ParamType = "PATH"
+	ParamTypeHash  ParamType = "HASH"
+
 	// Form parameter types
-	ParamTypeForm     ParamType = "FORM"
-	ParamTypeFormData ParamType = "FORM_DATA"
+	ParamTypeForm      ParamType = "FORM"
+	ParamTypeFormData  ParamType = "FORM_DATA"
 	ParamTypeMultipart ParamType = "MULTIPART"
-	
+
 	// Header parameter types
 	ParamTypeHeader ParamType = "HEADER"
 	ParamTypeCookie ParamType = "COOKIE"
 	ParamTypeAuth   ParamType = "AUTH"
-	
+
 	// Body parameter types
 	ParamTypeJSON ParamType = "JSON"
 	ParamTypeXML  ParamType = "XML"
 	ParamTypeText ParamType = "TEXT"
-	
+
 	// DOM parameter types
 	ParamTypeDOM       ParamType = "DOM"
 	ParamTypeAttribute ParamType = "ATTRIBUTE"
 	ParamTypeInnerHTML ParamType = "INNER_HTML"
 	ParamTypeInnerText ParamType = "INNER_TEXT"
-	
+
 	// JavaScript context types
 	ParamTypeJSVar      ParamType = "JS_VAR"
 	ParamTypeJSFunction ParamType = "JS_FUNCTION"
 	ParamTypeJSString   ParamType = "JS_STRING"
 	ParamTypeJSObject   ParamType = "JS_OBJECT"
-	
+
 	// Special types
-	ParamTypeFile     ParamType = "FILE"
+	ParamTypeFile      ParamType = "FILE"
 	ParamTypeWebSocket ParamType = "WEBSOCKET"
 	ParamTypeUnknown   ParamType = "UNKNOWN"
 )

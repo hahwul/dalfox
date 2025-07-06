@@ -75,9 +75,9 @@ func Test_getAssetHahwul(t *testing.T) {
 			apiContent:       validAssetJSON,
 			dataContent:      emptyPayloadData,
 			expectedPayloads: []string{}, // splitLines on "" might give {""} or {}, depends on impl.
-			                               // current splitLines gives empty slice for empty string.
-			expectedLine:     "2",
-			expectedSize:     "10 bytes",
+			// current splitLines gives empty slice for empty string.
+			expectedLine: "2",
+			expectedSize: "10 bytes",
 		},
 		{
 			name:             "malformed JSON (unmarshal error)",
@@ -92,7 +92,7 @@ func Test_getAssetHahwul(t *testing.T) {
 	// originalHTTPGet := httpGet // No longer needed
 	// defer func() { httpGet = originalHTTPGet }()
 
-	originalBaseURL := assetHahwulBaseURL // Store original base URL
+	originalBaseURL := assetHahwulBaseURL                   // Store original base URL
 	defer func() { assetHahwulBaseURL = originalBaseURL }() // Restore it after all tests in this function
 
 	for _, tt := range tests {
@@ -186,7 +186,7 @@ func TestGetPortswiggerPayload(t *testing.T) {
 		} else if strings.HasSuffix(r.URL.Path, "xss-portswigger.txt") {
 			fmt.Fprintln(w, payloadData)
 		} else {
-			http.NotFound(w,r)
+			http.NotFound(w, r)
 		}
 	}))
 	assetHahwulBaseURL = mockServer.URL
@@ -221,7 +221,7 @@ func TestGetPayloadBoxPayload(t *testing.T) {
 		} else if strings.HasSuffix(r.URL.Path, "xss-payloadbox.txt") {
 			fmt.Fprintln(w, payloadData)
 		} else {
-			http.NotFound(w,r)
+			http.NotFound(w, r)
 		}
 	}))
 	assetHahwulBaseURL = mockServer.URL
@@ -256,7 +256,7 @@ func TestGetBurpWordlist(t *testing.T) {
 		} else if strings.HasSuffix(r.URL.Path, "wl-params.txt") {
 			fmt.Fprintln(w, payloadData)
 		} else {
-			http.NotFound(w,r)
+			http.NotFound(w, r)
 		}
 	}))
 	assetHahwulBaseURL = mockServer.URL
@@ -290,7 +290,7 @@ func TestGetAssetnoteWordlist(t *testing.T) {
 		} else if strings.HasSuffix(r.URL.Path, "wl-assetnote-params.txt") {
 			fmt.Fprintln(w, payloadData)
 		} else {
-			http.NotFound(w,r)
+			http.NotFound(w, r)
 		}
 	}))
 	assetHahwulBaseURL = mockServer.URL
@@ -469,103 +469,103 @@ type testAsset struct {
 }
 
 func TestGetAssetHahwul_JsonUnmarshalError(t *testing.T) {
-    // Simulate a scenario where JSON unmarshalling fails
-    mockAPIContent := `{"line": 123, "size": "not a string field for Line"}` // Invalid: line is number
-    mockDataContent := "payload1\npayload2"
+	// Simulate a scenario where JSON unmarshalling fails
+	mockAPIContent := `{"line": 123, "size": "not a string field for Line"}` // Invalid: line is number
+	mockDataContent := "payload1\npayload2"
 
-    server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        if strings.HasSuffix(r.URL.Path, ".json") { // Simplified to any .json for this test's purpose
-            w.Header().Set("Content-Type", "application/json")
-            fmt.Fprintln(w, mockAPIContent)
-        } else {
-            fmt.Fprintln(w, mockDataContent)
-        }
-    }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, ".json") { // Simplified to any .json for this test's purpose
+			w.Header().Set("Content-Type", "application/json")
+			fmt.Fprintln(w, mockAPIContent)
+		} else {
+			fmt.Fprintln(w, mockDataContent)
+		}
+	}))
 	originalBaseURL := assetHahwulBaseURL
 	assetHahwulBaseURL = server.URL
-    defer func() {
+	defer func() {
 		assetHahwulBaseURL = originalBaseURL
 		server.Close()
 	}()
 
-    // The actual Asset struct in remote.go is { Line string, Size string }
-    // If json.Unmarshal receives a number for 'Line', it will error out.
-    // The function getAssetHahwul will then proceed with default/empty Asset values.
-    payloads, line, size := getAssetHahwul("api.json", "data.txt") // Endpoints are relative to assets.hahwul.com
+	// The actual Asset struct in remote.go is { Line string, Size string }
+	// If json.Unmarshal receives a number for 'Line', it will error out.
+	// The function getAssetHahwul will then proceed with default/empty Asset values.
+	payloads, line, size := getAssetHahwul("api.json", "data.txt") // Endpoints are relative to assets.hahwul.com
 
-    // Payloads should still be fetched
-    expectedPayloads := []string{"payload1", "payload2"}
-    if !equalSlices(payloads, expectedPayloads) {
-        t.Errorf("getAssetHahwul with JSON unmarshal error, payloads = %v, want %v", payloads, expectedPayloads)
-    }
-    // Line should be empty due to unmarshal error for the 'Line' field (type mismatch)
-    if line != "" {
-        t.Errorf("getAssetHahwul with JSON unmarshal error, line = %q, want \"\"", line)
-    }
-    // Size should be "not a string field for Line" as it's a valid string in JSON and struct
-    if size != "not a string field for Line" {
-        t.Errorf("getAssetHahwul with JSON unmarshal error, size = %q, want %q", size, "not a string field for Line")
-    }
+	// Payloads should still be fetched
+	expectedPayloads := []string{"payload1", "payload2"}
+	if !equalSlices(payloads, expectedPayloads) {
+		t.Errorf("getAssetHahwul with JSON unmarshal error, payloads = %v, want %v", payloads, expectedPayloads)
+	}
+	// Line should be empty due to unmarshal error for the 'Line' field (type mismatch)
+	if line != "" {
+		t.Errorf("getAssetHahwul with JSON unmarshal error, line = %q, want \"\"", line)
+	}
+	// Size should be "not a string field for Line" as it's a valid string in JSON and struct
+	if size != "not a string field for Line" {
+		t.Errorf("getAssetHahwul with JSON unmarshal error, size = %q, want %q", size, "not a string field for Line")
+	}
 }
 
 func TestGetAssetHahwul_HttpErrorOnApi(t *testing.T) {
-    server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        if strings.HasSuffix(r.URL.Path, "someapi.json") { // Target specific API endpoint for error
-            http.Error(w, "API down", http.StatusServiceUnavailable)
-        } else {
-            fmt.Fprintln(w, "somedata") // Or handle other requests if necessary
-        }
-    }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "someapi.json") { // Target specific API endpoint for error
+			http.Error(w, "API down", http.StatusServiceUnavailable)
+		} else {
+			fmt.Fprintln(w, "somedata") // Or handle other requests if necessary
+		}
+	}))
 	originalBaseURL := assetHahwulBaseURL
 	assetHahwulBaseURL = server.URL
-    defer func() {
+	defer func() {
 		assetHahwulBaseURL = originalBaseURL
 		server.Close()
 	}()
 
-    payloads, line, size := getAssetHahwul("someapi.json", "somedata.txt")
+	payloads, line, size := getAssetHahwul("someapi.json", "somedata.txt")
 
-    if len(payloads) != 0 {
-        t.Errorf("Expected empty payloads on API HTTP error, got %v", payloads)
-    }
-    if line != "" {
-        t.Errorf("Expected empty line on API HTTP error, got %s", line)
-    }
-    if size != "" {
-        t.Errorf("Expected empty size on API HTTP error, got %s", size)
-    }
+	if len(payloads) != 0 {
+		t.Errorf("Expected empty payloads on API HTTP error, got %v", payloads)
+	}
+	if line != "" {
+		t.Errorf("Expected empty line on API HTTP error, got %s", line)
+	}
+	if size != "" {
+		t.Errorf("Expected empty size on API HTTP error, got %s", size)
+	}
 }
 
 func TestGetAssetHahwul_HttpErrorOnData(t *testing.T) {
 	mockAPIContent := `{"line":"1","size":"1B"}`
-    server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-        if strings.HasSuffix(r.URL.Path, "somedata.txt") { // Target specific data endpoint for error
-            http.Error(w, "Data down", http.StatusServiceUnavailable)
-        } else if strings.HasSuffix(r.URL.Path, "someapi.json") {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "somedata.txt") { // Target specific data endpoint for error
+			http.Error(w, "Data down", http.StatusServiceUnavailable)
+		} else if strings.HasSuffix(r.URL.Path, "someapi.json") {
 			w.Header().Set("Content-Type", "application/json")
-            fmt.Fprintln(w, mockAPIContent)
+			fmt.Fprintln(w, mockAPIContent)
 		} else {
-			http.NotFound(w,r)
+			http.NotFound(w, r)
 		}
-    }))
+	}))
 	originalBaseURL := assetHahwulBaseURL
 	assetHahwulBaseURL = server.URL
-    defer func() {
+	defer func() {
 		assetHahwulBaseURL = originalBaseURL
 		server.Close()
 	}()
 
-    payloads, line, size := getAssetHahwul("someapi.json", "somedata.txt")
+	payloads, line, size := getAssetHahwul("someapi.json", "somedata.txt")
 
-    if len(payloads) != 0 {
-        t.Errorf("Expected empty payloads on Data HTTP error, got %v", payloads)
-    }
-    // Line and Size might be populated from the API call if it succeeded before data call failed.
-    // The current implementation of getAssetHahwul returns empty for all if dataResp fails.
-    if line != "" {
-        t.Errorf("Expected empty line on Data HTTP error, got %s", line)
-    }
-    if size != "" {
-        t.Errorf("Expected empty size on Data HTTP error, got %s", size)
-    }
+	if len(payloads) != 0 {
+		t.Errorf("Expected empty payloads on Data HTTP error, got %v", payloads)
+	}
+	// Line and Size might be populated from the API call if it succeeded before data call failed.
+	// The current implementation of getAssetHahwul returns empty for all if dataResp fails.
+	if line != "" {
+		t.Errorf("Expected empty line on Data HTTP error, got %s", line)
+	}
+	if size != "" {
+		t.Errorf("Expected empty size on Data HTTP error, got %s", size)
+	}
 }

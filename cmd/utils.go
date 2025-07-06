@@ -12,8 +12,6 @@ import (
 // This file contains utility functions for managing command-line help output
 // and other shared functionality used across the different commands
 
-
-
 // SubCommandCustomHelpFunc provides a custom help formatter for subcommands
 // This function is shared across all subcommands to ensure consistent help display
 // It leverages templates to create a more organized and user-friendly help output
