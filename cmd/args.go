@@ -30,7 +30,7 @@ type Args struct {
 	RemoteWordlists           string // Remote wordlist sources
 	OnlyPoC                   string // Show only PoC for specific patterns
 	PoCType                   string // PoC output format
-	ReportFormat              string // Report format (plain, json)
+	ReportFormat              string // Report format (plain, json, markdown, md)
 	HarFilePath               string // Path to save HAR files
 	CustomBlindXSSPayloadFile string // Path to custom blind XSS payload file
 
