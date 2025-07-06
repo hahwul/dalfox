@@ -2,14 +2,14 @@
 title: MCP Mode
 parent: Running
 has_children: false
-nav_order: 4
+nav_order: 6
 layout: page
 ---
 
 # Dalfox MCP Mode
 {: .d-inline-block }
 
-New (v2.11.0) 
+New (v2.11.0)
 {: .label .label-blue }
 
 ## Overview
@@ -56,9 +56,9 @@ VS Code provides robust support for MCP tools when used with AI coding assistant
    *[Installation](/page/installation/)*
 
 2. **Configure VS Code settings**
-   
+
    To enable the dalfox server in VS Code, update your `settings.json` file with the following configuration:
-   
+
    ```json
    {
      "mcp": {
@@ -79,9 +79,9 @@ VS Code provides robust support for MCP tools when used with AI coding assistant
    This setup defines a server named dalfox that uses standard input/output (stdio) and runs the command `dalfox server --type=mcp`. You can manually add the server by pressing `⌘` + `⇧` + `p`, selecting MCP: Add Server, choosing `Command (stdio)`, and entering `dalfox server --type=mcp` in the input field. This ensures seamless integration of the dalfox server with your VS Code environment.
 
 3. **Use with AI assistant**
-   
+
    Now your AI coding assistant can directly use Dalfox to scan for XSS vulnerabilities. For example, you can ask:
-   
+
    ```
    "Can you scan this URL for XSS vulnerabilities using Dalfox?"
    ```
@@ -128,9 +128,9 @@ Claude Desktop is Anthropic's standalone application that can integrate with ext
    ```
 
 3. **Use with Claude**
-   
+
    You can now use Dalfox directly through Claude's interface:
-   
+
    ```
    "Can you scan https://xss-game.appspot.com/level1/frame  for XSS vulnerabilities"
    ```
@@ -161,7 +161,7 @@ The AI assistant will translate these requests into the appropriate Dalfox comma
 Ask your AI assistant to review code and then scan endpoints for vulnerabilities:
 
 ```
-"Review this controller code and identify any potential XSS vulnerabilities. 
+"Review this controller code and identify any potential XSS vulnerabilities.
 Then use Dalfox to scan the corresponding endpoints."
 ```
 
@@ -170,14 +170,14 @@ Then use Dalfox to scan the corresponding endpoints."
 Have the AI assistant help with targeted testing:
 
 ```
-"I found a potential XSS vulnerability in the search parameter. 
+"I found a potential XSS vulnerability in the search parameter.
 Can you use Dalfox to verify if it's exploitable?"
 ```
 
 ## Best Practices
 
 1. **Keep Dalfox Updated**: Ensure you're using the latest version for the most current security checks
-2. **Validate Results**: Always verify AI-interpreted scan results manually for critical systems  
+2. **Validate Results**: Always verify AI-interpreted scan results manually for critical systems
 3. **Rate Limiting**: Be mindful of scan frequency to avoid overwhelming target systems
 4. **Context Matters**: Provide AI assistants with sufficient context about targets for more effective scanning
 5. **Security Awareness**: Remember that scan results might contain sensitive information

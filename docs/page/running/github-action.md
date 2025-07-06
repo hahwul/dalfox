@@ -109,7 +109,7 @@ jobs:
           target: ${{ github.event.inputs.url }}
           mode: url
           cmd_options: '--follow-redirects --format json --report'
-      
+
       - name: Display Results
         run: echo "${{ steps.xss-scan.outputs.result }}"
 ```
@@ -140,7 +140,7 @@ jobs:
             https://example.com/news?article=latest
           mode: pipe
           cmd_options: '--follow-redirects --format json --report --output scan-results.json'
-      
+
       - name: Upload scan results
         uses: actions/upload-artifact@v3
         with:
@@ -170,13 +170,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-      
+
       - name: Set up test environment
         run: |
           # Set up your application for testing
           # E.g., npm install && npm start
           echo "Starting application on http://localhost:3000"
-      
+
       - name: Dalfox scan
         uses: hahwul/action-dalfox@main
         id: xss-scan
@@ -184,7 +184,7 @@ jobs:
           target: 'http://localhost:3000'
           mode: url
           cmd_options: '--follow-redirects --deep-domxss --format json'
-      
+
       - name: Check for vulnerabilities
         run: |
           if [[ "${{ steps.xss-scan.outputs.result }}" == *"[POC]"* ]]; then
@@ -211,7 +211,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-      
+
       - name: Dalfox scan
         uses: hahwul/action-dalfox@main
         id: xss-scan
@@ -237,7 +237,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-      
+
       - name: Dalfox scan
         uses: hahwul/action-dalfox@main
         id: xss-scan
@@ -263,7 +263,7 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-      
+
       - name: Dalfox scan
         uses: hahwul/action-dalfox@main
         id: xss-scan
@@ -271,7 +271,7 @@ jobs:
           target: './security/target-urls.txt'
           mode: file
           cmd_options: '--mass-worker 5 --format json --output scan-results.json'
-      
+
       - name: Upload scan results
         uses: actions/upload-artifact@v3
         with:
@@ -323,7 +323,7 @@ cmd_options: '--worker 50 --delay 100 --timeout 5'
 
 ### Common Issues
 
-1. **Action fails with timeout**: 
+1. **Action fails with timeout**:
    - Increase the timeout value in cmd_options
    - Reduce the number of targets or parallel workers
 
