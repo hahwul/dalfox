@@ -58,8 +58,10 @@ To use Dalfox as an active workflow in Caido:
 
 1. **Set your Dalfox binary path**
 Update the workflow script with the path to your Dalfox executable (you can find it with `which dalfox`):
+
 ```bash
 DALFOX_PATH="/path/to/your/dalfox"
+```
 
 2. **Configure the Caido workflow**
    Use the following shell script in your Caido active workflow configuration:
@@ -74,6 +76,14 @@ DALFOX_PATH="/path/to/your/dalfox"
 #### Example Workflow Configuration
 
 ![Caido Workflow Configuration](/images/page/running/caido/workflow.jpg)
+
+```bash
+# Set your dalfox path
+DALFOX_PATH="/Users/hahwul/Projects/dalfox/dalfox"
+
+# Run dalfox
+cat - | jq -r .request | $DALFOX_PATH pipe --rawdata --silence --report --report-format=md
+```
 
 ## Using Dalfox in Caido
 
