@@ -5,13 +5,12 @@ logo: "/images/logo-wide.png"
 favicon_ico: "favicon.ico"
 url: https://dalfox.hahwul.com
 
-
 color_scheme: dalfox
 
 aux_links:
   Github: https://github.com/hahwul/dalfox
   Go: https://pkg.go.dev/github.com/hahwul/dalfox/v2
-  v2.11.0: https://github.com/hahwul/dalfox/releases/tag/v2.11.0
+  v2.12.0: https://github.com/hahwul/dalfox/releases/tag/v2.12.0
 
 plugins:
   - jekyll-sitemap
