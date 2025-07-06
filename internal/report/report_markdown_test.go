@@ -62,9 +62,9 @@ func TestGenerateMarkdownReport(t *testing.T) {
 ## XSS PoCs
 | # | Type | Severity | Method | Param | Inject-Type | CWE |
 |---|---|---|---|---|---|---|
-| #0 | XSS | High | GET | param1 | inHTML | CWE-79 |
+| [PoC1](#PoC1) | XSS | High | GET | param1 | inHTML | CWE-79 |
 
-### PoC #0
+### PoC1
 ` + "```\n<script>alert(1)</script>\n```" + `
 
 ` // Adding the code block directly as it contains backticks
@@ -153,9 +153,9 @@ func TestGenerateMarkdownReport_NoParams(t *testing.T) {
 ## XSS PoCs
 | # | Type | Severity | Method | Param | Inject-Type | CWE |
 |---|---|---|---|---|---|---|
-| #0 | XSS | High | GET | param1 | inHTML | CWE-79 |
+| [PoC1](#PoC1) | XSS | High | GET | param1 | inHTML | CWE-79 |
 
-### PoC #0
+### PoC1
 ` + "```\n<script>alert(1)</script>\n```" + `
 
 `
@@ -240,16 +240,16 @@ func TestGenerateMarkdownReport_MultiplePoCs(t *testing.T) {
 
 	report := GenerateMarkdownReport(scanResult, options)
 
-	if !strings.Contains(report, "### PoC #0") {
-		t.Errorf("Report does not contain PoC #0")
+	if !strings.Contains(report, "### PoC1") {
+		t.Errorf("Report does not contain PoC1")
 	}
 	if !strings.Contains(report, "<script>alert(1)</script>") {
-		t.Errorf("Report does not contain data for PoC #0")
+		t.Errorf("Report does not contain data for PoC1")
 	}
-	if !strings.Contains(report, "### PoC #1") {
-		t.Errorf("Report does not contain PoC #1")
+	if !strings.Contains(report, "### PoC2") {
+		t.Errorf("Report does not contain PoC2")
 	}
 	if !strings.Contains(report, "';alert(2);'") {
-		t.Errorf("Report does not contain data for PoC #1")
+		t.Errorf("Report does not contain data for PoC2")
 	}
 }
