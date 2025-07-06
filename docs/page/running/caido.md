@@ -57,10 +57,9 @@ snap install dalfox
 To use Dalfox as an active workflow in Caido:
 
 1. **Set your Dalfox binary path**
-   Update the workflow script with the path to your Dalfox executable:
-   ```bash
-   DALFOX_PATH="/Users/youruser/Projects/dalfox/dalfox"
-   ```
+Update the workflow script with the path to your Dalfox executable (you can find it with `which dalfox`):
+```bash
+DALFOX_PATH="/path/to/your/dalfox"
 
 2. **Configure the Caido workflow**
    Use the following shell script in your Caido active workflow configuration:
