@@ -24,7 +24,7 @@ go get github.com/hahwul/dalfox/v2/lib
 Here is a sample Go program that demonstrates how to use the Dalfox library to perform a scan:
 
 ```go
-package main 
+package main
 
 import (
     "fmt"
