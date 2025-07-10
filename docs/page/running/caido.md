@@ -79,10 +79,21 @@ DALFOX_PATH="/path/to/your/dalfox"
 
 ```bash
 # Set your dalfox path
-DALFOX_PATH="/Users/hahwul/Projects/dalfox/dalfox"
+DALFOX_PATH="/opt/homebrew/bin/dalfox"
 
-# Run dalfox
-cat - | jq -r .request | $DALFOX_PATH pipe --rawdata --silence --report --report-format=md
+# Run dalfox and store the entire output in a variable
+# Use $(...) for correct command substitution
+RESULT=$(cat - | jq -r .request | "$DALFOX_PATH" pipe --rawdata --silence --report --report-format=md)
+
+# Check if the result contains the string "PoC1"
+# Use [[ ... ]] for safer and more efficient string comparison
+if [[ "$RESULT" == *"PoC1"* ]]; then
+    # If "PoC1" is found, print the entire captured result
+    echo "$RESULT"
+else
+    # Otherwise, print the string "false"
+    false
+fi
 ```
 
 ## Using Dalfox in Caido
