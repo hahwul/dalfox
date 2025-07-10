@@ -22,7 +22,7 @@ require (
 	github.com/tidwall/sjson v1.2.5
 	github.com/tylerb/graceful v1.2.15
 	golang.org/x/sync v0.15.0
-	golang.org/x/term v0.32.0
+	golang.org/x/term v0.33.0
 )
 
 require (
@@ -65,7 +65,7 @@ require (
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/crypto v0.38.0 // indirect
 	golang.org/x/net v0.40.0 // indirect
-	golang.org/x/sys v0.33.0 // indirect
+	golang.org/x/sys v0.34.0 // indirect
 	golang.org/x/text v0.25.0 // indirect
 	golang.org/x/time v0.11.0 // indirect
 	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d // indirect
