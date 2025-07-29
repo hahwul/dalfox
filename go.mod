@@ -12,7 +12,7 @@ require (
 	github.com/labstack/echo/v4 v4.13.4
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/mark3labs/mcp-go v0.35.0
-	github.com/olekukonko/tablewriter v1.0.8
+	github.com/olekukonko/tablewriter v1.0.9
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.9.1
 	github.com/spf13/pflag v1.0.7
