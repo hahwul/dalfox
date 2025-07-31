@@ -18,7 +18,7 @@ require (
 	github.com/spf13/pflag v1.0.7
 	github.com/stretchr/testify v1.10.0
 	github.com/swaggo/echo-swagger v1.4.1
-	github.com/swaggo/swag v1.16.5
+	github.com/swaggo/swag v1.16.6
 	github.com/tidwall/sjson v1.2.5
 	github.com/tylerb/graceful v1.2.15
 	golang.org/x/sync v0.16.0
