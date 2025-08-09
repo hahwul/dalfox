@@ -541,8 +541,13 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 								if optimization.Optimization(avv, badchars) {
 									encoders := []string{NaN, urlEncode, urlDoubleEncode, htmlEncode}
 									for _, encoder := range encoders {
-										tq, tm := optimization.MakeRequestQuery(target, k, avv, ip+ptype, "toAppend", encoder, options)
-										query[tq] = tm
+										if ptype == "-JSON" {
+											tq, tm := optimization.MakeJSONRequestQuery(target, k, avv, ip+ptype, "toAppend", encoder, options)
+											query[tq] = tm
+										} else {
+											tq, tm := optimization.MakeRequestQuery(target, k, avv, ip+ptype, "toAppend", encoder, options)
+											query[tq] = tm
+										}
 									}
 								}
 							}
@@ -554,8 +559,13 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 					if !utils.ContainsFromArray(cpArr, k) && optimization.Optimization(avv, badchars) {
 						encoders := []string{NaN, urlEncode, urlDoubleEncode, htmlEncode}
 						for _, encoder := range encoders {
-							tq, tm := optimization.MakeRequestQuery(target, k, avv, "inHTML"+ptype, "toAppend", encoder, options)
-							query[tq] = tm
+							if ptype == "-JSON" {
+								tq, tm := optimization.MakeJSONRequestQuery(target, k, avv, "inHTML"+ptype, "toAppend", encoder, options)
+								query[tq] = tm
+							} else {
+								tq, tm := optimization.MakeRequestQuery(target, k, avv, "inHTML"+ptype, "toAppend", encoder, options)
+								query[tq] = tm
+							}
 						}
 					}
 				}
@@ -587,9 +597,15 @@ func generatePayloads(target string, options model.Options, policy map[string]st
 					bp := strings.Replace(bpayload, "CALLBACKURL", bcallback, 10)
 					encoders := []string{NaN, urlEncode, urlDoubleEncode, htmlEncode}
 					for _, encoder := range encoders {
-						tq, tm := optimization.MakeRequestQuery(target, k, bp, "toBlind"+ptype, "toAppend", encoder, options)
-						tm["payload"] = "toBlind"
-						query[tq] = tm
+						if ptype == "-JSON" {
+							tq, tm := optimization.MakeJSONRequestQuery(target, k, bp, "toBlind"+ptype, "toAppend", encoder, options)
+							tm["payload"] = "toBlind"
+							query[tq] = tm
+						} else {
+							tq, tm := optimization.MakeRequestQuery(target, k, bp, "toBlind"+ptype, "toAppend", encoder, options)
+							tm["payload"] = "toBlind"
+							query[tq] = tm
+						}
 					}
 				}
 			}
