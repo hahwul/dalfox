@@ -2,6 +2,7 @@ package scanning
 
 import (
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -81,6 +82,90 @@ func addParamsFromRemoteWordlists(p, dp url.Values, options model.Options) (url.
 		}
 	}
 	return p, dp
+}
+
+// isJSONData checks if the provided data string is valid JSON
+func isJSONData(data string) bool {
+	data = strings.TrimSpace(data)
+	if data == "" {
+		return false
+	}
+	var jsonData interface{}
+	err := json.Unmarshal([]byte(data), &jsonData)
+	return err == nil && (strings.HasPrefix(data, "{") || strings.HasPrefix(data, "["))
+}
+
+// extractJSONParams recursively extracts parameter paths from JSON data
+func extractJSONParams(data interface{}, path string, params map[string]model.ParamResult) {
+	switch v := data.(type) {
+	case map[string]interface{}:
+		for key, value := range v {
+			currentPath := path
+			if currentPath != "" {
+				currentPath += "."
+			}
+			currentPath += key
+
+			// Add this parameter path
+			params[currentPath] = model.ParamResult{
+				Name:      currentPath,
+				Type:      "JSON",
+				Reflected: true, // Assume reflected for JSON params
+				Chars:     append(payload.GetSpecialChar(), "PTYPE: JSON"), // Add ptype marker
+			}
+
+			// Recursively process nested structures
+			extractJSONParams(value, currentPath, params)
+		}
+
+	case []interface{}:
+		for i, item := range v {
+			currentPath := fmt.Sprintf("%s[%d]", path, i)
+			
+			// Add array index parameter
+			params[currentPath] = model.ParamResult{
+				Name:      currentPath,
+				Type:      "JSON",
+				Reflected: true,
+				Chars:     append(payload.GetSpecialChar(), "PTYPE: JSON"), // Add ptype marker
+			}
+
+			// Recursively process array items
+			extractJSONParams(item, currentPath, params)
+		}
+	}
+}
+
+// findJSONParams analyzes JSON data and extracts testable parameters
+func findJSONParams(params map[string]model.ParamResult, options model.Options) map[string]model.ParamResult {
+	if options.Data == "" || !isJSONData(options.Data) {
+		return params
+	}
+
+	printing.DalLog("SYSTEM", "Detected JSON body data - extracting JSON parameters", options)
+	
+	var jsonData interface{}
+	err := json.Unmarshal([]byte(options.Data), &jsonData)
+	if err != nil {
+		printing.DalLog("ERROR", "Failed to parse JSON data: "+err.Error(), options)
+		return params
+	}
+
+	// Extract JSON parameters
+	extractJSONParams(jsonData, "", params)
+	
+	jsonParamCount := 0
+	for _, param := range params {
+		if param.Type == "JSON" {
+			jsonParamCount++
+		}
+	}
+	
+	if jsonParamCount > 0 {
+		printing.DalLog("INFO", "Found "+strconv.Itoa(jsonParamCount)+" JSON parameters for testing", options)
+	}
+	
+	return params
 }
 
 func findDOMParams(target string, p, dp url.Values, options model.Options) (url.Values, url.Values) {
@@ -227,6 +312,9 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	for tempP := range p {
 		params[tempP] = model.ParamResult{}
 	}
+
+	// JSON Body Parameter Discovery
+	params = findJSONParams(params, options)
 
 	if options.Mining {
 		tempURL, _ := optimization.MakeRequestQuery(target, "pleasedonthaveanamelikethis_plz_plz", "Dalfox", "PA", "toAppend", "NaN", options)

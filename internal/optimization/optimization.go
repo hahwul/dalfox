@@ -3,11 +3,13 @@ package optimization
 import (
 	"bufio"
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/hahwul/dalfox/v2/internal/har"
@@ -232,4 +234,132 @@ func UrlEncode(s string) (result string) {
 	}
 
 	return result
+}
+
+// injectJSONPayload recursively injects payload into JSON structure at specified path
+func injectJSONPayload(data interface{}, targetPath string, payload string) interface{} {
+	if targetPath == "" {
+		return payload
+	}
+
+	parts := strings.Split(targetPath, ".")
+	firstPart := parts[0]
+	remainingPath := strings.Join(parts[1:], ".")
+
+	switch v := data.(type) {
+	case map[string]interface{}:
+		// Check if this is an array index notation like "field[0]"
+		if strings.Contains(firstPart, "[") && strings.Contains(firstPart, "]") {
+			// Extract field name and array index
+			fieldName := firstPart[:strings.Index(firstPart, "[")]
+			indexStr := firstPart[strings.Index(firstPart, "[")+1 : strings.Index(firstPart, "]")]
+			index, err := strconv.Atoi(indexStr)
+			if err == nil {
+				if arr, ok := v[fieldName].([]interface{}); ok && index < len(arr) {
+					if remainingPath == "" {
+						arr[index] = payload
+					} else {
+						arr[index] = injectJSONPayload(arr[index], remainingPath, payload)
+					}
+					v[fieldName] = arr
+				}
+			}
+		} else {
+			// Regular field
+			if remainingPath == "" {
+				v[firstPart] = payload
+			} else {
+				if _, exists := v[firstPart]; exists {
+					v[firstPart] = injectJSONPayload(v[firstPart], remainingPath, payload)
+				}
+			}
+		}
+		return v
+
+	case []interface{}:
+		// Direct array index access
+		if index, err := strconv.Atoi(firstPart); err == nil && index < len(v) {
+			if remainingPath == "" {
+				v[index] = payload
+			} else {
+				v[index] = injectJSONPayload(v[index], remainingPath, payload)
+			}
+		}
+		return v
+
+	default:
+		return payload
+	}
+}
+
+// MakeJSONRequestQuery generates HTTP request with JSON body parameter injection
+func MakeJSONRequestQuery(target, param, payload, ptype string, pAction string, pEncode string, options model.Options) (*http.Request, map[string]string) {
+	tempMap := make(map[string]string)
+	tempMap["type"] = ptype
+	tempMap["action"] = pAction
+	tempMap["encode"] = pEncode
+	tempMap["payload"] = payload
+	tempMap["param"] = param
+
+	// Apply encoding to payload
+	switch pEncode {
+	case "urlEncode":
+		payload = UrlEncode(payload)
+	case "urlDoubleEncode":
+		payload = UrlEncode(UrlEncode(payload))
+	case "htmlEncode":
+		payload = template.HTMLEscapeString(payload)
+	}
+
+	// Parse original JSON data
+	var jsonData interface{}
+	err := json.Unmarshal([]byte(options.Data), &jsonData)
+	if err != nil {
+		// If JSON parsing fails, fall back to regular request
+		return GenerateNewRequest(target, options.Data, options), tempMap
+	}
+
+	// Create a deep copy and inject payload
+	jsonBytes, _ := json.Marshal(jsonData)
+	var modifiedData interface{}
+	json.Unmarshal(jsonBytes, &modifiedData)
+
+	// Inject payload at the specified parameter path
+	modifiedData = injectJSONPayload(modifiedData, param, payload)
+
+	// Convert back to JSON string
+	modifiedBytes, err := json.Marshal(modifiedData)
+	if err != nil {
+		// If marshaling fails, fall back to original data
+		return GenerateNewRequest(target, options.Data, options), tempMap
+	}
+
+	// Create request with modified JSON body
+	u, _ := url.Parse(target)
+	req, _ := http.NewRequest("POST", u.String(), bytes.NewBuffer(modifiedBytes))
+	req = har.AddMessageIDToRequest(req)
+	req.Header.Set("Content-Type", "application/json")
+
+	// Apply headers from options
+	if len(options.Header) > 0 {
+		for _, v := range options.Header {
+			h := strings.Split(v, ": ")
+			if len(h) > 1 {
+				req.Header.Set(h[0], h[1])
+			}
+		}
+	}
+	if options.Cookie != "" {
+		req.Header.Set("Cookie", options.Cookie)
+	}
+	if options.UserAgent != "" {
+		req.Header.Set("User-Agent", options.UserAgent)
+	} else {
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:75.0) Gecko/20100101 Firefox/75.0")
+	}
+	if options.Method != "" {
+		req.Method = options.Method
+	}
+
+	return req, tempMap
 }
