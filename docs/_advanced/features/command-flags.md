@@ -20,7 +20,7 @@ These flags allow you to customize the HTTP requests sent by Dalfox:
 | `-b, --blind string` | Specify a blind XSS callback URL.<br>Example: `-b 'https://your-callback-url.com'` |
 | `-C, --cookie string` | Add custom cookies to the request.<br>Example: `-C 'sessionid=abc123'` |
 | `--cookie-from-raw string` | Load cookies from a raw HTTP request file.<br>Example: `--cookie-from-raw 'request.txt'` |
-| `-d, --data string` | Use POST method and add body data.<br>Example: `-d 'username=admin&password=admin'` |
+| `-d, --data string` | Add body data to the request. Supports all HTTP methods (use `-X` to specify). Body can be sent as form (`key=value&key2=value2`) or JSON (`{"key":"value"}`).<br>Example: `-d 'username=admin&password=admin'` or `-d '{"username":"admin","password":"admin"}' -X POST` |
 | `-F, --follow-redirects` | Follow HTTP redirects.<br>Example: `-F` |
 | `-H, --header strings` | Add custom headers to the request.<br>Example: `-H 'Authorization: Bearer <token>'` |
 | `-X, --method string` | Override the HTTP method (default: GET).<br>Example: `-X 'PUT'` |

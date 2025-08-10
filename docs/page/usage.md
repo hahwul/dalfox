@@ -85,7 +85,7 @@ These flags can be used with any mode to customize your scan:
 
 ```
   -X, --method string                 Override the HTTP method. Example: -X 'PUT' (default "GET")
-  -d, --data string                   Use POST method and add body data. Example: -d 'username=admin&password=admin'
+  -d, --data string                   Send body data with the request (supports all HTTP methods). Body can be form (key=value&...) or JSON. Example: -d 'username=admin&password=admin' or -d '{"username":"admin","password":"admin"}'
   -H, --header strings                Add custom headers to the request. Example: -H 'Authorization: Bearer <token>'
   -C, --cookie string                 Add custom cookies to the request. Example: -C 'sessionid=abc123'
       --cookie-from-raw string        Load cookies from a raw HTTP request file. Example: --cookie-from-raw 'request.txt'

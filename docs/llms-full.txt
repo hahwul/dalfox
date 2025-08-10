@@ -210,7 +210,7 @@ For more information and advanced usage, please refer to the [official Dalfox li
 # Custom Transport Feature
 {: .d-inline-block }
 
-Since (v2.10.0) 
+Since (v2.10.0)
 {: .label .label-blue }
 
 Dalfox now supports custom HTTP transports, allowing you to customize the HTTP client behavior for your scanning needs. This feature is particularly useful when integrating Dalfox with other pipelines for HTTP control flow, retry mechanisms, and non-trivial authentication scenarios.
@@ -1931,7 +1931,7 @@ curl -X POST "http://localhost:8090/scan" \
   -H "Content-Type: application/json" \
   -H "X-API-KEY: your-secret-key" \
   -d '{
-    "url": "https://example.com", 
+    "url": "https://example.com",
     "options": {
       "cookie": "session=abc123",
       "worker": 20,
@@ -1996,7 +1996,7 @@ def start_scan(url, options=None):
     payload = {"url": url}
     if options:
         payload["options"] = options
-    
+
     response = requests.post(f"{DALFOX_SERVER}/scan", json=payload)
     return response.json()["msg"]  # Return the scan ID
 
@@ -2011,9 +2011,9 @@ def main():
         "timeout": 5,
         "blind": "your-callback.xss.ht"
     })
-    
+
     print(f"Scan started with ID: {scan_id}")
-    
+
     # Poll for results
     while True:
         result = get_scan_results(scan_id)
@@ -2021,7 +2021,7 @@ def main():
             print("Scan completed!")
             print(json.dumps(result["data"], indent=2))
             break
-        
+
         print("Scan in progress...")
         time.sleep(5)
 
@@ -2046,23 +2046,23 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
-      
+
       - name: Run Dalfox Server
         run: |
           docker run -d -p 6664:6664 hahwul/dalfox:latest server
           sleep 5  # Wait for server to start
-      
+
       - name: Run Scan
         run: |
           # Extract URLs from your application
           URLS=$(grep -r "https://" ./src --include="*.js" | grep -o 'https://[^"]*' | sort | uniq)
-          
+
           # Scan each URL
           for url in $URLS; do
             SCAN_ID=$(curl -s -X POST "http://localhost:6664/scan" \
               -H "Content-Type: application/json" \
               -d "{\"url\": \"$url\"}" | jq -r .msg)
-            
+
             echo "Started scan for $url with ID: $SCAN_ID"
           done
 ```
@@ -2096,7 +2096,7 @@ When deploying Dalfox in server mode, consider the following security practices:
 ## MCP Server Mode
 {: .d-inline-block }
 
-New (v2.11.0) 
+New (v2.11.0)
 {: .label .label-blue }
 
 Dalfox can function as a Model Context Protocol (MCP) server, enabling direct integration with AI-powered development environments like Visual Studio Code and compatible AI assistants.
@@ -2391,7 +2391,7 @@ check_dalfox_update() {
   if command -v dalfox &> /dev/null; then
     local current_version=$(dalfox version | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+')
     local latest_version=$(curl -s https://api.github.com/repos/hahwul/dalfox/releases/latest | grep -Eo '"tag_name": "v[0-9]+\.[0-9]+\.[0-9]+"' | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+')
-    
+
     if [[ "$current_version" != "$latest_version" ]]; then
       echo "📢 Dalfox update available: $current_version → $latest_version"
     fi
@@ -2512,7 +2512,7 @@ These flags can be used with any mode to customize your scan:
 
 ```
   -X, --method string                 Override the HTTP method. Example: -X 'PUT' (default "GET")
-  -d, --data string                   Use POST method and add body data. Example: -d 'username=admin&password=admin'
+  -d, --data string                   Add body data to the request (supports all HTTP methods). Body can be form (key=value&...) or JSON. Example: -d 'username=admin&password=admin' or -d '{"username":"admin","password":"admin"}'
   -H, --header strings                Add custom headers to the request. Example: -H 'Authorization: Bearer <token>'
   -C, --cookie string                 Add custom cookies to the request. Example: -C 'sessionid=abc123'
       --cookie-from-raw string        Load cookies from a raw HTTP request file. Example: --cookie-from-raw 'request.txt'
@@ -2526,7 +2526,7 @@ These flags can be used with any mode to customize your scan:
 
 ```
   -p, --param strings                 Specify parameters to test. Example: -p 'username' -p 'password'
-      --ignore-param strings          Ignore specific parameters during scanning. Example: --ignore-param 'api_token' 
+      --ignore-param strings          Ignore specific parameters during scanning. Example: --ignore-param 'api_token'
       --ignore-return string          Ignore specific HTTP return codes. Example: --ignore-return '302,403,404'
   -w, --worker int                    Set the number of concurrent workers. Example: -w 100 (default 100)
       --delay int                     Set the delay between requests in milliseconds. Example: --delay 1000
@@ -2659,7 +2659,7 @@ Dalfox will automatically look for configuration files in the following location
 
 ## Creating a Configuration File
 
-To create a configuration file, you can start with a basic template and customize it according to your needs. 
+To create a configuration file, you can start with a basic template and customize it according to your needs.
 
 ### Basic Configuration Template
 
@@ -3052,7 +3052,7 @@ These flags allow you to customize the HTTP requests sent by Dalfox:
 | `-b, --blind string` | Specify a blind XSS callback URL.<br>Example: `-b 'https://your-callback-url.com'` |
 | `-C, --cookie string` | Add custom cookies to the request.<br>Example: `-C 'sessionid=abc123'` |
 | `--cookie-from-raw string` | Load cookies from a raw HTTP request file.<br>Example: `--cookie-from-raw 'request.txt'` |
-| `-d, --data string` | Use POST method and add body data.<br>Example: `-d 'username=admin&password=admin'` |
+| `-d, --data string` | Add body data to the request (supports all HTTP methods). Body can be form (key=value&...) or JSON.<br>Example: `-d 'username=admin&password=admin'` or `-d '{"username":"admin","password":"admin"}'` |
 | `-F, --follow-redirects` | Follow HTTP redirects.<br>Example: `-F` |
 | `-H, --header strings` | Add custom headers to the request.<br>Example: `-H 'Authorization: Bearer <token>'` |
 | `-X, --method string` | Override the HTTP method (default: GET).<br>Example: `-X 'PUT'` |
@@ -3371,7 +3371,7 @@ Run with your exfiltration payloads:
 dalfox url https://target-site.com --custom-payload exfiltration.txt
 ```
 
-### DOM Exploration 
+### DOM Exploration
 
 Custom payloads to explore DOM properties:
 
@@ -3908,7 +3908,7 @@ dalfox url https://example.com --remote-payloads portswigger
 - **Source**: [PortSwigger XSS Cheat Sheet](https://portswigger.net/web-security/cross-site-scripting/cheat-sheet)
 - **Maintainer**: PortSwigger (creators of Burp Suite)
 - **Payload Count**: ~100 specialized payloads
-- **Features**: 
+- **Features**:
   - Browser-specific payloads
   - Event handler payloads
   - HTML5 vectors
@@ -4024,7 +4024,7 @@ For requests to add new remote payload sources, please open an issue on the [Dal
 # Comprehensive Reporting
 {: .d-inline-block }
 
-Since (v2.8.0) 
+Since (v2.8.0)
 {: .label .label-green }
 
 ## Overview
@@ -4248,7 +4248,7 @@ dalfox url https://example.com/search?q=test --report --output-request --output-
 # Write HAR file
 {: .d-inline-block }
 
-SINCE (v2.9.0) 
+SINCE (v2.9.0)
 {: .label .label-green }
 
 In Dalfox 2.9 and later, all requests can be logged in HAR format. This allows you to save the HTTP Archive (HAR) file for further analysis or interaction with other tools.
@@ -4673,7 +4673,7 @@ Here is a detailed explanation of the PoC (Proof of Concept) section in the JSON
 # Result JSONL Format
 {: .d-inline-block }
 
-New (v2.11.0) 
+New (v2.11.0)
 {: .label .label-blue }
 
 This guide provides a detailed explanation of the JSONL (JSON Lines) format used for scan results generated by Dalfox. Understanding this format can help you better interpret the results and integrate them with other tools.
@@ -4803,4 +4803,3 @@ This page gathers various resources related to Dalfox, including articles, video
 - [Dalfox – Hacker Tools: XSS Scanning Made Easy 👩‍💻](https://blog.intigriti.com/hacking-tools/hacker-tools-dalfox)
 
 ---
-

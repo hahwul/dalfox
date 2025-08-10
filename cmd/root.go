@@ -93,7 +93,7 @@ func init() {
 	// String
 	rootCmd.PersistentFlags().StringVar(&args.Config, "config", "", "Load configuration from a file. Example: --config 'config.json'")
 	rootCmd.PersistentFlags().StringVarP(&args.Cookie, "cookie", "C", "", "Add custom cookies to the request. Example: -C 'sessionid=abc123'")
-	rootCmd.PersistentFlags().StringVarP(&args.Data, "data", "d", "", "Use POST method and add body data. Example: -d 'username=admin&password=admin'")
+	rootCmd.PersistentFlags().StringVarP(&args.Data, "data", "d", "", "Send body data with the request (supports all HTTP methods). Body can be form (key=value&...) or JSON. Example: -d 'username=admin&password=admin' or -d '{\"username\":\"admin\",\"password\":\"admin\"}'")
 	rootCmd.PersistentFlags().StringVar(&args.CustomPayload, "custom-payload", "", "Load custom payloads from a file. Example: --custom-payload 'payloads.txt'")
 	rootCmd.PersistentFlags().StringVar(&args.CustomBlindXSSPayloadFile, "custom-blind-xss-payload", "", "Load custom blind XSS payloads from a file. Example: --custom-blind-xss-payload 'payloads.txt'")
 	rootCmd.PersistentFlags().StringVar(&args.CustomAlertValue, "custom-alert-value", "1", "Set a custom alert value. Example: --custom-alert-value 'document.cookie'")
