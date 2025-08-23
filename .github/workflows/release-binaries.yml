@@ -1,54 +1,44 @@
+---
 name: Release Binaries
-
 on:
   release:
     types: [published]
-
 permissions:
-  contents: write # Required to write release assets
-
+  contents: write  # Required to write release assets
 jobs:
   build-and-upload:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
       - name: Set up Go
         uses: actions/setup-go@v4
         with:
-          go-version: '1.24' # Or a version appropriate for the project
-
+          go-version: '1.25'  # Or a version appropriate for the project
       - name: Build for Linux (amd64)
         run: |
           GOOS=linux GOARCH=amd64 go build -v -o dalfox-linux-amd64 ./dalfox.go
           tar -czvf dalfox-linux-amd64.tar.gz dalfox-linux-amd64
-
       - name: Build for Linux (arm64)
         run: |
           GOOS=linux GOARCH=arm64 go build -v -o dalfox-linux-arm64 ./dalfox.go
           tar -czvf dalfox-linux-arm64.tar.gz dalfox-linux-arm64
-
       - name: Build for Windows (amd64)
         run: |
           GOOS=windows GOARCH=amd64 go build -v -o dalfox-windows-amd64.exe ./dalfox.go
           zip dalfox-windows-amd64.zip dalfox-windows-amd64.exe
-
       - name: Build for Windows (arm64)
         run: |
           GOOS=windows GOARCH=arm64 go build -v -o dalfox-windows-arm64.exe ./dalfox.go
           zip dalfox-windows-arm64.zip dalfox-windows-arm64.exe
-
       - name: Build for macOS (amd64)
         run: |
           GOOS=darwin GOARCH=amd64 go build -v -o dalfox-darwin-amd64 ./dalfox.go
           tar -czvf dalfox-darwin-amd64.tar.gz dalfox-darwin-amd64
-
       - name: Build for macOS (arm64)
         run: |
           GOOS=darwin GOARCH=arm64 go build -v -o dalfox-darwin-arm64 ./dalfox.go
           tar -czvf dalfox-darwin-arm64.tar.gz dalfox-darwin-arm64
-
       - name: Upload Linux (amd64) artifact
         uses: svenstaro/upload-release-action@v2
         with:
@@ -57,7 +47,6 @@ jobs:
           asset_name: dalfox-linux-amd64.tar.gz
           tag: ${{ github.ref }}
           overwrite: true
-
       - name: Upload Linux (arm64) artifact
         uses: svenstaro/upload-release-action@v2
         with:
@@ -66,7 +55,6 @@ jobs:
           asset_name: dalfox-linux-arm64.tar.gz
           tag: ${{ github.ref }}
           overwrite: true
-
       - name: Upload Windows (amd64) artifact
         uses: svenstaro/upload-release-action@v2
         with:
@@ -75,7 +63,6 @@ jobs:
           asset_name: dalfox-windows-amd64.zip
           tag: ${{ github.ref }}
           overwrite: true
-
       - name: Upload Windows (arm64) artifact
         uses: svenstaro/upload-release-action@v2
         with:
@@ -84,7 +71,6 @@ jobs:
           asset_name: dalfox-windows-arm64.zip
           tag: ${{ github.ref }}
           overwrite: true
-
       - name: Upload macOS (amd64) artifact
         uses: svenstaro/upload-release-action@v2
         with:
@@ -93,7 +79,6 @@ jobs:
           asset_name: dalfox-darwin-amd64.tar.gz
           tag: ${{ github.ref }}
           overwrite: true
-
       - name: Upload macOS (arm64) artifact
         uses: svenstaro/upload-release-action@v2
         with:

@@ -16,7 +16,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.24'  # Match your go.mod
+          go-version: '1.25'  # Match your go.mod
       - name: Build dalfox
         run: go build -o dalfox .
       - name: Setup Ruby
