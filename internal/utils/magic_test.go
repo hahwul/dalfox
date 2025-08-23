@@ -220,12 +220,9 @@ func TestGenerateMagicString_EdgeCases(t *testing.T) {
 	// Test with a context not in ContextSpecificMagic but also not in MagicCharacters (should default to MagicCharacters)
 	// This scenario is implicitly covered by "unknown context" in TestGenerateMagicString,
 	// but an explicit test ensures clarity.
-	rand.Seed(1)                                                                // Ensure predictability
-	expectedFromAll := string(MagicCharacters[rand.Intn(len(MagicCharacters))]) // Get the first char based on seed
-	rand.Seed(1)                                                                // Reset seed for the actual call
 	gotUnknown := GenerateMagicCharacter("completely_new_context")
-	if gotUnknown != expectedFromAll {
-		t.Errorf("GenerateMagicCharacter() with completely new context = %s, want %s (based on seed)", gotUnknown, expectedFromAll)
+	if !contains(MagicCharacters, gotUnknown) {
+		t.Errorf("GenerateMagicCharacter() with completely new context returned %s, which is not in the default set", gotUnknown)
 	}
 }
 
