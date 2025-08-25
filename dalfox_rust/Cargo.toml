@@ -1,0 +1,9 @@
+[package]
+name = "dalfox"
+version = "0.1.0"
+edition = "2024"
+authors = ["hahwul"]
+description = "Dalfox is a powerful open-source XSS scanner and utility focused on automation"
+license = "MIT"
+
+[dependencies]

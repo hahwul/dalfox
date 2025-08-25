@@ -4,6 +4,9 @@
 **/.DS_Store
 **/._.DS_Store
 
+### Rust ###
+dalfox_rust/target/
+
 ### Go ###
 # Binaries for programs and plugins
 *.exe
