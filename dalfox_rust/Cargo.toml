@@ -7,3 +7,4 @@ description = "Dalfox is a powerful open-source XSS scanner and utility focused 
 license = "MIT"
 
 [dependencies]
+clap = { version = "4.0", features = ["derive"] }
