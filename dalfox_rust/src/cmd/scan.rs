@@ -17,6 +17,18 @@ pub struct ScanArgs {
     /// Targets (URLs or file paths)
     #[arg(value_name = "TARGET")]
     pub targets: Vec<String>,
+
+    /// HTTP request body data
+    #[arg(short = 'd', long)]
+    pub data: Option<String>,
+
+    /// HTTP headers (can be specified multiple times)
+    #[arg(short = 'H', long)]
+    pub headers: Vec<String>,
+
+    /// Cookies (can be specified multiple times)
+    #[arg(long)]
+    pub cookies: Vec<String>,
 }
 
 pub fn run_scan(args: ScanArgs) {
@@ -122,7 +134,22 @@ pub fn run_scan(args: ScanArgs) {
     let mut parsed_targets = Vec::new();
     for s in target_strings {
         match parse_target(&s) {
-            Ok(target) => parsed_targets.push(target),
+            Ok(mut target) => {
+                target.data = args.data.clone();
+                target.headers = args
+                    .headers
+                    .iter()
+                    .filter_map(|h| h.split_once(": "))
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect();
+                target.cookies = args
+                    .cookies
+                    .iter()
+                    .filter_map(|c| c.split_once("="))
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect();
+                parsed_targets.push(target);
+            }
             Err(e) => {
                 eprintln!("Error parsing target '{}': {}", s, e);
                 return;
@@ -134,8 +161,11 @@ pub fn run_scan(args: ScanArgs) {
         "Scanning with input-type: {}, format: {}",
         input_type, args.format
     );
-    for target in parsed_targets {
-        println!("Target: {}", target.url);
+    for target in &parsed_targets {
+        println!(
+            "Target: {} with data: {:?}, headers: {:?}, cookies: {:?}",
+            target.url, target.data, target.headers, target.cookies
+        );
         // TODO: Implement actual scanning logic for each target
     }
 }

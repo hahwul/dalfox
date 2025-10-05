@@ -3,6 +3,9 @@ use url::Url;
 #[derive(Debug)]
 pub struct Target {
     pub url: Url,
+    pub data: Option<String>,
+    pub headers: Vec<(String, String)>,
+    pub cookies: Vec<(String, String)>,
 }
 
 pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
@@ -12,5 +15,10 @@ pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
         format!("http://{}", s)
     };
     let url = Url::parse(&url_str)?;
-    Ok(Target { url })
+    Ok(Target {
+        url,
+        data: None,
+        headers: vec![],
+        cookies: vec![],
+    })
 }

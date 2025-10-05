@@ -17,6 +17,9 @@ pub fn run_file(args: FileArgs) {
         input_type: "file".to_string(),
         format: args.format,
         targets: vec![args.file],
+        data: None,
+        headers: vec![],
+        cookies: vec![],
     };
     crate::cmd::scan::run_scan(scan_args);
 }

@@ -17,6 +17,9 @@ pub fn run_url(args: UrlArgs) {
         input_type: "url".to_string(),
         format: args.format,
         targets: vec![args.url],
+        data: None,
+        headers: vec![],
+        cookies: vec![],
     };
     crate::cmd::scan::run_scan(scan_args);
 }

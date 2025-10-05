@@ -13,6 +13,9 @@ pub fn run_pipe(args: PipeArgs) {
         input_type: "pipe".to_string(),
         format: args.format,
         targets: vec![], // No targets needed for pipe
+        data: None,
+        headers: vec![],
+        cookies: vec![],
     };
     crate::cmd::scan::run_scan(scan_args);
 }
