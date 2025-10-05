@@ -8,3 +8,4 @@ license = "MIT"
 
 [dependencies]
 clap = { version = "4.0", features = ["derive"] }
+url = "2.0"

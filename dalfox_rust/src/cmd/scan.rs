@@ -2,6 +2,8 @@ use clap::Args;
 use std::fs;
 use std::io::{self, Read};
 
+use crate::target_parser::*;
+
 #[derive(Args)]
 pub struct ScanArgs {
     /// Input type: auto, url, file, raw-http
@@ -42,29 +44,32 @@ pub fn run_scan(args: ScanArgs) {
         args.input_type.clone()
     };
 
-    let mut targets = Vec::new();
+    let mut target_strings = Vec::new();
 
     if input_type == "auto" {
         for target in &args.targets {
-            if target.starts_with("http://") || target.starts_with("https://") {
-                targets.push(target.clone());
+            if target.contains("://") {
+                target_strings.push(target.clone());
             } else {
-                // Assume it's a file
+                // Try as file first
                 match fs::read_to_string(target) {
                     Ok(content) => {
                         for line in content.lines() {
-                            targets.push(line.to_string());
+                            let line = line.trim();
+                            if !line.is_empty() {
+                                target_strings.push(line.to_string());
+                            }
                         }
                     }
-                    Err(e) => {
-                        eprintln!("Error reading file {}: {}", target, e);
-                        return;
+                    Err(_) => {
+                        // Not a file, treat as URL
+                        target_strings.push(target.clone());
                     }
                 }
             }
         }
     } else {
-        targets = match input_type.as_str() {
+        target_strings = match input_type.as_str() {
             "url" => args.targets,
             "file" => {
                 if args.targets.is_empty() {
@@ -109,17 +114,28 @@ pub fn run_scan(args: ScanArgs) {
         };
     }
 
-    if targets.is_empty() {
+    if target_strings.is_empty() {
         eprintln!("Error: No targets specified");
         return;
+    }
+
+    let mut parsed_targets = Vec::new();
+    for s in target_strings {
+        match parse_target(&s) {
+            Ok(target) => parsed_targets.push(target),
+            Err(e) => {
+                eprintln!("Error parsing target '{}': {}", s, e);
+                return;
+            }
+        }
     }
 
     println!(
         "Scanning with input-type: {}, format: {}",
         input_type, args.format
     );
-    for target in targets {
-        println!("Target: {}", target);
+    for target in parsed_targets {
+        println!("Target: {}", target.url);
         // TODO: Implement actual scanning logic for each target
     }
 }

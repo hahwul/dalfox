@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 
 mod cmd;
+mod target_parser;
 
 #[derive(Parser)]
 #[command(name = "dalfox")]
