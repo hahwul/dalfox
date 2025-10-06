@@ -6,26 +6,32 @@ use crate::target_parser::*;
 
 #[derive(Args)]
 pub struct ScanArgs {
+    #[clap(help_heading = "INPUT")]
     /// Input type: auto, url, file, pipe, raw-http
-    #[arg(long, default_value = "auto")]
+    #[arg(short = 'i', long, default_value = "auto")]
     pub input_type: String,
 
+    #[clap(help_heading = "OUTPUT")]
     /// Output format
     #[arg(short, long, default_value = "json")]
     pub format: String,
 
+    #[clap(help_heading = "TARGETS")]
     /// Targets (URLs or file paths)
     #[arg(value_name = "TARGET")]
     pub targets: Vec<String>,
 
+    #[clap(help_heading = "TARGETS")]
     /// HTTP request body data
     #[arg(short = 'd', long)]
     pub data: Option<String>,
 
+    #[clap(help_heading = "TARGETS")]
     /// HTTP headers (can be specified multiple times)
     #[arg(short = 'H', long)]
     pub headers: Vec<String>,
 
+    #[clap(help_heading = "TARGETS")]
     /// Cookies (can be specified multiple times)
     #[arg(long)]
     pub cookies: Vec<String>,
