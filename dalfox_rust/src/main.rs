@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 
 mod cmd;
 mod parameter_analysis;
+mod payload;
 mod target_parser;
 
 #[derive(Parser)]
