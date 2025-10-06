@@ -13,18 +13,6 @@ struct Cli {
     /// Targets (when no subcommand is provided, defaults to scan)
     #[arg(value_name = "TARGET")]
     targets: Vec<String>,
-
-    /// HTTP request body data
-    #[arg(short = 'd', long)]
-    data: Option<String>,
-
-    /// HTTP headers (can be specified multiple times)
-    #[arg(short = 'H', long)]
-    headers: Vec<String>,
-
-    /// Cookies (can be specified multiple times)
-    #[arg(long)]
-    cookies: Vec<String>,
 }
 
 #[derive(Subcommand)]
@@ -36,6 +24,7 @@ enum Commands {
     Url(cmd::url::UrlArgs),
     #[clap(hide = true)]
     File(cmd::file::FileArgs),
+    #[clap(hide = true)]
     Pipe(cmd::pipe::PipeArgs),
 }
 
@@ -57,9 +46,9 @@ fn main() {
             input_type: "auto".to_string(),
             format: "json".to_string(),
             targets: cli.targets,
-            data: cli.data,
-            headers: cli.headers,
-            cookies: cli.cookies,
+            data: None,
+            headers: vec![],
+            cookies: vec![],
         };
         cmd::scan::run_scan(args);
     }

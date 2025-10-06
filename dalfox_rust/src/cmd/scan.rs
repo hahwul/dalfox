@@ -6,7 +6,7 @@ use crate::target_parser::*;
 
 #[derive(Args)]
 pub struct ScanArgs {
-    /// Input type: auto, url, file, raw-http
+    /// Input type: auto, url, file, pipe, raw-http
     #[arg(long, default_value = "auto")]
     pub input_type: String,
 
@@ -100,7 +100,17 @@ pub fn run_scan(args: ScanArgs) {
             "pipe" => {
                 let mut buffer = String::new();
                 match io::stdin().read_to_string(&mut buffer) {
-                    Ok(_) => buffer.lines().map(|s| s.to_string()).collect(),
+                    Ok(_) => buffer
+                        .lines()
+                        .filter_map(|line| {
+                            let trimmed = line.trim();
+                            if trimmed.is_empty() {
+                                None
+                            } else {
+                                Some(trimmed.to_string())
+                            }
+                        })
+                        .collect(),
                     Err(e) => {
                         eprintln!("Error reading from stdin: {}", e);
                         return;
@@ -108,17 +118,14 @@ pub fn run_scan(args: ScanArgs) {
                 }
             }
             "raw-http" => {
-                println!(
-                    "Scanning with input-type: raw-http, format: {}",
-                    args.format
-                );
                 // TODO: Implement raw HTTP request handling
                 eprintln!("raw-http input-type not implemented yet");
                 return;
             }
+
             _ => {
                 eprintln!(
-                    "Error: Invalid input-type '{}'. Use 'auto', 'url', 'file', or 'raw-http'",
+                    "Error: Invalid input-type '{}'. Use 'auto', 'url', 'file', 'pipe', or 'raw-http'",
                     input_type
                 );
                 return;
