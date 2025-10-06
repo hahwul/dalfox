@@ -49,6 +49,8 @@ fn main() {
             data: None,
             headers: vec![],
             cookies: vec![],
+            method: "GET".to_string(),
+            user_agent: None,
         };
         cmd::scan::run_scan(args);
     }

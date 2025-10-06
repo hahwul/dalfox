@@ -35,6 +35,16 @@ pub struct ScanArgs {
     /// Cookies (can be specified multiple times)
     #[arg(long)]
     pub cookies: Vec<String>,
+
+    #[clap(help_heading = "TARGETS")]
+    /// Override the HTTP method. Example: -X 'PUT' (default "GET")
+    #[arg(short = 'X', long, default_value = "GET")]
+    pub method: String,
+
+    #[clap(help_heading = "TARGETS")]
+    /// Set a custom User-Agent header. Example: --user-agent 'Mozilla/5.0'
+    #[arg(long)]
+    pub user_agent: Option<String>,
 }
 
 pub fn run_scan(args: ScanArgs) {
@@ -155,6 +165,11 @@ pub fn run_scan(args: ScanArgs) {
                     .filter_map(|h| h.split_once(": "))
                     .map(|(k, v)| (k.to_string(), v.to_string()))
                     .collect();
+                target.method = args.method.clone();
+                if let Some(ua) = &args.user_agent {
+                    target.headers.push(("User-Agent".to_string(), ua.clone()));
+                    target.user_agent = Some(ua.clone());
+                }
                 target.cookies = args
                     .cookies
                     .iter()
@@ -170,14 +185,24 @@ pub fn run_scan(args: ScanArgs) {
         }
     }
 
+    if parsed_targets.is_empty() {
+        eprintln!("Error: No targets specified");
+        return;
+    }
+
     println!(
         "Scanning with input-type: {}, format: {}",
         input_type, args.format
     );
     for target in &parsed_targets {
         println!(
-            "Target: {} with data: {:?}, headers: {:?}, cookies: {:?}",
-            target.url, target.data, target.headers, target.cookies
+            "Target: {} method: {}, user_agent: {:?}, data: {:?}, headers: {:?}, cookies: {:?}",
+            target.url,
+            target.method,
+            target.user_agent,
+            target.data,
+            target.headers,
+            target.cookies
         );
         // TODO: Implement actual scanning logic for each target
     }

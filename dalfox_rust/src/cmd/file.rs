@@ -20,6 +20,8 @@ pub fn run_file(args: FileArgs) {
         data: None,
         headers: vec![],
         cookies: vec![],
+        method: "GET".to_string(),
+        user_agent: None,
     };
     crate::cmd::scan::run_scan(scan_args);
 }
