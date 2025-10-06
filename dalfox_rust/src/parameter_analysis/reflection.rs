@@ -40,6 +40,7 @@ pub fn check_reflection(target: &mut Target) {
                         name: name.to_string(),
                         value: value.to_string(),
                         location: crate::parameter_analysis::Location::Query,
+                        injection_context: Some(crate::parameter_analysis::InjectionContext::Html),
                     });
                 }
             }
