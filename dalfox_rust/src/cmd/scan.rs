@@ -2,6 +2,7 @@ use clap::Args;
 use std::fs;
 use std::io::{self, Read};
 
+use crate::parameter_analysis::analyze_parameters;
 use crate::target_parser::*;
 
 #[derive(Args)]
@@ -190,19 +191,25 @@ pub fn run_scan(args: ScanArgs) {
         return;
     }
 
+    // Analyze parameters for each target
+    for target in &mut parsed_targets {
+        analyze_parameters(target);
+    }
+
     println!(
         "Scanning with input-type: {}, format: {}",
         input_type, args.format
     );
     for target in &parsed_targets {
         println!(
-            "Target: {} method: {}, user_agent: {:?}, data: {:?}, headers: {:?}, cookies: {:?}",
+            "Target: {} method: {}, user_agent: {:?}, data: {:?}, headers: {:?}, cookies: {:?}, reflection_params: {:?}",
             target.url,
             target.method,
             target.user_agent,
             target.data,
             target.headers,
-            target.cookies
+            target.cookies,
+            target.reflection_params
         );
         // TODO: Implement actual scanning logic for each target
     }

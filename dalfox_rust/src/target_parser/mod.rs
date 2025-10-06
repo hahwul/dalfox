@@ -1,3 +1,4 @@
+use crate::parameter_analysis::Param;
 use url::Url;
 
 #[derive(Debug)]
@@ -8,6 +9,7 @@ pub struct Target {
     pub headers: Vec<(String, String)>,
     pub cookies: Vec<(String, String)>,
     pub user_agent: Option<String>,
+    pub reflection_params: Vec<Param>,
 }
 
 pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
@@ -24,5 +26,6 @@ pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
         headers: vec![],
         cookies: vec![],
         user_agent: None,
+        reflection_params: vec![],
     })
 }

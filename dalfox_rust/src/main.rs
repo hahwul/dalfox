@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 
 mod cmd;
+mod parameter_analysis;
 mod target_parser;
 
 #[derive(Parser)]
