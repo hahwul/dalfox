@@ -10,3 +10,4 @@ license = "MIT"
 clap = { version = "4.0", features = ["derive"] }
 url = "2.0"
 reqwest = { version = "0.11", features = ["blocking"] }
+scraper = "0.18"
