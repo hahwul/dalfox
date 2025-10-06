@@ -1,5 +1,5 @@
 use crate::parameter_analysis::Param;
-use crate::payload::mining::PARAM_LIST;
+use crate::payload::mining::GF_PATTERNS_PARAMS;
 use crate::target_parser::Target;
 use reqwest::blocking::Client;
 
@@ -7,7 +7,7 @@ pub fn mine_parameters(target: &mut Target) {
     let client = Client::new();
 
     // Check for additional valid parameters
-    for &param in PARAM_LIST {
+    for &param in GF_PATTERNS_PARAMS {
         let mut url = target.url.clone();
         url.query_pairs_mut().append_pair(param, "dalfox");
         let mut request =

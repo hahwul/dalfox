@@ -1,4 +1,4 @@
-pub const PARAM_LIST: &[&str] = &[
+pub const GF_PATTERNS_PARAMS: &[&str] = &[
     "q",
     "s",
     "search",
