@@ -80,6 +80,8 @@ mod tests {
             custom_blind_xss_payload: None,
             custom_payload: None,
             only_custom_payload: false,
+            fast_scan: false,
+            skip_xss_scanning: false,
         };
 
         // This will attempt real HTTP requests, but in test environment it may fail
@@ -115,6 +117,8 @@ mod tests {
             custom_blind_xss_payload: None,
             custom_payload: None,
             only_custom_payload: false,
+            fast_scan: false,
+            skip_xss_scanning: false,
         };
 
         run_scanning(&target, &args).await;

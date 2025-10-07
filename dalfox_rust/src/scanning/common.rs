@@ -19,8 +19,10 @@ pub fn get_payloads(args: &ScanArgs) -> Result<Vec<String>, Box<dyn std::error::
         }
     } else {
         payloads.extend(XSS_PAYLOADS.iter().map(|s| s.to_string()));
-        if let Some(path) = &args.custom_payload {
-            payloads.extend(load_custom_payloads(path)?);
+        if !args.fast_scan {
+            if let Some(path) = &args.custom_payload {
+                payloads.extend(load_custom_payloads(path)?);
+            }
         }
     }
 

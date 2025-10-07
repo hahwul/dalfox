@@ -33,6 +33,8 @@ pub async fn run_pipe(args: PipeArgs) {
         custom_blind_xss_payload: None,
         custom_payload: None,
         only_custom_payload: false,
+        fast_scan: false,
+        skip_xss_scanning: false,
     };
     crate::cmd::scan::run_scan(&scan_args).await;
 }

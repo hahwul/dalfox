@@ -121,6 +121,16 @@ pub struct ScanArgs {
     /// Only test custom payloads. Example: --only-custom-payload --custom-payload=p.txt
     #[arg(long)]
     pub only_custom_payload: bool,
+
+    #[clap(help_heading = "XSS SCANNING")]
+    /// Common XSS payloads only
+    #[arg(long)]
+    pub fast_scan: bool,
+
+    #[clap(help_heading = "XSS SCANNING")]
+    /// Skip XSS scanning entirely
+    #[arg(long)]
+    pub skip_xss_scanning: bool,
 }
 
 pub async fn run_scan(args: &ScanArgs) {
@@ -294,7 +304,9 @@ pub async fn run_scan(args: &ScanArgs) {
     // Analyze parameters for each target
     for target in &mut parsed_targets {
         analyze_parameters(target, &args).await;
-        crate::scanning::run_scanning(target, &args).await;
+        if !args.skip_xss_scanning {
+            crate::scanning::run_scanning(target, &args).await;
+        }
     }
 
     println!(

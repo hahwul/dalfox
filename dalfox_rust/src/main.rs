@@ -71,6 +71,8 @@ async fn main() {
             custom_blind_xss_payload: None,
             custom_payload: None,
             only_custom_payload: false,
+            fast_scan: false,
+            skip_xss_scanning: false,
         };
         cmd::scan::run_scan(&args).await;
     }

@@ -87,6 +87,8 @@ mod tests {
             custom_blind_xss_payload: None,
             custom_payload: None,
             only_custom_payload: false,
+            fast_scan: false,
+            skip_xss_scanning: false,
         };
 
         // Mock mining instead of real mining
@@ -123,6 +125,8 @@ mod tests {
             custom_blind_xss_payload: None,
             custom_payload: None,
             only_custom_payload: false,
+            fast_scan: false,
+            skip_xss_scanning: false,
         };
 
         // Mock body param reflection
@@ -202,6 +206,8 @@ mod tests {
             custom_blind_xss_payload: None,
             custom_payload: None,
             only_custom_payload: false,
+            fast_scan: false,
+            skip_xss_scanning: false,
         };
 
         // Simulate cookie loading
