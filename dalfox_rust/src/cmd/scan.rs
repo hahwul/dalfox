@@ -47,22 +47,37 @@ pub struct ScanArgs {
     #[arg(long)]
     pub user_agent: Option<String>,
 
-    #[clap(help_heading = "MINING")]
+    #[clap(help_heading = "PARAMETER DISCOVERY")]
+    /// Skip all discovery checks
+    #[arg(long)]
+    pub skip_discovery: bool,
+
+    #[clap(help_heading = "PARAMETER DISCOVERY")]
+    /// Skip header-based reflection checks
+    #[arg(long)]
+    pub skip_reflection_header: bool,
+
+    #[clap(help_heading = "PARAMETER DISCOVERY")]
+    /// Skip cookie-based reflection checks
+    #[arg(long)]
+    pub skip_reflection_cookie: bool,
+
+    #[clap(help_heading = "PARAMETER MINING")]
     /// Dictionary analysis with wordlist file path
     #[arg(short = 'W', long)]
     pub mining_dict_word: Option<String>,
 
-    #[clap(help_heading = "MINING")]
+    #[clap(help_heading = "PARAMETER MINING")]
     /// Skip all mining
     #[arg(long)]
     pub skip_mining: bool,
 
-    #[clap(help_heading = "MINING")]
+    #[clap(help_heading = "PARAMETER MINING")]
     /// Skip dictionary-based mining
     #[arg(long)]
     pub skip_mining_dict: bool,
 
-    #[clap(help_heading = "MINING")]
+    #[clap(help_heading = "PARAMETER MINING")]
     /// Skip DOM-based mining
     #[arg(long)]
     pub skip_mining_dom: bool,

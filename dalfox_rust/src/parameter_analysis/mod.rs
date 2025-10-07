@@ -1,8 +1,8 @@
+pub mod discovery;
 pub mod mining;
-pub mod reflection;
 
+pub use discovery::*;
 pub use mining::*;
-pub use reflection::*;
 
 use crate::cmd::scan::ScanArgs;
 use crate::target_parser::Target;
@@ -34,7 +34,7 @@ pub struct Param {
 }
 
 pub fn analyze_parameters(target: &mut Target, args: &ScanArgs) {
-    check_reflection(target);
+    check_discovery(target, args);
     mine_parameters(target, args);
 }
 
@@ -71,6 +71,9 @@ mod tests {
             skip_mining: false,
             skip_mining_dict: false,
             skip_mining_dom: false,
+            skip_discovery: false,
+            skip_reflection_header: false,
+            skip_reflection_cookie: false,
         };
 
         // Mock mining instead of real mining
@@ -96,6 +99,9 @@ mod tests {
             skip_mining: false,
             skip_mining_dict: false,
             skip_mining_dom: false,
+            skip_discovery: false,
+            skip_reflection_header: false,
+            skip_reflection_cookie: false,
         };
 
         // Mock body param reflection

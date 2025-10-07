@@ -57,6 +57,9 @@ fn main() {
             skip_mining: false,
             skip_mining_dict: false,
             skip_mining_dom: false,
+            skip_discovery: false,
+            skip_reflection_header: false,
+            skip_reflection_cookie: false,
         };
         cmd::scan::run_scan(&args);
     }

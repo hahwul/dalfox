@@ -26,6 +26,9 @@ pub fn run_file(args: FileArgs) {
         skip_mining: false,
         skip_mining_dict: false,
         skip_mining_dom: false,
+        skip_discovery: false,
+        skip_reflection_header: false,
+        skip_reflection_cookie: false,
     };
     crate::cmd::scan::run_scan(&scan_args);
 }
