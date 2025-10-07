@@ -10,6 +10,7 @@ mod target_parser;
 #[derive(Parser)]
 #[command(name = "dalfox")]
 #[command(about = "Powerful open-source XSS scanner")]
+#[command(version, short_flag = 'V')]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
