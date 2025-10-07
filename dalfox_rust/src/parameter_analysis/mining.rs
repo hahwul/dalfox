@@ -5,7 +5,7 @@ use crate::target_parser::Target;
 use reqwest::Client;
 use scraper;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{Duration, sleep};
 use url::form_urlencoded;
 
@@ -54,6 +54,7 @@ pub async fn probe_dictionary_params(
     target: &Target,
     args: &ScanArgs,
     reflection_params: Arc<Mutex<Vec<Param>>>,
+    semaphore: Arc<Semaphore>,
 ) {
     let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
     if let Some(proxy_url) = &target.proxy {
@@ -94,9 +95,11 @@ pub async fn probe_dictionary_params(
         let method = target.method.clone();
         let delay = target.delay;
         let reflection_params_clone = reflection_params.clone();
+        let semaphore_clone = semaphore.clone();
         let param = param.clone();
 
         let handle = tokio::spawn(async move {
+            let permit = semaphore_clone.acquire().await.unwrap();
             let mut request =
                 client_clone.request(method.parse().unwrap_or(reqwest::Method::GET), url);
             for (k, v) in &headers {
@@ -128,6 +131,7 @@ pub async fn probe_dictionary_params(
             if delay > 0 {
                 sleep(Duration::from_millis(delay)).await;
             }
+            drop(permit);
         });
         handles.push(handle);
     }
@@ -143,6 +147,7 @@ pub async fn probe_body_params(
     target: &Target,
     args: &ScanArgs,
     reflection_params: Arc<Mutex<Vec<Param>>>,
+    semaphore: Arc<Semaphore>,
 ) {
     let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
     if let Some(proxy_url) = &target.proxy {
@@ -190,9 +195,11 @@ pub async fn probe_body_params(
             let method = target.method.clone();
             let delay = target.delay;
             let reflection_params_clone = reflection_params.clone();
+            let semaphore_clone = semaphore.clone();
             let param_name = param_name.clone();
 
             let handle = tokio::spawn(async move {
+                let permit = semaphore_clone.acquire().await.unwrap();
                 let mut request =
                     client_clone.request(method.parse().unwrap_or(reqwest::Method::POST), url);
                 for (k, v) in &headers {
@@ -224,6 +231,7 @@ pub async fn probe_body_params(
                 if delay > 0 {
                     sleep(Duration::from_millis(delay)).await;
                 }
+                drop(permit);
             });
             handles.push(handle);
         }
@@ -236,7 +244,11 @@ pub async fn probe_body_params(
     println!("Body parameter mining completed for target: {}", target.url);
 }
 
-pub async fn probe_response_id_params(target: &Target, reflection_params: Arc<Mutex<Vec<Param>>>) {
+pub async fn probe_response_id_params(
+    target: &Target,
+    reflection_params: Arc<Mutex<Vec<Param>>>,
+    semaphore: Arc<Semaphore>,
+) {
     let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
     if let Some(proxy_url) = &target.proxy {
         if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
@@ -301,9 +313,11 @@ pub async fn probe_response_id_params(target: &Target, reflection_params: Arc<Mu
                 let method = target.method.clone();
                 let delay = target.delay;
                 let reflection_params_clone = reflection_params.clone();
+                let semaphore_clone = semaphore.clone();
                 let param = param.clone();
 
                 let handle = tokio::spawn(async move {
+                    let permit = semaphore_clone.acquire().await.unwrap();
                     let mut request =
                         client_clone.request(method.parse().unwrap_or(reqwest::Method::GET), url);
                     for (k, v) in &headers {
@@ -335,6 +349,7 @@ pub async fn probe_response_id_params(target: &Target, reflection_params: Arc<Mu
                     if delay > 0 {
                         sleep(Duration::from_millis(delay)).await;
                     }
+                    drop(permit);
                 });
                 handles.push(handle);
             }
@@ -355,14 +370,16 @@ pub async fn mine_parameters(
     target: &mut Target,
     args: &ScanArgs,
     reflection_params: Arc<Mutex<Vec<Param>>>,
+    semaphore: Arc<Semaphore>,
 ) {
     if !args.skip_mining {
         if !args.skip_mining_dict {
-            probe_dictionary_params(target, args, reflection_params.clone()).await;
-            probe_body_params(target, args, reflection_params.clone()).await;
+            probe_dictionary_params(target, args, reflection_params.clone(), semaphore.clone())
+                .await;
+            probe_body_params(target, args, reflection_params.clone(), semaphore.clone()).await;
         }
         if !args.skip_mining_dom {
-            probe_response_id_params(target, reflection_params.clone()).await;
+            probe_response_id_params(target, reflection_params.clone(), semaphore.clone()).await;
         }
     }
 }

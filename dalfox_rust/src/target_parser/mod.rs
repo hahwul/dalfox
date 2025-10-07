@@ -13,6 +13,7 @@ pub struct Target {
     pub timeout: u64,
     pub delay: u64,
     pub proxy: Option<String>,
+    pub workers: usize,
 }
 
 pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
@@ -33,6 +34,7 @@ pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
         timeout: 10,
         delay: 0,
         proxy: None,
+        workers: 10,
     })
 }
 
@@ -53,6 +55,7 @@ mod tests {
         assert_eq!(target.timeout, 10);
         assert_eq!(target.delay, 0);
         assert!(target.proxy.is_none());
+        assert_eq!(target.workers, 10);
     }
 
     #[test]

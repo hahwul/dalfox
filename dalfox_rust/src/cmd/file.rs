@@ -33,6 +33,7 @@ pub async fn run_file(args: FileArgs) {
         timeout: 10,
         delay: 0,
         proxy: None,
+        workers: 10,
     };
     crate::cmd::scan::run_scan(&scan_args).await;
 }

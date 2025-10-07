@@ -101,6 +101,11 @@ pub struct ScanArgs {
     /// Proxy URL (e.g., http://localhost:8080)
     #[arg(long)]
     pub proxy: Option<String>,
+
+    #[clap(help_heading = "ENGINE")]
+    /// Number of concurrent workers
+    #[arg(long, default_value = "10")]
+    pub workers: usize,
 }
 
 pub async fn run_scan(args: &ScanArgs) {
@@ -235,6 +240,7 @@ pub async fn run_scan(args: &ScanArgs) {
                 target.timeout = args.timeout;
                 target.delay = args.delay;
                 target.proxy = args.proxy.clone();
+                target.workers = args.workers;
                 parsed_targets.push(target);
             }
             Err(e) => {
@@ -281,7 +287,7 @@ pub async fn run_scan(args: &ScanArgs) {
     );
     for target in &parsed_targets {
         println!(
-            "Target: {} method: {}, user_agent: {:?}, data: {:?}, headers: {:?}, cookies: {:?}, reflection_params: {:?}, timeout: {}, delay: {}, proxy: {:?}",
+            "Target: {} method: {}, user_agent: {:?}, data: {:?}, headers: {:?}, cookies: {:?}, reflection_params: {:?}, timeout: {}, delay: {}, proxy: {:?}, workers: {}",
             target.url,
             target.method,
             target.user_agent,
@@ -291,7 +297,8 @@ pub async fn run_scan(args: &ScanArgs) {
             target.reflection_params,
             target.timeout,
             target.delay,
-            target.proxy
+            target.proxy,
+            target.workers
         );
         // TODO: Implement actual scanning logic for each target
     }

@@ -6,6 +6,8 @@ pub use mining::*;
 
 use crate::cmd::scan::ScanArgs;
 use crate::target_parser::Target;
+use std::sync::Arc;
+use tokio::sync::{Mutex, Semaphore};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Location {
@@ -34,9 +36,10 @@ pub struct Param {
 }
 
 pub async fn analyze_parameters(target: &mut Target, args: &ScanArgs) {
-    let reflection_params = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new()));
-    check_discovery(target, args, reflection_params.clone()).await;
-    mine_parameters(target, args, reflection_params.clone()).await;
+    let reflection_params = Arc::new(Mutex::new(Vec::new()));
+    let semaphore = Arc::new(Semaphore::new(target.workers));
+    check_discovery(target, args, reflection_params.clone(), semaphore.clone()).await;
+    mine_parameters(target, args, reflection_params.clone(), semaphore.clone()).await;
     target.reflection_params = reflection_params.lock().await.clone();
 }
 
@@ -80,6 +83,7 @@ mod tests {
             timeout: 10,
             delay: 0,
             proxy: None,
+            workers: 10,
         };
 
         // Mock mining instead of real mining
@@ -112,6 +116,7 @@ mod tests {
             timeout: 10,
             delay: 0,
             proxy: None,
+            workers: 10,
         };
 
         // Mock body param reflection
@@ -187,6 +192,7 @@ mod tests {
             timeout: 10,
             delay: 0,
             proxy: None,
+            workers: 10,
         };
 
         // Simulate cookie loading

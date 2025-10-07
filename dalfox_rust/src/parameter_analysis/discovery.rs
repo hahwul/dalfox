@@ -3,32 +3,36 @@ use crate::parameter_analysis::Param;
 use crate::target_parser::Target;
 use reqwest::Client;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{Duration, sleep};
 
 pub async fn check_discovery(
     target: &mut Target,
     args: &ScanArgs,
     reflection_params: Arc<Mutex<Vec<Param>>>,
+    semaphore: Arc<Semaphore>,
 ) {
     if !args.skip_discovery {
-        check_query_discovery(target, reflection_params.clone()).await;
+        check_query_discovery(target, reflection_params.clone(), semaphore.clone()).await;
         if !args.skip_reflection_header {
-            check_header_discovery(target, reflection_params.clone()).await;
+            check_header_discovery(target, reflection_params.clone(), semaphore.clone()).await;
         }
         if !args.skip_reflection_cookie {
-            check_cookie_discovery(target, reflection_params.clone()).await;
+            check_cookie_discovery(target, reflection_params.clone(), semaphore.clone()).await;
         }
-        target.reflection_params = reflection_params.lock().await.clone();
     }
-
+    target.reflection_params = reflection_params.lock().await.clone();
     println!(
         "Parameter discovery check completed for target: {}",
         target.url
     );
 }
 
-pub async fn check_query_discovery(target: &Target, reflection_params: Arc<Mutex<Vec<Param>>>) {
+pub async fn check_query_discovery(
+    target: &Target,
+    reflection_params: Arc<Mutex<Vec<Param>>>,
+    semaphore: Arc<Semaphore>,
+) {
     let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
     if let Some(proxy_url) = &target.proxy {
         if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
@@ -59,10 +63,12 @@ pub async fn check_query_discovery(target: &Target, reflection_params: Arc<Mutex
         let method = target.method.clone();
         let delay = target.delay;
         let reflection_params_clone = reflection_params.clone();
+        let semaphore_clone = semaphore.clone();
         let name = name.to_string();
         let value = value.to_string();
 
         let handle = tokio::spawn(async move {
+            let permit = semaphore_clone.acquire().await.unwrap();
             let mut request =
                 client_clone.request(method.parse().unwrap_or(reqwest::Method::GET), url);
             for (k, v) in &headers {
@@ -95,6 +101,7 @@ pub async fn check_query_discovery(target: &Target, reflection_params: Arc<Mutex
             if delay > 0 {
                 sleep(Duration::from_millis(delay)).await;
             }
+            drop(permit);
         });
         handles.push(handle);
     }
@@ -104,7 +111,11 @@ pub async fn check_query_discovery(target: &Target, reflection_params: Arc<Mutex
     }
 }
 
-pub async fn check_header_discovery(target: &Target, reflection_params: Arc<Mutex<Vec<Param>>>) {
+pub async fn check_header_discovery(
+    target: &Target,
+    reflection_params: Arc<Mutex<Vec<Param>>>,
+    semaphore: Arc<Semaphore>,
+) {
     let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
     if let Some(proxy_url) = &target.proxy {
         if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
@@ -126,10 +137,12 @@ pub async fn check_header_discovery(target: &Target, reflection_params: Arc<Mute
         let method = target.method.clone();
         let delay = target.delay;
         let reflection_params_clone = reflection_params.clone();
+        let semaphore_clone = semaphore.clone();
         let header_name = header_name.clone();
         let header_value = header_value.clone();
 
         let handle = tokio::spawn(async move {
+            let permit = semaphore_clone.acquire().await.unwrap();
             let mut request =
                 client_clone.request(method.parse().unwrap_or(reqwest::Method::GET), url);
             for (k, v) in &headers {
@@ -166,6 +179,7 @@ pub async fn check_header_discovery(target: &Target, reflection_params: Arc<Mute
             if delay > 0 {
                 sleep(Duration::from_millis(delay)).await;
             }
+            drop(permit);
         });
         handles.push(handle);
     }
@@ -175,7 +189,11 @@ pub async fn check_header_discovery(target: &Target, reflection_params: Arc<Mute
     }
 }
 
-pub async fn check_cookie_discovery(target: &Target, reflection_params: Arc<Mutex<Vec<Param>>>) {
+pub async fn check_cookie_discovery(
+    target: &Target,
+    reflection_params: Arc<Mutex<Vec<Param>>>,
+    semaphore: Arc<Semaphore>,
+) {
     let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
     if let Some(proxy_url) = &target.proxy {
         if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
@@ -197,10 +215,12 @@ pub async fn check_cookie_discovery(target: &Target, reflection_params: Arc<Mute
         let method = target.method.clone();
         let delay = target.delay;
         let reflection_params_clone = reflection_params.clone();
+        let semaphore_clone = semaphore.clone();
         let cookie_name = cookie_name.clone();
         let cookie_value = cookie_value.clone();
 
         let handle = tokio::spawn(async move {
+            let permit = semaphore_clone.acquire().await.unwrap();
             let mut request =
                 client_clone.request(method.parse().unwrap_or(reqwest::Method::GET), url);
             for (k, v) in &headers {
@@ -243,6 +263,7 @@ pub async fn check_cookie_discovery(target: &Target, reflection_params: Arc<Mute
             if delay > 0 {
                 sleep(Duration::from_millis(delay)).await;
             }
+            drop(permit);
         });
         handles.push(handle);
     }

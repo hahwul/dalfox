@@ -29,6 +29,7 @@ pub async fn run_pipe(args: PipeArgs) {
         timeout: 10,
         delay: 0,
         proxy: None,
+        workers: 10,
     };
     crate::cmd::scan::run_scan(&scan_args).await;
 }

@@ -66,6 +66,7 @@ async fn main() {
             timeout: 10,
             delay: 0,
             proxy: None,
+            workers: 10,
         };
         cmd::scan::run_scan(&args).await;
     }
