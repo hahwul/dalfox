@@ -47,6 +47,11 @@ pub struct ScanArgs {
     #[arg(long)]
     pub user_agent: Option<String>,
 
+    #[clap(help_heading = "TARGETS")]
+    /// Load cookies from a raw HTTP request file. Example: --cookie-from-raw 'request.txt'
+    #[arg(long)]
+    pub cookie_from_raw: Option<String>,
+
     #[clap(help_heading = "PARAMETER DISCOVERY")]
     /// Skip all discovery checks
     #[arg(long)]
@@ -224,6 +229,27 @@ pub fn run_scan(args: &ScanArgs) {
     if parsed_targets.is_empty() {
         eprintln!("Error: No targets specified");
         return;
+    }
+
+    // Load cookies from raw HTTP request file if specified
+    if let Some(path) = &args.cookie_from_raw {
+        for target in &mut parsed_targets {
+            if let Ok(content) = std::fs::read_to_string(path) {
+                for line in content.lines() {
+                    if let Some(cookie_line) = line.strip_prefix("Cookie: ") {
+                        for cookie in cookie_line.split("; ") {
+                            if let Some((name, value)) = cookie.split_once('=') {
+                                target
+                                    .cookies
+                                    .push((name.trim().to_string(), value.trim().to_string()));
+                            }
+                        }
+                    }
+                }
+            } else {
+                eprintln!("Error reading cookie file: {}", path);
+            }
+        }
     }
 
     // Analyze parameters for each target

@@ -1,0 +1,4 @@
+GET / HTTP/1.1
+Host: example.com
+Cookie: session=abc; user=123
+User-Agent: Mozilla/5.0

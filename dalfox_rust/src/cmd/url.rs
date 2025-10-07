@@ -22,6 +22,7 @@ pub fn run_url(args: UrlArgs) {
         cookies: vec![],
         method: "GET".to_string(),
         user_agent: None,
+        cookie_from_raw: None,
         mining_dict_word: None,
         skip_mining: false,
         skip_mining_dict: false,
