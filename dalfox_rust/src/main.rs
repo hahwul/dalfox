@@ -4,6 +4,7 @@ use tokio;
 mod cmd;
 mod parameter_analysis;
 mod payload;
+mod scanning;
 mod target_parser;
 
 #[derive(Parser)]

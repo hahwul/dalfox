@@ -1,7 +1,7 @@
 use crate::parameter_analysis::Param;
 use url::Url;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Target {
     pub url: Url,
     pub method: String,

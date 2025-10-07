@@ -279,6 +279,7 @@ pub async fn run_scan(args: &ScanArgs) {
     // Analyze parameters for each target
     for target in &mut parsed_targets {
         analyze_parameters(target, &args).await;
+        crate::scanning::run_scanning(target).await;
     }
 
     println!(
