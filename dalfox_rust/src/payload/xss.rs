@@ -8,4 +8,7 @@ pub const XSS_PAYLOADS: &[&str] = &[
     "'><script>alert(1)</script>",
     "\"><script>alert(1)</script>",
     "<script>alert('dalfox')</script>",
+    "<div class=\"dalfox\">test</div>",
+    "<span class=\"dalfox\">xss</span>",
+    "<p class=\"dalfox\">payload</p>",
 ];

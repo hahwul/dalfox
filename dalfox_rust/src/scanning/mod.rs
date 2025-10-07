@@ -1,6 +1,8 @@
+pub mod check_dom_verification;
 pub mod check_reflection;
 pub mod common;
 
+use crate::scanning::check_dom_verification::check_dom_verification;
 use crate::scanning::check_reflection::check_reflection;
 use crate::scanning::common::get_xss_payloads;
 use crate::target_parser::Target;
@@ -21,7 +23,10 @@ pub async fn run_scanning(target: &Target) {
 
             let handle = tokio::spawn(async move {
                 let _permit = semaphore_clone.acquire().await.unwrap();
-                check_reflection(&target_clone, &param_clone, payload).await;
+                let reflected = check_reflection(&target_clone, &param_clone, payload).await;
+                if reflected {
+                    check_dom_verification(&target_clone, &param_clone, payload).await;
+                }
             });
             handles.push(handle);
         }
