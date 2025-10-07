@@ -38,3 +38,39 @@ pub async fn run_scanning(target: &Target) {
 
     println!("XSS scanning completed for target: {}", target.url);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parameter_analysis::{InjectionContext, Location, Param};
+    use crate::target_parser::parse_target;
+
+    #[tokio::test]
+    async fn test_run_scanning_with_reflection_params() {
+        let mut target = parse_target("https://example.com").unwrap();
+        target.reflection_params.push(Param {
+            name: "test_param".to_string(),
+            value: "test_value".to_string(),
+            location: Location::Query,
+            injection_context: Some(InjectionContext::Html),
+        });
+
+        // This will attempt real HTTP requests, but in test environment it may fail
+        // For unit testing, we can just ensure no panic occurs
+        run_scanning(&target).await;
+    }
+
+    #[tokio::test]
+    async fn test_run_scanning_empty_params() {
+        let target = parse_target("https://example.com").unwrap();
+
+        run_scanning(&target).await;
+    }
+
+    #[test]
+    fn test_get_xss_payloads() {
+        let payloads = get_xss_payloads();
+        assert!(!payloads.is_empty());
+        assert!(payloads.iter().any(|&p| p.contains("dalfox")));
+    }
+}
