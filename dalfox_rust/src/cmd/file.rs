@@ -11,7 +11,7 @@ pub struct FileArgs {
     pub format: String,
 }
 
-pub fn run_file(args: FileArgs) {
+pub async fn run_file(args: FileArgs) {
     // Redirect to scan with input-type=file
     let scan_args = crate::cmd::scan::ScanArgs {
         input_type: "file".to_string(),
@@ -34,5 +34,5 @@ pub fn run_file(args: FileArgs) {
         delay: 0,
         proxy: None,
     };
-    crate::cmd::scan::run_scan(&scan_args);
+    crate::cmd::scan::run_scan(&scan_args).await;
 }

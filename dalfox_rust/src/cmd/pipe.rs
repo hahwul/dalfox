@@ -7,7 +7,7 @@ pub struct PipeArgs {
     pub format: String,
 }
 
-pub fn run_pipe(args: PipeArgs) {
+pub async fn run_pipe(args: PipeArgs) {
     // Redirect to scan with input-type=pipe
     let scan_args = crate::cmd::scan::ScanArgs {
         input_type: "pipe".to_string(),
@@ -30,5 +30,5 @@ pub fn run_pipe(args: PipeArgs) {
         delay: 0,
         proxy: None,
     };
-    crate::cmd::scan::run_scan(&scan_args);
+    crate::cmd::scan::run_scan(&scan_args).await;
 }

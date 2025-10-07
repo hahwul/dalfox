@@ -2,9 +2,11 @@ use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::{InjectionContext, Param};
 use crate::payload::mining::GF_PATTERNS_PARAMS;
 use crate::target_parser::Target;
-use reqwest::blocking::Client;
+use reqwest::Client;
 use scraper;
-use std::time::Duration;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tokio::time::{Duration, sleep};
 use url::form_urlencoded;
 
 fn detect_injection_context(text: &str) -> InjectionContext {
@@ -48,7 +50,11 @@ fn detect_injection_context(text: &str) -> InjectionContext {
     InjectionContext::Html
 }
 
-pub fn probe_dictionary_params(target: &mut Target, args: &ScanArgs) {
+pub async fn probe_dictionary_params(
+    target: &Target,
+    args: &ScanArgs,
+    reflection_params: Arc<Mutex<Vec<Param>>>,
+) {
     let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
     if let Some(proxy_url) = &target.proxy {
         if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
@@ -74,46 +80,70 @@ pub fn probe_dictionary_params(target: &mut Target, args: &ScanArgs) {
         GF_PATTERNS_PARAMS.iter().map(|s| s.to_string()).collect()
     };
 
+    let mut handles = vec![];
+
     // Check for additional valid parameters
     for param in params {
         let mut url = target.url.clone();
         url.query_pairs_mut().append_pair(&param, "dalfox");
-        let mut request =
-            client.request(target.method.parse().unwrap_or(reqwest::Method::GET), url);
-        for (k, v) in &target.headers {
-            request = request.header(k, v);
-        }
-        if let Some(ua) = &target.user_agent {
-            request = request.header("User-Agent", ua);
-        }
-        for (k, v) in &target.cookies {
-            request = request.header("Cookie", format!("{}={}", k, v));
-        }
-        if let Some(data) = &target.data {
-            request = request.body(data.clone());
-        }
-        if let Ok(resp) = request.send() {
-            if let Ok(text) = resp.text() {
-                if text.contains("dalfox") {
-                    let context = detect_injection_context(&text);
-                    target.reflection_params.push(Param {
-                        name: param,
-                        value: "dalfox".to_string(),
-                        location: crate::parameter_analysis::Location::Query,
-                        injection_context: Some(context),
-                    });
+        let client_clone = client.clone();
+        let headers = target.headers.clone();
+        let user_agent = target.user_agent.clone();
+        let cookies = target.cookies.clone();
+        let data = target.data.clone();
+        let method = target.method.clone();
+        let delay = target.delay;
+        let reflection_params_clone = reflection_params.clone();
+        let param = param.clone();
+
+        let handle = tokio::spawn(async move {
+            let mut request =
+                client_clone.request(method.parse().unwrap_or(reqwest::Method::GET), url);
+            for (k, v) in &headers {
+                request = request.header(k, v);
+            }
+            if let Some(ua) = &user_agent {
+                request = request.header("User-Agent", ua);
+            }
+            for (k, v) in &cookies {
+                request = request.header("Cookie", format!("{}={}", k, v));
+            }
+            if let Some(data) = &data {
+                request = request.body(data.clone());
+            }
+            if let Ok(resp) = request.send().await {
+                if let Ok(text) = resp.text().await {
+                    if text.contains("dalfox") {
+                        let context = detect_injection_context(&text);
+                        let param_struct = Param {
+                            name: param,
+                            value: "dalfox".to_string(),
+                            location: crate::parameter_analysis::Location::Query,
+                            injection_context: Some(context),
+                        };
+                        reflection_params_clone.lock().await.push(param_struct);
+                    }
                 }
             }
-        }
-        if target.delay > 0 {
-            std::thread::sleep(Duration::from_millis(target.delay));
-        }
+            if delay > 0 {
+                sleep(Duration::from_millis(delay)).await;
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.await.unwrap();
     }
 
     println!("Parameter mining completed for target: {}", target.url);
 }
 
-pub fn probe_body_params(target: &mut Target, args: &ScanArgs) {
+pub async fn probe_body_params(
+    target: &Target,
+    args: &ScanArgs,
+    reflection_params: Arc<Mutex<Vec<Param>>>,
+) {
     let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
     if let Some(proxy_url) = &target.proxy {
         if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
@@ -128,12 +158,15 @@ pub fn probe_body_params(target: &mut Target, args: &ScanArgs) {
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
 
+        let mut handles = vec![];
+
         for (param_name, _) in params {
-            if target
-                .reflection_params
+            let existing = reflection_params
+                .lock()
+                .await
                 .iter()
-                .any(|p| p.name == param_name)
-            {
+                .any(|p| p.name == param_name);
+            if existing {
                 continue;
             }
             let new_data = form_urlencoded::parse(data.as_bytes())
@@ -149,45 +182,61 @@ pub fn probe_body_params(target: &mut Target, args: &ScanArgs) {
                 .extend_pairs(new_data)
                 .finish();
 
-            let mut request = client.request(
-                target.method.parse().unwrap_or(reqwest::Method::POST),
-                target.url.clone(),
-            );
-            for (k, v) in &target.headers {
-                request = request.header(k, v);
-            }
-            if let Some(ua) = &target.user_agent {
-                request = request.header("User-Agent", ua);
-            }
-            for (k, v) in &target.cookies {
-                request = request.header("Cookie", format!("{}={}", k, v));
-            }
-            request = request.header("Content-Type", "application/x-www-form-urlencoded");
-            request = request.body(body);
+            let client_clone = client.clone();
+            let url = target.url.clone();
+            let headers = target.headers.clone();
+            let user_agent = target.user_agent.clone();
+            let cookies = target.cookies.clone();
+            let method = target.method.clone();
+            let delay = target.delay;
+            let reflection_params_clone = reflection_params.clone();
+            let param_name = param_name.clone();
 
-            if let Ok(resp) = request.send() {
-                if let Ok(text) = resp.text() {
-                    if text.contains("dalfox") {
-                        let context = detect_injection_context(&text);
-                        target.reflection_params.push(Param {
-                            name: param_name,
-                            value: "dalfox".to_string(),
-                            location: crate::parameter_analysis::Location::Body,
-                            injection_context: Some(context),
-                        });
+            let handle = tokio::spawn(async move {
+                let mut request =
+                    client_clone.request(method.parse().unwrap_or(reqwest::Method::POST), url);
+                for (k, v) in &headers {
+                    request = request.header(k, v);
+                }
+                if let Some(ua) = &user_agent {
+                    request = request.header("User-Agent", ua);
+                }
+                for (k, v) in &cookies {
+                    request = request.header("Cookie", format!("{}={}", k, v));
+                }
+                request = request.header("Content-Type", "application/x-www-form-urlencoded");
+                request = request.body(body);
+
+                if let Ok(resp) = request.send().await {
+                    if let Ok(text) = resp.text().await {
+                        if text.contains("dalfox") {
+                            let context = detect_injection_context(&text);
+                            let param = Param {
+                                name: param_name,
+                                value: "dalfox".to_string(),
+                                location: crate::parameter_analysis::Location::Body,
+                                injection_context: Some(context),
+                            };
+                            reflection_params_clone.lock().await.push(param);
+                        }
                     }
                 }
-            }
-            if target.delay > 0 {
-                std::thread::sleep(Duration::from_millis(target.delay));
-            }
+                if delay > 0 {
+                    sleep(Duration::from_millis(delay)).await;
+                }
+            });
+            handles.push(handle);
+        }
+
+        for handle in handles {
+            handle.await.unwrap();
         }
     }
 
     println!("Body parameter mining completed for target: {}", target.url);
 }
 
-pub fn probe_response_id_params(target: &mut Target) {
+pub async fn probe_response_id_params(target: &Target, reflection_params: Arc<Mutex<Vec<Param>>>) {
     let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
     if let Some(proxy_url) = &target.proxy {
         if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
@@ -214,8 +263,8 @@ pub fn probe_response_id_params(target: &mut Target) {
         base_request = base_request.body(data.clone());
     }
 
-    if let Ok(resp) = base_request.send() {
-        if let Ok(text) = resp.text() {
+    if let Ok(resp) = base_request.send().await {
+        if let Ok(text) = resp.text().await {
             let document = scraper::Html::parse_document(&text);
 
             // Collect unique ids and names
@@ -230,43 +279,68 @@ pub fn probe_response_id_params(target: &mut Target) {
                 }
             }
 
+            let mut handles = vec![];
+
             // Check each param for reflection
             for param in params_to_check {
-                if target.reflection_params.iter().any(|p| p.name == param) {
+                let existing = reflection_params
+                    .lock()
+                    .await
+                    .iter()
+                    .any(|p| p.name == param);
+                if existing {
                     continue;
                 }
                 let mut url = target.url.clone();
                 url.query_pairs_mut().append_pair(&param, "dalfox");
-                let mut request =
-                    client.request(target.method.parse().unwrap_or(reqwest::Method::GET), url);
-                for (k, v) in &target.headers {
-                    request = request.header(k, v);
-                }
-                if let Some(ua) = &target.user_agent {
-                    request = request.header("User-Agent", ua);
-                }
-                for (k, v) in &target.cookies {
-                    request = request.header("Cookie", format!("{}={}", k, v));
-                }
-                if let Some(data) = &target.data {
-                    request = request.body(data.clone());
-                }
-                if let Ok(resp) = request.send() {
-                    if let Ok(text) = resp.text() {
-                        if text.contains("dalfox") {
-                            let context = detect_injection_context(&text);
-                            target.reflection_params.push(Param {
-                                name: param,
-                                value: "dalfox".to_string(),
-                                location: crate::parameter_analysis::Location::Query,
-                                injection_context: Some(context),
-                            });
+                let client_clone = client.clone();
+                let headers = target.headers.clone();
+                let user_agent = target.user_agent.clone();
+                let cookies = target.cookies.clone();
+                let data = target.data.clone();
+                let method = target.method.clone();
+                let delay = target.delay;
+                let reflection_params_clone = reflection_params.clone();
+                let param = param.clone();
+
+                let handle = tokio::spawn(async move {
+                    let mut request =
+                        client_clone.request(method.parse().unwrap_or(reqwest::Method::GET), url);
+                    for (k, v) in &headers {
+                        request = request.header(k, v);
+                    }
+                    if let Some(ua) = &user_agent {
+                        request = request.header("User-Agent", ua);
+                    }
+                    for (k, v) in &cookies {
+                        request = request.header("Cookie", format!("{}={}", k, v));
+                    }
+                    if let Some(data) = &data {
+                        request = request.body(data.clone());
+                    }
+                    if let Ok(resp) = request.send().await {
+                        if let Ok(text) = resp.text().await {
+                            if text.contains("dalfox") {
+                                let context = detect_injection_context(&text);
+                                let param_struct = Param {
+                                    name: param,
+                                    value: "dalfox".to_string(),
+                                    location: crate::parameter_analysis::Location::Query,
+                                    injection_context: Some(context),
+                                };
+                                reflection_params_clone.lock().await.push(param_struct);
+                            }
                         }
                     }
-                }
-                if target.delay > 0 {
-                    std::thread::sleep(Duration::from_millis(target.delay));
-                }
+                    if delay > 0 {
+                        sleep(Duration::from_millis(delay)).await;
+                    }
+                });
+                handles.push(handle);
+            }
+
+            for handle in handles {
+                handle.await.unwrap();
             }
         }
     }
@@ -277,14 +351,18 @@ pub fn probe_response_id_params(target: &mut Target) {
     );
 }
 
-pub fn mine_parameters(target: &mut Target, args: &ScanArgs) {
+pub async fn mine_parameters(
+    target: &mut Target,
+    args: &ScanArgs,
+    reflection_params: Arc<Mutex<Vec<Param>>>,
+) {
     if !args.skip_mining {
         if !args.skip_mining_dict {
-            probe_dictionary_params(target, args);
-            probe_body_params(target, args);
+            probe_dictionary_params(target, args, reflection_params.clone()).await;
+            probe_body_params(target, args, reflection_params.clone()).await;
         }
         if !args.skip_mining_dom {
-            probe_response_id_params(target);
+            probe_response_id_params(target, reflection_params.clone()).await;
         }
     }
 }

@@ -9,5 +9,6 @@ license = "MIT"
 [dependencies]
 clap = { version = "4.0", features = ["derive"] }
 url = "2.0"
-reqwest = { version = "0.11", features = ["blocking"] }
+reqwest = "0.11"
 scraper = "0.18"
+tokio = { version = "1", features = ["full"] }

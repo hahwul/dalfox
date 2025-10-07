@@ -103,7 +103,7 @@ pub struct ScanArgs {
     pub proxy: Option<String>,
 }
 
-pub fn run_scan(args: &ScanArgs) {
+pub async fn run_scan(args: &ScanArgs) {
     let input_type = if args.input_type == "auto" {
         if args.targets.is_empty() {
             eprintln!("Error: No targets specified");
@@ -272,7 +272,7 @@ pub fn run_scan(args: &ScanArgs) {
 
     // Analyze parameters for each target
     for target in &mut parsed_targets {
-        analyze_parameters(target, &args);
+        analyze_parameters(target, &args).await;
     }
 
     println!(

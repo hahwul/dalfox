@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+use tokio;
 
 mod cmd;
 mod parameter_analysis;
@@ -30,17 +31,18 @@ enum Commands {
     Pipe(cmd::pipe::PipeArgs),
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let cli = Cli::parse();
 
     if let Some(command) = cli.command {
         match command {
-            Commands::Scan(args) => cmd::scan::run_scan(&args),
+            Commands::Scan(args) => cmd::scan::run_scan(&args).await,
             Commands::Server(args) => cmd::server::run_server(args),
             Commands::Payload(args) => cmd::payload::run_payload(args),
-            Commands::Url(args) => cmd::url::run_url(args),
-            Commands::File(args) => cmd::file::run_file(args),
-            Commands::Pipe(args) => cmd::pipe::run_pipe(args),
+            Commands::Url(args) => cmd::url::run_url(args).await,
+            Commands::File(args) => cmd::file::run_file(args).await,
+            Commands::Pipe(args) => cmd::pipe::run_pipe(args).await,
         }
     } else {
         // Default to scan
@@ -65,6 +67,6 @@ fn main() {
             delay: 0,
             proxy: None,
         };
-        cmd::scan::run_scan(&args);
+        cmd::scan::run_scan(&args).await;
     }
 }

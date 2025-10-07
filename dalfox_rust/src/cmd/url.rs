@@ -11,7 +11,7 @@ pub struct UrlArgs {
     pub format: String,
 }
 
-pub fn run_url(args: UrlArgs) {
+pub async fn run_url(args: UrlArgs) {
     // Redirect to scan with input-type=url
     let scan_args = crate::cmd::scan::ScanArgs {
         input_type: "url".to_string(),
@@ -34,5 +34,5 @@ pub fn run_url(args: UrlArgs) {
         delay: 0,
         proxy: None,
     };
-    crate::cmd::scan::run_scan(&scan_args);
+    crate::cmd::scan::run_scan(&scan_args).await;
 }

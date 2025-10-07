@@ -33,9 +33,11 @@ pub struct Param {
     pub injection_context: Option<InjectionContext>,
 }
 
-pub fn analyze_parameters(target: &mut Target, args: &ScanArgs) {
-    check_discovery(target, args);
-    mine_parameters(target, args);
+pub async fn analyze_parameters(target: &mut Target, args: &ScanArgs) {
+    let reflection_params = std::sync::Arc::new(tokio::sync::Mutex::new(Vec::new()));
+    check_discovery(target, args, reflection_params.clone()).await;
+    mine_parameters(target, args, reflection_params.clone()).await;
+    target.reflection_params = reflection_params.lock().await.clone();
 }
 
 #[cfg(test)]
