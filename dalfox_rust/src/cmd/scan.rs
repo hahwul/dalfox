@@ -46,9 +46,29 @@ pub struct ScanArgs {
     /// Set a custom User-Agent header. Example: --user-agent 'Mozilla/5.0'
     #[arg(long)]
     pub user_agent: Option<String>,
+
+    #[clap(help_heading = "MINING")]
+    /// Dictionary analysis with wordlist file path
+    #[arg(short = 'W', long)]
+    pub mining_dict_word: Option<String>,
+
+    #[clap(help_heading = "MINING")]
+    /// Skip all mining
+    #[arg(long)]
+    pub skip_mining: bool,
+
+    #[clap(help_heading = "MINING")]
+    /// Skip dictionary-based mining
+    #[arg(long)]
+    pub skip_mining_dict: bool,
+
+    #[clap(help_heading = "MINING")]
+    /// Skip DOM-based mining
+    #[arg(long)]
+    pub skip_mining_dom: bool,
 }
 
-pub fn run_scan(args: ScanArgs) {
+pub fn run_scan(args: &ScanArgs) {
     let input_type = if args.input_type == "auto" {
         if args.targets.is_empty() {
             eprintln!("Error: No targets specified");
@@ -99,7 +119,7 @@ pub fn run_scan(args: ScanArgs) {
         }
     } else {
         target_strings = match input_type.as_str() {
-            "url" => args.targets,
+            "url" => args.targets.clone(),
             "file" => {
                 if args.targets.is_empty() {
                     eprintln!("Error: No file specified for input-type=file");
@@ -193,7 +213,7 @@ pub fn run_scan(args: ScanArgs) {
 
     // Analyze parameters for each target
     for target in &mut parsed_targets {
-        analyze_parameters(target);
+        analyze_parameters(target, &args);
     }
 
     println!(

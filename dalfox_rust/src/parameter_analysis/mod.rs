@@ -4,6 +4,7 @@ pub mod reflection;
 pub use mining::*;
 pub use reflection::*;
 
+use crate::cmd::scan::ScanArgs;
 use crate::target_parser::Target;
 
 #[derive(Debug, Clone)]
@@ -32,7 +33,7 @@ pub struct Param {
     pub injection_context: Option<InjectionContext>,
 }
 
-pub fn analyze_parameters(target: &mut Target) {
+pub fn analyze_parameters(target: &mut Target, args: &ScanArgs) {
     check_reflection(target);
-    mine_parameters(target);
+    mine_parameters(target, args);
 }

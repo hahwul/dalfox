@@ -1,3 +1,4 @@
+use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::{InjectionContext, Param};
 use crate::payload::mining::GF_PATTERNS_PARAMS;
 use crate::target_parser::Target;
@@ -45,13 +46,30 @@ fn detect_injection_context(text: &str) -> InjectionContext {
     InjectionContext::Html
 }
 
-pub fn probe_dictionary_params(target: &mut Target) {
+pub fn probe_dictionary_params(target: &mut Target, args: &ScanArgs) {
     let client = Client::new();
 
+    // Get parameters from wordlist or default
+    let params: Vec<String> = if let Some(wordlist_path) = &args.mining_dict_word {
+        match std::fs::read_to_string(wordlist_path) {
+            Ok(content) => content
+                .lines()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+            Err(e) => {
+                eprintln!("Error reading wordlist file {}: {}", wordlist_path, e);
+                return;
+            }
+        }
+    } else {
+        GF_PATTERNS_PARAMS.iter().map(|s| s.to_string()).collect()
+    };
+
     // Check for additional valid parameters
-    for &param in GF_PATTERNS_PARAMS {
+    for param in params {
         let mut url = target.url.clone();
-        url.query_pairs_mut().append_pair(param, "dalfox");
+        url.query_pairs_mut().append_pair(&param, "dalfox");
         let mut request =
             client.request(target.method.parse().unwrap_or(reqwest::Method::GET), url);
         for (k, v) in &target.headers {
@@ -71,7 +89,7 @@ pub fn probe_dictionary_params(target: &mut Target) {
                 if text.contains("dalfox") {
                     let context = detect_injection_context(&text);
                     target.reflection_params.push(Param {
-                        name: param.to_string(),
+                        name: param,
                         value: "dalfox".to_string(),
                         location: crate::parameter_analysis::Location::Query,
                         injection_context: Some(context),
@@ -165,7 +183,13 @@ pub fn probe_response_id_params(target: &mut Target) {
     );
 }
 
-pub fn mine_parameters(target: &mut Target) {
-    probe_dictionary_params(target);
-    probe_response_id_params(target);
+pub fn mine_parameters(target: &mut Target, args: &ScanArgs) {
+    if !args.skip_mining {
+        if !args.skip_mining_dict {
+            probe_dictionary_params(target, args);
+        }
+        if !args.skip_mining_dom {
+            probe_response_id_params(target);
+        }
+    }
 }

@@ -35,7 +35,7 @@ fn main() {
 
     if let Some(command) = cli.command {
         match command {
-            Commands::Scan(args) => cmd::scan::run_scan(args),
+            Commands::Scan(args) => cmd::scan::run_scan(&args),
             Commands::Server(args) => cmd::server::run_server(args),
             Commands::Payload(args) => cmd::payload::run_payload(args),
             Commands::Url(args) => cmd::url::run_url(args),
@@ -53,7 +53,11 @@ fn main() {
             cookies: vec![],
             method: "GET".to_string(),
             user_agent: None,
+            mining_dict_word: None,
+            skip_mining: false,
+            skip_mining_dict: false,
+            skip_mining_dom: false,
         };
-        cmd::scan::run_scan(args);
+        cmd::scan::run_scan(&args);
     }
 }

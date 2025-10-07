@@ -18,6 +18,10 @@ pub fn run_pipe(args: PipeArgs) {
         cookies: vec![],
         method: "GET".to_string(),
         user_agent: None,
+        mining_dict_word: None,
+        skip_mining: false,
+        skip_mining_dict: false,
+        skip_mining_dom: false,
     };
-    crate::cmd::scan::run_scan(scan_args);
+    crate::cmd::scan::run_scan(&scan_args);
 }
