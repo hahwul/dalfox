@@ -29,3 +29,32 @@ pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
         reflection_params: vec![],
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_target_with_scheme() {
+        let target = parse_target("https://example.com").unwrap();
+        assert_eq!(target.url.as_str(), "https://example.com/");
+        assert_eq!(target.method, "GET");
+        assert!(target.data.is_none());
+        assert!(target.headers.is_empty());
+        assert!(target.cookies.is_empty());
+        assert!(target.user_agent.is_none());
+        assert!(target.reflection_params.is_empty());
+    }
+
+    #[test]
+    fn test_parse_target_without_scheme() {
+        let target = parse_target("example.com").unwrap();
+        assert_eq!(target.url.as_str(), "http://example.com/");
+        assert_eq!(target.method, "GET");
+    }
+
+    #[test]
+    fn test_parse_target_invalid_url() {
+        assert!(parse_target("invalid url").is_err());
+    }
+}
