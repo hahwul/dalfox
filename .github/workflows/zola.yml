@@ -1,0 +1,20 @@
+name: Zola on GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    name: Publish site
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v5
+
+      - name: Build and deploy
+        uses: shalzz/zola-deploy-action@v0.20.0
+        env:
+          BUILD_DIR: docs
+          GITHUB_TOKEN: ${{ secrets.dalfox_PUBLISH_TOKEN }}

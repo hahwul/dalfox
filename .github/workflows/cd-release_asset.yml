@@ -1,0 +1,26 @@
+---
+name: Release Assets
+on:
+  release:
+    types: [published]
+jobs:
+  generate-sbom:
+    runs-on: ubuntu-latest
+    name: Generate and Upload SBOM
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - name: Install cargo-cyclonedx
+        run: cargo install cargo-cyclonedx
+      - name: Generate SBOM
+        run: cargo cyclonedx --format xml --override-filename dalfox.cdx
+      - name: Upload SBOM to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dalfox.cdx.xml
+        env:
+          GITHUB_TOKEN: ${{ secrets.dalfox_PUBLISH_TOKEN }}

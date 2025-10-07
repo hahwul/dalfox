@@ -1,0 +1,17 @@
+---
+name: Crates Publish
+on:
+  release:
+    types: [published]
+jobs:
+  crates-releaser:
+    runs-on: ubuntu-latest
+    name: crates-releaser
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+      - uses: katyo/publish-crates@v2
+        with:
+          registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}

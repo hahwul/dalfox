@@ -1,0 +1,104 @@
+---
+name: Release
+on:
+  release:
+    types: [published]
+env:
+  CARGO_TERM_COLOR: always
+jobs:
+  build-and-upload:
+    name: Build and upload
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write # Required to upload release assets
+    strategy:
+      matrix:
+        include:
+          # Linux targets
+          - build: linux-x86_64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            use_cross: false
+          - build: linux-aarch64
+            os: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            use_cross: false
+          # macOS targets
+          - build: macos-x86_64
+            os: macos-latest
+            target: x86_64-apple-darwin
+            use_cross: false
+          - build: macos-aarch64
+            os: macos-latest
+            target: aarch64-apple-darwin
+            use_cross: false # Apple Silicon Macs can build for both architectures natively
+          # Windows targets
+          - build: windows-x86_64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            use_cross: false
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Setup vcpkg and install OpenSSL
+        if: matrix.os == 'windows-latest'
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: "${{ runner.workspace }}/vcpkg"
+          vcpkgArguments: "install openssl:x64-windows-static"
+      - name: Get the release version from the tag
+        shell: bash
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - name: Install cross-compilation tools
+        if: matrix.use_cross == true
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cross
+      - name: Build
+        shell: bash
+        run: |
+          if [[ "${{ matrix.use_cross }}" == "true" ]]; then
+            cross build --verbose --release --target ${{ matrix.target }}
+          else
+            cargo build --verbose --release --target ${{ matrix.target }}
+          fi
+      - name: Build archive
+        shell: bash
+        run: |
+          binary_name="dalfox"
+          dirname="$binary_name-$VERSION-${{ matrix.build }}"
+          mkdir "$dirname"
+
+          # Move the appropriate binary into the archive directory
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            mv "target/${{ matrix.target }}/release/$binary_name.exe" "$dirname"
+          else
+            mv "target/${{ matrix.target }}/release/$binary_name" "$dirname"
+          fi
+
+          # Create the appropriate archive format for each OS
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z a "$dirname.zip" "$dirname"
+            echo "ASSET=$dirname.zip" >> $GITHUB_ENV
+          else
+            tar -czf "$dirname.tar.gz" "$dirname"
+            echo "ASSET=$dirname.tar.gz" >> $GITHUB_ENV
+          fi
+      - name: Generate checksums
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            certutil -hashfile "$ASSET" SHA256 > "$ASSET.sha256"
+          else
+            shasum -a 256 "$ASSET" > "$ASSET.sha256"
+          fi
+      - name: Upload release archive
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |-
+            ${{ env.ASSET }}
+            ${{ env.ASSET }}.sha256
