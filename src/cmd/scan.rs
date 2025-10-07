@@ -16,8 +16,8 @@ pub struct ScanArgs {
     pub input_type: String,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Output format: json, jsonl
-    #[arg(short, long, default_value = "json")]
+    /// Output format: json, jsonl, plain
+    #[arg(short, long, default_value = "plain")]
     pub format: String,
 
     #[clap(help_heading = "OUTPUT")]
@@ -344,6 +344,15 @@ pub async fn run_scan(args: &ScanArgs) {
         for result in &*final_results {
             output.push_str(&serde_json::to_string(&result).unwrap());
             output.push('\n');
+        }
+        output
+    } else if args.format == "plain" {
+        let mut output = String::new();
+        for result in &*final_results {
+            output.push_str(&format!(
+                "[POC][V][{}][{}] {}\n",
+                result.method, result.inject_type, result.data
+            ));
         }
         output
     } else {
