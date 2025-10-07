@@ -239,6 +239,8 @@ dependencies = [
  "clap",
  "reqwest",
  "scraper",
+ "serde",
+ "serde_json",
  "tokio",
  "url",
 ]

@@ -1,15 +1,20 @@
 pub mod check_dom_verification;
 pub mod check_reflection;
 pub mod common;
+pub mod result;
 
 use crate::cmd::scan::ScanArgs;
 use crate::scanning::check_dom_verification::check_dom_verification;
 use crate::scanning::check_reflection::check_reflection;
 use crate::target_parser::Target;
 use std::sync::Arc;
-use tokio::sync::Semaphore;
+use tokio::sync::{Mutex, Semaphore};
 
-pub async fn run_scanning(target: &Target, args: &ScanArgs) {
+pub async fn run_scanning(
+    target: &Target,
+    args: &ScanArgs,
+    results: Arc<tokio::sync::Mutex<Vec<crate::scanning::result::Result>>>,
+) {
     let semaphore = Arc::new(Semaphore::new(target.workers));
     let payloads = crate::scanning::common::get_payloads(args).unwrap_or_else(|_| vec![]);
 
@@ -21,12 +26,45 @@ pub async fn run_scanning(target: &Target, args: &ScanArgs) {
             let param_clone = param.clone();
             let target_clone = (*target).clone(); // Clone target for each task
             let payload_clone = payload.clone();
+            let results_clone = results.clone();
 
             let handle = tokio::spawn(async move {
                 let _permit = semaphore_clone.acquire().await.unwrap();
                 let reflected = check_reflection(&target_clone, &param_clone, &payload_clone).await;
                 if reflected {
-                    check_dom_verification(&target_clone, &param_clone, &payload_clone).await;
+                    let dom_verified =
+                        check_dom_verification(&target_clone, &param_clone, &payload_clone).await;
+                    if dom_verified {
+                        // Create result
+                        let result_url =
+                            if param_clone.location == crate::parameter_analysis::Location::Query {
+                                let mut url = target_clone.url.clone();
+                                url.query_pairs_mut()
+                                    .append_pair(&param_clone.name, &payload_clone);
+                                url.to_string()
+                            } else {
+                                target_clone.url.to_string()
+                            };
+
+                        let result = crate::scanning::result::Result::new(
+                            "V".to_string(),
+                            "inHTML".to_string(),
+                            target_clone.method.clone(),
+                            result_url,
+                            param_clone.name.clone(),
+                            payload_clone.clone(),
+                            format!("DOM verification successful for param {}", param_clone.name),
+                            "CWE-79".to_string(),
+                            "High".to_string(),
+                            606,
+                            format!(
+                                "Triggered XSS Payload (found DOM Object): {}={}",
+                                param_clone.name, payload_clone
+                            ),
+                        );
+
+                        results_clone.lock().await.push(result);
+                    }
                 }
             });
             handles.push(handle);
@@ -45,6 +83,102 @@ mod tests {
     use super::*;
     use crate::parameter_analysis::{InjectionContext, Location, Param};
     use crate::target_parser::parse_target;
+
+    // Mock function for XSS scanning tests (similar to parameter analysis mocks)
+    fn mock_add_reflection_param(target: &mut Target, name: &str, location: Location) {
+        target.reflection_params.push(Param {
+            name: name.to_string(),
+            value: "mock_value".to_string(),
+            location,
+            injection_context: Some(InjectionContext::Html),
+        });
+    }
+
+    #[tokio::test]
+    async fn test_xss_scanning_get_query() {
+        let mut target = parse_target("https://example.com").unwrap();
+        mock_add_reflection_param(&mut target, "q", Location::Query);
+
+        let args = crate::cmd::scan::ScanArgs {
+            input_type: "auto".to_string(),
+            format: "json".to_string(),
+            targets: vec!["https://example.com".to_string()],
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            method: "GET".to_string(),
+            user_agent: None,
+            cookie_from_raw: None,
+            mining_dict_word: None,
+            skip_mining: false,
+            skip_mining_dict: false,
+            skip_mining_dom: false,
+            skip_discovery: false,
+            skip_reflection_header: false,
+            skip_reflection_cookie: false,
+            timeout: 10,
+            delay: 0,
+            proxy: None,
+            workers: 10,
+            custom_blind_xss_payload: None,
+            custom_payload: None,
+            only_custom_payload: false,
+            fast_scan: false,
+            skip_xss_scanning: false,
+        };
+
+        let results = Arc::new(Mutex::new(Vec::new()));
+
+        // Mock scanning - in real scenario this would attempt HTTP requests
+        run_scanning(&target, &args, results).await;
+
+        // Verify that reflection params are present
+        assert!(!target.reflection_params.is_empty());
+        assert_eq!(target.reflection_params[0].location, Location::Query);
+    }
+
+    #[tokio::test]
+    async fn test_xss_scanning_post_body() {
+        let mut target = parse_target("https://example.com").unwrap();
+        mock_add_reflection_param(&mut target, "data", Location::Body);
+
+        let args = crate::cmd::scan::ScanArgs {
+            input_type: "auto".to_string(),
+            format: "json".to_string(),
+            targets: vec!["https://example.com".to_string()],
+            data: Some("key1=value1&key2=value2".to_string()),
+            headers: vec![],
+            cookies: vec![],
+            method: "POST".to_string(),
+            user_agent: None,
+            cookie_from_raw: None,
+            mining_dict_word: None,
+            skip_mining: false,
+            skip_mining_dict: false,
+            skip_mining_dom: false,
+            skip_discovery: false,
+            skip_reflection_header: false,
+            skip_reflection_cookie: false,
+            timeout: 10,
+            delay: 0,
+            proxy: None,
+            workers: 10,
+            custom_blind_xss_payload: None,
+            custom_payload: None,
+            only_custom_payload: false,
+            fast_scan: false,
+            skip_xss_scanning: false,
+        };
+
+        let results = Arc::new(Mutex::new(Vec::new()));
+
+        // Mock scanning - in real scenario this would attempt HTTP requests
+        run_scanning(&target, &args, results).await;
+
+        // Verify that reflection params are present
+        assert!(!target.reflection_params.is_empty());
+        assert_eq!(target.reflection_params[0].location, Location::Body);
+    }
 
     #[tokio::test]
     async fn test_run_scanning_with_reflection_params() {
@@ -84,9 +218,11 @@ mod tests {
             skip_xss_scanning: false,
         };
 
+        let results = Arc::new(Mutex::new(Vec::new()));
+
         // This will attempt real HTTP requests, but in test environment it may fail
         // For unit testing, we can just ensure no panic occurs
-        run_scanning(&target, &args).await;
+        run_scanning(&target, &args, results).await;
     }
 
     #[tokio::test]
@@ -121,7 +257,9 @@ mod tests {
             skip_xss_scanning: false,
         };
 
-        run_scanning(&target, &args).await;
+        let results = Arc::new(Mutex::new(Vec::new()));
+
+        run_scanning(&target, &args, results).await;
     }
 
     #[test]

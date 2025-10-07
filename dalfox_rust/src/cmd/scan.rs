@@ -1,8 +1,11 @@
 use clap::Args;
 use std::fs;
 use std::io::{self, Read};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 use crate::parameter_analysis::analyze_parameters;
+use crate::scanning::result::Result;
 use crate::target_parser::*;
 
 #[derive(Args)]
@@ -301,11 +304,23 @@ pub async fn run_scan(args: &ScanArgs) {
         }
     }
 
+    let results = Arc::new(Mutex::new(Vec::<Result>::new()));
+
     // Analyze parameters for each target
     for target in &mut parsed_targets {
         analyze_parameters(target, &args).await;
         if !args.skip_xss_scanning {
-            crate::scanning::run_scanning(target, &args).await;
+            crate::scanning::run_scanning(target, &args, results.clone()).await;
+        }
+    }
+
+    // Output results
+    let final_results = results.lock().await;
+    if args.format == "json" {
+        println!("{}", serde_json::to_string_pretty(&*final_results).unwrap());
+    } else {
+        for result in &*final_results {
+            println!("Found XSS: {} - {}", result.param, result.payload);
         }
     }
 
