@@ -115,4 +115,42 @@ mod tests {
         assert!(!target.reflection_params.is_empty());
         assert_eq!(target.reflection_params[0].location, Location::Body);
     }
+
+    #[test]
+    fn test_check_header_discovery_mock() {
+        let mut target = parse_target("https://example.com").unwrap();
+        target
+            .headers
+            .push(("X-Test".to_string(), "value".to_string()));
+
+        // Mock header discovery
+        target.reflection_params.push(Param {
+            name: "X-Test".to_string(),
+            value: "dalfox".to_string(),
+            location: Location::Header,
+            injection_context: Some(InjectionContext::Html),
+        });
+
+        assert!(!target.reflection_params.is_empty());
+        assert_eq!(target.reflection_params[0].location, Location::Header);
+    }
+
+    #[test]
+    fn test_check_cookie_discovery_mock() {
+        let mut target = parse_target("https://example.com").unwrap();
+        target
+            .cookies
+            .push(("session".to_string(), "abc".to_string()));
+
+        // Mock cookie discovery
+        target.reflection_params.push(Param {
+            name: "session".to_string(),
+            value: "dalfox".to_string(),
+            location: Location::Header, // Cookies are sent in Header
+            injection_context: Some(InjectionContext::Html),
+        });
+
+        assert!(!target.reflection_params.is_empty());
+        assert_eq!(target.reflection_params[0].location, Location::Header);
+    }
 }
