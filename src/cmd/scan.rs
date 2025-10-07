@@ -16,7 +16,7 @@ pub struct ScanArgs {
     pub input_type: String,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Output format
+    /// Output format: json, jsonl
     #[arg(short, long, default_value = "json")]
     pub format: String,
 
@@ -339,6 +339,13 @@ pub async fn run_scan(args: &ScanArgs) {
     let final_results = results.lock().await;
     let output_content = if args.format == "json" {
         serde_json::to_string_pretty(&*final_results).unwrap()
+    } else if args.format == "jsonl" {
+        let mut output = String::new();
+        for result in &*final_results {
+            output.push_str(&serde_json::to_string(&result).unwrap());
+            output.push('\n');
+        }
+        output
     } else {
         let mut output = String::new();
         for result in &*final_results {
