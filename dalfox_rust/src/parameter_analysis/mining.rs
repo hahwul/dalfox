@@ -4,6 +4,7 @@ use crate::payload::mining::GF_PATTERNS_PARAMS;
 use crate::target_parser::Target;
 use reqwest::blocking::Client;
 use scraper;
+use url::form_urlencoded;
 
 fn detect_injection_context(text: &str) -> InjectionContext {
     let dalfox_pos = match text.find("dalfox") {
@@ -102,6 +103,69 @@ pub fn probe_dictionary_params(target: &mut Target, args: &ScanArgs) {
     println!("Parameter mining completed for target: {}", target.url);
 }
 
+pub fn probe_body_params(target: &mut Target, args: &ScanArgs) {
+    if let Some(data) = &args.data {
+        // Assume form data for now (application/x-www-form-urlencoded)
+        let params: Vec<(String, String)> = form_urlencoded::parse(data.as_bytes())
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+
+        for (param_name, _) in params {
+            if target
+                .reflection_params
+                .iter()
+                .any(|p| p.name == param_name)
+            {
+                continue;
+            }
+            let new_data = form_urlencoded::parse(data.as_bytes())
+                .map(|(k, v)| {
+                    if k == param_name {
+                        (k, "dalfox".to_string())
+                    } else {
+                        (k, v.to_string())
+                    }
+                })
+                .collect::<Vec<_>>();
+            let body = form_urlencoded::Serializer::new(String::new())
+                .extend_pairs(new_data)
+                .finish();
+
+            let mut request = Client::new().request(
+                target.method.parse().unwrap_or(reqwest::Method::POST),
+                target.url.clone(),
+            );
+            for (k, v) in &target.headers {
+                request = request.header(k, v);
+            }
+            if let Some(ua) = &target.user_agent {
+                request = request.header("User-Agent", ua);
+            }
+            for (k, v) in &target.cookies {
+                request = request.header("Cookie", format!("{}={}", k, v));
+            }
+            request = request.header("Content-Type", "application/x-www-form-urlencoded");
+            request = request.body(body);
+
+            if let Ok(resp) = request.send() {
+                if let Ok(text) = resp.text() {
+                    if text.contains("dalfox") {
+                        let context = detect_injection_context(&text);
+                        target.reflection_params.push(Param {
+                            name: param_name,
+                            value: "dalfox".to_string(),
+                            location: crate::parameter_analysis::Location::Body,
+                            injection_context: Some(context),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    println!("Body parameter mining completed for target: {}", target.url);
+}
+
 pub fn probe_response_id_params(target: &mut Target) {
     let client = Client::new();
 
@@ -187,6 +251,7 @@ pub fn mine_parameters(target: &mut Target, args: &ScanArgs) {
     if !args.skip_mining {
         if !args.skip_mining_dict {
             probe_dictionary_params(target, args);
+            probe_body_params(target, args);
         }
         if !args.skip_mining_dom {
             probe_response_id_params(target);

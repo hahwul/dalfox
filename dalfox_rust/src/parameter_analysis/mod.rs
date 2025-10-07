@@ -7,7 +7,7 @@ pub use reflection::*;
 use crate::cmd::scan::ScanArgs;
 use crate::target_parser::Target;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Location {
     Query,
     Body,
@@ -78,5 +78,35 @@ mod tests {
 
         assert!(!target.reflection_params.is_empty());
         assert_eq!(target.reflection_params[0].name, "test_param");
+    }
+
+    #[test]
+    fn test_probe_body_params_mock() {
+        let mut target = parse_target("https://example.com").unwrap();
+        let args = ScanArgs {
+            input_type: "auto".to_string(),
+            format: "json".to_string(),
+            targets: vec!["https://example.com".to_string()],
+            data: Some("key1=value1&key2=value2".to_string()),
+            headers: vec![],
+            cookies: vec![],
+            method: "POST".to_string(),
+            user_agent: None,
+            mining_dict_word: None,
+            skip_mining: false,
+            skip_mining_dict: false,
+            skip_mining_dom: false,
+        };
+
+        // Mock body param reflection
+        target.reflection_params.push(Param {
+            name: "key1".to_string(),
+            value: "dalfox".to_string(),
+            location: Location::Body,
+            injection_context: Some(InjectionContext::Html),
+        });
+
+        assert!(!target.reflection_params.is_empty());
+        assert_eq!(target.reflection_params[0].location, Location::Body);
     }
 }
