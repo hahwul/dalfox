@@ -44,17 +44,11 @@ be present in the `unstable` channel.
 nix-shell -p dalfox
 ```
 
-### From Source
-
-```bash
-go install github.com/hahwul/dalfox/v2@latest
-```
-
 See [Installation guide](https://dalfox.hahwul.com/docs/installation/) for details.
 
 ## Usage
 ```bash
-dalfox [mode] [target] [flags] 
+dalfox [mode] [target] [flags]
 ```
 
 * Single URL: `dalfox url http://example.com -b https://callback`
