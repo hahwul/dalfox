@@ -106,6 +106,21 @@ pub struct ScanArgs {
     /// Number of concurrent workers
     #[arg(long, default_value = "10")]
     pub workers: usize,
+
+    #[clap(help_heading = "XSS SCANNING")]
+    /// Load custom blind XSS payloads from a file. Example: --custom-blind-xss-payload 'payloads.txt'
+    #[arg(long)]
+    pub custom_blind_xss_payload: Option<String>,
+
+    #[clap(help_heading = "XSS SCANNING")]
+    /// Load custom payloads from a file. Example: --custom-payload 'payloads.txt'
+    #[arg(long)]
+    pub custom_payload: Option<String>,
+
+    #[clap(help_heading = "XSS SCANNING")]
+    /// Only test custom payloads. Example: --only-custom-payload --custom-payload=p.txt
+    #[arg(long)]
+    pub only_custom_payload: bool,
 }
 
 pub async fn run_scan(args: &ScanArgs) {
@@ -279,7 +294,7 @@ pub async fn run_scan(args: &ScanArgs) {
     // Analyze parameters for each target
     for target in &mut parsed_targets {
         analyze_parameters(target, &args).await;
-        crate::scanning::run_scanning(target).await;
+        crate::scanning::run_scanning(target, &args).await;
     }
 
     println!(

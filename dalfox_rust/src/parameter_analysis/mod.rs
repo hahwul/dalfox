@@ -84,6 +84,9 @@ mod tests {
             delay: 0,
             proxy: None,
             workers: 10,
+            custom_blind_xss_payload: None,
+            custom_payload: None,
+            only_custom_payload: false,
         };
 
         // Mock mining instead of real mining
@@ -117,6 +120,9 @@ mod tests {
             delay: 0,
             proxy: None,
             workers: 10,
+            custom_blind_xss_payload: None,
+            custom_payload: None,
+            only_custom_payload: false,
         };
 
         // Mock body param reflection
@@ -193,6 +199,9 @@ mod tests {
             delay: 0,
             proxy: None,
             workers: 10,
+            custom_blind_xss_payload: None,
+            custom_payload: None,
+            only_custom_payload: false,
         };
 
         // Simulate cookie loading

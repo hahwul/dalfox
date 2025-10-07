@@ -34,6 +34,9 @@ pub async fn run_file(args: FileArgs) {
         delay: 0,
         proxy: None,
         workers: 10,
+        custom_blind_xss_payload: None,
+        custom_payload: None,
+        only_custom_payload: false,
     };
     crate::cmd::scan::run_scan(&scan_args).await;
 }
