@@ -14,6 +14,8 @@ pub struct Result {
     pub severity: String,
     pub message_id: u32,
     pub message_str: String,
+    pub request: Option<String>,
+    pub response: Option<String>,
 }
 
 impl Result {
@@ -42,6 +44,8 @@ impl Result {
             severity,
             message_id,
             message_str,
+            request: None,
+            response: None,
         }
     }
 }
@@ -69,6 +73,8 @@ mod tests {
         assert_eq!(result.result_type, "V");
         assert_eq!(result.param, "q");
         assert_eq!(result.severity, "High");
+        assert!(result.request.is_none());
+        assert!(result.response.is_none());
     }
 
     #[test]

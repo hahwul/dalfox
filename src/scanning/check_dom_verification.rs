@@ -4,7 +4,11 @@ use reqwest::{Client, redirect};
 use scraper;
 use tokio::time::{Duration, sleep};
 
-pub async fn check_dom_verification(target: &Target, param: &Param, payload: &str) -> bool {
+pub async fn check_dom_verification(
+    target: &Target,
+    param: &Param,
+    payload: &str,
+) -> (bool, Option<String>) {
     let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
     if let Some(proxy_url) = &target.proxy {
         if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
@@ -52,7 +56,7 @@ pub async fn check_dom_verification(target: &Target, param: &Param, payload: &st
                     "DOM verification successful for param {} with payload {}",
                     param.name, payload
                 );
-                return true;
+                return (true, Some(text));
             }
         }
     }
@@ -61,5 +65,5 @@ pub async fn check_dom_verification(target: &Target, param: &Param, payload: &st
         sleep(Duration::from_millis(target.delay)).await;
     }
 
-    false
+    (false, None)
 }

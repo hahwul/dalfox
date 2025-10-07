@@ -4,11 +4,47 @@ pub mod common;
 pub mod result;
 
 use crate::cmd::scan::ScanArgs;
+use crate::parameter_analysis::Param;
 use crate::scanning::check_dom_verification::check_dom_verification;
 use crate::scanning::check_reflection::check_reflection;
 use crate::target_parser::Target;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
+
+fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
+    let url = match param.location {
+        crate::parameter_analysis::Location::Query => {
+            let mut url = target.url.clone();
+            url.query_pairs_mut().append_pair(&param.name, payload);
+            url
+        }
+        _ => target.url.clone(),
+    };
+
+    let mut request_lines = vec![];
+    request_lines.push(format!(
+        "{} {} HTTP/1.1",
+        target.method,
+        format!(
+            "{}{}",
+            url.path(),
+            url.query().map(|q| format!("?{}", q)).unwrap_or_default()
+        )
+    ));
+    request_lines.push(format!("Host: {}", url.host_str().unwrap_or("")));
+    for (k, v) in &target.headers {
+        request_lines.push(format!("{}: {}", k, v));
+    }
+    if let Some(data) = &target.data {
+        request_lines.push(format!("Content-Length: {}", data.len()));
+        request_lines.push("".to_string());
+        request_lines.push(data.clone());
+    } else {
+        request_lines.push("".to_string());
+    }
+
+    request_lines.join("\r\n")
+}
 
 pub async fn run_scanning(
     target: &Target,
@@ -32,7 +68,7 @@ pub async fn run_scanning(
                 let _permit = semaphore_clone.acquire().await.unwrap();
                 let reflected = check_reflection(&target_clone, &param_clone, &payload_clone).await;
                 if reflected {
-                    let dom_verified =
+                    let (dom_verified, response_text) =
                         check_dom_verification(&target_clone, &param_clone, &payload_clone).await;
                     if dom_verified {
                         // Create result
@@ -46,7 +82,7 @@ pub async fn run_scanning(
                                 target_clone.url.to_string()
                             };
 
-                        let result = crate::scanning::result::Result::new(
+                        let mut result = crate::scanning::result::Result::new(
                             "V".to_string(),
                             "inHTML".to_string(),
                             target_clone.method.clone(),
@@ -62,6 +98,12 @@ pub async fn run_scanning(
                                 param_clone.name, payload_clone
                             ),
                         );
+                        result.request = Some(build_request_text(
+                            &target_clone,
+                            &param_clone,
+                            &payload_clone,
+                        ));
+                        result.response = response_text;
 
                         results_clone.lock().await.push(result);
                     }
@@ -120,6 +162,9 @@ mod tests {
             delay: 0,
             proxy: None,
             follow_redirects: false,
+            output: None,
+            include_request: false,
+            include_response: false,
             workers: 10,
             custom_blind_xss_payload: None,
             custom_payload: None,
@@ -164,6 +209,9 @@ mod tests {
             delay: 0,
             proxy: None,
             follow_redirects: false,
+            output: None,
+            include_request: false,
+            include_response: false,
             workers: 10,
             custom_blind_xss_payload: None,
             custom_payload: None,
@@ -213,6 +261,9 @@ mod tests {
             delay: 0,
             proxy: None,
             follow_redirects: false,
+            output: None,
+            include_request: false,
+            include_response: false,
             workers: 10,
             custom_blind_xss_payload: None,
             custom_payload: None,
@@ -253,6 +304,9 @@ mod tests {
             delay: 0,
             proxy: None,
             follow_redirects: false,
+            output: None,
+            include_request: false,
+            include_response: false,
             workers: 10,
             custom_blind_xss_payload: None,
             custom_payload: None,

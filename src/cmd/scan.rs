@@ -20,6 +20,21 @@ pub struct ScanArgs {
     #[arg(short, long, default_value = "json")]
     pub format: String,
 
+    #[clap(help_heading = "OUTPUT")]
+    /// Write output to a file. Example: -o 'output.txt'
+    #[arg(short = 'o', long)]
+    pub output: Option<String>,
+
+    #[clap(help_heading = "OUTPUT")]
+    /// Include HTTP request information in output
+    #[arg(long)]
+    pub include_request: bool,
+
+    #[clap(help_heading = "OUTPUT")]
+    /// Include HTTP response information in output
+    #[arg(long)]
+    pub include_response: bool,
+
     #[clap(help_heading = "TARGETS")]
     /// Targets (URLs or file paths)
     #[arg(value_name = "TARGET")]
@@ -322,11 +337,42 @@ pub async fn run_scan(args: &ScanArgs) {
 
     // Output results
     let final_results = results.lock().await;
-    if args.format == "json" {
-        println!("{}", serde_json::to_string_pretty(&*final_results).unwrap());
+    let output_content = if args.format == "json" {
+        serde_json::to_string_pretty(&*final_results).unwrap()
     } else {
+        let mut output = String::new();
         for result in &*final_results {
-            println!("Found XSS: {} - {}", result.param, result.payload);
+            output.push_str(&format!(
+                "Found XSS: {} - {}\n",
+                result.param, result.payload
+            ));
+        }
+        output
+    };
+
+    if let Some(output_path) = &args.output {
+        match std::fs::write(output_path, &output_content) {
+            Ok(_) => println!("Results written to {}", output_path),
+            Err(e) => eprintln!("Error writing to file {}: {}", output_path, e),
+        }
+    } else {
+        println!("{}", output_content);
+    }
+
+    // Include request/response if requested
+    if args.include_request || args.include_response {
+        for result in &*final_results {
+            if args.include_request {
+                if let Some(request) = &result.request {
+                    println!("Request:\n{}", request);
+                }
+            }
+            if args.include_response {
+                if let Some(response) = &result.response {
+                    println!("Response:\n{}", response);
+                }
+            }
+            println!("---");
         }
     }
 
@@ -336,7 +382,7 @@ pub async fn run_scan(args: &ScanArgs) {
     );
     for target in &parsed_targets {
         println!(
-            "Target: {} method: {}, user_agent: {:?}, data: {:?}, headers: {:?}, cookies: {:?}, reflection_params: {:?}, timeout: {}, delay: {}, proxy: {:?}, workers: {}",
+            "Target: {} method: {}, user_agent: {:?}, data: {:?}, headers: {:?}, cookies: {:?}, reflection_params: {:?}, timeout: {}, delay: {}, proxy: {:?}, follow_redirects: {}, workers: {}",
             target.url,
             target.method,
             target.user_agent,
@@ -347,6 +393,7 @@ pub async fn run_scan(args: &ScanArgs) {
             target.timeout,
             target.delay,
             target.proxy,
+            target.follow_redirects,
             target.workers
         );
         // TODO: Implement actual scanning logic for each target
