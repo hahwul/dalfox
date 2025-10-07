@@ -139,8 +139,6 @@ pub async fn probe_dictionary_params(
     for handle in handles {
         handle.await.unwrap();
     }
-
-    println!("Parameter mining completed for target: {}", target.url);
 }
 
 pub async fn probe_body_params(
@@ -240,8 +238,6 @@ pub async fn probe_body_params(
             handle.await.unwrap();
         }
     }
-
-    println!("Body parameter mining completed for target: {}", target.url);
 }
 
 pub async fn probe_response_id_params(
@@ -359,11 +355,6 @@ pub async fn probe_response_id_params(
             }
         }
     }
-
-    println!(
-        "Response-based parameter mining completed for target: {}",
-        target.url
-    );
 }
 
 pub async fn mine_parameters(

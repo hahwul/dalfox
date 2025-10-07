@@ -52,10 +52,6 @@ pub async fn check_dom_verification(
             let document = scraper::Html::parse_document(&text);
             let selector = scraper::Selector::parse(".dalfox").unwrap();
             if document.select(&selector).next().is_some() {
-                println!(
-                    "DOM verification successful for param {} with payload {}",
-                    param.name, payload
-                );
                 return (true, Some(text));
             }
         }

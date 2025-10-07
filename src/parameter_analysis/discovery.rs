@@ -22,10 +22,6 @@ pub async fn check_discovery(
         }
     }
     target.reflection_params = reflection_params.lock().await.clone();
-    println!(
-        "Parameter discovery check completed for target: {}",
-        target.url
-    );
 }
 
 pub async fn check_query_discovery(

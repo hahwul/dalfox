@@ -45,10 +45,6 @@ pub async fn check_reflection(target: &Target, param: &Param, payload: &str) -> 
     if let Ok(resp) = request.send().await {
         if let Ok(text) = resp.text().await {
             if text.contains(payload) {
-                println!(
-                    "XSS vulnerability found for param {} with payload {}",
-                    param.name, payload
-                );
                 return true;
             }
         }

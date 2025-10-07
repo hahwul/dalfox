@@ -12,6 +12,5 @@ pub struct ServerArgs {
 }
 
 pub fn run_server(args: ServerArgs) {
-    println!("Starting server on {}:{}", args.host, args.port);
     // TODO: Implement server logic
 }

@@ -8,6 +8,7 @@ use crate::parameter_analysis::Param;
 use crate::scanning::check_dom_verification::check_dom_verification;
 use crate::scanning::check_reflection::check_reflection;
 use crate::target_parser::Target;
+use indicatif::{ProgressBar, ProgressStyle};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
 
@@ -54,6 +55,19 @@ pub async fn run_scanning(
     let semaphore = Arc::new(Semaphore::new(target.workers));
     let payloads = crate::scanning::common::get_payloads(args).unwrap_or_else(|_| vec![]);
 
+    let total_tasks = target.reflection_params.len() as u64 * payloads.len() as u64;
+    let pb = ProgressBar::new(total_tasks);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template(
+                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} {msg}",
+            )
+            .unwrap()
+            .progress_chars("#>-"),
+    );
+    pb.set_message("Scanning XSS payloads");
+    let pb = Arc::new(Mutex::new(pb));
+
     let mut handles = vec![];
 
     for param in &target.reflection_params {
@@ -63,6 +77,7 @@ pub async fn run_scanning(
             let target_clone = (*target).clone(); // Clone target for each task
             let payload_clone = payload.clone();
             let results_clone = results.clone();
+            let pb_clone = pb.clone();
 
             let handle = tokio::spawn(async move {
                 let _permit = semaphore_clone.acquire().await.unwrap();
@@ -108,6 +123,7 @@ pub async fn run_scanning(
                         results_clone.lock().await.push(result);
                     }
                 }
+                pb_clone.lock().await.inc(1);
             });
             handles.push(handle);
         }
@@ -117,7 +133,9 @@ pub async fn run_scanning(
         handle.await.unwrap();
     }
 
-    println!("XSS scanning completed for target: {}", target.url);
+    pb.lock()
+        .await
+        .finish_with_message("XSS scanning completed");
 }
 
 #[cfg(test)]

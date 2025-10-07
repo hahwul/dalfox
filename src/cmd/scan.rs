@@ -382,27 +382,4 @@ pub async fn run_scan(args: &ScanArgs) {
             println!("---");
         }
     }
-
-    println!(
-        "Scanning with input-type: {}, format: {}",
-        input_type, args.format
-    );
-    for target in &parsed_targets {
-        println!(
-            "Target: {} method: {}, user_agent: {:?}, data: {:?}, headers: {:?}, cookies: {:?}, reflection_params: {:?}, timeout: {}, delay: {}, proxy: {:?}, follow_redirects: {}, workers: {}",
-            target.url,
-            target.method,
-            target.user_agent,
-            target.data,
-            target.headers,
-            target.cookies,
-            target.reflection_params,
-            target.timeout,
-            target.delay,
-            target.proxy,
-            target.follow_redirects,
-            target.workers
-        );
-        // TODO: Implement actual scanning logic for each target
-    }
 }
