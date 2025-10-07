@@ -33,6 +33,7 @@ pub async fn run_file(args: FileArgs) {
         timeout: 10,
         delay: 0,
         proxy: None,
+        follow_redirects: false,
         workers: 10,
         custom_blind_xss_payload: None,
         custom_payload: None,

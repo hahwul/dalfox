@@ -14,6 +14,7 @@ pub struct Target {
     pub delay: u64,
     pub proxy: Option<String>,
     pub workers: usize,
+    pub follow_redirects: bool,
 }
 
 pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
@@ -35,6 +36,7 @@ pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
         delay: 0,
         proxy: None,
         workers: 10,
+        follow_redirects: false,
     })
 }
 
@@ -56,6 +58,7 @@ mod tests {
         assert_eq!(target.delay, 0);
         assert!(target.proxy.is_none());
         assert_eq!(target.workers, 10);
+        assert_eq!(target.follow_redirects, false);
     }
 
     #[test]

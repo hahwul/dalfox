@@ -1,6 +1,6 @@
 use crate::parameter_analysis::Param;
 use crate::target_parser::Target;
-use reqwest::Client;
+use reqwest::{Client, redirect};
 use scraper;
 use tokio::time::{Duration, sleep};
 
@@ -11,6 +11,11 @@ pub async fn check_dom_verification(target: &Target, param: &Param, payload: &st
             client_builder = client_builder.proxy(proxy);
         }
     }
+    client_builder = client_builder.redirect(if target.follow_redirects {
+        redirect::Policy::limited(10)
+    } else {
+        redirect::Policy::none()
+    });
     let client = client_builder.build().unwrap_or_else(|_| Client::new());
 
     // Build URL or body based on param location

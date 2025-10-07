@@ -105,6 +105,11 @@ pub struct ScanArgs {
     #[arg(long)]
     pub proxy: Option<String>,
 
+    #[clap(help_heading = "NETWORK")]
+    /// Follow HTTP redirects. Example: -F
+    #[arg(short = 'F', long)]
+    pub follow_redirects: bool,
+
     #[clap(help_heading = "ENGINE")]
     /// Number of concurrent workers
     #[arg(long, default_value = "10")]
@@ -268,6 +273,7 @@ pub async fn run_scan(args: &ScanArgs) {
                 target.timeout = args.timeout;
                 target.delay = args.delay;
                 target.proxy = args.proxy.clone();
+                target.follow_redirects = args.follow_redirects;
                 target.workers = args.workers;
                 parsed_targets.push(target);
             }
