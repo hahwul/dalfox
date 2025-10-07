@@ -4,6 +4,7 @@ use crate::payload::mining::GF_PATTERNS_PARAMS;
 use crate::target_parser::Target;
 use reqwest::blocking::Client;
 use scraper;
+use std::time::Duration;
 use url::form_urlencoded;
 
 fn detect_injection_context(text: &str) -> InjectionContext {
@@ -48,7 +49,13 @@ fn detect_injection_context(text: &str) -> InjectionContext {
 }
 
 pub fn probe_dictionary_params(target: &mut Target, args: &ScanArgs) {
-    let client = Client::new();
+    let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
+    if let Some(proxy_url) = &target.proxy {
+        if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
+            client_builder = client_builder.proxy(proxy);
+        }
+    }
+    let client = client_builder.build().unwrap_or_else(|_| Client::new());
 
     // Get parameters from wordlist or default
     let params: Vec<String> = if let Some(wordlist_path) = &args.mining_dict_word {
@@ -98,12 +105,23 @@ pub fn probe_dictionary_params(target: &mut Target, args: &ScanArgs) {
                 }
             }
         }
+        if target.delay > 0 {
+            std::thread::sleep(Duration::from_millis(target.delay));
+        }
     }
 
     println!("Parameter mining completed for target: {}", target.url);
 }
 
 pub fn probe_body_params(target: &mut Target, args: &ScanArgs) {
+    let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
+    if let Some(proxy_url) = &target.proxy {
+        if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
+            client_builder = client_builder.proxy(proxy);
+        }
+    }
+    let client = client_builder.build().unwrap_or_else(|_| Client::new());
+
     if let Some(data) = &args.data {
         // Assume form data for now (application/x-www-form-urlencoded)
         let params: Vec<(String, String)> = form_urlencoded::parse(data.as_bytes())
@@ -131,7 +149,7 @@ pub fn probe_body_params(target: &mut Target, args: &ScanArgs) {
                 .extend_pairs(new_data)
                 .finish();
 
-            let mut request = Client::new().request(
+            let mut request = client.request(
                 target.method.parse().unwrap_or(reqwest::Method::POST),
                 target.url.clone(),
             );
@@ -160,6 +178,9 @@ pub fn probe_body_params(target: &mut Target, args: &ScanArgs) {
                     }
                 }
             }
+            if target.delay > 0 {
+                std::thread::sleep(Duration::from_millis(target.delay));
+            }
         }
     }
 
@@ -167,7 +188,13 @@ pub fn probe_body_params(target: &mut Target, args: &ScanArgs) {
 }
 
 pub fn probe_response_id_params(target: &mut Target) {
-    let client = Client::new();
+    let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
+    if let Some(proxy_url) = &target.proxy {
+        if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
+            client_builder = client_builder.proxy(proxy);
+        }
+    }
+    let client = client_builder.build().unwrap_or_else(|_| Client::new());
 
     // First, get the HTML to find input ids and names
     let mut base_request = client.request(
@@ -236,6 +263,9 @@ pub fn probe_response_id_params(target: &mut Target) {
                             });
                         }
                     }
+                }
+                if target.delay > 0 {
+                    std::thread::sleep(Duration::from_millis(target.delay));
                 }
             }
         }

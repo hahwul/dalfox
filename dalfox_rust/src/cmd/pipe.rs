@@ -26,6 +26,9 @@ pub fn run_pipe(args: PipeArgs) {
         skip_discovery: false,
         skip_reflection_header: false,
         skip_reflection_cookie: false,
+        timeout: 10,
+        delay: 0,
+        proxy: None,
     };
     crate::cmd::scan::run_scan(&scan_args);
 }

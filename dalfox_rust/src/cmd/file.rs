@@ -30,6 +30,9 @@ pub fn run_file(args: FileArgs) {
         skip_discovery: false,
         skip_reflection_header: false,
         skip_reflection_cookie: false,
+        timeout: 10,
+        delay: 0,
+        proxy: None,
     };
     crate::cmd::scan::run_scan(&scan_args);
 }

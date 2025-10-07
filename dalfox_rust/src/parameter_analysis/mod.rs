@@ -75,6 +75,9 @@ mod tests {
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
+            timeout: 10,
+            delay: 0,
+            proxy: None,
         };
 
         // Mock mining instead of real mining
@@ -104,6 +107,9 @@ mod tests {
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
+            timeout: 10,
+            delay: 0,
+            proxy: None,
         };
 
         // Mock body param reflection
@@ -176,6 +182,9 @@ mod tests {
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
+            timeout: 10,
+            delay: 0,
+            proxy: None,
         };
 
         // Simulate cookie loading

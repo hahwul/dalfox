@@ -10,6 +10,9 @@ pub struct Target {
     pub cookies: Vec<(String, String)>,
     pub user_agent: Option<String>,
     pub reflection_params: Vec<Param>,
+    pub timeout: u64,
+    pub delay: u64,
+    pub proxy: Option<String>,
 }
 
 pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
@@ -27,6 +30,9 @@ pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
         cookies: vec![],
         user_agent: None,
         reflection_params: vec![],
+        timeout: 10,
+        delay: 0,
+        proxy: None,
     })
 }
 
@@ -44,6 +50,9 @@ mod tests {
         assert!(target.cookies.is_empty());
         assert!(target.user_agent.is_none());
         assert!(target.reflection_params.is_empty());
+        assert_eq!(target.timeout, 10);
+        assert_eq!(target.delay, 0);
+        assert!(target.proxy.is_none());
     }
 
     #[test]

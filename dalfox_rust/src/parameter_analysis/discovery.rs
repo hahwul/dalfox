@@ -2,6 +2,7 @@ use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::Param;
 use crate::target_parser::Target;
 use reqwest::blocking::Client;
+use std::time::Duration;
 
 pub fn check_discovery(target: &mut Target, args: &ScanArgs) {
     if !args.skip_discovery {
@@ -21,7 +22,13 @@ pub fn check_discovery(target: &mut Target, args: &ScanArgs) {
 }
 
 pub fn check_query_discovery(target: &mut Target) {
-    let client = Client::new();
+    let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
+    if let Some(proxy_url) = &target.proxy {
+        if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
+            client_builder = client_builder.proxy(proxy);
+        }
+    }
+    let client = client_builder.build().unwrap_or_else(|_| Client::new());
     let test_value = "test'\"<script>";
 
     // Check existing query params for reflection
@@ -63,12 +70,21 @@ pub fn check_query_discovery(target: &mut Target) {
                 }
             }
         }
+        if target.delay > 0 {
+            std::thread::sleep(Duration::from_millis(target.delay));
+        }
         url = target.url.clone(); // Reset
     }
 }
 
 pub fn check_header_discovery(target: &mut Target) {
-    let client = Client::new();
+    let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
+    if let Some(proxy_url) = &target.proxy {
+        if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
+            client_builder = client_builder.proxy(proxy);
+        }
+    }
+    let client = client_builder.build().unwrap_or_else(|_| Client::new());
     let test_value = "dalfox";
 
     for (header_name, header_value) in &target.headers {
@@ -104,11 +120,20 @@ pub fn check_header_discovery(target: &mut Target) {
                 }
             }
         }
+        if target.delay > 0 {
+            std::thread::sleep(Duration::from_millis(target.delay));
+        }
     }
 }
 
 pub fn check_cookie_discovery(target: &mut Target) {
-    let client = Client::new();
+    let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
+    if let Some(proxy_url) = &target.proxy {
+        if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
+            client_builder = client_builder.proxy(proxy);
+        }
+    }
+    let client = client_builder.build().unwrap_or_else(|_| Client::new());
     let test_value = "dalfox";
 
     for (cookie_name, cookie_value) in &target.cookies {
@@ -149,6 +174,9 @@ pub fn check_cookie_discovery(target: &mut Target) {
                     });
                 }
             }
+        }
+        if target.delay > 0 {
+            std::thread::sleep(Duration::from_millis(target.delay));
         }
     }
 }

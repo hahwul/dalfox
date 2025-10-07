@@ -61,6 +61,9 @@ fn main() {
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
+            timeout: 10,
+            delay: 0,
+            proxy: None,
         };
         cmd::scan::run_scan(&args);
     }

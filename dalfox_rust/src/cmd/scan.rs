@@ -86,6 +86,21 @@ pub struct ScanArgs {
     /// Skip DOM-based mining
     #[arg(long)]
     pub skip_mining_dom: bool,
+
+    #[clap(help_heading = "NETWORK")]
+    /// Timeout in seconds
+    #[arg(long, default_value = "10")]
+    pub timeout: u64,
+
+    #[clap(help_heading = "NETWORK")]
+    /// Delay in milliseconds
+    #[arg(long, default_value = "0")]
+    pub delay: u64,
+
+    #[clap(help_heading = "NETWORK")]
+    /// Proxy URL (e.g., http://localhost:8080)
+    #[arg(long)]
+    pub proxy: Option<String>,
 }
 
 pub fn run_scan(args: &ScanArgs) {
@@ -217,6 +232,9 @@ pub fn run_scan(args: &ScanArgs) {
                     .filter_map(|c| c.split_once("="))
                     .map(|(k, v)| (k.to_string(), v.to_string()))
                     .collect();
+                target.timeout = args.timeout;
+                target.delay = args.delay;
+                target.proxy = args.proxy.clone();
                 parsed_targets.push(target);
             }
             Err(e) => {
@@ -263,14 +281,17 @@ pub fn run_scan(args: &ScanArgs) {
     );
     for target in &parsed_targets {
         println!(
-            "Target: {} method: {}, user_agent: {:?}, data: {:?}, headers: {:?}, cookies: {:?}, reflection_params: {:?}",
+            "Target: {} method: {}, user_agent: {:?}, data: {:?}, headers: {:?}, cookies: {:?}, reflection_params: {:?}, timeout: {}, delay: {}, proxy: {:?}",
             target.url,
             target.method,
             target.user_agent,
             target.data,
             target.headers,
             target.cookies,
-            target.reflection_params
+            target.reflection_params,
+            target.timeout,
+            target.delay,
+            target.proxy
         );
         // TODO: Implement actual scanning logic for each target
     }
