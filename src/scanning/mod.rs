@@ -9,6 +9,7 @@ use crate::scanning::check_dom_verification::check_dom_verification;
 use crate::scanning::check_reflection::check_reflection;
 use crate::target_parser::Target;
 use indicatif::{ProgressBar, ProgressStyle};
+use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
 
@@ -68,6 +69,8 @@ pub async fn run_scanning(
     pb.set_message("Scanning XSS payloads");
     let pb = Arc::new(Mutex::new(pb));
 
+    let found_params = Arc::new(Mutex::new(HashSet::new()));
+
     let mut handles = vec![];
 
     for param in &target.reflection_params {
@@ -78,6 +81,7 @@ pub async fn run_scanning(
             let payload_clone = payload.clone();
             let results_clone = results.clone();
             let pb_clone = pb.clone();
+            let found_params_clone = found_params.clone();
 
             let handle = tokio::spawn(async move {
                 let _permit = semaphore_clone.acquire().await.unwrap();
@@ -86,9 +90,16 @@ pub async fn run_scanning(
                     let (dom_verified, response_text) =
                         check_dom_verification(&target_clone, &param_clone, &payload_clone).await;
                     if dom_verified {
-                        // Create result
-                        let result_url =
-                            if param_clone.location == crate::parameter_analysis::Location::Query {
+                        // Check if this param has already been found
+                        let mut found = found_params_clone.lock().await;
+                        if !found.contains(&param_clone.name) {
+                            found.insert(param_clone.name.clone());
+                            drop(found); // Release lock
+
+                            // Create result
+                            let result_url = if param_clone.location
+                                == crate::parameter_analysis::Location::Query
+                            {
                                 let mut url = target_clone.url.clone();
                                 url.query_pairs_mut()
                                     .append_pair(&param_clone.name, &payload_clone);
@@ -97,30 +108,34 @@ pub async fn run_scanning(
                                 target_clone.url.to_string()
                             };
 
-                        let mut result = crate::scanning::result::Result::new(
-                            "V".to_string(),
-                            "inHTML".to_string(),
-                            target_clone.method.clone(),
-                            result_url,
-                            param_clone.name.clone(),
-                            payload_clone.clone(),
-                            format!("DOM verification successful for param {}", param_clone.name),
-                            "CWE-79".to_string(),
-                            "High".to_string(),
-                            606,
-                            format!(
-                                "Triggered XSS Payload (found DOM Object): {}={}",
-                                param_clone.name, payload_clone
-                            ),
-                        );
-                        result.request = Some(build_request_text(
-                            &target_clone,
-                            &param_clone,
-                            &payload_clone,
-                        ));
-                        result.response = response_text;
+                            let mut result = crate::scanning::result::Result::new(
+                                "V".to_string(),
+                                "inHTML".to_string(),
+                                target_clone.method.clone(),
+                                result_url,
+                                param_clone.name.clone(),
+                                payload_clone.clone(),
+                                format!(
+                                    "DOM verification successful for param {}",
+                                    param_clone.name
+                                ),
+                                "CWE-79".to_string(),
+                                "High".to_string(),
+                                606,
+                                format!(
+                                    "Triggered XSS Payload (found DOM Object): {}={}",
+                                    param_clone.name, payload_clone
+                                ),
+                            );
+                            result.request = Some(build_request_text(
+                                &target_clone,
+                                &param_clone,
+                                &payload_clone,
+                            ));
+                            result.response = response_text;
 
-                        results_clone.lock().await.push(result);
+                            results_clone.lock().await.push(result);
+                        }
                     }
                 }
                 pb_clone.lock().await.inc(1);
