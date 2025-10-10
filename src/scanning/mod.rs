@@ -1,6 +1,7 @@
 pub mod check_dom_verification;
 pub mod check_reflection;
 pub mod common;
+pub mod dynamic;
 pub mod result;
 
 use crate::cmd::scan::ScanArgs;
@@ -61,9 +62,18 @@ pub async fn run_scanning(
     results: Arc<tokio::sync::Mutex<Vec<crate::scanning::result::Result>>>,
 ) {
     let semaphore = Arc::new(Semaphore::new(target.workers));
-    let payloads = crate::scanning::common::get_payloads(args).unwrap_or_else(|_| vec![]);
 
-    let total_tasks = target.reflection_params.len() as u64 * payloads.len() as u64;
+    // Calculate total tasks by summing payloads for each param
+    let mut total_tasks = 0u64;
+    for param in &target.reflection_params {
+        let payloads = if let Some(context) = &param.injection_context {
+            crate::scanning::dynamic::get_dynamic_payloads(context, args).unwrap_or_else(|_| vec![])
+        } else {
+            crate::scanning::common::get_payloads(args).unwrap_or_else(|_| vec![])
+        };
+        total_tasks += payloads.len() as u64;
+    }
+
     let pb = ProgressBar::new(total_tasks);
     pb.set_style(
         ProgressStyle::default_bar()
@@ -81,7 +91,13 @@ pub async fn run_scanning(
     let mut handles = vec![];
 
     for param in &target.reflection_params {
-        for payload in &payloads {
+        let payloads = if let Some(context) = &param.injection_context {
+            crate::scanning::dynamic::get_dynamic_payloads(context, args).unwrap_or_else(|_| vec![])
+        } else {
+            crate::scanning::common::get_payloads(args).unwrap_or_else(|_| vec![])
+        };
+
+        for payload in payloads {
             let semaphore_clone = semaphore.clone();
             let param_clone = param.clone();
             let target_clone = (*target).clone(); // Clone target for each task
