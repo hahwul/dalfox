@@ -85,6 +85,14 @@ pub async fn probe_dictionary_params(
 
     // Check for additional valid parameters
     for param in params {
+        let existing = reflection_params
+            .lock()
+            .await
+            .iter()
+            .any(|p| p.name == param);
+        if existing {
+            continue;
+        }
         let mut url = target.url.clone();
         url.query_pairs_mut().append_pair(&param, "dalfox");
         let client_clone = client.clone();

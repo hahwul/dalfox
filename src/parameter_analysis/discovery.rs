@@ -36,7 +36,7 @@ pub async fn check_query_discovery(
         }
     }
     let client = client_builder.build().unwrap_or_else(|_| Client::new());
-    let test_value = "test'\"<script>";
+    let test_value = "dalfox";
 
     let mut handles = vec![];
 

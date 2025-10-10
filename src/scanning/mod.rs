@@ -17,7 +17,14 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
     let url = match param.location {
         crate::parameter_analysis::Location::Query => {
             let mut url = target.url.clone();
-            url.query_pairs_mut().append_pair(&param.name, payload);
+            url.query_pairs_mut().clear();
+            for (n, v) in target.url.query_pairs() {
+                if n == param.name {
+                    url.query_pairs_mut().append_pair(&n, payload);
+                } else {
+                    url.query_pairs_mut().append_pair(&n, &v);
+                }
+            }
             url
         }
         _ => target.url.clone(),
@@ -101,8 +108,14 @@ pub async fn run_scanning(
                                 == crate::parameter_analysis::Location::Query
                             {
                                 let mut url = target_clone.url.clone();
-                                url.query_pairs_mut()
-                                    .append_pair(&param_clone.name, &payload_clone);
+                                url.query_pairs_mut().clear();
+                                for (n, v) in target_clone.url.query_pairs() {
+                                    if n == param_clone.name {
+                                        url.query_pairs_mut().append_pair(&n, &payload_clone);
+                                    } else {
+                                        url.query_pairs_mut().append_pair(&n, &v);
+                                    }
+                                }
                                 url.to_string()
                             } else {
                                 target_clone.url.to_string()

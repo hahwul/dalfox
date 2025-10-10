@@ -26,7 +26,14 @@ pub async fn check_dom_verification(
     let url = match param.location {
         crate::parameter_analysis::Location::Query => {
             let mut url = target.url.clone();
-            url.query_pairs_mut().append_pair(&param.name, payload);
+            url.query_pairs_mut().clear();
+            for (n, v) in target.url.query_pairs() {
+                if n == param.name {
+                    url.query_pairs_mut().append_pair(&n, payload);
+                } else {
+                    url.query_pairs_mut().append_pair(&n, &v);
+                }
+            }
             url
         }
         _ => target.url.clone(), // For simplicity, assume query for now
