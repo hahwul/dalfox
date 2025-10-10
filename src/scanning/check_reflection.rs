@@ -22,12 +22,17 @@ pub async fn check_reflection(target: &Target, param: &Param, payload: &str) -> 
         crate::parameter_analysis::Location::Query => {
             let mut url = target.url.clone();
             url.query_pairs_mut().clear();
+            let mut found = false;
             for (n, v) in target.url.query_pairs() {
                 if n == param.name {
                     url.query_pairs_mut().append_pair(&n, payload);
+                    found = true;
                 } else {
                     url.query_pairs_mut().append_pair(&n, &v);
                 }
+            }
+            if !found {
+                url.query_pairs_mut().append_pair(&param.name, payload);
             }
             url
         }

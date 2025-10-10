@@ -157,12 +157,13 @@ pub async fn probe_dictionary_params(
                     if text.contains("dalfox") {
                         let context = detect_injection_context(&text);
                         let param_struct = Param {
-                            name: param,
+                            name: param.clone(),
                             value: "dalfox".to_string(),
                             location: crate::parameter_analysis::Location::Query,
                             injection_context: Some(context),
                         };
                         reflection_params_clone.lock().await.push(param_struct);
+                        eprintln!("Discovered parameter: {}", param);
                     }
                 }
             }
@@ -255,12 +256,13 @@ pub async fn probe_body_params(
                         if text.contains("dalfox") {
                             let context = detect_injection_context(&text);
                             let param = Param {
-                                name: param_name,
+                                name: param_name.clone(),
                                 value: "dalfox".to_string(),
                                 location: crate::parameter_analysis::Location::Body,
                                 injection_context: Some(context),
                             };
                             reflection_params_clone.lock().await.push(param);
+                            eprintln!("Discovered parameter: {}", param_name);
                         }
                     }
                 }
@@ -371,12 +373,13 @@ pub async fn probe_response_id_params(
                             if text.contains("dalfox") {
                                 let context = detect_injection_context(&text);
                                 let param_struct = Param {
-                                    name: param,
+                                    name: param.clone(),
                                     value: "dalfox".to_string(),
                                     location: crate::parameter_analysis::Location::Query,
                                     injection_context: Some(context),
                                 };
                                 reflection_params_clone.lock().await.push(param_struct);
+                                eprintln!("Discovered parameter: {}", param);
                             }
                         }
                     }

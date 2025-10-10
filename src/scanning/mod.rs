@@ -19,16 +19,21 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
         crate::parameter_analysis::Location::Query => {
             let mut url = target.url.clone();
             url.query_pairs_mut().clear();
+            let mut found = false;
             for (n, v) in target.url.query_pairs() {
                 if n == param.name {
                     url.query_pairs_mut().append_pair(&n, payload);
+                    found = true;
                 } else {
                     url.query_pairs_mut().append_pair(&n, &v);
                 }
             }
+            if !found {
+                url.query_pairs_mut().append_pair(&param.name, payload);
+            }
             url
         }
-        _ => target.url.clone(),
+        _ => target.url.clone(), // For simplicity, assume query for now
     };
 
     let mut request_lines = vec![];
