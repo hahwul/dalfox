@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use tokio;
 
 mod cmd;
+mod encoding;
 mod parameter_analysis;
 mod payload;
 mod scanning;
