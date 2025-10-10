@@ -9,7 +9,7 @@ use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{Duration, sleep};
 use url::form_urlencoded;
 
-fn detect_injection_context(text: &str) -> InjectionContext {
+pub fn detect_injection_context(text: &str) -> InjectionContext {
     let dalfox_pos = match text.find("dalfox") {
         Some(pos) => pos,
         None => return InjectionContext::Html,
@@ -19,7 +19,18 @@ fn detect_injection_context(text: &str) -> InjectionContext {
     if let Some(script_start) = text.find("<script") {
         if let Some(script_end) = text.find("</script>") {
             if script_start < dalfox_pos && dalfox_pos < script_end {
-                return InjectionContext::Javascript;
+                // Check for delimiter type in JavaScript
+                if text.contains("\"dalfox\"") {
+                    return InjectionContext::Javascript(Some(
+                        crate::parameter_analysis::DelimiterType::DoubleQuote,
+                    ));
+                } else if text.contains("'dalfox'") {
+                    return InjectionContext::Javascript(Some(
+                        crate::parameter_analysis::DelimiterType::SingleQuote,
+                    ));
+                } else {
+                    return InjectionContext::Javascript(None);
+                }
             }
         }
     }
@@ -28,17 +39,36 @@ fn detect_injection_context(text: &str) -> InjectionContext {
     if let Some(comment_start) = text.find("<!--") {
         if let Some(comment_end) = text.find("-->") {
             if comment_start < dalfox_pos && dalfox_pos < comment_end {
-                return InjectionContext::Comment;
+                // Check for delimiter type in comment
+                if text.contains("\"dalfox\"") {
+                    return InjectionContext::Comment(Some(
+                        crate::parameter_analysis::DelimiterType::DoubleQuote,
+                    ));
+                } else if text.contains("'dalfox'") {
+                    return InjectionContext::Comment(Some(
+                        crate::parameter_analysis::DelimiterType::SingleQuote,
+                    ));
+                } else {
+                    return InjectionContext::Comment(Some(
+                        crate::parameter_analysis::DelimiterType::Comment,
+                    ));
+                }
             }
         }
     }
 
-    // Check for attribute context (simple check)
-    if text.contains("=\"dalfox\"") || text.contains("='dalfox'") {
-        return InjectionContext::Attribute;
+    // Check for attribute context
+    if text.contains("=\"dalfox\"") {
+        return InjectionContext::Attribute(Some(
+            crate::parameter_analysis::DelimiterType::DoubleQuote,
+        ));
+    } else if text.contains("='dalfox'") {
+        return InjectionContext::Attribute(Some(
+            crate::parameter_analysis::DelimiterType::SingleQuote,
+        ));
     }
 
-    // Check for string contexts
+    // Check for string contexts (fallback)
     if text.contains("\"dalfox\"") {
         return InjectionContext::StringDouble;
     }

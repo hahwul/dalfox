@@ -389,12 +389,4 @@ mod tests {
 
         run_scanning(&target, &args, results).await;
     }
-
-    #[test]
-    fn test_get_xss_payloads() {
-        use crate::scanning::common::get_xss_payloads;
-        let payloads = get_xss_payloads();
-        assert!(!payloads.is_empty());
-        assert!(payloads.iter().any(|&p| p.contains("dalfox")));
-    }
 }

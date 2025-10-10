@@ -1,6 +1,8 @@
 pub mod discovery;
 pub mod mining;
 
+pub use mining::detect_injection_context;
+
 pub use discovery::*;
 pub use mining::*;
 
@@ -18,11 +20,18 @@ pub enum Location {
 }
 
 #[derive(Debug, Clone)]
+pub enum DelimiterType {
+    SingleQuote,
+    DoubleQuote,
+    Comment,
+}
+
+#[derive(Debug, Clone)]
 pub enum InjectionContext {
     Html,
-    Javascript,
-    Comment,
-    Attribute,
+    Javascript(Option<DelimiterType>),
+    Comment(Option<DelimiterType>),
+    Attribute(Option<DelimiterType>),
     StringSingle,
     StringDouble,
 }
