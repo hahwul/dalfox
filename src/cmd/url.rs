@@ -17,6 +17,7 @@ pub async fn run_url(args: UrlArgs) {
         input_type: "url".to_string(),
         format: args.format,
         targets: vec![args.url],
+        param: vec![],
         data: None,
         headers: vec![],
         cookies: vec![],

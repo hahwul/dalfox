@@ -52,6 +52,7 @@ async fn main() {
             input_type: "auto".to_string(),
             format: "json".to_string(),
             targets: cli.targets,
+            param: vec![],
             data: None,
             headers: vec![],
             cookies: vec![],

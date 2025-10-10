@@ -40,7 +40,55 @@ pub async fn analyze_parameters(target: &mut Target, args: &ScanArgs) {
     let semaphore = Arc::new(Semaphore::new(target.workers));
     check_discovery(target, args, reflection_params.clone(), semaphore.clone()).await;
     mine_parameters(target, args, reflection_params.clone(), semaphore.clone()).await;
-    target.reflection_params = reflection_params.lock().await.clone();
+    let mut params = reflection_params.lock().await.clone();
+    if !args.param.is_empty() {
+        params = filter_params(params, &args.param, target);
+    }
+    target.reflection_params = params;
+}
+
+fn filter_params(params: Vec<Param>, param_specs: &[String], target: &Target) -> Vec<Param> {
+    if param_specs.is_empty() {
+        return params;
+    }
+
+    params
+        .into_iter()
+        .filter(|p| {
+            for spec in param_specs {
+                if spec.contains(':') {
+                    let parts: Vec<&str> = spec.split(':').collect();
+                    if parts.len() == 2 {
+                        let name = parts[0];
+                        let type_str = parts[1];
+                        if p.name == name {
+                            let param_type = match p.location {
+                                Location::Query => "query",
+                                Location::Body => "body",
+                                Location::JsonBody => "json",
+                                Location::Header => {
+                                    if target.cookies.iter().any(|(n, _)| n == &p.name) {
+                                        "cookie"
+                                    } else {
+                                        "header"
+                                    }
+                                }
+                            };
+                            if param_type == type_str {
+                                return true;
+                            }
+                        }
+                    }
+                } else {
+                    // 이름만 지정
+                    if p.name == *spec {
+                        return true;
+                    }
+                }
+            }
+            false
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -67,6 +115,7 @@ mod tests {
             input_type: "auto".to_string(),
             format: "json".to_string(),
             targets: vec!["https://example.com".to_string()],
+            param: vec![],
             data: None,
             headers: vec![],
             cookies: vec![],
@@ -109,6 +158,7 @@ mod tests {
             input_type: "auto".to_string(),
             format: "json".to_string(),
             targets: vec!["https://example.com".to_string()],
+            param: vec![],
             data: Some("key1=value1&key2=value2".to_string()),
             headers: vec![],
             cookies: vec![],
@@ -194,6 +244,7 @@ mod tests {
             input_type: "auto".to_string(),
             format: "json".to_string(),
             targets: vec!["https://example.com".to_string()],
+            param: vec![],
             data: None,
             headers: vec![],
             cookies: vec![],
@@ -245,5 +296,61 @@ mod tests {
             target.cookies[0],
             ("session".to_string(), "abc".to_string())
         );
+    }
+
+    #[test]
+    fn test_filter_params_by_name_and_type() {
+        let mut target = parse_target("https://example.com").unwrap();
+        target
+            .cookies
+            .push(("session".to_string(), "abc".to_string()));
+
+        let params = vec![
+            Param {
+                name: "sort".to_string(),
+                value: "asc".to_string(),
+                location: Location::Query,
+                injection_context: Some(InjectionContext::Html),
+            },
+            Param {
+                name: "sort".to_string(),
+                value: "asc".to_string(),
+                location: Location::Body,
+                injection_context: Some(InjectionContext::Html),
+            },
+            Param {
+                name: "id".to_string(),
+                value: "123".to_string(),
+                location: Location::Query,
+                injection_context: Some(InjectionContext::Html),
+            },
+            Param {
+                name: "session".to_string(),
+                value: "abc".to_string(),
+                location: Location::Header,
+                injection_context: Some(InjectionContext::Html),
+            },
+        ];
+
+        // Filter by name only
+        let filtered = filter_params(params.clone(), &["sort".to_string()], &target);
+        assert_eq!(filtered.len(), 2);
+        assert!(filtered.iter().all(|p| p.name == "sort"));
+
+        // Filter by name and type
+        let filtered = filter_params(params.clone(), &["sort:query".to_string()], &target);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "sort");
+        assert_eq!(filtered[0].location, Location::Query);
+
+        // Filter by cookie type
+        let filtered = filter_params(params.clone(), &["session:cookie".to_string()], &target);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].name, "session");
+        assert_eq!(filtered[0].location, Location::Header);
+
+        // No match
+        let filtered = filter_params(params.clone(), &["nonexistent".to_string()], &target);
+        assert_eq!(filtered.len(), 0);
     }
 }

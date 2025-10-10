@@ -41,6 +41,11 @@ pub struct ScanArgs {
     pub targets: Vec<String>,
 
     #[clap(help_heading = "TARGETS")]
+    /// Specify parameter names to analyze (e.g., -p sort -p id:query). Types: query, body, json, cookie, header.
+    #[arg(short = 'p', long)]
+    pub param: Vec<String>,
+
+    #[clap(help_heading = "TARGETS")]
     /// HTTP request body data
     #[arg(short = 'd', long)]
     pub data: Option<String>,

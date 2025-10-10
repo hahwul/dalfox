@@ -13,6 +13,7 @@ pub async fn run_pipe(args: PipeArgs) {
         input_type: "pipe".to_string(),
         format: args.format,
         targets: vec![], // No targets needed for pipe
+        param: vec![],
         data: None,
         headers: vec![],
         cookies: vec![],

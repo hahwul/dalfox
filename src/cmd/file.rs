@@ -17,6 +17,7 @@ pub async fn run_file(args: FileArgs) {
         input_type: "file".to_string(),
         format: args.format,
         targets: vec![args.file],
+        param: vec![],
         data: None,
         headers: vec![],
         cookies: vec![],
