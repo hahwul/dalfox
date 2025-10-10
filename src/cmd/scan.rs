@@ -382,9 +382,10 @@ pub async fn run_scan(args: &ScanArgs) {
                 "[POC][V][{}][{}] {}\n",
                 result.method, result.inject_type, result.data
             ));
+            output.push_str(&format!("   \x1b[90mPayload: {}\x1b[0m\n", result.payload));
             if let Some(resp) = &result.response {
                 if let Some((line_num, context)) = extract_context(resp, &result.payload) {
-                    output.push_str(&format!("\x1b[90m{}: {}\x1b[0m\n", line_num, context));
+                    output.push_str(&format!("   \x1b[90mL{}: {}\x1b[0m\n", line_num, context));
                 }
             }
         }
