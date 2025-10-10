@@ -3,6 +3,7 @@ use crate::target_parser::Target;
 use reqwest::{Client, redirect};
 use scraper;
 use tokio::time::{Duration, sleep};
+use url::form_urlencoded;
 
 pub async fn check_dom_verification(
     target: &Target,
@@ -25,20 +26,27 @@ pub async fn check_dom_verification(
     // Build URL or body based on param location
     let url = match param.location {
         crate::parameter_analysis::Location::Query => {
-            let mut url = target.url.clone();
-            url.query_pairs_mut().clear();
+            let mut pairs: Vec<(String, String)> = target
+                .url
+                .query_pairs()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
             let mut found = false;
-            for (n, v) in target.url.query_pairs() {
-                if n == param.name {
-                    url.query_pairs_mut().append_pair(&n, payload);
+            for pair in &mut pairs {
+                if pair.0 == param.name {
+                    pair.1 = payload.to_string();
                     found = true;
-                } else {
-                    url.query_pairs_mut().append_pair(&n, &v);
+                    break;
                 }
             }
             if !found {
-                url.query_pairs_mut().append_pair(&param.name, payload);
+                pairs.push((param.name.clone(), payload.to_string()));
             }
+            let query = form_urlencoded::Serializer::new(String::new())
+                .extend_pairs(&pairs)
+                .finish();
+            let mut url = target.url.clone();
+            url.set_query(Some(&query));
             url
         }
         _ => target.url.clone(), // For simplicity, assume query for now

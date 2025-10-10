@@ -13,24 +13,32 @@ use indicatif::{ProgressBar, ProgressStyle};
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
+use url::form_urlencoded;
 
 fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
     let url = match param.location {
         crate::parameter_analysis::Location::Query => {
-            let mut url = target.url.clone();
-            url.query_pairs_mut().clear();
+            let mut pairs: Vec<(String, String)> = target
+                .url
+                .query_pairs()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
             let mut found = false;
-            for (n, v) in target.url.query_pairs() {
-                if n == param.name {
-                    url.query_pairs_mut().append_pair(&n, payload);
+            for pair in &mut pairs {
+                if pair.0 == param.name {
+                    pair.1 = payload.to_string();
                     found = true;
-                } else {
-                    url.query_pairs_mut().append_pair(&n, &v);
+                    break;
                 }
             }
             if !found {
-                url.query_pairs_mut().append_pair(&param.name, payload);
+                pairs.push((param.name.clone(), payload.to_string()));
             }
+            let query = form_urlencoded::Serializer::new(String::new())
+                .extend_pairs(&pairs)
+                .finish();
+            let mut url = target.url.clone();
+            url.set_query(Some(&query));
             url
         }
         _ => target.url.clone(), // For simplicity, assume query for now
@@ -128,15 +136,30 @@ pub async fn run_scanning(
                             let result_url = if param_clone.location
                                 == crate::parameter_analysis::Location::Query
                             {
-                                let mut url = target_clone.url.clone();
-                                url.query_pairs_mut().clear();
-                                for (n, v) in target_clone.url.query_pairs() {
-                                    if n == param_clone.name {
-                                        url.query_pairs_mut().append_pair(&n, &payload_clone);
-                                    } else {
-                                        url.query_pairs_mut().append_pair(&n, &v);
+                                let mut pairs: Vec<(String, String)> = target_clone
+                                    .url
+                                    .query_pairs()
+                                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                                    .collect();
+                                let mut found = false;
+                                for pair in &mut pairs {
+                                    if pair.0 == param_clone.name {
+                                        pair.1 = payload_clone.to_string();
+                                        found = true;
+                                        break;
                                     }
                                 }
+                                if !found {
+                                    pairs.push((
+                                        param_clone.name.clone(),
+                                        payload_clone.to_string(),
+                                    ));
+                                }
+                                let query = form_urlencoded::Serializer::new(String::new())
+                                    .extend_pairs(&pairs)
+                                    .finish();
+                                let mut url = target_clone.url.clone();
+                                url.set_query(Some(&query));
                                 url.to_string()
                             } else {
                                 target_clone.url.to_string()

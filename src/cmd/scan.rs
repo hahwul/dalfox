@@ -307,6 +307,8 @@ pub async fn run_scan(args: &ScanArgs) {
                 if let Some(ua) = &args.user_agent {
                     target.headers.push(("User-Agent".to_string(), ua.clone()));
                     target.user_agent = Some(ua.clone());
+                } else {
+                    target.user_agent = Some("".to_string());
                 }
                 target.cookies = args
                     .cookies
