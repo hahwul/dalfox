@@ -136,6 +136,11 @@ pub struct ScanArgs {
     pub workers: usize,
 
     #[clap(help_heading = "XSS SCANNING")]
+    /// Specify payload encoders to use (comma-separated). Options: none, url, 2url, html, base64. Default: url,html
+    #[arg(short = 'e', long, value_delimiter = ',', default_values = &["url", "html"])]
+    pub encoders: Vec<String>,
+
+    #[clap(help_heading = "XSS SCANNING")]
     /// Load custom blind XSS payloads from a file. Example: --custom-blind-xss-payload 'payloads.txt'
     #[arg(long)]
     pub custom_blind_xss_payload: Option<String>,

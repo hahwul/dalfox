@@ -1,9 +1,16 @@
+use base64::{Engine, engine::general_purpose::STANDARD};
 use urlencoding;
 
 /// URL-encodes the given payload string.
 /// Example: "<" becomes "%3C"
 pub fn url_encode(payload: &str) -> String {
     urlencoding::encode(payload).to_string()
+}
+
+/// Base64-encodes the given payload string.
+/// Example: "<" becomes "PA=="
+pub fn base64_encode(payload: &str) -> String {
+    STANDARD.encode(payload)
 }
 
 /// HTML entity-encodes the given payload string using hex entities.
@@ -94,6 +101,20 @@ mod tests {
         assert_eq!(url_encode(""), "");
         assert_eq!(html_entity_encode(""), "");
         assert_eq!(double_url_encode(""), "");
+    }
+
+    #[test]
+    fn test_base64_encode() {
+        assert_eq!(base64_encode("<"), "PA==");
+        assert_eq!(base64_encode(">"), "Pg==");
+        assert_eq!(base64_encode("&"), "Jg==");
+        assert_eq!(base64_encode("\""), "Ig==");
+        assert_eq!(base64_encode("'"), "Jw==");
+        assert_eq!(base64_encode("hello world"), "aGVsbG8gd29ybGQ=");
+        assert_eq!(
+            base64_encode("<script>alert(1)</script>"),
+            "PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg=="
+        );
     }
 
     #[test]

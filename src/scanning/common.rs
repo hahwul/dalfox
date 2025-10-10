@@ -1,5 +1,5 @@
 use crate::cmd::scan::ScanArgs;
-use crate::encoding::{double_url_encode, html_entity_encode, url_encode};
+use crate::encoding::{base64_encode, double_url_encode, html_entity_encode, url_encode};
 use crate::payload::XSS_PAYLOADS;
 
 pub fn get_xss_payloads() -> &'static [&'static str] {
@@ -29,10 +29,23 @@ pub fn get_payloads(args: &ScanArgs) -> Result<Vec<String>, Box<dyn std::error::
 
     let mut payloads = vec![];
     for payload in base_payloads {
-        payloads.push(payload.clone()); // Original
-        payloads.push(url_encode(&payload)); // URL encoded
-        payloads.push(html_entity_encode(&payload)); // HTML entity encoded
-        payloads.push(double_url_encode(&payload)); // Double URL encoded
+        if args.encoders.contains(&"none".to_string()) {
+            payloads.push(payload.clone()); // No encoding
+        } else {
+            payloads.push(payload.clone()); // Original
+            if args.encoders.contains(&"url".to_string()) {
+                payloads.push(url_encode(&payload)); // URL encoded
+            }
+            if args.encoders.contains(&"html".to_string()) {
+                payloads.push(html_entity_encode(&payload)); // HTML entity encoded
+            }
+            if args.encoders.contains(&"2url".to_string()) {
+                payloads.push(double_url_encode(&payload)); // Double URL encoded
+            }
+            if args.encoders.contains(&"base64".to_string()) {
+                payloads.push(base64_encode(&payload)); // Base64 encoded
+            }
+        }
     }
 
     Ok(payloads)

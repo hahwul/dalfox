@@ -39,6 +39,7 @@ pub async fn run_url(args: UrlArgs) {
         include_request: false,
         include_response: false,
         workers: 10,
+        encoders: vec!["url".to_string(), "html".to_string()],
         custom_blind_xss_payload: None,
         custom_payload: None,
         only_custom_payload: false,
