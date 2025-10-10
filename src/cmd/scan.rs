@@ -8,6 +8,25 @@ use crate::parameter_analysis::analyze_parameters;
 use crate::scanning::result::Result;
 use crate::target_parser::*;
 
+fn extract_context(response: &str, payload: &str) -> Option<(usize, String)> {
+    for (line_num, line) in response.lines().enumerate() {
+        if line.contains(payload) {
+            let mut context = line.to_string();
+            if context.len() > 40 {
+                if let Some(pos) = line.find(payload) {
+                    let start = pos.saturating_sub(20);
+                    let end = (pos + payload.len() + 20).min(line.len());
+                    context = line[start..end].to_string();
+                } else {
+                    context = context.chars().take(40).collect();
+                }
+            }
+            return Some((line_num + 1, context));
+        }
+    }
+    None
+}
+
 #[derive(Args)]
 pub struct ScanArgs {
     #[clap(help_heading = "INPUT")]
@@ -363,6 +382,11 @@ pub async fn run_scan(args: &ScanArgs) {
                 "[POC][V][{}][{}] {}\n",
                 result.method, result.inject_type, result.data
             ));
+            if let Some(resp) = &result.response {
+                if let Some((line_num, context)) = extract_context(resp, &result.payload) {
+                    output.push_str(&format!("\x1b[90m{}: {}\x1b[0m\n", line_num, context));
+                }
+            }
         }
         output
     } else {
