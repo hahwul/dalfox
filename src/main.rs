@@ -86,6 +86,9 @@ async fn main() {
             fast_scan: false,
             skip_xss_scanning: false,
             deep_scan: false,
+            sxss: false,
+            sxss_url: None,
+            sxss_method: "GET".to_string(),
         };
         cmd::scan::run_scan(&args).await;
     }

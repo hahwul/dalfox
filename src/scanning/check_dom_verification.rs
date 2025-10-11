@@ -9,6 +9,7 @@ pub async fn check_dom_verification(
     target: &Target,
     param: &Param,
     payload: &str,
+    args: &crate::cmd::scan::ScanArgs,
 ) -> (bool, Option<String>) {
     let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
     if let Some(proxy_url) = &target.proxy {
@@ -23,8 +24,8 @@ pub async fn check_dom_verification(
     });
     let client = client_builder.build().unwrap_or_else(|_| Client::new());
 
-    // Build URL or body based on param location
-    let url = match param.location {
+    // Build URL or body based on param location for injection
+    let inject_url = match param.location {
         crate::parameter_analysis::Location::Query => {
             let mut pairs: Vec<(String, String)> = target
                 .url
@@ -52,33 +53,74 @@ pub async fn check_dom_verification(
         _ => target.url.clone(), // For simplicity, assume query for now
     };
 
-    let mut request = client.request(target.method.parse().unwrap_or(reqwest::Method::GET), url);
+    // Send injection request
+    let mut inject_request = client.request(
+        target.method.parse().unwrap_or(reqwest::Method::GET),
+        inject_url,
+    );
 
     for (k, v) in &target.headers {
-        request = request.header(k, v);
+        inject_request = inject_request.header(k, v);
     }
     if let Some(ua) = &target.user_agent {
-        request = request.header("User-Agent", ua);
+        inject_request = inject_request.header("User-Agent", ua);
     }
     for (k, v) in &target.cookies {
-        request = request.header("Cookie", format!("{}={}", k, v));
+        inject_request = inject_request.header("Cookie", format!("{}={}", k, v));
     }
     if let Some(data) = &target.data {
-        request = request.body(data.clone());
+        inject_request = inject_request.body(data.clone());
     }
 
-    if let Ok(resp) = request.send().await {
-        if let Ok(text) = resp.text().await {
-            let document = scraper::Html::parse_document(&text);
-            let selector = scraper::Selector::parse(".dalfox").unwrap();
-            if document.select(&selector).next().is_some() {
-                return (true, Some(text));
-            }
-        }
-    }
+    // Send the injection request
+    let inject_resp = inject_request.send().await;
 
     if target.delay > 0 {
         sleep(Duration::from_millis(target.delay)).await;
+    }
+
+    if args.sxss {
+        // For Stored XSS, check DOM on sxss_url
+        if let Some(sxss_url_str) = &args.sxss_url {
+            if let Ok(sxss_url) = url::Url::parse(sxss_url_str) {
+                let mut check_request = client.request(
+                    args.sxss_method.parse().unwrap_or(reqwest::Method::GET),
+                    sxss_url,
+                );
+
+                // Use target's headers, user_agent, cookies for check request
+                for (k, v) in &target.headers {
+                    check_request = check_request.header(k, v);
+                }
+                if let Some(ua) = &target.user_agent {
+                    check_request = check_request.header("User-Agent", ua);
+                }
+                for (k, v) in &target.cookies {
+                    check_request = check_request.header("Cookie", format!("{}={}", k, v));
+                }
+
+                if let Ok(resp) = check_request.send().await {
+                    if let Ok(text) = resp.text().await {
+                        let document = scraper::Html::parse_document(&text);
+                        let selector = scraper::Selector::parse(".dalfox").unwrap();
+                        if document.select(&selector).next().is_some() {
+                            return (true, Some(text));
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // Normal DOM verification
+        if let Ok(resp) = inject_resp {
+            if let Ok(text) = resp.text().await {
+                let document = scraper::Html::parse_document(&text);
+                let selector = scraper::Selector::parse(".dalfox").unwrap();
+                if document.select(&selector).next().is_some() {
+                    return (true, Some(text));
+                }
+            }
+        }
     }
 
     (false, None)

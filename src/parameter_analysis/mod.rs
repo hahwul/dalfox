@@ -180,10 +180,15 @@ mod tests {
             max_targets_per_host: 100,
             encoders: vec!["url".to_string(), "html".to_string()],
             custom_blind_xss_payload: None,
+            blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
             fast_scan: false,
             skip_xss_scanning: false,
+            deep_scan: false,
+            sxss: false,
+            sxss_url: None,
+            sxss_method: "GET".to_string(),
         };
 
         // Mock mining instead of real mining
@@ -227,10 +232,15 @@ mod tests {
             max_targets_per_host: 100,
             encoders: vec!["url".to_string(), "html".to_string()],
             custom_blind_xss_payload: None,
+            blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
             fast_scan: false,
             skip_xss_scanning: false,
+            deep_scan: false,
+            sxss: false,
+            sxss_url: None,
+            sxss_method: "GET".to_string(),
         };
 
         // Mock body param reflection
@@ -317,10 +327,15 @@ mod tests {
             max_targets_per_host: 100,
             encoders: vec!["url".to_string(), "html".to_string()],
             custom_blind_xss_payload: None,
+            blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
             fast_scan: false,
             skip_xss_scanning: false,
+            deep_scan: false,
+            sxss: false,
+            sxss_url: None,
+            sxss_method: "GET".to_string(),
         };
 
         // Simulate cookie loading

@@ -205,6 +205,21 @@ pub struct ScanArgs {
     #[arg(long)]
     pub deep_scan: bool,
 
+    #[clap(help_heading = "XSS SCANNING")]
+    /// Enable Stored XSS mode
+    #[arg(long)]
+    pub sxss: bool,
+
+    #[clap(help_heading = "XSS SCANNING")]
+    /// URL to check for Stored XSS reflection (required if --sxss is used)
+    #[arg(long, required_if_eq("sxss", "true"))]
+    pub sxss_url: Option<String>,
+
+    #[clap(help_heading = "XSS SCANNING")]
+    /// HTTP method for checking Stored XSS (default "GET")
+    #[arg(long, default_value = "GET")]
+    pub sxss_method: String,
+
     #[clap(help_heading = "TARGETS")]
     /// Targets (URLs or file paths)
     #[arg(value_name = "TARGET")]

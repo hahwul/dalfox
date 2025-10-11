@@ -77,7 +77,7 @@ pub async fn run_scanning(
     multi_pb: Option<Arc<MultiProgress>>,
     overall_pb: Option<Arc<Mutex<indicatif::ProgressBar>>>,
 ) {
-    let semaphore = Arc::new(Semaphore::new(target.workers));
+    let semaphore = Arc::new(Semaphore::new(if args.sxss { 1 } else { target.workers }));
 
     // Calculate total tasks by summing payloads for each param
     let mut total_tasks = 0u64;
@@ -145,8 +145,13 @@ pub async fn run_scanning(
 
             let handle = tokio::spawn(async move {
                 let _permit = semaphore_clone.acquire().await.unwrap();
-                let reflected =
-                    check_reflection(&target_clone, &param_clone, &reflection_payload_clone).await;
+                let reflected = check_reflection(
+                    &target_clone,
+                    &param_clone,
+                    &reflection_payload_clone,
+                    &args_clone,
+                )
+                .await;
                 if let Some(ref pb) = pb_clone {
                     pb.inc(1);
                 }
@@ -155,8 +160,13 @@ pub async fn run_scanning(
                 }
                 if reflected {
                     for dom_payload in dom_payloads_clone {
-                        let (dom_verified, response_text) =
-                            check_dom_verification(&target_clone, &param_clone, &dom_payload).await;
+                        let (dom_verified, response_text) = check_dom_verification(
+                            &target_clone,
+                            &param_clone,
+                            &dom_payload,
+                            &args_clone,
+                        )
+                        .await;
                         if dom_verified {
                             let should_add = if args_clone.deep_scan {
                                 true
@@ -309,16 +319,21 @@ mod tests {
             max_targets_per_host: 100,
             encoders: vec!["url".to_string(), "html".to_string()],
             custom_blind_xss_payload: None,
+            blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
             fast_scan: false,
             skip_xss_scanning: false,
+            deep_scan: false,
+            sxss: false,
+            sxss_url: None,
+            sxss_method: "GET".to_string(),
         };
 
         let results = Arc::new(Mutex::new(Vec::new()));
 
         // Mock scanning - in real scenario this would attempt HTTP requests
-        run_scanning(&target, &args, results, None, None).await;
+        run_scanning(&target, Arc::new(args), results, None, None).await;
 
         // Verify that reflection params are present
         assert!(!target.reflection_params.is_empty());
@@ -361,16 +376,21 @@ mod tests {
             max_targets_per_host: 100,
             encoders: vec!["url".to_string(), "html".to_string()],
             custom_blind_xss_payload: None,
+            blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
             fast_scan: false,
             skip_xss_scanning: false,
+            deep_scan: false,
+            sxss: false,
+            sxss_url: None,
+            sxss_method: "GET".to_string(),
         };
 
         let results = Arc::new(Mutex::new(Vec::new()));
 
         // Mock scanning - in real scenario this would attempt HTTP requests
-        run_scanning(&target, &args, results, None, None).await;
+        run_scanning(&target, Arc::new(args), results, None, None).await;
 
         // Verify that reflection params are present
         assert!(!target.reflection_params.is_empty());
@@ -418,17 +438,22 @@ mod tests {
             max_targets_per_host: 100,
             encoders: vec!["url".to_string(), "html".to_string()],
             custom_blind_xss_payload: None,
+            blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
             fast_scan: false,
             skip_xss_scanning: false,
+            deep_scan: false,
+            sxss: false,
+            sxss_url: None,
+            sxss_method: "GET".to_string(),
         };
 
         let results = Arc::new(Mutex::new(Vec::new()));
 
         // This will attempt real HTTP requests, but in test environment it may fail
         // For unit testing, we can just ensure no panic occurs
-        run_scanning(&target, &args, results, None, None).await;
+        run_scanning(&target, Arc::new(args), results, None, None).await;
     }
 
     #[tokio::test]
@@ -466,14 +491,19 @@ mod tests {
             max_targets_per_host: 100,
             encoders: vec!["url".to_string(), "html".to_string()],
             custom_blind_xss_payload: None,
+            blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
             fast_scan: false,
             skip_xss_scanning: false,
+            deep_scan: false,
+            sxss: false,
+            sxss_url: None,
+            sxss_method: "GET".to_string(),
         };
 
         let results = Arc::new(Mutex::new(Vec::new()));
 
-        run_scanning(&target, &args, results, None, None).await;
+        run_scanning(&target, Arc::new(args), results, None, None).await;
     }
 }
