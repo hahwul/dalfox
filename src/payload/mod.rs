@@ -1,4 +1,10 @@
 pub mod mining;
 pub mod xss;
+pub mod xss_dom;
+pub mod xss_html;
+pub mod xss_javascript;
 pub use mining::*;
 pub use xss::*;
+pub use xss_dom::*;
+pub use xss_html::*;
+pub use xss_javascript::*;
