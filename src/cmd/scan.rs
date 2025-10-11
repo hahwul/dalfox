@@ -61,11 +61,6 @@ pub struct ScanArgs {
     pub silence: bool,
 
     #[clap(help_heading = "TARGETS")]
-    /// Targets (URLs or file paths)
-    #[arg(value_name = "TARGET")]
-    pub targets: Vec<String>,
-
-    #[clap(help_heading = "TARGETS")]
     /// Specify parameter names to analyze (e.g., -p sort -p id:query). Types: query, body, json, cookie, header.
     #[arg(short = 'p', long)]
     pub param: Vec<String>,
@@ -181,6 +176,11 @@ pub struct ScanArgs {
     pub custom_blind_xss_payload: Option<String>,
 
     #[clap(help_heading = "XSS SCANNING")]
+    /// Blind XSS callback URL. Example: -b 'https://example.com/callback'
+    #[arg(short = 'b', long = "blind")]
+    pub blind_callback_url: Option<String>,
+
+    #[clap(help_heading = "XSS SCANNING")]
     /// Load custom payloads from a file. Example: --custom-payload 'payloads.txt'
     #[arg(long)]
     pub custom_payload: Option<String>,
@@ -199,6 +199,11 @@ pub struct ScanArgs {
     /// Skip XSS scanning entirely
     #[arg(long)]
     pub skip_xss_scanning: bool,
+
+    #[clap(help_heading = "TARGETS")]
+    /// Targets (URLs or file paths)
+    #[arg(value_name = "TARGET")]
+    pub targets: Vec<String>,
 }
 
 pub async fn run_scan(args: &ScanArgs) {
@@ -406,6 +411,21 @@ pub async fn run_scan(args: &ScanArgs) {
     for target in parsed_targets {
         let host = target.url.host_str().unwrap_or("unknown").to_string();
         host_groups.entry(host).or_insert(Vec::new()).push(target);
+    }
+
+    // Perform blind XSS scanning if callback URL is provided
+    if let Some(callback_url) = &args.blind_callback_url {
+        if !args.silence {
+            println!(
+                "Performing blind XSS scanning with callback URL: {}",
+                callback_url
+            );
+        }
+        for group in host_groups.values() {
+            for target in group {
+                crate::scanning::blind_scanning(target, callback_url).await;
+            }
+        }
     }
 
     // Analyze parameters for each target sequentially to avoid Send issues

@@ -80,6 +80,7 @@ async fn main() {
             max_targets_per_host: 100,
             encoders: vec!["url".to_string(), "html".to_string()],
             custom_blind_xss_payload: None,
+            blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
             fast_scan: false,
