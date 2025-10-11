@@ -160,6 +160,16 @@ pub struct ScanArgs {
     #[arg(long, default_value = "10")]
     pub workers: usize,
 
+    #[clap(help_heading = "ENGINE")]
+    /// Maximum number of concurrent targets to scan
+    #[arg(long, default_value = "10")]
+    pub max_concurrent_targets: usize,
+
+    #[clap(help_heading = "ENGINE")]
+    /// Maximum number of targets per host
+    #[arg(long, default_value = "100")]
+    pub max_targets_per_host: usize,
+
     #[clap(help_heading = "XSS SCANNING")]
     /// Specify payload encoders to use (comma-separated). Options: none, url, 2url, html, base64. Default: url,html
     #[arg(short = 'e', long, value_delimiter = ',', default_values = &["url", "html"])]
@@ -390,70 +400,110 @@ pub async fn run_scan(args: &ScanArgs) {
         Some(Arc::new(MultiProgress::new()))
     };
 
-    // Analyze parameters for each target sequentially to avoid Send issues
-    for target in &mut parsed_targets {
-        analyze_parameters(target, &args, multi_pb.clone()).await;
+    // Group targets by host
+    let mut host_groups: std::collections::HashMap<String, Vec<Target>> =
+        std::collections::HashMap::new();
+    for target in parsed_targets {
+        let host = target.url.host_str().unwrap_or("unknown").to_string();
+        host_groups.entry(host).or_insert(Vec::new()).push(target);
     }
 
-    // Calculate total overall tasks (sum of payloads across all targets)
-    let mut total_overall_tasks = 0u64;
-    for target in &parsed_targets {
-        for param in &target.reflection_params {
-            let payloads = if let Some(context) = &param.injection_context {
-                crate::scanning::dynamic::get_dynamic_payloads(context, args)
-                    .unwrap_or_else(|_| vec![])
-            } else {
-                crate::scanning::common::get_payloads(args).unwrap_or_else(|_| vec![])
-            };
-            total_overall_tasks += payloads.len() as u64;
+    // Analyze parameters for each target sequentially to avoid Send issues
+    for group in host_groups.values_mut() {
+        // Limit targets per host
+        if group.len() > args.max_targets_per_host {
+            group.truncate(args.max_targets_per_host);
+        }
+        for target in group {
+            analyze_parameters(target, &args, multi_pb.clone()).await;
         }
     }
 
-    let overall_pb: Option<Arc<Mutex<indicatif::ProgressBar>>> = if let Some(ref mp) = multi_pb {
-        let pb = mp.add(indicatif::ProgressBar::new(total_overall_tasks));
-        pb.set_style(
-            indicatif::ProgressStyle::default_bar()
-                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} Overall scanning")
-                .unwrap()
-                .progress_chars("#>-"),
-        );
-        Some(Arc::new(Mutex::new(pb)))
-    } else {
-        None
-    };
+    // Semaphore for limiting concurrent targets across all hosts
+    let global_semaphore = Arc::new(tokio::sync::Semaphore::new(args.max_concurrent_targets));
 
-    let args_arc = Arc::new(args.clone());
-    let mut handles = vec![];
+    let mut group_handles = vec![];
 
-    for target in parsed_targets {
-        let results_clone = results.clone();
-        let args_clone = args_arc.clone();
+    for (host, group) in host_groups {
+        let global_semaphore_clone = global_semaphore.clone();
         let multi_pb_clone = multi_pb.clone();
-        let overall_pb_clone = overall_pb.clone();
+        let args_arc = Arc::new(args.clone());
+        let results_clone = results.clone();
 
-        let handle = tokio::spawn(async move {
-            if !args_clone.skip_xss_scanning {
-                crate::scanning::run_scanning(
-                    &target,
-                    &args_clone,
-                    results_clone,
-                    multi_pb_clone,
-                    overall_pb_clone,
-                )
-                .await;
+        let group_handle = tokio::spawn(async move {
+            // Calculate total overall tasks for this group
+            let mut total_overall_tasks = 0u64;
+            for target in &group {
+                for param in &target.reflection_params {
+                    let payloads = if let Some(context) = &param.injection_context {
+                        crate::scanning::dynamic::get_dynamic_payloads(context, &args_arc)
+                            .unwrap_or_else(|_| vec![])
+                    } else {
+                        crate::scanning::common::get_payloads(&args_arc).unwrap_or_else(|_| vec![])
+                    };
+                    total_overall_tasks += payloads.len() as u64;
+                }
+            }
+
+            let overall_pb: Option<Arc<Mutex<indicatif::ProgressBar>>> = if let Some(ref mp) =
+                multi_pb_clone
+            {
+                let pb = mp.add(indicatif::ProgressBar::new(total_overall_tasks));
+                pb.set_style(
+                    indicatif::ProgressStyle::default_bar()
+                        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} Overall scanning")
+                        .unwrap()
+                        .progress_chars("#>-"),
+                );
+                Some(Arc::new(Mutex::new(pb)))
+            } else {
+                None
+            };
+
+            let mut target_handles = vec![];
+
+            for target in group {
+                let permit = global_semaphore_clone
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .unwrap();
+                let args_clone = args_arc.clone();
+                let results_clone_inner = results_clone.clone();
+                let multi_pb_clone_inner = multi_pb_clone.clone();
+                let overall_pb_clone = overall_pb.clone();
+
+                let target_handle = tokio::spawn(async move {
+                    if !args_clone.skip_xss_scanning {
+                        crate::scanning::run_scanning(
+                            &target,
+                            &args_clone,
+                            results_clone_inner,
+                            multi_pb_clone_inner,
+                            overall_pb_clone,
+                        )
+                        .await;
+                    }
+                    drop(permit);
+                });
+                target_handles.push(target_handle);
+            }
+
+            for handle in target_handles {
+                handle.await.unwrap();
+            }
+
+            if let Some(pb) = overall_pb {
+                pb.lock()
+                    .await
+                    .finish_with_message(format!("All scanning completed for {}", host));
             }
         });
-        handles.push(handle);
+        group_handles.push(group_handle);
     }
 
-    for handle in handles {
+    for handle in group_handles {
         handle.await.unwrap();
-    }
-
-    if let Some(pb) = overall_pb {
-        pb.lock()
-            .await
-            .finish_with_message("All scanning completed");
     }
 
     // Output results

@@ -76,6 +76,8 @@ async fn main() {
             include_response: false,
             silence: false,
             workers: 10,
+            max_concurrent_targets: 10,
+            max_targets_per_host: 100,
             encoders: vec!["url".to_string(), "html".to_string()],
             custom_blind_xss_payload: None,
             custom_payload: None,
