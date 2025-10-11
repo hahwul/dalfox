@@ -5,7 +5,7 @@ use crate::cmd::scan::ScanArgs;
 #[derive(Args)]
 pub struct UrlArgs {
     /// Target URL to scan
-    #[arg(value_name = "URL")]
+    #[arg(short = 'u', long = "url", value_name = "URL")]
     pub url: String,
 
     #[clap(flatten)]
