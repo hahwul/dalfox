@@ -51,7 +51,7 @@ async fn main() {
         // Default to scan
         let args = cmd::scan::ScanArgs {
             input_type: "auto".to_string(),
-            format: "json".to_string(),
+            format: "plain".to_string(),
             targets: cli.targets,
             param: vec![],
             data: None,
