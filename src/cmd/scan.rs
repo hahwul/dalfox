@@ -37,7 +37,7 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "OUTPUT")]
     /// Output format: json, jsonl, plain
-    #[arg(short, long, default_value = "plain")]
+    #[arg(short, long, default_value = "json")]
     pub format: String,
 
     #[clap(help_heading = "OUTPUT")]
