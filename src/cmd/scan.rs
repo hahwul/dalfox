@@ -525,10 +525,10 @@ pub async fn run_scan(args: &ScanArgs) {
                 result.method, result.inject_type, result.data
             ));
             if !args.silence {
-                eprintln!("   \x1b[90mPayload: {}\x1b[0m\n", result.payload);
+                output.push_str(&format!("   \x1b[90mPayload: {}\x1b[0m\n", result.payload));
                 if let Some(resp) = &result.response {
                     if let Some((line_num, context)) = extract_context(resp, &result.payload) {
-                        eprintln!("   \x1b[90mL{}: {}\x1b[0m\n", line_num, context);
+                        output.push_str(&format!("   \x1b[90mL{}: {}\x1b[0m\n", line_num, context));
                     }
                 }
             }
