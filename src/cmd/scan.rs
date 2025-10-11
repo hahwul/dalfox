@@ -57,7 +57,7 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "OUTPUT")]
     /// Silence all logs except POC output to STDOUT
-    #[arg(long)]
+    #[arg(short = 'S', long)]
     pub silence: bool,
 
     #[clap(help_heading = "TARGETS")]
