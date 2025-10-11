@@ -86,6 +86,7 @@ pub async fn probe_dictionary_params(
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
 ) {
+    let silence = args.silence;
     let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
     if let Some(proxy_url) = &target.proxy {
         if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
@@ -103,7 +104,9 @@ pub async fn probe_dictionary_params(
                 .filter(|s| !s.is_empty())
                 .collect(),
             Err(e) => {
-                eprintln!("Error reading wordlist file {}: {}", wordlist_path, e);
+                if !silence {
+                    eprintln!("Error reading wordlist file {}: {}", wordlist_path, e);
+                }
                 return;
             }
         }
@@ -163,7 +166,9 @@ pub async fn probe_dictionary_params(
                             injection_context: Some(context),
                         };
                         reflection_params_clone.lock().await.push(param_struct);
-                        eprintln!("Discovered parameter: {}", param);
+                        if !silence {
+                            eprintln!("Discovered parameter: {}", param);
+                        }
                     }
                 }
             }
@@ -186,6 +191,7 @@ pub async fn probe_body_params(
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
 ) {
+    let silence = args.silence;
     let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
     if let Some(proxy_url) = &target.proxy {
         if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
@@ -262,7 +268,9 @@ pub async fn probe_body_params(
                                 injection_context: Some(context),
                             };
                             reflection_params_clone.lock().await.push(param);
-                            eprintln!("Discovered parameter: {}", param_name);
+                            if !silence {
+                                eprintln!("Discovered parameter: {}", param_name);
+                            }
                         }
                     }
                 }
@@ -282,9 +290,11 @@ pub async fn probe_body_params(
 
 pub async fn probe_response_id_params(
     target: &Target,
+    args: &ScanArgs,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
 ) {
+    let silence = args.silence;
     let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
     if let Some(proxy_url) = &target.proxy {
         if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
@@ -379,7 +389,9 @@ pub async fn probe_response_id_params(
                                     injection_context: Some(context),
                                 };
                                 reflection_params_clone.lock().await.push(param_struct);
-                                eprintln!("Discovered parameter: {}", param);
+                                if !silence {
+                                    eprintln!("Discovered parameter: {}", param);
+                                }
                             }
                         }
                     }
@@ -411,7 +423,8 @@ pub async fn mine_parameters(
             probe_body_params(target, args, reflection_params.clone(), semaphore.clone()).await;
         }
         if !args.skip_mining_dom {
-            probe_response_id_params(target, reflection_params.clone(), semaphore.clone()).await;
+            probe_response_id_params(target, args, reflection_params.clone(), semaphore.clone())
+                .await;
         }
     }
 }

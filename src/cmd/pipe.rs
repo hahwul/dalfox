@@ -34,6 +34,7 @@ pub async fn run_pipe(args: PipeArgs) {
         output: None,
         include_request: false,
         include_response: false,
+        silence: false,
         workers: 10,
         encoders: vec!["url".to_string(), "html".to_string()],
         custom_blind_xss_payload: None,

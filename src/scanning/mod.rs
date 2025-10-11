@@ -87,16 +87,21 @@ pub async fn run_scanning(
         total_tasks += payloads.len() as u64;
     }
 
-    let pb = ProgressBar::new(total_tasks);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template(
-                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} {msg}",
-            )
-            .unwrap()
-            .progress_chars("#>-"),
-    );
-    pb.set_message("Scanning XSS payloads");
+    let pb = if args.silence {
+        ProgressBar::hidden()
+    } else {
+        let pb = ProgressBar::new(total_tasks);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} {msg}",
+                )
+                .unwrap()
+                .progress_chars("#>-"),
+        );
+        pb.set_message("Scanning XSS payloads");
+        pb
+    };
     let pb = Arc::new(Mutex::new(pb));
 
     let found_params = Arc::new(Mutex::new(HashSet::new()));
@@ -205,9 +210,11 @@ pub async fn run_scanning(
         handle.await.unwrap();
     }
 
-    pb.lock()
-        .await
-        .finish_with_message("XSS scanning completed");
+    if !args.silence {
+        pb.lock()
+            .await
+            .finish_with_message("XSS scanning completed");
+    }
 }
 
 #[cfg(test)]

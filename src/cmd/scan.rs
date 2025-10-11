@@ -54,6 +54,11 @@ pub struct ScanArgs {
     #[arg(long)]
     pub include_response: bool,
 
+    #[clap(help_heading = "OUTPUT")]
+    /// Silence all logs except POC output to STDOUT
+    #[arg(long)]
+    pub silence: bool,
+
     #[clap(help_heading = "TARGETS")]
     /// Targets (URLs or file paths)
     #[arg(value_name = "TARGET")]
@@ -188,7 +193,9 @@ pub struct ScanArgs {
 pub async fn run_scan(args: &ScanArgs) {
     let input_type = if args.input_type == "auto" {
         if args.targets.is_empty() {
-            eprintln!("Error: No targets specified");
+            if !args.silence {
+                eprintln!("Error: No targets specified");
+            }
             return;
         }
         // Check if all targets look like raw HTTP requests
@@ -239,14 +246,18 @@ pub async fn run_scan(args: &ScanArgs) {
             "url" => args.targets.clone(),
             "file" => {
                 if args.targets.is_empty() {
-                    eprintln!("Error: No file specified for input-type=file");
+                    if !args.silence {
+                        eprintln!("Error: No file specified for input-type=file");
+                    }
                     return;
                 }
                 let file_path = &args.targets[0];
                 match fs::read_to_string(file_path) {
                     Ok(content) => content.lines().map(|s| s.to_string()).collect(),
                     Err(e) => {
-                        eprintln!("Error reading file {}: {}", file_path, e);
+                        if !args.silence {
+                            eprintln!("Error reading file {}: {}", file_path, e);
+                        }
                         return;
                     }
                 }
@@ -266,29 +277,37 @@ pub async fn run_scan(args: &ScanArgs) {
                         })
                         .collect(),
                     Err(e) => {
-                        eprintln!("Error reading from stdin: {}", e);
+                        if !args.silence {
+                            eprintln!("Error reading from stdin: {}", e);
+                        }
                         return;
                     }
                 }
             }
             "raw-http" => {
                 // TODO: Implement raw HTTP request handling
-                eprintln!("raw-http input-type not implemented yet");
+                if !args.silence {
+                    eprintln!("raw-http input-type not implemented yet");
+                }
                 return;
             }
 
             _ => {
-                eprintln!(
-                    "Error: Invalid input-type '{}'. Use 'auto', 'url', 'file', 'pipe', or 'raw-http'",
-                    input_type
-                );
+                if !args.silence {
+                    eprintln!(
+                        "Error: Invalid input-type '{}'. Use 'auto', 'url', 'file', 'pipe', or 'raw-http'",
+                        input_type
+                    );
+                }
                 return;
             }
         };
     }
 
     if target_strings.is_empty() {
-        eprintln!("Error: No targets specified");
+        if !args.silence {
+            eprintln!("Error: No targets specified");
+        }
         return;
     }
 
@@ -324,14 +343,18 @@ pub async fn run_scan(args: &ScanArgs) {
                 parsed_targets.push(target);
             }
             Err(e) => {
-                eprintln!("Error parsing target '{}': {}", s, e);
+                if !args.silence {
+                    eprintln!("Error parsing target '{}': {}", s, e);
+                }
                 return;
             }
         }
     }
 
     if parsed_targets.is_empty() {
-        eprintln!("Error: No targets specified");
+        if !args.silence {
+            eprintln!("Error: No targets specified");
+        }
         return;
     }
 
@@ -351,7 +374,9 @@ pub async fn run_scan(args: &ScanArgs) {
                     }
                 }
             } else {
-                eprintln!("Error reading cookie file: {}", path);
+                if !args.silence {
+                    eprintln!("Error reading cookie file: {}", path);
+                }
             }
         }
     }
@@ -384,10 +409,12 @@ pub async fn run_scan(args: &ScanArgs) {
                 "[POC][V][{}][{}] {}\n",
                 result.method, result.inject_type, result.data
             ));
-            eprintln!("   \x1b[90mPayload: {}\x1b[0m\n", result.payload);
-            if let Some(resp) = &result.response {
-                if let Some((line_num, context)) = extract_context(resp, &result.payload) {
-                    eprintln!("   \x1b[90mL{}: {}\x1b[0m\n", line_num, context);
+            if !args.silence {
+                eprintln!("   \x1b[90mPayload: {}\x1b[0m\n", result.payload);
+                if let Some(resp) = &result.response {
+                    if let Some((line_num, context)) = extract_context(resp, &result.payload) {
+                        eprintln!("   \x1b[90mL{}: {}\x1b[0m\n", line_num, context);
+                    }
                 }
             }
         }
@@ -405,8 +432,16 @@ pub async fn run_scan(args: &ScanArgs) {
 
     if let Some(output_path) = &args.output {
         match std::fs::write(output_path, &output_content) {
-            Ok(_) => println!("Results written to {}", output_path),
-            Err(e) => eprintln!("Error writing to file {}: {}", output_path, e),
+            Ok(_) => {
+                if !args.silence {
+                    println!("Results written to {}", output_path);
+                }
+            }
+            Err(e) => {
+                if !args.silence {
+                    eprintln!("Error writing to file {}: {}", output_path, e);
+                }
+            }
         }
     } else {
         println!("{}", output_content);
