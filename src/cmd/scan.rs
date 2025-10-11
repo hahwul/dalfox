@@ -152,12 +152,12 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "ENGINE")]
     /// Number of concurrent workers
-    #[arg(long, default_value = "10")]
+    #[arg(long, default_value = "50")]
     pub workers: usize,
 
     #[clap(help_heading = "ENGINE")]
     /// Maximum number of concurrent targets to scan
-    #[arg(long, default_value = "10")]
+    #[arg(long, default_value = "50")]
     pub max_concurrent_targets: usize,
 
     #[clap(help_heading = "ENGINE")]
@@ -166,8 +166,8 @@ pub struct ScanArgs {
     pub max_targets_per_host: usize,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Specify payload encoders to use (comma-separated). Options: none, url, 2url, html, base64. Default: url,html
-    #[arg(short = 'e', long, value_delimiter = ',', default_values = &["url", "html"])]
+    /// Specify payload encoders to use (comma-separated). Options: none, url, 2url, html, base64. Default: none,url,html
+    #[arg(short = 'e', long, value_delimiter = ',', default_values = &["none", "url", "html"])]
     pub encoders: Vec<String>,
 
     #[clap(help_heading = "XSS SCANNING")]
@@ -192,7 +192,7 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "XSS SCANNING")]
     /// Common XSS payloads only
-    #[arg(long)]
+    #[arg(long, default_value = "true")]
     pub fast_scan: bool,
 
     #[clap(help_heading = "XSS SCANNING")]
