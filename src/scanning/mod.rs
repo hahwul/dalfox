@@ -9,7 +9,7 @@ use crate::parameter_analysis::Param;
 use crate::scanning::check_dom_verification::check_dom_verification;
 use crate::scanning::check_reflection::check_reflection;
 use crate::target_parser::Target;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
@@ -72,7 +72,9 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
 pub async fn run_scanning(
     target: &Target,
     args: &ScanArgs,
-    results: Arc<tokio::sync::Mutex<Vec<crate::scanning::result::Result>>>,
+    results: Arc<Mutex<Vec<crate::scanning::result::Result>>>,
+    multi_pb: Option<Arc<MultiProgress>>,
+    overall_pb: Option<Arc<Mutex<indicatif::ProgressBar>>>,
 ) {
     let semaphore = Arc::new(Semaphore::new(target.workers));
 
@@ -87,10 +89,8 @@ pub async fn run_scanning(
         total_tasks += payloads.len() as u64;
     }
 
-    let pb = if args.silence {
-        ProgressBar::hidden()
-    } else {
-        let pb = ProgressBar::new(total_tasks);
+    let pb = if let Some(ref mp) = multi_pb {
+        let pb = mp.add(ProgressBar::new(total_tasks));
         pb.set_style(
             ProgressStyle::default_bar()
                 .template(
@@ -99,10 +99,11 @@ pub async fn run_scanning(
                 .unwrap()
                 .progress_chars("#>-"),
         );
-        pb.set_message("Scanning XSS payloads");
-        pb
+        pb.set_message(format!("Scanning {}", target.url));
+        Some(pb)
+    } else {
+        None
     };
-    let pb = Arc::new(Mutex::new(pb));
 
     let found_params = Arc::new(Mutex::new(HashSet::new()));
 
@@ -123,6 +124,7 @@ pub async fn run_scanning(
             let results_clone = results.clone();
             let pb_clone = pb.clone();
             let found_params_clone = found_params.clone();
+            let overall_pb_clone = overall_pb.clone();
 
             let handle = tokio::spawn(async move {
                 let _permit = semaphore_clone.acquire().await.unwrap();
@@ -200,7 +202,12 @@ pub async fn run_scanning(
                         }
                     }
                 }
-                pb_clone.lock().await.inc(1);
+                if let Some(ref pb) = pb_clone {
+                    pb.inc(1);
+                }
+                if let Some(ref opb) = overall_pb_clone {
+                    opb.lock().await.inc(1);
+                }
             });
             handles.push(handle);
         }
@@ -210,10 +217,8 @@ pub async fn run_scanning(
         handle.await.unwrap();
     }
 
-    if !args.silence {
-        pb.lock()
-            .await
-            .finish_with_message("XSS scanning completed");
+    if let Some(pb) = pb {
+        pb.finish_with_message(format!("Completed scanning {}", target.url));
     }
 }
 
@@ -276,7 +281,7 @@ mod tests {
         let results = Arc::new(Mutex::new(Vec::new()));
 
         // Mock scanning - in real scenario this would attempt HTTP requests
-        run_scanning(&target, &args, results).await;
+        run_scanning(&target, &args, results, None, None).await;
 
         // Verify that reflection params are present
         assert!(!target.reflection_params.is_empty());
@@ -326,7 +331,7 @@ mod tests {
         let results = Arc::new(Mutex::new(Vec::new()));
 
         // Mock scanning - in real scenario this would attempt HTTP requests
-        run_scanning(&target, &args, results).await;
+        run_scanning(&target, &args, results, None, None).await;
 
         // Verify that reflection params are present
         assert!(!target.reflection_params.is_empty());
@@ -382,7 +387,7 @@ mod tests {
 
         // This will attempt real HTTP requests, but in test environment it may fail
         // For unit testing, we can just ensure no panic occurs
-        run_scanning(&target, &args, results).await;
+        run_scanning(&target, &args, results, None, None).await;
     }
 
     #[tokio::test]
@@ -426,6 +431,6 @@ mod tests {
 
         let results = Arc::new(Mutex::new(Vec::new()));
 
-        run_scanning(&target, &args, results).await;
+        run_scanning(&target, &args, results, None, None).await;
     }
 }

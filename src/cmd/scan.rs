@@ -1,4 +1,5 @@
 use clap::Args;
+use indicatif::MultiProgress;
 use std::fs;
 use std::io::{self, Read};
 use std::sync::Arc;
@@ -27,7 +28,7 @@ fn extract_context(response: &str, payload: &str) -> Option<(usize, String)> {
     None
 }
 
-#[derive(Args)]
+#[derive(Clone, Args)]
 pub struct ScanArgs {
     #[clap(help_heading = "INPUT")]
     /// Input type: auto, url, file, pipe, raw-http
@@ -383,12 +384,76 @@ pub async fn run_scan(args: &ScanArgs) {
 
     let results = Arc::new(Mutex::new(Vec::<Result>::new()));
 
-    // Analyze parameters for each target
+    // Analyze parameters for each target sequentially to avoid Send issues
     for target in &mut parsed_targets {
         analyze_parameters(target, &args).await;
-        if !args.skip_xss_scanning {
-            crate::scanning::run_scanning(target, &args, results.clone()).await;
+    }
+
+    // Calculate total overall tasks (sum of payloads across all targets)
+    let mut total_overall_tasks = 0u64;
+    for target in &parsed_targets {
+        for param in &target.reflection_params {
+            let payloads = if let Some(context) = &param.injection_context {
+                crate::scanning::dynamic::get_dynamic_payloads(context, args)
+                    .unwrap_or_else(|_| vec![])
+            } else {
+                crate::scanning::common::get_payloads(args).unwrap_or_else(|_| vec![])
+            };
+            total_overall_tasks += payloads.len() as u64;
         }
+    }
+
+    let multi_pb = if args.silence {
+        None
+    } else {
+        Some(Arc::new(MultiProgress::new()))
+    };
+
+    let overall_pb: Option<Arc<Mutex<indicatif::ProgressBar>>> = if let Some(ref mp) = multi_pb {
+        let pb = mp.add(indicatif::ProgressBar::new(total_overall_tasks));
+        pb.set_style(
+            indicatif::ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} Overall scanning")
+                .unwrap()
+                .progress_chars("#>-"),
+        );
+        Some(Arc::new(Mutex::new(pb)))
+    } else {
+        None
+    };
+
+    let args_arc = Arc::new(args.clone());
+    let mut handles = vec![];
+
+    for target in parsed_targets {
+        let results_clone = results.clone();
+        let args_clone = args_arc.clone();
+        let multi_pb_clone = multi_pb.clone();
+        let overall_pb_clone = overall_pb.clone();
+
+        let handle = tokio::spawn(async move {
+            if !args_clone.skip_xss_scanning {
+                crate::scanning::run_scanning(
+                    &target,
+                    &args_clone,
+                    results_clone,
+                    multi_pb_clone,
+                    overall_pb_clone,
+                )
+                .await;
+            }
+        });
+        handles.push(handle);
+    }
+
+    for handle in handles {
+        handle.await.unwrap();
+    }
+
+    if let Some(pb) = overall_pb {
+        pb.lock()
+            .await
+            .finish_with_message("All scanning completed");
     }
 
     // Output results
