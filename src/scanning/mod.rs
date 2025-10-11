@@ -72,7 +72,7 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
 
 pub async fn run_scanning(
     target: &Target,
-    args: &ScanArgs,
+    args: Arc<ScanArgs>,
     results: Arc<Mutex<Vec<crate::scanning::result::Result>>>,
     multi_pb: Option<Arc<MultiProgress>>,
     overall_pb: Option<Arc<Mutex<indicatif::ProgressBar>>>,
@@ -83,12 +83,14 @@ pub async fn run_scanning(
     let mut total_tasks = 0u64;
     for param in &target.reflection_params {
         let reflection_payloads = if let Some(context) = &param.injection_context {
-            crate::scanning::dynamic::get_dynamic_payloads(context, args).unwrap_or_else(|_| vec![])
+            crate::scanning::dynamic::get_dynamic_payloads(context, args.as_ref())
+                .unwrap_or_else(|_| vec![])
         } else {
-            crate::scanning::common::get_reflection_payloads(args).unwrap_or_else(|_| vec![])
+            crate::scanning::common::get_reflection_payloads(args.as_ref())
+                .unwrap_or_else(|_| vec![])
         };
         let dom_payloads =
-            crate::scanning::common::get_dom_payloads(args).unwrap_or_else(|_| vec![]);
+            crate::scanning::common::get_dom_payloads(args.as_ref()).unwrap_or_else(|_| vec![]);
         total_tasks += reflection_payloads.len() as u64 * (1 + dom_payloads.len() as u64);
     }
 
@@ -113,15 +115,24 @@ pub async fn run_scanning(
     let mut handles = vec![];
 
     for param in &target.reflection_params {
+        let already_found = found_params.lock().await.contains(&param.name);
+        if already_found && !args.deep_scan {
+            // Skip further testing for this param if XSS already found and not deep scanning
+            continue;
+        }
+
         let reflection_payloads = if let Some(context) = &param.injection_context {
-            crate::scanning::dynamic::get_dynamic_payloads(context, args).unwrap_or_else(|_| vec![])
+            crate::scanning::dynamic::get_dynamic_payloads(context, args.as_ref())
+                .unwrap_or_else(|_| vec![])
         } else {
-            crate::scanning::common::get_reflection_payloads(args).unwrap_or_else(|_| vec![])
+            crate::scanning::common::get_reflection_payloads(args.as_ref())
+                .unwrap_or_else(|_| vec![])
         };
         let dom_payloads =
-            crate::scanning::common::get_dom_payloads(args).unwrap_or_else(|_| vec![]);
+            crate::scanning::common::get_dom_payloads(args.as_ref()).unwrap_or_else(|_| vec![]);
 
         for reflection_payload in reflection_payloads {
+            let args_clone = args.clone();
             let semaphore_clone = semaphore.clone();
             let param_clone = param.clone();
             let target_clone = (*target).clone(); // Clone target for each task
@@ -147,12 +158,19 @@ pub async fn run_scanning(
                         let (dom_verified, response_text) =
                             check_dom_verification(&target_clone, &param_clone, &dom_payload).await;
                         if dom_verified {
-                            // Check if this param has already been found
-                            let mut found = found_params_clone.lock().await;
-                            if !found.contains(&param_clone.name) {
-                                found.insert(param_clone.name.clone());
-                                drop(found); // Release lock
+                            let should_add = if args_clone.deep_scan {
+                                true
+                            } else {
+                                let mut found = found_params_clone.lock().await;
+                                if !found.contains(&param_clone.name) {
+                                    found.insert(param_clone.name.clone());
+                                    true
+                                } else {
+                                    false
+                                }
+                            };
 
+                            if should_add {
                                 // Create result
                                 let result_url = if param_clone.location
                                     == crate::parameter_analysis::Location::Query

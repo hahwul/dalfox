@@ -200,6 +200,11 @@ pub struct ScanArgs {
     #[arg(long)]
     pub skip_xss_scanning: bool,
 
+    #[clap(help_heading = "XSS SCANNING")]
+    /// Perform deep scanning - test all payloads even after finding XSS
+    #[arg(long)]
+    pub deep_scan: bool,
+
     #[clap(help_heading = "TARGETS")]
     /// Targets (URLs or file paths)
     #[arg(value_name = "TARGET")]
@@ -497,7 +502,7 @@ pub async fn run_scan(args: &ScanArgs) {
                     if !args_clone.skip_xss_scanning {
                         crate::scanning::run_scanning(
                             &target,
-                            &args_clone,
+                            args_clone.clone(),
                             results_clone_inner,
                             multi_pb_clone_inner,
                             overall_pb_clone,
