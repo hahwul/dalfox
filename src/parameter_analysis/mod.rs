@@ -8,6 +8,7 @@ pub use mining::*;
 
 use crate::cmd::scan::ScanArgs;
 use crate::target_parser::Target;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
 
@@ -44,16 +45,44 @@ pub struct Param {
     pub injection_context: Option<InjectionContext>,
 }
 
-pub async fn analyze_parameters(target: &mut Target, args: &ScanArgs) {
+pub async fn analyze_parameters(
+    target: &mut Target,
+    args: &ScanArgs,
+    multi_pb: Option<Arc<MultiProgress>>,
+) {
+    let pb = if let Some(ref mp) = multi_pb {
+        let pb = mp.add(ProgressBar::new_spinner());
+        pb.set_style(
+            ProgressStyle::default_spinner()
+                .template("{spinner:.green} {msg}")
+                .unwrap(),
+        );
+        pb.set_message(format!("Analyzing parameters for {}", target.url));
+        Some(pb)
+    } else {
+        None
+    };
+
     let reflection_params = Arc::new(Mutex::new(Vec::new()));
     let semaphore = Arc::new(Semaphore::new(target.workers));
     check_discovery(target, args, reflection_params.clone(), semaphore.clone()).await;
-    mine_parameters(target, args, reflection_params.clone(), semaphore.clone()).await;
+    mine_parameters(
+        target,
+        args,
+        reflection_params.clone(),
+        semaphore.clone(),
+        pb.clone(),
+    )
+    .await;
     let mut params = reflection_params.lock().await.clone();
     if !args.param.is_empty() {
         params = filter_params(params, &args.param, target);
     }
     target.reflection_params = params;
+
+    if let Some(pb) = pb {
+        pb.finish_with_message(format!("Completed analyzing parameters for {}", target.url));
+    }
 }
 
 fn filter_params(params: Vec<Param>, param_specs: &[String], target: &Target) -> Vec<Param> {

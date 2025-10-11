@@ -384,9 +384,15 @@ pub async fn run_scan(args: &ScanArgs) {
 
     let results = Arc::new(Mutex::new(Vec::<Result>::new()));
 
+    let multi_pb = if args.silence {
+        None
+    } else {
+        Some(Arc::new(MultiProgress::new()))
+    };
+
     // Analyze parameters for each target sequentially to avoid Send issues
     for target in &mut parsed_targets {
-        analyze_parameters(target, &args).await;
+        analyze_parameters(target, &args, multi_pb.clone()).await;
     }
 
     // Calculate total overall tasks (sum of payloads across all targets)
@@ -402,12 +408,6 @@ pub async fn run_scan(args: &ScanArgs) {
             total_overall_tasks += payloads.len() as u64;
         }
     }
-
-    let multi_pb = if args.silence {
-        None
-    } else {
-        Some(Arc::new(MultiProgress::new()))
-    };
 
     let overall_pb: Option<Arc<Mutex<indicatif::ProgressBar>>> = if let Some(ref mp) = multi_pb {
         let pb = mp.add(indicatif::ProgressBar::new(total_overall_tasks));

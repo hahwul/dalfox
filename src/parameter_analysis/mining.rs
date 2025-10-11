@@ -1,7 +1,8 @@
 use crate::cmd::scan::ScanArgs;
-use crate::parameter_analysis::{InjectionContext, Param};
+use crate::parameter_analysis::{InjectionContext, Location, Param};
 use crate::payload::mining::GF_PATTERNS_PARAMS;
 use crate::target_parser::Target;
+use indicatif::{ProgressBar, ProgressStyle};
 use reqwest::Client;
 use scraper;
 use std::sync::Arc;
@@ -85,6 +86,7 @@ pub async fn probe_dictionary_params(
     args: &ScanArgs,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
+    pb: Option<ProgressBar>,
 ) {
     let silence = args.silence;
     let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
@@ -114,7 +116,12 @@ pub async fn probe_dictionary_params(
         GF_PATTERNS_PARAMS.iter().map(|s| s.to_string()).collect()
     };
 
-    let mut handles = vec![];
+    if let Some(ref pb) = pb {
+        pb.set_length(params.len() as u64);
+        pb.set_message("Mining dictionary parameters");
+    }
+
+    let mut handles: Vec<tokio::task::JoinHandle<()>> = vec![];
 
     // Check for additional valid parameters
     for param in params {
@@ -138,6 +145,7 @@ pub async fn probe_dictionary_params(
         let reflection_params_clone = reflection_params.clone();
         let semaphore_clone = semaphore.clone();
         let param = param.clone();
+        let pb_clone = pb.clone();
 
         let handle = tokio::spawn(async move {
             let permit = semaphore_clone.acquire().await.unwrap();
@@ -176,6 +184,9 @@ pub async fn probe_dictionary_params(
                 sleep(Duration::from_millis(delay)).await;
             }
             drop(permit);
+            if let Some(ref pb) = pb_clone {
+                pb.inc(1);
+            }
         });
         handles.push(handle);
     }
@@ -190,6 +201,7 @@ pub async fn probe_body_params(
     args: &ScanArgs,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
+    pb: Option<ProgressBar>,
 ) {
     let silence = args.silence;
     let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
@@ -206,7 +218,12 @@ pub async fn probe_body_params(
             .map(|(k, v)| (k.to_string(), v.to_string()))
             .collect();
 
-        let mut handles = vec![];
+        if let Some(ref pb) = pb {
+            pb.set_length(params.len() as u64);
+            pb.set_message("Mining body parameters");
+        }
+
+        let mut handles: Vec<tokio::task::JoinHandle<()>> = vec![];
 
         for (param_name, _) in params {
             let existing = reflection_params
@@ -240,6 +257,7 @@ pub async fn probe_body_params(
             let reflection_params_clone = reflection_params.clone();
             let semaphore_clone = semaphore.clone();
             let param_name = param_name.clone();
+            let pb_clone = pb.clone();
 
             let handle = tokio::spawn(async move {
                 let permit = semaphore_clone.acquire().await.unwrap();
@@ -264,7 +282,7 @@ pub async fn probe_body_params(
                             let param = Param {
                                 name: param_name.clone(),
                                 value: "dalfox".to_string(),
-                                location: crate::parameter_analysis::Location::Body,
+                                location: Location::Body,
                                 injection_context: Some(context),
                             };
                             reflection_params_clone.lock().await.push(param);
@@ -278,6 +296,9 @@ pub async fn probe_body_params(
                     sleep(Duration::from_millis(delay)).await;
                 }
                 drop(permit);
+                if let Some(ref pb) = pb_clone {
+                    pb.inc(1);
+                }
             });
             handles.push(handle);
         }
@@ -293,6 +314,7 @@ pub async fn probe_response_id_params(
     args: &ScanArgs,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
+    pb: Option<ProgressBar>,
 ) {
     let silence = args.silence;
     let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
@@ -337,7 +359,12 @@ pub async fn probe_response_id_params(
                 }
             }
 
-            let mut handles = vec![];
+            if let Some(ref pb) = pb {
+                pb.set_length(params_to_check.len() as u64);
+                pb.set_message("Mining DOM parameters");
+            }
+
+            let mut handles: Vec<tokio::task::JoinHandle<()>> = vec![];
 
             // Check each param for reflection
             for param in params_to_check {
@@ -361,6 +388,7 @@ pub async fn probe_response_id_params(
                 let reflection_params_clone = reflection_params.clone();
                 let semaphore_clone = semaphore.clone();
                 let param = param.clone();
+                let pb_clone = pb.clone();
 
                 let handle = tokio::spawn(async move {
                     let permit = semaphore_clone.acquire().await.unwrap();
@@ -399,6 +427,9 @@ pub async fn probe_response_id_params(
                         sleep(Duration::from_millis(delay)).await;
                     }
                     drop(permit);
+                    if let Some(ref pb) = pb_clone {
+                        pb.inc(1);
+                    }
                 });
                 handles.push(handle);
             }
@@ -415,16 +446,36 @@ pub async fn mine_parameters(
     args: &ScanArgs,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
+    pb: Option<ProgressBar>,
 ) {
     if !args.skip_mining {
         if !args.skip_mining_dict {
-            probe_dictionary_params(target, args, reflection_params.clone(), semaphore.clone())
-                .await;
-            probe_body_params(target, args, reflection_params.clone(), semaphore.clone()).await;
+            probe_dictionary_params(
+                target,
+                args,
+                reflection_params.clone(),
+                semaphore.clone(),
+                pb.clone(),
+            )
+            .await;
+            probe_body_params(
+                target,
+                args,
+                reflection_params.clone(),
+                semaphore.clone(),
+                pb.clone(),
+            )
+            .await;
         }
         if !args.skip_mining_dom {
-            probe_response_id_params(target, args, reflection_params.clone(), semaphore.clone())
-                .await;
+            probe_response_id_params(
+                target,
+                args,
+                reflection_params.clone(),
+                semaphore.clone(),
+                pb.clone(),
+            )
+            .await;
         }
     }
 }
