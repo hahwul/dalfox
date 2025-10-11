@@ -1,3 +1,5 @@
 https://xss-game.appspot.com/level1/frame
 https://www.hahwul.com
+https://www.hahwul.com/about/
+https://xss-game.appspot.com/level1/frame?query=1
 http://testphp.vulnweb.com/search.php?test=query
