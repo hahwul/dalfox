@@ -1,2 +1,3 @@
 https://xss-game.appspot.com/level1/frame
 https://www.hahwul.com
+http://testphp.vulnweb.com/search.php?test=query
