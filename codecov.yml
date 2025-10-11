@@ -1,3 +1,0 @@
-ignore:  
-  - cmd
-  - pkg/server/docs/docs.go

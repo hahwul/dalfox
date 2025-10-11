@@ -9,6 +9,32 @@ use crate::parameter_analysis::analyze_parameters;
 use crate::scanning::result::Result;
 use crate::target_parser::*;
 
+fn generate_poc(result: &crate::scanning::result::Result, poc_type: &str) -> String {
+    match poc_type {
+        "plain" => format!(
+            "[POC][V][{}][{}] {}\n",
+            result.method, result.inject_type, result.data
+        ),
+        "curl" => format!("curl -X {} \"{}\"\n", result.method, result.data),
+        "httpie" => format!(
+            "http {} \"{}\"\n",
+            result.method.to_lowercase(),
+            result.data
+        ),
+        "http-request" => {
+            if let Some(request) = &result.request {
+                format!("{}\n", request)
+            } else {
+                format!("{}\n", result.data)
+            }
+        }
+        _ => format!(
+            "[POC][V][{}][{}] {}\n",
+            result.method, result.inject_type, result.data
+        ),
+    }
+}
+
 fn extract_context(response: &str, payload: &str) -> Option<(usize, String)> {
     for (line_num, line) in response.lines().enumerate() {
         if line.contains(payload) {
@@ -59,6 +85,11 @@ pub struct ScanArgs {
     /// Silence all logs except POC output to STDOUT
     #[arg(short = 'S', long)]
     pub silence: bool,
+
+    #[clap(help_heading = "OUTPUT")]
+    /// POC output type: plain, curl, httpie, http-request
+    #[arg(long, default_value = "plain")]
+    pub poc_type: String,
 
     #[clap(help_heading = "TARGETS")]
     /// Specify parameter names to analyze (e.g., -p sort -p id:query). Types: query, body, json, cookie, header.
@@ -560,11 +591,8 @@ pub async fn run_scan(args: &ScanArgs) {
     } else if args.format == "plain" {
         let mut output = String::new();
         for result in &*final_results {
-            output.push_str(&format!(
-                "[POC][V][{}][{}] {}\n",
-                result.method, result.inject_type, result.data
-            ));
-            if !args.silence {
+            output.push_str(&generate_poc(result, &args.poc_type));
+            if args.poc_type == "plain" && !args.silence {
                 output.push_str(&format!("   \x1b[90mPayload: {}\x1b[0m\n", result.payload));
                 if let Some(resp) = &result.response {
                     if let Some((line_num, context)) = extract_context(resp, &result.payload) {
