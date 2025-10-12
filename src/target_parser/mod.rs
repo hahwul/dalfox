@@ -72,4 +72,69 @@ mod tests {
     fn test_parse_target_invalid_url() {
         assert!(parse_target("invalid url").is_err());
     }
+
+    #[test]
+    fn test_parse_target_with_path() {
+        let target = parse_target("https://example.com/path/to/resource").unwrap();
+        assert_eq!(target.url.as_str(), "https://example.com/path/to/resource");
+        assert_eq!(target.method, "GET");
+    }
+
+    #[test]
+    fn test_parse_target_with_query() {
+        let target = parse_target("https://example.com?param=value").unwrap();
+        assert_eq!(target.url.as_str(), "https://example.com/?param=value");
+        assert_eq!(target.method, "GET");
+    }
+
+    #[test]
+    fn test_parse_target_with_fragment() {
+        let target = parse_target("https://example.com#section").unwrap();
+        assert_eq!(target.url.as_str(), "https://example.com/#section");
+        assert_eq!(target.method, "GET");
+    }
+
+    #[test]
+    fn test_parse_target_with_port() {
+        let target = parse_target("https://example.com:8080").unwrap();
+        assert_eq!(target.url.as_str(), "https://example.com:8080/");
+        assert_eq!(target.method, "GET");
+    }
+
+    #[test]
+    fn test_parse_target_ip_address() {
+        let target = parse_target("http://192.168.1.1").unwrap();
+        assert_eq!(target.url.as_str(), "http://192.168.1.1/");
+        assert_eq!(target.method, "GET");
+    }
+
+    #[test]
+    fn test_parse_target_localhost() {
+        let target = parse_target("localhost:3000").unwrap();
+        assert_eq!(target.url.as_str(), "http://localhost:3000/");
+        assert_eq!(target.method, "GET");
+    }
+
+    #[test]
+    fn test_parse_target_unicode_domain() {
+        // URL parsing converts unicode domains to punycode
+        let target = parse_target("https://例え.テスト").unwrap();
+        assert!(target.url.as_str().contains("xn--r8jz45g.xn--zckzah"));
+        assert_eq!(target.method, "GET");
+    }
+
+    #[test]
+    fn test_parse_target_empty_string() {
+        assert!(parse_target("").is_err());
+    }
+
+    #[test]
+    fn test_parse_target_only_spaces() {
+        assert!(parse_target("   ").is_err());
+    }
+
+    #[test]
+    fn test_parse_target_invalid_scheme() {
+        assert!(parse_target("://example.com").is_err());
+    }
 }

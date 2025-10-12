@@ -53,6 +53,7 @@ impl Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json;
 
     #[test]
     fn test_result_creation() {
@@ -71,10 +72,45 @@ mod tests {
         );
 
         assert_eq!(result.result_type, "V");
+        assert_eq!(result.inject_type, "inHTML");
+        assert_eq!(result.method, "GET");
+        assert_eq!(result.data, "https://example.com?q=test");
         assert_eq!(result.param, "q");
+        assert_eq!(result.payload, "<script>alert(1)</script>");
+        assert_eq!(result.evidence, "Found script tag");
+        assert_eq!(result.cwe, "CWE-79");
         assert_eq!(result.severity, "High");
+        assert_eq!(result.message_id, 606);
+        assert_eq!(result.message_str, "XSS detected");
         assert!(result.request.is_none());
         assert!(result.response.is_none());
+    }
+
+    #[test]
+    fn test_result_creation_with_request_response() {
+        let mut result = Result::new(
+            "V".to_string(),
+            "inJS".to_string(),
+            "POST".to_string(),
+            "https://example.com".to_string(),
+            "data".to_string(),
+            "alert(1)".to_string(),
+            "JavaScript execution".to_string(),
+            "CWE-79".to_string(),
+            "Medium".to_string(),
+            200,
+            "Potential XSS".to_string(),
+        );
+
+        result.request = Some("POST / HTTP/1.1\nHost: example.com\n\nkey=value".to_string());
+        result.response = Some("HTTP/1.1 200 OK\n\n<html>alert(1)</html>".to_string());
+
+        assert_eq!(result.result_type, "V");
+        assert_eq!(result.severity, "Medium");
+        assert!(result.request.is_some());
+        assert!(result.response.is_some());
+        assert!(result.request.as_ref().unwrap().contains("POST"));
+        assert!(result.response.as_ref().unwrap().contains("200 OK"));
     }
 
     #[test]
@@ -95,6 +131,120 @@ mod tests {
 
         let json = serde_json::to_string(&result).unwrap();
         assert!(json.contains("\"type\":\"V\""));
+        assert!(json.contains("\"inject_type\":\"inHTML\""));
+        assert!(json.contains("\"method\":\"GET\""));
+        assert!(json.contains("\"data\":\"https://example.com\""));
         assert!(json.contains("\"param\":\"query\""));
+        assert!(json.contains("\"payload\":\"payload\""));
+        assert!(json.contains("\"evidence\":\"evidence\""));
+        assert!(json.contains("\"cwe\":\"CWE-79\""));
+        assert!(json.contains("\"severity\":\"High\""));
+        assert!(json.contains("\"message_id\":606"));
+        assert!(json.contains("\"message_str\":\"message\""));
+        assert!(json.contains("\"request\":null"));
+        assert!(json.contains("\"response\":null"));
+    }
+
+    #[test]
+    fn test_result_deserialization() {
+        let json = r#"{
+            "type": "V",
+            "inject_type": "inHTML",
+            "method": "GET",
+            "data": "https://example.com",
+            "param": "q",
+            "payload": "<script>alert(1)</script>",
+            "evidence": "Found script",
+            "cwe": "CWE-79",
+            "severity": "High",
+            "message_id": 200,
+            "message_str": "XSS found",
+            "request": null,
+            "response": null
+        }"#;
+
+        let result: Result = serde_json::from_str(json).unwrap();
+        assert_eq!(result.result_type, "V");
+        assert_eq!(result.param, "q");
+        assert_eq!(result.severity, "High");
+        assert_eq!(result.message_id, 200);
+    }
+
+    #[test]
+    fn test_result_different_types() {
+        let reflected = Result::new(
+            "R".to_string(),
+            "inHTML".to_string(),
+            "GET".to_string(),
+            "https://example.com".to_string(),
+            "param".to_string(),
+            "test".to_string(),
+            "Reflected".to_string(),
+            "CWE-79".to_string(),
+            "Info".to_string(),
+            200,
+            "Parameter reflected".to_string(),
+        );
+
+        let vulnerable = Result::new(
+            "V".to_string(),
+            "inJS".to_string(),
+            "POST".to_string(),
+            "https://example.com".to_string(),
+            "data".to_string(),
+            "alert(1)".to_string(),
+            "Executed".to_string(),
+            "CWE-79".to_string(),
+            "High".to_string(),
+            200,
+            "XSS confirmed".to_string(),
+        );
+
+        assert_eq!(reflected.result_type, "R");
+        assert_eq!(reflected.severity, "Info");
+        assert_eq!(vulnerable.result_type, "V");
+        assert_eq!(vulnerable.severity, "High");
+        assert_ne!(reflected.result_type, vulnerable.result_type);
+    }
+
+    #[test]
+    fn test_result_edge_cases() {
+        // Empty strings
+        let result = Result::new(
+            "".to_string(),
+            "".to_string(),
+            "".to_string(),
+            "".to_string(),
+            "".to_string(),
+            "".to_string(),
+            "".to_string(),
+            "".to_string(),
+            "".to_string(),
+            0,
+            "".to_string(),
+        );
+
+        assert_eq!(result.result_type, "");
+        assert_eq!(result.message_id, 0);
+
+        // Special characters
+        let result = Result::new(
+            "V".to_string(),
+            "inHTML".to_string(),
+            "GET".to_string(),
+            "https://example.com".to_string(),
+            "param".to_string(),
+            "<>\"'&".to_string(),
+            "Special chars".to_string(),
+            "CWE-79".to_string(),
+            "High".to_string(),
+            200,
+            "Test".to_string(),
+        );
+
+        assert_eq!(result.payload, "<>\"'&");
+        let json = serde_json::to_string(&result).unwrap();
+        // Ensure special chars are properly handled in JSON
+        assert!(json.contains("\"payload\":\"<>\\\""));
     }
 }
