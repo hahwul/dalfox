@@ -1,7 +1,11 @@
 use crate::target_parser::Target;
 
 pub async fn blind_scanning(target: &Target, callback_url: &str) {
-    let payload = format!("\"'><script src={}></script>", callback_url);
+    let template = crate::payload::XSS_BLIND_PAYLOADS
+        .get(0)
+        .copied()
+        .unwrap_or("\"'><script src={}></script>");
+    let payload = template.replace("{}", callback_url);
 
     // Collect all params
     let mut all_params = vec![];
