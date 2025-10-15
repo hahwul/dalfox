@@ -20,6 +20,12 @@ dev:
     cargo build
 
 xss_maze:
+    # Install and Run xssmaze
+    # git clone https://github.com/hahwul/xssmaze
+    # cd xssmaze
+    # shards build
+    # ./bin/xssmaze
+
     # Basic
     ./target/debug/dalfox scan "http://localhost:3000/basic/level1/?query=a"
     ./target/debug/dalfox scan "http://localhost:3000/basic/level2/?query=a"
