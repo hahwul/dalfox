@@ -507,10 +507,14 @@ pub async fn run_scan(args: &ScanArgs) {
             for target in &group {
                 for param in &target.reflection_params {
                     let payloads = if let Some(context) = &param.injection_context {
-                        crate::scanning::dynamic::get_dynamic_payloads(context, &args_arc)
+                        crate::scanning::xss_common::get_dynamic_payloads(context, &args_arc)
                             .unwrap_or_else(|_| vec![])
                     } else {
-                        crate::scanning::common::get_payloads(&args_arc).unwrap_or_else(|_| vec![])
+                        crate::scanning::xss_common::get_dynamic_payloads(
+                            &crate::parameter_analysis::InjectionContext::Html(None),
+                            &args_arc,
+                        )
+                        .unwrap_or_else(|_| vec![])
                     };
                     total_overall_tasks += payloads.len() as u64;
                 }

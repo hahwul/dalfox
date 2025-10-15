@@ -29,12 +29,9 @@ pub enum DelimiterType {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum InjectionContext {
-    Html,
+    Html(Option<DelimiterType>),
     Javascript(Option<DelimiterType>),
-    Comment(Option<DelimiterType>),
     Attribute(Option<DelimiterType>),
-    StringSingle,
-    StringDouble,
 }
 
 #[derive(Debug, Clone)]
@@ -147,7 +144,7 @@ mod tests {
             name: "test_param".to_string(),
             value: "test_value".to_string(),
             location: Location::Query,
-            injection_context: Some(InjectionContext::Html),
+            injection_context: Some(InjectionContext::Html(None)),
         });
     }
 
@@ -206,7 +203,7 @@ mod tests {
         assert_eq!(target.reflection_params[0].location, Location::Query);
         assert_eq!(
             target.reflection_params[0].injection_context,
-            Some(InjectionContext::Html)
+            Some(InjectionContext::Html(None))
         );
     }
 
@@ -312,7 +309,7 @@ mod tests {
             name: "key1".to_string(),
             value: "dalfox".to_string(),
             location: Location::Body,
-            injection_context: Some(InjectionContext::Html),
+            injection_context: Some(InjectionContext::Html(None)),
         });
 
         assert!(!target.reflection_params.is_empty());
@@ -331,7 +328,7 @@ mod tests {
             name: "X-Test".to_string(),
             value: "dalfox".to_string(),
             location: Location::Header,
-            injection_context: Some(InjectionContext::Html),
+            injection_context: Some(InjectionContext::Html(None)),
         });
 
         assert!(!target.reflection_params.is_empty());
@@ -350,7 +347,7 @@ mod tests {
             name: "session".to_string(),
             value: "dalfox".to_string(),
             location: Location::Header, // Cookies are sent in Header
-            injection_context: Some(InjectionContext::Html),
+            injection_context: Some(InjectionContext::Html(None)),
         });
 
         assert!(!target.reflection_params.is_empty());
@@ -534,25 +531,25 @@ mod tests {
                 name: "sort".to_string(),
                 value: "asc".to_string(),
                 location: Location::Query,
-                injection_context: Some(InjectionContext::Html),
+                injection_context: Some(InjectionContext::Html(None)),
             },
             Param {
                 name: "sort".to_string(),
                 value: "asc".to_string(),
                 location: Location::Body,
-                injection_context: Some(InjectionContext::Html),
+                injection_context: Some(InjectionContext::Html(None)),
             },
             Param {
                 name: "id".to_string(),
                 value: "123".to_string(),
                 location: Location::Query,
-                injection_context: Some(InjectionContext::Html),
+                injection_context: Some(InjectionContext::Html(None)),
             },
             Param {
                 name: "session".to_string(),
                 value: "abc".to_string(),
                 location: Location::Header,
-                injection_context: Some(InjectionContext::Html),
+                injection_context: Some(InjectionContext::Html(None)),
             },
         ];
 
@@ -590,19 +587,19 @@ mod tests {
                 name: "sort".to_string(),
                 value: "asc".to_string(),
                 location: Location::Query,
-                injection_context: Some(InjectionContext::Html),
+                injection_context: Some(InjectionContext::Html(None)),
             },
             Param {
                 name: "id".to_string(),
                 value: "123".to_string(),
                 location: Location::Query,
-                injection_context: Some(InjectionContext::Html),
+                injection_context: Some(InjectionContext::Html(None)),
             },
             Param {
                 name: "session".to_string(),
                 value: "abc".to_string(),
                 location: Location::Header,
-                injection_context: Some(InjectionContext::Html),
+                injection_context: Some(InjectionContext::Html(None)),
             },
         ];
 
@@ -624,7 +621,7 @@ mod tests {
             name: "sort".to_string(),
             value: "asc".to_string(),
             location: Location::Query,
-            injection_context: Some(InjectionContext::Html),
+            injection_context: Some(InjectionContext::Html(None)),
         }];
 
         // Empty filters should return all params
@@ -639,7 +636,7 @@ mod tests {
             name: "sort".to_string(),
             value: "asc".to_string(),
             location: Location::Query,
-            injection_context: Some(InjectionContext::Html),
+            injection_context: Some(InjectionContext::Html(None)),
         }];
 
         // Invalid filter format (too many colons) should be treated as name only

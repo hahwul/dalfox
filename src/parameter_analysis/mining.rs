@@ -2,7 +2,7 @@ use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::{InjectionContext, Location, Param};
 use crate::payload::mining::GF_PATTERNS_PARAMS;
 use crate::target_parser::Target;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::ProgressBar;
 use reqwest::Client;
 use scraper;
 use std::sync::Arc;
@@ -13,7 +13,7 @@ use url::form_urlencoded;
 pub fn detect_injection_context(text: &str) -> InjectionContext {
     let dalfox_pos = match text.find("dalfox") {
         Some(pos) => pos,
-        None => return InjectionContext::Html,
+        None => return InjectionContext::Html(None),
     };
 
     // Check for JavaScript context
@@ -42,15 +42,15 @@ pub fn detect_injection_context(text: &str) -> InjectionContext {
             if comment_start < dalfox_pos && dalfox_pos < comment_end {
                 // Check for delimiter type in comment
                 if text.contains("\"dalfox\"") {
-                    return InjectionContext::Comment(Some(
-                        crate::parameter_analysis::DelimiterType::DoubleQuote,
+                    return InjectionContext::Html(Some(
+                        crate::parameter_analysis::DelimiterType::Comment,
                     ));
                 } else if text.contains("'dalfox'") {
-                    return InjectionContext::Comment(Some(
-                        crate::parameter_analysis::DelimiterType::SingleQuote,
+                    return InjectionContext::Html(Some(
+                        crate::parameter_analysis::DelimiterType::Comment,
                     ));
                 } else {
-                    return InjectionContext::Comment(Some(
+                    return InjectionContext::Html(Some(
                         crate::parameter_analysis::DelimiterType::Comment,
                     ));
                 }
@@ -71,14 +71,18 @@ pub fn detect_injection_context(text: &str) -> InjectionContext {
 
     // Check for string contexts (fallback)
     if text.contains("\"dalfox\"") {
-        return InjectionContext::StringDouble;
+        return InjectionContext::Attribute(Some(
+            crate::parameter_analysis::DelimiterType::DoubleQuote,
+        ));
     }
     if text.contains("'dalfox'") {
-        return InjectionContext::StringSingle;
+        return InjectionContext::Attribute(Some(
+            crate::parameter_analysis::DelimiterType::SingleQuote,
+        ));
     }
 
     // Default to HTML
-    InjectionContext::Html
+    InjectionContext::Html(None)
 }
 
 pub async fn probe_dictionary_params(

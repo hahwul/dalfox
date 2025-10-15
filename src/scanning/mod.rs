@@ -1,9 +1,9 @@
-pub mod blind;
 pub mod check_dom_verification;
 pub mod check_reflection;
-pub mod common;
-pub mod dynamic;
+pub mod xss_blind;
+
 pub mod result;
+pub mod xss_common;
 
 use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::Param;
@@ -15,6 +15,57 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
 use url::form_urlencoded;
+
+fn get_fallback_reflection_payloads(
+    args: &ScanArgs,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let mut base_payloads = vec![];
+
+    if args.only_custom_payload {
+        if let Some(path) = &args.custom_payload {
+            base_payloads.extend(crate::scanning::xss_common::load_custom_payloads(path)?);
+        }
+    } else {
+        base_payloads.extend(
+            crate::payload::XSS_JAVASCRIPT_PAYLOADS
+                .iter()
+                .map(|s| s.to_string()),
+        );
+        base_payloads.extend(
+            crate::payload::XSS_HTML_PAYLOADS
+                .iter()
+                .map(|s| s.to_string()),
+        );
+        if !args.fast_scan {
+            if let Some(path) = &args.custom_payload {
+                base_payloads.extend(crate::scanning::xss_common::load_custom_payloads(path)?);
+            }
+        }
+    }
+
+    let mut payloads = vec![];
+    for payload in base_payloads {
+        if args.encoders.contains(&"none".to_string()) {
+            payloads.push(payload.clone()); // No encoding
+        } else {
+            payloads.push(payload.clone()); // Original
+            if args.encoders.contains(&"url".to_string()) {
+                payloads.push(crate::encoding::url_encode(&payload)); // URL encoded
+            }
+            if args.encoders.contains(&"html".to_string()) {
+                payloads.push(crate::encoding::html_entity_encode(&payload)); // HTML entity encoded
+            }
+            if args.encoders.contains(&"2url".to_string()) {
+                payloads.push(crate::encoding::double_url_encode(&payload)); // Double URL encoded
+            }
+            if args.encoders.contains(&"base64".to_string()) {
+                payloads.push(crate::encoding::base64_encode(&payload)); // Base64 encoded
+            }
+        }
+    }
+
+    Ok(payloads)
+}
 
 fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
     let url = match param.location {
@@ -83,14 +134,50 @@ pub async fn run_scanning(
     let mut total_tasks = 0u64;
     for param in &target.reflection_params {
         let reflection_payloads = if let Some(context) = &param.injection_context {
-            crate::scanning::dynamic::get_dynamic_payloads(context, args.as_ref())
+            crate::scanning::xss_common::get_dynamic_payloads(context, args.as_ref())
                 .unwrap_or_else(|_| vec![])
         } else {
-            crate::scanning::common::get_reflection_payloads(args.as_ref())
-                .unwrap_or_else(|_| vec![])
+            get_fallback_reflection_payloads(args.as_ref()).unwrap_or_else(|_| vec![])
         };
-        let dom_payloads =
-            crate::scanning::common::get_dom_payloads(args.as_ref()).unwrap_or_else(|_| vec![]);
+        let dom_payloads = {
+            let mut base_payloads = vec![];
+            if args.only_custom_payload {
+                if let Some(path) = &args.custom_payload {
+                    base_payloads.extend(
+                        crate::scanning::xss_common::load_custom_payloads(path)
+                            .unwrap_or_else(|_| vec![]),
+                    );
+                }
+            } else {
+                if let Some(path) = &args.custom_payload {
+                    base_payloads.extend(
+                        crate::scanning::xss_common::load_custom_payloads(path)
+                            .unwrap_or_else(|_| vec![]),
+                    );
+                }
+            }
+            let mut out = vec![];
+            for p in base_payloads {
+                if args.encoders.contains(&"none".to_string()) {
+                    out.push(p.clone());
+                } else {
+                    out.push(p.clone());
+                    if args.encoders.contains(&"url".to_string()) {
+                        out.push(crate::encoding::url_encode(&p));
+                    }
+                    if args.encoders.contains(&"html".to_string()) {
+                        out.push(crate::encoding::html_entity_encode(&p));
+                    }
+                    if args.encoders.contains(&"2url".to_string()) {
+                        out.push(crate::encoding::double_url_encode(&p));
+                    }
+                    if args.encoders.contains(&"base64".to_string()) {
+                        out.push(crate::encoding::base64_encode(&p));
+                    }
+                }
+            }
+            out
+        };
         total_tasks += reflection_payloads.len() as u64 * (1 + dom_payloads.len() as u64);
     }
 
@@ -122,14 +209,50 @@ pub async fn run_scanning(
         }
 
         let reflection_payloads = if let Some(context) = &param.injection_context {
-            crate::scanning::dynamic::get_dynamic_payloads(context, args.as_ref())
+            crate::scanning::xss_common::get_dynamic_payloads(context, args.as_ref())
                 .unwrap_or_else(|_| vec![])
         } else {
-            crate::scanning::common::get_reflection_payloads(args.as_ref())
-                .unwrap_or_else(|_| vec![])
+            get_fallback_reflection_payloads(args.as_ref()).unwrap_or_else(|_| vec![])
         };
-        let dom_payloads =
-            crate::scanning::common::get_dom_payloads(args.as_ref()).unwrap_or_else(|_| vec![]);
+        let dom_payloads = {
+            let mut base_payloads = vec![];
+            if args.only_custom_payload {
+                if let Some(path) = &args.custom_payload {
+                    base_payloads.extend(
+                        crate::scanning::xss_common::load_custom_payloads(path)
+                            .unwrap_or_else(|_| vec![]),
+                    );
+                }
+            } else {
+                if let Some(path) = &args.custom_payload {
+                    base_payloads.extend(
+                        crate::scanning::xss_common::load_custom_payloads(path)
+                            .unwrap_or_else(|_| vec![]),
+                    );
+                }
+            }
+            let mut out = vec![];
+            for p in base_payloads {
+                if args.encoders.contains(&"none".to_string()) {
+                    out.push(p.clone());
+                } else {
+                    out.push(p.clone());
+                    if args.encoders.contains(&"url".to_string()) {
+                        out.push(crate::encoding::url_encode(&p));
+                    }
+                    if args.encoders.contains(&"html".to_string()) {
+                        out.push(crate::encoding::html_entity_encode(&p));
+                    }
+                    if args.encoders.contains(&"2url".to_string()) {
+                        out.push(crate::encoding::double_url_encode(&p));
+                    }
+                    if args.encoders.contains(&"base64".to_string()) {
+                        out.push(crate::encoding::base64_encode(&p));
+                    }
+                }
+            }
+            out
+        };
 
         for reflection_payload in reflection_payloads {
             let args_clone = args.clone();
@@ -265,7 +388,7 @@ pub async fn run_scanning(
     }
 }
 
-pub use blind::blind_scanning;
+pub use xss_blind::blind_scanning;
 
 #[cfg(test)]
 mod tests {
@@ -279,7 +402,7 @@ mod tests {
             name: name.to_string(),
             value: "mock_value".to_string(),
             location,
-            injection_context: Some(InjectionContext::Html),
+            injection_context: Some(InjectionContext::Html(None)),
         });
     }
 
@@ -406,7 +529,7 @@ mod tests {
             name: "test_param".to_string(),
             value: "test_value".to_string(),
             location: Location::Query,
-            injection_context: Some(InjectionContext::Html),
+            injection_context: Some(InjectionContext::Html(None)),
         });
 
         let args = crate::cmd::scan::ScanArgs {
