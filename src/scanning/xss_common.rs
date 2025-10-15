@@ -90,7 +90,7 @@ mod tests {
             generate_dynamic_payloads(&InjectionContext::Html(Some(DelimiterType::Comment)));
         assert!(!payloads.is_empty());
         assert!(payloads.iter().any(|p| p.starts_with("-->")));
-        assert!(payloads.iter().any(|p| p.contains("<svg/onload=alert(1)>")));
+        assert!(payloads.iter().any(|p| p.contains("<svg onload=alert(1)>")));
     }
 
     #[test]
