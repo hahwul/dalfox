@@ -281,6 +281,82 @@ pub async fn run_scanning(
                 if let Some(ref opb) = overall_pb_clone {
                     opb.lock().await.inc(1);
                 }
+                if reflected && dom_payloads_clone.is_empty() {
+                    let should_add = if args_clone.deep_scan {
+                        true
+                    } else {
+                        let mut found = found_params_clone.lock().await;
+                        if !found.contains(&param_clone.name) {
+                            found.insert(param_clone.name.clone());
+                            true
+                        } else {
+                            false
+                        }
+                    };
+
+                    if should_add {
+                        // Build result URL with the reflected payload (no DOM verification available)
+                        let result_url =
+                            if param_clone.location == crate::parameter_analysis::Location::Query {
+                                let mut pairs: Vec<(String, String)> = target_clone
+                                    .url
+                                    .query_pairs()
+                                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                                    .collect();
+                                let mut found = false;
+                                for pair in &mut pairs {
+                                    if pair.0 == param_clone.name {
+                                        pair.1 = reflection_payload_clone.to_string();
+                                        found = true;
+                                        break;
+                                    }
+                                }
+                                if !found {
+                                    pairs.push((
+                                        param_clone.name.clone(),
+                                        reflection_payload_clone.to_string(),
+                                    ));
+                                }
+                                let query = form_urlencoded::Serializer::new(String::new())
+                                    .extend_pairs(&pairs)
+                                    .finish();
+                                let mut url = target_clone.url.clone();
+                                url.set_query(Some(&query));
+                                url.to_string()
+                            } else {
+                                target_clone.url.to_string()
+                            };
+
+                        // Record reflected XSS finding (fallback path)
+                        let mut result = crate::scanning::result::Result::new(
+                            "V".to_string(),
+                            "inHTML".to_string(),
+                            target_clone.method.clone(),
+                            result_url,
+                            param_clone.name.clone(),
+                            reflection_payload_clone.clone(),
+                            format!(
+                                "Reflected XSS detected for param {} (no DOM verification)",
+                                param_clone.name
+                            ),
+                            "CWE-79".to_string(),
+                            "High".to_string(),
+                            606,
+                            format!(
+                                "Triggered XSS Payload (reflected): {}={}",
+                                param_clone.name, reflection_payload_clone
+                            ),
+                        );
+                        result.request = Some(build_request_text(
+                            &target_clone,
+                            &param_clone,
+                            &reflection_payload_clone,
+                        ));
+                        result.response = None;
+
+                        results_clone.lock().await.push(result);
+                    }
+                }
                 if reflected {
                     for dom_payload in dom_payloads_clone {
                         let (dom_verified, response_text) = check_dom_verification(
