@@ -55,6 +55,7 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
             Some(DelimiterType::Comment) => {
                 for &payload in crate::payload::XSS_JAVASCRIPT_PAYLOADS.iter() {
                     payloads.push(format!("*/{}/*", payload));
+                    payloads.push(format!("\n{}", payload));
                 }
             }
             _ => {
@@ -161,6 +162,15 @@ mod tests {
         )));
         assert!(!payloads.is_empty());
         assert!(payloads.iter().any(|p| p.starts_with("\"")));
+    }
+
+    #[test]
+    fn test_generate_dynamic_payloads_javascript_comment() {
+        let payloads =
+            generate_dynamic_payloads(&InjectionContext::Javascript(Some(DelimiterType::Comment)));
+        assert!(!payloads.is_empty());
+        assert!(payloads.iter().any(|p| p.starts_with("*/")));
+        assert!(payloads.iter().any(|p| p.starts_with("\n")));
     }
 
     #[test]
