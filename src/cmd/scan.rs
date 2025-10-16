@@ -227,11 +227,6 @@ pub struct ScanArgs {
     pub only_custom_payload: bool,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Common XSS payloads only
-    #[arg(long, default_value = "true")]
-    pub fast_scan: bool,
-
-    #[clap(help_heading = "XSS SCANNING")]
     /// Skip XSS scanning entirely
     #[arg(long)]
     pub skip_xss_scanning: bool,

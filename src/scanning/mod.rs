@@ -36,10 +36,8 @@ fn get_fallback_reflection_payloads(
                 .iter()
                 .map(|s| s.to_string()),
         );
-        if !args.fast_scan {
-            if let Some(path) = &args.custom_payload {
-                base_payloads.extend(crate::scanning::xss_common::load_custom_payloads(path)?);
-            }
+        if let Some(path) = &args.custom_payload {
+            base_payloads.extend(crate::scanning::xss_common::load_custom_payloads(path)?);
         }
     }
 
@@ -125,13 +123,11 @@ fn get_dom_payloads(
                         .iter()
                         .map(|s| s.to_string()),
                 );
-                if !args.fast_scan {
-                    if let Some(path) = &args.custom_payload {
-                        base_payloads.extend(
-                            crate::scanning::xss_common::load_custom_payloads(path)
-                                .unwrap_or_else(|_| vec![]),
-                        );
-                    }
+                if let Some(path) = &args.custom_payload {
+                    base_payloads.extend(
+                        crate::scanning::xss_common::load_custom_payloads(path)
+                            .unwrap_or_else(|_| vec![]),
+                    );
                 }
             }
 
@@ -602,7 +598,6 @@ mod tests {
             blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
-            fast_scan: false,
             skip_xss_scanning: true,
             deep_scan: false,
             sxss: false,
@@ -661,7 +656,6 @@ mod tests {
             blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
-            fast_scan: false,
             skip_xss_scanning: true,
             deep_scan: false,
             sxss: false,
@@ -725,7 +719,6 @@ mod tests {
             blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
-            fast_scan: false,
             skip_xss_scanning: true,
             deep_scan: false,
             sxss: false,
@@ -780,7 +773,6 @@ mod tests {
             blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
-            fast_scan: false,
             skip_xss_scanning: true,
             deep_scan: false,
             sxss: false,

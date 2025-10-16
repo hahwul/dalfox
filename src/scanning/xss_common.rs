@@ -249,7 +249,6 @@ mod tests {
             blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
-            fast_scan: false,
             skip_xss_scanning: false,
             deep_scan: false,
             sxss: false,
@@ -309,7 +308,6 @@ mod tests {
             blind_callback_url: None,
             custom_payload: Some("test_payloads.txt".to_string()),
             only_custom_payload: true,
-            fast_scan: false,
             skip_xss_scanning: false,
             deep_scan: false,
             sxss: false,
@@ -362,7 +360,6 @@ mod tests {
             blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
-            fast_scan: false,
             skip_xss_scanning: false,
             deep_scan: false,
             sxss: false,
@@ -398,10 +395,8 @@ pub fn get_dynamic_payloads(
         }
     } else {
         base_payloads.extend(generate_dynamic_payloads(context));
-        if !args.fast_scan {
-            if let Some(path) = &args.custom_payload {
-                base_payloads.extend(load_custom_payloads(path)?);
-            }
+        if let Some(path) = &args.custom_payload {
+            base_payloads.extend(load_custom_payloads(path)?);
         }
     }
 
