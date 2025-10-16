@@ -91,6 +91,11 @@ pub struct ScanArgs {
     #[arg(long, default_value = "plain")]
     pub poc_type: String,
 
+    #[clap(help_heading = "OUTPUT")]
+    /// Limit the number of results to display. Example: --limit 10
+    #[arg(long)]
+    pub limit: Option<usize>,
+
     #[clap(help_heading = "TARGETS")]
     /// Specify parameter names to analyze (e.g., -p sort -p id:query). Types: query, body, json, cookie, header.
     #[arg(short = 'p', long)]
@@ -583,18 +588,21 @@ pub async fn run_scan(args: &ScanArgs) {
 
     // Output results
     let final_results = results.lock().await;
+    let limit = args.limit.unwrap_or(usize::MAX);
+    let display_results_len = std::cmp::min(final_results.len(), limit);
+    let display_results = &final_results[..display_results_len];
     let output_content = if args.format == "json" {
-        serde_json::to_string_pretty(&*final_results).unwrap()
+        serde_json::to_string_pretty(&display_results).unwrap()
     } else if args.format == "jsonl" {
         let mut output = String::new();
-        for result in &*final_results {
+        for result in display_results {
             output.push_str(&serde_json::to_string(&result).unwrap());
             output.push('\n');
         }
         output
     } else if args.format == "plain" {
         let mut output = String::new();
-        for result in &*final_results {
+        for result in display_results {
             output.push_str(&generate_poc(result, &args.poc_type));
             if args.poc_type == "plain" && !args.silence {
                 output.push_str(&format!("   \x1b[90mPayload: {}\x1b[0m\n", result.payload));
@@ -608,7 +616,7 @@ pub async fn run_scan(args: &ScanArgs) {
         output
     } else {
         let mut output = String::new();
-        for result in &*final_results {
+        for result in display_results {
             output.push_str(&format!(
                 "Found XSS: {} - {}\n",
                 result.param, result.payload
@@ -636,7 +644,7 @@ pub async fn run_scan(args: &ScanArgs) {
 
     // Include request/response if requested
     if args.include_request || args.include_response {
-        for result in &*final_results {
+        for result in display_results {
             if args.include_request {
                 if let Some(request) = &result.request {
                     println!("Request:\n{}", request);

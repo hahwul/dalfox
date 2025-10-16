@@ -76,6 +76,7 @@ async fn main() {
             include_response: false,
             silence: false,
             poc_type: "plain".to_string(),
+            limit: None,
             workers: 50,
             max_concurrent_targets: 50,
             max_targets_per_host: 100,
