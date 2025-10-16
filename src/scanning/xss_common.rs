@@ -91,7 +91,11 @@ mod tests {
             generate_dynamic_payloads(&InjectionContext::Html(Some(DelimiterType::Comment)));
         assert!(!payloads.is_empty());
         assert!(payloads.iter().any(|p| p.starts_with("-->")));
-        assert!(payloads.iter().any(|p| p.contains("<svg onload=alert(1)>")));
+        assert!(
+            payloads
+                .iter()
+                .any(|p| p.contains("<svg onload=alert(1) class=dalfox>"))
+        );
     }
 
     #[test]
@@ -116,7 +120,7 @@ mod tests {
         assert!(
             payloads
                 .iter()
-                .any(|p| p.contains("<img src=x onerror=alert(1)>"))
+                .any(|p| p.contains("<img src=x onerror=alert(1) class=dalfox>"))
         );
     }
 
@@ -143,7 +147,11 @@ mod tests {
         let payloads = generate_dynamic_payloads(&InjectionContext::Javascript(None));
         assert!(!payloads.is_empty());
         assert!(payloads.iter().any(|p| p == "javascript:alert(1)"));
-        assert!(payloads.iter().any(|p| p == "<script>alert(1)</script>"));
+        assert!(
+            payloads
+                .iter()
+                .any(|p| p == "<script>alert('dalfox')</script>")
+        );
     }
 
     #[test]
@@ -195,7 +203,11 @@ mod tests {
     fn test_generate_dynamic_payloads_html() {
         let payloads = generate_dynamic_payloads(&InjectionContext::Html(None));
         assert!(!payloads.is_empty());
-        assert!(payloads.iter().any(|p| p == "<img src=x onerror=alert(1)>"));
+        assert!(
+            payloads
+                .iter()
+                .any(|p| p == "<img src=x onerror=alert(1) class=dalfox>")
+        );
     }
 
     #[test]
@@ -247,7 +259,11 @@ mod tests {
         let payloads = get_dynamic_payloads(&context, &args).unwrap();
         assert!(!payloads.is_empty());
         // Check that original payloads are included
-        assert!(payloads.iter().any(|p| p == "<img src=x onerror=alert(1)>"));
+        assert!(
+            payloads
+                .iter()
+                .any(|p| p == "<img src=x onerror=alert(1) class=dalfox>")
+        );
         // Check encoded versions
         assert!(payloads.iter().any(|p| p.contains("%3Cimg")));
         assert!(payloads.iter().any(|p| p.contains("&#x")));
