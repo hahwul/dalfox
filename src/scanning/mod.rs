@@ -67,6 +67,113 @@ fn get_fallback_reflection_payloads(
     Ok(payloads)
 }
 
+fn get_dom_payloads(
+    param: &Param,
+    args: &ScanArgs,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    match &param.injection_context {
+        // JS context: reflection-only
+        Some(crate::parameter_analysis::InjectionContext::Javascript(_)) => Ok(vec![]),
+        // Known non-JS contexts: try dynamic payloads; if they fail or are empty, fallback to generated + encoders
+        Some(ctx) => match crate::scanning::xss_common::get_dynamic_payloads(ctx, args) {
+            Ok(v) if !v.is_empty() => Ok(v),
+            _ => {
+                let base_payloads = crate::scanning::xss_common::generate_dynamic_payloads(ctx);
+                let mut out = vec![];
+                for p in base_payloads {
+                    if args.encoders.contains(&"none".to_string()) {
+                        out.push(p.clone());
+                    } else {
+                        out.push(p.clone());
+                        if args.encoders.contains(&"url".to_string()) {
+                            out.push(crate::encoding::url_encode(&p));
+                        }
+                        if args.encoders.contains(&"html".to_string()) {
+                            out.push(crate::encoding::html_entity_encode(&p));
+                        }
+                        if args.encoders.contains(&"2url".to_string()) {
+                            out.push(crate::encoding::double_url_encode(&p));
+                        }
+                        if args.encoders.contains(&"base64".to_string()) {
+                            out.push(crate::encoding::base64_encode(&p));
+                        }
+                    }
+                }
+                Ok(out)
+            }
+        },
+        // Unknown context: use HTML + Attribute payloads (+ custom if provided), never error
+        None => {
+            let mut base_payloads = vec![];
+
+            if args.only_custom_payload {
+                if let Some(path) = &args.custom_payload {
+                    // Avoid erroring when custom payload file is missing
+                    base_payloads.extend(
+                        crate::scanning::xss_common::load_custom_payloads(path)
+                            .unwrap_or_else(|_| vec![]),
+                    );
+                }
+            } else {
+                base_payloads.extend(
+                    crate::payload::XSS_HTML_PAYLOADS
+                        .iter()
+                        .map(|s| s.to_string()),
+                );
+                base_payloads.extend(
+                    crate::payload::XSS_ATTRIBUTE_PAYLOADS
+                        .iter()
+                        .map(|s| s.to_string()),
+                );
+                if !args.fast_scan {
+                    if let Some(path) = &args.custom_payload {
+                        base_payloads.extend(
+                            crate::scanning::xss_common::load_custom_payloads(path)
+                                .unwrap_or_else(|_| vec![]),
+                        );
+                    }
+                }
+            }
+
+            // Ensure we always have DOM-capable payloads for non-JS contexts
+            if base_payloads.is_empty() {
+                base_payloads.extend(
+                    crate::payload::XSS_HTML_PAYLOADS
+                        .iter()
+                        .map(|s| s.to_string()),
+                );
+                base_payloads.extend(
+                    crate::payload::XSS_ATTRIBUTE_PAYLOADS
+                        .iter()
+                        .map(|s| s.to_string()),
+                );
+            }
+
+            let mut out = vec![];
+            for p in base_payloads {
+                if args.encoders.contains(&"none".to_string()) {
+                    out.push(p.clone());
+                } else {
+                    out.push(p.clone());
+                    if args.encoders.contains(&"url".to_string()) {
+                        out.push(crate::encoding::url_encode(&p));
+                    }
+                    if args.encoders.contains(&"html".to_string()) {
+                        out.push(crate::encoding::html_entity_encode(&p));
+                    }
+                    if args.encoders.contains(&"2url".to_string()) {
+                        out.push(crate::encoding::double_url_encode(&p));
+                    }
+                    if args.encoders.contains(&"base64".to_string()) {
+                        out.push(crate::encoding::base64_encode(&p));
+                    }
+                }
+            }
+            Ok(out)
+        }
+    }
+}
+
 fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
     let url = match param.location {
         crate::parameter_analysis::Location::Query => {
@@ -139,45 +246,7 @@ pub async fn run_scanning(
         } else {
             get_fallback_reflection_payloads(args.as_ref()).unwrap_or_else(|_| vec![])
         };
-        let dom_payloads = {
-            let mut base_payloads = vec![];
-            if args.only_custom_payload {
-                if let Some(path) = &args.custom_payload {
-                    base_payloads.extend(
-                        crate::scanning::xss_common::load_custom_payloads(path)
-                            .unwrap_or_else(|_| vec![]),
-                    );
-                }
-            } else {
-                if let Some(path) = &args.custom_payload {
-                    base_payloads.extend(
-                        crate::scanning::xss_common::load_custom_payloads(path)
-                            .unwrap_or_else(|_| vec![]),
-                    );
-                }
-            }
-            let mut out = vec![];
-            for p in base_payloads {
-                if args.encoders.contains(&"none".to_string()) {
-                    out.push(p.clone());
-                } else {
-                    out.push(p.clone());
-                    if args.encoders.contains(&"url".to_string()) {
-                        out.push(crate::encoding::url_encode(&p));
-                    }
-                    if args.encoders.contains(&"html".to_string()) {
-                        out.push(crate::encoding::html_entity_encode(&p));
-                    }
-                    if args.encoders.contains(&"2url".to_string()) {
-                        out.push(crate::encoding::double_url_encode(&p));
-                    }
-                    if args.encoders.contains(&"base64".to_string()) {
-                        out.push(crate::encoding::base64_encode(&p));
-                    }
-                }
-            }
-            out
-        };
+        let dom_payloads = get_dom_payloads(param, args.as_ref()).unwrap_or_else(|_| vec![]);
         total_tasks += reflection_payloads.len() as u64 * (1 + dom_payloads.len() as u64);
     }
 
@@ -197,14 +266,16 @@ pub async fn run_scanning(
         None
     };
 
-    let found_params = Arc::new(Mutex::new(HashSet::new()));
+    let found_reflection_params = Arc::new(Mutex::new(HashSet::new()));
+    let found_dom_params = Arc::new(Mutex::new(HashSet::new()));
 
     let mut handles = vec![];
 
     for param in &target.reflection_params {
-        let already_found = found_params.lock().await.contains(&param.name);
-        if already_found && !args.deep_scan {
-            // Skip further testing for this param if XSS already found and not deep scanning
+        let already_ref = found_reflection_params.lock().await.contains(&param.name);
+        let already_dom = found_dom_params.lock().await.contains(&param.name);
+        if (already_ref && already_dom) && !args.deep_scan {
+            // Skip further testing for this param if both Reflection and DOM results already found and not deep scanning
             continue;
         }
 
@@ -214,45 +285,7 @@ pub async fn run_scanning(
         } else {
             get_fallback_reflection_payloads(args.as_ref()).unwrap_or_else(|_| vec![])
         };
-        let dom_payloads = {
-            let mut base_payloads = vec![];
-            if args.only_custom_payload {
-                if let Some(path) = &args.custom_payload {
-                    base_payloads.extend(
-                        crate::scanning::xss_common::load_custom_payloads(path)
-                            .unwrap_or_else(|_| vec![]),
-                    );
-                }
-            } else {
-                if let Some(path) = &args.custom_payload {
-                    base_payloads.extend(
-                        crate::scanning::xss_common::load_custom_payloads(path)
-                            .unwrap_or_else(|_| vec![]),
-                    );
-                }
-            }
-            let mut out = vec![];
-            for p in base_payloads {
-                if args.encoders.contains(&"none".to_string()) {
-                    out.push(p.clone());
-                } else {
-                    out.push(p.clone());
-                    if args.encoders.contains(&"url".to_string()) {
-                        out.push(crate::encoding::url_encode(&p));
-                    }
-                    if args.encoders.contains(&"html".to_string()) {
-                        out.push(crate::encoding::html_entity_encode(&p));
-                    }
-                    if args.encoders.contains(&"2url".to_string()) {
-                        out.push(crate::encoding::double_url_encode(&p));
-                    }
-                    if args.encoders.contains(&"base64".to_string()) {
-                        out.push(crate::encoding::base64_encode(&p));
-                    }
-                }
-            }
-            out
-        };
+        let dom_payloads = get_dom_payloads(param, args.as_ref()).unwrap_or_else(|_| vec![]);
 
         for reflection_payload in reflection_payloads {
             let args_clone = args.clone();
@@ -263,29 +296,41 @@ pub async fn run_scanning(
             let dom_payloads_clone = dom_payloads.clone();
             let results_clone = results.clone();
             let pb_clone = pb.clone();
-            let found_params_clone = found_params.clone();
+            let found_reflection_params_clone = found_reflection_params.clone();
+            let found_dom_params_clone = found_dom_params.clone();
             let overall_pb_clone = overall_pb.clone();
 
             let handle = tokio::spawn(async move {
                 let _permit = semaphore_clone.acquire().await.unwrap();
-                let reflected = check_reflection(
-                    &target_clone,
-                    &param_clone,
-                    &reflection_payload_clone,
-                    &args_clone,
-                )
-                .await;
+                // Skip reflection if already found for this param
+                let reflected = {
+                    let already_found = found_reflection_params_clone
+                        .lock()
+                        .await
+                        .contains(&param_clone.name);
+                    if already_found {
+                        false
+                    } else {
+                        check_reflection(
+                            &target_clone,
+                            &param_clone,
+                            &reflection_payload_clone,
+                            &args_clone,
+                        )
+                        .await
+                    }
+                };
                 if let Some(ref pb) = pb_clone {
                     pb.inc(1);
                 }
                 if let Some(ref opb) = overall_pb_clone {
                     opb.lock().await.inc(1);
                 }
-                if reflected && dom_payloads_clone.is_empty() {
+                if reflected {
                     let should_add = if args_clone.deep_scan {
                         true
                     } else {
-                        let mut found = found_params_clone.lock().await;
+                        let mut found = found_reflection_params_clone.lock().await;
                         if !found.contains(&param_clone.name) {
                             found.insert(param_clone.name.clone());
                             true
@@ -329,21 +374,18 @@ pub async fn run_scanning(
 
                         // Record reflected XSS finding (fallback path)
                         let mut result = crate::scanning::result::Result::new(
-                            "V".to_string(),
+                            "R".to_string(),
                             "inHTML".to_string(),
                             target_clone.method.clone(),
                             result_url,
                             param_clone.name.clone(),
                             reflection_payload_clone.clone(),
-                            format!(
-                                "Reflected XSS detected for param {} (no DOM verification)",
-                                param_clone.name
-                            ),
+                            format!("Reflected XSS detected for param {}", param_clone.name),
                             "CWE-79".to_string(),
                             "High".to_string(),
                             606,
                             format!(
-                                "Triggered XSS Payload (reflected): {}={}",
+                                "[R] Triggered XSS Payload (reflected): {}={}",
                                 param_clone.name, reflection_payload_clone
                             ),
                         );
@@ -357,8 +399,22 @@ pub async fn run_scanning(
                         results_clone.lock().await.push(result);
                     }
                 }
-                if reflected {
+                {
                     for dom_payload in dom_payloads_clone {
+                        // Skip DOM verification if already found for this param
+                        let already_dom_found = found_dom_params_clone
+                            .lock()
+                            .await
+                            .contains(&param_clone.name);
+                        if already_dom_found {
+                            if let Some(ref pb) = pb_clone {
+                                pb.inc(1);
+                            }
+                            if let Some(ref opb) = overall_pb_clone {
+                                opb.lock().await.inc(1);
+                            }
+                            continue;
+                        }
                         let (dom_verified, response_text) = check_dom_verification(
                             &target_clone,
                             &param_clone,
@@ -370,7 +426,7 @@ pub async fn run_scanning(
                             let should_add = if args_clone.deep_scan {
                                 true
                             } else {
-                                let mut found = found_params_clone.lock().await;
+                                let mut found = found_dom_params_clone.lock().await;
                                 if !found.contains(&param_clone.name) {
                                     found.insert(param_clone.name.clone());
                                     true
@@ -414,7 +470,7 @@ pub async fn run_scanning(
                                 };
 
                                 let mut result = crate::scanning::result::Result::new(
-                                    "V".to_string(),
+                                    "V".to_string(), // DOM-verified => Vulnerability
                                     "inHTML".to_string(),
                                     target_clone.method.clone(),
                                     result_url,
@@ -440,6 +496,7 @@ pub async fn run_scanning(
                                 result.response = response_text;
 
                                 results_clone.lock().await.push(result);
+                                break;
                             }
                         }
                         if let Some(ref pb) = pb_clone {

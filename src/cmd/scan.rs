@@ -12,8 +12,8 @@ use crate::target_parser::*;
 fn generate_poc(result: &crate::scanning::result::Result, poc_type: &str) -> String {
     match poc_type {
         "plain" => format!(
-            "[POC][V][{}][{}] {}\n",
-            result.method, result.inject_type, result.data
+            "[POC][{}][{}][{}] {}\n",
+            result.result_type, result.method, result.inject_type, result.data
         ),
         "curl" => format!("curl -X {} \"{}\"\n", result.method, result.data),
         "httpie" => format!(
@@ -29,8 +29,8 @@ fn generate_poc(result: &crate::scanning::result::Result, poc_type: &str) -> Str
             }
         }
         _ => format!(
-            "[POC][V][{}][{}] {}\n",
-            result.method, result.inject_type, result.data
+            "[POC][{}][{}][{}] {}\n",
+            result.result_type, result.method, result.inject_type, result.data
         ),
     }
 }
