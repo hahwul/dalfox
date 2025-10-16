@@ -501,6 +501,11 @@ pub async fn run_scan(args: &ScanArgs) {
     let mut group_handles = vec![];
 
     for (host, group) in host_groups {
+        if let Some(lim) = args.limit {
+            if results.lock().await.len() >= lim {
+                break;
+            }
+        }
         let global_semaphore_clone = global_semaphore.clone();
         let multi_pb_clone = multi_pb.clone();
         let args_arc = Arc::new(args.clone());
@@ -543,6 +548,11 @@ pub async fn run_scan(args: &ScanArgs) {
             let mut target_handles = vec![];
 
             for target in group {
+                if let Some(lim) = args_arc.limit {
+                    if results_clone.lock().await.len() >= lim {
+                        break;
+                    }
+                }
                 let permit = global_semaphore_clone
                     .clone()
                     .acquire_owned()
@@ -584,6 +594,11 @@ pub async fn run_scan(args: &ScanArgs) {
 
     for handle in group_handles {
         handle.await.unwrap();
+        if let Some(lim) = args.limit {
+            if results.lock().await.len() >= lim {
+                break;
+            }
+        }
     }
 
     // Output results

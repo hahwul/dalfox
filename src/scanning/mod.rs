@@ -236,6 +236,7 @@ pub async fn run_scanning(
     overall_pb: Option<Arc<Mutex<indicatif::ProgressBar>>>,
 ) {
     let semaphore = Arc::new(Semaphore::new(if args.sxss { 1 } else { target.workers }));
+    let limit = args.limit;
 
     // Calculate total tasks by summing payloads for each param
     let mut total_tasks = 0u64;
@@ -278,6 +279,15 @@ pub async fn run_scanning(
             // Skip further testing for this param if both Reflection and DOM results already found and not deep scanning
             continue;
         }
+        // Early stop if global limit reached
+        if let Some(lim) = limit {
+            if results.lock().await.len() >= lim {
+                if let Some(ref pb) = pb {
+                    pb.finish_with_message(format!("Completed scanning {}", target.url));
+                }
+                return;
+            }
+        }
 
         let reflection_payloads = if let Some(context) = &param.injection_context {
             crate::scanning::xss_common::get_dynamic_payloads(context, args.as_ref())
@@ -301,6 +311,12 @@ pub async fn run_scanning(
             let overall_pb_clone = overall_pb.clone();
 
             let handle = tokio::spawn(async move {
+                // Early stop if global limit reached
+                if let Some(lim) = args_clone.limit {
+                    if results_clone.lock().await.len() >= lim {
+                        return;
+                    }
+                }
                 let _permit = semaphore_clone.acquire().await.unwrap();
                 // Skip reflection if already found for this param
                 let reflected = {
@@ -401,6 +417,12 @@ pub async fn run_scanning(
                 }
                 {
                     for dom_payload in dom_payloads_clone {
+                        // Early stop if global limit reached
+                        if let Some(lim) = args_clone.limit {
+                            if results_clone.lock().await.len() >= lim {
+                                break;
+                            }
+                        }
                         // Skip DOM verification if already found for this param
                         let already_dom_found = found_dom_params_clone
                             .lock()
