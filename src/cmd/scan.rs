@@ -1,9 +1,12 @@
 use clap::Args;
 use indicatif::MultiProgress;
+use reqwest::header::CONTENT_TYPE;
+use reqwest::{Client, redirect::Policy};
 use std::fs;
 use std::io::{self, Read};
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::time::Duration;
 use tokio::sync::Mutex;
 use urlencoding;
 
@@ -129,6 +132,75 @@ fn extract_context(response: &str, payload: &str) -> Option<(usize, String)> {
         }
     }
     None
+}
+
+fn is_allowed_content_type(ct: &str) -> bool {
+    let ct_l = ct.to_ascii_lowercase();
+    let deny = [
+        "application/json",
+        "application/javascript",
+        "text/javascript",
+        "text/plain",
+        "text/css",
+        "image/jpeg",
+        "image/png",
+        "image/bmp",
+        "image/gif",
+        "application/rss+xml",
+    ];
+    for n in deny.iter() {
+        if ct_l.contains(n) {
+            return false;
+        }
+    }
+    true
+}
+
+async fn preflight_content_type(
+    target: &crate::target_parser::Target,
+    args: &ScanArgs,
+) -> Option<String> {
+    let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
+    if let Some(proxy_url) = &target.proxy {
+        if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
+            client_builder = client_builder.proxy(proxy);
+        }
+    }
+    if args.follow_redirects {
+        client_builder = client_builder.redirect(Policy::limited(10));
+    } else {
+        client_builder = client_builder.redirect(Policy::none());
+    }
+    let client = client_builder.build().ok()?;
+
+    let mut request_builder = client.get(target.url.clone());
+    for (k, v) in &target.headers {
+        request_builder = request_builder.header(k, v);
+    }
+    if let Some(ua) = &target.user_agent {
+        if !ua.is_empty() {
+            request_builder = request_builder.header("User-Agent", ua);
+        }
+    }
+    if !target.cookies.is_empty() {
+        let mut cookie_header = String::new();
+        for (ck, cv) in &target.cookies {
+            cookie_header.push_str(&format!("{}={}; ", ck, cv));
+        }
+        if !cookie_header.is_empty() {
+            cookie_header.pop();
+            cookie_header.pop();
+            request_builder = request_builder.header("Cookie", cookie_header);
+        }
+    }
+    if target.delay > 0 {
+        tokio::time::sleep(Duration::from_millis(target.delay)).await;
+    }
+    let resp = request_builder.send().await.ok()?;
+    resp.headers()
+        .get(CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .map(|s| s.to_string())
 }
 
 #[derive(Clone, Args)]
@@ -571,6 +643,20 @@ pub async fn run_scan(args: &ScanArgs) {
             group.truncate(args.max_targets_per_host);
         }
         for target in group {
+            // Preflight Content-Type check (skip denylisted types unless deep-scan)
+            if !args.deep_scan {
+                if let Some(ct) = preflight_content_type(target, &args).await {
+                    if !is_allowed_content_type(&ct) {
+                        if !args.silence {
+                            eprintln!(
+                                "[preflight] Skipping {} due to denylisted Content-Type: {} (use --deep-scan to override)",
+                                target.url, ct
+                            );
+                        }
+                        continue;
+                    }
+                }
+            }
             analyze_parameters(target, &args, multi_pb.clone()).await;
         }
     }
