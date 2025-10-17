@@ -9,6 +9,7 @@ pub use mining::*;
 use crate::cmd::scan::ScanArgs;
 use crate::target_parser::Target;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use reqwest::Client;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
 
@@ -73,6 +74,236 @@ pub fn classify_special_chars(body: &str) -> (Vec<char>, Vec<char>) {
     (valid, invalid)
 }
 
+/// Return common encoded variants (HTML entities / numeric) for a character.
+/// Used to treat encoded reflection as still valid.
+pub fn encoded_variants(c: char) -> Vec<&'static str> {
+    match c {
+        '<' => vec!["&lt;", "&#60;"],
+        '>' => vec!["&gt;", "&#62;"],
+        '"' => vec!["&quot;", "&#34;"],
+        '\'' => vec!["&#39;", "&apos;"],
+        '(' => vec!["&#40;"],
+        ')' => vec!["&#41;"],
+        '{' => vec!["&#123;"],
+        '}' => vec!["&#125;"],
+        '[' => vec!["&#91;"],
+        ']' => vec!["&#93;"],
+        '`' => vec!["&#96;"],
+        '/' => vec!["&#47;"],
+        '\\' => vec!["&#92;"],
+        ';' => vec!["&#59;"],
+        '=' => vec!["&#61;"],
+        '|' => vec!["&#124;"],
+        '+' => vec!["&#43;"],
+        ',' => vec!["&#44;"],
+        '$' => vec!["&#36;"],
+        '-' => vec!["&#45;"],
+        '.' => vec!["&#46;"],
+        ':' => vec!["&#58;"],
+        _ => vec![],
+    }
+}
+
+/// Extract segment between first "dalfox" and subsequent "dlafox"
+fn extract_reflected_segment(body: &str) -> Option<&str> {
+    let start = body.find("dalfox")?;
+    let after = start + "dalfox".len();
+    let rest = &body[after..];
+    let end_rel = rest.find("dlafox")?;
+    Some(&rest[..end_rel])
+}
+
+/// Active probe for one parameter: send per-char payloads and classify specials.
+pub async fn active_probe_param(
+    target: &Target,
+    mut param: Param,
+    semaphore: Arc<Semaphore>,
+) -> Param {
+    let mut client_builder =
+        Client::builder().timeout(std::time::Duration::from_secs(target.timeout));
+    if let Some(proxy_url) = &target.proxy {
+        if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
+            client_builder = client_builder.proxy(proxy);
+        }
+    }
+    let client = client_builder.build().unwrap_or_else(|_| Client::new());
+
+    let mut handles = Vec::new();
+    let valid_specials = Arc::new(Mutex::new(Vec::<char>::new()));
+    let invalid_specials = Arc::new(Mutex::new(Vec::<char>::new()));
+
+    for &c in SPECIAL_PROBE_CHARS {
+        let sem_clone = semaphore.clone();
+        let client_clone = client.clone();
+        let method = target.method.clone();
+        let url_original = target.url.clone();
+        let headers = target.headers.clone();
+        let cookies = target.cookies.clone();
+        let user_agent = target.user_agent.clone();
+        let data = target.data.clone();
+        let param_name = param.name.clone();
+        let location = param.location.clone();
+
+        let valid_ref = valid_specials.clone();
+        let invalid_ref = invalid_specials.clone();
+
+        let handle = tokio::spawn(async move {
+            let _permit = sem_clone.acquire().await.unwrap();
+            let payload = format!("dalfox{}dlafox", c);
+            let req_method = method.parse().unwrap_or(reqwest::Method::GET);
+            let mut url = url_original.clone();
+            let mut request_builder;
+
+            match location {
+                Location::Query => {
+                    let mut new_pairs: Vec<(String, String)> = Vec::new();
+                    let mut replaced = false;
+                    for (k, v) in url_original.query_pairs() {
+                        if k == param_name {
+                            new_pairs.push((k.to_string(), payload.clone()));
+                            replaced = true;
+                        } else {
+                            new_pairs.push((k.to_string(), v.to_string()));
+                        }
+                    }
+                    if !replaced {
+                        new_pairs.push((param_name.clone(), payload.clone()));
+                    }
+                    url.query_pairs_mut().clear();
+                    for (k, v) in new_pairs {
+                        url.query_pairs_mut().append_pair(&k, &v);
+                    }
+                    request_builder = client_clone.request(req_method, url);
+                }
+                Location::Body => {
+                    let mut body_string;
+                    if let Some(d) = &data {
+                        let mut pairs: Vec<(String, String)> =
+                            url::form_urlencoded::parse(d.as_bytes())
+                                .map(|(k, v)| (k.to_string(), v.to_string()))
+                                .collect();
+                        let mut found = false;
+                        for (k, v) in &mut pairs {
+                            if *k == param_name {
+                                *v = payload.clone();
+                                found = true;
+                            }
+                        }
+                        if !found {
+                            pairs.push((param_name.clone(), payload.clone()));
+                        }
+                        body_string = url::form_urlencoded::Serializer::new(String::new())
+                            .extend_pairs(pairs)
+                            .finish();
+                    } else {
+                        body_string = format!("{}={}", param_name, payload);
+                    }
+                    request_builder = client_clone
+                        .request(req_method, url)
+                        .header("Content-Type", "application/x-www-form-urlencoded")
+                        .body(body_string);
+                }
+                Location::Header => {
+                    let is_cookie = cookies.iter().any(|(n, _)| n == &param_name);
+                    request_builder = client_clone.request(req_method, url);
+                    if is_cookie {
+                        let mut cookie_header = String::new();
+                        for (k, v) in &cookies {
+                            if k == &param_name {
+                                cookie_header.push_str(&format!("{}={}; ", k, payload));
+                            } else {
+                                cookie_header.push_str(&format!("{}={}; ", k, v));
+                            }
+                        }
+                        if !cookie_header.is_empty() {
+                            cookie_header.pop();
+                            cookie_header.pop();
+                            request_builder = request_builder.header("Cookie", cookie_header);
+                        }
+                    } else {
+                        for (k, v) in &headers {
+                            if k == &param_name {
+                                request_builder = request_builder.header(k, payload.clone());
+                            } else {
+                                request_builder = request_builder.header(k, v);
+                            }
+                        }
+                    }
+                }
+                Location::JsonBody => {
+                    // TODO: Implement JSON body probing
+                    invalid_ref.lock().await.push(c);
+                    return;
+                }
+            }
+
+            if let Some(ua) = &user_agent {
+                request_builder = request_builder.header("User-Agent", ua);
+            }
+            for (ck, cv) in &cookies {
+                if ck != &param_name {
+                    request_builder = request_builder.header("Cookie", format!("{}={}", ck, cv));
+                }
+            }
+            if let Some(d) = &data {
+                if matches!(location, Location::Query | Location::Header) {
+                    request_builder = request_builder.body(d.clone());
+                }
+            }
+
+            let reflected_ok = if let Ok(resp) = request_builder.send().await {
+                if let Ok(text) = resp.text().await {
+                    if let Some(segment) = extract_reflected_segment(&text) {
+                        if segment.contains(c) {
+                            true
+                        } else {
+                            let encs = encoded_variants(c);
+                            let mut found = false;
+                            for e in encs {
+                                if segment.contains(e) {
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if !found {
+                                let pct = format!("%{:02X}", c as u32);
+                                if segment.to_ascii_uppercase().contains(&pct) {
+                                    found = true;
+                                }
+                            }
+                            found
+                        }
+                    } else {
+                        false
+                    }
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            if reflected_ok {
+                valid_ref.lock().await.push(c);
+            } else {
+                invalid_ref.lock().await.push(c);
+            }
+        });
+        handles.push(handle);
+    }
+
+    for h in handles {
+        let _ = h.await;
+    }
+
+    let v = valid_specials.lock().await.clone();
+    let iv = invalid_specials.lock().await.clone();
+
+    param.valid_specials = Some(v);
+    param.invalid_specials = Some(iv);
+    param
+}
+
 pub async fn analyze_parameters(
     target: &mut Target,
     args: &ScanArgs,
@@ -107,6 +338,24 @@ pub async fn analyze_parameters(
         params = filter_params(params, &args.param, target);
     }
     target.reflection_params = params;
+    // Active special character probing (overwrite naive classification)
+    // Concurrent active probing per parameter
+    let probe_semaphore = Arc::new(Semaphore::new(target.workers));
+    let mut param_handles = Vec::new();
+    for p in target.reflection_params.clone() {
+        let target_ref = target.clone();
+        let sem = probe_semaphore.clone();
+        param_handles.push(tokio::spawn(async move {
+            active_probe_param(&target_ref, p, sem).await
+        }));
+    }
+    let mut probed = Vec::with_capacity(param_handles.len());
+    for h in param_handles {
+        if let Ok(res) = h.await {
+            probed.push(res);
+        }
+    }
+    target.reflection_params = probed;
 
     // Logging parameter analysis (stderr)
     if !args.silence {
