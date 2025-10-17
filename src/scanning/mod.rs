@@ -408,9 +408,17 @@ pub async fn run_scanning(
                                                 .collect()
                                         };
                                         if idx < segments.len() {
-                                            // Encode only spaces for readability (keep < and >)
-                                            let encoded =
-                                                reflection_payload_clone.replace(' ', "%20");
+                                            // Selective encoding for path visibility: encode space, '#', '?', '%'
+                                            let mut encoded = String::new();
+                                            for ch in reflection_payload_clone.chars() {
+                                                match ch {
+                                                    ' ' => encoded.push_str("%20"),
+                                                    '#' => encoded.push_str("%23"),
+                                                    '?' => encoded.push_str("%3F"),
+                                                    '%' => encoded.push_str("%25"),
+                                                    _ => encoded.push(ch),
+                                                }
+                                            }
                                             segments[idx] = encoded;
                                             let new_path = if segments.is_empty() {
                                                 "/".to_string()
@@ -544,7 +552,17 @@ pub async fn run_scanning(
                                                             .collect()
                                                     };
                                                 if idx < segments.len() {
-                                                    let encoded = dom_payload.replace(' ', "%20");
+                                                    // Selective encoding for path visibility: encode space, '#', '?', '%'
+                                                    let mut encoded = String::new();
+                                                    for ch in dom_payload.chars() {
+                                                        match ch {
+                                                            ' ' => encoded.push_str("%20"),
+                                                            '#' => encoded.push_str("%23"),
+                                                            '?' => encoded.push_str("%3F"),
+                                                            '%' => encoded.push_str("%25"),
+                                                            _ => encoded.push(ch),
+                                                        }
+                                                    }
                                                     segments[idx] = encoded;
                                                     let new_path = if segments.is_empty() {
                                                         "/".to_string()

@@ -3,34 +3,80 @@ use indicatif::MultiProgress;
 use std::fs;
 use std::io::{self, Read};
 use std::sync::Arc;
+use std::sync::OnceLock;
 use tokio::sync::Mutex;
 use urlencoding;
 
+use crate::encoding::{base64_encode, double_url_encode, html_entity_encode, url_encode};
 use crate::parameter_analysis::analyze_parameters;
 use crate::scanning::result::Result;
 use crate::target_parser::*;
 
+static GLOBAL_ENCODERS: OnceLock<Vec<String>> = OnceLock::new();
+
 fn generate_poc(result: &crate::scanning::result::Result, poc_type: &str) -> String {
-    // Derive an attack URL embedding the payload explicitly for path/query contexts.
-    // result.data is already the mutated URL produced during scanning, but we
-    // defensively ensure the payload is present (especially for future locations).
+    // Helper: selective path encoding (space, #, ?, % only) to keep exploit chars visible.
+    fn selective_path_encode(s: &str) -> String {
+        let mut out = String::with_capacity(s.len() * 3);
+        for ch in s.chars() {
+            match ch {
+                ' ' => out.push_str("%20"),
+                '#' => out.push_str("%23"),
+                '?' => out.push_str("%3F"),
+                '%' => out.push_str("%25"),
+                _ => out.push(ch),
+            }
+        }
+        out
+    }
+
+    // Apply user-specified encoders (highest precedence first) to path payload if requested.
+    // We only transform the payload portion inside the path (if any); query/body already handled upstream.
+    fn apply_path_encoders_if_requested(raw_payload: &str) -> String {
+        let encoders = GLOBAL_ENCODERS.get();
+        if encoders.is_none() {
+            return selective_path_encode(raw_payload);
+        }
+        let encs = encoders.unwrap();
+        // Priority order: explicit user order (stop at first transforming encoder that is not 'none')
+        for enc in encs {
+            match enc.as_str() {
+                "none" => continue,
+                "url" => return url_encode(raw_payload),
+                "2url" => return double_url_encode(raw_payload),
+                "html" => return html_entity_encode(raw_payload),
+                "base64" => return base64_encode(raw_payload),
+                _ => {}
+            }
+        }
+        // Fallback to selective path encode
+        selective_path_encode(raw_payload)
+    }
+
     let attack_url = {
         let mut url = result.data.clone();
-        // If it's a query param and missing (very unlikely), append it.
         if result.param.starts_with("path_segment_") {
-            // Already embedded in path when created; optionally percent-encode spaces only (keeps < > visible)
-            // Ensure spaces are %20 (in case future code changes)
+            // Determine if payload (raw or already selectively encoded) is present
+            let sel = selective_path_encode(&result.payload);
+            let transformed = apply_path_encoders_if_requested(&result.payload);
             if url.contains(&result.payload) {
-                url = url.replace(' ', "%20");
-            } else if url.contains(&result.payload.replace(' ', "%20")) {
-                // already encoded form present
+                // Replace raw with transformed (which might be url/html/base64 etc.)
+                url = url.replace(&result.payload, &transformed);
+            } else if url.contains(&sel) {
+                // Already selectively encoded; consider upgrading if user asked for stronger encoding
+                if sel != transformed {
+                    url = url.replace(&sel, &transformed);
+                }
             } else {
-                // Fallback: do nothing; original url stands
+                // Payload not visible (unexpected) – append as synthetic segment
+                if !url.ends_with('/') {
+                    url.push('/');
+                }
+                url.push_str(&transformed);
             }
         } else if url.contains('?') {
-            // Query param injection likely already serialized. Nothing to do.
+            // Query mutation already embedded
         } else {
-            // If neither path nor query shows payload, append as synthetic query for visibility
             if !url.contains(&result.payload) {
                 let sep = if url.contains('?') { '&' } else { '?' };
                 url = format!(
@@ -289,6 +335,10 @@ pub struct ScanArgs {
 }
 
 pub async fn run_scan(args: &ScanArgs) {
+    // Initialize global encoders once for downstream POC/path handling
+    if GLOBAL_ENCODERS.get().is_none() {
+        let _ = GLOBAL_ENCODERS.set(args.encoders.clone());
+    }
     let input_type = if args.input_type == "auto" {
         if args.targets.is_empty() {
             if !args.silence {
