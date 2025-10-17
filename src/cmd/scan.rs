@@ -335,6 +335,10 @@ pub struct ScanArgs {
 }
 
 pub async fn run_scan(args: &ScanArgs) {
+    let __dalfox_scan_start = std::time::Instant::now();
+    if !args.silence {
+        eprintln!("Scan started (elapsed: 0.000 s)");
+    }
     // Initialize global encoders once for downstream POC/path handling
     if GLOBAL_ENCODERS.get().is_none() {
         let _ = GLOBAL_ENCODERS.set(args.encoders.clone());
@@ -748,5 +752,9 @@ pub async fn run_scan(args: &ScanArgs) {
             }
             println!("---");
         }
+    }
+    if !args.silence {
+        let __dalfox_elapsed = __dalfox_scan_start.elapsed().as_secs_f64();
+        eprintln!("Scan completed in {:.3} seconds", __dalfox_elapsed);
     }
 }
