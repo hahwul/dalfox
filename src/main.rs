@@ -15,6 +15,30 @@ mod target_parser;
 #[command(
     override_usage = "dalfox [COMMAND] [TARGET] <FLAGS>\ne.g., dalfox scan https://dalfox.hahwul.com"
 )]
+#[command(help_template = r#"
+
+               ░█▒
+             ████     ▓
+           ▓█████  ▓██▓
+          ████████████         ░
+        ░███████████▓          ▓░
+     ░████████████████        ▒██░
+    ▓██████████▒███████     ░█████▓░
+   ██████████████░ ████        █▓
+ ░█████▓          ░████▒       ░         Dalfox v{version}
+ █████               ▓██░
+ ████                  ▓██      Powerful open-source XSS scanner
+ ███▓        ▓███████▓▒▓█░     and utility focused on automation.
+ ███▒      █████
+ ▓███     ██████
+ ████     ██████▒
+ ░████    ████████▒
+
+Usage: {usage}
+
+{all-args}
+{subcommands}
+"#)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
