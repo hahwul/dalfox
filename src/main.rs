@@ -12,6 +12,9 @@ mod target_parser;
 #[command(name = "dalfox")]
 #[command(about = "Powerful open-source XSS scanner")]
 #[command(version, short_flag = 'V')]
+#[command(
+    override_usage = "dalfox [COMMAND] [TARGET] <FLAGS>\ne.g., dalfox scan https://dalfox.hahwul.com"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
