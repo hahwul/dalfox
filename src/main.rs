@@ -37,7 +37,6 @@ mod target_parser;
 Usage: {usage}
 
 {all-args}
-{subcommands}
 "#)]
 struct Cli {
     #[command(subcommand)]
