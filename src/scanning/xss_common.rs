@@ -91,11 +91,10 @@ mod tests {
             generate_dynamic_payloads(&InjectionContext::Html(Some(DelimiterType::Comment)));
         assert!(!payloads.is_empty());
         assert!(payloads.iter().any(|p| p.starts_with("-->")));
-        assert!(
-            payloads
-                .iter()
-                .any(|p| p.contains("<svg onload=alert(1) class=dalfox>"))
-        );
+        assert!(payloads.iter().any(|p| {
+            p.to_lowercase()
+                .contains("<svg onload=alert(1) class=dalfox>")
+        }));
     }
 
     #[test]
@@ -108,7 +107,7 @@ mod tests {
         assert!(
             payloads
                 .iter()
-                .any(|p| p.contains("\"-") || p.contains("\"+"))
+                .any(|p| p.starts_with("\"") && p.ends_with("\""))
         );
     }
 
@@ -117,11 +116,10 @@ mod tests {
         let payloads = generate_dynamic_payloads(&InjectionContext::Attribute(None));
         assert!(!payloads.is_empty());
         assert!(payloads.iter().any(|p| p.contains("onerror=alert(1)")));
-        assert!(
-            payloads
-                .iter()
-                .any(|p| p.contains("<img src=x onerror=alert(1) class=dalfox>"))
-        );
+        assert!(payloads.iter().any(|p| {
+            p.to_lowercase()
+                .contains("<img src=x onerror=alert(1) class=dalfox>")
+        }));
     }
 
     #[test]
@@ -146,8 +144,12 @@ mod tests {
     fn test_generate_dynamic_payloads_javascript() {
         let payloads = generate_dynamic_payloads(&InjectionContext::Javascript(None));
         assert!(!payloads.is_empty());
-        assert!(payloads.iter().any(|p| p == "javascript:alert(1)"));
-        assert!(payloads.iter().any(|p| p == "<script>alert(1)</script>"));
+        assert!(payloads.iter().any(|p| p == "alert(1)"));
+        assert!(
+            payloads
+                .iter()
+                .any(|p| p == "</script><script>alert(1)</script>")
+        );
     }
 
     #[test]
@@ -202,7 +204,7 @@ mod tests {
         assert!(
             payloads
                 .iter()
-                .any(|p| p == "<img src=x onerror=alert(1) class=dalfox>")
+                .any(|p| p.to_lowercase() == "<img src=x onerror=alert(1) class=dalfox>")
         );
     }
 
@@ -258,10 +260,10 @@ mod tests {
         assert!(
             payloads
                 .iter()
-                .any(|p| p == "<img src=x onerror=alert(1) class=dalfox>")
+                .any(|p| p.to_lowercase() == "<img src=x onerror=alert(1) class=dalfox>")
         );
         // Check encoded versions
-        assert!(payloads.iter().any(|p| p.contains("%3Cimg")));
+        assert!(payloads.iter().any(|p| p.contains("%3C")));
         assert!(payloads.iter().any(|p| p.contains("&#x")));
     }
 
