@@ -7,13 +7,16 @@ pub use discovery::*;
 pub use mining::*;
 
 use crate::cmd::scan::ScanArgs;
+use crate::encoding::{base64_encode, double_url_encode, html_entity_encode, url_encode};
 use crate::target_parser::Target;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use reqwest::Client;
+use serde::{Deserialize, Serialize};
+use serde_json::{self, Value};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Location {
     Query,
     Body,
@@ -21,29 +24,32 @@ pub enum Location {
     Header,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DelimiterType {
     SingleQuote,
     DoubleQuote,
     Comment,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum InjectionContext {
     Html(Option<DelimiterType>),
     Javascript(Option<DelimiterType>),
     Attribute(Option<DelimiterType>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Param {
     pub name: String,
     pub value: String,
     pub location: Location,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub injection_context: Option<InjectionContext>,
     // Special characters that were confirmed reflected unchanged for this parameter
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub valid_specials: Option<Vec<char>>,
     // Special characters that appear to be filtered, encoded, or not reflected
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub invalid_specials: Option<Vec<char>>,
 }
 
@@ -118,6 +124,7 @@ pub async fn active_probe_param(
     target: &Target,
     mut param: Param,
     semaphore: Arc<Semaphore>,
+    encoders: Vec<String>,
 ) -> Param {
     let mut client_builder =
         Client::builder().timeout(std::time::Duration::from_secs(target.timeout));
@@ -147,6 +154,7 @@ pub async fn active_probe_param(
         let valid_ref = valid_specials.clone();
         let invalid_ref = invalid_specials.clone();
 
+        let encoders_clone = encoders.clone();
         let handle = tokio::spawn(async move {
             let _permit = sem_clone.acquire().await.unwrap();
             let payload = format!("dalfox{}dlafox", c);
@@ -231,18 +239,51 @@ pub async fn active_probe_param(
                     }
                 }
                 Location::JsonBody => {
-                    // TODO: Implement JSON body probing
-                    invalid_ref.lock().await.push(c);
-                    return;
+                    // Attempt JSON body mutation
+                    let mut json_value_opt: Option<Value> = None;
+                    if let Some(d) = &data {
+                        if let Ok(parsed) = serde_json::from_str::<Value>(d) {
+                            json_value_opt = Some(parsed);
+                        }
+                    }
+                    let mut root =
+                        json_value_opt.unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+                    if let Value::Object(ref mut map) = root {
+                        map.insert(param_name.clone(), Value::String(payload.clone()));
+                    } else {
+                        // If existing body isn't an object, wrap it
+                        let mut map = serde_json::Map::new();
+                        map.insert(param_name.clone(), Value::String(payload.clone()));
+                        root = Value::Object(map);
+                    }
+                    let body_string = serde_json::to_string(&root)
+                        .unwrap_or_else(|_| format!("{{\"{}\":\"{}\"}}", param_name, payload));
+                    request_builder = client_clone
+                        .request(req_method, url)
+                        .header("Content-Type", "application/json")
+                        .body(body_string);
                 }
             }
 
             if let Some(ua) = &user_agent {
                 request_builder = request_builder.header("User-Agent", ua);
             }
-            for (ck, cv) in &cookies {
-                if ck != &param_name {
-                    request_builder = request_builder.header("Cookie", format!("{}={}", ck, cv));
+            // Aggregate cookies into a single Cookie header to avoid duplicates
+            let is_cookie_param =
+                location == Location::Header && cookies.iter().any(|(n, _)| n == &param_name);
+            if !is_cookie_param && !cookies.is_empty() {
+                let mut cookie_header = String::new();
+                for (ck, cv) in &cookies {
+                    // Skip the probed cookie param itself (already injected above if applicable)
+                    if ck == &param_name && location == Location::Header {
+                        continue;
+                    }
+                    cookie_header.push_str(&format!("{}={}; ", ck, cv));
+                }
+                if !cookie_header.is_empty() {
+                    cookie_header.pop();
+                    cookie_header.pop();
+                    request_builder = request_builder.header("Cookie", cookie_header);
                 }
             }
             if let Some(d) = &data {
@@ -286,7 +327,178 @@ pub async fn active_probe_param(
             if reflected_ok {
                 valid_ref.lock().await.push(c);
             } else {
-                invalid_ref.lock().await.push(c);
+                // Dynamic fallback probing using user-specified encoders
+                // Iterate through encoders from args.encoders (passed in) except "none"
+                let mut alt_reflected = false;
+                let priorities = ["url", "html", "2url", "base64"];
+                let mut ordered: Vec<String> = Vec::new();
+                for p in priorities.iter() {
+                    if encoders_clone.iter().any(|e| e == p) {
+                        ordered.push(p.to_string());
+                    }
+                }
+                for enc in ordered {
+                    let encoded_piece = match enc.as_str() {
+                        "url" => url_encode(&c.to_string()),
+                        "html" => html_entity_encode(&c.to_string()),
+                        "2url" => double_url_encode(&c.to_string()),
+                        "base64" => base64_encode(&c.to_string()),
+                        _ => continue,
+                    };
+                    let payload_enc = format!("dalfox{}dlafox", encoded_piece);
+                    let req_method2 = method.parse().unwrap_or(reqwest::Method::GET);
+                    let mut url2 = url_original.clone();
+                    let mut request_builder2;
+                    match location {
+                        Location::Query => {
+                            let mut new_pairs: Vec<(String, String)> = Vec::new();
+                            let mut replaced = false;
+                            for (k, v) in url_original.query_pairs() {
+                                if k == param_name {
+                                    new_pairs.push((k.to_string(), payload_enc.clone()));
+                                    replaced = true;
+                                } else {
+                                    new_pairs.push((k.to_string(), v.to_string()));
+                                }
+                            }
+                            if !replaced {
+                                new_pairs.push((param_name.clone(), payload_enc.clone()));
+                            }
+                            url2.query_pairs_mut().clear();
+                            for (k, v) in new_pairs {
+                                url2.query_pairs_mut().append_pair(&k, &v);
+                            }
+                            request_builder2 = client_clone.request(req_method2, url2);
+                        }
+                        Location::Body => {
+                            let mut body_string;
+                            if let Some(d) = &data {
+                                let mut pairs: Vec<(String, String)> =
+                                    url::form_urlencoded::parse(d.as_bytes())
+                                        .map(|(k, v)| (k.to_string(), v.to_string()))
+                                        .collect();
+                                let mut found = false;
+                                for (k, v) in &mut pairs {
+                                    if *k == param_name {
+                                        *v = payload_enc.clone();
+                                        found = true;
+                                    }
+                                }
+                                if !found {
+                                    pairs.push((param_name.clone(), payload_enc.clone()));
+                                }
+                                body_string = url::form_urlencoded::Serializer::new(String::new())
+                                    .extend_pairs(pairs)
+                                    .finish();
+                            } else {
+                                body_string = format!("{}={}", param_name, payload_enc);
+                            }
+                            request_builder2 = client_clone
+                                .request(req_method2, url2)
+                                .header("Content-Type", "application/x-www-form-urlencoded")
+                                .body(body_string);
+                        }
+                        Location::Header => {
+                            let is_cookie = cookies.iter().any(|(n, _)| n == &param_name);
+                            request_builder2 = client_clone.request(req_method2, url2);
+                            if is_cookie {
+                                let mut cookie_header = String::new();
+                                for (k, v) in &cookies {
+                                    if k == &param_name {
+                                        cookie_header.push_str(&format!("{}={}; ", k, payload_enc));
+                                    } else {
+                                        cookie_header.push_str(&format!("{}={}; ", k, v));
+                                    }
+                                }
+                                if !cookie_header.is_empty() {
+                                    cookie_header.pop();
+                                    cookie_header.pop();
+                                    request_builder2 =
+                                        request_builder2.header("Cookie", cookie_header);
+                                }
+                            } else {
+                                for (k, v) in &headers {
+                                    if k == &param_name {
+                                        request_builder2 =
+                                            request_builder2.header(k, payload_enc.clone());
+                                    } else {
+                                        request_builder2 = request_builder2.header(k, v);
+                                    }
+                                }
+                            }
+                        }
+                        Location::JsonBody => {
+                            // JSON fallback probing
+                            let mut json_value_opt: Option<Value> = None;
+                            if let Some(d) = &data {
+                                if let Ok(parsed) = serde_json::from_str::<Value>(d) {
+                                    json_value_opt = Some(parsed);
+                                }
+                            }
+                            let mut root = json_value_opt
+                                .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+                            if let Value::Object(ref mut map) = root {
+                                map.insert(param_name.clone(), Value::String(payload_enc.clone()));
+                            } else {
+                                let mut map = serde_json::Map::new();
+                                map.insert(param_name.clone(), Value::String(payload_enc.clone()));
+                                root = Value::Object(map);
+                            }
+                            let body_string = serde_json::to_string(&root).unwrap_or_else(|_| {
+                                format!("{{\"{}\":\"{}\"}}", param_name, payload_enc)
+                            });
+                            request_builder2 = client_clone
+                                .request(req_method2, url2)
+                                .header("Content-Type", "application/json")
+                                .body(body_string);
+                        }
+                    }
+                    if let Some(ua) = &user_agent {
+                        request_builder2 = request_builder2.header("User-Agent", ua);
+                    }
+                    // Aggregate cookies once (skip if probing a cookie param already set above)
+                    let is_cookie_param = location == Location::Header
+                        && cookies.iter().any(|(n, _)| n == &param_name);
+                    if !is_cookie_param && !cookies.is_empty() {
+                        let mut cookie_header = String::new();
+                        for (ck, cv) in &cookies {
+                            if ck == &param_name && location == Location::Header {
+                                continue;
+                            }
+                            cookie_header.push_str(&format!("{}={}; ", ck, cv));
+                        }
+                        if !cookie_header.is_empty() {
+                            cookie_header.pop();
+                            cookie_header.pop();
+                            request_builder2 = request_builder2.header("Cookie", cookie_header);
+                        }
+                    }
+                    if let Some(d) = &data {
+                        if matches!(location, Location::Query | Location::Header) {
+                            request_builder2 = request_builder2.body(d.clone());
+                        }
+                    }
+                    if let Ok(resp2) = request_builder2.send().await {
+                        if let Ok(text2) = resp2.text().await {
+                            if let Some(segment2) = extract_reflected_segment(&text2) {
+                                if segment2.contains(c)
+                                    || segment2.contains(&encoded_piece)
+                                    || segment2
+                                        .to_ascii_uppercase()
+                                        .contains(&format!("%{:02X}", c as u32))
+                                {
+                                    alt_reflected = true;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                }
+                if alt_reflected {
+                    valid_ref.lock().await.push(c);
+                } else {
+                    invalid_ref.lock().await.push(c);
+                }
             }
         });
         handles.push(handle);
@@ -345,8 +557,9 @@ pub async fn analyze_parameters(
     for p in target.reflection_params.clone() {
         let target_ref = target.clone();
         let sem = probe_semaphore.clone();
+        let encoders_clone = args.encoders.clone();
         param_handles.push(tokio::spawn(async move {
-            active_probe_param(&target_ref, p, sem).await
+            active_probe_param(&target_ref, p, sem, encoders_clone).await
         }));
     }
     let mut probed = Vec::with_capacity(param_handles.len());
