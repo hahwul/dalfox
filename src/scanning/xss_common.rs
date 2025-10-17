@@ -15,22 +15,18 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
             match delimiter_type {
                 Some(DelimiterType::SingleQuote) => {
                     for payload in html_payloads.iter() {
-                        payloads.push(format!("'-{}-'", payload));
-                        payloads.push(format!("'+{}+'", payload));
+                        payloads.push(format!("'>{}'", payload));
                     }
                     for payload in attr_payloads.iter() {
-                        payloads.push(format!("'-{}-'", payload));
-                        payloads.push(format!("'+{}+'", payload));
+                        payloads.push(format!("' {} a='", payload));
                     }
                 }
                 Some(DelimiterType::DoubleQuote) => {
                     for payload in html_payloads.iter() {
-                        payloads.push(format!("\"-{}-\"", payload));
-                        payloads.push(format!("\"+{}+\"", payload));
+                        payloads.push(format!("\">{}\"", payload));
                     }
                     for payload in attr_payloads.iter() {
-                        payloads.push(format!("\"-{}-\"", payload));
-                        payloads.push(format!("\"+{}+\"", payload));
+                        payloads.push(format!("\" {} \"", payload));
                     }
                 }
                 _ => {
@@ -63,8 +59,7 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
                     // Base payload
                     payloads.push(payload.to_string());
                     // Augmented wrappers for broader execution contexts
-                    payloads.push(format!("javascript:{}", payload));
-                    payloads.push(format!("<script>{}</script>", payload));
+                    payloads.push(format!("</script><script>{}</script>", payload));
                 }
             }
         },
