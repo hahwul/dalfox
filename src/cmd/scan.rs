@@ -4,33 +4,64 @@ use std::fs;
 use std::io::{self, Read};
 use std::sync::Arc;
 use tokio::sync::Mutex;
+use urlencoding;
 
 use crate::parameter_analysis::analyze_parameters;
 use crate::scanning::result::Result;
 use crate::target_parser::*;
 
 fn generate_poc(result: &crate::scanning::result::Result, poc_type: &str) -> String {
+    // Derive an attack URL embedding the payload explicitly for path/query contexts.
+    // result.data is already the mutated URL produced during scanning, but we
+    // defensively ensure the payload is present (especially for future locations).
+    let attack_url = {
+        let mut url = result.data.clone();
+        // If it's a query param and missing (very unlikely), append it.
+        if result.param.starts_with("path_segment_") {
+            // Already embedded in path when created; optionally percent-encode spaces only (keeps < > visible)
+            // Ensure spaces are %20 (in case future code changes)
+            if url.contains(&result.payload) {
+                url = url.replace(' ', "%20");
+            } else if url.contains(&result.payload.replace(' ', "%20")) {
+                // already encoded form present
+            } else {
+                // Fallback: do nothing; original url stands
+            }
+        } else if url.contains('?') {
+            // Query param injection likely already serialized. Nothing to do.
+        } else {
+            // If neither path nor query shows payload, append as synthetic query for visibility
+            if !url.contains(&result.payload) {
+                let sep = if url.contains('?') { '&' } else { '?' };
+                url = format!(
+                    "{}{}{}={}",
+                    url,
+                    sep,
+                    result.param,
+                    urlencoding::encode(&result.payload)
+                );
+            }
+        }
+        url
+    };
+
     match poc_type {
         "plain" => format!(
             "[POC][{}][{}][{}] {}\n",
-            result.result_type, result.method, result.inject_type, result.data
+            result.result_type, result.method, result.inject_type, attack_url
         ),
-        "curl" => format!("curl -X {} \"{}\"\n", result.method, result.data),
-        "httpie" => format!(
-            "http {} \"{}\"\n",
-            result.method.to_lowercase(),
-            result.data
-        ),
+        "curl" => format!("curl -X {} \"{}\"\n", result.method, attack_url),
+        "httpie" => format!("http {} \"{}\"\n", result.method.to_lowercase(), attack_url),
         "http-request" => {
             if let Some(request) = &result.request {
                 format!("{}\n", request)
             } else {
-                format!("{}\n", result.data)
+                format!("{}\n", attack_url)
             }
         }
         _ => format!(
             "[POC][{}][{}][{}] {}\n",
-            result.result_type, result.method, result.inject_type, result.data
+            result.result_type, result.method, result.inject_type, attack_url
         ),
     }
 }
