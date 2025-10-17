@@ -9,36 +9,36 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
     let mut payloads = Vec::new();
 
     match context {
-        InjectionContext::Attribute(delimiter_type) => match delimiter_type {
-            Some(DelimiterType::SingleQuote) => {
-                for &payload in crate::payload::XSS_HTML_PAYLOADS.iter() {
-                    payloads.push(format!("'-{}-'", payload));
-                    payloads.push(format!("'+{}+'", payload));
+        InjectionContext::Attribute(delimiter_type) => {
+            let html_payloads = crate::payload::get_dynamic_xss_html_payloads();
+            let attr_payloads = crate::payload::get_dynamic_xss_attribute_payloads();
+            match delimiter_type {
+                Some(DelimiterType::SingleQuote) => {
+                    for payload in html_payloads.iter() {
+                        payloads.push(format!("'-{}-'", payload));
+                        payloads.push(format!("'+{}+'", payload));
+                    }
+                    for payload in attr_payloads.iter() {
+                        payloads.push(format!("'-{}-'", payload));
+                        payloads.push(format!("'+{}+'", payload));
+                    }
                 }
-                for &payload in crate::payload::XSS_ATTRIBUTE_PAYLOADS.iter() {
-                    payloads.push(format!("'-{}-'", payload));
-                    payloads.push(format!("'+{}+'", payload));
+                Some(DelimiterType::DoubleQuote) => {
+                    for payload in html_payloads.iter() {
+                        payloads.push(format!("\"-{}-\"", payload));
+                        payloads.push(format!("\"+{}+\"", payload));
+                    }
+                    for payload in attr_payloads.iter() {
+                        payloads.push(format!("\"-{}-\"", payload));
+                        payloads.push(format!("\"+{}+\"", payload));
+                    }
+                }
+                _ => {
+                    payloads.extend(html_payloads.into_iter());
+                    payloads.extend(attr_payloads.into_iter());
                 }
             }
-            Some(DelimiterType::DoubleQuote) => {
-                for &payload in crate::payload::XSS_HTML_PAYLOADS.iter() {
-                    payloads.push(format!("\"-{}-\"", payload));
-                    payloads.push(format!("\"+{}+\"", payload));
-                }
-                for &payload in crate::payload::XSS_ATTRIBUTE_PAYLOADS.iter() {
-                    payloads.push(format!("\"-{}-\"", payload));
-                    payloads.push(format!("\"+{}+\"", payload));
-                }
-            }
-            _ => {
-                for &payload in crate::payload::XSS_HTML_PAYLOADS.iter() {
-                    payloads.push(payload.to_string());
-                }
-                for &payload in crate::payload::XSS_ATTRIBUTE_PAYLOADS.iter() {
-                    payloads.push(payload.to_string());
-                }
-            }
-        },
+        }
         InjectionContext::Javascript(delimiter_type) => match delimiter_type {
             Some(DelimiterType::SingleQuote) => {
                 for &payload in crate::payload::XSS_JAVASCRIPT_PAYLOADS.iter() {
@@ -60,22 +60,27 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
             }
             _ => {
                 for &payload in crate::payload::XSS_JAVASCRIPT_PAYLOADS.iter() {
+                    // Base payload
                     payloads.push(payload.to_string());
+                    // Augmented wrappers for broader execution contexts
+                    payloads.push(format!("javascript:{}", payload));
+                    payloads.push(format!("<script>{}</script>", payload));
                 }
             }
         },
-        InjectionContext::Html(delimiter_type) => match delimiter_type {
-            Some(DelimiterType::Comment) => {
-                for &payload in crate::payload::XSS_HTML_PAYLOADS.iter() {
-                    payloads.push(format!("-->{}<!--", payload));
+        InjectionContext::Html(delimiter_type) => {
+            let html_payloads = crate::payload::get_dynamic_xss_html_payloads();
+            match delimiter_type {
+                Some(DelimiterType::Comment) => {
+                    for payload in html_payloads.iter() {
+                        payloads.push(format!("-->{}<!--", payload));
+                    }
+                }
+                _ => {
+                    payloads.extend(html_payloads.into_iter());
                 }
             }
-            _ => {
-                for &payload in crate::payload::XSS_HTML_PAYLOADS.iter() {
-                    payloads.push(payload.to_string());
-                }
-            }
-        },
+        }
     }
 
     payloads
@@ -147,11 +152,7 @@ mod tests {
         let payloads = generate_dynamic_payloads(&InjectionContext::Javascript(None));
         assert!(!payloads.is_empty());
         assert!(payloads.iter().any(|p| p == "javascript:alert(1)"));
-        assert!(
-            payloads
-                .iter()
-                .any(|p| p == "<script>alert('dalfox')</script>")
-        );
+        assert!(payloads.iter().any(|p| p == "<script>alert(1)</script>"));
     }
 
     #[test]

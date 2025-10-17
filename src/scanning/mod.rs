@@ -31,11 +31,7 @@ fn get_fallback_reflection_payloads(
                 .iter()
                 .map(|s| s.to_string()),
         );
-        base_payloads.extend(
-            crate::payload::XSS_HTML_PAYLOADS
-                .iter()
-                .map(|s| s.to_string()),
-        );
+        base_payloads.extend(crate::payload::get_dynamic_xss_html_payloads());
         if let Some(path) = &args.custom_payload {
             base_payloads.extend(crate::scanning::xss_common::load_custom_payloads(path)?);
         }
@@ -113,16 +109,8 @@ fn get_dom_payloads(
                     );
                 }
             } else {
-                base_payloads.extend(
-                    crate::payload::XSS_HTML_PAYLOADS
-                        .iter()
-                        .map(|s| s.to_string()),
-                );
-                base_payloads.extend(
-                    crate::payload::XSS_ATTRIBUTE_PAYLOADS
-                        .iter()
-                        .map(|s| s.to_string()),
-                );
+                base_payloads.extend(crate::payload::get_dynamic_xss_html_payloads());
+                base_payloads.extend(crate::payload::get_dynamic_xss_attribute_payloads());
                 if let Some(path) = &args.custom_payload {
                     base_payloads.extend(
                         crate::scanning::xss_common::load_custom_payloads(path)
@@ -133,16 +121,8 @@ fn get_dom_payloads(
 
             // Ensure we always have DOM-capable payloads for non-JS contexts
             if base_payloads.is_empty() {
-                base_payloads.extend(
-                    crate::payload::XSS_HTML_PAYLOADS
-                        .iter()
-                        .map(|s| s.to_string()),
-                );
-                base_payloads.extend(
-                    crate::payload::XSS_ATTRIBUTE_PAYLOADS
-                        .iter()
-                        .map(|s| s.to_string()),
-                );
+                base_payloads.extend(crate::payload::get_dynamic_xss_html_payloads());
+                base_payloads.extend(crate::payload::get_dynamic_xss_attribute_payloads());
             }
 
             let mut out = vec![];
