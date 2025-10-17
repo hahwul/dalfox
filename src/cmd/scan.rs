@@ -135,25 +135,64 @@ fn extract_context(response: &str, payload: &str) -> Option<(usize, String)> {
 }
 
 fn is_allowed_content_type(ct: &str) -> bool {
-    let ct_l = ct.to_ascii_lowercase();
-    let deny = [
-        "application/json",
-        "application/javascript",
-        "text/javascript",
-        "text/plain",
-        "text/css",
-        "image/jpeg",
-        "image/png",
-        "image/bmp",
-        "image/gif",
-        "application/rss+xml",
-    ];
-    for n in deny.iter() {
-        if ct_l.contains(n) {
-            return false;
-        }
+    if ct.trim().is_empty() {
+        return false;
     }
-    true
+    static DENY_SET: OnceLock<std::collections::HashSet<&'static str>> = OnceLock::new();
+    let deny_set = DENY_SET.get_or_init(|| {
+        std::collections::HashSet::from([
+            "application/json",
+            "application/javascript",
+            "text/javascript",
+            "text/plain",
+            "text/css",
+            "image/jpeg",
+            "image/png",
+            "image/bmp",
+            "image/gif",
+            "application/rss+xml",
+        ])
+    });
+    let primary = ct
+        .split(';')
+        .next()
+        .unwrap_or(ct)
+        .trim()
+        .to_ascii_lowercase();
+    // Validate MIME type format: must be type/subtype with both non-empty
+    let mut parts = primary.splitn(2, '/');
+    let typ = parts.next().unwrap_or("");
+    let sub = parts.next().unwrap_or("");
+    if typ.is_empty() || sub.is_empty() {
+        return false;
+    }
+    !deny_set.contains(primary.as_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::is_allowed_content_type;
+
+    #[test]
+    fn test_allowed_content_types() {
+        assert!(is_allowed_content_type("text/html"));
+        assert!(is_allowed_content_type("text/html; charset=utf-8"));
+        assert!(is_allowed_content_type("application/xml"));
+    }
+
+    #[test]
+    fn test_denied_content_types() {
+        assert!(!is_allowed_content_type("application/json"));
+        assert!(!is_allowed_content_type("text/plain"));
+        assert!(!is_allowed_content_type("image/png"));
+    }
+
+    #[test]
+    fn test_edge_cases() {
+        assert!(!is_allowed_content_type(""));
+        assert!(!is_allowed_content_type("invalid"));
+        assert!(!is_allowed_content_type("application/json; charset=utf-8"));
+    }
 }
 
 async fn preflight_content_type(
