@@ -726,7 +726,7 @@ mod tests {
     #[test]
     fn test_analyze_parameters_skip_mining() {
         let mut target = parse_target("https://example.com").unwrap();
-        let args = ScanArgs {
+        let _args = ScanArgs {
             input_type: "auto".to_string(),
             format: "json".to_string(),
             targets: vec!["https://example.com".to_string()],
@@ -778,7 +778,7 @@ mod tests {
     #[test]
     fn test_probe_body_params_mock() {
         let mut target = parse_target("https://example.com").unwrap();
-        let args = ScanArgs {
+        let _args = ScanArgs {
             input_type: "auto".to_string(),
             format: "json".to_string(),
             targets: vec!["https://example.com".to_string()],

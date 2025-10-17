@@ -6,7 +6,7 @@ use indicatif::ProgressBar;
 use reqwest::Client;
 use scraper;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{Duration, sleep};
 use url::form_urlencoded;
@@ -16,7 +16,6 @@ const EWMA_START_VALUE: f64 = 0.0;
 const COLLAPSE_EWMA_THRESHOLD: f64 = 0.85; // if sustained EWMA reflection ratio >= 85%
 const COLLAPSE_MIN_ATTEMPTS: usize = 15; // need at least this many attempts before collapsing
 const COLLAPSE_MIN_REFLECTIONS: usize = 5; // and at least this many reflections
-const MAX_SAMPLED_REFLECTIONS_AFTER_COLLAPSE: usize = 1; // keep a single synthetic 'any'
 
 #[derive(Debug)]
 struct MiningSampleStats {
@@ -255,17 +254,29 @@ pub async fn probe_dictionary_params(
                                 st.collapsed = true;
                                 // Collapse existing discovered params into single synthetic 'any'
                                 let mut guard = reflection_params_clone.lock().await;
+                                let preserved = guard.first().cloned();
                                 guard.clear();
-                                guard.push(Param {
-                                    name: "any".to_string(),
-                                    value: "dalfox".to_string(),
-                                    location: crate::parameter_analysis::Location::Query,
-                                    injection_context: Some(
-                                        crate::parameter_analysis::InjectionContext::Html(None),
-                                    ),
-                                    valid_specials: None,
-                                    invalid_specials: None,
-                                });
+                                if let Some(orig) = preserved {
+                                    guard.push(Param {
+                                        name: "any".to_string(),
+                                        value: orig.value.clone(),
+                                        location: crate::parameter_analysis::Location::Query,
+                                        injection_context: orig.injection_context.clone(),
+                                        valid_specials: orig.valid_specials.clone(),
+                                        invalid_specials: orig.invalid_specials.clone(),
+                                    });
+                                } else {
+                                    guard.push(Param {
+                                        name: "any".to_string(),
+                                        value: "dalfox".to_string(),
+                                        location: crate::parameter_analysis::Location::Query,
+                                        injection_context: Some(
+                                            crate::parameter_analysis::InjectionContext::Html(None),
+                                        ),
+                                        valid_specials: None,
+                                        invalid_specials: None,
+                                    });
+                                }
                                 if !silence {
                                     eprintln!(
                                         "[mining-collapse] High reflection EWMA {:.2} after {} attempts ({} reflections) -> collapsing to single 'any' param",
@@ -411,17 +422,31 @@ pub async fn probe_body_params(
                                 }
                                 if st.should_collapse() {
                                     st.collapsed = true;
+                                    let preserved = guard.first().cloned();
                                     guard.clear();
-                                    guard.push(Param {
-                                        name: "any".to_string(),
-                                        value: "dalfox".to_string(),
-                                        location: Location::Body,
-                                        injection_context: Some(
-                                            crate::parameter_analysis::InjectionContext::Html(None),
-                                        ),
-                                        valid_specials: None,
-                                        invalid_specials: None,
-                                    });
+                                    if let Some(orig) = preserved {
+                                        guard.push(Param {
+                                            name: "any".to_string(),
+                                            value: orig.value.clone(),
+                                            location: Location::Body,
+                                            injection_context: orig.injection_context.clone(),
+                                            valid_specials: orig.valid_specials.clone(),
+                                            invalid_specials: orig.invalid_specials.clone(),
+                                        });
+                                    } else {
+                                        guard.push(Param {
+                                            name: "any".to_string(),
+                                            value: "dalfox".to_string(),
+                                            location: Location::Body,
+                                            injection_context: Some(
+                                                crate::parameter_analysis::InjectionContext::Html(
+                                                    None,
+                                                ),
+                                            ),
+                                            valid_specials: None,
+                                            invalid_specials: None,
+                                        });
+                                    }
                                     if !silence {
                                         eprintln!(
                                             "[mining-collapse] Body mining collapsed at EWMA {:.2} after {} attempts",
@@ -585,19 +610,32 @@ pub async fn probe_response_id_params(
                                     }
                                     if st.should_collapse() {
                                         st.collapsed = true;
+                                        let preserved = guard.first().cloned();
                                         guard.clear();
-                                        guard.push(Param {
-                                            name: "any".to_string(),
-                                            value: "dalfox".to_string(),
-                                            location: crate::parameter_analysis::Location::Query,
-                                            injection_context: Some(
-                                                crate::parameter_analysis::InjectionContext::Html(
-                                                    None,
+                                        if let Some(orig) = preserved {
+                                            guard.push(Param {
+                                                name: "any".to_string(),
+                                                value: orig.value.clone(),
+                                                location:
+                                                    crate::parameter_analysis::Location::Query,
+                                                injection_context: orig.injection_context.clone(),
+                                                valid_specials: orig.valid_specials.clone(),
+                                                invalid_specials: orig.invalid_specials.clone(),
+                                            });
+                                        } else {
+                                            guard.push(Param {
+                                                name: "any".to_string(),
+                                                value: "dalfox".to_string(),
+                                                location: crate::parameter_analysis::Location::Query,
+                                                injection_context: Some(
+                                                    crate::parameter_analysis::InjectionContext::Html(
+                                                        None,
+                                                    ),
                                                 ),
-                                            ),
-                                            valid_specials: None,
-                                            invalid_specials: None,
-                                        });
+                                                valid_specials: None,
+                                                invalid_specials: None,
+                                            });
+                                        }
                                         if !silence {
                                             eprintln!(
                                                 "[mining-collapse] DOM mining collapsed at EWMA {:.2} after {} attempts",
