@@ -23,9 +23,14 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Scan targets for XSS
     Scan(cmd::scan::ScanArgs),
+    /// Run API/server mode
     Server(cmd::server::ServerArgs),
+    /// Manage or enumerate payloads
     Payload(cmd::payload::PayloadArgs),
+    /// Print current dalfox version
+    Version(cmd::version::VersionArgs),
     #[clap(hide = true)]
     Url(cmd::url::UrlArgs),
     #[clap(hide = true)]
@@ -43,6 +48,7 @@ async fn main() {
             Commands::Scan(args) => cmd::scan::run_scan(&args).await,
             Commands::Server(args) => cmd::server::run_server(args),
             Commands::Payload(args) => cmd::payload::run_payload(args),
+            Commands::Version(args) => cmd::version::run_version(args),
             Commands::Url(args) => cmd::url::run_url(args).await,
             Commands::File(args) => cmd::file::run_file(args).await,
             Commands::Pipe(args) => cmd::pipe::run_pipe(args).await,
