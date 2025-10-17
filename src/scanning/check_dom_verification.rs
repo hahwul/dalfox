@@ -11,6 +11,9 @@ pub async fn check_dom_verification(
     payload: &str,
     args: &crate::cmd::scan::ScanArgs,
 ) -> (bool, Option<String>) {
+    if args.skip_xss_scanning {
+        return (false, None);
+    }
     let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
     if let Some(proxy_url) = &target.proxy {
         if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {

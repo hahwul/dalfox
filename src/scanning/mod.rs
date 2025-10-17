@@ -239,6 +239,10 @@ pub async fn run_scanning(
     multi_pb: Option<Arc<MultiProgress>>,
     overall_pb: Option<Arc<Mutex<indicatif::ProgressBar>>>,
 ) {
+    // Short-circuit scanning when skip_xss_scanning is enabled (e.g., in unit tests)
+    if args.skip_xss_scanning {
+        return;
+    }
     let semaphore = Arc::new(Semaphore::new(if args.sxss { 1 } else { target.workers }));
     let limit = args.limit;
 
