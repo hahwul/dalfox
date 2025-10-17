@@ -6,9 +6,57 @@ use indicatif::ProgressBar;
 use reqwest::Client;
 use scraper;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{Duration, sleep};
 use url::form_urlencoded;
+
+const EWMA_ALPHA: f64 = 0.30; // smoothing factor for exponential weighted moving average
+const EWMA_START_VALUE: f64 = 0.0;
+const COLLAPSE_EWMA_THRESHOLD: f64 = 0.85; // if sustained EWMA reflection ratio >= 85%
+const COLLAPSE_MIN_ATTEMPTS: usize = 15; // need at least this many attempts before collapsing
+const COLLAPSE_MIN_REFLECTIONS: usize = 5; // and at least this many reflections
+const MAX_SAMPLED_REFLECTIONS_AFTER_COLLAPSE: usize = 1; // keep a single synthetic 'any'
+
+#[derive(Debug)]
+struct MiningSampleStats {
+    attempts: usize,
+    reflections: usize,
+    ewma_ratio: f64,
+    collapsed: bool,
+}
+
+impl MiningSampleStats {
+    fn new() -> Self {
+        Self {
+            attempts: 0,
+            reflections: 0,
+            ewma_ratio: EWMA_START_VALUE,
+            collapsed: false,
+        }
+    }
+    fn record_attempt(&mut self) {
+        self.attempts += 1;
+    }
+    fn record_reflection(&mut self) {
+        self.reflections += 1;
+        let instant = 1.0; // this attempt reflected
+        self.update_ewma(instant);
+    }
+    fn record_non_reflection(&mut self) {
+        let instant = 0.0;
+        self.update_ewma(instant);
+    }
+    fn update_ewma(&mut self, instant: f64) {
+        self.ewma_ratio = EWMA_ALPHA * instant + (1.0 - EWMA_ALPHA) * self.ewma_ratio;
+    }
+    fn should_collapse(&self) -> bool {
+        !self.collapsed
+            && self.attempts >= COLLAPSE_MIN_ATTEMPTS
+            && self.reflections >= COLLAPSE_MIN_REFLECTIONS
+            && self.ewma_ratio >= COLLAPSE_EWMA_THRESHOLD
+    }
+}
 
 pub fn detect_injection_context(text: &str) -> InjectionContext {
     let dalfox_pos = match text.find("dalfox") {
@@ -127,8 +175,18 @@ pub async fn probe_dictionary_params(
 
     let mut handles: Vec<tokio::task::JoinHandle<()>> = vec![];
 
+    // Adaptive sampling stats (EWMA-based)
+    let stats = Arc::new(Mutex::new(MiningSampleStats::new()));
+
     // Check for additional valid parameters
     for param in params {
+        // Collapse check (after previous updates possibly set collapsed)
+        {
+            let st = stats.lock().await;
+            if st.collapsed {
+                break;
+            }
+        }
         let existing = reflection_params
             .lock()
             .await
@@ -150,6 +208,7 @@ pub async fn probe_dictionary_params(
         let semaphore_clone = semaphore.clone();
         let param = param.clone();
         let pb_clone = pb.clone();
+        let stats_clone = stats.clone();
 
         let handle = tokio::spawn(async move {
             let permit = semaphore_clone.acquire().await.unwrap();
@@ -169,22 +228,54 @@ pub async fn probe_dictionary_params(
             }
             if let Ok(resp) = request.send().await {
                 if let Ok(text) = resp.text().await {
+                    let mut st = stats_clone.lock().await;
+                    st.record_attempt();
                     if text.contains("dalfox") {
-                        let context = detect_injection_context(&text);
-                        let (valid, invalid) =
-                            crate::parameter_analysis::classify_special_chars(&text);
-                        let param_struct = Param {
-                            name: param.clone(),
-                            value: "dalfox".to_string(),
-                            location: crate::parameter_analysis::Location::Query,
-                            injection_context: Some(context),
-                            valid_specials: Some(valid),
-                            invalid_specials: Some(invalid),
-                        };
-                        reflection_params_clone.lock().await.push(param_struct);
-                        if !silence {
-                            eprintln!("Discovered parameter: {}", param);
+                        st.record_reflection();
+                        if !st.collapsed {
+                            let context = detect_injection_context(&text);
+                            let (valid, invalid) =
+                                crate::parameter_analysis::classify_special_chars(&text);
+                            let param_struct = Param {
+                                name: param.clone(),
+                                value: "dalfox".to_string(),
+                                location: crate::parameter_analysis::Location::Query,
+                                injection_context: Some(context),
+                                valid_specials: Some(valid),
+                                invalid_specials: Some(invalid),
+                            };
+                            reflection_params_clone.lock().await.push(param_struct);
+                            if !silence {
+                                eprintln!(
+                                    "Discovered parameter: {} (EWMA {:.2}, {}/{})",
+                                    param, st.ewma_ratio, st.reflections, st.attempts
+                                );
+                            }
+                            if st.should_collapse() {
+                                st.collapsed = true;
+                                // Collapse existing discovered params into single synthetic 'any'
+                                let mut guard = reflection_params_clone.lock().await;
+                                guard.clear();
+                                guard.push(Param {
+                                    name: "any".to_string(),
+                                    value: "dalfox".to_string(),
+                                    location: crate::parameter_analysis::Location::Query,
+                                    injection_context: Some(
+                                        crate::parameter_analysis::InjectionContext::Html(None),
+                                    ),
+                                    valid_specials: None,
+                                    invalid_specials: None,
+                                });
+                                if !silence {
+                                    eprintln!(
+                                        "[mining-collapse] High reflection EWMA {:.2} after {} attempts ({} reflections) -> collapsing to single 'any' param",
+                                        st.ewma_ratio, st.attempts, st.reflections
+                                    );
+                                }
+                            }
                         }
+                    } else {
+                        st.record_non_reflection();
                     }
                 }
             }
@@ -232,8 +323,16 @@ pub async fn probe_body_params(
         }
 
         let mut handles: Vec<tokio::task::JoinHandle<()>> = vec![];
+        let stats = Arc::new(Mutex::new(MiningSampleStats::new()));
 
         for (param_name, _) in params {
+            // Sampling stop for body parameters
+            {
+                let st = stats.lock().await;
+                if st.collapsed {
+                    break;
+                }
+            }
             let existing = reflection_params
                 .lock()
                 .await
@@ -266,6 +365,7 @@ pub async fn probe_body_params(
             let semaphore_clone = semaphore.clone();
             let param_name = param_name.clone();
             let pb_clone = pb.clone();
+            let stats_clone = stats.clone();
 
             let handle = tokio::spawn(async move {
                 let permit = semaphore_clone.acquire().await.unwrap();
@@ -285,22 +385,53 @@ pub async fn probe_body_params(
 
                 if let Ok(resp) = request.send().await {
                     if let Ok(text) = resp.text().await {
+                        let mut st = stats_clone.lock().await;
+                        st.record_attempt();
                         if text.contains("dalfox") {
-                            let context = detect_injection_context(&text);
-                            let (valid, invalid) =
-                                crate::parameter_analysis::classify_special_chars(&text);
-                            let param = Param {
-                                name: param_name.clone(),
-                                value: "dalfox".to_string(),
-                                location: Location::Body,
-                                injection_context: Some(context),
-                                valid_specials: Some(valid),
-                                invalid_specials: Some(invalid),
-                            };
-                            reflection_params_clone.lock().await.push(param);
-                            if !silence {
-                                eprintln!("Discovered parameter: {}", param_name);
+                            st.record_reflection();
+                            if !st.collapsed {
+                                let context = detect_injection_context(&text);
+                                let (valid, invalid) =
+                                    crate::parameter_analysis::classify_special_chars(&text);
+                                let param = Param {
+                                    name: param_name.clone(),
+                                    value: "dalfox".to_string(),
+                                    location: Location::Body,
+                                    injection_context: Some(context),
+                                    valid_specials: Some(valid),
+                                    invalid_specials: Some(invalid),
+                                };
+                                let mut guard = reflection_params_clone.lock().await;
+                                guard.push(param);
+                                if !silence {
+                                    eprintln!(
+                                        "Discovered body param: {} (EWMA {:.2}, {}/{})",
+                                        param_name, st.ewma_ratio, st.reflections, st.attempts
+                                    );
+                                }
+                                if st.should_collapse() {
+                                    st.collapsed = true;
+                                    guard.clear();
+                                    guard.push(Param {
+                                        name: "any".to_string(),
+                                        value: "dalfox".to_string(),
+                                        location: Location::Body,
+                                        injection_context: Some(
+                                            crate::parameter_analysis::InjectionContext::Html(None),
+                                        ),
+                                        valid_specials: None,
+                                        invalid_specials: None,
+                                    });
+                                    if !silence {
+                                        eprintln!(
+                                            "[mining-collapse] Body mining collapsed at EWMA {:.2} after {} attempts",
+                                            st.ewma_ratio, st.attempts
+                                        );
+                                    }
+                                }
                             }
+                        } else {
+                            st.record_non_reflection();
                         }
                     }
                 }
@@ -377,9 +508,16 @@ pub async fn probe_response_id_params(
             }
 
             let mut handles: Vec<tokio::task::JoinHandle<()>> = vec![];
+            let stats = Arc::new(Mutex::new(MiningSampleStats::new()));
 
             // Check each param for reflection
             for param in params_to_check {
+                {
+                    let st = stats.lock().await;
+                    if st.collapsed {
+                        break;
+                    }
+                }
                 let existing = reflection_params
                     .lock()
                     .await
@@ -401,6 +539,7 @@ pub async fn probe_response_id_params(
                 let semaphore_clone = semaphore.clone();
                 let param = param.clone();
                 let pb_clone = pb.clone();
+                let stats_clone = stats.clone();
 
                 let handle = tokio::spawn(async move {
                     let permit = semaphore_clone.acquire().await.unwrap();
@@ -420,22 +559,55 @@ pub async fn probe_response_id_params(
                     }
                     if let Ok(resp) = request.send().await {
                         if let Ok(text) = resp.text().await {
+                            let mut st = stats_clone.lock().await;
+                            st.record_attempt();
                             if text.contains("dalfox") {
-                                let context = detect_injection_context(&text);
-                                let (valid, invalid) =
-                                    crate::parameter_analysis::classify_special_chars(&text);
-                                let param_struct = Param {
-                                    name: param.clone(),
-                                    value: "dalfox".to_string(),
-                                    location: crate::parameter_analysis::Location::Query,
-                                    injection_context: Some(context),
-                                    valid_specials: Some(valid),
-                                    invalid_specials: Some(invalid),
-                                };
-                                reflection_params_clone.lock().await.push(param_struct);
-                                if !silence {
-                                    eprintln!("Discovered parameter: {}", param);
+                                st.record_reflection();
+                                if !st.collapsed {
+                                    let context = detect_injection_context(&text);
+                                    let (valid, invalid) =
+                                        crate::parameter_analysis::classify_special_chars(&text);
+                                    let param_struct = Param {
+                                        name: param.clone(),
+                                        value: "dalfox".to_string(),
+                                        location: crate::parameter_analysis::Location::Query,
+                                        injection_context: Some(context),
+                                        valid_specials: Some(valid),
+                                        invalid_specials: Some(invalid),
+                                    };
+                                    let mut guard = reflection_params_clone.lock().await;
+                                    guard.push(param_struct);
+                                    if !silence {
+                                        eprintln!(
+                                            "Discovered DOM param: {} (EWMA {:.2}, {}/{})",
+                                            param, st.ewma_ratio, st.reflections, st.attempts
+                                        );
+                                    }
+                                    if st.should_collapse() {
+                                        st.collapsed = true;
+                                        guard.clear();
+                                        guard.push(Param {
+                                            name: "any".to_string(),
+                                            value: "dalfox".to_string(),
+                                            location: crate::parameter_analysis::Location::Query,
+                                            injection_context: Some(
+                                                crate::parameter_analysis::InjectionContext::Html(
+                                                    None,
+                                                ),
+                                            ),
+                                            valid_specials: None,
+                                            invalid_specials: None,
+                                        });
+                                        if !silence {
+                                            eprintln!(
+                                                "[mining-collapse] DOM mining collapsed at EWMA {:.2} after {} attempts",
+                                                st.ewma_ratio, st.attempts
+                                            );
+                                        }
+                                    }
                                 }
+                            } else {
+                                st.record_non_reflection();
                             }
                         }
                     }
