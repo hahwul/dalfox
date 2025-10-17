@@ -1,5 +1,5 @@
 use crate::cmd::scan::ScanArgs;
-use crate::parameter_analysis::{Param, detect_injection_context};
+use crate::parameter_analysis::{Param, classify_special_chars, detect_injection_context};
 use crate::target_parser::Target;
 use reqwest::Client;
 use std::sync::Arc;
@@ -82,11 +82,14 @@ pub async fn check_query_discovery(
             if let Ok(resp) = request.send().await {
                 if let Ok(text) = resp.text().await {
                     if text.contains(test_value) {
+                        let (valid, invalid) = classify_special_chars(&text);
                         let param = Param {
                             name,
                             value,
                             location: crate::parameter_analysis::Location::Query,
                             injection_context: Some(detect_injection_context(&text)),
+                            valid_specials: Some(valid),
+                            invalid_specials: Some(invalid),
                         };
                         reflection_params_clone.lock().await.push(param);
                     }
@@ -158,11 +161,14 @@ pub async fn check_header_discovery(
             if let Ok(resp) = request.send().await {
                 if let Ok(text) = resp.text().await {
                     if text.contains(test_value) {
+                        let (valid, invalid) = classify_special_chars(&text);
                         let param = Param {
                             name: header_name,
                             value: header_value,
                             location: crate::parameter_analysis::Location::Header,
                             injection_context: Some(detect_injection_context(&text)),
+                            valid_specials: Some(valid),
+                            invalid_specials: Some(invalid),
                         };
                         reflection_params_clone.lock().await.push(param);
                     }
@@ -240,11 +246,14 @@ pub async fn check_cookie_discovery(
             if let Ok(resp) = request.send().await {
                 if let Ok(text) = resp.text().await {
                     if text.contains(test_value) {
+                        let (valid, invalid) = classify_special_chars(&text);
                         let param = Param {
                             name: cookie_name,
                             value: cookie_value,
                             location: crate::parameter_analysis::Location::Header, // Cookies are sent in Header
                             injection_context: Some(detect_injection_context(&text)),
+                            valid_specials: Some(valid),
+                            invalid_specials: Some(invalid),
                         };
                         reflection_params_clone.lock().await.push(param);
                     }

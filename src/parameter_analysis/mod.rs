@@ -40,6 +40,37 @@ pub struct Param {
     pub value: String,
     pub location: Location,
     pub injection_context: Option<InjectionContext>,
+    // Special characters that were confirmed reflected unchanged for this parameter
+    pub valid_specials: Option<Vec<char>>,
+    // Special characters that appear to be filtered, encoded, or not reflected
+    pub invalid_specials: Option<Vec<char>>,
+}
+
+/// Set of special characters to probe with patterns like: dalfox'<char>dlafox"
+/// Order preserved for deterministic output.
+pub const SPECIAL_PROBE_CHARS: &[char] = &[
+    '/', '\\', '\'', '{', '`', '<', '>', '"', '(', ')', ';', '=', '|', '}', '[', '.', ':', ']',
+    '+', ',', '$', '-',
+];
+
+/// Skeleton classification helper.
+/// Given a response body that already contains the reflection marker (e.g. "dalfox"),
+/// return (valid, invalid) special chars based on naive presence detection.
+/// TODO:
+/// 1. Actively send mutated payloads per character (e.g. dalfox'<c>dlafox")
+/// 2. Parse the reflected segment boundaries to avoid false positives
+/// 3. Detect normalization (HTML entity encoding, URL encoding) and still treat as "valid"
+pub fn classify_special_chars(body: &str) -> (Vec<char>, Vec<char>) {
+    let mut valid = Vec::new();
+    let mut invalid = Vec::new();
+    for c in SPECIAL_PROBE_CHARS {
+        if body.contains(*c) {
+            valid.push(*c);
+        } else {
+            invalid.push(*c);
+        }
+    }
+    (valid, invalid)
 }
 
 pub async fn analyze_parameters(
@@ -76,6 +107,26 @@ pub async fn analyze_parameters(
         params = filter_params(params, &args.param, target);
     }
     target.reflection_params = params;
+
+    // Logging parameter analysis (stderr)
+    if !args.silence {
+        for p in &target.reflection_params {
+            let valid = p
+                .valid_specials
+                .as_ref()
+                .map(|v| v.iter().collect::<String>())
+                .unwrap_or_else(|| "-".to_string());
+            let invalid = p
+                .invalid_specials
+                .as_ref()
+                .map(|v| v.iter().collect::<String>())
+                .unwrap_or_else(|| "-".to_string());
+            eprintln!(
+                "[param-analysis] name={} type={:?} reflected=true context={:?} valid_specials=\"{}\" invalid_specials=\"{}\"",
+                p.name, p.location, p.injection_context, valid, invalid
+            );
+        }
+    }
 
     if let Some(pb) = pb {
         pb.finish_with_message(format!("Completed analyzing parameters for {}", target.url));
@@ -145,6 +196,8 @@ mod tests {
             value: "test_value".to_string(),
             location: Location::Query,
             injection_context: Some(InjectionContext::Html(None)),
+            valid_specials: None,
+            invalid_specials: None,
         });
     }
 
@@ -313,6 +366,8 @@ mod tests {
             value: "dalfox".to_string(),
             location: Location::Body,
             injection_context: Some(InjectionContext::Html(None)),
+            valid_specials: None,
+            invalid_specials: None,
         });
 
         assert!(!target.reflection_params.is_empty());
@@ -332,6 +387,8 @@ mod tests {
             value: "dalfox".to_string(),
             location: Location::Header,
             injection_context: Some(InjectionContext::Html(None)),
+            valid_specials: None,
+            invalid_specials: None,
         });
 
         assert!(!target.reflection_params.is_empty());
@@ -351,6 +408,8 @@ mod tests {
             value: "dalfox".to_string(),
             location: Location::Header, // Cookies are sent in Header
             injection_context: Some(InjectionContext::Html(None)),
+            valid_specials: None,
+            invalid_specials: None,
         });
 
         assert!(!target.reflection_params.is_empty());
@@ -537,24 +596,32 @@ mod tests {
                 value: "asc".to_string(),
                 location: Location::Query,
                 injection_context: Some(InjectionContext::Html(None)),
+                valid_specials: None,
+                invalid_specials: None,
             },
             Param {
                 name: "sort".to_string(),
                 value: "asc".to_string(),
                 location: Location::Body,
                 injection_context: Some(InjectionContext::Html(None)),
+                valid_specials: None,
+                invalid_specials: None,
             },
             Param {
                 name: "id".to_string(),
                 value: "123".to_string(),
                 location: Location::Query,
                 injection_context: Some(InjectionContext::Html(None)),
+                valid_specials: None,
+                invalid_specials: None,
             },
             Param {
                 name: "session".to_string(),
                 value: "abc".to_string(),
                 location: Location::Header,
                 injection_context: Some(InjectionContext::Html(None)),
+                valid_specials: None,
+                invalid_specials: None,
             },
         ];
 
@@ -593,18 +660,24 @@ mod tests {
                 value: "asc".to_string(),
                 location: Location::Query,
                 injection_context: Some(InjectionContext::Html(None)),
+                valid_specials: None,
+                invalid_specials: None,
             },
             Param {
                 name: "id".to_string(),
                 value: "123".to_string(),
                 location: Location::Query,
                 injection_context: Some(InjectionContext::Html(None)),
+                valid_specials: None,
+                invalid_specials: None,
             },
             Param {
                 name: "session".to_string(),
                 value: "abc".to_string(),
                 location: Location::Header,
                 injection_context: Some(InjectionContext::Html(None)),
+                valid_specials: None,
+                invalid_specials: None,
             },
         ];
 
@@ -627,6 +700,8 @@ mod tests {
             value: "asc".to_string(),
             location: Location::Query,
             injection_context: Some(InjectionContext::Html(None)),
+            valid_specials: None,
+            invalid_specials: None,
         }];
 
         // Empty filters should return all params
@@ -642,6 +717,8 @@ mod tests {
             value: "asc".to_string(),
             location: Location::Query,
             injection_context: Some(InjectionContext::Html(None)),
+            valid_specials: None,
+            invalid_specials: None,
         }];
 
         // Invalid filter format (too many colons) should be treated as name only

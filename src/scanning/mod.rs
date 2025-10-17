@@ -534,6 +534,8 @@ mod tests {
             value: "mock_value".to_string(),
             location,
             injection_context: Some(InjectionContext::Html(None)),
+            valid_specials: None,
+            invalid_specials: None,
         });
     }
 
@@ -661,6 +663,8 @@ mod tests {
             value: "test_value".to_string(),
             location: Location::Query,
             injection_context: Some(InjectionContext::Html(None)),
+            valid_specials: None,
+            invalid_specials: None,
         });
 
         let args = crate::cmd::scan::ScanArgs {

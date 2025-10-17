@@ -171,11 +171,15 @@ pub async fn probe_dictionary_params(
                 if let Ok(text) = resp.text().await {
                     if text.contains("dalfox") {
                         let context = detect_injection_context(&text);
+                        let (valid, invalid) =
+                            crate::parameter_analysis::classify_special_chars(&text);
                         let param_struct = Param {
                             name: param.clone(),
                             value: "dalfox".to_string(),
                             location: crate::parameter_analysis::Location::Query,
                             injection_context: Some(context),
+                            valid_specials: Some(valid),
+                            invalid_specials: Some(invalid),
                         };
                         reflection_params_clone.lock().await.push(param_struct);
                         if !silence {
@@ -283,11 +287,15 @@ pub async fn probe_body_params(
                     if let Ok(text) = resp.text().await {
                         if text.contains("dalfox") {
                             let context = detect_injection_context(&text);
+                            let (valid, invalid) =
+                                crate::parameter_analysis::classify_special_chars(&text);
                             let param = Param {
                                 name: param_name.clone(),
                                 value: "dalfox".to_string(),
                                 location: Location::Body,
                                 injection_context: Some(context),
+                                valid_specials: Some(valid),
+                                invalid_specials: Some(invalid),
                             };
                             reflection_params_clone.lock().await.push(param);
                             if !silence {
@@ -414,11 +422,15 @@ pub async fn probe_response_id_params(
                         if let Ok(text) = resp.text().await {
                             if text.contains("dalfox") {
                                 let context = detect_injection_context(&text);
+                                let (valid, invalid) =
+                                    crate::parameter_analysis::classify_special_chars(&text);
                                 let param_struct = Param {
                                     name: param.clone(),
                                     value: "dalfox".to_string(),
                                     location: crate::parameter_analysis::Location::Query,
                                     injection_context: Some(context),
+                                    valid_specials: Some(valid),
+                                    invalid_specials: Some(invalid),
                                 };
                                 reflection_params_clone.lock().await.push(param_struct);
                                 if !silence {
