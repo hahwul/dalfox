@@ -11,6 +11,6 @@ pub struct ServerArgs {
     pub host: String,
 }
 
-pub fn run_server(args: ServerArgs) {
+pub fn run_server(_args: ServerArgs) {
     // TODO: Implement server logic
 }

@@ -22,6 +22,7 @@ pub enum Location {
     Body,
     JsonBody,
     Header,
+    Path,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -238,6 +239,34 @@ pub async fn active_probe_param(
                         }
                     }
                 }
+                Location::Path => {
+                    let mut path_url = url_original.clone();
+                    if let Some(idx_str) = param_name.strip_prefix("path_segment_") {
+                        if let Ok(idx) = idx_str.parse::<usize>() {
+                            let original_path = path_url.path();
+                            let mut segments: Vec<String> = if original_path == "/" {
+                                Vec::new()
+                            } else {
+                                original_path
+                                    .trim_matches('/')
+                                    .split('/')
+                                    .filter(|s| !s.is_empty())
+                                    .map(|s| s.to_string())
+                                    .collect()
+                            };
+                            if idx < segments.len() {
+                                segments[idx] = payload.clone();
+                                let new_path = if segments.is_empty() {
+                                    "/".to_string()
+                                } else {
+                                    format!("/{}", segments.join("/"))
+                                };
+                                path_url.set_path(&new_path);
+                            }
+                        }
+                    }
+                    request_builder = client_clone.request(req_method, path_url);
+                }
                 Location::JsonBody => {
                     // Attempt JSON body mutation
                     let mut json_value_opt: Option<Value> = None;
@@ -427,6 +456,34 @@ pub async fn active_probe_param(
                                 }
                             }
                         }
+                        Location::Path => {
+                            let mut url_path = url2.clone();
+                            if let Some(idx_str) = param_name.strip_prefix("path_segment_") {
+                                if let Ok(idx) = idx_str.parse::<usize>() {
+                                    let original_path = url_path.path();
+                                    let mut segments: Vec<String> = if original_path == "/" {
+                                        Vec::new()
+                                    } else {
+                                        original_path
+                                            .trim_matches('/')
+                                            .split('/')
+                                            .filter(|s| !s.is_empty())
+                                            .map(|s| s.to_string())
+                                            .collect()
+                                    };
+                                    if idx < segments.len() {
+                                        segments[idx] = payload_enc.clone();
+                                        let new_path = if segments.is_empty() {
+                                            "/".to_string()
+                                        } else {
+                                            format!("/{}", segments.join("/"))
+                                        };
+                                        url_path.set_path(&new_path);
+                                    }
+                                }
+                            }
+                            request_builder2 = client_clone.request(req_method2, url_path);
+                        }
                         Location::JsonBody => {
                             // JSON fallback probing
                             let mut json_value_opt: Option<Value> = None;
@@ -614,6 +671,7 @@ fn filter_params(params: Vec<Param>, param_specs: &[String], target: &Target) ->
                                 Location::Query => "query",
                                 Location::Body => "body",
                                 Location::JsonBody => "json",
+                                Location::Path => "path",
                                 Location::Header => {
                                     if target.cookies.iter().any(|(n, _)| n == &p.name) {
                                         "cookie"

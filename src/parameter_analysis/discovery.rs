@@ -20,6 +20,8 @@ pub async fn check_discovery(
         if !args.skip_reflection_cookie {
             check_cookie_discovery(target, reflection_params.clone(), semaphore.clone()).await;
         }
+        // Path discovery (no skip flag yet)
+        check_path_discovery(target, reflection_params.clone(), semaphore.clone()).await;
     }
     target.reflection_params = reflection_params.lock().await.clone();
 }
@@ -184,6 +186,118 @@ pub async fn check_header_discovery(
 
     for handle in handles {
         handle.await.unwrap();
+    }
+}
+
+/// Discover reflections in path segments by replacing each segment with the test marker
+pub async fn check_path_discovery(
+    target: &Target,
+    reflection_params: Arc<Mutex<Vec<Param>>>,
+    semaphore: Arc<Semaphore>,
+) {
+    let test_value = "dalfox";
+    let path = target.url.path();
+    // Split non-empty segments
+    let segments: Vec<&str> = path
+        .trim_matches('/')
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .collect();
+    if segments.is_empty() {
+        return;
+    }
+
+    let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
+    if let Some(proxy_url) = &target.proxy {
+        if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
+            client_builder = client_builder.proxy(proxy);
+        }
+    }
+    let client = client_builder.build().unwrap_or_else(|_| Client::new());
+
+    let mut handles = Vec::new();
+
+    for (idx, original) in segments.iter().enumerate() {
+        let mut new_segments: Vec<String> = segments.iter().map(|s| s.to_string()).collect();
+        new_segments[idx] = test_value.to_string();
+        let new_path = format!("/{}", new_segments.join("/"));
+
+        let mut new_url = target.url.clone();
+        new_url.set_path(&new_path);
+
+        let client_clone = client.clone();
+        let headers = target.headers.clone();
+        let user_agent = target.user_agent.clone();
+        let cookies = target.cookies.clone();
+        let data = target.data.clone();
+        let method = target.method.clone();
+        let delay = target.delay;
+        let reflection_params_clone = reflection_params.clone();
+        let semaphore_clone = semaphore.clone();
+        let param_name = format!("path_segment_{}", idx);
+        let original_value = original.to_string();
+
+        // Skip if already discovered (e.g., duplicate path pattern)
+        {
+            let guard = reflection_params_clone.lock().await;
+            if guard.iter().any(|p| {
+                p.name == param_name && p.location == crate::parameter_analysis::Location::Path
+            }) {
+                continue;
+            }
+        }
+
+        let handle = tokio::spawn(async move {
+            let permit = semaphore_clone.acquire().await.unwrap();
+            let mut request =
+                client_clone.request(method.parse().unwrap_or(reqwest::Method::GET), new_url);
+            for (k, v) in &headers {
+                request = request.header(k, v);
+            }
+            if let Some(ua) = &user_agent {
+                request = request.header("User-Agent", ua);
+            }
+            if !cookies.is_empty() {
+                let mut cookie_header = String::new();
+                for (k, v) in &cookies {
+                    cookie_header.push_str(&format!("{}={}; ", k, v));
+                }
+                if !cookie_header.is_empty() {
+                    cookie_header.pop();
+                    cookie_header.pop();
+                    request = request.header("Cookie", cookie_header);
+                }
+            }
+            if let Some(d) = &data {
+                request = request.body(d.clone());
+            }
+
+            if let Ok(resp) = request.send().await {
+                if let Ok(text) = resp.text().await {
+                    if text.contains(test_value) {
+                        let (valid, invalid) = classify_special_chars(&text);
+                        let param = Param {
+                            name: param_name,
+                            value: original_value,
+                            location: crate::parameter_analysis::Location::Path,
+                            injection_context: Some(detect_injection_context(&text)),
+                            valid_specials: Some(valid),
+                            invalid_specials: Some(invalid),
+                        };
+                        reflection_params_clone.lock().await.push(param);
+                    }
+                }
+            }
+            if delay > 0 {
+                sleep(Duration::from_millis(delay)).await;
+            }
+            drop(permit);
+        });
+        handles.push(handle);
+    }
+
+    for h in handles {
+        let _ = h.await;
     }
 }
 

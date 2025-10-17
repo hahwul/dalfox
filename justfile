@@ -54,7 +54,7 @@ xss_maze:
     ./target/debug/dalfox scan "http://localhost:3000/hidden/level3/?query=a"
 
     # Path
-    ./target/debug/dalfox scan "http://localhost:3000/path/level1/?query=a"
-    ./target/debug/dalfox scan "http://localhost:3000/path/level2/?query=a"
-    ./target/debug/dalfox scan "http://localhost:3000/path/level3/?query=a"
-    ./target/debug/dalfox scan "http://localhost:3000/path/level4/?query=a"
+    ./target/debug/dalfox scan "http://localhost:3000/path/level1/a"
+    ./target/debug/dalfox scan "http://localhost:3000/path/level2/a"
+    ./target/debug/dalfox scan "http://localhost:3000/path/level3/a"
+    ./target/debug/dalfox scan "http://localhost:3000/path/level4/a"

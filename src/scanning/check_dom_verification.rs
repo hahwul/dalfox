@@ -50,7 +50,35 @@ pub async fn check_dom_verification(
             url.set_query(Some(&query));
             url
         }
-        _ => target.url.clone(), // For simplicity, assume query for now
+        crate::parameter_analysis::Location::Path => {
+            // Inject into a specific path segment (param.name pattern: path_segment_{idx})
+            let mut url = target.url.clone();
+            if let Some(idx_str) = param.name.strip_prefix("path_segment_") {
+                if let Ok(idx) = idx_str.parse::<usize>() {
+                    let original_path = url.path();
+                    let mut segments: Vec<&str> = if original_path == "/" {
+                        Vec::new()
+                    } else {
+                        original_path
+                            .trim_matches('/')
+                            .split('/')
+                            .filter(|s| !s.is_empty())
+                            .collect()
+                    };
+                    if idx < segments.len() {
+                        segments[idx] = payload;
+                        let new_path = if segments.is_empty() {
+                            "/".to_string()
+                        } else {
+                            format!("/{}", segments.join("/"))
+                        };
+                        url.set_path(&new_path);
+                    }
+                }
+            }
+            url
+        }
+        _ => target.url.clone(),
     };
 
     // Send injection request
