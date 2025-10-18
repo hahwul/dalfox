@@ -14,7 +14,9 @@ pub struct Result {
     pub severity: String,
     pub message_id: u32,
     pub message_str: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub response: Option<String>,
 }
 
@@ -46,6 +48,54 @@ impl Result {
             message_str,
             request: None,
             response: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SanitizedResult {
+    #[serde(rename = "type")]
+    pub result_type: String,
+    pub inject_type: String,
+    pub method: String,
+    pub data: String,
+    pub param: String,
+    pub payload: String,
+    pub evidence: String,
+    pub cwe: String,
+    pub severity: String,
+    pub message_id: u32,
+    pub message_str: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub response: Option<String>,
+}
+
+impl Result {
+    pub fn to_sanitized(&self, include_request: bool, include_response: bool) -> SanitizedResult {
+        SanitizedResult {
+            result_type: self.result_type.clone(),
+            inject_type: self.inject_type.clone(),
+            method: self.method.clone(),
+            data: self.data.clone(),
+            param: self.param.clone(),
+            payload: self.payload.clone(),
+            evidence: self.evidence.clone(),
+            cwe: self.cwe.clone(),
+            severity: self.severity.clone(),
+            message_id: self.message_id,
+            message_str: self.message_str.clone(),
+            request: if include_request {
+                self.request.clone()
+            } else {
+                None
+            },
+            response: if include_response {
+                self.response.clone()
+            } else {
+                None
+            },
         }
     }
 }
@@ -141,8 +191,8 @@ mod tests {
         assert!(json.contains("\"severity\":\"High\""));
         assert!(json.contains("\"message_id\":606"));
         assert!(json.contains("\"message_str\":\"message\""));
-        assert!(json.contains("\"request\":null"));
-        assert!(json.contains("\"response\":null"));
+        assert!(!json.contains("\"request\":null"));
+        assert!(!json.contains("\"response\":null"));
     }
 
     #[test]

@@ -447,7 +447,7 @@ pub struct ScanArgs {
 
 pub async fn run_scan(args: &ScanArgs) {
     let __dalfox_scan_start = std::time::Instant::now();
-    if !args.silence {
+    if !args.silence && args.format == "plain" {
         eprintln!("Scan started (elapsed: 0.000 s)");
     }
     // Initialize global encoders once for downstream POC/path handling
@@ -646,7 +646,7 @@ pub async fn run_scan(args: &ScanArgs) {
 
     let results = Arc::new(Mutex::new(Vec::<Result>::new()));
 
-    let multi_pb = if args.silence {
+    let multi_pb = if args.silence || args.format != "plain" {
         None
     } else {
         Some(Arc::new(MultiProgress::new()))
@@ -662,7 +662,7 @@ pub async fn run_scan(args: &ScanArgs) {
 
     // Perform blind XSS scanning if callback URL is provided
     if let Some(callback_url) = &args.blind_callback_url {
-        if !args.silence {
+        if !args.silence && args.format == "plain" {
             println!(
                 "Performing blind XSS scanning with callback URL: {}",
                 callback_url
@@ -686,7 +686,7 @@ pub async fn run_scan(args: &ScanArgs) {
             if !args.deep_scan {
                 if let Some(ct) = preflight_content_type(target, &args).await {
                     if !is_allowed_content_type(&ct) {
-                        if !args.silence {
+                        if !args.silence && args.format == "plain" {
                             eprintln!(
                                 "[preflight] Skipping {} due to denylisted Content-Type: {} (use --deep-scan to override)",
                                 target.url, ct
@@ -696,7 +696,11 @@ pub async fn run_scan(args: &ScanArgs) {
                     }
                 }
             }
-            analyze_parameters(target, &args, multi_pb.clone()).await;
+            let mut __analysis_args = args.clone();
+            if __analysis_args.format != "plain" {
+                __analysis_args.silence = true;
+            }
+            analyze_parameters(target, &__analysis_args, multi_pb.clone()).await;
         }
     }
 
@@ -812,11 +816,85 @@ pub async fn run_scan(args: &ScanArgs) {
     let display_results_len = std::cmp::min(final_results.len(), limit);
     let display_results = &final_results[..display_results_len];
     let output_content = if args.format == "json" {
-        serde_json::to_string_pretty(&display_results).unwrap()
+        {
+            let sanitized: Vec<serde_json::Value> = display_results
+                .iter()
+                .map(|r| {
+                    let mut obj = serde_json::json!({
+                        "type": r.result_type,
+                        "inject_type": r.inject_type,
+                        "method": r.method,
+                        "data": r.data,
+                        "param": r.param,
+                        "payload": r.payload,
+                        "evidence": r.evidence,
+                        "cwe": r.cwe,
+                        "severity": r.severity,
+                        "message_id": r.message_id,
+                        "message_str": r.message_str
+                    });
+                    if args.include_request {
+                        if let Some(req) = &r.request {
+                            if let serde_json::Value::Object(ref mut map) = obj {
+                                map.insert(
+                                    "request".to_string(),
+                                    serde_json::Value::String(req.clone()),
+                                );
+                            }
+                        }
+                    }
+                    if args.include_response {
+                        if let Some(resp) = &r.response {
+                            if let serde_json::Value::Object(ref mut map) = obj {
+                                map.insert(
+                                    "response".to_string(),
+                                    serde_json::Value::String(resp.clone()),
+                                );
+                            }
+                        }
+                    }
+                    obj
+                })
+                .collect();
+            serde_json::to_string_pretty(&sanitized).unwrap()
+        }
     } else if args.format == "jsonl" {
         let mut output = String::new();
-        for result in display_results {
-            output.push_str(&serde_json::to_string(&result).unwrap());
+        for r in display_results {
+            let mut obj = serde_json::json!({
+                "type": r.result_type,
+                "inject_type": r.inject_type,
+                "method": r.method,
+                "data": r.data,
+                "param": r.param,
+                "payload": r.payload,
+                "evidence": r.evidence,
+                "cwe": r.cwe,
+                "severity": r.severity,
+                "message_id": r.message_id,
+                "message_str": r.message_str
+            });
+            if args.include_request {
+                if let Some(req) = &r.request {
+                    if let serde_json::Value::Object(ref mut map) = obj {
+                        map.insert(
+                            "request".to_string(),
+                            serde_json::Value::String(req.clone()),
+                        );
+                    }
+                }
+            }
+            if args.include_response {
+                if let Some(resp) = &r.response {
+                    if let serde_json::Value::Object(ref mut map) = obj {
+                        map.insert(
+                            "response".to_string(),
+                            serde_json::Value::String(resp.clone()),
+                        );
+                    }
+                }
+            }
+            output.push_str(&serde_json::to_string(&obj).unwrap());
             output.push('\n');
         }
         output
@@ -862,8 +940,8 @@ pub async fn run_scan(args: &ScanArgs) {
         println!("{}", output_content);
     }
 
-    // Include request/response if requested
-    if args.include_request || args.include_response {
+    // Include request/response if requested (only for plain format)
+    if args.format == "plain" && (args.include_request || args.include_response) {
         for result in display_results {
             if args.include_request {
                 if let Some(request) = &result.request {
@@ -878,7 +956,7 @@ pub async fn run_scan(args: &ScanArgs) {
             println!("---");
         }
     }
-    if !args.silence {
+    if !args.silence && args.format == "plain" {
         let __dalfox_elapsed = __dalfox_scan_start.elapsed().as_secs_f64();
         eprintln!("Scan completed in {:.3} seconds", __dalfox_elapsed);
     }
