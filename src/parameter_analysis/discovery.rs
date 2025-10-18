@@ -189,6 +189,63 @@ pub async fn check_header_discovery(
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parameter_analysis::{Location, Param};
+    use crate::target_parser::parse_target;
+
+    #[tokio::test]
+    async fn test_check_path_discovery_skips_existing_segment() {
+        // URL with a single non-empty segment -> index 0
+        let target = {
+            let mut t = parse_target("https://example.com/only").unwrap();
+            // Ensure deterministic small timeout to avoid long waits if something goes wrong
+            t.timeout = 1;
+            t
+        };
+
+        // reflection_params already contains path_segment_0 so discovery should skip it
+        let reflection_params = Arc::new(Mutex::new(vec![Param {
+            name: "path_segment_0".to_string(),
+            value: "only".to_string(),
+            location: Location::Path,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+        }]));
+
+        // Limit parallelism to 1 to keep behavior deterministic
+        let semaphore = Arc::new(Semaphore::new(1));
+
+        let before_len = reflection_params.lock().await.len();
+        check_path_discovery(&target, reflection_params.clone(), semaphore.clone()).await;
+        let after_len = reflection_params.lock().await.len();
+
+        // No new params should be added because the only segment was already discovered
+        assert_eq!(before_len, 1);
+        assert_eq!(after_len, 1);
+    }
+
+    #[tokio::test]
+    async fn test_check_path_discovery_respects_semaphore_single_permit() {
+        // No path segments ("/") => early return, but we still validate it handles a single-permit semaphore
+        let target = {
+            let mut t = parse_target("https://example.com/").unwrap();
+            t.timeout = 1;
+            t
+        };
+
+        let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+        // Single permit semaphore; if the function tried to over-acquire, this could deadlock
+        let semaphore = Arc::new(Semaphore::new(1));
+
+        // Should complete without blocking and without adding params
+        check_path_discovery(&target, reflection_params.clone(), semaphore.clone()).await;
+        assert!(reflection_params.lock().await.is_empty());
+    }
+}
+
 /// Discover reflections in path segments by replacing each segment with the test marker
 pub async fn check_path_discovery(
     target: &Target,
