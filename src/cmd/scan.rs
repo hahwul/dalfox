@@ -942,7 +942,17 @@ pub async fn run_scan(args: &ScanArgs) {
         log_warn(&format!("XSS found \x1b[33m{}\x1b[0m XSS", v_count));
 
         for result in display_results {
-            output.push_str(&generate_poc(result, &args.poc_type));
+            let mut poc_line = generate_poc(result, &args.poc_type);
+            if args.poc_type == "plain" {
+                if result.result_type == "R" {
+                    let trimmed = poc_line.trim_end();
+                    poc_line = format!("\x1b[33m{}\x1b[0m\n", trimmed);
+                } else if result.result_type == "V" {
+                    let trimmed = poc_line.trim_end();
+                    poc_line = format!("\x1b[31m{}\x1b[0m\n", trimmed);
+                }
+            }
+            output.push_str(&poc_line);
 
             // Determine context (for Line rendering)
             let context_info = if let Some(resp) = &result.response {
@@ -979,7 +989,7 @@ pub async fn run_scan(args: &ScanArgs) {
                 "├──"
             };
             output.push_str(&format!(
-                "  \x1b[37m{} Issue:\x1b[0m \x1b[90m{}\x1b[0m\n",
+                "  \x1b[90m{}\x1b[0m \x1b[37mIssue:\x1b[0m \x1b[90m{}\x1b[0m\n",
                 bullet, issue_text
             ));
             idx += 1;
@@ -991,7 +1001,7 @@ pub async fn run_scan(args: &ScanArgs) {
                 "├──"
             };
             output.push_str(&format!(
-                "  \x1b[37m{} Payload:\x1b[0m \x1b[90m{}\x1b[0m\n",
+                "  \x1b[90m{}\x1b[0m \x1b[37mPayload:\x1b[0m \x1b[90m{}\x1b[0m\n",
                 bullet, result.payload
             ));
             idx += 1;
@@ -1004,7 +1014,7 @@ pub async fn run_scan(args: &ScanArgs) {
                     "├──"
                 };
                 output.push_str(&format!(
-                    "  \x1b[37m{} L{}:\x1b[0m \x1b[90m{}\x1b[0m\n",
+                    "  \x1b[90m{}\x1b[0m \x1b[37mL{}:\x1b[0m \x1b[90m{}\x1b[0m\n",
                     bullet, line_num, context
                 ));
                 idx += 1;
@@ -1017,7 +1027,10 @@ pub async fn run_scan(args: &ScanArgs) {
                 } else {
                     "├──"
                 };
-                output.push_str(&format!("  \x1b[37m{} Request:\x1b[0m\n", bullet));
+                output.push_str(&format!(
+                    "  \x1b[90m{}\x1b[0m \x1b[37mRequest:\x1b[0m\n",
+                    bullet
+                ));
                 if let Some(req) = &result.request {
                     for line in req.lines() {
                         output.push_str(&format!("      \x1b[90m{}\x1b[0m\n", line));
@@ -1033,7 +1046,10 @@ pub async fn run_scan(args: &ScanArgs) {
                 } else {
                     "├──"
                 };
-                output.push_str(&format!("  \x1b[37m{} Response:\x1b[0m\n", bullet));
+                output.push_str(&format!(
+                    "  \x1b[90m{}\x1b[0m \x1b[37mResponse:\x1b[0m\n",
+                    bullet
+                ));
                 if let Some(resp) = &result.response {
                     for line in resp.lines() {
                         output.push_str(&format!("      \x1b[90m{}\x1b[0m\n", line));
