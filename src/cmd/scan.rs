@@ -3,11 +3,11 @@ use indicatif::MultiProgress;
 use reqwest::header::CONTENT_TYPE;
 use reqwest::{Client, redirect::Policy};
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Duration;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, oneshot};
 use urlencoding;
 
 use crate::encoding::{base64_encode, double_url_encode, html_entity_encode, url_encode};
@@ -459,6 +459,38 @@ pub async fn run_scan(args: &ScanArgs) {
             println!("\x1b[90m{}\x1b[0m \x1b[33mWRN\x1b[0m {}", ts, msg);
         }
     };
+    // Ephemeral animated spinner for progress (returns (stop_tx, done_rx))
+    let start_spinner =
+        |enabled: bool, label: String| -> Option<(oneshot::Sender<()>, oneshot::Receiver<()>)> {
+            if !enabled {
+                return None;
+            }
+            let (tx, mut rx) = oneshot::channel::<()>();
+            let (done_tx, done_rx) = oneshot::channel::<()>();
+            tokio::spawn(async move {
+                let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+                let mut i = 0usize;
+                loop {
+                    print!(
+                        "\r\x1b[38;5;247m{} {}\x1b[0m",
+                        frames[i % frames.len()],
+                        label
+                    );
+                    let _ = io::stdout().flush();
+                    tokio::select! {
+                        _ = tokio::time::sleep(Duration::from_millis(80)) => {},
+                        _ = &mut rx => {
+                            print!("\r\x1b[2K\r");
+                            let _ = io::stdout().flush();
+                            let _ = done_tx.send(());
+                            break;
+                        }
+                    }
+                    i = (i + 1) % frames.len();
+                }
+            });
+            Some((tx, done_rx))
+        };
     // Initialize global encoders once for downstream POC/path handling
     if GLOBAL_ENCODERS.get().is_none() {
         let _ = GLOBAL_ENCODERS.set(args.encoders.clone());
@@ -689,14 +721,18 @@ pub async fn run_scan(args: &ScanArgs) {
         for target in group {
             // Preflight Content-Type check (skip denylisted types unless deep-scan)
             if !args.deep_scan {
-                if let Some(ct) = preflight_content_type(target, &args).await {
+                let __preflight_spinner = start_spinner(
+                    args.format == "plain" && !args.silence,
+                    format!("preflight: {}", target.url),
+                );
+                let __preflight_ct = preflight_content_type(target, &args).await;
+                if let Some((tx, done_rx)) = __preflight_spinner {
+                    let _ = tx.send(());
+                    let _ = done_rx.await;
+                }
+                if let Some(ct) = __preflight_ct {
                     if !is_allowed_content_type(&ct) {
-                        if !args.silence && args.format == "plain" {
-                            eprintln!(
-                                "[preflight] Skipping {} due to denylisted Content-Type: {} (use --deep-scan to override)",
-                                target.url, ct
-                            );
-                        }
+                        // Skip quietly; do not leave progress/logs
                         continue;
                     }
                 }
@@ -708,9 +744,17 @@ pub async fn run_scan(args: &ScanArgs) {
             }
 
             // Silence parameter analysis logs and progress; we'll print our own summary
+            let __analyze_spinner = start_spinner(
+                args.format == "plain" && !args.silence,
+                format!("analyzing: {}", target.url),
+            );
             let mut __analysis_args = args.clone();
             __analysis_args.silence = true;
             analyze_parameters(target, &__analysis_args, multi_pb.clone()).await;
+            if let Some((tx, done_rx)) = __analyze_spinner {
+                let _ = tx.send(());
+                let _ = done_rx.await;
+            }
 
             // Pretty reflection summary (plain only)
             if args.format == "plain" && !args.silence {
@@ -807,6 +851,11 @@ pub async fn run_scan(args: &ScanArgs) {
 
                 let target_handle = tokio::spawn(async move {
                     if !args_clone.skip_xss_scanning {
+                        let __scan_spinner = {
+                            // Use outer helper via move of flags and label
+                            let enabled = args_clone.format == "plain" && !args_clone.silence;
+                            start_spinner(enabled, format!("scanning: {}", target.url))
+                        };
                         crate::scanning::run_scanning(
                             &target,
                             args_clone.clone(),
@@ -815,6 +864,10 @@ pub async fn run_scan(args: &ScanArgs) {
                             overall_pb_clone,
                         )
                         .await;
+                        if let Some((tx, done_rx)) = __scan_spinner {
+                            let _ = tx.send(());
+                            let _ = done_rx.await;
+                        }
                     }
                     drop(permit);
                 });
