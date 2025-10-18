@@ -453,6 +453,12 @@ pub async fn run_scan(args: &ScanArgs) {
             println!("\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m {}", ts, msg);
         }
     };
+    let log_warn = |msg: &str| {
+        if args.format == "plain" && !args.silence {
+            let ts = chrono::Local::now().format("%-I:%M%p").to_string();
+            println!("\x1b[90m{}\x1b[0m \x1b[33mWRN\x1b[0m {}", ts, msg);
+        }
+    };
     // Initialize global encoders once for downstream POC/path handling
     if GLOBAL_ENCODERS.get().is_none() {
         let _ = GLOBAL_ENCODERS.set(args.encoders.clone());
@@ -933,20 +939,105 @@ pub async fn run_scan(args: &ScanArgs) {
             .iter()
             .filter(|r| r.result_type == "V")
             .count();
-        log_info(&format!("XSS found \x1b[33m{}\x1b[0m XSS", v_count));
+        log_warn(&format!("XSS found \x1b[33m{}\x1b[0m XSS", v_count));
 
         for result in display_results {
             output.push_str(&generate_poc(result, &args.poc_type));
+
+            // Determine context (for Line rendering)
+            let context_info = if let Some(resp) = &result.response {
+                extract_context(resp, &result.payload)
+            } else {
+                None
+            };
+
+            // Build sequence of detail sections to render under POC
+            let mut sections: Vec<&str> = vec!["Issue", "Payload"];
+            if context_info.is_some() {
+                sections.push("Line");
+            }
+            let want_request = args.include_request && result.request.is_some();
+            let want_response = args.include_response && result.response.is_some();
+            if want_request {
+                sections.push("Request");
+            }
+            if want_response {
+                sections.push("Response");
+            }
+            let last_idx = sections.len().saturating_sub(1);
+
+            // 1) Issue
+            let issue_text = if result.result_type == "R" {
+                "Reflected payload confirmed"
+            } else {
+                "DOM object confirmed"
+            };
+            let mut idx = 0usize;
+            let bullet = if idx == last_idx {
+                "└──"
+            } else {
+                "├──"
+            };
             output.push_str(&format!(
-                "  \x1b[90m├── Payload:\x1b[0m \x1b[90m{}\x1b[0m\n",
-                result.payload
+                "  \x1b[37m{} Issue:\x1b[0m \x1b[90m{}\x1b[0m\n",
+                bullet, issue_text
             ));
-            if let Some(resp) = &result.response {
-                if let Some((line_num, context)) = extract_context(resp, &result.payload) {
-                    output.push_str(&format!(
-                        "  \x1b[90m└── L{}:\x1b[0m \x1b[90m{}\x1b[0m\n",
-                        line_num, context
-                    ));
+            idx += 1;
+
+            // 2) Payload
+            let bullet = if idx == last_idx {
+                "└──"
+            } else {
+                "├──"
+            };
+            output.push_str(&format!(
+                "  \x1b[37m{} Payload:\x1b[0m \x1b[90m{}\x1b[0m\n",
+                bullet, result.payload
+            ));
+            idx += 1;
+
+            // 3) Line (context), if available
+            if let Some((line_num, context)) = context_info {
+                let bullet = if idx == last_idx {
+                    "└──"
+                } else {
+                    "├──"
+                };
+                output.push_str(&format!(
+                    "  \x1b[37m{} L{}:\x1b[0m \x1b[90m{}\x1b[0m\n",
+                    bullet, line_num, context
+                ));
+                idx += 1;
+            }
+
+            // 4) Request, if included
+            if want_request {
+                let bullet = if idx == last_idx {
+                    "└──"
+                } else {
+                    "├──"
+                };
+                output.push_str(&format!("  \x1b[37m{} Request:\x1b[0m\n", bullet));
+                if let Some(req) = &result.request {
+                    for line in req.lines() {
+                        output.push_str(&format!("      \x1b[90m{}\x1b[0m\n", line));
+                    }
+                }
+                idx += 1;
+            }
+
+            // 5) Response, if included
+            if want_response {
+                let bullet = if idx == last_idx {
+                    "└──"
+                } else {
+                    "├──"
+                };
+                output.push_str(&format!("  \x1b[37m{} Response:\x1b[0m\n", bullet));
+                if let Some(resp) = &result.response {
+                    for line in resp.lines() {
+                        output.push_str(&format!("      \x1b[90m{}\x1b[0m\n", line));
+                    }
                 }
             }
         }
@@ -979,22 +1070,7 @@ pub async fn run_scan(args: &ScanArgs) {
         println!("{}", output_content);
     }
 
-    // Include request/response if requested (only for plain format)
-    if args.format == "plain" && (args.include_request || args.include_response) {
-        for result in display_results {
-            if args.include_request {
-                if let Some(request) = &result.request {
-                    println!("Request:\n{}", request);
-                }
-            }
-            if args.include_response {
-                if let Some(response) = &result.response {
-                    println!("Response:\n{}", response);
-                }
-            }
-            println!("---");
-        }
-    }
+    // Request/Response are displayed inline under each POC in plain mode.
     if args.format == "plain" && !args.silence {
         let __dalfox_elapsed = __dalfox_scan_start.elapsed().as_secs_f64();
         log_info(&format!(
