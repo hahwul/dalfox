@@ -731,7 +731,11 @@ pub async fn run_scan(args: &ScanArgs) {
                 let current = preflight_idx.fetch_add(1, Ordering::Relaxed) + 1;
                 let __preflight_spinner = start_spinner(
                     !args.silence,
-                    format!("[{}/{}] preflight: {}", current, total_targets, target.url),
+                    if total_targets > 1 {
+                        format!("[{}/{}] preflight: {}", current, total_targets, target.url)
+                    } else {
+                        format!("preflight: {}", target.url)
+                    },
                 );
                 let __preflight_ct = preflight_content_type(target, &args).await;
                 if let Some((tx, done_rx)) = __preflight_spinner {
@@ -755,7 +759,11 @@ pub async fn run_scan(args: &ScanArgs) {
             let current = analyze_idx.fetch_add(1, Ordering::Relaxed) + 1;
             let __analyze_spinner = start_spinner(
                 !args.silence,
-                format!("[{}/{}] analyzing: {}", current, total_targets, target.url),
+                if total_targets > 1 {
+                    format!("[{}/{}] analyzing: {}", current, total_targets, target.url)
+                } else {
+                    format!("analyzing: {}", target.url)
+                },
             );
             let mut __analysis_args = args.clone();
             __analysis_args.silence = true;
@@ -868,10 +876,14 @@ pub async fn run_scan(args: &ScanArgs) {
                             let current = scan_idx_clone.fetch_add(1, Ordering::Relaxed) + 1;
                             start_spinner(
                                 enabled,
-                                format!(
-                                    "[{}/{}] scanning: {}",
-                                    current, total_targets_copy, target.url
-                                ),
+                                if total_targets_copy > 1 {
+                                    format!(
+                                        "[{}/{}] scanning: {}",
+                                        current, total_targets_copy, target.url
+                                    )
+                                } else {
+                                    format!("scanning: {}", target.url)
+                                },
                             )
                         };
                         crate::scanning::run_scanning(
