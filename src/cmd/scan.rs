@@ -174,7 +174,8 @@ fn is_allowed_content_type(ct: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::is_allowed_content_type;
+    use super::{extract_context, generate_poc, is_allowed_content_type};
+    use crate::scanning::result::Result as ScanResult;
 
     #[test]
     fn test_allowed_content_types() {
@@ -195,6 +196,110 @@ mod tests {
         assert!(!is_allowed_content_type(""));
         assert!(!is_allowed_content_type("invalid"));
         assert!(!is_allowed_content_type("application/json; charset=utf-8"));
+    }
+
+    #[test]
+    fn test_extract_context_basic() {
+        let resp = "first line\nzzzPAYzzz\nlast line";
+        let (line, ctx) = extract_context(resp, "PAY").expect("should find payload");
+        assert_eq!(line, 2);
+        assert_eq!(ctx, "zzzPAYzzz");
+    }
+
+    #[test]
+    fn test_extract_context_trims_long_line() {
+        let prefix = "a".repeat(30);
+        let suffix = "b".repeat(30);
+        let line = format!("{}X{}", prefix, suffix);
+        let (ln, ctx) = extract_context(&line, "X").expect("should find payload");
+        assert_eq!(ln, 1);
+        assert!(ctx.starts_with(&"a".repeat(20)));
+        assert!(ctx.contains('X'));
+        assert!(ctx.ends_with(&"b".repeat(20)));
+    }
+
+    #[test]
+    fn test_extract_context_none() {
+        assert!(extract_context("no match here", "PAY").is_none());
+    }
+
+    #[test]
+    fn test_generate_poc_plain_query() {
+        let r = ScanResult::new(
+            "R".to_string(),
+            "inHTML".to_string(),
+            "GET".to_string(),
+            "https://example.com".to_string(),
+            "q".to_string(),
+            "<x>".to_string(),
+            "evidence".to_string(),
+            "CWE-79".to_string(),
+            "Info".to_string(),
+            0,
+            "msg".to_string(),
+        );
+        let out = generate_poc(&r, "plain");
+        assert!(out.contains("[POC][R][GET][inHTML]"));
+        assert!(out.contains("?q=%3Cx%3E"));
+    }
+
+    #[test]
+    fn test_generate_poc_curl() {
+        let r = ScanResult::new(
+            "R".to_string(),
+            "inHTML".to_string(),
+            "GET".to_string(),
+            "https://example.com".to_string(),
+            "q".to_string(),
+            "<x>".to_string(),
+            "evidence".to_string(),
+            "CWE-79".to_string(),
+            "Info".to_string(),
+            0,
+            "msg".to_string(),
+        );
+        let out = generate_poc(&r, "curl");
+        assert!(out.starts_with("curl -X GET "));
+        assert!(out.contains("?q=%3Cx%3E"));
+    }
+
+    #[test]
+    fn test_generate_poc_http_request_prefers_request_block() {
+        let mut r = ScanResult::new(
+            "R".to_string(),
+            "inHTML".to_string(),
+            "GET".to_string(),
+            "https://example.com".to_string(),
+            "q".to_string(),
+            "<x>".to_string(),
+            "evidence".to_string(),
+            "CWE-79".to_string(),
+            "Info".to_string(),
+            0,
+            "msg".to_string(),
+        );
+        r.request = Some("GET / HTTP/1.1\nHost: example.com".to_string());
+        let out = generate_poc(&r, "http-request");
+        assert!(out.contains("GET / HTTP/1.1"));
+    }
+
+    #[test]
+    fn test_generate_poc_path_segment_append() {
+        let r = ScanResult::new(
+            "R".to_string(),
+            "inHTML".to_string(),
+            "GET".to_string(),
+            "https://ex.com/foo/bar".to_string(),
+            "path_segment_1".to_string(),
+            "PAY".to_string(),
+            "evidence".to_string(),
+            "CWE-79".to_string(),
+            "Info".to_string(),
+            0,
+            "msg".to_string(),
+        );
+        let out = generate_poc(&r, "plain");
+        assert!(out.contains("https://ex.com/foo/bar/PAY"));
     }
 }
 

@@ -156,3 +156,67 @@ pub async fn check_dom_verification(
 
     (false, None)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parameter_analysis::{Location, Param};
+    use crate::target_parser::parse_target;
+
+    #[tokio::test]
+    async fn test_check_dom_verification_early_return_when_skip() {
+        let target = parse_target("https://example.com/?q=1").unwrap();
+        let param = Param {
+            name: "q".to_string(),
+            value: "1".to_string(),
+            location: Location::Query,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+        };
+        let args = crate::cmd::scan::ScanArgs {
+            input_type: "auto".to_string(),
+            format: "json".to_string(),
+            targets: vec![],
+            param: vec![],
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            method: "GET".to_string(),
+            user_agent: None,
+            cookie_from_raw: None,
+            mining_dict_word: None,
+            skip_mining: false,
+            skip_mining_dict: false,
+            skip_mining_dom: false,
+            skip_discovery: false,
+            skip_reflection_header: false,
+            skip_reflection_cookie: false,
+            timeout: 10,
+            delay: 0,
+            proxy: None,
+            follow_redirects: false,
+            output: None,
+            include_request: false,
+            include_response: false,
+            silence: false,
+            poc_type: "plain".to_string(),
+            limit: None,
+            workers: 10,
+            max_concurrent_targets: 10,
+            max_targets_per_host: 100,
+            encoders: vec!["url".to_string(), "html".to_string()],
+            custom_blind_xss_payload: None,
+            blind_callback_url: None,
+            custom_payload: None,
+            only_custom_payload: false,
+            skip_xss_scanning: true,
+            deep_scan: false,
+            sxss: false,
+            sxss_url: None,
+            sxss_method: "GET".to_string(),
+        };
+        let res = check_dom_verification(&target, &param, "PAY", &args).await;
+        assert_eq!(res, (false, None));
+    }
+}
