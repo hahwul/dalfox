@@ -730,7 +730,7 @@ pub async fn run_scan(args: &ScanArgs) {
             if !args.deep_scan {
                 let current = preflight_idx.fetch_add(1, Ordering::Relaxed) + 1;
                 let __preflight_spinner = start_spinner(
-                    args.format == "plain" && !args.silence,
+                    !args.silence,
                     format!("[{}/{}] preflight: {}", current, total_targets, target.url),
                 );
                 let __preflight_ct = preflight_content_type(target, &args).await;
@@ -754,7 +754,7 @@ pub async fn run_scan(args: &ScanArgs) {
             // Silence parameter analysis logs and progress; we'll print our own summary
             let current = analyze_idx.fetch_add(1, Ordering::Relaxed) + 1;
             let __analyze_spinner = start_spinner(
-                args.format == "plain" && !args.silence,
+                !args.silence,
                 format!("[{}/{}] analyzing: {}", current, total_targets, target.url),
             );
             let mut __analysis_args = args.clone();
@@ -864,7 +864,7 @@ pub async fn run_scan(args: &ScanArgs) {
                 let target_handle = tokio::spawn(async move {
                     if !args_clone.skip_xss_scanning {
                         let __scan_spinner = {
-                            let enabled = args_clone.format == "plain" && !args_clone.silence;
+                            let enabled = !args_clone.silence;
                             let current = scan_idx_clone.fetch_add(1, Ordering::Relaxed) + 1;
                             start_spinner(
                                 enabled,
