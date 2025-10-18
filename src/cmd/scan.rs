@@ -5,7 +5,10 @@ use reqwest::{Client, redirect::Policy};
 use std::fs;
 use std::io::{self, Read, Write};
 use std::sync::Arc;
-use std::sync::OnceLock;
+use std::sync::{
+    OnceLock,
+    atomic::{AtomicUsize, Ordering},
+};
 use std::time::Duration;
 use tokio::sync::{Mutex, oneshot};
 use urlencoding;
@@ -697,6 +700,10 @@ pub async fn run_scan(args: &ScanArgs) {
         host_groups.entry(host).or_insert(Vec::new()).push(target);
     }
 
+    let total_targets = host_groups.values().map(|g| g.len()).sum::<usize>();
+    let preflight_idx = Arc::new(AtomicUsize::new(0));
+    let analyze_idx = Arc::new(AtomicUsize::new(0));
+    let scan_idx = Arc::new(AtomicUsize::new(0));
     // Perform blind XSS scanning if callback URL is provided
     if let Some(callback_url) = &args.blind_callback_url {
         if !args.silence && args.format == "plain" {
@@ -721,9 +728,10 @@ pub async fn run_scan(args: &ScanArgs) {
         for target in group {
             // Preflight Content-Type check (skip denylisted types unless deep-scan)
             if !args.deep_scan {
+                let current = preflight_idx.fetch_add(1, Ordering::Relaxed) + 1;
                 let __preflight_spinner = start_spinner(
                     args.format == "plain" && !args.silence,
-                    format!("preflight: {}", target.url),
+                    format!("[{}/{}] preflight: {}", current, total_targets, target.url),
                 );
                 let __preflight_ct = preflight_content_type(target, &args).await;
                 if let Some((tx, done_rx)) = __preflight_spinner {
@@ -744,9 +752,10 @@ pub async fn run_scan(args: &ScanArgs) {
             }
 
             // Silence parameter analysis logs and progress; we'll print our own summary
+            let current = analyze_idx.fetch_add(1, Ordering::Relaxed) + 1;
             let __analyze_spinner = start_spinner(
                 args.format == "plain" && !args.silence,
-                format!("analyzing: {}", target.url),
+                format!("[{}/{}] analyzing: {}", current, total_targets, target.url),
             );
             let mut __analysis_args = args.clone();
             __analysis_args.silence = true;
@@ -797,6 +806,7 @@ pub async fn run_scan(args: &ScanArgs) {
         let args_arc = Arc::new(args.clone());
         let results_clone = results.clone();
 
+        let scan_idx = scan_idx.clone();
         let group_handle = tokio::spawn(async move {
             // Calculate total overall tasks for this group
             let mut total_overall_tasks = 0u64;
@@ -848,13 +858,21 @@ pub async fn run_scan(args: &ScanArgs) {
                 let results_clone_inner = results_clone.clone();
                 let multi_pb_clone_inner = multi_pb_clone.clone();
                 let overall_pb_clone = overall_pb.clone();
+                let scan_idx_clone = scan_idx.clone();
+                let total_targets_copy = total_targets;
 
                 let target_handle = tokio::spawn(async move {
                     if !args_clone.skip_xss_scanning {
                         let __scan_spinner = {
-                            // Use outer helper via move of flags and label
                             let enabled = args_clone.format == "plain" && !args_clone.silence;
-                            start_spinner(enabled, format!("scanning: {}", target.url))
+                            let current = scan_idx_clone.fetch_add(1, Ordering::Relaxed) + 1;
+                            start_spinner(
+                                enabled,
+                                format!(
+                                    "[{}/{}] scanning: {}",
+                                    current, total_targets_copy, target.url
+                                ),
+                            )
                         };
                         crate::scanning::run_scanning(
                             &target,
