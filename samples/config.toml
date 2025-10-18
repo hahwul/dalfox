@@ -1,0 +1,109 @@
+# Dalfox sample configuration (TOML)
+# Place this file under:
+# - $XDG_CONFIG_HOME/dalfox/config.toml, or
+# - $HOME/.config/dalfox/config.toml
+#
+# CLI flags override values in this file. Remove or comment lines to fall back to CLI defaults.
+
+[scan]
+# INPUT
+# auto: detect URL or treat target as file path when readable,
+# url|file|pipe: force interpretation,
+# raw-http: stubbed (not implemented yet)
+input_type = "auto"
+
+# OUTPUT
+# plain|json|jsonl
+format = "plain"
+# Write results to a file (uncomment to enable)
+# output = "results.json"
+# Include HTTP request/response content in output (JSON/plain detail sections)
+include_request = false
+include_response = false
+# Silence logs except POC output (plain mode)
+silence = false
+# POC output: plain|curl|httpie|http-request
+poc_type = "plain"
+# Limit number of results (set a positive integer; omit to disable)
+limit = 100
+
+# TARGETS
+# Parameter filters. Supported type qualifiers: query|body|json|cookie|header
+# Examples: "id", "q:query", "auth:header"
+param = []
+# HTTP request body (uncomment and fill to enable)
+# data = "param=value&another=1"
+# HTTP headers ("Key: Value")
+headers = ["Accept: text/html"]
+# Cookies ("name=value")
+cookies = []
+# Override HTTP method
+method = "GET"
+# Custom User-Agent
+user_agent = "Dalfox/3"
+# Load cookies from a raw HTTP request file (reads the `Cookie:` line)
+# cookie_from_raw = "request.txt"
+
+# PARAMETER DISCOVERY
+# Skip discovery entirely
+skip_discovery = false
+# Skip reflection checks for headers
+skip_reflection_header = false
+# Skip reflection checks for cookies
+skip_reflection_cookie = false
+
+# PARAMETER MINING
+# Dictionary wordlist for parameter probing
+# mining_dict_word = "wordlist.txt"
+# Skip all mining
+skip_mining = false
+# Skip dictionary-based mining
+skip_mining_dict = false
+# Skip DOM-based mining
+skip_mining_dom = false
+
+# NETWORK
+# Request timeout (seconds)
+timeout = 10
+# Delay between requests (milliseconds)
+delay = 0
+# Upstream proxy (e.g., "http://127.0.0.1:8080")
+# proxy = "http://127.0.0.1:8080"
+# Follow HTTP redirects
+follow_redirects = false
+
+# ENGINE (concurrency)
+# Worker count for analysis/mining
+workers = 50
+# Global concurrent targets
+max_concurrent_targets = 50
+# Per-host target cap
+max_targets_per_host = 100
+
+# XSS SCANNING
+# Encoders to generate payload variants:
+# - none: use only original payloads (no encoders)
+# - url: URL encode
+# - 2url: double URL encode
+# - html: HTML hex entity encode
+# - base64: base64 encode
+encoders = ["none", "url", "html"]
+# Custom blind XSS payload templates file (uses "{}" placeholder for callback URL)
+# custom_blind_xss_payload = "blind_payloads.txt"
+# Blind XSS callback URL (enables blind scanning pass)
+# blind_callback_url = "https://collab.example/x/callback"
+# Additional payloads file (appended to dynamic payload set)
+# custom_payload = "payloads.txt"
+# Only test custom payloads (ignore built-ins)
+only_custom_payload = false
+# Skip XSS scanning (perform discovery/mining only)
+skip_xss_scanning = false
+# Deep scan: run even when Content-Type is typically skipped (e.g., JSON/images)
+deep_scan = false
+
+# Stored XSS workflow
+# Inject on target, then fetch sxss_url with sxss_method to verify reflection/DOM markers
+sxss = false
+# Required when sxss = true
+# sxss_url = "https://example.com/profile"
+sxss_method = "GET"
