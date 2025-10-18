@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use tokio;
 
 mod cmd;
+mod config;
 mod encoding;
 mod parameter_analysis;
 mod payload;
@@ -42,6 +43,10 @@ struct Cli {
     #[command(subcommand)]
     command: Option<Commands>,
 
+    /// Path to a config file (TOML or JSON). Overrides default search path.
+    #[arg(long = "config", global = true, value_name = "FILE")]
+    config: Option<String>,
+
     /// Targets (when no subcommand is provided, defaults to scan)
     #[arg(value_name = "TARGET")]
     targets: Vec<String>,
@@ -68,9 +73,106 @@ enum Commands {
 async fn main() {
     let cli = Cli::parse();
 
+    // Load configuration with optional --config override
+    let config_load = if let Some(cfg_path) = &cli.config {
+        let p = std::path::Path::new(cfg_path);
+        if let Some(parent) = p.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if !p.exists() {
+            let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("");
+            if ext.eq_ignore_ascii_case("json") {
+                let s = config::default_json_template();
+                let _ = std::fs::write(p, &s);
+                match serde_json::from_str::<config::Config>(&s) {
+                    Ok(cfg) => Ok(config::LoadResult {
+                        config: cfg,
+                        path: p.to_path_buf(),
+                        format: config::ConfigFormat::Json,
+                        created: true,
+                    }),
+                    Err(e) => Err(Box::<dyn std::error::Error>::from(e)),
+                }
+            } else {
+                let s = config::default_toml_template();
+                let _ = std::fs::write(p, &s);
+                match toml::from_str::<config::Config>(&s) {
+                    Ok(cfg) => Ok(config::LoadResult {
+                        config: cfg,
+                        path: p.to_path_buf(),
+                        format: config::ConfigFormat::Toml,
+                        created: true,
+                    }),
+                    Err(e) => Err(Box::<dyn std::error::Error>::from(e)),
+                }
+            }
+        } else {
+            match std::fs::read_to_string(p) {
+                Ok(content) => {
+                    let is_json_ext = p
+                        .extension()
+                        .and_then(|s| s.to_str())
+                        .map(|e| e.eq_ignore_ascii_case("json"))
+                        .unwrap_or(false);
+                    if is_json_ext {
+                        if let Ok(cfg) = serde_json::from_str::<config::Config>(&content) {
+                            Ok(config::LoadResult {
+                                config: cfg,
+                                path: p.to_path_buf(),
+                                format: config::ConfigFormat::Json,
+                                created: false,
+                            })
+                        } else if let Ok(cfg) = toml::from_str::<config::Config>(&content) {
+                            Ok(config::LoadResult {
+                                config: cfg,
+                                path: p.to_path_buf(),
+                                format: config::ConfigFormat::Toml,
+                                created: false,
+                            })
+                        } else {
+                            Err(Box::<dyn std::error::Error>::from(
+                                "Failed to parse config as JSON or TOML",
+                            ))
+                        }
+                    } else {
+                        if let Ok(cfg) = toml::from_str::<config::Config>(&content) {
+                            Ok(config::LoadResult {
+                                config: cfg,
+                                path: p.to_path_buf(),
+                                format: config::ConfigFormat::Toml,
+                                created: false,
+                            })
+                        } else if let Ok(cfg) = serde_json::from_str::<config::Config>(&content) {
+                            Ok(config::LoadResult {
+                                config: cfg,
+                                path: p.to_path_buf(),
+                                format: config::ConfigFormat::Json,
+                                created: false,
+                            })
+                        } else {
+                            Err(Box::<dyn std::error::Error>::from(
+                                "Failed to parse config as TOML or JSON",
+                            ))
+                        }
+                    }
+                }
+                Err(e) => Err(Box::<dyn std::error::Error>::from(e)),
+            }
+        }
+    } else {
+        // Default path behavior: $XDG_CONFIG_HOME/dalfox/config.* or $HOME/.config/dalfox/config.*
+        config::load_or_init()
+    };
+
     if let Some(command) = cli.command {
         match command {
-            Commands::Scan(args) => cmd::scan::run_scan(&args).await,
+            Commands::Scan(args) => {
+                let mut args = args;
+                if let Ok(res) = &config_load {
+                    res.config.apply_to_scan_args_if_default(&mut args);
+                }
+                cmd::scan::run_scan(&args).await
+            }
             Commands::Server(args) => cmd::server::run_server(args),
             Commands::Payload(args) => cmd::payload::run_payload(args),
 
@@ -80,7 +182,7 @@ async fn main() {
         }
     } else {
         // Default to scan
-        let args = cmd::scan::ScanArgs {
+        let mut args = cmd::scan::ScanArgs {
             input_type: "auto".to_string(),
             format: "plain".to_string(),
             targets: cli.targets,
@@ -123,6 +225,9 @@ async fn main() {
             sxss_url: None,
             sxss_method: "GET".to_string(),
         };
+        if let Ok(res) = &config_load {
+            res.config.apply_to_scan_args_if_default(&mut args);
+        }
         cmd::scan::run_scan(&args).await;
     }
 }
