@@ -447,9 +447,12 @@ pub struct ScanArgs {
 
 pub async fn run_scan(args: &ScanArgs) {
     let __dalfox_scan_start = std::time::Instant::now();
-    if !args.silence && args.format == "plain" {
-        eprintln!("Scan started (elapsed: 0.000 s)");
-    }
+    let log_info = |msg: &str| {
+        if args.format == "plain" && !args.silence {
+            let ts = chrono::Local::now().format("%-I:%M%p").to_string();
+            println!("\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m {}", ts, msg);
+        }
+    };
     // Initialize global encoders once for downstream POC/path handling
     if GLOBAL_ENCODERS.get().is_none() {
         let _ = GLOBAL_ENCODERS.set(args.encoders.clone());
@@ -646,11 +649,7 @@ pub async fn run_scan(args: &ScanArgs) {
 
     let results = Arc::new(Mutex::new(Vec::<Result>::new()));
 
-    let multi_pb = if args.silence || args.format != "plain" {
-        None
-    } else {
-        Some(Arc::new(MultiProgress::new()))
-    };
+    let multi_pb: Option<Arc<MultiProgress>> = None;
 
     // Group targets by host
     let mut host_groups: std::collections::HashMap<String, Vec<Target>> =
@@ -696,11 +695,39 @@ pub async fn run_scan(args: &ScanArgs) {
                     }
                 }
             }
-            let mut __analysis_args = args.clone();
-            if __analysis_args.format != "plain" {
-                __analysis_args.silence = true;
+
+            // Pretty start log per target (plain only)
+            if args.format == "plain" && !args.silence {
+                log_info(&format!("start scan to {}", target.url));
             }
+
+            // Silence parameter analysis logs and progress; we'll print our own summary
+            let mut __analysis_args = args.clone();
+            __analysis_args.silence = true;
             analyze_parameters(target, &__analysis_args, multi_pb.clone()).await;
+
+            // Pretty reflection summary (plain only)
+            if args.format == "plain" && !args.silence {
+                let n = target.reflection_params.len();
+                log_info(&format!("found reflected \x1b[33m{}\x1b[0m params", n));
+                for (i, p) in target.reflection_params.iter().enumerate() {
+                    let bullet = if i + 1 == n { "└──" } else { "├──" };
+                    let valid = p
+                        .valid_specials
+                        .as_ref()
+                        .map(|v| v.iter().collect::<String>())
+                        .unwrap_or_else(|| "-".to_string());
+                    let invalid = p
+                        .invalid_specials
+                        .as_ref()
+                        .map(|v| v.iter().collect::<String>())
+                        .unwrap_or_else(|| "-".to_string());
+                    println!(
+                        "  \x1b[90m{}\x1b[0m \x1b[36m{}\x1b[0m \x1b[90mvalid_specials=\x1b[0m\"\x1b[33m{}\x1b[0m\" \x1b[90minvalid_specials=\x1b[0m\"\x1b[33m{}\x1b[0m\"",
+                        bullet, p.name, valid, invalid
+                    );
+                }
+            }
         }
     }
 
@@ -900,14 +927,26 @@ pub async fn run_scan(args: &ScanArgs) {
         output
     } else if args.format == "plain" {
         let mut output = String::new();
+
+        // Plain logger: XSS summary before POC lines
+        let v_count = display_results
+            .iter()
+            .filter(|r| r.result_type == "V")
+            .count();
+        log_info(&format!("XSS found \x1b[33m{}\x1b[0m XSS", v_count));
+
         for result in display_results {
             output.push_str(&generate_poc(result, &args.poc_type));
-            if args.poc_type == "plain" && !args.silence {
-                output.push_str(&format!("   \x1b[90mPayload: {}\x1b[0m\n", result.payload));
-                if let Some(resp) = &result.response {
-                    if let Some((line_num, context)) = extract_context(resp, &result.payload) {
-                        output.push_str(&format!("   \x1b[90mL{}: {}\x1b[0m\n", line_num, context));
-                    }
+            output.push_str(&format!(
+                "  \x1b[90m├── Payload:\x1b[0m \x1b[90m{}\x1b[0m\n",
+                result.payload
+            ));
+            if let Some(resp) = &result.response {
+                if let Some((line_num, context)) = extract_context(resp, &result.payload) {
+                    output.push_str(&format!(
+                        "  \x1b[90m└── L{}:\x1b[0m \x1b[90m{}\x1b[0m\n",
+                        line_num, context
+                    ));
                 }
             }
         }
@@ -956,8 +995,11 @@ pub async fn run_scan(args: &ScanArgs) {
             println!("---");
         }
     }
-    if !args.silence && args.format == "plain" {
+    if args.format == "plain" && !args.silence {
         let __dalfox_elapsed = __dalfox_scan_start.elapsed().as_secs_f64();
-        eprintln!("Scan completed in {:.3} seconds", __dalfox_elapsed);
+        log_info(&format!(
+            "scan completed in {:.3} seconds",
+            __dalfox_elapsed
+        ));
     }
 }

@@ -8,7 +8,7 @@ pub mod xss_common;
 use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::Param;
 use crate::scanning::check_dom_verification::check_dom_verification;
-use crate::scanning::check_reflection::check_reflection;
+use crate::scanning::check_reflection::check_reflection_with_response;
 use crate::target_parser::Target;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::collections::HashSet;
@@ -327,15 +327,15 @@ pub async fn run_scanning(
                 }
                 let _permit = semaphore_clone.acquire().await.unwrap();
                 // Skip reflection if already found for this param
-                let reflected = {
+                let reflection_tuple = {
                     let already_found = found_reflection_params_clone
                         .lock()
                         .await
                         .contains(&param_clone.name);
                     if already_found {
-                        false
+                        (false, None)
                     } else {
-                        check_reflection(
+                        check_reflection_with_response(
                             &target_clone,
                             &param_clone,
                             &reflection_payload_clone,
@@ -344,6 +344,8 @@ pub async fn run_scanning(
                         .await
                     }
                 };
+                let reflected = reflection_tuple.0;
+                let reflection_response_text = reflection_tuple.1;
                 if let Some(ref pb) = pb_clone {
                     pb.inc(1);
                 }
@@ -460,7 +462,7 @@ pub async fn run_scanning(
                             &param_clone,
                             &reflection_payload_clone,
                         ));
-                        result.response = None;
+                        result.response = reflection_response_text;
 
                         results_clone.lock().await.push(result);
                     }
