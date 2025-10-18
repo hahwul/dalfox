@@ -729,7 +729,7 @@ pub async fn run_scan(args: &ScanArgs) {
                         .map(|v| v.iter().collect::<String>())
                         .unwrap_or_else(|| "-".to_string());
                     println!(
-                        "  \x1b[90m{}\x1b[0m \x1b[36m{}\x1b[0m \x1b[90mvalid_specials=\x1b[0m\"\x1b[33m{}\x1b[0m\" \x1b[90minvalid_specials=\x1b[0m\"\x1b[33m{}\x1b[0m\"",
+                        "  \x1b[90m{}\x1b[0m \x1b[38;5;247m{}\x1b[0m \x1b[38;5;247mvalid_specials=\x1b[0m\"\x1b[38;5;247m{}\x1b[0m\" \x1b[38;5;247minvalid_specials=\x1b[0m\"\x1b[38;5;247m{}\x1b[0m\"",
                         bullet, p.name, valid, invalid
                     );
                 }
@@ -978,9 +978,9 @@ pub async fn run_scan(args: &ScanArgs) {
 
             // 1) Issue
             let issue_text = if result.result_type == "R" {
-                "Reflected payload confirmed"
+                "XSS payload reflected"
             } else {
-                "DOM object confirmed"
+                "XSS payload DOM object identified"
             };
             let mut idx = 0usize;
             let bullet = if idx == last_idx {
@@ -989,7 +989,7 @@ pub async fn run_scan(args: &ScanArgs) {
                 "├──"
             };
             output.push_str(&format!(
-                "  \x1b[90m{}\x1b[0m \x1b[37mIssue:\x1b[0m \x1b[90m{}\x1b[0m\n",
+                "  \x1b[90m{}\x1b[0m \x1b[38;5;247mIssue:\x1b[0m \x1b[38;5;247m{}\x1b[0m\n",
                 bullet, issue_text
             ));
             idx += 1;
@@ -1001,7 +1001,7 @@ pub async fn run_scan(args: &ScanArgs) {
                 "├──"
             };
             output.push_str(&format!(
-                "  \x1b[90m{}\x1b[0m \x1b[37mPayload:\x1b[0m \x1b[90m{}\x1b[0m\n",
+                "  \x1b[90m{}\x1b[0m \x1b[38;5;247mPayload:\x1b[0m \x1b[38;5;247m{}\x1b[0m\n",
                 bullet, result.payload
             ));
             idx += 1;
@@ -1014,7 +1014,7 @@ pub async fn run_scan(args: &ScanArgs) {
                     "├──"
                 };
                 output.push_str(&format!(
-                    "  \x1b[90m{}\x1b[0m \x1b[37mL{}:\x1b[0m \x1b[90m{}\x1b[0m\n",
+                    "  \x1b[90m{}\x1b[0m \x1b[38;5;247mL{}:\x1b[0m \x1b[38;5;247m{}\x1b[0m\n",
                     bullet, line_num, context
                 ));
                 idx += 1;
@@ -1028,12 +1028,12 @@ pub async fn run_scan(args: &ScanArgs) {
                     "├──"
                 };
                 output.push_str(&format!(
-                    "  \x1b[90m{}\x1b[0m \x1b[37mRequest:\x1b[0m\n",
+                    "  \x1b[90m{}\x1b[0m \x1b[38;5;247mRequest:\x1b[0m\n",
                     bullet
                 ));
                 if let Some(req) = &result.request {
                     for line in req.lines() {
-                        output.push_str(&format!("      \x1b[90m{}\x1b[0m\n", line));
+                        output.push_str(&format!("      \x1b[38;5;247m{}\x1b[0m\n", line));
                     }
                 }
                 idx += 1;
@@ -1047,12 +1047,12 @@ pub async fn run_scan(args: &ScanArgs) {
                     "├──"
                 };
                 output.push_str(&format!(
-                    "  \x1b[90m{}\x1b[0m \x1b[37mResponse:\x1b[0m\n",
+                    "  \x1b[90m{}\x1b[0m \x1b[38;5;247mResponse:\x1b[0m\n",
                     bullet
                 ));
                 if let Some(resp) = &result.response {
                     for line in resp.lines() {
-                        output.push_str(&format!("      \x1b[90m{}\x1b[0m\n", line));
+                        output.push_str(&format!("      \x1b[38;5;247m{}\x1b[0m\n", line));
                     }
                 }
             }
