@@ -895,3 +895,232 @@ pub async fn run_server(args: ServerArgs) {
         eprintln!("server error: {}", e);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        extract::{Path, Query, State},
+        http::{HeaderMap, HeaderValue, StatusCode},
+        response::IntoResponse,
+    };
+    use std::collections::HashMap as Map;
+
+    fn make_state(
+        api_key: Option<&str>,
+        origins: Option<Vec<&str>>,
+        allow_all: bool,
+        jsonp: bool,
+        cb_name: &str,
+    ) -> AppState {
+        AppState {
+            api_key: api_key.map(|s| s.to_string()),
+            jobs: Arc::new(Mutex::new(std::collections::HashMap::new())),
+            log_file: None,
+            allowed_origins: origins.map(|v| v.into_iter().map(|s| s.to_string()).collect()),
+            allowed_origin_regexes: vec![],
+            allow_all_origins: allow_all,
+            allow_methods: "GET,POST,OPTIONS,PUT,PATCH,DELETE".to_string(),
+            allow_headers: "Content-Type,X-API-KEY,Authorization".to_string(),
+            jsonp_enabled: jsonp,
+            callback_param_name: cb_name.to_string(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cors_headers_on_result_exact_origin() {
+        let state = make_state(
+            Some("secret"),
+            Some(vec!["http://localhost:3000"]),
+            false,
+            false,
+            "callback",
+        );
+
+        // Insert a dummy job
+        let id = "job1".to_string();
+        {
+            let mut jobs = state.jobs.lock().await;
+            jobs.insert(
+                id.clone(),
+                Job {
+                    status: "done".to_string(),
+                    results: None,
+                    include_request: false,
+                    include_response: false,
+                },
+            );
+        }
+
+        // Build headers with API key and Origin
+        let mut headers = HeaderMap::new();
+        headers.insert("X-API-KEY", HeaderValue::from_static("secret"));
+        headers.insert("Origin", HeaderValue::from_static("http://localhost:3000"));
+
+        let resp = super::get_result_handler(
+            State(state.clone()),
+            headers,
+            Path(id.clone()),
+            Query(Map::new()),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let allow_origin = resp
+            .headers()
+            .get("access-control-allow-origin")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert_eq!(allow_origin, "http://localhost:3000");
+
+        let allow_methods = resp
+            .headers()
+            .get("access-control-allow-methods")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert!(allow_methods.contains("GET"));
+        assert!(allow_methods.contains("POST"));
+        assert!(allow_methods.contains("OPTIONS"));
+    }
+
+    #[tokio::test]
+    async fn test_jsonp_unauthorized_with_callback() {
+        let state = make_state(Some("secret"), None, false, true, "cb");
+
+        // No API key header provided to trigger 401
+        let mut headers = HeaderMap::new();
+        headers.insert("Origin", HeaderValue::from_static("http://evil.test"));
+
+        // Provide ?cb=myFunc in query to request JSONP
+        let mut q = Map::new();
+        q.insert("cb".to_string(), "myFunc".to_string());
+
+        let resp = super::get_result_handler(
+            State(state.clone()),
+            headers,
+            Path("nojob".to_string()),
+            Query(q),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+        let ctype = resp
+            .headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert!(ctype.starts_with("application/javascript"));
+    }
+
+    #[tokio::test]
+    async fn test_auth_success_and_failure() {
+        let state = make_state(Some("secret"), None, false, false, "callback");
+
+        // Insert a dummy job for success case
+        let ok_id = "ok".to_string();
+        {
+            let mut jobs = state.jobs.lock().await;
+            jobs.insert(
+                ok_id.clone(),
+                Job {
+                    status: "done".to_string(),
+                    results: None,
+                    include_request: false,
+                    include_response: false,
+                },
+            );
+        }
+
+        // Failure (no key)
+        let headers_fail = HeaderMap::new();
+        let resp_fail = super::get_result_handler(
+            State(state.clone()),
+            headers_fail,
+            Path(ok_id.clone()),
+            Query(Map::new()),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp_fail.status(), StatusCode::UNAUTHORIZED);
+
+        // Success
+        let mut headers_ok = HeaderMap::new();
+        headers_ok.insert("X-API-KEY", HeaderValue::from_static("secret"));
+        let resp_ok = super::get_result_handler(
+            State(state.clone()),
+            headers_ok,
+            Path(ok_id.clone()),
+            Query(Map::new()),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp_ok.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_options_preflight_headers() {
+        let state = make_state(None, Some(vec!["*"]), true, false, "callback");
+
+        let mut headers = HeaderMap::new();
+        headers.insert("Origin", HeaderValue::from_static("http://any.example"));
+
+        let resp =
+            super::options_result_handler(State(state.clone()), headers, Path("any".to_string()))
+                .await
+                .into_response();
+
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+
+        let allow_origin = resp
+            .headers()
+            .get("access-control-allow-origin")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert_eq!(allow_origin, "*");
+
+        let allow_methods = resp
+            .headers()
+            .get("access-control-allow-methods")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        assert!(allow_methods.contains("OPTIONS"));
+    }
+
+    #[tokio::test]
+    async fn test_scan_alternate_path_uses_same_handler_semantics() {
+        // This test validates that the result handler semantics (used by /result/:id)
+        // are suitable for /scan/:id as well (same handler wired).
+        let state = make_state(Some("secret"), None, false, false, "callback");
+
+        // Insert job
+        let id = "alt".to_string();
+        {
+            let mut jobs = state.jobs.lock().await;
+            jobs.insert(
+                id.clone(),
+                Job {
+                    status: "running".to_string(),
+                    results: None,
+                    include_request: false,
+                    include_response: false,
+                },
+            );
+        }
+
+        let mut headers = HeaderMap::new();
+        headers.insert("X-API-KEY", HeaderValue::from_static("secret"));
+
+        // Directly call the same handler that is wired to both /result/:id and /scan/:id
+        let resp = super::get_result_handler(
+            State(state.clone()),
+            headers,
+            Path(id.clone()),
+            Query(Map::new()),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+    }
+}
