@@ -554,6 +554,10 @@ pub struct ScanArgs {
 }
 
 pub async fn run_scan(args: &ScanArgs) {
+    // Show banner at the start when using plain format and not silenced
+    if args.format == "plain" && !args.silence {
+        crate::utils::print_banner_once(env!("CARGO_PKG_VERSION"), true);
+    }
     let __dalfox_scan_start = std::time::Instant::now();
     let log_info = |msg: &str| {
         if args.format == "plain" && !args.silence {

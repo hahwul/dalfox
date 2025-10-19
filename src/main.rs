@@ -8,6 +8,7 @@ mod parameter_analysis;
 mod payload;
 mod scanning;
 mod target_parser;
+mod utils;
 
 #[derive(Parser)]
 #[command(name = "dalfox")]
@@ -17,24 +18,7 @@ mod target_parser;
     override_usage = "dalfox [COMMAND] [TARGET] <FLAGS>\ne.g., dalfox scan https://dalfox.hahwul.com"
 )]
 #[command(help_template = r#"
-
-               ░█▒
-             ████     ▓
-           ▓█████  ▓██▓
-          ████████████         ░
-        ░███████████▓          ▓░
-     ░████████████████        ▒██░
-    ▓██████████▒███████     ░█████▓░
-   ██████████████░ ████        █▓
- ░█████▓          ░████▒       ░         Dalfox v{version}
- █████               ▓██░
- ████                  ▓██      Powerful open-source XSS scanner
- ███▓        ▓███████▓▒▓█░     and utility focused on automation.
- ███▒      █████
- ▓███     ██████
- ████     ██████▒
- ░████    ████████▒
-
+{about-with-newline}
 Usage: {usage}
 
 {all-args}
@@ -71,7 +55,16 @@ enum Commands {
 
 #[tokio::main]
 async fn main() {
+    // Determine color policy from TTY and print banner early for help
+    let __args: Vec<String> = std::env::args().collect();
+    let color_enabled = atty::is(atty::Stream::Stdout);
+    if __args.iter().any(|a| a == "-h" || a == "--help") {
+        crate::utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
+    }
+
     let cli = Cli::parse();
+    // Print a colored banner once for normal execution paths.
+    crate::utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
 
     // Load configuration with optional --config override
     let config_load = if let Some(cfg_path) = &cli.config {
@@ -228,6 +221,7 @@ async fn main() {
         if let Ok(res) = &config_load {
             res.config.apply_to_scan_args_if_default(&mut args);
         }
+        crate::utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
         cmd::scan::run_scan(&args).await;
     }
 }
