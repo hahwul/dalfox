@@ -814,6 +814,49 @@ pub async fn run_scan(args: &ScanArgs) {
     let preflight_idx = Arc::new(AtomicUsize::new(0));
     let analyze_idx = Arc::new(AtomicUsize::new(0));
     let scan_idx = Arc::new(AtomicUsize::new(0));
+    let overall_done = Arc::new(AtomicUsize::new(0));
+
+    // Start global overall progress ticker when multiple targets; runs across preflight, analysis, and scanning
+    let overall_ticker = if args.format == "plain" && !args.silence && total_targets > 1 {
+        let results_clone = results.clone();
+        let overall_done_clone = overall_done.clone();
+        let total_targets_copy = total_targets;
+        let (tx, mut rx) = oneshot::channel::<()>();
+        let (done_tx, done_rx) = oneshot::channel::<()>();
+        tokio::spawn(async move {
+            let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            let mut i = 0usize;
+            loop {
+                let done = overall_done_clone.load(Ordering::Relaxed);
+                let percent = (done * 100) / std::cmp::max(1, total_targets_copy);
+                let findings = results_clone.lock().await.len();
+                print!(
+                    "\r\x1b[38;5;247m{} overall: targets={}  done={}  progress={}{}  findings={}\x1b[0m",
+                    frames[i % frames.len()],
+                    total_targets_copy,
+                    done,
+                    percent,
+                    "%",
+                    findings
+                );
+                let _ = io::stdout().flush();
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_millis(120)) => {},
+                    _ = &mut rx => {
+                        // clear the line and exit
+                        print!("\r\x1b[2K\r");
+                        let _ = io::stdout().flush();
+                        let _ = done_tx.send(());
+                        break;
+                    }
+                }
+                i = (i + 1) % frames.len();
+            }
+        });
+        Some((tx, done_rx))
+    } else {
+        None
+    };
     // Perform blind XSS scanning if callback URL is provided
     if let Some(callback_url) = &args.blind_callback_url {
         if !args.silence && args.format == "plain" {
@@ -871,19 +914,21 @@ pub async fn run_scan(args: &ScanArgs) {
                 // Preflight Content-Type check (skip denylisted types unless deep-scan)
                 if !args_clone.deep_scan {
                     let current = preflight_idx_clone.fetch_add(1, Ordering::Relaxed) + 1;
-                    // Print a single-line notice to avoid overlapping spinners
-                    if args_clone.format == "plain" && !args_clone.silence {
-                        let label = if total_targets_copy > 1 {
-                            format!(
-                                "[{}/{}] preflight: {}",
-                                current, total_targets_copy, target.url
-                            )
-                        } else {
-                            format!("preflight: {}", target.url)
-                        };
-                        println!("\x1b[38;5;247m{}\x1b[0m", label);
-                    }
+                    // Print an ephemeral spinner and auto-clear when finished
+                    let label = if total_targets_copy > 1 {
+                        format!(
+                            "[{}/{}] preflight: {}",
+                            current, total_targets_copy, target.url
+                        )
+                    } else {
+                        format!("preflight: {}", target.url)
+                    };
+                    let __preflight_spinner = if total_targets_copy == 1 { start_spinner(!args_clone.silence, label) } else { None };
                     let __preflight_ct = preflight_content_type(&target, &args_clone).await;
+                    if let Some((tx, done_rx)) = __preflight_spinner {
+                        let _ = tx.send(());
+                        let _ = done_rx.await;
+                    }
                     if let Some(ct) = __preflight_ct {
                         if !is_allowed_content_type(&ct) {
                             // Skip this target early
@@ -893,7 +938,7 @@ pub async fn run_scan(args: &ScanArgs) {
                 }
 
                 // Pretty start log per target (plain only)
-                if args_clone.format == "plain" && !args_clone.silence {
+                if args_clone.format == "plain" && !args_clone.silence && total_targets_copy == 1 {
                     if total_targets_copy > 1 {
                         let sid = crate::utils::short_scan_id(&crate::utils::make_scan_id(
                             &target.url.to_string(),
@@ -912,14 +957,30 @@ pub async fn run_scan(args: &ScanArgs) {
                     }
                 }
 
-                // Silence parameter analysis logs and progress; we'll print our own summary
-                let _current = analyze_idx_clone.fetch_add(1, Ordering::Relaxed) + 1;
+                // Silence parameter analysis logs and progress; show spinner for single-target runs
+                let current = analyze_idx_clone.fetch_add(1, Ordering::Relaxed) + 1;
+                let __analyze_spinner = if total_targets_copy == 1 {
+                    start_spinner(
+                        !args_clone.silence,
+                        if total_targets_copy > 1 {
+                            format!("[{}/{}] analyzing: {}", current, total_targets_copy, target.url)
+                        } else {
+                            format!("analyzing: {}", target.url)
+                        },
+                    )
+                } else {
+                    None
+                };
                 let mut __analysis_args = args_clone.clone();
                 __analysis_args.silence = true;
                 analyze_parameters(&mut target, &__analysis_args, multi_pb_clone).await;
+                if let Some((tx, done_rx)) = __analyze_spinner {
+                    let _ = tx.send(());
+                    let _ = done_rx.await;
+                }
 
                 // Pretty reflection summary (plain only)
-                if args_clone.format == "plain" && !args_clone.silence {
+                if args_clone.format == "plain" && !args_clone.silence && total_targets_copy == 1 {
                     let n = target.reflection_params.len();
                     let ts = chrono::Local::now().format("%-I:%M%p").to_string();
                     if total_targets_copy > 1 {
@@ -993,6 +1054,7 @@ pub async fn run_scan(args: &ScanArgs) {
         let results_clone = results.clone();
 
         let scan_idx = scan_idx.clone();
+        let overall_done_clone = overall_done.clone();
         let group_handle = tokio::spawn(async move {
             // Calculate total overall tasks for this group
             let mut total_overall_tasks = 0u64;
@@ -1050,7 +1112,7 @@ pub async fn run_scan(args: &ScanArgs) {
                 let target_handle = tokio::spawn(async move {
                     if !args_clone.skip_xss_scanning {
                         let __scan_spinner = {
-                            let enabled = !args_clone.silence;
+                            let enabled = !args_clone.silence && total_targets_copy == 1;
                             let current = scan_idx_clone.fetch_add(1, Ordering::Relaxed) + 1;
                             start_spinner(
                                 enabled,
@@ -1084,6 +1146,9 @@ pub async fn run_scan(args: &ScanArgs) {
 
             for handle in target_handles {
                 handle.await.unwrap();
+                // Update global overall progress line when multiple targets
+                overall_done_clone.fetch_add(1, Ordering::Relaxed);
+                // overall ticker handles rendering globally
             }
 
             if let Some(pb) = overall_pb {
@@ -1104,6 +1169,13 @@ pub async fn run_scan(args: &ScanArgs) {
         }
     }
 
+    if args.format == "plain" && !args.silence && total_targets > 1 {
+        if let Some((tx, done_rx)) = overall_ticker {
+            let _ = tx.send(());
+            let _ = done_rx.await;
+        }
+        println!();
+    }
     // Output results
     let final_results = results.lock().await;
     let limit = args.limit.unwrap_or(usize::MAX);
