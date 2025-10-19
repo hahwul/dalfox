@@ -1,5 +1,5 @@
-use std::collections::HashSet;
-use std::sync::{Arc, OnceLock};
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use reqwest::Client;
@@ -13,6 +13,73 @@ static REMOTE_WORDS: OnceLock<Arc<Vec<String>>> = OnceLock::new();
 
 /// Default timeout for remote fetch operations.
 const DEFAULT_TIMEOUT_SECS: u64 = 15;
+
+// Provider registries with default seeds and registration APIs
+static PAYLOAD_PROVIDER_REGISTRY: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+static WORDLIST_PROVIDER_REGISTRY: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
+
+fn ensure_default_registries() {
+    // Seed payload providers if empty
+    {
+        let reg = PAYLOAD_PROVIDER_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut m = reg.lock().unwrap();
+        if m.is_empty() {
+            m.insert(
+                "payloadbox".to_string(),
+                vec!["https://raw.githubusercontent.com/payloadbox/xss-payload-list/master/Intruder/xss-payload-list.txt".to_string()],
+            );
+            m.insert(
+                "portswigger".to_string(),
+                vec!["https://raw.githubusercontent.com/PortSwigger/xss-cheatsheet-data/master/output/payloads.txt".to_string()],
+            );
+        }
+    }
+    // Seed wordlist providers if empty
+    {
+        let reg = WORDLIST_PROVIDER_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
+        let mut m = reg.lock().unwrap();
+        if m.is_empty() {
+            m.insert(
+                "assetnote".to_string(),
+                vec!["https://raw.githubusercontent.com/assetnote/wordlists/master/data/parameters.txt".to_string()],
+            );
+            m.insert(
+                "burp".to_string(),
+                vec!["https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/burp-parameter-names.txt".to_string()],
+            );
+        }
+    }
+}
+
+// Public registration APIs
+pub fn register_payload_provider<N: AsRef<str>>(name: N, urls: Vec<String>) {
+    let reg = PAYLOAD_PROVIDER_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
+    let key = name.as_ref().to_ascii_lowercase();
+    let mut m = reg.lock().unwrap();
+    m.insert(key, urls);
+}
+
+pub fn register_wordlist_provider<N: AsRef<str>>(name: N, urls: Vec<String>) {
+    let reg = WORDLIST_PROVIDER_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
+    let key = name.as_ref().to_ascii_lowercase();
+    let mut m = reg.lock().unwrap();
+    m.insert(key, urls);
+}
+
+// Optional helpers to enumerate providers
+pub fn list_payload_providers() -> Vec<String> {
+    ensure_default_registries();
+    let reg = PAYLOAD_PROVIDER_REGISTRY.get().unwrap();
+    let m = reg.lock().unwrap();
+    m.keys().cloned().collect()
+}
+
+pub fn list_wordlist_providers() -> Vec<String> {
+    ensure_default_registries();
+    let reg = WORDLIST_PROVIDER_REGISTRY.get().unwrap();
+    let m = reg.lock().unwrap();
+    m.keys().cloned().collect()
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct RemoteFetchOptions {
@@ -168,23 +235,13 @@ pub fn has_remote_wordlists() -> bool {
 
 /// Build the list of remote URLs for the given payload providers.
 fn collect_payload_provider_urls(providers: &[String]) -> Vec<String> {
+    ensure_default_registries();
+    let reg = PAYLOAD_PROVIDER_REGISTRY.get().unwrap();
+    let m = reg.lock().unwrap();
     let mut urls: Vec<String> = Vec::new();
     for p in providers {
-        match p.to_ascii_lowercase().as_str() {
-            // PayloadBox XSS payloads
-            // Reference: payloadbox/xss-payload-list
-            "payloadbox" => {
-                urls.push("https://raw.githubusercontent.com/payloadbox/xss-payload-list/master/Intruder/xss-payload-list.txt".to_string());
-                // Alternative (extra) lists can be appended here if desired in the future
-            }
-            // PortSwigger XSS cheat sheet data (best-effort; repository structure may change)
-            // If the URL is unavailable, it will be skipped gracefully.
-            "portswigger" => {
-                // Note: This is a best-effort endpoint. If the upstream path changes, fetching will simply fail silently.
-                urls.push("https://raw.githubusercontent.com/PortSwigger/xss-cheatsheet-data/master/output/payloads.txt".to_string());
-            }
-            // Unknown provider – ignore
-            _ => {}
+        if let Some(lst) = m.get(&p.to_ascii_lowercase()) {
+            urls.extend(lst.clone());
         }
     }
     urls
@@ -192,22 +249,13 @@ fn collect_payload_provider_urls(providers: &[String]) -> Vec<String> {
 
 /// Build the list of remote URLs for the given wordlist providers.
 fn collect_wordlist_provider_urls(providers: &[String]) -> Vec<String> {
+    ensure_default_registries();
+    let reg = WORDLIST_PROVIDER_REGISTRY.get().unwrap();
+    let m = reg.lock().unwrap();
     let mut urls: Vec<String> = Vec::new();
     for p in providers {
-        match p.to_ascii_lowercase().as_str() {
-            // Assetnote parameter wordlist
-            "assetnote" => {
-                urls.push(
-                    "https://raw.githubusercontent.com/assetnote/wordlists/master/data/parameters.txt"
-                        .to_string(),
-                );
-            }
-            // Burp parameter names (via SecLists)
-            "burp" => {
-                urls.push("https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/burp-parameter-names.txt".to_string());
-            }
-            // Unknown provider – ignore
-            _ => {}
+        if let Some(lst) = m.get(&p.to_ascii_lowercase()) {
+            urls.extend(lst.clone());
         }
     }
     urls
