@@ -610,25 +610,31 @@ pub async fn run_scan(args: &ScanArgs) {
     }
     let input_type = if args.input_type == "auto" {
         if args.targets.is_empty() {
-            if !args.silence {
-                eprintln!("Error: No targets specified");
+            // If no positional targets and STDIN is piped, treat as pipe mode
+            if !atty::is(atty::Stream::Stdin) {
+                "pipe".to_string()
+            } else {
+                if !args.silence {
+                    eprintln!("Error: No targets specified");
+                }
+                return;
             }
-            return;
-        }
-        // Check if all targets look like raw HTTP requests
-        let is_raw_http = args.targets.iter().all(|t| {
-            t.starts_with("GET ")
-                || t.starts_with("POST ")
-                || t.starts_with("PUT ")
-                || t.starts_with("DELETE ")
-                || t.starts_with("HEAD ")
-                || t.starts_with("OPTIONS ")
-                || t.starts_with("PATCH ")
-        });
-        if is_raw_http {
-            "raw-http".to_string()
         } else {
-            "auto".to_string()
+            // Check if all targets look like raw HTTP requests
+            let is_raw_http = args.targets.iter().all(|t| {
+                t.starts_with("GET ")
+                    || t.starts_with("POST ")
+                    || t.starts_with("PUT ")
+                    || t.starts_with("DELETE ")
+                    || t.starts_with("HEAD ")
+                    || t.starts_with("OPTIONS ")
+                    || t.starts_with("PATCH ")
+            });
+            if is_raw_http {
+                "raw-http".to_string()
+            } else {
+                "auto".to_string()
+            }
         }
     } else {
         args.input_type.clone()

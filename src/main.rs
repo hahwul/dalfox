@@ -221,6 +221,7 @@ async fn main() {
         if let Ok(res) = &config_load {
             res.config.apply_to_scan_args_if_default(&mut args);
         }
+
         crate::utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
         cmd::scan::run_scan(&args).await;
     }
