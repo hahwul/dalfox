@@ -871,6 +871,8 @@ pub async fn run_server(args: ServerArgs) {
         .route("/scan", options(options_scan_handler))
         .route("/result/:id", get(get_result_handler))
         .route("/result/:id", options(options_result_handler))
+        .route("/scan/:id", get(get_result_handler))
+        .route("/scan/:id", options(options_result_handler))
         .with_state(state.clone());
 
     log(
