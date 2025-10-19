@@ -860,8 +860,19 @@ pub async fn run_scan(args: &ScanArgs) {
             }
 
             // Pretty start log per target (plain only)
+            let __scan_id = if total_targets > 1 {
+                Some(crate::utils::short_scan_id(&crate::utils::make_scan_id(
+                    &target.url.to_string(),
+                )))
+            } else {
+                None
+            };
             if args.format == "plain" && !args.silence {
-                log_info(&format!("start scan to {}", target.url));
+                if let Some(ref sid) = __scan_id {
+                    log_info(&format!("{} start scan to {}", sid, target.url));
+                } else {
+                    log_info(&format!("start scan to {}", target.url));
+                }
             }
 
             // Silence parameter analysis logs and progress; we'll print our own summary
@@ -885,7 +896,14 @@ pub async fn run_scan(args: &ScanArgs) {
             // Pretty reflection summary (plain only)
             if args.format == "plain" && !args.silence {
                 let n = target.reflection_params.len();
-                log_info(&format!("found reflected \x1b[33m{}\x1b[0m params", n));
+                if let Some(ref sid) = __scan_id {
+                    log_info(&format!(
+                        "{} found reflected \x1b[33m{}\x1b[0m params",
+                        sid, n
+                    ));
+                } else {
+                    log_info(&format!("found reflected \x1b[33m{}\x1b[0m params", n));
+                }
                 for (i, p) in target.reflection_params.iter().enumerate() {
                     let bullet = if i + 1 == n { "└──" } else { "├──" };
                     let valid = p

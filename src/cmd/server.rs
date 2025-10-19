@@ -2,7 +2,6 @@ use clap::Args;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::{
     Json, Router,
@@ -11,9 +10,9 @@ use axum::{
     response::IntoResponse,
     routing::{get, options, post},
 };
-use hex;
+
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+
 use tokio::sync::Mutex;
 
 use crate::cmd::scan::ScanArgs;
@@ -156,14 +155,12 @@ fn check_api_key(state: &AppState, headers: &HeaderMap) -> bool {
 }
 
 fn make_scan_id(s: &str) -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
-    let mut hasher = Sha256::new();
-    hasher.update(format!("{}:{}", s, now));
-    let digest = hasher.finalize();
-    hex::encode(digest)
+    crate::utils::make_scan_id(s)
+}
+
+/// Return a compact, 7-character prefix of a scan id for log display.
+fn short_scan_id(id: &str) -> String {
+    crate::utils::short_scan_id(id)
 }
 
 fn build_cors_headers(state: &AppState, req_headers: &HeaderMap) -> HeaderMap {
