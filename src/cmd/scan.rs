@@ -11,6 +11,7 @@ use std::sync::{
 };
 use std::time::Duration;
 use tokio::sync::{Mutex, oneshot};
+use tokio::task::LocalSet;
 use urlencoding;
 
 use crate::encoding::{base64_encode, double_url_encode, html_entity_encode, url_encode};
@@ -828,101 +829,151 @@ pub async fn run_scan(args: &ScanArgs) {
         }
     }
 
-    // Analyze parameters for each target sequentially to avoid Send issues
+    // Analyze parameters for each target concurrently (bounded) instead of sequentially
     for group in host_groups.values_mut() {
         // Limit targets per host
         if group.len() > args.max_targets_per_host {
             group.truncate(args.max_targets_per_host);
         }
-        for target in group {
-            // Preflight Content-Type check (skip denylisted types unless deep-scan)
-            if !args.deep_scan {
-                let current = preflight_idx.fetch_add(1, Ordering::Relaxed) + 1;
-                let __preflight_spinner = start_spinner(
-                    !args.silence,
-                    if total_targets > 1 {
-                        format!("[{}/{}] preflight: {}", current, total_targets, target.url)
-                    } else {
-                        format!("preflight: {}", target.url)
-                    },
-                );
-                let __preflight_ct = preflight_content_type(target, &args).await;
-                if let Some((tx, done_rx)) = __preflight_spinner {
-                    let _ = tx.send(());
-                    let _ = done_rx.await;
-                }
-                if let Some(ct) = __preflight_ct {
-                    if !is_allowed_content_type(&ct) {
-                        // Skip quietly; do not leave progress/logs
-                        continue;
+
+        // Bound overall concurrency for preflight + analysis with the same cap as scanning
+        let pre_analyze_semaphore =
+            Arc::new(tokio::sync::Semaphore::new(args.max_concurrent_targets));
+
+        // Move targets out of the group to own them in spawned tasks
+        let mut drained: Vec<Target> = Vec::new();
+        drained.append(group);
+
+        let processed: Vec<Target> = {
+            let local = LocalSet::new();
+            // Clone shared indices and config for this LocalSet to avoid moving them
+            let preflight_idx_outer = preflight_idx.clone();
+            let analyze_idx_outer = analyze_idx.clone();
+            let args_outer = args.clone();
+            let pre_analyze_semaphore_outer = pre_analyze_semaphore.clone();
+            let total_targets_outer = total_targets;
+            let multi_pb_outer = multi_pb.clone();
+            local.run_until(async move {
+                let mut handles = vec![];
+
+                for mut target in drained {
+            let args_clone = args_outer.clone();
+            let sem = pre_analyze_semaphore_outer.clone();
+            let preflight_idx_clone = preflight_idx_outer.clone();
+            let analyze_idx_clone = analyze_idx_outer.clone();
+            let total_targets_copy = total_targets_outer;
+            let multi_pb_clone = multi_pb_outer.clone();
+
+            handles.push(tokio::task::spawn_local(async move {
+                // Bound concurrency across targets for preflight + analysis
+                let _permit = sem.acquire_owned().await.unwrap();
+
+                // Preflight Content-Type check (skip denylisted types unless deep-scan)
+                if !args_clone.deep_scan {
+                    let current = preflight_idx_clone.fetch_add(1, Ordering::Relaxed) + 1;
+                    // Print a single-line notice to avoid overlapping spinners
+                    if args_clone.format == "plain" && !args_clone.silence {
+                        let label = if total_targets_copy > 1 {
+                            format!(
+                                "[{}/{}] preflight: {}",
+                                current, total_targets_copy, target.url
+                            )
+                        } else {
+                            format!("preflight: {}", target.url)
+                        };
+                        println!("\x1b[38;5;247m{}\x1b[0m", label);
+                    }
+                    let __preflight_ct = preflight_content_type(&target, &args_clone).await;
+                    if let Some(ct) = __preflight_ct {
+                        if !is_allowed_content_type(&ct) {
+                            // Skip this target early
+                            return None;
+                        }
                     }
                 }
-            }
 
-            // Pretty start log per target (plain only)
-            let __scan_id = if total_targets > 1 {
-                Some(crate::utils::short_scan_id(&crate::utils::make_scan_id(
-                    &target.url.to_string(),
-                )))
-            } else {
-                None
-            };
-            if args.format == "plain" && !args.silence {
-                if let Some(ref sid) = __scan_id {
-                    log_info(&format!("{} start scan to {}", sid, target.url));
-                } else {
-                    log_info(&format!("start scan to {}", target.url));
+                // Pretty start log per target (plain only)
+                if args_clone.format == "plain" && !args_clone.silence {
+                    if total_targets_copy > 1 {
+                        let sid = crate::utils::short_scan_id(&crate::utils::make_scan_id(
+                            &target.url.to_string(),
+                        ));
+                        let ts = chrono::Local::now().format("%-I:%M%p").to_string();
+                        println!(
+                            "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m {} start scan to {}",
+                            ts, sid, target.url
+                        );
+                    } else {
+                        let ts = chrono::Local::now().format("%-I:%M%p").to_string();
+                        println!(
+                            "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m start scan to {}",
+                            ts, target.url
+                        );
+                    }
                 }
-            }
 
-            // Silence parameter analysis logs and progress; we'll print our own summary
-            let current = analyze_idx.fetch_add(1, Ordering::Relaxed) + 1;
-            let __analyze_spinner = start_spinner(
-                !args.silence,
-                if total_targets > 1 {
-                    format!("[{}/{}] analyzing: {}", current, total_targets, target.url)
-                } else {
-                    format!("analyzing: {}", target.url)
-                },
-            );
-            let mut __analysis_args = args.clone();
-            __analysis_args.silence = true;
-            analyze_parameters(target, &__analysis_args, multi_pb.clone()).await;
-            if let Some((tx, done_rx)) = __analyze_spinner {
-                let _ = tx.send(());
-                let _ = done_rx.await;
-            }
+                // Silence parameter analysis logs and progress; we'll print our own summary
+                let _current = analyze_idx_clone.fetch_add(1, Ordering::Relaxed) + 1;
+                let mut __analysis_args = args_clone.clone();
+                __analysis_args.silence = true;
+                analyze_parameters(&mut target, &__analysis_args, multi_pb_clone).await;
 
-            // Pretty reflection summary (plain only)
-            if args.format == "plain" && !args.silence {
-                let n = target.reflection_params.len();
-                if let Some(ref sid) = __scan_id {
-                    log_info(&format!(
-                        "{} found reflected \x1b[33m{}\x1b[0m params",
-                        sid, n
-                    ));
-                } else {
-                    log_info(&format!("found reflected \x1b[33m{}\x1b[0m params", n));
+                // Pretty reflection summary (plain only)
+                if args_clone.format == "plain" && !args_clone.silence {
+                    let n = target.reflection_params.len();
+                    let ts = chrono::Local::now().format("%-I:%M%p").to_string();
+                    if total_targets_copy > 1 {
+                        let sid = crate::utils::short_scan_id(&crate::utils::make_scan_id(
+                            &target.url.to_string(),
+                        ));
+                        println!(
+                            "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m {} found reflected \x1b[33m{}\x1b[0m params",
+                            ts, sid, n
+                        );
+                    } else {
+                        println!(
+                            "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m found reflected \x1b[33m{}\x1b[0m params",
+                            ts, n
+                        );
+                    }
+                    for (i, p) in target.reflection_params.iter().enumerate() {
+                        let bullet = if i + 1 == n { "└──" } else { "├──" };
+                        let valid = p
+                            .valid_specials
+                            .as_ref()
+                            .map(|v| v.iter().collect::<String>())
+                            .unwrap_or_else(|| "-".to_string());
+                        let invalid = p
+                            .invalid_specials
+                            .as_ref()
+                            .map(|v| v.iter().collect::<String>())
+                            .unwrap_or_else(|| "-".to_string());
+                        println!(
+                            "  \x1b[90m{}\x1b[0m \x1b[38;5;247m{}\x1b[0m \x1b[38;5;247mvalid_specials=\x1b[0m\"\x1b[38;5;247m{}\x1b[0m\" \x1b[38;5;247minvalid_specials=\x1b[0m\"\x1b[38;5;247m{}\x1b[0m\"",
+                            bullet, p.name, valid, invalid
+                        );
+                    }
                 }
-                for (i, p) in target.reflection_params.iter().enumerate() {
-                    let bullet = if i + 1 == n { "└──" } else { "├──" };
-                    let valid = p
-                        .valid_specials
-                        .as_ref()
-                        .map(|v| v.iter().collect::<String>())
-                        .unwrap_or_else(|| "-".to_string());
-                    let invalid = p
-                        .invalid_specials
-                        .as_ref()
-                        .map(|v| v.iter().collect::<String>())
-                        .unwrap_or_else(|| "-".to_string());
-                    println!(
-                        "  \x1b[90m{}\x1b[0m \x1b[38;5;247m{}\x1b[0m \x1b[38;5;247mvalid_specials=\x1b[0m\"\x1b[38;5;247m{}\x1b[0m\" \x1b[38;5;247minvalid_specials=\x1b[0m\"\x1b[38;5;247m{}\x1b[0m\"",
-                        bullet, p.name, valid, invalid
-                    );
-                }
-            }
+
+                Some(target)
+            }));
         }
+
+        // Collect processed targets (skipping those filtered by preflight)
+                let mut processed: Vec<Target> = Vec::new();
+                for handle in handles {
+                    if let Ok(res) = handle.await {
+                        if let Some(t) = res {
+                            processed.push(t);
+                        }
+                    }
+                }
+                processed
+            }).await
+        };
+
+        // Replace group with processed targets
+        *group = processed;
     }
 
     // Semaphore for limiting concurrent targets across all hosts
