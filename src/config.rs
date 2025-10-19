@@ -673,9 +673,9 @@ pub fn default_toml_template() -> String {
 # skip_mining_dom = false
 
 # NETWORK
-# timeout = 10               # seconds
+# timeout = 10               # seconds (applies to HTTP requests and remote provider fetches)
 # delay = 0                  # milliseconds
-# proxy = "http://127.0.0.1:8080"
+# proxy = "http://127.0.0.1:8080"  # also used for remote provider fetches
 # follow_redirects = false
 
 # ENGINE
