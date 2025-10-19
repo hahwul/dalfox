@@ -217,6 +217,8 @@ async fn main() {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
         };
         if let Ok(res) = &config_load {
             res.config.apply_to_scan_args_if_default(&mut args);

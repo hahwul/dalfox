@@ -766,6 +766,8 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
         };
 
         // Mock mining instead of real mining
@@ -826,6 +828,8 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
         };
 
         // Even with mock, if skip_mining is true, no params should be added
@@ -878,6 +882,8 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
         };
 
         // Mock body param reflection
@@ -981,6 +987,8 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
         };
 
         // Simulate cookie loading
@@ -1054,6 +1062,8 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
         };
 
         // Simulate cookie loading - file doesn't exist

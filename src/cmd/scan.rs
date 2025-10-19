@@ -449,6 +449,11 @@ pub struct ScanArgs {
     pub mining_dict_word: Option<String>,
 
     #[clap(help_heading = "PARAMETER MINING")]
+    /// Fetch remote parameter wordlists from providers (comma-separated). Options: burp, assetnote
+    #[arg(long = "remote-wordlists", value_delimiter = ',')]
+    pub remote_wordlists: Vec<String>,
+
+    #[clap(help_heading = "PARAMETER MINING")]
     /// Skip all mining
     #[arg(long)]
     pub skip_mining: bool,
@@ -502,6 +507,11 @@ pub struct ScanArgs {
     /// Specify payload encoders to use (comma-separated). Options: none, url, 2url, html, base64. Default: none,url,html
     #[arg(short = 'e', long, value_delimiter = ',', default_values = &["none", "url", "html"])]
     pub encoders: Vec<String>,
+
+    #[clap(help_heading = "XSS SCANNING")]
+    /// Fetch remote XSS payloads from providers (comma-separated). Options: portswigger, payloadbox
+    #[arg(long = "remote-payloads", value_delimiter = ',')]
+    pub remote_payloads: Vec<String>,
 
     #[clap(help_heading = "XSS SCANNING")]
     /// Load custom blind XSS payloads from a file. Example: --custom-blind-xss-payload 'payloads.txt'
@@ -607,6 +617,21 @@ pub async fn run_scan(args: &ScanArgs) {
     // Initialize global encoders once for downstream POC/path handling
     if GLOBAL_ENCODERS.get().is_none() {
         let _ = GLOBAL_ENCODERS.set(args.encoders.clone());
+    }
+    // Initialize remote payloads/wordlists if requested (honor timeout/proxy)
+    if !args.remote_payloads.is_empty() || !args.remote_wordlists.is_empty() {
+        if let Err(e) = crate::utils::init_remote_resources_with_options(
+            &args.remote_payloads,
+            &args.remote_wordlists,
+            Some(args.timeout),
+            args.proxy.clone(),
+        )
+        .await
+        {
+            if !args.silence {
+                eprintln!("Error initializing remote resources: {}", e);
+            }
+        }
     }
     let input_type = if args.input_type == "auto" {
         if args.targets.is_empty() {

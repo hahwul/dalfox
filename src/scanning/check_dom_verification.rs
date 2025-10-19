@@ -215,6 +215,8 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
         };
         let res = check_dom_verification(&target, &param, "PAY", &args).await;
         assert_eq!(res, (false, None));

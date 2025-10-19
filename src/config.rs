@@ -69,6 +69,7 @@ pub struct ScanConfig {
     pub skip_reflection_cookie: Option<bool>,
     // PARAMETER MINING
     pub mining_dict_word: Option<String>,
+    pub remote_wordlists: Option<Vec<String>>,
     pub skip_mining: Option<bool>,
     pub skip_mining_dict: Option<bool>,
     pub skip_mining_dom: Option<bool>,
@@ -83,6 +84,7 @@ pub struct ScanConfig {
     pub max_targets_per_host: Option<usize>,
     // XSS SCANNING
     pub encoders: Option<Vec<String>>,
+    pub remote_payloads: Option<Vec<String>>,
     pub custom_blind_xss_payload: Option<String>,
     pub blind_callback_url: Option<String>,
     pub custom_payload: Option<String>,
@@ -162,6 +164,9 @@ impl Config {
             if let Some(v) = &scan.mining_dict_word {
                 args.mining_dict_word = Some(v.clone());
             }
+            if let Some(v) = &scan.remote_wordlists {
+                args.remote_wordlists = v.clone();
+            }
             if let Some(v) = scan.skip_mining {
                 args.skip_mining = v;
             }
@@ -197,6 +202,9 @@ impl Config {
             // XSS SCANNING
             if let Some(v) = &scan.encoders {
                 args.encoders = v.clone();
+            }
+            if let Some(v) = &scan.remote_payloads {
+                args.remote_payloads = v.clone();
             }
             if let Some(v) = &scan.custom_blind_xss_payload {
                 args.custom_blind_xss_payload = Some(v.clone());
@@ -265,6 +273,11 @@ impl Config {
                     args.mining_dict_word = Some(v.clone());
                 }
             }
+            if let Some(v) = &scan.remote_wordlists {
+                if args.remote_wordlists.is_empty() {
+                    args.remote_wordlists = v.clone();
+                }
+            }
             // NETWORK
             if let Some(v) = &scan.proxy {
                 if args.proxy.is_none() {
@@ -285,6 +298,11 @@ impl Config {
             if let Some(v) = &scan.custom_payload {
                 if args.custom_payload.is_none() {
                     args.custom_payload = Some(v.clone());
+                }
+            }
+            if let Some(v) = &scan.remote_payloads {
+                if args.remote_payloads.is_empty() {
+                    args.remote_payloads = v.clone();
                 }
             }
             if let Some(v) = &scan.sxss_url {
@@ -403,6 +421,11 @@ impl Config {
                     args.mining_dict_word = Some(v.clone());
                 }
             }
+            if let Some(v) = &scan.remote_wordlists {
+                if args.remote_wordlists.is_empty() {
+                    args.remote_wordlists = v.clone();
+                }
+            }
             if let Some(v) = scan.skip_mining {
                 if !args.skip_mining {
                     args.skip_mining = v;
@@ -463,6 +486,11 @@ impl Config {
                 let default_enc = vec!["none".to_string(), "url".to_string(), "html".to_string()];
                 if args.encoders == default_enc {
                     args.encoders = v.clone();
+                }
+            }
+            if let Some(v) = &scan.remote_payloads {
+                if args.remote_payloads.is_empty() {
+                    args.remote_payloads = v.clone();
                 }
             }
             if let Some(v) = &scan.custom_blind_xss_payload {
@@ -639,6 +667,7 @@ pub fn default_toml_template() -> String {
 
 # PARAMETER MINING
 # mining_dict_word = "wordlist.txt"
+# remote_wordlists = ["burp", "assetnote"]
 # skip_mining = false
 # skip_mining_dict = false
 # skip_mining_dom = false
@@ -656,6 +685,7 @@ pub fn default_toml_template() -> String {
 
 # XSS SCANNING
 # encoders = ["none", "url", "html"]  # none, url, 2url, html, base64
+# remote_payloads = ["payloadbox", "portswigger"]
 # custom_blind_xss_payload = "blind.txt"
 # blind_callback_url = "https://your-bxss-callback.com"
 # custom_payload = "payloads.txt"

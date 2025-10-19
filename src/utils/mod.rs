@@ -12,3 +12,50 @@ pub mod scan_id;
 pub use banner::{print_banner, print_banner_once, render_banner};
 // Re-export scan_id helpers at `crate::utils::*`
 pub use scan_id::{make_scan_id, make_scan_id_with_nonce, short_scan_id};
+
+// Re-export remote payload/wordlist getters at `crate::utils::*`
+pub use crate::payload::{
+    get_remote_payloads, get_remote_words, has_remote_payloads, has_remote_wordlists,
+};
+
+/// Initialize remote resources based on CLI flags. Safe to call multiple times.
+/// This default variant uses no proxy and default timeout. To customize, use
+/// `init_remote_resources_with_options`.
+pub async fn init_remote_resources(
+    payload_providers: &[String],
+    wordlist_providers: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Default options: no proxy, default timeout handled by fetcher
+    let opts = crate::payload::RemoteFetchOptions {
+        timeout_secs: None,
+        proxy: None,
+    };
+    if !payload_providers.is_empty() {
+        crate::payload::init_remote_payloads_with(payload_providers, opts.clone()).await?;
+    }
+    if !wordlist_providers.is_empty() {
+        crate::payload::init_remote_wordlists_with(wordlist_providers, opts).await?;
+    }
+    Ok(())
+}
+
+/// Initialize remote resources with explicit options (timeout/proxy).
+/// Use this in contexts (like server jobs) where you want to honor user/network options.
+pub async fn init_remote_resources_with_options(
+    payload_providers: &[String],
+    wordlist_providers: &[String],
+    timeout_secs: Option<u64>,
+    proxy: Option<String>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let opts = crate::payload::RemoteFetchOptions {
+        timeout_secs,
+        proxy,
+    };
+    if !payload_providers.is_empty() {
+        crate::payload::init_remote_payloads_with(payload_providers, opts.clone()).await?;
+    }
+    if !wordlist_providers.is_empty() {
+        crate::payload::init_remote_wordlists_with(wordlist_providers, opts).await?;
+    }
+    Ok(())
+}

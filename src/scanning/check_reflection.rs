@@ -364,6 +364,8 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
         };
         let res = check_reflection(&target, &param, "PAY", &args).await;
         assert!(
@@ -424,6 +426,8 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
         };
         let res = check_reflection_with_response(&target, &param, "PAY", &args).await;
         assert_eq!(

@@ -702,6 +702,8 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
         };
 
         let results = Arc::new(Mutex::new(Vec::new()));
@@ -760,6 +762,8 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
         };
 
         let results = Arc::new(Mutex::new(Vec::new()));
@@ -825,6 +829,8 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
         };
 
         let results = Arc::new(Mutex::new(Vec::new()));
@@ -879,6 +885,8 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
         };
 
         let results = Arc::new(Mutex::new(Vec::new()));

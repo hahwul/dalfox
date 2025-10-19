@@ -129,6 +129,8 @@ struct ScanOptions {
     data: Option<String>,
     user_agent: Option<String>,
     encoders: Option<Vec<String>>,
+    remote_payloads: Option<Vec<String>>,
+    remote_wordlists: Option<Vec<String>>,
     include_request: Option<bool>,
     include_response: Option<bool>,
 }
@@ -316,10 +318,22 @@ async fn run_scan_job(
         sxss: false,
         sxss_url: None,
         sxss_method: "GET".to_string(),
+        remote_payloads: opts.remote_payloads.clone().unwrap_or_default(),
+        remote_wordlists: opts.remote_wordlists.clone().unwrap_or_default(),
 
         targets: vec![url.clone()],
     };
 
+    // Initialize remote resources if requested (honor timeout/proxy)
+    if !args.remote_payloads.is_empty() || !args.remote_wordlists.is_empty() {
+        let _ = crate::utils::init_remote_resources_with_options(
+            &args.remote_payloads,
+            &args.remote_wordlists,
+            Some(args.timeout),
+            args.proxy.clone(),
+        )
+        .await;
+    }
     let results = Arc::new(Mutex::new(Vec::<ScanResult>::new()));
 
     let mut target = match parse_target(&url) {
@@ -716,6 +730,18 @@ async fn get_scan_handler(
             data: data_opt,
             user_agent,
             encoders: Some(encoders),
+            remote_payloads: params.get("remote_payloads").map(|s| {
+                s.split(',')
+                    .map(|x| x.trim().to_string())
+                    .filter(|x| !x.is_empty())
+                    .collect::<Vec<_>>()
+            }),
+            remote_wordlists: params.get("remote_wordlists").map(|s| {
+                s.split(',')
+                    .map(|x| x.trim().to_string())
+                    .filter(|x| !x.is_empty())
+                    .collect::<Vec<_>>()
+            }),
             include_request: Some(include_request),
             include_response: Some(include_response),
         }),

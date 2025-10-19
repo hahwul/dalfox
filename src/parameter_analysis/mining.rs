@@ -148,8 +148,52 @@ pub async fn probe_dictionary_params(
     }
     let client = client_builder.build().unwrap_or_else(|_| Client::new());
 
-    // Get parameters from wordlist or default
-    let params: Vec<String> = if let Some(wordlist_path) = &args.mining_dict_word {
+    // Get parameters from remote wordlists, file, or default
+    let params: Vec<String> = if !args.remote_wordlists.is_empty() {
+        // Initialize remote wordlists for requested providers (best-effort)
+        if let Err(e) = crate::payload::init_remote_wordlists(&args.remote_wordlists).await {
+            if !silence {
+                eprintln!("Error initializing remote wordlists: {}", e);
+            }
+        }
+        if let Some(words) = crate::payload::get_remote_words() {
+            if !words.is_empty() {
+                words.as_ref().clone()
+            } else if let Some(wordlist_path) = &args.mining_dict_word {
+                match std::fs::read_to_string(wordlist_path) {
+                    Ok(content) => content
+                        .lines()
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect(),
+                    Err(e) => {
+                        if !silence {
+                            eprintln!("Error reading wordlist file {}: {}", wordlist_path, e);
+                        }
+                        return;
+                    }
+                }
+            } else {
+                GF_PATTERNS_PARAMS.iter().map(|s| s.to_string()).collect()
+            }
+        } else if let Some(wordlist_path) = &args.mining_dict_word {
+            match std::fs::read_to_string(wordlist_path) {
+                Ok(content) => content
+                    .lines()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect(),
+                Err(e) => {
+                    if !silence {
+                        eprintln!("Error reading wordlist file {}: {}", wordlist_path, e);
+                    }
+                    return;
+                }
+            }
+        } else {
+            GF_PATTERNS_PARAMS.iter().map(|s| s.to_string()).collect()
+        }
+    } else if let Some(wordlist_path) = &args.mining_dict_word {
         match std::fs::read_to_string(wordlist_path) {
             Ok(content) => content
                 .lines()

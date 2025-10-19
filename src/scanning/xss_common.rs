@@ -252,6 +252,8 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
         };
 
         let payloads = get_dynamic_payloads(&context, &args).unwrap();
@@ -311,6 +313,8 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
         };
 
         // This will fail if file doesn't exist, but for test structure it's fine
@@ -363,6 +367,8 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
         };
 
         let payloads = get_dynamic_payloads(&context, &args).unwrap();
@@ -398,6 +404,12 @@ pub fn get_dynamic_payloads(
         }
     }
 
+    // Include remote payloads if available (initialized via --remote-payloads at runtime)
+    if let Some(remotes) = crate::payload::get_remote_payloads() {
+        if !remotes.is_empty() {
+            base_payloads.extend(remotes.as_ref().clone());
+        }
+    }
     let mut payloads = vec![];
     for payload in base_payloads {
         if args.encoders.contains(&"none".to_string()) {
