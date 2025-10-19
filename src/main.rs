@@ -173,7 +173,7 @@ async fn main() {
                 }
                 cmd::scan::run_scan(&args).await
             }
-            Commands::Server(args) => cmd::server::run_server(args),
+            Commands::Server(args) => cmd::server::run_server(args).await,
             Commands::Payload(args) => cmd::payload::run_payload(args),
 
             Commands::Url(args) => cmd::url::run_url(args).await,

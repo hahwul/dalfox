@@ -7,7 +7,7 @@ description = "Dalfox is a powerful open-source XSS scanner and utility focused 
 license = "MIT"
 
 [dependencies]
-clap = { version = "4.0", features = ["derive"] }
+clap = { version = "4.0", features = ["derive", "env"] }
 url = "2.0"
 reqwest = "0.11"
 scraper = "0.18"
@@ -19,3 +19,7 @@ urlencoding = "2.1"
 base64 = "0.21"
 chrono = "0.4"
 toml = "0.8"
+axum = "0.7"
+sha2 = "0.10"
+hex = "0.4"
+regex = "1"
