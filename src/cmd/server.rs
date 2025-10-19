@@ -38,6 +38,11 @@ pub struct ServerArgs {
     #[arg(long = "api-key")]
     pub api_key: Option<String>,
 
+    /// Path to a log file to also write logs (plain text, no ANSI colors)
+    #[clap(help_heading = "SERVER")]
+    #[arg(long = "log-file")]
+    pub log_file: Option<String>,
+
     /// Comma-separated list of allowed origins for CORS. Supports:
     /// - "*" (match all)
     /// - exact origins (http://localhost:3000)
@@ -75,6 +80,8 @@ pub struct ServerArgs {
 struct AppState {
     api_key: Option<String>,
     jobs: Arc<Mutex<HashMap<String, Job>>>,
+    // optional log file path (plain logs only; no ANSI color codes)
+    log_file: Option<String>,
     // raw allowed origins as provided (after split)
     allowed_origins: Option<Vec<String>>,
     // compiled regex patterns derived from allowed_origins entries starting with "regex:" or with wildcard '*'
@@ -209,6 +216,33 @@ fn build_cors_headers(state: &AppState, req_headers: &HeaderMap) -> HeaderMap {
     headers.insert("Access-Control-Allow-Methods", allow_methods);
     headers.insert("Access-Control-Allow-Headers", allow_headers);
     headers
+}
+
+fn log(state: &AppState, level: &str, message: &str) {
+    let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+    let (color, lvl) = match level {
+        "INF" => ("\x1b[36m", "INF"),
+        "WRN" => ("\x1b[33m", "WRN"),
+        "ERR" => ("\x1b[31m", "ERR"),
+        "JOB" => ("\x1b[32m", "JOB"),
+        "AUTH" => ("\x1b[35m", "AUTH"),
+        "RESULT" => ("\x1b[34m", "RESULT"),
+        "SERVER" => ("\x1b[36m", "SERVER"),
+        other => ("\x1b[37m", other),
+    };
+    println!("\x1b[90m{}\x1b[0m {}{}\x1b[0m {}", ts, color, lvl, message);
+
+    if let Some(path) = &state.log_file {
+        let line = format!("[{}] [{}] {}\n", ts, lvl, message);
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .and_then(|mut f| {
+                use std::io::Write;
+                f.write_all(line.as_bytes())
+            });
+    }
 }
 
 async fn run_scan_job(
@@ -354,6 +388,7 @@ async fn run_scan_job(
         job.status = "done".to_string();
         job.results = Some(final_results);
     }
+    log(&state, "JOB", &format!("done id={} url={}", job_id, url));
 }
 
 async fn start_scan_handler(
@@ -364,6 +399,7 @@ async fn start_scan_handler(
 ) -> impl IntoResponse {
     if !check_api_key(&state, &headers) {
         let mut cors = build_cors_headers(&state, &headers);
+        log(&state, "AUTH", "Unauthorized access to /scan");
         let resp = ApiResponse::<serde_json::Value> {
             code: 401,
             msg: "unauthorized".to_string(),
@@ -427,6 +463,7 @@ async fn start_scan_handler(
             },
         );
     }
+    log(&state, "JOB", &format!("queued id={} url={}", id, req.url));
 
     // Spawn the scanning task
     let state_clone = state.clone();
@@ -478,6 +515,7 @@ async fn get_result_handler(
 ) -> impl IntoResponse {
     if !check_api_key(&state, &headers) {
         let mut cors = build_cors_headers(&state, &headers);
+        log(&state, "AUTH", "Unauthorized access to /result");
         let resp = ApiResponse::<ResultPayload> {
             code: 401,
             msg: "unauthorized".to_string(),
@@ -513,6 +551,7 @@ async fn get_result_handler(
                 status: j.status.clone(),
                 results: j.results.clone(),
             };
+            log(&state, "RESULT", &format!("id={} status={}", id, j.status));
             let resp = ApiResponse {
                 code: 200,
                 msg: if j.status == "done" {
@@ -579,6 +618,7 @@ async fn get_scan_handler(
 ) -> impl IntoResponse {
     if !check_api_key(&state, &headers) {
         let mut cors = build_cors_headers(&state, &headers);
+        log(&state, "AUTH", "Unauthorized access to /scan");
         let resp = ApiResponse::<serde_json::Value> {
             code: 401,
             msg: "unauthorized".to_string(),
@@ -703,6 +743,7 @@ async fn get_scan_handler(
             },
         );
     }
+    log(&state, "JOB", &format!("queued id={} url={}", id, req.url));
 
     let id_for_resp = id.clone();
     let state_clone = state.clone();
@@ -814,6 +855,7 @@ pub async fn run_server(args: ServerArgs) {
     let state = AppState {
         api_key,
         jobs: Arc::new(Mutex::new(HashMap::new())),
+        log_file: args.log_file.clone(),
         allowed_origins: allowed_origins_vec,
         allowed_origin_regexes,
         allow_all_origins,
@@ -829,13 +871,21 @@ pub async fn run_server(args: ServerArgs) {
         .route("/scan", options(options_scan_handler))
         .route("/result/:id", get(get_result_handler))
         .route("/result/:id", options(options_result_handler))
-        .with_state(state);
+        .with_state(state.clone());
 
-    println!("dalfox server listening on http://{}", addr_str);
+    log(
+        &state,
+        "SERVER",
+        &format!("listening on http://{}", addr_str),
+    );
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(e) => {
-            eprintln!("Failed to bind {}: {}", addr_str, e);
+            log(
+                &state,
+                "ERR",
+                &format!("Failed to bind {}: {}", addr_str, e),
+            );
             return;
         }
     };
