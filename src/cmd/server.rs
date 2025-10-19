@@ -25,7 +25,7 @@ use crate::target_parser::parse_target;
 pub struct ServerArgs {
     /// Port to run the server on
     #[clap(help_heading = "SERVER")]
-    #[arg(short, long, default_value = "8090")]
+    #[arg(short, long, default_value = "6664")]
     pub port: u16,
 
     /// Host to bind the server to
