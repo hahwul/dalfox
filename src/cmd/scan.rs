@@ -2,6 +2,7 @@ use clap::Args;
 use indicatif::MultiProgress;
 use reqwest::header::CONTENT_TYPE;
 use reqwest::{Client, redirect::Policy};
+use scraper::{Html, Selector};
 use std::fs;
 use std::io::{self, Read, Write};
 use std::sync::Arc;
@@ -350,7 +351,7 @@ async fn preflight_content_type(
         .get(CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
-    let csp_header = if let Some(v) = headers
+    let mut csp_header = if let Some(v) = headers
         .get("content-security-policy")
         .and_then(|v| v.to_str().ok())
     {
@@ -366,6 +367,35 @@ async fn preflight_content_type(
     } else {
         None
     };
+    // If no CSP header present, attempt to detect via <meta http-equiv="Content-Security-Policy">
+    if csp_header.is_none() {
+        if let Ok(body) = resp.text().await {
+            let doc = Html::parse_document(&body);
+            if let Ok(sel) = Selector::parse("meta[http-equiv][content]") {
+                for el in doc.select(&sel) {
+                    let http_equiv = el
+                        .value()
+                        .attr("http-equiv")
+                        .unwrap_or("")
+                        .to_ascii_lowercase();
+                    if http_equiv == "content-security-policy"
+                        || http_equiv == "content-security-policy-report-only"
+                    {
+                        let content = el.value().attr("content").unwrap_or("").to_string();
+                        if !content.is_empty() {
+                            let name = if http_equiv == "content-security-policy" {
+                                "Content-Security-Policy".to_string()
+                            } else {
+                                "Content-Security-Policy-Report-Only".to_string()
+                            };
+                            csp_header = Some((name, content));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
     ct_opt.map(|ct| (ct, csp_header))
 }
 
