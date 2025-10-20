@@ -307,7 +307,7 @@ mod tests {
 async fn preflight_content_type(
     target: &crate::target_parser::Target,
     args: &ScanArgs,
-) -> Option<String> {
+) -> Option<(String, Option<(String, String)>)> {
     let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
     if let Some(proxy_url) = &target.proxy {
         if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
@@ -345,10 +345,28 @@ async fn preflight_content_type(
         tokio::time::sleep(Duration::from_millis(target.delay)).await;
     }
     let resp = request_builder.send().await.ok()?;
-    resp.headers()
+    let headers = resp.headers();
+    let ct_opt = headers
         .get(CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string())
+        .map(|s| s.to_string());
+    let csp_header = if let Some(v) = headers
+        .get("content-security-policy")
+        .and_then(|v| v.to_str().ok())
+    {
+        Some(("Content-Security-Policy".to_string(), v.to_string()))
+    } else if let Some(v) = headers
+        .get("content-security-policy-report-only")
+        .and_then(|v| v.to_str().ok())
+    {
+        Some((
+            "Content-Security-Policy-Report-Only".to_string(),
+            v.to_string(),
+        ))
+    } else {
+        None
+    };
+    ct_opt.map(|ct| (ct, csp_header))
 }
 
 #[derive(Clone, Args)]
@@ -941,6 +959,8 @@ pub async fn run_scan(args: &ScanArgs) {
             handles.push(tokio::task::spawn_local(async move {
                 // Bound concurrency across targets for preflight + analysis
                 let _permit = sem.acquire_owned().await.unwrap();
+                let mut __preflight_csp_present = false;
+                let mut __preflight_csp_header: Option<(String, String)> = None;
 
                 // Preflight Content-Type check (skip denylisted types unless deep-scan)
                 if !args_clone.deep_scan {
@@ -955,12 +975,17 @@ pub async fn run_scan(args: &ScanArgs) {
                         format!("preflight: {}", target.url)
                     };
                     let __preflight_spinner = if total_targets_copy == 1 { start_spinner(!args_clone.silence, label) } else { None };
-                    let __preflight_ct = preflight_content_type(&target, &args_clone).await;
+
+                    let __preflight_info = preflight_content_type(&target, &args_clone).await;
                     if let Some((tx, done_rx)) = __preflight_spinner {
                         let _ = tx.send(());
                         let _ = done_rx.await;
                     }
-                    if let Some(ct) = __preflight_ct {
+                    if let Some((ct, csp_header)) = __preflight_info {
+                        if let Some((hn, hv)) = csp_header {
+                            __preflight_csp_present = true;
+                            __preflight_csp_header = Some((hn, hv));
+                        }
                         if !is_allowed_content_type(&ct) {
                             // Skip this target early
                             return None;
@@ -985,6 +1010,12 @@ pub async fn run_scan(args: &ScanArgs) {
                             "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m start scan to {}",
                             ts, target.url
                         );
+                        if __preflight_csp_present {
+                            println!("\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m CSP: enabled", ts);
+                            if let Some((hn, hv)) = &__preflight_csp_header {
+                                println!("  \x1b[90m└──\x1b[0m \x1b[38;5;247m{}:\x1b[0m \x1b[38;5;247m{}\x1b[0m", hn, hv);
+                            }
+                        }
                     }
                 }
 
