@@ -4,7 +4,7 @@
 /// automatic synchronization when JavaScript payload list changes.
 pub fn get_dynamic_xss_attribute_payloads() -> Vec<String> {
     let mut out = Vec::new();
-    for js in crate::payload::XSS_JAVASCRIPT_PAYLOADS.iter() {
+    for js in crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL.iter() {
         out.push(format!("onerror={}", js));
         out.push(format!("onload={}", js));
         out.push(format!("onmouseover={}", js));
@@ -56,7 +56,7 @@ mod tests {
 
     #[test]
     fn test_js_payloads_exposed_and_contains_alert() {
-        let js = crate::payload::XSS_JAVASCRIPT_PAYLOADS;
+        let js = crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL;
         assert!(!js.is_empty(), "JS payload list should not be empty");
         assert!(
             js.iter().any(|p| p.contains("alert(1)")),
