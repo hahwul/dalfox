@@ -1,3 +1,4 @@
+// inHTML, inAttr, ETC
 pub const XSS_JAVASCRIPT_PAYLOADS_SMALL: &[&str] = &[
     "alert(1)",   // alert
     "prompt`1`",  // prompt with backtick
@@ -7,6 +8,7 @@ pub const XSS_JAVASCRIPT_PAYLOADS_SMALL: &[&str] = &[
     "[2].find(alert)",
 ];
 
+// for inJS
 pub const XSS_JAVASCRIPT_PAYLOADS: &[&str] = &[
     "alert(1)",                                                         // alert
     "alert`1`",                                                         // alert with backtick
