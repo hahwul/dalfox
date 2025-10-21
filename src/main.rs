@@ -4,6 +4,7 @@ use tokio;
 mod cmd;
 mod config;
 mod encoding;
+mod mcp;
 mod parameter_analysis;
 mod payload;
 mod scanning;
@@ -44,6 +45,8 @@ enum Commands {
     Server(cmd::server::ServerArgs),
     /// Manage or enumerate payloads
     Payload(cmd::payload::PayloadArgs),
+    /// Run MCP stdio server (Model Context Protocol) exposing Dalfox tools
+    Mcp,
 
     #[clap(hide = true)]
     Url(cmd::url::UrlArgs),
@@ -63,8 +66,11 @@ async fn main() {
     }
 
     let cli = Cli::parse();
-    // Print a colored banner once for normal execution paths.
-    crate::utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
+    // Skip banner for MCP subcommand to keep stdout clean for JSON-RPC
+    let is_mcp = matches!(cli.command, Some(Commands::Mcp));
+    if !is_mcp {
+        crate::utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
+    }
 
     // Load configuration with optional --config override
     let config_load = if let Some(cfg_path) = &cli.config {
@@ -168,6 +174,12 @@ async fn main() {
             }
             Commands::Server(args) => cmd::server::run_server(args).await,
             Commands::Payload(args) => cmd::payload::run_payload(args),
+            Commands::Mcp => {
+                // Run MCP stdio server (no banner already)
+                if let Err(e) = crate::mcp::run_mcp_server().await {
+                    eprintln!("MCP server error: {e}");
+                }
+            }
 
             Commands::Url(args) => cmd::url::run_url(args).await,
             Commands::File(args) => cmd::file::run_file(args).await,

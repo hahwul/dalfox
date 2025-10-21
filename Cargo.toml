@@ -24,3 +24,5 @@ sha2 = "0.10"
 hex = "0.4"
 regex = "1"
 atty = "0.2"
+rmcp = { version = "0.8.0", features = ["server", "macros"] }
+schemars = { version = "0.8", features = ["derive"] }
