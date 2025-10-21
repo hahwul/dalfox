@@ -72,14 +72,8 @@ impl DalfoxMcp {
         eprintln!("[{}] [{}] {}", ts, level, msg);
     }
 
-    /// Execute a scan job (parameter discovery + scanning) and store results.
-    async fn run_job(
-        &self,
-        scan_id: String,
-        url: String,
-        include_request: bool,
-        include_response: bool,
-    ) {
+    /// Execute a scan job (parameter discovery + scanning) using a fully prepared ScanArgs.
+    async fn run_job(&self, scan_id: String, scan_args: ScanArgs) {
         {
             let mut jobs = self.jobs.lock().await;
             if let Some(j) = jobs.get_mut(&scan_id) {
@@ -87,62 +81,37 @@ impl DalfoxMcp {
             }
         }
 
-        // Prepare ScanArgs (lean defaults)
-        let args = ScanArgs {
-            input_type: "url".to_string(),
-            format: "json".to_string(),
-            targets: vec![url.clone()],
-            param: vec![],
-            data: None,
-            headers: vec![],
-            cookies: vec![],
-            method: "GET".to_string(),
-            user_agent: None,
-            cookie_from_raw: None,
-            mining_dict_word: None,
-            skip_mining: false,
-            skip_mining_dict: false,
-            skip_mining_dom: false,
-            skip_discovery: false,
-            skip_reflection_header: false,
-            skip_reflection_cookie: false,
-            timeout: 10,
-            delay: 0,
-            proxy: None,
-            follow_redirects: false,
-            output: None,
-            include_request,
-            include_response,
-            silence: true,
-            poc_type: "plain".to_string(),
-            limit: None,
-            workers: 50,
-            max_concurrent_targets: 50,
-            max_targets_per_host: 100,
-            encoders: vec!["url".into(), "html".into()],
-            custom_blind_xss_payload: None,
-            blind_callback_url: None,
-            custom_payload: None,
-            only_custom_payload: false,
-            skip_xss_scanning: false,
-            deep_scan: false,
-            sxss: false,
-            sxss_url: None,
-            sxss_method: "GET".to_string(),
-            remote_payloads: vec![],
-            remote_wordlists: vec![],
-        };
+        let url = scan_args
+            .targets
+            .get(0)
+            .cloned()
+            .unwrap_or_else(|| "<missing>".to_string());
+        let include_request = scan_args.include_request;
+        let include_response = scan_args.include_response;
 
         // Parse and hydrate a single target
         let mut target = match parse_target(&url) {
             Ok(mut t) => {
-                t.method = args.method.clone();
-                t.timeout = args.timeout;
-                t.delay = args.delay;
-                t.proxy = args.proxy.clone();
-                t.follow_redirects = args.follow_redirects;
-                t.workers = args.workers;
-                t.user_agent = args.user_agent.clone().or(Some("".to_string()));
+                t.method = scan_args.method.clone();
+                t.timeout = scan_args.timeout;
+                t.delay = scan_args.delay;
+                t.proxy = scan_args.proxy.clone();
+                t.follow_redirects = scan_args.follow_redirects;
+                t.workers = scan_args.workers;
+                t.user_agent = scan_args.user_agent.clone().or(Some("".to_string()));
+                t.headers = scan_args
+                    .headers
+                    .iter()
+                    .filter_map(|h| h.split_once(":"))
+                    .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+                    .collect();
+                t.cookies = scan_args
+                    .cookies
+                    .iter()
+                    .filter_map(|c| c.split_once('='))
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect();
+                t.data = scan_args.data.clone();
                 t
             }
             Err(e) => {
@@ -156,13 +125,13 @@ impl DalfoxMcp {
         };
 
         // Parameter discovery / mining
-        analyze_parameters(&mut target, &args, None).await;
+        analyze_parameters(&mut target, &scan_args, None).await;
 
         // Collect raw results
         let results_arc = Arc::new(Mutex::new(Vec::<ScanResult>::new()));
         crate::scanning::run_scanning(
             &target,
-            Arc::new(args.clone()),
+            Arc::new(scan_args.clone()),
             results_arc.clone(),
             None,
             None,
@@ -268,9 +237,150 @@ impl DalfoxMcp {
             ),
         );
 
-        // Spawn scan in a dedicated thread with its own single-thread runtime to avoid Send requirements
+        // Extract additional scan configuration flags
+        let param_filters: Vec<String> = args
+            .get("param")
+            .and_then(|v| {
+                if v.is_array() {
+                    Some(
+                        v.as_array()
+                            .unwrap()
+                            .iter()
+                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                            .collect::<Vec<_>>(),
+                    )
+                } else if let Some(s) = v.as_str() {
+                    Some(vec![s.to_string()])
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default();
+
+        let data_body = args
+            .get("data")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        let headers_list: Vec<String> = args
+            .get("headers")
+            .and_then(|v| {
+                if v.is_array() {
+                    Some(
+                        v.as_array()
+                            .unwrap()
+                            .iter()
+                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                            .collect::<Vec<_>>(),
+                    )
+                } else if let Some(s) = v.as_str() {
+                    Some(vec![s.to_string()])
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default();
+
+        let cookies_list: Vec<String> = args
+            .get("cookies")
+            .and_then(|v| {
+                if v.is_array() {
+                    Some(
+                        v.as_array()
+                            .unwrap()
+                            .iter()
+                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                            .collect::<Vec<_>>(),
+                    )
+                } else if let Some(s) = v.as_str() {
+                    Some(vec![s.to_string()])
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default();
+
+        let method_override = args
+            .get("method")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "GET".to_string());
+
+        let user_agent = args
+            .get("user_agent")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        // cookie_from_raw: read Cookie: line and append
+        let mut all_cookies = cookies_list.clone();
+        if let Some(raw_path) = args
+            .get("cookie_from_raw")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+        {
+            if let Ok(content) = std::fs::read_to_string(&raw_path) {
+                for line in content.lines() {
+                    if line.to_ascii_lowercase().starts_with("cookie:") {
+                        let rest = line.splitn(2, ':').nth(1).unwrap_or("").trim();
+                        for part in rest.split(';') {
+                            let trimmed = part.trim();
+                            if trimmed.contains('=') {
+                                all_cookies.push(trimmed.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Prepare ScanArgs
+        let scan_args = ScanArgs {
+            input_type: "url".to_string(),
+            format: "json".to_string(),
+            targets: vec![target.clone()],
+            param: param_filters,
+            data: data_body,
+            headers: headers_list,
+            cookies: all_cookies,
+            method: method_override,
+            user_agent,
+            cookie_from_raw: None,
+            mining_dict_word: None,
+            skip_mining: false,
+            skip_mining_dict: false,
+            skip_mining_dom: false,
+            skip_discovery: false,
+            skip_reflection_header: false,
+            skip_reflection_cookie: false,
+            timeout: 10,
+            delay: 0,
+            proxy: None,
+            follow_redirects: false,
+            output: None,
+            include_request,
+            include_response,
+            silence: true,
+            poc_type: "plain".to_string(),
+            limit: None,
+            workers: 50,
+            max_concurrent_targets: 50,
+            max_targets_per_host: 100,
+            encoders: vec!["url".into(), "html".into()],
+            custom_blind_xss_payload: None,
+            blind_callback_url: None,
+            custom_payload: None,
+            only_custom_payload: false,
+            skip_xss_scanning: false,
+            deep_scan: false,
+            sxss: false,
+            sxss_url: None,
+            sxss_method: "GET".to_string(),
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
+        };
+
+        // Spawn scan in dedicated thread runtime
         let handler = self.clone();
-        let url = target.clone();
         let sid = scan_id.clone();
         std::thread::spawn(move || {
             match tokio::runtime::Builder::new_current_thread()
@@ -278,7 +388,7 @@ impl DalfoxMcp {
                 .build()
             {
                 Ok(rt) => {
-                    rt.block_on(handler.run_job(sid, url, include_request, include_response));
+                    rt.block_on(handler.run_job(sid, scan_args));
                 }
                 Err(e) => {
                     eprintln!("[MCP][ERR] runtime build failed for scan_id={}: {}", sid, e);
