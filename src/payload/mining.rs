@@ -1,3 +1,4 @@
+// https://github.com/1ndianl33t/Gf-Patterns/blob/master/xss.json
 pub const GF_PATTERNS_PARAMS: &[&str] = &[
     "q",
     "s",
