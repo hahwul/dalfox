@@ -203,7 +203,16 @@ impl DalfoxMcp {
             .unwrap_or("")
             .to_string();
         if target.trim().is_empty() {
-            return Err(ErrorData::invalid_params("target must not be empty", None));
+            return Err(ErrorData::invalid_params(
+                "missing required field 'target' (example: {\"target\":\"https://example.com\"})",
+                None,
+            ));
+        }
+        if !(target.starts_with("http://") || target.starts_with("https://")) {
+            return Err(ErrorData::invalid_params(
+                "target must start with http:// or https://",
+                None,
+            ));
         }
         let include_request = args
             .get("include_request")
@@ -334,6 +343,73 @@ impl DalfoxMcp {
         }
 
         // Prepare ScanArgs
+        // Optional engine/network flags
+        let encoders: Vec<String> = args
+            .get("encoders")
+            .and_then(|v| {
+                if v.is_array() {
+                    Some(
+                        v.as_array()
+                            .unwrap()
+                            .iter()
+                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                            .collect::<Vec<_>>(),
+                    )
+                } else if let Some(s) = v.as_str() {
+                    Some(
+                        s.split(',')
+                            .map(|x| x.trim().to_string())
+                            .filter(|x| !x.is_empty())
+                            .collect(),
+                    )
+                } else {
+                    None
+                }
+            })
+            .map(|xs| {
+                // Normalize "none" semantics: if "none" present use only original payloads
+                if xs.iter().any(|e| e == "none") {
+                    vec!["none".to_string()]
+                } else {
+                    xs
+                }
+            })
+            .unwrap_or_else(|| vec!["url".to_string(), "html".to_string()]);
+
+        let timeout = args
+            .get("timeout")
+            .and_then(|v| v.as_i64())
+            .and_then(|n| {
+                if n > 0 && n < 300 {
+                    Some(n as u64)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(10);
+
+        let delay = args
+            .get("delay")
+            .and_then(|v| v.as_i64())
+            .and_then(|n| {
+                if n >= 0 && n < 10_000 {
+                    Some(n as u64)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0);
+
+        let follow_redirects = args
+            .get("follow_redirects")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        let proxy = args
+            .get("proxy")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
         let scan_args = ScanArgs {
             input_type: "url".to_string(),
             format: "json".to_string(),
@@ -352,10 +428,10 @@ impl DalfoxMcp {
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
-            timeout: 10,
-            delay: 0,
-            proxy: None,
-            follow_redirects: false,
+            timeout,
+            delay,
+            proxy,
+            follow_redirects,
             output: None,
             include_request,
             include_response,
@@ -365,7 +441,7 @@ impl DalfoxMcp {
             workers: 50,
             max_concurrent_targets: 50,
             max_targets_per_host: 100,
-            encoders: vec!["url".into(), "html".into()],
+            encoders,
             custom_blind_xss_payload: None,
             blind_callback_url: None,
             custom_payload: None,
