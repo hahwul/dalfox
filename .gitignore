@@ -6,3 +6,6 @@
 
 ### Rust ###
 target/
+
+### Zola ###
+docs/public
