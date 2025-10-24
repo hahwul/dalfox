@@ -11,6 +11,9 @@ mod scanning;
 mod target_parser;
 mod utils;
 
+pub static DEBUG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static REQUEST_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 #[derive(Parser)]
 #[command(name = "dalfox")]
 #[command(about = "Powerful open-source XSS scanner")]
@@ -31,6 +34,10 @@ struct Cli {
     /// Path to a config file (TOML or JSON). Overrides default search path.
     #[arg(long = "config", global = true, value_name = "FILE")]
     config: Option<String>,
+
+    /// Enable debug logging (show DBG lines)
+    #[arg(long = "debug", global = true)]
+    debug: bool,
 
     /// Targets (when no subcommand is provided, defaults to scan)
     #[arg(value_name = "TARGET")]
@@ -66,6 +73,8 @@ async fn main() {
     }
 
     let cli = Cli::parse();
+    // Set global debug toggle for downstream modules
+    crate::DEBUG.store(cli.debug, std::sync::atomic::Ordering::Relaxed);
     // Skip banner for MCP subcommand to keep stdout clean for JSON-RPC
     let is_mcp = matches!(cli.command, Some(Commands::Mcp));
     if !is_mcp {

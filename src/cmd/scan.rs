@@ -345,6 +345,7 @@ async fn preflight_content_type(
     if target.delay > 0 {
         tokio::time::sleep(Duration::from_millis(target.delay)).await;
     }
+    crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let resp = request_builder.send().await.ok()?;
     let headers = resp.headers();
     let ct_opt = headers
@@ -618,6 +619,7 @@ pub async fn run_scan(args: &ScanArgs) {
         crate::utils::print_banner_once(env!("CARGO_PKG_VERSION"), true);
     }
     let __dalfox_scan_start = std::time::Instant::now();
+    crate::REQUEST_COUNT.store(0, Ordering::Relaxed);
     let log_info = |msg: &str| {
         if args.format == "plain" && !args.silence {
             let ts = chrono::Local::now().format("%-I:%M%p").to_string();
@@ -628,6 +630,12 @@ pub async fn run_scan(args: &ScanArgs) {
         if args.format == "plain" && !args.silence {
             let ts = chrono::Local::now().format("%-I:%M%p").to_string();
             println!("\x1b[90m{}\x1b[0m \x1b[33mWRN\x1b[0m {}", ts, msg);
+        }
+    };
+    let log_dbg = |msg: &str| {
+        if crate::DEBUG.load(Ordering::Relaxed) {
+            let ts = chrono::Local::now().format("%-I:%M%p").to_string();
+            println!("\x1b[90m{}\x1b[0m \x1b[35mDBG\x1b[0m {}", ts, msg);
         }
     };
     // Ephemeral animated spinner for progress (returns (stop_tx, done_rx))
@@ -1106,6 +1114,66 @@ pub async fn run_scan(args: &ScanArgs) {
                             bullet, p.name, valid, invalid
                         );
                     }
+                    // Debug: estimate total test cases (requests) to be run during scanning
+                    if crate::DEBUG.load(Ordering::Relaxed) && args_clone.format == "plain" && !args_clone.silence {
+                        // encoder expansion factor
+                        let enc_factor = if args_clone.encoders.iter().any(|e| e == "none") {
+                            1
+                        } else {
+                            let mut f = 1;
+                            for e in ["url", "html", "2url", "base64"] {
+                                if args_clone.encoders.iter().any(|x| x == e) {
+                                    f += 1;
+                                }
+                            }
+                            f
+                        };
+                        let mut total: usize = 0;
+                        for p in &target.reflection_params {
+                            let refl_len = if let Some(ctx) = &p.injection_context {
+                                crate::scanning::xss_common::get_dynamic_payloads(ctx, &args_clone)
+                                    .unwrap_or_else(|_| vec![])
+                                    .len()
+                            } else {
+                                // Fallback estimate: HTML dynamic payloads + JS payloads (with encoders)
+                                let html_len = crate::scanning::xss_common::get_dynamic_payloads(
+                                    &crate::parameter_analysis::InjectionContext::Html(None),
+                                    &args_clone,
+                                )
+                                .unwrap_or_else(|_| vec![])
+                                .len();
+                                let js_len =
+                                    crate::payload::XSS_JAVASCRIPT_PAYLOADS.len() * enc_factor;
+                                html_len + js_len
+                            };
+                            let dom_len = match &p.injection_context {
+                                Some(crate::parameter_analysis::InjectionContext::Javascript(_)) => 0,
+                                Some(ctx) => crate::scanning::xss_common::get_dynamic_payloads(
+                                    ctx,
+                                    &args_clone,
+                                )
+                                .unwrap_or_else(|_| vec![])
+                                .len(),
+                                None => {
+                                    let html = crate::scanning::xss_common::get_dynamic_payloads(
+                                        &crate::parameter_analysis::InjectionContext::Html(None),
+                                        &args_clone,
+                                    )
+                                    .unwrap_or_else(|_| vec![]);
+                                    let attr = crate::scanning::xss_common::get_dynamic_payloads(
+                                        &crate::parameter_analysis::InjectionContext::Attribute(None),
+                                        &args_clone,
+                                    )
+                                    .unwrap_or_else(|_| vec![]);
+                                    html.len() + attr.len()
+                                }
+                            };
+                            total = total.saturating_add(refl_len.saturating_mul(1 + dom_len));
+                        }
+                        if args_clone.format == "plain" && !args_clone.silence {
+                            log_dbg(&format!("{} test cases (reqs) estimated", total));
+                        }
+                    }
                 }
 
                 Some(target)
@@ -1518,5 +1586,11 @@ pub async fn run_scan(args: &ScanArgs) {
             "scan completed in {:.3} seconds",
             __dalfox_elapsed
         ));
+        if crate::DEBUG.load(Ordering::Relaxed) {
+            log_dbg(&format!(
+                "{} test cases (reqs) sent",
+                crate::REQUEST_COUNT.load(Ordering::Relaxed)
+            ));
+        }
     }
 }

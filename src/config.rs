@@ -94,6 +94,8 @@ pub struct ScanConfig {
     pub sxss: Option<bool>,
     pub sxss_url: Option<String>,
     pub sxss_method: Option<String>,
+    // LOGGING/DEBUG
+    pub debug: Option<bool>,
 }
 
 impl Config {
@@ -358,6 +360,12 @@ impl Config {
             if let Some(v) = scan.limit {
                 if args.limit.is_none() {
                     args.limit = Some(v);
+                }
+            }
+            // Map debug conservatively: only set when CLI didn't enable it (global false)
+            if let Some(v) = scan.debug {
+                if !crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                    crate::DEBUG.store(v, std::sync::atomic::Ordering::Relaxed);
                 }
             }
 
@@ -648,6 +656,7 @@ pub fn default_toml_template() -> String {
 # include_request = false
 # include_response = false
 # silence = false
+# debug = false              # enable debug logging (DBG lines)
 # poc_type = "plain"         # plain, curl, httpie, http-request
 # limit = 100
 
