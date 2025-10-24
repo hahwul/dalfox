@@ -1,6 +1,7 @@
 use crate::parameter_analysis::Param;
 use crate::target_parser::Target;
 use reqwest::{Client, redirect};
+use std::sync::atomic::Ordering;
 use tokio::time::{Duration, sleep};
 use url::form_urlencoded;
 
@@ -105,6 +106,7 @@ pub async fn check_reflection(
 
     // Send the injection request
     let inject_resp = inject_request.send().await;
+    crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
 
     if target.delay > 0 {
         sleep(Duration::from_millis(target.delay)).await;
@@ -130,6 +132,7 @@ pub async fn check_reflection(
                     check_request = check_request.header("Cookie", format!("{}={}", k, v));
                 }
 
+                crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
                 if let Ok(resp) = check_request.send().await {
                     if let Ok(text) = resp.text().await {
                         if text.contains(payload) {
@@ -254,6 +257,7 @@ pub async fn check_reflection_with_response(
 
     // Send the injection request
     let inject_resp = inject_request.send().await;
+    crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
 
     if target.delay > 0 {
         sleep(Duration::from_millis(target.delay)).await;
@@ -279,6 +283,7 @@ pub async fn check_reflection_with_response(
                     check_request = check_request.header("Cookie", format!("{}={}", k, v));
                 }
 
+                crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
                 if let Ok(resp) = check_request.send().await {
                     if let Ok(text) = resp.text().await {
                         if text.contains(payload) {

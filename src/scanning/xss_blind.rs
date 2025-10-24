@@ -44,6 +44,7 @@ async fn send_blind_request(target: &Target, param_name: &str, payload: &str, pa
     use reqwest::{Client, redirect};
     use tokio::time::{Duration, sleep};
     use url::form_urlencoded;
+    // use global request counter: crate::REQUEST_COUNT
 
     let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
     if let Some(proxy_url) = &target.proxy {
@@ -151,6 +152,7 @@ async fn send_blind_request(target: &Target, param_name: &str, payload: &str, pa
     }
 
     // Send the request, ignore response
+    crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let _ = request.send().await;
 
     if target.delay > 0 {

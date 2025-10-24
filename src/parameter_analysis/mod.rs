@@ -5,6 +5,7 @@ pub use mining::detect_injection_context;
 
 pub use discovery::*;
 pub use mining::*;
+pub static REQUEST_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 use crate::cmd::scan::ScanArgs;
 use crate::encoding::{base64_encode, double_url_encode, html_entity_encode, url_encode};
@@ -321,7 +322,10 @@ pub async fn active_probe_param(
                 }
             }
 
-            let reflected_ok = if let Ok(resp) = request_builder.send().await {
+            let reflected_ok = if let Ok(resp) = {
+                crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                request_builder.send().await
+            } {
                 if let Ok(text) = resp.text().await {
                     if let Some(segment) = extract_reflected_segment(&text) {
                         if segment.contains(c) {
@@ -535,7 +539,10 @@ pub async fn active_probe_param(
                             request_builder2 = request_builder2.body(d.clone());
                         }
                     }
-                    if let Ok(resp2) = request_builder2.send().await {
+                    if let Ok(resp2) = {
+                        crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                        request_builder2.send().await
+                    } {
                         if let Ok(text2) = resp2.text().await {
                             if let Some(segment2) = extract_reflected_segment(&text2) {
                                 if segment2.contains(c)

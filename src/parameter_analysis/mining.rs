@@ -5,7 +5,10 @@ use crate::target_parser::Target;
 use indicatif::ProgressBar;
 use reqwest::Client;
 use scraper;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicU64, Ordering},
+};
 
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{Duration, sleep};
@@ -269,7 +272,9 @@ pub async fn probe_dictionary_params(
             if let Some(data) = &data {
                 request = request.body(data.clone());
             }
-            if let Ok(resp) = request.send().await {
+            let __resp = request.send().await;
+            crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+            if let Ok(resp) = __resp {
                 if let Ok(text) = resp.text().await {
                     let mut st = stats_clone.lock().await;
                     st.record_attempt();
@@ -438,7 +443,9 @@ pub async fn probe_body_params(
                 request = request.header("Content-Type", "application/x-www-form-urlencoded");
                 request = request.body(body);
 
-                if let Ok(resp) = request.send().await {
+                let __resp = request.send().await;
+                crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+                if let Ok(resp) = __resp {
                     if let Ok(text) = resp.text().await {
                         let mut st = stats_clone.lock().await;
                         st.record_attempt();
@@ -555,7 +562,9 @@ pub async fn probe_response_id_params(
         base_request = base_request.body(data.clone());
     }
 
-    if let Ok(resp) = base_request.send().await {
+    let __resp = base_request.send().await;
+    crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+    if let Ok(resp) = __resp {
         if let Ok(text) = resp.text().await {
             let document = scraper::Html::parse_document(&text);
 
@@ -626,7 +635,9 @@ pub async fn probe_response_id_params(
                     if let Some(data) = &data {
                         request = request.body(data.clone());
                     }
-                    if let Ok(resp) = request.send().await {
+                    let __resp = request.send().await;
+                    crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+                    if let Ok(resp) = __resp {
                         if let Ok(text) = resp.text().await {
                             let mut st = stats_clone.lock().await;
                             st.record_attempt();

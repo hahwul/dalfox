@@ -81,6 +81,7 @@ pub async fn check_query_discovery(
             if let Some(data) = &data {
                 request = request.body(data.clone());
             }
+            crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if let Ok(resp) = request.send().await {
                 if let Ok(text) = resp.text().await {
                     if text.contains(test_value) {
@@ -160,6 +161,7 @@ pub async fn check_header_discovery(
             if let Some(data) = &data {
                 request = request.body(data.clone());
             }
+            crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if let Ok(resp) = request.send().await {
                 if let Ok(text) = resp.text().await {
                     if text.contains(test_value) {
@@ -329,6 +331,7 @@ pub async fn check_path_discovery(
                 request = request.body(d.clone());
             }
 
+            crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if let Ok(resp) = request.send().await {
                 if let Ok(text) = resp.text().await {
                     if text.contains(test_value) {
@@ -414,6 +417,7 @@ pub async fn check_cookie_discovery(
             if let Some(data) = &data {
                 request = request.body(data.clone());
             }
+            crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if let Ok(resp) = request.send().await {
                 if let Ok(text) = resp.text().await {
                     if text.contains(test_value) {

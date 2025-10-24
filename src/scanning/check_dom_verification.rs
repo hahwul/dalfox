@@ -2,6 +2,7 @@ use crate::parameter_analysis::Param;
 use crate::target_parser::Target;
 use reqwest::{Client, redirect};
 use scraper;
+use std::sync::atomic::Ordering;
 use tokio::time::{Duration, sleep};
 use url::form_urlencoded;
 
@@ -104,6 +105,7 @@ pub async fn check_dom_verification(
     }
 
     // Send the injection request
+    crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let inject_resp = inject_request.send().await;
 
     if target.delay > 0 {
@@ -130,6 +132,7 @@ pub async fn check_dom_verification(
                     check_request = check_request.header("Cookie", format!("{}={}", k, v));
                 }
 
+                crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if let Ok(resp) = check_request.send().await {
                     if let Ok(text) = resp.text().await {
                         let document = scraper::Html::parse_document(&text);
