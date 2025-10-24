@@ -1,6 +1,6 @@
 <div align="center">
   <br>
-  <img src="docs/images/logo.png" alt="dalfox" width="400px;">
+  <img src="docs/static/images/logo.png" alt="dalfox" width="400px;">
 </div>
 <p align="center">
   <a href="https://github.com/hahwul/dalfox/releases/latest"><img src="https://img.shields.io/github/v/release/hahwul/dalfox?style=for-the-badge&logoColor=%2330365e&label=dalfox&labelColor=%2330365e&color=%2330365e"></a>
