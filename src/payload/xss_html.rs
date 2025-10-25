@@ -2,6 +2,15 @@
 /// primitives from XSS_JAVASCRIPT_PAYLOADS.
 /// This replaces the previous static XSS_HTML_PAYLOADS constant to ensure automatic synchronization
 /// when JavaScript payload list changes.
+/// Expose useful HTML tag names commonly leveraged in XSS contexts
+pub fn useful_html_tag_names() -> &'static [&'static str] {
+    &[
+        "script", "img", "svg", "iframe", "math", "xmp", "details", "video", "audio", "object",
+        "embed", "marquee", "body", "meta", "link", "input", "form", "textarea", "select",
+        "template",
+    ]
+}
+
 pub fn get_dynamic_xss_html_payloads() -> Vec<String> {
     let templates = [
         // CLASS

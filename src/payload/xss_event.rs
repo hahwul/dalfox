@@ -1,21 +1,118 @@
+/// Expose a comprehensive set of common DOM event handler attribute names
+/// (e.g., "onmouseover", "onclick") that can be used for attribute-based XSS payloads.
+pub fn common_event_handler_names() -> &'static [&'static str] {
+    &[
+        "onabort",
+        "onanimationend",
+        "onanimationiteration",
+        "onanimationstart",
+        "onauxclick",
+        "onbeforeinput",
+        "onbeforeprint",
+        "onbeforeunload",
+        "onblur",
+        "oncancel",
+        "oncanplay",
+        "oncanplaythrough",
+        "onchange",
+        "onclick",
+        "onclose",
+        "oncontextmenu",
+        "oncopy",
+        "oncuechange",
+        "oncut",
+        "ondblclick",
+        "ondrag",
+        "ondragend",
+        "ondragenter",
+        "ondragleave",
+        "ondragover",
+        "ondragstart",
+        "ondrop",
+        "ondurationchange",
+        "onended",
+        "onerror",
+        "onfocus",
+        "onfocusin",
+        "onfocusout",
+        "onformdata",
+        "ongotpointercapture",
+        "onhashchange",
+        "oninput",
+        "oninvalid",
+        "onkeydown",
+        "onkeypress",
+        "onkeyup",
+        "onlanguagechange",
+        "onload",
+        "onloadeddata",
+        "onloadedmetadata",
+        "onloadstart",
+        "onlostpointercapture",
+        "onmessage",
+        "onmessageerror",
+        "onmousedown",
+        "onmouseenter",
+        "onmouseleave",
+        "onmousemove",
+        "onmouseout",
+        "onmouseover",
+        "onmouseup",
+        "onpaste",
+        "onpause",
+        "onplay",
+        "onplaying",
+        "onpointercancel",
+        "onpointerdown",
+        "onpointerenter",
+        "onpointerleave",
+        "onpointermove",
+        "onpointerout",
+        "onpointerover",
+        "onpointerup",
+        "onpopstate",
+        "onprogress",
+        "onratechange",
+        "onreset",
+        "onresize",
+        "onscroll",
+        "onsearch",
+        "onsecuritypolicyviolation",
+        "onseeked",
+        "onseeking",
+        "onselect",
+        "onselectionchange",
+        "onselectstart",
+        "onslotchange",
+        "onstalled",
+        "onstorage",
+        "onsubmit",
+        "onsuspend",
+        "ontimeupdate",
+        "ontoggle",
+        "ontouchcancel",
+        "ontouchend",
+        "ontouchmove",
+        "ontouchstart",
+        "ontransitionend",
+        "onunhandledrejection",
+        "onvisibilitychange",
+        "onvolumechange",
+        "onwaiting",
+        "onwheel",
+    ]
+}
+
 /// Dynamically build attribute payloads by combining common event handlers with
 /// JavaScript execution primitives from XSS_JAVASCRIPT_PAYLOADS.
 /// This replaces the previous static XSS_ATTRIBUTE_PAYLOADS constant to ensure
 /// automatic synchronization when JavaScript payload list changes.
 pub fn get_dynamic_xss_attribute_payloads() -> Vec<String> {
     let mut out = Vec::new();
-    for js in crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL.iter() {
-        out.push(format!("onerror={}", js));
-        out.push(format!("onload={}", js));
-        out.push(format!("onmouseover={}", js));
-        out.push(format!("onclick={}", js));
-        out.push(format!("onfocus={}", js));
-        out.push(format!("onmouseenter={}", js));
-        out.push(format!("onmouseleave={}", js));
-        out.push(format!("onkeydown={}", js));
-        out.push(format!("onkeyup={}", js));
-        out.push(format!("onsubmit={}", js));
-        out.push(format!("onpointerover={}", js));
+    for ev in common_event_handler_names().iter() {
+        for js in crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL.iter() {
+            out.push(format!("{}={}", ev, js));
+        }
     }
     out
 }
