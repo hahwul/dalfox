@@ -26,11 +26,11 @@ fn ensure_default_registries() {
         if m.is_empty() {
             m.insert(
                 "payloadbox".to_string(),
-                vec!["https://raw.githubusercontent.com/payloadbox/xss-payload-list/master/Intruder/xss-payload-list.txt".to_string()],
+                vec!["https://assets.hahwul.com/xss-payloadbox.txt".to_string()],
             );
             m.insert(
                 "portswigger".to_string(),
-                vec!["https://raw.githubusercontent.com/PortSwigger/xss-cheatsheet-data/master/output/payloads.txt".to_string()],
+                vec!["https://assets.hahwul.com/xss-portswigger.txt".to_string()],
             );
         }
     }
@@ -41,11 +41,11 @@ fn ensure_default_registries() {
         if m.is_empty() {
             m.insert(
                 "assetnote".to_string(),
-                vec!["https://raw.githubusercontent.com/assetnote/wordlists/master/data/parameters.txt".to_string()],
+                vec!["https://assets.hahwul.com/wl-assetnote-params.txt".to_string()],
             );
             m.insert(
                 "burp".to_string(),
-                vec!["https://raw.githubusercontent.com/danielmiessler/SecLists/master/Discovery/Web-Content/burp-parameter-names.txt".to_string()],
+                vec!["https://assets.hahwul.com/wl-params.txt".to_string()],
             );
         }
     }
