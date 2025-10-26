@@ -68,36 +68,35 @@ fn get_dom_payloads(
     match &param.injection_context {
         // JS context: reflection-only
         Some(crate::parameter_analysis::InjectionContext::Javascript(_)) => Ok(vec![]),
-        // Known non-JS contexts: try dynamic payloads; if they fail or are empty, fallback to generated + encoders
-        Some(ctx) => match crate::scanning::xss_common::get_dynamic_payloads(ctx, args) {
-            Ok(v) if !v.is_empty() => Ok(v),
-            _ => {
-                let base_payloads = crate::scanning::xss_common::generate_dynamic_payloads(ctx);
-                let mut out = vec![];
-                for p in base_payloads {
-                    if args.encoders.contains(&"none".to_string()) {
-                        out.push(p.clone());
-                    } else {
-                        out.push(p.clone());
-                        if args.encoders.contains(&"url".to_string()) {
-                            out.push(crate::encoding::url_encode(&p));
-                        }
-                        if args.encoders.contains(&"html".to_string()) {
-                            out.push(crate::encoding::html_entity_encode(&p));
-                        }
-                        if args.encoders.contains(&"2url".to_string()) {
-                            out.push(crate::encoding::double_url_encode(&p));
-                        }
-                        if args.encoders.contains(&"base64".to_string()) {
-                            out.push(crate::encoding::base64_encode(&p));
-                        }
+        // Known non-JS contexts: use locally generated payloads only (exclude remote) to avoid large cross-product
+        Some(ctx) => {
+            // Use locally generated payloads only (no remote) to avoid large cross-product in DOM verification
+            let base_payloads = crate::scanning::xss_common::generate_dynamic_payloads(ctx);
+            let mut out = vec![];
+            for p in base_payloads {
+                if args.encoders.contains(&"none".to_string()) {
+                    out.push(p.clone());
+                } else {
+                    out.push(p.clone());
+                    if args.encoders.contains(&"url".to_string()) {
+                        out.push(crate::encoding::url_encode(&p));
+                    }
+                    if args.encoders.contains(&"html".to_string()) {
+                        out.push(crate::encoding::html_entity_encode(&p));
+                    }
+                    if args.encoders.contains(&"2url".to_string()) {
+                        out.push(crate::encoding::double_url_encode(&p));
+                    }
+                    if args.encoders.contains(&"base64".to_string()) {
+                        out.push(crate::encoding::base64_encode(&p));
                     }
                 }
-                Ok(out)
             }
-        },
+            Ok(out)
+        }
         // Unknown context: use HTML + Attribute payloads (+ custom if provided), never error
         None => {
+            // Use only local HTML/Attribute payloads (exclude remote) for DOM verification in unknown contexts
             let mut base_payloads = vec![];
 
             if args.only_custom_payload {

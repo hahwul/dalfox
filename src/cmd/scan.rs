@@ -1135,37 +1135,24 @@ pub async fn run_scan(args: &ScanArgs) {
                                     .unwrap_or_else(|_| vec![])
                                     .len()
                             } else {
-                                // Fallback estimate: HTML dynamic payloads + JS payloads (with encoders)
-                                let html_len = crate::scanning::xss_common::get_dynamic_payloads(
-                                    &crate::parameter_analysis::InjectionContext::Html(None),
-                                    &args_clone,
-                                )
-                                .unwrap_or_else(|_| vec![])
-                                .len();
-                                let js_len =
-                                    crate::payload::XSS_JAVASCRIPT_PAYLOADS.len() * enc_factor;
+                                // Fallback estimate: HTML dynamic payloads + JS payloads (with encoders), excluding remote payloads
+                                let html_base_len = crate::payload::get_dynamic_xss_html_payloads().len();
+                                let html_len = html_base_len * enc_factor;
+                                let js_len = crate::payload::XSS_JAVASCRIPT_PAYLOADS.len() * enc_factor;
                                 html_len + js_len
                             };
                             let dom_len = match &p.injection_context {
                                 Some(crate::parameter_analysis::InjectionContext::Javascript(_)) => 0,
-                                Some(ctx) => crate::scanning::xss_common::get_dynamic_payloads(
-                                    ctx,
-                                    &args_clone,
-                                )
-                                .unwrap_or_else(|_| vec![])
-                                .len(),
+                                Some(ctx) => {
+                                    // Use locally generated payloads and apply encoder factor; exclude remote payloads
+                                    let base = crate::scanning::xss_common::generate_dynamic_payloads(ctx);
+                                    base.len() * enc_factor
+                                }
                                 None => {
-                                    let html = crate::scanning::xss_common::get_dynamic_payloads(
-                                        &crate::parameter_analysis::InjectionContext::Html(None),
-                                        &args_clone,
-                                    )
-                                    .unwrap_or_else(|_| vec![]);
-                                    let attr = crate::scanning::xss_common::get_dynamic_payloads(
-                                        &crate::parameter_analysis::InjectionContext::Attribute(None),
-                                        &args_clone,
-                                    )
-                                    .unwrap_or_else(|_| vec![]);
-                                    html.len() + attr.len()
+                                    // Unknown context: use HTML + Attribute payloads without remote, apply encoder factor
+                                    let html = crate::payload::get_dynamic_xss_html_payloads();
+                                    let attr = crate::payload::get_dynamic_xss_attribute_payloads();
+                                    (html.len() + attr.len()) * enc_factor
                                 }
                             };
                             total = total.saturating_add(refl_len.saturating_mul(1 + dom_len));
