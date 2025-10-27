@@ -260,8 +260,13 @@ pub async fn probe_dictionary_params(
             if let Some(ua) = &user_agent {
                 request = request.header("User-Agent", ua);
             }
-            for (k, v) in &cookies {
-                request = request.header("Cookie", format!("{}={}", k, v));
+            if !cookies.is_empty() {
+                let cookie_header = cookies
+                    .iter()
+                    .map(|(k, v)| format!("{}={}", k, v))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                request = request.header("Cookie", cookie_header);
             }
             if let Some(data) = &data {
                 request = request.body(data.clone());
@@ -425,8 +430,13 @@ pub async fn probe_body_params(
                 if let Some(ua) = &user_agent {
                     request = request.header("User-Agent", ua);
                 }
-                for (k, v) in &cookies {
-                    request = request.header("Cookie", format!("{}={}", k, v));
+                if !cookies.is_empty() {
+                    let cookie_header = cookies
+                        .iter()
+                        .map(|(k, v)| format!("{}={}", k, v))
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    request = request.header("Cookie", cookie_header);
                 }
                 request = request.header("Content-Type", "application/x-www-form-urlencoded");
                 request = request.body(body);
@@ -611,8 +621,13 @@ pub async fn probe_response_id_params(
                     if let Some(ua) = &user_agent {
                         request = request.header("User-Agent", ua);
                     }
-                    for (k, v) in &cookies {
-                        request = request.header("Cookie", format!("{}={}", k, v));
+                    if !cookies.is_empty() {
+                        let cookie_header = cookies
+                            .iter()
+                            .map(|(k, v)| format!("{}={}", k, v))
+                            .collect::<Vec<_>>()
+                            .join("; ");
+                        request = request.header("Cookie", cookie_header);
                     }
                     if let Some(data) = &data {
                         request = request.body(data.clone());

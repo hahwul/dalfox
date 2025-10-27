@@ -231,6 +231,15 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
     for (k, v) in &target.headers {
         request_lines.push(format!("{}: {}", k, v));
     }
+    if !target.cookies.is_empty() {
+        let cookie_header = target
+            .cookies
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect::<Vec<_>>()
+            .join("; ");
+        request_lines.push(format!("Cookie: {}", cookie_header));
+    }
     if let Some(data) = &target.data {
         request_lines.push(format!("Content-Length: {}", data.len()));
         request_lines.push("".to_string());

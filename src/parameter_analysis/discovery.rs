@@ -69,8 +69,13 @@ pub async fn check_query_discovery(
             if let Some(ua) = &user_agent {
                 request = request.header("User-Agent", ua);
             }
-            for (k, v) in &cookies {
-                request = request.header("Cookie", format!("{}={}", k, v));
+            if !cookies.is_empty() {
+                let cookie_header = cookies
+                    .iter()
+                    .map(|(k, v)| format!("{}={}", k, v))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                request = request.header("Cookie", cookie_header);
             }
             if let Some(data) = &data {
                 request = request.body(data.clone());
@@ -143,8 +148,13 @@ pub async fn check_header_discovery(
             if let Some(ua) = &user_agent {
                 request = request.header("User-Agent", ua);
             }
-            for (k, v) in &cookies {
-                request = request.header("Cookie", format!("{}={}", k, v));
+            if !cookies.is_empty() {
+                let cookie_header = cookies
+                    .iter()
+                    .map(|(k, v)| format!("{}={}", k, v))
+                    .collect::<Vec<_>>()
+                    .join("; ");
+                request = request.header("Cookie", cookie_header);
             }
             if let Some(data) = &data {
                 request = request.body(data.clone());

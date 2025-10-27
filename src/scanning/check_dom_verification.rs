@@ -86,8 +86,14 @@ pub async fn check_dom_verification(
     if let Some(ua) = &target.user_agent {
         inject_request = inject_request.header("User-Agent", ua);
     }
-    for (k, v) in &target.cookies {
-        inject_request = inject_request.header("Cookie", format!("{}={}", k, v));
+    if !target.cookies.is_empty() {
+        let cookie_header = target
+            .cookies
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect::<Vec<_>>()
+            .join("; ");
+        inject_request = inject_request.header("Cookie", cookie_header);
     }
     if let Some(data) = &target.data {
         inject_request = inject_request.body(data.clone());
@@ -117,8 +123,14 @@ pub async fn check_dom_verification(
                 if let Some(ua) = &target.user_agent {
                     check_request = check_request.header("User-Agent", ua);
                 }
-                for (k, v) in &target.cookies {
-                    check_request = check_request.header("Cookie", format!("{}={}", k, v));
+                if !target.cookies.is_empty() {
+                    let cookie_header = target
+                        .cookies
+                        .iter()
+                        .map(|(k, v)| format!("{}={}", k, v))
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    check_request = check_request.header("Cookie", cookie_header);
                 }
 
                 crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
