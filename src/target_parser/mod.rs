@@ -1,4 +1,6 @@
 use crate::parameter_analysis::Param;
+use reqwest::{Client, redirect::Policy};
+use std::time::Duration;
 use url::Url;
 
 #[derive(Debug, Clone)]
@@ -15,6 +17,28 @@ pub struct Target {
     pub proxy: Option<String>,
     pub workers: usize,
     pub follow_redirects: bool,
+}
+
+impl Target {
+    pub fn build_client(&self) -> Result<Client, Box<dyn std::error::Error>> {
+        let mut client_builder = Client::builder()
+            .timeout(Duration::from_secs(self.timeout))
+            .danger_accept_invalid_certs(true); // Insecure mode for scanner
+
+        if let Some(proxy_url) = &self.proxy {
+            if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
+                client_builder = client_builder.proxy(proxy);
+            }
+        }
+
+        if self.follow_redirects {
+            client_builder = client_builder.redirect(Policy::limited(10));
+        } else {
+            client_builder = client_builder.redirect(Policy::none());
+        }
+
+        Ok(client_builder.build()?)
+    }
 }
 
 pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {

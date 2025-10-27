@@ -31,13 +31,7 @@ pub async fn check_query_discovery(
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
 ) {
-    let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
-    if let Some(proxy_url) = &target.proxy {
-        if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
-            client_builder = client_builder.proxy(proxy);
-        }
-    }
-    let client = client_builder.build().unwrap_or_else(|_| Client::new());
+    let client = target.build_client().unwrap_or_else(|_| Client::new());
     let test_value = "dalfox";
 
     let mut handles = vec![];
@@ -116,13 +110,7 @@ pub async fn check_header_discovery(
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
 ) {
-    let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
-    if let Some(proxy_url) = &target.proxy {
-        if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
-            client_builder = client_builder.proxy(proxy);
-        }
-    }
-    let client = client_builder.build().unwrap_or_else(|_| Client::new());
+    let client = target.build_client().unwrap_or_else(|_| Client::new());
     let test_value = "dalfox";
 
     let mut handles = vec![];
@@ -266,13 +254,7 @@ pub async fn check_path_discovery(
         return;
     }
 
-    let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
-    if let Some(proxy_url) = &target.proxy {
-        if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
-            client_builder = client_builder.proxy(proxy);
-        }
-    }
-    let client = client_builder.build().unwrap_or_else(|_| Client::new());
+    let client = target.build_client().unwrap_or_else(|_| Client::new());
 
     let mut handles = Vec::new();
 
@@ -366,13 +348,7 @@ pub async fn check_cookie_discovery(
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
 ) {
-    let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
-    if let Some(proxy_url) = &target.proxy {
-        if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
-            client_builder = client_builder.proxy(proxy);
-        }
-    }
-    let client = client_builder.build().unwrap_or_else(|_| Client::new());
+    let client = target.build_client().unwrap_or_else(|_| Client::new());
     let test_value = "dalfox";
 
     let mut handles = vec![];

@@ -128,14 +128,7 @@ pub async fn active_probe_param(
     semaphore: Arc<Semaphore>,
     encoders: Vec<String>,
 ) -> Param {
-    let mut client_builder =
-        Client::builder().timeout(std::time::Duration::from_secs(target.timeout));
-    if let Some(proxy_url) = &target.proxy {
-        if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
-            client_builder = client_builder.proxy(proxy);
-        }
-    }
-    let client = client_builder.build().unwrap_or_else(|_| Client::new());
+    let client = target.build_client().unwrap_or_else(|_| Client::new());
 
     let mut handles = Vec::new();
     let valid_specials = Arc::new(Mutex::new(Vec::<char>::new()));

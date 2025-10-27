@@ -309,18 +309,7 @@ async fn preflight_content_type(
     target: &crate::target_parser::Target,
     args: &ScanArgs,
 ) -> Option<(String, Option<(String, String)>)> {
-    let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
-    if let Some(proxy_url) = &target.proxy {
-        if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
-            client_builder = client_builder.proxy(proxy);
-        }
-    }
-    if args.follow_redirects {
-        client_builder = client_builder.redirect(Policy::limited(10));
-    } else {
-        client_builder = client_builder.redirect(Policy::none());
-    }
-    let client = client_builder.build().ok()?;
+    let client = target.build_client().ok()?;
 
     let mut request_builder = client.get(target.url.clone());
     for (k, v) in &target.headers {

@@ -46,18 +46,7 @@ async fn send_blind_request(target: &Target, param_name: &str, payload: &str, pa
     use url::form_urlencoded;
     // use global request counter: crate::REQUEST_COUNT
 
-    let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
-    if let Some(proxy_url) = &target.proxy {
-        if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
-            client_builder = client_builder.proxy(proxy);
-        }
-    }
-    client_builder = client_builder.redirect(if target.follow_redirects {
-        redirect::Policy::limited(10)
-    } else {
-        redirect::Policy::none()
-    });
-    let client = client_builder.build().unwrap_or_else(|_| Client::new());
+    let client = target.build_client().unwrap_or_else(|_| Client::new());
 
     let url = match param_type {
         "query" => {

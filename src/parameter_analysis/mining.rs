@@ -143,13 +143,7 @@ pub async fn probe_dictionary_params(
     pb: Option<ProgressBar>,
 ) {
     let silence = args.silence;
-    let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
-    if let Some(proxy_url) = &target.proxy {
-        if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
-            client_builder = client_builder.proxy(proxy);
-        }
-    }
-    let client = client_builder.build().unwrap_or_else(|_| Client::new());
+    let client = target.build_client().unwrap_or_else(|_| Client::new());
 
     // Get parameters from remote wordlists, file, or default
     let params: Vec<String> = if !args.remote_wordlists.is_empty() {
@@ -363,13 +357,7 @@ pub async fn probe_body_params(
     pb: Option<ProgressBar>,
 ) {
     let silence = args.silence;
-    let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
-    if let Some(proxy_url) = &target.proxy {
-        if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
-            client_builder = client_builder.proxy(proxy);
-        }
-    }
-    let client = client_builder.build().unwrap_or_else(|_| Client::new());
+    let client = target.build_client().unwrap_or_else(|_| Client::new());
 
     if let Some(data) = &args.data {
         // Assume form data for now (application/x-www-form-urlencoded)
@@ -536,13 +524,7 @@ pub async fn probe_response_id_params(
     pb: Option<ProgressBar>,
 ) {
     let silence = args.silence;
-    let mut client_builder = Client::builder().timeout(Duration::from_secs(target.timeout));
-    if let Some(proxy_url) = &target.proxy {
-        if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
-            client_builder = client_builder.proxy(proxy);
-        }
-    }
-    let client = client_builder.build().unwrap_or_else(|_| Client::new());
+    let client = target.build_client().unwrap_or_else(|_| Client::new());
 
     // First, get the HTML to find input ids and names
     let mut base_request = client.request(

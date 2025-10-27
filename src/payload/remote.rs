@@ -103,9 +103,11 @@ pub async fn init_remote_payloads_with(
         return Ok(());
     }
 
-    let mut client_builder = Client::builder().timeout(Duration::from_secs(
-        opts.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS),
-    ));
+    let mut client_builder = Client::builder()
+        .timeout(Duration::from_secs(
+            opts.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS),
+        ))
+        .danger_accept_invalid_certs(true);
     if let Some(pxy) = opts.proxy.as_ref() {
         if let Ok(proxy) = reqwest::Proxy::all(pxy) {
             client_builder = client_builder.proxy(proxy);
@@ -137,9 +139,11 @@ pub async fn init_remote_wordlists_with(
         return Ok(());
     }
 
-    let mut client_builder = Client::builder().timeout(Duration::from_secs(
-        opts.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS),
-    ));
+    let mut client_builder = Client::builder()
+        .timeout(Duration::from_secs(
+            opts.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS),
+        ))
+        .danger_accept_invalid_certs(true);
     if let Some(pxy) = opts.proxy.as_ref() {
         if let Ok(proxy) = reqwest::Proxy::all(pxy) {
             client_builder = client_builder.proxy(proxy);
@@ -173,6 +177,7 @@ pub async fn init_remote_payloads(providers: &[String]) -> Result<(), Box<dyn st
 
     let client = Client::builder()
         .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
+        .danger_accept_invalid_certs(true)
         .build()?;
 
     let lines = fetch_multiple_text_lists(&client, &urls).await;
@@ -207,6 +212,7 @@ pub async fn init_remote_wordlists(providers: &[String]) -> Result<(), Box<dyn s
 
     let client = Client::builder()
         .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
+        .danger_accept_invalid_certs(true)
         .build()?;
 
     let lines = fetch_multiple_text_lists(&client, &urls).await;
