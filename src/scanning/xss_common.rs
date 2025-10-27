@@ -410,6 +410,11 @@ pub fn get_dynamic_payloads(
             base_payloads.extend(remotes.as_ref().clone());
         }
     }
+
+    // Deduplicate base_payloads to prevent sending identical payloads multiple times
+    let mut unique_base_payloads = std::collections::HashSet::new();
+    base_payloads.retain(|p| unique_base_payloads.insert(p.clone()));
+
     let mut payloads = vec![];
     for payload in base_payloads {
         if args.encoders.contains(&"none".to_string()) {

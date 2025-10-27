@@ -37,6 +37,10 @@ fn get_fallback_reflection_payloads(
         }
     }
 
+    // Deduplicate base_payloads to prevent sending identical payloads multiple times
+    let mut unique_base_payloads = std::collections::HashSet::new();
+    base_payloads.retain(|p| unique_base_payloads.insert(p.clone()));
+
     let mut payloads = vec![];
     for payload in base_payloads {
         if args.encoders.contains(&"none".to_string()) {
@@ -71,7 +75,10 @@ fn get_dom_payloads(
         // Known non-JS contexts: use locally generated payloads only (exclude remote) to avoid large cross-product
         Some(ctx) => {
             // Use locally generated payloads only (no remote) to avoid large cross-product in DOM verification
-            let base_payloads = crate::scanning::xss_common::generate_dynamic_payloads(ctx);
+            let mut base_payloads = crate::scanning::xss_common::generate_dynamic_payloads(ctx);
+            // Deduplicate base_payloads
+            let mut unique_base = std::collections::HashSet::new();
+            base_payloads.retain(|p| unique_base.insert(p.clone()));
             let mut out = vec![];
             for p in base_payloads {
                 if args.encoders.contains(&"none".to_string()) {
@@ -123,6 +130,10 @@ fn get_dom_payloads(
                 base_payloads.extend(crate::payload::get_dynamic_xss_html_payloads());
                 base_payloads.extend(crate::payload::get_dynamic_xss_attribute_payloads());
             }
+
+            // Deduplicate base_payloads
+            let mut unique_base = std::collections::HashSet::new();
+            base_payloads.retain(|p| unique_base.insert(p.clone()));
 
             let mut out = vec![];
             for p in base_payloads {
@@ -282,8 +293,8 @@ pub async fn run_scanning(
     for param in &target.reflection_params {
         let already_ref = found_reflection_params.lock().await.contains(&param.name);
         let already_dom = found_dom_params.lock().await.contains(&param.name);
-        if (already_ref && already_dom) && !args.deep_scan {
-            // Skip further testing for this param if both Reflection and DOM results already found and not deep scanning
+        if (already_ref || already_dom) && !args.deep_scan {
+            // Skip further testing for this param if reflection or DOM XSS already found and not deep scanning
             continue;
         }
         // Early stop if global limit reached
@@ -304,27 +315,29 @@ pub async fn run_scanning(
         };
         let dom_payloads = get_dom_payloads(param, args.as_ref()).unwrap_or_else(|_| vec![]);
 
-        for reflection_payload in reflection_payloads {
-            let args_clone = args.clone();
-            let semaphore_clone = semaphore.clone();
-            let param_clone = param.clone();
-            let target_clone = (*target).clone(); // Clone target for each task
-            let reflection_payload_clone = reflection_payload.clone();
-            let dom_payloads_clone = dom_payloads.clone();
-            let results_clone = results.clone();
-            let pb_clone = pb.clone();
-            let found_reflection_params_clone = found_reflection_params.clone();
-            let found_dom_params_clone = found_dom_params.clone();
-            let overall_pb_clone = overall_pb.clone();
+        let args_clone = args.clone();
+        let semaphore_clone = semaphore.clone();
+        let param_clone = param.clone();
+        let target_clone = (*target).clone();
+        let reflection_payloads_clone = reflection_payloads.clone();
+        let dom_payloads_clone = dom_payloads.clone();
+        let results_clone = results.clone();
+        let pb_clone = pb.clone();
+        let found_reflection_params_clone = found_reflection_params.clone();
+        let found_dom_params_clone = found_dom_params.clone();
+        let overall_pb_clone = overall_pb.clone();
 
-            let handle = tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
+            let _permit = semaphore_clone.acquire().await.unwrap();
+
+            // Sequential testing for this param
+            for reflection_payload in reflection_payloads_clone {
                 // Early stop if global limit reached
                 if let Some(lim) = args_clone.limit {
                     if results_clone.lock().await.len() >= lim {
                         return;
                     }
                 }
-                let _permit = semaphore_clone.acquire().await.unwrap();
                 // Skip reflection if already found for this param
                 let reflection_tuple = {
                     let already_found = found_reflection_params_clone
@@ -337,7 +350,7 @@ pub async fn run_scanning(
                         check_reflection_with_response(
                             &target_clone,
                             &param_clone,
-                            &reflection_payload_clone,
+                            &reflection_payload,
                             &args_clone,
                         )
                         .await
@@ -376,7 +389,7 @@ pub async fn run_scanning(
                                 let mut found = false;
                                 for pair in &mut pairs {
                                     if pair.0 == param_clone.name {
-                                        pair.1 = reflection_payload_clone.to_string();
+                                        pair.1 = reflection_payload.to_string();
                                         found = true;
                                         break;
                                     }
@@ -384,7 +397,7 @@ pub async fn run_scanning(
                                 if !found {
                                     pairs.push((
                                         param_clone.name.clone(),
-                                        reflection_payload_clone.to_string(),
+                                        reflection_payload.to_string(),
                                     ));
                                 }
                                 let query = form_urlencoded::Serializer::new(String::new())
@@ -415,7 +428,7 @@ pub async fn run_scanning(
                                         if idx < segments.len() {
                                             // Selective encoding for path visibility: encode space, '#', '?', '%'
                                             let mut encoded = String::new();
-                                            for ch in reflection_payload_clone.chars() {
+                                            for ch in reflection_payload.chars() {
                                                 match ch {
                                                     ' ' => encoded.push_str("%20"),
                                                     '#' => encoded.push_str("%23"),
@@ -446,184 +459,173 @@ pub async fn run_scanning(
                             target_clone.method.clone(),
                             result_url,
                             param_clone.name.clone(),
-                            reflection_payload_clone.clone(),
+                            reflection_payload.clone(),
                             format!("Reflected XSS detected for param {}", param_clone.name),
                             "CWE-79".to_string(),
                             "High".to_string(),
                             606,
                             format!(
                                 "[R] Triggered XSS Payload (reflected): {}={}",
-                                param_clone.name, reflection_payload_clone
+                                param_clone.name, reflection_payload
                             ),
                         );
                         result.request = Some(build_request_text(
                             &target_clone,
                             &param_clone,
-                            &reflection_payload_clone,
+                            &reflection_payload,
                         ));
                         result.response = reflection_response_text;
 
                         results_clone.lock().await.push(result);
                     }
                 }
-                {
-                    for dom_payload in dom_payloads_clone {
-                        // Early stop if global limit reached
-                        if let Some(lim) = args_clone.limit {
-                            if results_clone.lock().await.len() >= lim {
-                                break;
-                            }
+            }
+
+            // DOM verification
+            for dom_payload in dom_payloads_clone {
+                // Early stop if global limit reached
+                if let Some(lim) = args_clone.limit {
+                    if results_clone.lock().await.len() >= lim {
+                        return;
+                    }
+                }
+                // Skip DOM verification if already found for this param
+                let already_dom_found = found_dom_params_clone
+                    .lock()
+                    .await
+                    .contains(&param_clone.name);
+                if already_dom_found {
+                    if let Some(ref pb) = pb_clone {
+                        pb.inc(1);
+                    }
+                    if let Some(ref opb) = overall_pb_clone {
+                        opb.lock().await.inc(1);
+                    }
+                    continue;
+                }
+                let (dom_verified, response_text) =
+                    check_dom_verification(&target_clone, &param_clone, &dom_payload, &args_clone)
+                        .await;
+                if dom_verified {
+                    let should_add = if args_clone.deep_scan {
+                        true
+                    } else {
+                        let mut found = found_dom_params_clone.lock().await;
+                        if !found.contains(&param_clone.name) {
+                            found.insert(param_clone.name.clone());
+                            true
+                        } else {
+                            false
                         }
-                        // Skip DOM verification if already found for this param
-                        let already_dom_found = found_dom_params_clone
-                            .lock()
-                            .await
-                            .contains(&param_clone.name);
-                        if already_dom_found {
-                            if let Some(ref pb) = pb_clone {
-                                pb.inc(1);
+                    };
+
+                    if should_add {
+                        // Create result
+                        let result_url = match param_clone.location {
+                            crate::parameter_analysis::Location::Query => {
+                                let mut pairs: Vec<(String, String)> = target_clone
+                                    .url
+                                    .query_pairs()
+                                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                                    .collect();
+                                let mut found = false;
+                                for pair in &mut pairs {
+                                    if pair.0 == param_clone.name {
+                                        pair.1 = dom_payload.to_string();
+                                        found = true;
+                                        break;
+                                    }
+                                }
+                                if !found {
+                                    pairs.push((param_clone.name.clone(), dom_payload.to_string()));
+                                }
+                                let query = form_urlencoded::Serializer::new(String::new())
+                                    .extend_pairs(&pairs)
+                                    .finish();
+                                let mut url = target_clone.url.clone();
+                                url.set_query(Some(&query));
+                                url.to_string()
                             }
-                            if let Some(ref opb) = overall_pb_clone {
-                                opb.lock().await.inc(1);
+                            crate::parameter_analysis::Location::Path => {
+                                let mut url = target_clone.url.clone();
+                                if let Some(idx_str) =
+                                    param_clone.name.strip_prefix("path_segment_")
+                                {
+                                    if let Ok(idx) = idx_str.parse::<usize>() {
+                                        let original_path = url.path();
+                                        let mut segments: Vec<String> = if original_path == "/" {
+                                            Vec::new()
+                                        } else {
+                                            original_path
+                                                .trim_matches('/')
+                                                .split('/')
+                                                .filter(|s| !s.is_empty())
+                                                .map(|s| s.to_string())
+                                                .collect()
+                                        };
+                                        if idx < segments.len() {
+                                            // Selective encoding for path visibility: encode space, '#', '?', '%'
+                                            let mut encoded = String::new();
+                                            for ch in dom_payload.chars() {
+                                                match ch {
+                                                    ' ' => encoded.push_str("%20"),
+                                                    '#' => encoded.push_str("%23"),
+                                                    '?' => encoded.push_str("%3F"),
+                                                    '%' => encoded.push_str("%25"),
+                                                    _ => encoded.push(ch),
+                                                }
+                                            }
+                                            segments[idx] = encoded;
+                                            let new_path = if segments.is_empty() {
+                                                "/".to_string()
+                                            } else {
+                                                format!("/{}", segments.join("/"))
+                                            };
+                                            url.set_path(&new_path);
+                                        }
+                                    }
+                                }
+                                url.to_string()
                             }
-                            continue;
-                        }
-                        let (dom_verified, response_text) = check_dom_verification(
+                            _ => target_clone.url.to_string(),
+                        };
+
+                        let mut result = crate::scanning::result::Result::new(
+                            "V".to_string(), // DOM-verified => Vulnerability
+                            "inHTML".to_string(),
+                            target_clone.method.clone(),
+                            result_url,
+                            param_clone.name.clone(),
+                            dom_payload.clone(),
+                            format!("DOM verification successful for param {}", param_clone.name),
+                            "CWE-79".to_string(),
+                            "High".to_string(),
+                            606,
+                            format!(
+                                "Triggered XSS Payload (found DOM Object): {}={}",
+                                param_clone.name, dom_payload
+                            ),
+                        );
+                        result.request = Some(build_request_text(
                             &target_clone,
                             &param_clone,
                             &dom_payload,
-                            &args_clone,
-                        )
-                        .await;
-                        if dom_verified {
-                            let should_add = if args_clone.deep_scan {
-                                true
-                            } else {
-                                let mut found = found_dom_params_clone.lock().await;
-                                if !found.contains(&param_clone.name) {
-                                    found.insert(param_clone.name.clone());
-                                    true
-                                } else {
-                                    false
-                                }
-                            };
+                        ));
+                        result.response = response_text;
 
-                            if should_add {
-                                // Create result
-                                let result_url = match param_clone.location {
-                                    crate::parameter_analysis::Location::Query => {
-                                        let mut pairs: Vec<(String, String)> = target_clone
-                                            .url
-                                            .query_pairs()
-                                            .map(|(k, v)| (k.to_string(), v.to_string()))
-                                            .collect();
-                                        let mut found = false;
-                                        for pair in &mut pairs {
-                                            if pair.0 == param_clone.name {
-                                                pair.1 = dom_payload.to_string();
-                                                found = true;
-                                                break;
-                                            }
-                                        }
-                                        if !found {
-                                            pairs.push((
-                                                param_clone.name.clone(),
-                                                dom_payload.to_string(),
-                                            ));
-                                        }
-                                        let query = form_urlencoded::Serializer::new(String::new())
-                                            .extend_pairs(&pairs)
-                                            .finish();
-                                        let mut url = target_clone.url.clone();
-                                        url.set_query(Some(&query));
-                                        url.to_string()
-                                    }
-                                    crate::parameter_analysis::Location::Path => {
-                                        let mut url = target_clone.url.clone();
-                                        if let Some(idx_str) =
-                                            param_clone.name.strip_prefix("path_segment_")
-                                        {
-                                            if let Ok(idx) = idx_str.parse::<usize>() {
-                                                let original_path = url.path();
-                                                let mut segments: Vec<String> =
-                                                    if original_path == "/" {
-                                                        Vec::new()
-                                                    } else {
-                                                        original_path
-                                                            .trim_matches('/')
-                                                            .split('/')
-                                                            .filter(|s| !s.is_empty())
-                                                            .map(|s| s.to_string())
-                                                            .collect()
-                                                    };
-                                                if idx < segments.len() {
-                                                    // Selective encoding for path visibility: encode space, '#', '?', '%'
-                                                    let mut encoded = String::new();
-                                                    for ch in dom_payload.chars() {
-                                                        match ch {
-                                                            ' ' => encoded.push_str("%20"),
-                                                            '#' => encoded.push_str("%23"),
-                                                            '?' => encoded.push_str("%3F"),
-                                                            '%' => encoded.push_str("%25"),
-                                                            _ => encoded.push(ch),
-                                                        }
-                                                    }
-                                                    segments[idx] = encoded;
-                                                    let new_path = if segments.is_empty() {
-                                                        "/".to_string()
-                                                    } else {
-                                                        format!("/{}", segments.join("/"))
-                                                    };
-                                                    url.set_path(&new_path);
-                                                }
-                                            }
-                                        }
-                                        url.to_string()
-                                    }
-                                    _ => target_clone.url.to_string(),
-                                };
-
-                                let mut result = crate::scanning::result::Result::new(
-                                    "V".to_string(), // DOM-verified => Vulnerability
-                                    "inHTML".to_string(),
-                                    target_clone.method.clone(),
-                                    result_url,
-                                    param_clone.name.clone(),
-                                    dom_payload.clone(),
-                                    format!(
-                                        "DOM verification successful for param {}",
-                                        param_clone.name
-                                    ),
-                                    "CWE-79".to_string(),
-                                    "High".to_string(),
-                                    606,
-                                    format!(
-                                        "Triggered XSS Payload (found DOM Object): {}={}",
-                                        param_clone.name, dom_payload
-                                    ),
-                                );
-                                result.request = Some(build_request_text(
-                                    &target_clone,
-                                    &param_clone,
-                                    &dom_payload,
-                                ));
-                                result.response = response_text;
-
-                                results_clone.lock().await.push(result);
-                                break;
-                            }
-                        }
-                        if let Some(ref pb) = pb_clone {
-                            pb.inc(1);
-                        }
-                        if let Some(ref opb) = overall_pb_clone {
-                            opb.lock().await.inc(1);
-                        }
+                        results_clone.lock().await.push(result);
+                        break;
                     }
                 }
-            });
-            handles.push(handle);
-        }
+                if let Some(ref pb) = pb_clone {
+                    pb.inc(1);
+                }
+                if let Some(ref opb) = overall_pb_clone {
+                    opb.lock().await.inc(1);
+                }
+            }
+        });
+        handles.push(handle);
     }
 
     for handle in handles {
