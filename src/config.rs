@@ -492,7 +492,7 @@ impl Config {
             // XSS SCANNING
             if let Some(v) = &scan.encoders {
                 // Override only if current encoders equal the canonical defaults (user did not supply CLI override).
-                // Canonical defaults are defined in cmd::scan::DEFAULT_ENCODERS (["url","html"]).
+                // Canonical defaults are defined in cmd::scan::DEFAULT_ENCODERS (["none","url","html"]).
                 if args.encoders.iter().map(|s| s.as_str()).collect::<Vec<_>>()
                     == crate::cmd::scan::DEFAULT_ENCODERS
                 {
@@ -754,7 +754,7 @@ mod tests {
         assert_eq!(crate::cmd::scan::DEFAULT_MAX_CONCURRENT_TARGETS, 50);
         assert_eq!(crate::cmd::scan::DEFAULT_MAX_TARGETS_PER_HOST, 100);
         // DEFAULT_ENCODERS canonical defaults
-        assert_eq!(crate::cmd::scan::DEFAULT_ENCODERS, &["url", "html"]);
+        assert_eq!(crate::cmd::scan::DEFAULT_ENCODERS, &["none", "url", "html"]);
     }
 
     #[test]
@@ -772,7 +772,7 @@ mod tests {
             }),
         };
 
-        // Prepare ScanArgs with canonical defaults (["url","html"])
+        // Prepare ScanArgs with canonical defaults (["none","url","html"])
         let mut args = crate::cmd::scan::ScanArgs {
             input_type: "auto".to_string(),
             format: "plain".to_string(),

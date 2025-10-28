@@ -22,7 +22,7 @@ use crate::target_parser::*;
 
 /// Default encoders used when the user does not specify any via CLI or config.
 /// Centralizing this allows config.rs to reference the same canonical defaults.
-pub const DEFAULT_ENCODERS: &[&str] = &["url", "html"];
+pub const DEFAULT_ENCODERS: &[&str] = &["none", "url", "html"];
 // Centralized numeric defaults (used by CLI default_value_t and config precedence logic)
 pub const DEFAULT_TIMEOUT_SECS: u64 = 10;
 pub const DEFAULT_DELAY_MS: u64 = 0;
