@@ -409,6 +409,8 @@ pub async fn run_scanning(
 
         let handle = tokio::spawn(async move {
             let _permit = semaphore_clone.acquire().await.unwrap();
+            // Batch local results to reduce mutex contention
+            let mut local_results: Vec<crate::scanning::result::Result> = Vec::new();
 
             // Sequential testing for this param
             for reflection_payload in reflection_payloads_clone {
@@ -489,7 +491,8 @@ pub async fn run_scanning(
                         ));
                         result.response = reflection_response_text;
 
-                        results_clone.lock().await.push(result);
+                        // Defer pushing to shared results (batched)
+                        local_results.push(result);
                     }
                 }
             }
@@ -560,7 +563,8 @@ pub async fn run_scanning(
                         ));
                         result.response = response_text;
 
-                        results_clone.lock().await.push(result);
+                        // Defer pushing to shared results (batched)
+                        local_results.push(result);
                         break;
                     }
                 }
@@ -570,6 +574,10 @@ pub async fn run_scanning(
                 if let Some(ref opb) = overall_pb_clone {
                     opb.lock().await.inc(1);
                 }
+            }
+            if !local_results.is_empty() {
+                let mut guard = results_clone.lock().await;
+                guard.extend(local_results);
             }
         });
         handles.push(handle);
