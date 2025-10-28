@@ -651,7 +651,7 @@ pub fn default_toml_template() -> String {
 
 [scan]
 # INPUT
-# input_type = "auto"        # auto, url, file, pipe, raw-http
+# input_type = "auto"        # auto, url, file, pipe, raw-http (parses raw HTTP request file or literal)
 
 # OUTPUT
 # format = "plain"           # json, jsonl, plain

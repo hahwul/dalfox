@@ -13,6 +13,7 @@ use std::sync::{
 use std::time::Duration;
 use tokio::sync::{Mutex, oneshot};
 use tokio::task::LocalSet;
+
 use urlencoding;
 
 use crate::encoding::{base64_encode, double_url_encode, html_entity_encode, url_encode};
@@ -677,15 +678,15 @@ pub async fn run_scan(args: &ScanArgs) {
                 return;
             }
         } else {
-            // Check if all targets look like raw HTTP requests
+            // Check if all targets look like raw HTTP requests or files containing them
             let is_raw_http = args.targets.iter().all(|t| {
-                t.starts_with("GET ")
-                    || t.starts_with("POST ")
-                    || t.starts_with("PUT ")
-                    || t.starts_with("DELETE ")
-                    || t.starts_with("HEAD ")
-                    || t.starts_with("OPTIONS ")
-                    || t.starts_with("PATCH ")
+                if crate::target_parser::is_raw_http_request(t) {
+                    true
+                } else if let Ok(content) = fs::read_to_string(t) {
+                    crate::target_parser::is_raw_http_request(&content)
+                } else {
+                    false
+                }
             });
             if is_raw_http {
                 "raw-http".to_string()
@@ -765,11 +766,8 @@ pub async fn run_scan(args: &ScanArgs) {
                 }
             }
             "raw-http" => {
-                // TODO: Implement raw HTTP request handling
-                if !args.silence {
-                    eprintln!("raw-http input-type not implemented yet");
-                }
-                return;
+                // Treat targets as raw HTTP request files or literals; actual parsing happens later
+                args.targets.clone()
             }
 
             _ => {
@@ -793,47 +791,98 @@ pub async fn run_scan(args: &ScanArgs) {
 
     let mut parsed_targets = Vec::new();
     for s in target_strings {
-        match parse_target(&s) {
-            Ok(mut target) => {
-                target.data = args.data.clone();
-                target.headers = args
-                    .headers
-                    .iter()
-                    .filter_map(|h| {
-                        let mut parts = h.splitn(2, ':');
-                        let name = parts.next()?.trim();
-                        let value = parts.next()?.trim();
-                        if name.is_empty() {
-                            return None;
+        if input_type == "raw-http" {
+            // Parse raw HTTP from file or literal via target_parser helper
+            let content = match fs::read_to_string(&s) {
+                Ok(c) => c,
+                Err(_) => s.clone(),
+            };
+            match crate::target_parser::parse_raw_http_request(&content) {
+                Ok(mut target) => {
+                    // Apply CLI overrides cautiously
+                    if args.method != "GET" {
+                        target.method = args.method.clone();
+                    }
+                    if let Some(d) = &args.data {
+                        target.data = Some(d.clone());
+                    }
+                    for h in &args.headers {
+                        if let Some((name, value)) = h.split_once(":") {
+                            target
+                                .headers
+                                .push((name.trim().to_string(), value.trim().to_string()));
                         }
-                        Some((name.to_string(), value.to_string()))
-                    })
-                    .collect();
-                target.method = args.method.clone();
-                if let Some(ua) = &args.user_agent {
-                    target.headers.push(("User-Agent".to_string(), ua.clone()));
-                    target.user_agent = Some(ua.clone());
-                } else {
-                    target.user_agent = Some("".to_string());
+                    }
+                    if let Some(ua) = &args.user_agent {
+                        target.headers.push(("User-Agent".to_string(), ua.clone()));
+                        target.user_agent = Some(ua.clone());
+                    } else if target.user_agent.is_none() {
+                        target.user_agent = Some("".to_string());
+                    }
+                    for c in &args.cookies {
+                        if let Some((k, v)) = c.split_once('=') {
+                            target
+                                .cookies
+                                .push((k.trim().to_string(), v.trim().to_string()));
+                        }
+                    }
+                    target.timeout = args.timeout;
+                    target.delay = args.delay;
+                    target.proxy = args.proxy.clone();
+                    target.follow_redirects = args.follow_redirects;
+                    target.workers = args.workers;
+                    parsed_targets.push(target);
                 }
-                target.cookies = args
-                    .cookies
-                    .iter()
-                    .filter_map(|c| c.split_once("="))
-                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                    .collect();
-                target.timeout = args.timeout;
-                target.delay = args.delay;
-                target.proxy = args.proxy.clone();
-                target.follow_redirects = args.follow_redirects;
-                target.workers = args.workers;
-                parsed_targets.push(target);
+                Err(e) => {
+                    if !args.silence {
+                        eprintln!("Error parsing raw HTTP request '{}': {}", s, e);
+                    }
+                    return;
+                }
             }
-            Err(e) => {
-                if !args.silence {
-                    eprintln!("Error parsing target '{}': {}", s, e);
+        } else {
+            match parse_target(&s) {
+                Ok(mut target) => {
+                    target.data = args.data.clone();
+                    target.headers = args
+                        .headers
+                        .iter()
+                        .filter_map(|h| {
+                            let mut parts = h.splitn(2, ':');
+                            let name = parts.next()?.trim();
+                            let value = parts.next()?.trim();
+                            if name.is_empty() {
+                                return None;
+                            }
+                            Some((name.to_string(), value.to_string()))
+                        })
+                        .collect();
+                    target.method = args.method.clone();
+                    if let Some(ua) = &args.user_agent {
+                        target.headers.push(("User-Agent".to_string(), ua.clone()));
+                        target.user_agent = Some(ua.clone());
+                    } else {
+                        target.user_agent = Some("".to_string());
+                    }
+                    target.cookies = args
+                        .cookies
+                        .iter()
+                        .filter_map(|c| c.split_once("="))
+                        .map(|(k, v)| (k.to_string(), v.to_string()))
+                        .collect();
+                    target.timeout = args.timeout;
+                    target.delay = args.delay;
+                    target.proxy = args.proxy.clone();
+                    target.follow_redirects = args.follow_redirects;
+                    target.workers = args.workers;
+                    parsed_targets.push(target);
                 }
-                return;
+                Err(e) => {
+                    if !args.silence {
+                        eprintln!("Error parsing target '{}': {}", s, e);
+                    }
+                    return;
+                }
             }
         }
     }

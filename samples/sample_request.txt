@@ -1,4 +1,4 @@
 GET /level1/frame HTTP/1.1
 Host: xss-game.appspot.com/
-Cookie: session=abc;
+Cookie: session=abc; user=123
 User-Agent: Mozilla/5.0

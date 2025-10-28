@@ -9,7 +9,7 @@
 # INPUT
 # auto: detect URL or treat target as file path when readable,
 # url|file|pipe: force interpretation,
-# raw-http: stubbed (not implemented yet)
+# raw-http: parse raw HTTP request (file or literal)
 input_type = "auto"
 
 # OUTPUT

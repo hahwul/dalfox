@@ -8,7 +8,7 @@ This document helps GitHub Copilot understand the actual project shape, conventi
 Dalfox is an open-source XSS scanner focused on automation, parameter analysis, and flexible payload generation.
 
 Key capabilities:
-- Multiple scanning inputs: auto, url, file, pipe (raw-http is stubbed)
+- Multiple scanning inputs: auto, url, file, pipe, raw-http
 - Parameter discovery: query, header, cookie, and path-segment reflections
 - Parameter mining: dictionary, body probing, response-id heuristics, remote wordlists
 - XSS scanning: reflection/DOM verification, context-aware payload generation
@@ -112,7 +112,7 @@ When no subcommand is given, the CLI defaults to scan with positional targets.
 
 Scan flags (as of src/cmd/scan.rs):
 - INPUT
-  - -i, --input-type: auto | url | file | pipe | raw-http (raw-http is not implemented yet)
+  - -i, --input-type: auto | url | file | pipe | raw-http
 - OUTPUT
   - -f, --format: plain | json | jsonl (default: plain)
   - -o, --output: file path to write results
@@ -404,7 +404,7 @@ When drafting tests:
 
 ## Known Gaps / TODOs
 
-- raw-http input-type is stubbed (prints not implemented)
+- raw-http input-type is supported; parses raw HTTP request files or literals
 - Blind XSS scanning is fire-and-forget; verification is up to external callback monitoring
 
 Keeping these in mind will help generate consistent and maintainable contributions aligned with the current codebase.
