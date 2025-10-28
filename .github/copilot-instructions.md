@@ -10,25 +10,31 @@ Dalfox is an open-source XSS scanner focused on automation, parameter analysis, 
 Key capabilities:
 - Multiple scanning inputs: auto, url, file, pipe (raw-http is stubbed)
 - Parameter discovery: query, header, cookie, and path-segment reflections
-- Parameter mining: dictionary, body probing, response-id heuristics
+- Parameter mining: dictionary, body probing, response-id heuristics, remote wordlists
 - XSS scanning: reflection/DOM verification, context-aware payload generation
-- Stored XSS support (sxss) and blind XSS callback workflows
+- Blind XSS callback workflows and Stored XSS (sxss)
 - JSON, JSONL, and enhanced plain POC output with optional request/response inclusion
 - Concurrency with host grouping and global concurrency limits
+- Server/API mode for remote orchestration + MCP (Model Context Protocol) stdio server
 
 ## Technology Stack
 
 - Language: Rust (edition 2024)
 - Async runtime: tokio (full features)
 - HTTP client: reqwest 0.11
-- CLI: clap 4 (derive)
+- Web server: axum 0.7
+- CLI: clap 4 (derive, env)
 - HTML parsing: scraper
 - Serialization: serde / serde_json
 - URL handling: url + urlencoding
-- Misc: indicatif, base64, chrono, toml
+- Regex: regex
+- TTY detection: atty
+- MCP: rmcp 0.8
+- JSON schema (server/MCP tooling): schemars
+- Misc: indicatif, base64, chrono, toml, sha2, hex
 
 Crate versions (Cargo.toml):
-- clap = 4.0 (features: derive)
+- clap = 4.0 (features: derive, env)
 - tokio = 1 (features: full)
 - reqwest = 0.11
 - scraper = 0.18
@@ -40,12 +46,24 @@ Crate versions (Cargo.toml):
 - base64 = 0.21
 - chrono = 0.4
 - toml = 0.8
+- axum = 0.7
+- regex = 1
+- atty = 0.2
+- rmcp = 0.8.0 (features: server, macros)
+- schemars = 0.8 (features: derive)
+- sha2 = 0.10
+- hex = 0.4
 
 ## Project Structure (current)
 
 src/
 - main.rs                          Entry point + CLI
 - config.rs                        Config loading, defaults, and apply helpers
+- utils/                           Common helpers (banner, http builders, scan_id, remote init)
+  - mod.rs
+  - banner.rs
+  - http.rs
+  - scan_id.rs
 - encoding/
   - mod.rs                         Encoders: url, 2url, html-entity (hex), base64
 - cmd/
@@ -54,7 +72,7 @@ src/
   - url.rs                         Legacy/specific URL mode (hidden subcommand)
   - file.rs                        Legacy file mode (hidden subcommand)
   - pipe.rs                        Legacy pipe mode (hidden subcommand)
-  - server.rs                      Server/API mode (stub)
+  - server.rs                      Server/API mode (Axum-based JSON/JSONP + CORS, API key)
   - payload.rs                     Payload management (list/generate)
 - parameter_analysis/
   - mod.rs                         Core param types, filtering, active probing, orchestrator
@@ -62,6 +80,7 @@ src/
   - mining.rs                      Mining: dictionary, body, heuristic response-id probing
 - payload/
   - mod.rs
+  - remote.rs                      Remote payload/wordlist registry and fetchers
   - xss_javascript.rs              Canonical JS execution primitives
   - xss_html.rs                    Dynamic HTML payloads derived from JS primitives
   - xss_event.rs                   Dynamic attribute payloads (onerror/onload) from JS primitives
@@ -69,6 +88,7 @@ src/
   - mining.rs                      Payload mining helpers (if any)
 - scanning/
   - mod.rs                         Scanning driver, request builder, payload selection
+  - url_inject.rs                  URL builder helpers for injection
   - xss_common.rs                  Context-aware payload generation + encoder expansion
   - xss_blind.rs                   Blind XSS dispatcher using callback URL
   - check_reflection.rs            Reflection detector with response capture
@@ -76,13 +96,16 @@ src/
   - result.rs                      Result model (JSON-compatible shape)
 - target_parser/
   - mod.rs                         URL parsing, default target settings
+- mcp/
+  - mod.rs                         MCP stdio server exposing scan tools
 
 ## Commands and CLI
 
 Top-level subcommands:
 - scan        Scan targets for XSS
-- server      Run API/server mode (currently a stub)
+- server      Run Axum API/server mode (CORS/JSONP/API key supported)
 - payload     Manage or enumerate payloads
+- mcp         Run MCP stdio server exposing Dalfox tools
 - url,file,pipe are present as hidden subcommands for compatibility
 
 When no subcommand is given, the CLI defaults to scan with positional targets.
@@ -112,6 +135,7 @@ Scan flags (as of src/cmd/scan.rs):
   - --skip-reflection-cookie
 - PARAMETER MINING
   - -W, --mining-dict-word: wordlist file for dictionary probing
+  - --remote-wordlists: comma-separated providers; options: burp, assetnote
   - --skip-mining
   - --skip-mining-dict
   - --skip-mining-dom
@@ -127,6 +151,7 @@ Scan flags (as of src/cmd/scan.rs):
 - XSS SCANNING
   - -e, --encoders: comma-separated; options: none, url, 2url, html, base64
     - Note: if list contains "none", only original payloads are used (no encoder variants).
+  - --remote-payloads: comma-separated providers; options: portswigger, payloadbox
   - --custom-blind-xss-payload: file with blind payload templates
   - -b, --blind: blind XSS callback URL (enables blind scanning pass)
   - --custom-payload: file with additional payloads
@@ -140,17 +165,46 @@ Scan flags (as of src/cmd/scan.rs):
   - URLs or file paths depending on input-type
 
 Behavioral notes:
-- Input auto: each target is interpreted as URL, or file path containing URLs when readable.
-- Preflight: a HEAD-like GET is used to read Content-Type and skip denylisted types (e.g., application/json, text/plain, images) unless --deep-scan is set.
+- Input auto: each target is interpreted as URL, or file path containing URLs when readable. If STDIN is piped and no targets are passed, treat input as lines (pipe mode).
+- Preflight: a fast HEAD request (with Range) reads Content-Type to skip denylisted types (e.g., application/json, text/plain, images) unless --deep-scan is set. Also detects CSP from response headers or <meta http-equiv="Content-Security-Policy">, and surfaces it in plain logs for single-target scans.
 - Grouping: targets grouped by host; capped by --max-targets-per-host; global concurrent scanning gated by --max-concurrent-targets.
+- Remote resources: when --remote-payloads/--remote-wordlists are provided, remote lists are fetched once per run (honoring --timeout and --proxy) and cached in-process.
 - Blind XSS: when --blind is supplied, a blind scanning pass injects a template payload across all param types; responses are not analyzed (out-of-band validation assumed).
 - Stored XSS (sxss): inject on the target, then check sxss-url with sxss-method to detect reflection/DOM markers.
+
+## Server/API Mode (Axum)
+
+- Command: dalfox server
+- Endpoints:
+  - POST /scan: body { url: string, options?: ScanOptions } -> { code, msg: scan_id }
+  - GET  /scan?url=...&... -> same behavior as POST but query-driven (JSONP-friendly)
+  - GET  /result/:id        -> { code, msg, data: { status, results? } }
+  - GET  /scan/:id          -> alias to /result/:id
+  - OPTIONS handlers for CORS preflight
+- Auth: optional API key via X-API-KEY header (or DALFOX_API_KEY env)
+- CORS: configurable allowed origins (exact, wildcard, regex), allow-methods/headers
+- JSONP: optional; wraps JSON as callback(payload)
+- Logging: plain stdout with optional log file (no ANSI)
+- ScanOptions (subset of ScanArgs):
+  - cookie, worker, delay, blind, header[], method, data, user_agent, encoders[],
+    remote_payloads[], remote_wordlists[], include_request, include_response
+
+## MCP Integration (Model Context Protocol)
+
+- Command: dalfox mcp
+- Exposes two tools over stdio via rmcp:
+  - scan_with_dalfox(target, include_request?, include_response?, …args) -> { scan_id, status: queued }
+    - Optional additional args: param[], data, headers[], cookies[], cookie_from_raw, method,
+      user_agent, encoders (string or array), timeout, delay, follow_redirects, proxy
+  - get_results_dalfox(scan_id) -> { scan_id, status: queued|running|done|error, results?: [...] }
+- Jobs are in-memory only; non-blocking (tokio runtime per spawned thread)
 
 ## Configuration
 
 - Command-line flag --config allows explicit config path. If missing, Dalfox searches $XDG_CONFIG_HOME/dalfox/config.* or $HOME/.config/dalfox/config.* and initializes defaults when absent.
 - Supported formats: TOML, JSON (auto-detected). Default templates are generated on first use.
 - Config is applied via apply_to_scan_args_if_default, which only fills defaults when CLI hasn’t provided explicit values. See src/config.rs for all fields mirrored from ScanArgs.
+- Config fields include debug, remote_payloads, remote_wordlists, and all scan flags.
 
 ## Parameter Analysis
 
@@ -164,9 +218,13 @@ Behavioral notes:
   - Body parameter probing
   - Heuristic response-id probing
   - Adaptive collapse via EWMA to stop unproductive probes
+- Active probing (src/parameter_analysis/mod.rs: active_probe_param):
+  - Sends per-character probes around “dalfox{c}dlafox”
+  - Classifies valid_specials/invalid_specials
+  - Falls back to encoded variants using user-selected encoders (url, html, 2url, base64)
 
 Each discovered Param records:
-- location: query, header, cookie (as header), body, path
+- location: query, body, json, header, path
 - injection_context: Html | Javascript | Attribute and optional delimiter hints (single/double quote, comment)
 - valid_specials / invalid_specials: which special characters reflect cleanly
 
@@ -179,12 +237,17 @@ Filtering:
 - Dynamic HTML payloads: xss_html.rs renders templates with JS payloads; includes class/id variants and obfuscated tag variants
 - Dynamic attribute payloads: xss_event.rs renders common event handlers (onerror/onload) with JS payloads
 - Encoders (src/encoding/mod.rs): url, 2url, html-entity (hex), base64
-  - scan.rs uses a global encoder set to influence POC generation for path-segment injections
+  - scan.rs uses a global encoder set (GLOBAL_ENCODERS) to influence PoC generation for path-segment injections
 - Blind payload templates: xss_blind.rs (string templates using "{}" for callback URLs)
+- Remote payloads/wordlists: src/payload/remote.rs
+  - Providers: payloads (payloadbox, portswigger), wordlists (burp, assetnote)
+  - Fetchers: init_remote_payloads_with/init_remote_wordlists_with (honor --timeout/--proxy)
+  - Provider registration: register_payload_provider, register_wordlist_provider
 
-Context-aware payload generation:
+Context-aware payload generation (scanning/xss_common.rs):
 - The scanning engine chooses payloads per InjectionContext with delimiter hints (Attribute, Javascript, Html, with optional SingleQuote, DoubleQuote, Comment).
 - Encoders are applied in scanning/xss_common.rs to produce variants unless encoders include "none".
+- Remote payloads and custom payload files are appended then de-duplicated.
 
 ## Scanning Engine
 
@@ -192,6 +255,7 @@ Context-aware payload generation:
 - DOM verification (scanning/check_dom_verification.rs): inject and parse HTML for presence of .dalfox element(s); supports sxss check URL
 - Orchestrator (scanning/mod.rs): builds request text (for optional inclusion), iterates params and payloads, and pushes results to shared vector
 - Blind scanning (scanning/xss_blind.rs): dispatches callback-based payloads across all known locations
+- POC generation (cmd/scan.rs: generate_poc): supports plain|curl|httpie|http-request; for path injections, applies user-selected path encoders
 
 Result model (scanning/result.rs):
 - Fields: type, inject_type, method, data, param, payload, evidence, cwe, severity, message_id, message_str
@@ -262,6 +326,11 @@ Enhance discovery/mining
 - Wire into analyze_parameters in parameter_analysis/mod.rs
 - Add tests for each new probing routine; mock reqwest as needed
 
+Add or customize remote providers
+- Register new providers via payload::register_payload_provider / register_wordlist_provider
+- Ensure network fetch options (timeout/proxy) are honored
+- Keep outputs sanitized, deduplicated, and sorted
+
 Add a new command
 - Create src/cmd/new_command.rs
 - Define Args struct with clap derives
@@ -280,8 +349,9 @@ Unit tests live alongside modules using #[cfg(test)] with a tests module.
   - encoding (url/html/2url/base64 correctness)
   - parameter discovery/mining behavior
   - xss_common payload generation per injection context
-  - preflight content-type filtering logic
+  - preflight content-type/CSP filtering logic
   - result serialization/deserialization
+  - server API behaviors (CORS/JSONP/auth), MCP flows when practical
 - CI policy: cargo fmt, cargo clippy -- --deny warnings, cargo test pass before merging
 
 ## CLI Examples
@@ -296,19 +366,27 @@ Unit tests live alongside modules using #[cfg(test)] with a tests module.
   - dalfox scan https://example.com -b https://collab.example/x/callback
 - Stored XSS flow
   - dalfox scan https://example.com --sxss --sxss-url https://example.com/profile --sxss-method GET
+- Remote payloads/wordlists
+  - dalfox scan https://example.com --remote-payloads portswigger,payloadbox --remote-wordlists burp,assetnote
 - Custom payloads only (no encoders)
   - dalfox scan https://example.com --custom-payload p.txt --only-custom-payload -e none
 - Skip discovery, deep scan
   - dalfox scan https://example.com --skip-discovery --deep-scan
+- Server mode
+  - dalfox server --host 0.0.0.0 --port 6664 --api-key secret --allowed-origins "regex:^https?://localhost(:\\d+)?$"
+- MCP stdio
+  - dalfox mcp
 
 ## Tooling Notes for Copilot
 
 When generating code:
-- Respect existing module boundaries (encoding, parameter_analysis, payload, scanning, cmd, config)
-- Prefer adding new encoders/payloads in their dedicated modules; avoid duplicating logic in scan.rs
+- Respect existing module boundaries (encoding, parameter_analysis, payload, scanning, cmd, config, utils, mcp)
+- Prefer adding new encoders/payloads/providers in their dedicated modules; avoid duplicating logic in scan.rs
 - For concurrency, use semaphores and spawned tasks; don’t block the runtime
 - Preserve CLI help strings and defaults; align new fields across ScanArgs and ScanConfig
 - Avoid introducing panics in the CLI and scanning paths; propagate errors where reasonable
+- For server: keep handlers slim, return explicit status codes, and honor CORS/JSONP settings
+- For MCP: keep tools minimal in schema and return JSON strings
 
 When drafting tests:
 - Co-locate tests with modules
@@ -327,7 +405,6 @@ When drafting tests:
 ## Known Gaps / TODOs
 
 - raw-http input-type is stubbed (prints not implemented)
-- server subcommand is a placeholder
 - Blind XSS scanning is fire-and-forget; verification is up to external callback monitoring
 
 Keeping these in mind will help generate consistent and maintainable contributions aligned with the current codebase.
