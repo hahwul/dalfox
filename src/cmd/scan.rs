@@ -1328,88 +1328,18 @@ pub async fn run_scan(args: &ScanArgs) {
     let display_results_len = std::cmp::min(final_results.len(), limit);
     let display_results = &final_results[..display_results_len];
     let output_content = if args.format == "json" {
-        {
-            let sanitized: Vec<serde_json::Value> = display_results
-                .iter()
-                .map(|r| {
-                    let mut obj = serde_json::json!({
-                        "type": r.result_type,
-                        "inject_type": r.inject_type,
-                        "method": r.method,
-                        "data": r.data,
-                        "param": r.param,
-                        "payload": r.payload,
-                        "evidence": r.evidence,
-                        "cwe": r.cwe,
-                        "severity": r.severity,
-                        "message_id": r.message_id,
-                        "message_str": r.message_str
-                    });
-                    if args.include_request {
-                        if let Some(req) = &r.request {
-                            if let serde_json::Value::Object(ref mut map) = obj {
-                                map.insert(
-                                    "request".to_string(),
-                                    serde_json::Value::String(req.clone()),
-                                );
-                            }
-                        }
-                    }
-                    if args.include_response {
-                        if let Some(resp) = &r.response {
-                            if let serde_json::Value::Object(ref mut map) = obj {
-                                map.insert(
-                                    "response".to_string(),
-                                    serde_json::Value::String(resp.clone()),
-                                );
-                            }
-                        }
-                    }
-                    obj
-                })
-                .collect();
-            serde_json::to_string_pretty(&sanitized).unwrap()
-        }
+        crate::scanning::result::Result::results_to_json(
+            display_results,
+            args.include_request,
+            args.include_response,
+            true,
+        )
     } else if args.format == "jsonl" {
-        let mut output = String::new();
-        for r in display_results {
-            let mut obj = serde_json::json!({
-                "type": r.result_type,
-                "inject_type": r.inject_type,
-                "method": r.method,
-                "data": r.data,
-                "param": r.param,
-                "payload": r.payload,
-                "evidence": r.evidence,
-                "cwe": r.cwe,
-                "severity": r.severity,
-                "message_id": r.message_id,
-                "message_str": r.message_str
-            });
-            if args.include_request {
-                if let Some(req) = &r.request {
-                    if let serde_json::Value::Object(ref mut map) = obj {
-                        map.insert(
-                            "request".to_string(),
-                            serde_json::Value::String(req.clone()),
-                        );
-                    }
-                }
-            }
-            if args.include_response {
-                if let Some(resp) = &r.response {
-                    if let serde_json::Value::Object(ref mut map) = obj {
-                        map.insert(
-                            "response".to_string(),
-                            serde_json::Value::String(resp.clone()),
-                        );
-                    }
-                }
-            }
-            output.push_str(&serde_json::to_string(&obj).unwrap());
-            output.push('\n');
-        }
-        output
+        crate::scanning::result::Result::results_to_jsonl(
+            display_results,
+            args.include_request,
+            args.include_response,
+        )
     } else if args.format == "plain" {
         let mut output = String::new();
 

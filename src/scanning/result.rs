@@ -98,6 +98,83 @@ impl Result {
             },
         }
     }
+
+    /// Convert this Result into a serde_json::Value honoring include_request/include_response flags.
+    pub fn to_json_value(
+        &self,
+        include_request: bool,
+        include_response: bool,
+    ) -> serde_json::Value {
+        let mut obj = serde_json::json!({
+            "type": self.result_type,
+            "inject_type": self.inject_type,
+            "method": self.method,
+            "data": self.data,
+            "param": self.param,
+            "payload": self.payload,
+            "evidence": self.evidence,
+            "cwe": self.cwe,
+            "severity": self.severity,
+            "message_id": self.message_id,
+            "message_str": self.message_str
+        });
+        if include_request {
+            if let Some(req) = &self.request {
+                if let serde_json::Value::Object(ref mut map) = obj {
+                    map.insert(
+                        "request".to_string(),
+                        serde_json::Value::String(req.clone()),
+                    );
+                }
+            }
+        }
+        if include_response {
+            if let Some(resp) = &self.response {
+                if let serde_json::Value::Object(ref mut map) = obj {
+                    map.insert(
+                        "response".to_string(),
+                        serde_json::Value::String(resp.clone()),
+                    );
+                }
+            }
+        }
+        obj
+    }
+
+    /// Serialize a slice of Result into JSON array string. Set pretty=true for pretty-printed JSON.
+    pub fn results_to_json(
+        results: &[Result],
+        include_request: bool,
+        include_response: bool,
+        pretty: bool,
+    ) -> String {
+        let vals: Vec<serde_json::Value> = results
+            .iter()
+            .map(|r| r.to_json_value(include_request, include_response))
+            .collect();
+        if pretty {
+            serde_json::to_string_pretty(&vals).unwrap_or_else(|_| "[]".to_string())
+        } else {
+            serde_json::to_string(&vals).unwrap_or_else(|_| "[]".to_string())
+        }
+    }
+
+    /// Serialize a slice of Result into JSON Lines (JSONL) string.
+    pub fn results_to_jsonl(
+        results: &[Result],
+        include_request: bool,
+        include_response: bool,
+    ) -> String {
+        let mut out = String::new();
+        for r in results {
+            let v = r.to_json_value(include_request, include_response);
+            if let Ok(s) = serde_json::to_string(&v) {
+                out.push_str(&s);
+                out.push('\n');
+            }
+        }
+        out
+    }
 }
 
 #[cfg(test)]
