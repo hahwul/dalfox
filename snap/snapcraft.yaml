@@ -6,7 +6,7 @@ base: core22
 grade: stable
 confinement: strict
 license: MIT
-version: v2.12.0
+version: v3.0.0
 architectures:
   - build-on: amd64
   - build-on: arm64
