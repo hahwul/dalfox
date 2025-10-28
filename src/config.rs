@@ -742,6 +742,161 @@ mod tests {
     fn test_default_json_parses() {
         let s = default_json_template();
         let cfg: Config = serde_json::from_str(&s).expect("json template must parse");
-        let _ = cfg.scan.as_ref().and_then(|s| s.format.clone());
+        // Touch a field to avoid unused variable warning
+        let _ = cfg.scan.as_ref().and_then(|scan| scan.format.clone());
+    }
+
+    #[test]
+    fn test_default_numeric_constants_alignment() {
+        assert_eq!(crate::cmd::scan::DEFAULT_TIMEOUT_SECS, 10);
+        assert_eq!(crate::cmd::scan::DEFAULT_DELAY_MS, 0);
+        assert_eq!(crate::cmd::scan::DEFAULT_WORKERS, 50);
+        assert_eq!(crate::cmd::scan::DEFAULT_MAX_CONCURRENT_TARGETS, 50);
+        assert_eq!(crate::cmd::scan::DEFAULT_MAX_TARGETS_PER_HOST, 100);
+        // DEFAULT_ENCODERS canonical defaults
+        assert_eq!(crate::cmd::scan::DEFAULT_ENCODERS, &["url", "html"]);
+    }
+
+    #[test]
+    fn test_encoders_override_when_default() {
+        // Prepare config with custom encoders
+        let cfg = Config {
+            scan: Some(ScanConfig {
+                encoders: Some(vec![
+                    "url".to_string(),
+                    "2url".to_string(),
+                    "html".to_string(),
+                    "base64".to_string(),
+                ]),
+                ..Default::default()
+            }),
+        };
+
+        // Prepare ScanArgs with canonical defaults (["url","html"])
+        let mut args = crate::cmd::scan::ScanArgs {
+            input_type: "auto".to_string(),
+            format: "plain".to_string(),
+            output: None,
+            include_request: false,
+            include_response: false,
+            silence: false,
+            poc_type: "plain".to_string(),
+            limit: None,
+            param: vec![],
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            method: "GET".to_string(),
+            user_agent: None,
+            cookie_from_raw: None,
+            skip_discovery: false,
+            skip_reflection_header: false,
+            skip_reflection_cookie: false,
+            mining_dict_word: None,
+            remote_wordlists: vec![],
+            skip_mining: false,
+            skip_mining_dict: false,
+            skip_mining_dom: false,
+            timeout: crate::cmd::scan::DEFAULT_TIMEOUT_SECS,
+            delay: crate::cmd::scan::DEFAULT_DELAY_MS,
+            proxy: None,
+            follow_redirects: false,
+            workers: crate::cmd::scan::DEFAULT_WORKERS,
+            max_concurrent_targets: crate::cmd::scan::DEFAULT_MAX_CONCURRENT_TARGETS,
+            max_targets_per_host: crate::cmd::scan::DEFAULT_MAX_TARGETS_PER_HOST,
+            encoders: crate::cmd::scan::DEFAULT_ENCODERS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            remote_payloads: vec![],
+            custom_blind_xss_payload: None,
+            blind_callback_url: None,
+            custom_payload: None,
+            only_custom_payload: false,
+            skip_xss_scanning: false,
+            deep_scan: false,
+            sxss: false,
+            sxss_url: None,
+            sxss_method: "GET".to_string(),
+            targets: vec![],
+        };
+
+        // Apply config only-if-default logic
+        cfg.apply_to_scan_args_if_default(&mut args);
+        // Expect override to occur
+        assert_eq!(
+            args.encoders,
+            vec!["url", "2url", "html", "base64"],
+            "Encoders should be overridden when starting from canonical defaults"
+        );
+    }
+
+    #[test]
+    fn test_encoders_not_override_when_custom_cli() {
+        // Config wants to set encoders, but CLI already customized
+        let cfg = Config {
+            scan: Some(ScanConfig {
+                encoders: Some(vec![
+                    "url".to_string(),
+                    "html".to_string(),
+                    "base64".to_string(),
+                ]),
+                ..Default::default()
+            }),
+        };
+
+        // CLI provided non-default encoders (e.g., includes 'none')
+        let mut args = crate::cmd::scan::ScanArgs {
+            input_type: "auto".to_string(),
+            format: "plain".to_string(),
+            output: None,
+            include_request: false,
+            include_response: false,
+            silence: false,
+            poc_type: "plain".to_string(),
+            limit: None,
+            param: vec![],
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            method: "GET".to_string(),
+            user_agent: None,
+            cookie_from_raw: None,
+            skip_discovery: false,
+            skip_reflection_header: false,
+            skip_reflection_cookie: false,
+            mining_dict_word: None,
+            remote_wordlists: vec![],
+            skip_mining: false,
+            skip_mining_dict: false,
+            skip_mining_dom: false,
+            timeout: crate::cmd::scan::DEFAULT_TIMEOUT_SECS,
+            delay: crate::cmd::scan::DEFAULT_DELAY_MS,
+            proxy: None,
+            follow_redirects: false,
+            workers: crate::cmd::scan::DEFAULT_WORKERS,
+            max_concurrent_targets: crate::cmd::scan::DEFAULT_MAX_CONCURRENT_TARGETS,
+            max_targets_per_host: crate::cmd::scan::DEFAULT_MAX_TARGETS_PER_HOST,
+            encoders: vec!["none".to_string(), "url".to_string()], // Custom CLI setting
+            remote_payloads: vec![],
+            custom_blind_xss_payload: None,
+            blind_callback_url: None,
+            custom_payload: None,
+            only_custom_payload: false,
+            skip_xss_scanning: false,
+            deep_scan: false,
+            sxss: false,
+            sxss_url: None,
+            sxss_method: "GET".to_string(),
+            targets: vec![],
+        };
+
+        cfg.apply_to_scan_args_if_default(&mut args);
+        // Should NOT override because starting encoders != canonical defaults
+        assert_eq!(
+            args.encoders,
+            vec!["none", "url"],
+            "Encoders should remain as custom CLI-provided set"
+        );
     }
 }
