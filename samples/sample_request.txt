@@ -1,4 +1,4 @@
-GET / HTTP/1.1
-Host: example.com
-Cookie: session=abc; user=123
+GET /level1/frame HTTP/1.1
+Host: xss-game.appspot.com/
+Cookie: session=abc;
 User-Agent: Mozilla/5.0
