@@ -452,12 +452,12 @@ impl Config {
 
             // NETWORK
             if let Some(v) = scan.timeout {
-                if args.timeout == 10 {
+                if args.timeout == crate::cmd::scan::DEFAULT_TIMEOUT_SECS {
                     args.timeout = v;
                 }
             }
             if let Some(v) = scan.delay {
-                if args.delay == 0 {
+                if args.delay == crate::cmd::scan::DEFAULT_DELAY_MS {
                     args.delay = v;
                 }
             }
@@ -474,25 +474,28 @@ impl Config {
 
             // ENGINE
             if let Some(v) = scan.workers {
-                if args.workers == 50 {
+                if args.workers == crate::cmd::scan::DEFAULT_WORKERS {
                     args.workers = v;
                 }
             }
             if let Some(v) = scan.max_concurrent_targets {
-                if args.max_concurrent_targets == 50 {
+                if args.max_concurrent_targets == crate::cmd::scan::DEFAULT_MAX_CONCURRENT_TARGETS {
                     args.max_concurrent_targets = v;
                 }
             }
             if let Some(v) = scan.max_targets_per_host {
-                if args.max_targets_per_host == 100 {
+                if args.max_targets_per_host == crate::cmd::scan::DEFAULT_MAX_TARGETS_PER_HOST {
                     args.max_targets_per_host = v;
                 }
             }
 
             // XSS SCANNING
             if let Some(v) = &scan.encoders {
-                let default_enc = vec!["none".to_string(), "url".to_string(), "html".to_string()];
-                if args.encoders == default_enc {
+                // Override only if current encoders equal the canonical defaults (user did not supply CLI override).
+                // Canonical defaults are defined in cmd::scan::DEFAULT_ENCODERS (["url","html"]).
+                if args.encoders.iter().map(|s| s.as_str()).collect::<Vec<_>>()
+                    == crate::cmd::scan::DEFAULT_ENCODERS
+                {
                     args.encoders = v.clone();
                 }
             }

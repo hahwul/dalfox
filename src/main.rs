@@ -214,8 +214,8 @@ async fn main() {
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
-            timeout: 10,
-            delay: 0,
+            timeout: crate::cmd::scan::DEFAULT_TIMEOUT_SECS,
+            delay: crate::cmd::scan::DEFAULT_DELAY_MS,
             proxy: None,
             follow_redirects: false,
             output: None,
@@ -224,10 +224,13 @@ async fn main() {
             silence: false,
             poc_type: "plain".to_string(),
             limit: None,
-            workers: 50,
-            max_concurrent_targets: 50,
-            max_targets_per_host: 100,
-            encoders: vec!["url".to_string(), "html".to_string()],
+            workers: crate::cmd::scan::DEFAULT_WORKERS,
+            max_concurrent_targets: crate::cmd::scan::DEFAULT_MAX_CONCURRENT_TARGETS,
+            max_targets_per_host: crate::cmd::scan::DEFAULT_MAX_TARGETS_PER_HOST,
+            encoders: crate::cmd::scan::DEFAULT_ENCODERS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
             custom_blind_xss_payload: None,
             blind_callback_url: None,
             custom_payload: None,

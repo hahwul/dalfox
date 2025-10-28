@@ -20,6 +20,16 @@ use crate::parameter_analysis::analyze_parameters;
 use crate::scanning::result::Result;
 use crate::target_parser::*;
 
+/// Default encoders used when the user does not specify any via CLI or config.
+/// Centralizing this allows config.rs to reference the same canonical defaults.
+pub const DEFAULT_ENCODERS: &[&str] = &["url", "html"];
+// Centralized numeric defaults (used by CLI default_value_t and config precedence logic)
+pub const DEFAULT_TIMEOUT_SECS: u64 = 10;
+pub const DEFAULT_DELAY_MS: u64 = 0;
+pub const DEFAULT_WORKERS: usize = 50;
+pub const DEFAULT_MAX_CONCURRENT_TARGETS: usize = 50;
+pub const DEFAULT_MAX_TARGETS_PER_HOST: usize = 100;
+
 static GLOBAL_ENCODERS: OnceLock<Vec<String>> = OnceLock::new();
 
 fn generate_poc(result: &crate::scanning::result::Result, poc_type: &str) -> String {
@@ -508,12 +518,12 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "NETWORK")]
     /// Timeout in seconds
-    #[arg(long, default_value = "10")]
+    #[arg(long, default_value_t = crate::cmd::scan::DEFAULT_TIMEOUT_SECS)]
     pub timeout: u64,
 
     #[clap(help_heading = "NETWORK")]
     /// Delay in milliseconds
-    #[arg(long, default_value = "0")]
+    #[arg(long, default_value_t = crate::cmd::scan::DEFAULT_DELAY_MS)]
     pub delay: u64,
 
     #[clap(help_heading = "NETWORK")]
@@ -528,17 +538,17 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "ENGINE")]
     /// Number of concurrent workers
-    #[arg(long, default_value = "50")]
+    #[arg(long, default_value_t = crate::cmd::scan::DEFAULT_WORKERS)]
     pub workers: usize,
 
     #[clap(help_heading = "ENGINE")]
     /// Maximum number of concurrent targets to scan
-    #[arg(long, default_value = "50")]
+    #[arg(long, default_value_t = crate::cmd::scan::DEFAULT_MAX_CONCURRENT_TARGETS)]
     pub max_concurrent_targets: usize,
 
     #[clap(help_heading = "ENGINE")]
     /// Maximum number of targets per host
-    #[arg(long, default_value = "100")]
+    #[arg(long, default_value_t = crate::cmd::scan::DEFAULT_MAX_TARGETS_PER_HOST)]
     pub max_targets_per_host: usize,
 
     #[clap(help_heading = "XSS SCANNING")]
