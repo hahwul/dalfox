@@ -165,6 +165,32 @@ fn short_scan_id(id: &str) -> String {
     crate::utils::short_scan_id(id)
 }
 
+// Validate JSONP callback name to prevent XSS via callback parameter.
+// Rules:
+// - 1..=64 length
+// - First char: [A-Za-z_$]
+// - Subsequent chars: [A-Za-z0-9_$\.]
+fn validate_jsonp_callback(cb: &str) -> Option<String> {
+    let cb = cb.trim();
+    if cb.is_empty() || cb.len() > 64 {
+        return None;
+    }
+    let mut chars = cb.chars();
+    let first = match chars.next() {
+        Some(c) => c,
+        None => return None,
+    };
+    if !(first.is_ascii_alphabetic() || first == '_' || first == '$') {
+        return None;
+    }
+    for c in chars {
+        if !(c.is_ascii_alphanumeric() || c == '_' || c == '$' || c == '.') {
+            return None;
+        }
+    }
+    Some(cb.to_string())
+}
+
 fn build_cors_headers(state: &AppState, req_headers: &HeaderMap) -> HeaderMap {
     let mut headers = HeaderMap::new();
     if state.allowed_origins.is_none() {
@@ -426,7 +452,30 @@ async fn start_scan_handler(
         if state.jsonp_enabled {
             if let Some(cb) = params
                 .get(&state.callback_param_name)
-                .filter(|s| !s.is_empty())
+                .and_then(|s| validate_jsonp_callback(s))
+                .and_then(|raw_cb| {
+                    let cb = raw_cb.trim();
+                    if cb.is_empty() || cb.len() > 64 {
+                        None
+                    } else {
+                        let mut it = cb.chars();
+                        match it.next() {
+                            Some(c) if c.is_ascii_alphabetic() || c == '_' || c == '$' => {
+                                if it.all(|ch| {
+                                    ch.is_ascii_alphanumeric()
+                                        || ch == '_'
+                                        || ch == '$'
+                                        || ch == '.'
+                                }) {
+                                    Some(cb.to_string())
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        }
+                    }
+                })
             {
                 cors.insert(
                     "Content-Type",
@@ -450,7 +499,30 @@ async fn start_scan_handler(
         if state.jsonp_enabled {
             if let Some(cb) = params
                 .get(&state.callback_param_name)
-                .filter(|s| !s.is_empty())
+                .and_then(|s| validate_jsonp_callback(s))
+                .and_then(|raw_cb| {
+                    let cb = raw_cb.trim();
+                    if cb.is_empty() || cb.len() > 64 {
+                        None
+                    } else {
+                        let mut it = cb.chars();
+                        match it.next() {
+                            Some(c) if c.is_ascii_alphabetic() || c == '_' || c == '$' => {
+                                if it.all(|ch| {
+                                    ch.is_ascii_alphanumeric()
+                                        || ch == '_'
+                                        || ch == '$'
+                                        || ch == '.'
+                                }) {
+                                    Some(cb.to_string())
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        }
+                    }
+                })
             {
                 cors.insert(
                     "Content-Type",
@@ -483,11 +555,11 @@ async fn start_scan_handler(
     }
     log(&state, "JOB", &format!("queued id={} url={}", id, req.url));
 
-    // Spawn the scanning task
+    // Spawn the scanning task (run !Send future inside blocking thread with local runtime)
     let state_clone = state.clone();
     let url = req.url.clone();
     let job_id = id.clone();
-    std::thread::spawn(move || {
+    tokio::task::spawn_blocking(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -511,7 +583,27 @@ async fn start_scan_handler(
     if state.jsonp_enabled {
         if let Some(cb) = params
             .get(&state.callback_param_name)
-            .filter(|s| !s.is_empty())
+            .and_then(|s| validate_jsonp_callback(s))
+            .and_then(|raw_cb| {
+                let cb = raw_cb.trim();
+                if cb.is_empty() || cb.len() > 64 {
+                    None
+                } else {
+                    let mut it = cb.chars();
+                    match it.next() {
+                        Some(c) if c.is_ascii_alphabetic() || c == '_' || c == '$' => {
+                            if it.all(|ch| {
+                                ch.is_ascii_alphanumeric() || ch == '_' || ch == '$' || ch == '.'
+                            }) {
+                                Some(cb.to_string())
+                            } else {
+                                None
+                            }
+                        }
+                        _ => None,
+                    }
+                }
+            })
         {
             cors.insert(
                 "Content-Type",
@@ -542,7 +634,30 @@ async fn get_result_handler(
         if state.jsonp_enabled {
             if let Some(cb) = params
                 .get(&state.callback_param_name)
-                .filter(|s| !s.is_empty())
+                .and_then(|s| validate_jsonp_callback(s))
+                .and_then(|raw_cb| {
+                    let cb = raw_cb.trim();
+                    if cb.is_empty() || cb.len() > 64 {
+                        None
+                    } else {
+                        let mut it = cb.chars();
+                        match it.next() {
+                            Some(c) if c.is_ascii_alphabetic() || c == '_' || c == '$' => {
+                                if it.all(|ch| {
+                                    ch.is_ascii_alphanumeric()
+                                        || ch == '_'
+                                        || ch == '$'
+                                        || ch == '.'
+                                }) {
+                                    Some(cb.to_string())
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        }
+                    }
+                })
             {
                 cors.insert(
                     "Content-Type",
@@ -582,7 +697,30 @@ async fn get_result_handler(
             if state.jsonp_enabled {
                 if let Some(cb) = params
                     .get(&state.callback_param_name)
-                    .filter(|s| !s.is_empty())
+                    .and_then(|s| validate_jsonp_callback(s))
+                    .and_then(|raw_cb| {
+                        let cb = raw_cb.trim();
+                        if cb.is_empty() || cb.len() > 64 {
+                            None
+                        } else {
+                            let mut it = cb.chars();
+                            match it.next() {
+                                Some(c) if c.is_ascii_alphabetic() || c == '_' || c == '$' => {
+                                    if it.all(|ch| {
+                                        ch.is_ascii_alphanumeric()
+                                            || ch == '_'
+                                            || ch == '$'
+                                            || ch == '.'
+                                    }) {
+                                        Some(cb.to_string())
+                                    } else {
+                                        None
+                                    }
+                                }
+                                _ => None,
+                            }
+                        }
+                    })
                 {
                     cors.insert(
                         "Content-Type",
@@ -604,7 +742,30 @@ async fn get_result_handler(
             if state.jsonp_enabled {
                 if let Some(cb) = params
                     .get(&state.callback_param_name)
-                    .filter(|s| !s.is_empty())
+                    .and_then(|s| validate_jsonp_callback(s))
+                    .and_then(|raw_cb| {
+                        let cb = raw_cb.trim();
+                        if cb.is_empty() || cb.len() > 64 {
+                            None
+                        } else {
+                            let mut it = cb.chars();
+                            match it.next() {
+                                Some(c) if c.is_ascii_alphabetic() || c == '_' || c == '$' => {
+                                    if it.all(|ch| {
+                                        ch.is_ascii_alphanumeric()
+                                            || ch == '_'
+                                            || ch == '$'
+                                            || ch == '.'
+                                    }) {
+                                        Some(cb.to_string())
+                                    } else {
+                                        None
+                                    }
+                                }
+                                _ => None,
+                            }
+                        }
+                    })
                 {
                     cors.insert(
                         "Content-Type",
@@ -645,7 +806,30 @@ async fn get_scan_handler(
         if state.jsonp_enabled {
             if let Some(cb) = params
                 .get(&state.callback_param_name)
-                .filter(|s| !s.is_empty())
+                .and_then(|s| validate_jsonp_callback(s))
+                .and_then(|raw_cb| {
+                    let cb = raw_cb.trim();
+                    if cb.is_empty() || cb.len() > 64 {
+                        None
+                    } else {
+                        let mut it = cb.chars();
+                        match it.next() {
+                            Some(c) if c.is_ascii_alphabetic() || c == '_' || c == '$' => {
+                                if it.all(|ch| {
+                                    ch.is_ascii_alphanumeric()
+                                        || ch == '_'
+                                        || ch == '$'
+                                        || ch == '.'
+                                }) {
+                                    Some(cb.to_string())
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        }
+                    }
+                })
             {
                 cors.insert(
                     "Content-Type",
@@ -670,7 +854,30 @@ async fn get_scan_handler(
         if state.jsonp_enabled {
             if let Some(cb) = params
                 .get(&state.callback_param_name)
-                .filter(|s| !s.is_empty())
+                .and_then(|s| validate_jsonp_callback(s))
+                .and_then(|raw_cb| {
+                    let cb = raw_cb.trim();
+                    if cb.is_empty() || cb.len() > 64 {
+                        None
+                    } else {
+                        let mut it = cb.chars();
+                        match it.next() {
+                            Some(c) if c.is_ascii_alphabetic() || c == '_' || c == '$' => {
+                                if it.all(|ch| {
+                                    ch.is_ascii_alphanumeric()
+                                        || ch == '_'
+                                        || ch == '$'
+                                        || ch == '.'
+                                }) {
+                                    Some(cb.to_string())
+                                } else {
+                                    None
+                                }
+                            }
+                            _ => None,
+                        }
+                    }
+                })
             {
                 cors.insert(
                     "Content-Type",
@@ -777,7 +984,7 @@ async fn get_scan_handler(
 
     let id_for_resp = id.clone();
     let state_clone = state.clone();
-    std::thread::spawn(move || {
+    tokio::task::spawn_blocking(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -801,7 +1008,7 @@ async fn get_scan_handler(
     if state.jsonp_enabled {
         if let Some(cb) = params
             .get(&state.callback_param_name)
-            .filter(|s| !s.is_empty())
+            .and_then(|s| validate_jsonp_callback(s))
         {
             cors.insert(
                 "Content-Type",
