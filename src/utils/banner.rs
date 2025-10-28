@@ -29,6 +29,7 @@ pub mod banner {
         // We keep the ASCII art identical to the CLI help_template, but allow
         // the right-side "Dalfox v{version}" and the tagline to be colorized.
         let mut out = String::new();
+        out.push_str("\n");
         out.push_str("               ░█▒\n");
         out.push_str("             ████     ▓\n");
         out.push_str("           ▓█████  ▓██▓\n");
