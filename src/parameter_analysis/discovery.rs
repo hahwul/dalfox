@@ -54,11 +54,11 @@ pub async fn check_query_discovery(
         let data = target.data.clone();
         let method = target.method.clone();
         let delay = target.delay;
-        let reflection_params_clone = reflection_params.clone();
         let semaphore_clone = semaphore.clone();
         let name = name.to_string();
         let value = value.to_string();
 
+        // Spawn a task that returns Option<Param> instead of locking per discovery.
         let handle = tokio::spawn(async move {
             let permit = semaphore_clone.acquire().await.unwrap();
             let mut request =
@@ -81,19 +81,19 @@ pub async fn check_query_discovery(
                 request = request.body(data.clone());
             }
             crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let mut discovered: Option<Param> = None;
             if let Ok(resp) = request.send().await {
                 if let Ok(text) = resp.text().await {
                     if text.contains(test_value) {
                         let (valid, invalid) = classify_special_chars(&text);
-                        let param = Param {
+                        discovered = Some(Param {
                             name,
                             value,
                             location: crate::parameter_analysis::Location::Query,
                             injection_context: Some(detect_injection_context(&text)),
                             valid_specials: Some(valid),
                             invalid_specials: Some(invalid),
-                        };
-                        reflection_params_clone.lock().await.push(param);
+                        });
                     }
                 }
             }
@@ -101,12 +101,23 @@ pub async fn check_query_discovery(
                 sleep(Duration::from_millis(delay)).await;
             }
             drop(permit);
+            discovered
         });
         handles.push(handle);
     }
 
+    // Batch collect results to reduce mutex contention
+    let mut batch: Vec<Param> = Vec::new();
     for handle in handles {
-        handle.await.unwrap();
+        if let Ok(opt_param) = handle.await {
+            if let Some(p) = opt_param {
+                batch.push(p);
+            }
+        }
+    }
+    if !batch.is_empty() {
+        let mut guard = reflection_params.lock().await;
+        guard.extend(batch);
     }
 }
 
@@ -129,11 +140,11 @@ pub async fn check_header_discovery(
         let data = target.data.clone();
         let method = target.method.clone();
         let delay = target.delay;
-        let reflection_params_clone = reflection_params.clone();
         let semaphore_clone = semaphore.clone();
         let header_name = header_name.clone();
         let header_value = header_value.clone();
 
+        // Spawn task returning Option<Param> to batch reduce mutex contention
         let handle = tokio::spawn(async move {
             let permit = semaphore_clone.acquire().await.unwrap();
             let mut request =
@@ -160,19 +171,19 @@ pub async fn check_header_discovery(
                 request = request.body(data.clone());
             }
             crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let mut discovered: Option<Param> = None;
             if let Ok(resp) = request.send().await {
                 if let Ok(text) = resp.text().await {
                     if text.contains(test_value) {
                         let (valid, invalid) = classify_special_chars(&text);
-                        let param = Param {
+                        discovered = Some(Param {
                             name: header_name,
                             value: header_value,
                             location: crate::parameter_analysis::Location::Header,
                             injection_context: Some(detect_injection_context(&text)),
                             valid_specials: Some(valid),
                             invalid_specials: Some(invalid),
-                        };
-                        reflection_params_clone.lock().await.push(param);
+                        });
                     }
                 }
             }
@@ -180,12 +191,23 @@ pub async fn check_header_discovery(
                 sleep(Duration::from_millis(delay)).await;
             }
             drop(permit);
+            discovered
         });
         handles.push(handle);
     }
 
+    // Batch collect
+    let mut batch: Vec<Param> = Vec::new();
     for handle in handles {
-        handle.await.unwrap();
+        if let Ok(opt) = handle.await {
+            if let Some(p) = opt {
+                batch.push(p);
+            }
+        }
+    }
+    if !batch.is_empty() {
+        let mut guard = reflection_params.lock().await;
+        guard.extend(batch);
     }
 }
 
@@ -283,14 +305,13 @@ pub async fn check_path_discovery(
         let data = target.data.clone();
         let method = target.method.clone();
         let delay = target.delay;
-        let reflection_params_clone = reflection_params.clone();
         let semaphore_clone = semaphore.clone();
         let param_name = format!("path_segment_{}", idx);
         let original_value = original.to_string();
 
         // Skip if already discovered (e.g., duplicate path pattern)
         {
-            let guard = reflection_params_clone.lock().await;
+            let guard = reflection_params.lock().await;
             if guard.iter().any(|p| {
                 p.name == param_name && p.location == crate::parameter_analysis::Location::Path
             }) {
@@ -298,6 +319,7 @@ pub async fn check_path_discovery(
             }
         }
 
+        // Spawn task returning Option<Param> for batched collection
         let handle = tokio::spawn(async move {
             let permit = semaphore_clone.acquire().await.unwrap();
             let mut request =
@@ -324,19 +346,19 @@ pub async fn check_path_discovery(
             }
 
             crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let mut discovered: Option<Param> = None;
             if let Ok(resp) = request.send().await {
                 if let Ok(text) = resp.text().await {
                     if text.contains(test_value) {
                         let (valid, invalid) = classify_special_chars(&text);
-                        let param = Param {
+                        discovered = Some(Param {
                             name: param_name,
                             value: original_value,
                             location: crate::parameter_analysis::Location::Path,
                             injection_context: Some(detect_injection_context(&text)),
                             valid_specials: Some(valid),
                             invalid_specials: Some(invalid),
-                        };
-                        reflection_params_clone.lock().await.push(param);
+                        });
                     }
                 }
             }
@@ -344,12 +366,23 @@ pub async fn check_path_discovery(
                 sleep(Duration::from_millis(delay)).await;
             }
             drop(permit);
+            discovered
         });
         handles.push(handle);
     }
 
+    // Batch collect discovered path params
+    let mut batch: Vec<Param> = Vec::new();
     for h in handles {
-        let _ = h.await;
+        if let Ok(opt) = h.await {
+            if let Some(p) = opt {
+                batch.push(p);
+            }
+        }
+    }
+    if !batch.is_empty() {
+        let mut guard = reflection_params.lock().await;
+        guard.extend(batch);
     }
 }
 
@@ -372,11 +405,11 @@ pub async fn check_cookie_discovery(
         let data = target.data.clone();
         let method = target.method.clone();
         let delay = target.delay;
-        let reflection_params_clone = reflection_params.clone();
         let semaphore_clone = semaphore.clone();
         let cookie_name = cookie_name.clone();
         let cookie_value = cookie_value.clone();
 
+        // Spawn task returning Option<Param> for batched collection
         let handle = tokio::spawn(async move {
             let permit = semaphore_clone.acquire().await.unwrap();
             let mut request =
@@ -396,27 +429,27 @@ pub async fn check_cookie_discovery(
                 }
             }
             if !cookie_header.is_empty() {
-                cookie_header.pop(); // Remove trailing space
-                cookie_header.pop(); // Remove trailing semicolon
+                cookie_header.pop();
+                cookie_header.pop();
                 request = request.header("Cookie", cookie_header);
             }
             if let Some(data) = &data {
                 request = request.body(data.clone());
             }
             crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let mut discovered: Option<Param> = None;
             if let Ok(resp) = request.send().await {
                 if let Ok(text) = resp.text().await {
                     if text.contains(test_value) {
                         let (valid, invalid) = classify_special_chars(&text);
-                        let param = Param {
+                        discovered = Some(Param {
                             name: cookie_name,
                             value: cookie_value,
-                            location: crate::parameter_analysis::Location::Header, // Cookies are sent in Header
+                            location: crate::parameter_analysis::Location::Header,
                             injection_context: Some(detect_injection_context(&text)),
                             valid_specials: Some(valid),
                             invalid_specials: Some(invalid),
-                        };
-                        reflection_params_clone.lock().await.push(param);
+                        });
                     }
                 }
             }
@@ -424,11 +457,22 @@ pub async fn check_cookie_discovery(
                 sleep(Duration::from_millis(delay)).await;
             }
             drop(permit);
+            discovered
         });
         handles.push(handle);
     }
 
+    // Batch collect cookie params
+    let mut batch: Vec<Param> = Vec::new();
     for handle in handles {
-        handle.await.unwrap();
+        if let Ok(opt) = handle.await {
+            if let Some(p) = opt {
+                batch.push(p);
+            }
+        }
+    }
+    if !batch.is_empty() {
+        let mut guard = reflection_params.lock().await;
+        guard.extend(batch);
     }
 }
