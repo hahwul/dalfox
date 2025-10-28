@@ -150,38 +150,7 @@ fn extract_context(response: &str, payload: &str) -> Option<(usize, String)> {
 }
 
 fn is_allowed_content_type(ct: &str) -> bool {
-    if ct.trim().is_empty() {
-        return false;
-    }
-    static DENY_SET: OnceLock<std::collections::HashSet<&'static str>> = OnceLock::new();
-    let deny_set = DENY_SET.get_or_init(|| {
-        std::collections::HashSet::from([
-            "application/json",
-            "application/javascript",
-            "text/javascript",
-            "text/plain",
-            "text/css",
-            "image/jpeg",
-            "image/png",
-            "image/bmp",
-            "image/gif",
-            "application/rss+xml",
-        ])
-    });
-    let primary = ct
-        .split(';')
-        .next()
-        .unwrap_or(ct)
-        .trim()
-        .to_ascii_lowercase();
-    // Validate MIME type format: must be type/subtype with both non-empty
-    let mut parts = primary.splitn(2, '/');
-    let typ = parts.next().unwrap_or("");
-    let sub = parts.next().unwrap_or("");
-    if typ.is_empty() || sub.is_empty() {
-        return false;
-    }
-    !deny_set.contains(primary.as_str())
+    crate::utils::is_htmlish_content_type(ct)
 }
 
 #[cfg(test)]
@@ -321,7 +290,9 @@ async fn preflight_content_type(
 ) -> Option<(String, Option<(String, String)>)> {
     let client = target.build_client().ok()?;
 
-    let mut request_builder = client.get(target.url.clone());
+    // Prefer HEAD for fast Content-Type detection; fallback GET with Range elsewhere if needed
+    let mut request_builder =
+        crate::utils::build_preflight_request(&client, target, true, Some(8192));
     for (k, v) in &target.headers {
         request_builder = request_builder.header(k, v);
     }
@@ -341,6 +312,8 @@ async fn preflight_content_type(
             request_builder = request_builder.header("Cookie", cookie_header);
         }
     }
+    // Request only the first 8KB to reduce transfer while still allowing meta-tag parsing
+    request_builder = request_builder.header("Range", "bytes=0-8191");
     if target.delay > 0 {
         tokio::time::sleep(Duration::from_millis(target.delay)).await;
     }
@@ -367,29 +340,33 @@ async fn preflight_content_type(
     } else {
         None
     };
-    // If no CSP header present, attempt to detect via <meta http-equiv="Content-Security-Policy">
+    // If no CSP header present, try fetching a small body to parse <meta http-equiv="Content-Security-Policy">
     if csp_header.is_none() {
-        if let Ok(body) = resp.text().await {
-            let doc = Html::parse_document(&body);
-            if let Ok(sel) = Selector::parse("meta[http-equiv][content]") {
-                for el in doc.select(&sel) {
-                    let http_equiv = el
-                        .value()
-                        .attr("http-equiv")
-                        .unwrap_or("")
-                        .to_ascii_lowercase();
-                    if http_equiv == "content-security-policy"
-                        || http_equiv == "content-security-policy-report-only"
-                    {
-                        let content = el.value().attr("content").unwrap_or("").to_string();
-                        if !content.is_empty() {
-                            let name = if http_equiv == "content-security-policy" {
-                                "Content-Security-Policy".to_string()
-                            } else {
-                                "Content-Security-Policy-Report-Only".to_string()
-                            };
-                            csp_header = Some((name, content));
-                            break;
+        let get_req = crate::utils::build_preflight_request(&client, target, false, Some(8192));
+        crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if let Ok(get_resp) = get_req.send().await {
+            if let Ok(body) = get_resp.text().await {
+                let doc = Html::parse_document(&body);
+                if let Ok(sel) = Selector::parse("meta[http-equiv][content]") {
+                    for el in doc.select(&sel) {
+                        let http_equiv = el
+                            .value()
+                            .attr("http-equiv")
+                            .unwrap_or("")
+                            .to_ascii_lowercase();
+                        if http_equiv == "content-security-policy"
+                            || http_equiv == "content-security-policy-report-only"
+                        {
+                            let content = el.value().attr("content").unwrap_or("").to_string();
+                            if !content.is_empty() {
+                                let name = if http_equiv == "content-security-policy" {
+                                    "Content-Security-Policy".to_string()
+                                } else {
+                                    "Content-Security-Policy-Report-Only".to_string()
+                                };
+                                csp_header = Some((name, content));
+                                break;
+                            }
                         }
                     }
                 }
@@ -822,8 +799,15 @@ pub async fn run_scan(args: &ScanArgs) {
                 target.headers = args
                     .headers
                     .iter()
-                    .filter_map(|h| h.split_once(": "))
-                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .filter_map(|h| {
+                        let mut parts = h.splitn(2, ':');
+                        let name = parts.next()?.trim();
+                        let value = parts.next()?.trim();
+                        if name.is_empty() {
+                            return None;
+                        }
+                        Some((name.to_string(), value.to_string()))
+                    })
                     .collect();
                 target.method = args.method.clone();
                 if let Some(ua) = &args.user_agent {

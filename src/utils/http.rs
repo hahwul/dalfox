@@ -151,6 +151,100 @@ pub fn apply_header_overrides(
     rb
 }
 
+// Header parsing: splitn(2, ':') with both sides trim
+pub fn parse_header_line(line: &str) -> Option<(String, String)> {
+    let mut parts = line.splitn(2, ':');
+    let name = parts.next()?.trim();
+    let value = parts.next()?.trim();
+    if name.is_empty() {
+        return None;
+    }
+    Some((name.to_string(), value.to_string()))
+}
+
+/// Parse a list of raw header lines into (name, value) pairs.
+/// Ignores lines without ":" or with empty header names.
+pub fn parse_headers(lines: &[String]) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for l in lines {
+        if let Some((k, v)) = parse_header_line(l) {
+            out.push((k, v));
+        }
+    }
+    out
+}
+
+/// Extract primary type/subtype (lowercased) from a Content-Type header.
+/// Returns None for invalid formats.
+pub fn content_type_primary(ct: &str) -> Option<String> {
+    if ct.trim().is_empty() {
+        return None;
+    }
+    let primary = ct.split(';').next()?.trim().to_ascii_lowercase();
+    let mut parts = primary.splitn(2, '/');
+    let typ = parts.next().unwrap_or("");
+    let sub = parts.next().unwrap_or("");
+    if typ.is_empty() || sub.is_empty() {
+        return None;
+    }
+    Some(primary)
+}
+
+/// Allow-list check for HTML-ish content types.
+/// Accepts:
+/// - text/html
+/// - application/xhtml+xml
+/// - text/xml, application/xml
+/// - application/rss+xml, application/atom+xml
+pub fn is_htmlish_content_type(ct: &str) -> bool {
+    let Some(primary) = content_type_primary(ct) else {
+        return false;
+    };
+    if primary == "text/html" {
+        return true;
+    }
+    matches!(
+        primary.as_str(),
+        "application/xhtml+xml"
+            | "text/xml"
+            | "application/xml"
+            | "application/rss+xml"
+            | "application/atom+xml"
+    )
+}
+
+/// Build a preflight request for content-type detection.
+/// - If `prefer_head` is true, uses HEAD; otherwise GET.
+/// - When using GET and `range_bytes` is Some(n), adds `Range: bytes=0-(n-1)`
+///   to minimize transfer size while still allowing meta tag parsing if needed.
+pub fn build_preflight_request(
+    client: &Client,
+    target: &Target,
+    prefer_head: bool,
+    range_bytes: Option<usize>,
+) -> RequestBuilder {
+    let method = if prefer_head {
+        Method::HEAD
+    } else {
+        Method::GET
+    };
+    let mut rb = client.request(method.clone(), target.url.clone());
+    // Reuse the same consistent header/UA/Cookie application
+    rb = apply_headers_ua_cookies(rb, target, None);
+
+    if method == Method::GET {
+        if let Some(n) = range_bytes {
+            if n > 0 {
+                // bytes are inclusive
+                let end = n.saturating_sub(1);
+                rb = rb.header("Range", format!("bytes=0-{}", end));
+            }
+        }
+    }
+
+    rb
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

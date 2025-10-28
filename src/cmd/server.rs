@@ -342,8 +342,15 @@ async fn run_scan_job(
             t.headers = args
                 .headers
                 .iter()
-                .filter_map(|h| h.split_once(": "))
-                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .filter_map(|h| {
+                    let mut parts = h.splitn(2, ':');
+                    let name = parts.next()?.trim();
+                    let value = parts.next()?.trim();
+                    if name.is_empty() {
+                        return None;
+                    }
+                    Some((name.to_string(), value.to_string()))
+                })
                 .collect();
             t.method = args.method.clone();
             if let Some(ua) = &args.user_agent {
