@@ -1,9 +1,78 @@
 use crate::parameter_analysis::Param;
 use crate::target_parser::Target;
-use reqwest::{Client, redirect};
+use regex::Regex;
+use reqwest::Client;
 use std::sync::atomic::Ordering;
 use tokio::time::{Duration, sleep};
 use url::form_urlencoded;
+
+/// Decode a subset of HTML entities (numeric dec & hex) for reflection normalization.
+/// Examples:
+///   "&#x3c;script&#x3e;" -> "<script>"
+///   "&#60;alert(1)&#62;"  -> "<alert(1)>"
+fn decode_html_entities(input: &str) -> String {
+    // Match patterns like &#xHH; or &#xHHHH; or &#DDDD;
+    // We purposely limit to reasonable length to avoid catastrophic replacements.
+    let re = Regex::new(r"&#(x[0-9a-fA-F]{2,6}|[0-9]{2,6});").unwrap();
+    let mut out = String::with_capacity(input.len());
+    let mut last = 0;
+    for m in re.find_iter(input) {
+        out.push_str(&input[last..m.start()]);
+        let entity = &input[m.start() + 2..m.end() - 1]; // strip &# and ;
+        let decoded = if let Some(hex) = entity.strip_prefix('x') {
+            u32::from_str_radix(hex, 16)
+                .ok()
+                .and_then(std::char::from_u32)
+                .unwrap_or('\u{FFFD}')
+        } else {
+            entity
+                .parse::<u32>()
+                .ok()
+                .and_then(std::char::from_u32)
+                .unwrap_or('\u{FFFD}')
+        };
+        out.push(decoded);
+        last = m.end();
+    }
+    out.push_str(&input[last..]);
+    out
+}
+
+/// Generate normalization variants of a response body to test for reflected payload.
+/// Order: raw, html-decoded, url-decoded(html-decoded(raw)) for broader coverage.
+fn normalization_variants(raw: &str) -> Vec<String> {
+    let html_dec = decode_html_entities(raw);
+    let url_dec_once = urlencoding::decode(raw)
+        .map(|s| s.to_string())
+        .unwrap_or_else(|_| raw.to_string());
+    let url_dec_html_dec = urlencoding::decode(&html_dec)
+        .map(|s| s.to_string())
+        .unwrap_or(html_dec.clone());
+    // Deduplicate while preserving order
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::new();
+    for v in [raw.to_string(), html_dec, url_dec_once, url_dec_html_dec] {
+        if seen.insert(v.clone()) {
+            out.push(v);
+        }
+    }
+    out
+}
+
+/// Determine if payload is reflected in any normalization variant.
+fn is_payload_reflected(resp_text: &str, payload: &str) -> bool {
+    // Direct match first (fast path)
+    if resp_text.contains(payload) {
+        return true;
+    }
+    // Try normalization variants
+    for variant in normalization_variants(resp_text) {
+        if variant.contains(payload) {
+            return true;
+        }
+    }
+    false
+}
 
 pub async fn check_reflection(
     target: &Target,
@@ -136,7 +205,7 @@ pub async fn check_reflection(
                 crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
                 if let Ok(resp) = check_request.send().await {
                     if let Ok(text) = resp.text().await {
-                        if text.contains(payload) {
+                        if is_payload_reflected(&text, payload) {
                             return true;
                         }
                     }
@@ -147,7 +216,7 @@ pub async fn check_reflection(
         // Normal reflection check
         if let Ok(resp) = inject_resp {
             if let Ok(text) = resp.text().await {
-                if text.contains(payload) {
+                if is_payload_reflected(&text, payload) {
                     return true;
                 }
             }
@@ -288,7 +357,7 @@ pub async fn check_reflection_with_response(
                 crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
                 if let Ok(resp) = check_request.send().await {
                     if let Ok(text) = resp.text().await {
-                        if text.contains(payload) {
+                        if is_payload_reflected(&text, payload) {
                             return (true, Some(text));
                         } else {
                             return (false, Some(text));
@@ -301,7 +370,7 @@ pub async fn check_reflection_with_response(
         // Normal reflection check
         if let Ok(resp) = inject_resp {
             if let Ok(text) = resp.text().await {
-                if text.contains(payload) {
+                if is_payload_reflected(&text, payload) {
                     return (true, Some(text));
                 } else {
                     return (false, Some(text));
@@ -442,5 +511,43 @@ mod tests {
             (false, None),
             "should early-return (false, None) when skip_xss_scanning=true"
         );
+    }
+
+    #[test]
+    fn test_decode_html_entities_basic() {
+        let s = "&#x3c;script&#x3e;alert(1)&#x3c;/script&#x3e;";
+        let d = decode_html_entities(s);
+        assert!(d.contains("<script>"));
+        assert!(d.contains("</script>"));
+    }
+
+    #[test]
+    fn test_normalization_variants_dedup() {
+        let raw = "Hello";
+        let vars = normalization_variants(raw);
+        assert!(!vars.is_empty());
+        assert_eq!(vars.iter().filter(|v| *v == "Hello").count(), 1);
+    }
+
+    #[test]
+    fn test_is_payload_reflected_html_encoded() {
+        let payload = "<script>alert(1)</script>";
+        let resp = "prefix &#x3c;script&#x3e;alert(1)&#x3c;/script&#x3e; suffix";
+        assert!(is_payload_reflected(resp, payload));
+    }
+
+    #[test]
+    fn test_is_payload_reflected_url_encoded() {
+        let payload = "<img src=x onerror=alert(1)>";
+        let encoded = urlencoding::encode(payload).to_string();
+        let resp = format!("ok {} end", encoded);
+        assert!(is_payload_reflected(&resp, payload));
+    }
+
+    #[test]
+    fn test_is_payload_reflected_negative() {
+        let payload = "<svg/onload=alert(1)>";
+        let resp = "benign content without the thing";
+        assert!(!is_payload_reflected(resp, payload));
     }
 }
