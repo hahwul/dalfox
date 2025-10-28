@@ -6,12 +6,18 @@ This module re-exports commonly used helpers so other modules can simply
 */
 
 pub mod banner;
+pub mod http;
 pub mod scan_id;
 
 // Re-export banner helpers at `crate::utils::*`
 pub use banner::{print_banner, print_banner_once, render_banner};
 // Re-export scan_id helpers at `crate::utils::*`
 pub use scan_id::{make_scan_id, make_scan_id_with_nonce, short_scan_id};
+// Re-export http helpers at `crate::utils::*`
+pub use http::{
+    apply_header_overrides, build_request, build_request_with_cookie, compose_cookie_header,
+    compose_cookie_header_excluding, has_header,
+};
 
 // Re-export remote payload/wordlist getters at `crate::utils::*`
 pub use crate::payload::{

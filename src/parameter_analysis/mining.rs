@@ -261,6 +261,7 @@ pub async fn probe_dictionary_params(
             let cookies = target.cookies.clone();
             let data = target.data.clone();
             let method = target.method.clone();
+            let target_clone = target.clone();
             let delay = target.delay;
             let semaphore_clone = semaphore.clone();
             let param_name = param.clone();
@@ -269,25 +270,9 @@ pub async fn probe_dictionary_params(
 
             let handle = tokio::spawn(async move {
                 let permit = semaphore_clone.acquire().await.unwrap();
-                let mut request =
-                    client_clone.request(method.parse().unwrap_or(reqwest::Method::GET), url);
-                for (k, v) in &headers {
-                    request = request.header(k, v);
-                }
-                if let Some(ua) = &user_agent {
-                    request = request.header("User-Agent", ua);
-                }
-                if !cookies.is_empty() {
-                    let cookie_header = cookies
-                        .iter()
-                        .map(|(k, v)| format!("{}={}", k, v))
-                        .collect::<Vec<_>>()
-                        .join("; ");
-                    request = request.header("Cookie", cookie_header);
-                }
-                if let Some(data) = &data {
-                    request = request.body(data.clone());
-                }
+                let m = method.parse().unwrap_or(reqwest::Method::GET);
+                let request =
+                    crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
 
                 let resp = request.send().await;
                 crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
@@ -455,6 +440,7 @@ pub async fn probe_body_params(
             let user_agent = target.user_agent.clone();
             let cookies = target.cookies.clone();
             let method = target.method.clone();
+            let target_clone = target.clone();
             let delay = target.delay;
             let semaphore_clone = semaphore.clone();
             let param_name_cloned = param_name.clone();
@@ -463,24 +449,14 @@ pub async fn probe_body_params(
 
             let handle = tokio::spawn(async move {
                 let permit = semaphore_clone.acquire().await.unwrap();
-                let mut request =
-                    client_clone.request(method.parse().unwrap_or(reqwest::Method::POST), url);
-                for (k, v) in &headers {
-                    request = request.header(k, v);
-                }
-                if let Some(ua) = &user_agent {
-                    request = request.header("User-Agent", ua);
-                }
-                if !cookies.is_empty() {
-                    let cookie_header = cookies
-                        .iter()
-                        .map(|(k, v)| format!("{}={}", k, v))
-                        .collect::<Vec<_>>()
-                        .join("; ");
-                    request = request.header("Cookie", cookie_header);
-                }
-                request = request.header("Content-Type", "application/x-www-form-urlencoded");
-                request = request.body(body);
+                let m = method.parse().unwrap_or(reqwest::Method::POST);
+                let base =
+                    crate::utils::build_request(&client_clone, &target_clone, m, url, Some(body));
+                let overrides = vec![(
+                    "Content-Type".to_string(),
+                    "application/x-www-form-urlencoded".to_string(),
+                )];
+                let request = crate::utils::apply_header_overrides(base, &overrides);
 
                 let resp = request.send().await;
                 crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
@@ -598,22 +574,13 @@ pub async fn probe_response_id_params(
     let client = target.build_client().unwrap_or_else(|_| Client::new());
 
     // First, get the HTML to find input ids and names
-    let mut base_request = client.request(
+    let base_request = crate::utils::build_request(
+        &client,
+        target,
         target.method.parse().unwrap_or(reqwest::Method::GET),
         target.url.clone(),
+        target.data.clone(),
     );
-    for (k, v) in &target.headers {
-        base_request = base_request.header(k, v);
-    }
-    if let Some(ua) = &target.user_agent {
-        base_request = base_request.header("User-Agent", ua);
-    }
-    for (k, v) in &target.cookies {
-        base_request = base_request.header("Cookie", format!("{}={}", k, v));
-    }
-    if let Some(data) = &target.data {
-        base_request = base_request.body(data.clone());
-    }
 
     let __resp = base_request.send().await;
     crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
@@ -666,6 +633,7 @@ pub async fn probe_response_id_params(
                 let cookies = target.cookies.clone();
                 let data = target.data.clone();
                 let method = target.method.clone();
+                let target_clone = target.clone();
                 let delay = target.delay;
                 // removed unused variable reflection_params_clone
                 let semaphore_clone = semaphore.clone();
@@ -675,27 +643,16 @@ pub async fn probe_response_id_params(
 
                 let handle = tokio::spawn(async move {
                     let permit = semaphore_clone.acquire().await.unwrap();
-                    let mut request =
-                        client_clone.request(method.parse().unwrap_or(reqwest::Method::GET), url);
+                    let m = method.parse().unwrap_or(reqwest::Method::GET);
+                    let request = crate::utils::build_request(
+                        &client_clone,
+                        &target_clone,
+                        m,
+                        url,
+                        data.clone(),
+                    );
                     // Prepare optional discovered Param container for batched return
                     let mut discovered: Option<Param> = None;
-                    for (k, v) in &headers {
-                        request = request.header(k, v);
-                    }
-                    if let Some(ua) = &user_agent {
-                        request = request.header("User-Agent", ua);
-                    }
-                    if !cookies.is_empty() {
-                        let cookie_header = cookies
-                            .iter()
-                            .map(|(k, v)| format!("{}={}", k, v))
-                            .collect::<Vec<_>>()
-                            .join("; ");
-                        request = request.header("Cookie", cookie_header);
-                    }
-                    if let Some(data) = &data {
-                        request = request.body(data.clone());
-                    }
                     let __resp = request.send().await;
                     crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
                     if let Ok(resp) = __resp {

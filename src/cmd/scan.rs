@@ -1,7 +1,7 @@
 use clap::Args;
 use indicatif::MultiProgress;
 use reqwest::header::CONTENT_TYPE;
-use reqwest::{Client, redirect::Policy};
+
 use scraper::{Html, Selector};
 use std::fs;
 use std::io::{self, Read, Write};

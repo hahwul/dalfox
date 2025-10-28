@@ -57,29 +57,14 @@ pub async fn check_query_discovery(
         let semaphore_clone = semaphore.clone();
         let name = name.to_string();
         let value = value.to_string();
+        let target_clone = target.clone();
 
         // Spawn a task that returns Option<Param> instead of locking per discovery.
         let handle = tokio::spawn(async move {
             let permit = semaphore_clone.acquire().await.unwrap();
-            let mut request =
-                client_clone.request(method.parse().unwrap_or(reqwest::Method::GET), url);
-            for (k, v) in &headers {
-                request = request.header(k, v);
-            }
-            if let Some(ua) = &user_agent {
-                request = request.header("User-Agent", ua);
-            }
-            if !cookies.is_empty() {
-                let cookie_header = cookies
-                    .iter()
-                    .map(|(k, v)| format!("{}={}", k, v))
-                    .collect::<Vec<_>>()
-                    .join("; ");
-                request = request.header("Cookie", cookie_header);
-            }
-            if let Some(data) = &data {
-                request = request.body(data.clone());
-            }
+            let m = method.parse().unwrap_or(reqwest::Method::GET);
+            let request =
+                crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
             crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let mut discovered: Option<Param> = None;
             if let Ok(resp) = request.send().await {
@@ -143,33 +128,16 @@ pub async fn check_header_discovery(
         let semaphore_clone = semaphore.clone();
         let header_name = header_name.clone();
         let header_value = header_value.clone();
+        let target_clone = target.clone();
 
         // Spawn task returning Option<Param> to batch reduce mutex contention
         let handle = tokio::spawn(async move {
             let permit = semaphore_clone.acquire().await.unwrap();
-            let mut request =
-                client_clone.request(method.parse().unwrap_or(reqwest::Method::GET), url);
-            for (k, v) in &headers {
-                if k == &header_name {
-                    request = request.header(k, test_value);
-                } else {
-                    request = request.header(k, v);
-                }
-            }
-            if let Some(ua) = &user_agent {
-                request = request.header("User-Agent", ua);
-            }
-            if !cookies.is_empty() {
-                let cookie_header = cookies
-                    .iter()
-                    .map(|(k, v)| format!("{}={}", k, v))
-                    .collect::<Vec<_>>()
-                    .join("; ");
-                request = request.header("Cookie", cookie_header);
-            }
-            if let Some(data) = &data {
-                request = request.body(data.clone());
-            }
+            let m = method.parse().unwrap_or(reqwest::Method::GET);
+            let base =
+                crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
+            let overrides = vec![(header_name.clone(), test_value.to_string())];
+            let request = crate::utils::apply_header_overrides(base, &overrides);
             crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let mut discovered: Option<Param> = None;
             if let Ok(resp) = request.send().await {
@@ -304,6 +272,7 @@ pub async fn check_path_discovery(
         let cookies = target.cookies.clone();
         let data = target.data.clone();
         let method = target.method.clone();
+        let target_clone = target.clone();
         let delay = target.delay;
         let semaphore_clone = semaphore.clone();
         let param_name = format!("path_segment_{}", idx);
@@ -322,28 +291,9 @@ pub async fn check_path_discovery(
         // Spawn task returning Option<Param> for batched collection
         let handle = tokio::spawn(async move {
             let permit = semaphore_clone.acquire().await.unwrap();
-            let mut request =
-                client_clone.request(method.parse().unwrap_or(reqwest::Method::GET), new_url);
-            for (k, v) in &headers {
-                request = request.header(k, v);
-            }
-            if let Some(ua) = &user_agent {
-                request = request.header("User-Agent", ua);
-            }
-            if !cookies.is_empty() {
-                let mut cookie_header = String::new();
-                for (k, v) in &cookies {
-                    cookie_header.push_str(&format!("{}={}; ", k, v));
-                }
-                if !cookie_header.is_empty() {
-                    cookie_header.pop();
-                    cookie_header.pop();
-                    request = request.header("Cookie", cookie_header);
-                }
-            }
-            if let Some(d) = &data {
-                request = request.body(d.clone());
-            }
+            let m = method.parse().unwrap_or(reqwest::Method::GET);
+            let request =
+                crate::utils::build_request(&client_clone, &target_clone, m, new_url, data.clone());
 
             crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let mut discovered: Option<Param> = None;
@@ -408,34 +358,32 @@ pub async fn check_cookie_discovery(
         let semaphore_clone = semaphore.clone();
         let cookie_name = cookie_name.clone();
         let cookie_value = cookie_value.clone();
+        let target_clone = target.clone();
 
         // Spawn task returning Option<Param> for batched collection
         let handle = tokio::spawn(async move {
             let permit = semaphore_clone.acquire().await.unwrap();
-            let mut request =
-                client_clone.request(method.parse().unwrap_or(reqwest::Method::GET), url);
-            for (k, v) in &headers {
-                request = request.header(k, v);
-            }
-            if let Some(ua) = &user_agent {
-                request = request.header("User-Agent", ua);
-            }
-            let mut cookie_header = String::new();
-            for (k, v) in &cookies {
-                if k == &cookie_name {
-                    cookie_header.push_str(&format!("{}={}; ", k, test_value));
+            let m = method.parse().unwrap_or(reqwest::Method::GET);
+            // Compose cookie header overriding the probed cookie while preserving others
+            let others =
+                crate::utils::compose_cookie_header_excluding(&cookies, Some(&cookie_name));
+            let cookie_header = if let Some(s) = others {
+                if s.is_empty() {
+                    format!("{}={}", cookie_name, test_value)
                 } else {
-                    cookie_header.push_str(&format!("{}={}; ", k, v));
+                    format!("{}; {}={}", s, cookie_name, test_value)
                 }
-            }
-            if !cookie_header.is_empty() {
-                cookie_header.pop();
-                cookie_header.pop();
-                request = request.header("Cookie", cookie_header);
-            }
-            if let Some(data) = &data {
-                request = request.body(data.clone());
-            }
+            } else {
+                format!("{}={}", cookie_name, test_value)
+            };
+            let request = crate::utils::build_request_with_cookie(
+                &client_clone,
+                &target_clone,
+                m,
+                url,
+                data.clone(),
+                Some(cookie_header),
+            );
             crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let mut discovered: Option<Param> = None;
             if let Ok(resp) = request.send().await {

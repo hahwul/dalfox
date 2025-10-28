@@ -87,30 +87,11 @@ pub async fn check_reflection(
     // Build URL or body based on param location for injection (refactored to shared helper)
     let inject_url = crate::scanning::url_inject::build_injected_url(&target.url, param, payload);
 
-    // Send injection request
-    let mut inject_request = client.request(
-        target.method.parse().unwrap_or(reqwest::Method::GET),
-        inject_url.clone(),
-    );
-
-    for (k, v) in &target.headers {
-        inject_request = inject_request.header(k, v);
-    }
-    if let Some(ua) = &target.user_agent {
-        inject_request = inject_request.header("User-Agent", ua);
-    }
-    if !target.cookies.is_empty() {
-        let cookie_header = target
-            .cookies
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect::<Vec<_>>()
-            .join("; ");
-        inject_request = inject_request.header("Cookie", cookie_header);
-    }
-    if let Some(data) = &target.data {
-        inject_request = inject_request.body(data.clone());
-    }
+    // Send injection request (centralized builder)
+    let method = target.method.parse().unwrap_or(reqwest::Method::GET);
+    let parsed_url = url::Url::parse(&inject_url).unwrap_or_else(|_| target.url.clone());
+    let inject_request =
+        crate::utils::build_request(&client, target, method, parsed_url, target.data.clone());
 
     // Send the injection request
     let inject_resp = inject_request.send().await;
@@ -124,27 +105,9 @@ pub async fn check_reflection(
     if args.sxss {
         if let Some(sxss_url_str) = &args.sxss_url {
             if let Ok(sxss_url) = url::Url::parse(sxss_url_str) {
-                let mut check_request = client.request(
-                    args.sxss_method.parse().unwrap_or(reqwest::Method::GET),
-                    sxss_url,
-                );
-
-                // Use target's headers, user_agent, cookies for check request
-                for (k, v) in &target.headers {
-                    check_request = check_request.header(k, v);
-                }
-                if let Some(ua) = &target.user_agent {
-                    check_request = check_request.header("User-Agent", ua);
-                }
-                if !target.cookies.is_empty() {
-                    let cookie_header = target
-                        .cookies
-                        .iter()
-                        .map(|(k, v)| format!("{}={}", k, v))
-                        .collect::<Vec<_>>()
-                        .join("; ");
-                    check_request = check_request.header("Cookie", cookie_header);
-                }
+                let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
+                let check_request =
+                    crate::utils::build_request(&client, target, method, sxss_url, None);
 
                 crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
                 if let Ok(resp) = check_request.send().await {
@@ -184,30 +147,11 @@ pub async fn check_reflection_with_response(
     // Build URL or body based on param location for injection (refactored to shared helper)
     let inject_url = crate::scanning::url_inject::build_injected_url(&target.url, param, payload);
 
-    // Send injection request
-    let mut inject_request = client.request(
-        target.method.parse().unwrap_or(reqwest::Method::GET),
-        inject_url.clone(),
-    );
-
-    for (k, v) in &target.headers {
-        inject_request = inject_request.header(k, v);
-    }
-    if let Some(ua) = &target.user_agent {
-        inject_request = inject_request.header("User-Agent", ua);
-    }
-    if !target.cookies.is_empty() {
-        let cookie_header = target
-            .cookies
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect::<Vec<_>>()
-            .join("; ");
-        inject_request = inject_request.header("Cookie", cookie_header);
-    }
-    if let Some(data) = &target.data {
-        inject_request = inject_request.body(data.clone());
-    }
+    // Send injection request (centralized builder)
+    let method = target.method.parse().unwrap_or(reqwest::Method::GET);
+    let parsed_url = url::Url::parse(&inject_url).unwrap_or_else(|_| target.url.clone());
+    let inject_request =
+        crate::utils::build_request(&client, target, method, parsed_url, target.data.clone());
 
     // Send the injection request
     let inject_resp = inject_request.send().await;
@@ -221,27 +165,9 @@ pub async fn check_reflection_with_response(
     if args.sxss {
         if let Some(sxss_url_str) = &args.sxss_url {
             if let Ok(sxss_url) = url::Url::parse(sxss_url_str) {
-                let mut check_request = client.request(
-                    args.sxss_method.parse().unwrap_or(reqwest::Method::GET),
-                    sxss_url,
-                );
-
-                // Use target's headers, user_agent, cookies for check request
-                for (k, v) in &target.headers {
-                    check_request = check_request.header(k, v);
-                }
-                if let Some(ua) = &target.user_agent {
-                    check_request = check_request.header("User-Agent", ua);
-                }
-                if !target.cookies.is_empty() {
-                    let cookie_header = target
-                        .cookies
-                        .iter()
-                        .map(|(k, v)| format!("{}={}", k, v))
-                        .collect::<Vec<_>>()
-                        .join("; ");
-                    check_request = check_request.header("Cookie", cookie_header);
-                }
+                let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
+                let check_request =
+                    crate::utils::build_request(&client, target, method, sxss_url, None);
 
                 crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
                 if let Ok(resp) = check_request.send().await {
