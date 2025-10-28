@@ -1,8 +1,8 @@
 pub mod check_dom_verification;
 pub mod check_reflection;
-pub mod xss_blind;
-
 pub mod result;
+pub mod url_inject;
+pub mod xss_blind;
 pub mod xss_common;
 
 use crate::cmd::scan::ScanArgs;
@@ -251,6 +251,77 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
     request_lines.join("\r\n")
 }
 
+fn build_injected_url(
+    base: &url::Url,
+    param: &crate::parameter_analysis::Param,
+    injected: &str,
+) -> String {
+    match param.location {
+        crate::parameter_analysis::Location::Query => {
+            let mut pairs: Vec<(String, String)> = base
+                .query_pairs()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
+            let mut found = false;
+            for pair in &mut pairs {
+                if pair.0 == param.name {
+                    pair.1 = injected.to_string();
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                pairs.push((param.name.clone(), injected.to_string()));
+            }
+            let query = form_urlencoded::Serializer::new(String::new())
+                .extend_pairs(&pairs)
+                .finish();
+            let mut url = base.clone();
+            url.set_query(Some(&query));
+            url.to_string()
+        }
+        crate::parameter_analysis::Location::Path => {
+            let mut url = base.clone();
+            if let Some(idx_str) = param.name.strip_prefix("path_segment_") {
+                if let Ok(idx) = idx_str.parse::<usize>() {
+                    let original_path = url.path();
+                    let mut segments: Vec<String> = if original_path == "/" {
+                        Vec::new()
+                    } else {
+                        original_path
+                            .trim_matches('/')
+                            .split('/')
+                            .filter(|s| !s.is_empty())
+                            .map(|s| s.to_string())
+                            .collect()
+                    };
+                    if idx < segments.len() {
+                        let mut encoded = String::new();
+                        for ch in injected.chars() {
+                            match ch {
+                                ' ' => encoded.push_str("%20"),
+                                '#' => encoded.push_str("%23"),
+                                '?' => encoded.push_str("%3F"),
+                                '%' => encoded.push_str("%25"),
+                                _ => encoded.push(ch),
+                            }
+                        }
+                        segments[idx] = encoded;
+                        let new_path = if segments.is_empty() {
+                            "/".to_string()
+                        } else {
+                            format!("/{}", segments.join("/"))
+                        };
+                        url.set_path(&new_path);
+                    }
+                }
+            }
+            url.to_string()
+        }
+        _ => base.to_string(),
+    }
+}
+
 pub async fn run_scanning(
     target: &Target,
     args: Arc<ScanArgs>,
@@ -387,79 +458,12 @@ pub async fn run_scanning(
                     };
 
                     if should_add {
-                        // Build result URL with the reflected payload (no DOM verification available)
-                        let result_url = match param_clone.location {
-                            crate::parameter_analysis::Location::Query => {
-                                let mut pairs: Vec<(String, String)> = target_clone
-                                    .url
-                                    .query_pairs()
-                                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                                    .collect();
-                                let mut found = false;
-                                for pair in &mut pairs {
-                                    if pair.0 == param_clone.name {
-                                        pair.1 = reflection_payload.to_string();
-                                        found = true;
-                                        break;
-                                    }
-                                }
-                                if !found {
-                                    pairs.push((
-                                        param_clone.name.clone(),
-                                        reflection_payload.to_string(),
-                                    ));
-                                }
-                                let query = form_urlencoded::Serializer::new(String::new())
-                                    .extend_pairs(&pairs)
-                                    .finish();
-                                let mut url = target_clone.url.clone();
-                                url.set_query(Some(&query));
-                                url.to_string()
-                            }
-                            crate::parameter_analysis::Location::Path => {
-                                // Inject into path segment (name pattern: path_segment_{idx})
-                                let mut url = target_clone.url.clone();
-                                if let Some(idx_str) =
-                                    param_clone.name.strip_prefix("path_segment_")
-                                {
-                                    if let Ok(idx) = idx_str.parse::<usize>() {
-                                        let original_path = url.path();
-                                        let mut segments: Vec<String> = if original_path == "/" {
-                                            Vec::new()
-                                        } else {
-                                            original_path
-                                                .trim_matches('/')
-                                                .split('/')
-                                                .filter(|s| !s.is_empty())
-                                                .map(|s| s.to_string())
-                                                .collect()
-                                        };
-                                        if idx < segments.len() {
-                                            // Selective encoding for path visibility: encode space, '#', '?', '%'
-                                            let mut encoded = String::new();
-                                            for ch in reflection_payload.chars() {
-                                                match ch {
-                                                    ' ' => encoded.push_str("%20"),
-                                                    '#' => encoded.push_str("%23"),
-                                                    '?' => encoded.push_str("%3F"),
-                                                    '%' => encoded.push_str("%25"),
-                                                    _ => encoded.push(ch),
-                                                }
-                                            }
-                                            segments[idx] = encoded;
-                                            let new_path = if segments.is_empty() {
-                                                "/".to_string()
-                                            } else {
-                                                format!("/{}", segments.join("/"))
-                                            };
-                                            url.set_path(&new_path);
-                                        }
-                                    }
-                                }
-                                url.to_string()
-                            }
-                            _ => target_clone.url.to_string(),
-                        };
+                        // Build result URL with the reflected payload (via helper)
+                        let result_url = build_injected_url(
+                            &target_clone.url,
+                            &param_clone,
+                            &reflection_payload,
+                        );
 
                         // Record reflected XSS finding (fallback path)
                         let mut result = crate::scanning::result::Result::new(
@@ -529,75 +533,9 @@ pub async fn run_scanning(
                     };
 
                     if should_add {
-                        // Create result
-                        let result_url = match param_clone.location {
-                            crate::parameter_analysis::Location::Query => {
-                                let mut pairs: Vec<(String, String)> = target_clone
-                                    .url
-                                    .query_pairs()
-                                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                                    .collect();
-                                let mut found = false;
-                                for pair in &mut pairs {
-                                    if pair.0 == param_clone.name {
-                                        pair.1 = dom_payload.to_string();
-                                        found = true;
-                                        break;
-                                    }
-                                }
-                                if !found {
-                                    pairs.push((param_clone.name.clone(), dom_payload.to_string()));
-                                }
-                                let query = form_urlencoded::Serializer::new(String::new())
-                                    .extend_pairs(&pairs)
-                                    .finish();
-                                let mut url = target_clone.url.clone();
-                                url.set_query(Some(&query));
-                                url.to_string()
-                            }
-                            crate::parameter_analysis::Location::Path => {
-                                let mut url = target_clone.url.clone();
-                                if let Some(idx_str) =
-                                    param_clone.name.strip_prefix("path_segment_")
-                                {
-                                    if let Ok(idx) = idx_str.parse::<usize>() {
-                                        let original_path = url.path();
-                                        let mut segments: Vec<String> = if original_path == "/" {
-                                            Vec::new()
-                                        } else {
-                                            original_path
-                                                .trim_matches('/')
-                                                .split('/')
-                                                .filter(|s| !s.is_empty())
-                                                .map(|s| s.to_string())
-                                                .collect()
-                                        };
-                                        if idx < segments.len() {
-                                            // Selective encoding for path visibility: encode space, '#', '?', '%'
-                                            let mut encoded = String::new();
-                                            for ch in dom_payload.chars() {
-                                                match ch {
-                                                    ' ' => encoded.push_str("%20"),
-                                                    '#' => encoded.push_str("%23"),
-                                                    '?' => encoded.push_str("%3F"),
-                                                    '%' => encoded.push_str("%25"),
-                                                    _ => encoded.push(ch),
-                                                }
-                                            }
-                                            segments[idx] = encoded;
-                                            let new_path = if segments.is_empty() {
-                                                "/".to_string()
-                                            } else {
-                                                format!("/{}", segments.join("/"))
-                                            };
-                                            url.set_path(&new_path);
-                                        }
-                                    }
-                                }
-                                url.to_string()
-                            }
-                            _ => target_clone.url.to_string(),
-                        };
+                        // Create result (via helper)
+                        let result_url =
+                            build_injected_url(&target_clone.url, &param_clone, &dom_payload);
 
                         let mut result = crate::scanning::result::Result::new(
                             "V".to_string(), // DOM-verified => Vulnerability

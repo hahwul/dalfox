@@ -4,7 +4,6 @@ use regex::Regex;
 use reqwest::Client;
 use std::sync::atomic::Ordering;
 use tokio::time::{Duration, sleep};
-use url::form_urlencoded;
 
 /// Decode a subset of HTML entities (numeric dec & hex) for reflection normalization.
 /// Examples:
@@ -85,63 +84,8 @@ pub async fn check_reflection(
     }
     let client = target.build_client().unwrap_or_else(|_| Client::new());
 
-    // Build URL or body based on param location for injection
-    let inject_url = match param.location {
-        crate::parameter_analysis::Location::Query => {
-            let mut pairs: Vec<(String, String)> = target
-                .url
-                .query_pairs()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect();
-            let mut found = false;
-            for pair in &mut pairs {
-                if pair.0 == param.name {
-                    pair.1 = payload.to_string();
-                    found = true;
-                    break;
-                }
-            }
-            if !found {
-                pairs.push((param.name.clone(), payload.to_string()));
-            }
-            let query = form_urlencoded::Serializer::new(String::new())
-                .extend_pairs(&pairs)
-                .finish();
-            let mut url = target.url.clone();
-            url.set_query(Some(&query));
-            url
-        }
-        crate::parameter_analysis::Location::Path => {
-            // Path segment injection (param.name pattern: path_segment_{idx})
-            let mut url = target.url.clone();
-            if let Some(idx_str) = param.name.strip_prefix("path_segment_") {
-                if let Ok(idx) = idx_str.parse::<usize>() {
-                    let original_path = url.path();
-                    let mut segments: Vec<&str> = if original_path == "/" {
-                        Vec::new()
-                    } else {
-                        original_path
-                            .trim_matches('/')
-                            .split('/')
-                            .filter(|s| !s.is_empty())
-                            .collect()
-                    };
-                    if idx < segments.len() {
-                        // Replace the targeted segment with the payload
-                        segments[idx] = payload;
-                        let new_path = if segments.is_empty() {
-                            "/".to_string()
-                        } else {
-                            format!("/{}", segments.join("/"))
-                        };
-                        url.set_path(&new_path);
-                    }
-                }
-            }
-            url
-        }
-        _ => target.url.clone(),
-    };
+    // Build URL or body based on param location for injection (refactored to shared helper)
+    let inject_url = crate::scanning::url_inject::build_injected_url(&target.url, param, payload);
 
     // Send injection request
     let mut inject_request = client.request(
@@ -237,63 +181,8 @@ pub async fn check_reflection_with_response(
     }
     let client = target.build_client().unwrap_or_else(|_| Client::new());
 
-    // Build URL or body based on param location for injection
-    let inject_url = match param.location {
-        crate::parameter_analysis::Location::Query => {
-            let mut pairs: Vec<(String, String)> = target
-                .url
-                .query_pairs()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect();
-            let mut found = false;
-            for pair in &mut pairs {
-                if pair.0 == param.name {
-                    pair.1 = payload.to_string();
-                    found = true;
-                    break;
-                }
-            }
-            if !found {
-                pairs.push((param.name.clone(), payload.to_string()));
-            }
-            let query = form_urlencoded::Serializer::new(String::new())
-                .extend_pairs(&pairs)
-                .finish();
-            let mut url = target.url.clone();
-            url.set_query(Some(&query));
-            url
-        }
-        crate::parameter_analysis::Location::Path => {
-            // Path segment injection (param.name pattern: path_segment_{idx})
-            let mut url = target.url.clone();
-            if let Some(idx_str) = param.name.strip_prefix("path_segment_") {
-                if let Ok(idx) = idx_str.parse::<usize>() {
-                    let original_path = url.path();
-                    let mut segments: Vec<&str> = if original_path == "/" {
-                        Vec::new()
-                    } else {
-                        original_path
-                            .trim_matches('/')
-                            .split('/')
-                            .filter(|s| !s.is_empty())
-                            .collect()
-                    };
-                    if idx < segments.len() {
-                        // Replace the targeted segment with the payload
-                        segments[idx] = payload;
-                        let new_path = if segments.is_empty() {
-                            "/".to_string()
-                        } else {
-                            format!("/{}", segments.join("/"))
-                        };
-                        url.set_path(&new_path);
-                    }
-                }
-            }
-            url
-        }
-        _ => target.url.clone(),
-    };
+    // Build URL or body based on param location for injection (refactored to shared helper)
+    let inject_url = crate::scanning::url_inject::build_injected_url(&target.url, param, payload);
 
     // Send injection request
     let mut inject_request = client.request(
