@@ -218,117 +218,134 @@ pub async fn probe_dictionary_params(
     // Each task returns Option<Param>; batch flush later
     let mut handles: Vec<tokio::task::JoinHandle<Option<Param>>> = Vec::new();
 
-    for param in params {
-        // Early collapse stop
+    // Chunked processing to reduce memory and allow early collapse exit
+    const CHUNK_SIZE: usize = 500;
+    'outer: for param_chunk in params.chunks(CHUNK_SIZE) {
         {
             let st = stats.lock().await;
             if st.collapsed {
-                break;
+                break 'outer;
             }
         }
-        // Skip if already discovered
-        let exists = reflection_params
-            .lock()
-            .await
-            .iter()
-            .any(|p| p.name == param);
-        if exists {
-            continue;
-        }
-
-        let mut url = target.url.clone();
-        url.query_pairs_mut().append_pair(&param, "dalfox");
-
-        let client_clone = client.clone();
-        let headers = target.headers.clone();
-        let user_agent = target.user_agent.clone();
-        let cookies = target.cookies.clone();
-        let data = target.data.clone();
-        let method = target.method.clone();
-        let delay = target.delay;
-        let semaphore_clone = semaphore.clone();
-        let param_name = param.clone();
-        let pb_clone = pb.clone();
-        let stats_clone = stats.clone();
-
-        let handle = tokio::spawn(async move {
-            let permit = semaphore_clone.acquire().await.unwrap();
-            let mut request =
-                client_clone.request(method.parse().unwrap_or(reqwest::Method::GET), url);
-            for (k, v) in &headers {
-                request = request.header(k, v);
-            }
-            if let Some(ua) = &user_agent {
-                request = request.header("User-Agent", ua);
-            }
-            if !cookies.is_empty() {
-                let cookie_header = cookies
-                    .iter()
-                    .map(|(k, v)| format!("{}={}", k, v))
-                    .collect::<Vec<_>>()
-                    .join("; ");
-                request = request.header("Cookie", cookie_header);
-            }
-            if let Some(data) = &data {
-                request = request.body(data.clone());
-            }
-
-            let resp = request.send().await;
-            crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
-
-            let mut discovered: Option<Param> = None;
-            if let Ok(r) = resp {
-                if let Ok(text) = r.text().await {
-                    let mut st = stats_clone.lock().await;
-                    st.record_attempt();
-                    if text.contains("dalfox") {
-                        st.record_reflection();
-                        if !st.collapsed {
-                            let context = detect_injection_context(&text);
-                            let (valid, invalid) =
-                                crate::parameter_analysis::classify_special_chars(&text);
-                            discovered = Some(Param {
-                                name: param_name.clone(),
-                                value: "dalfox".to_string(),
-                                location: crate::parameter_analysis::Location::Query,
-                                injection_context: Some(context),
-                                valid_specials: Some(valid),
-                                invalid_specials: Some(invalid),
-                            });
-                            if !silence {
-                                eprintln!(
-                                    "Discovered parameter: {} (EWMA {:.2}, {}/{})",
-                                    param_name, st.ewma_ratio, st.reflections, st.attempts
-                                );
-                            }
-                            if st.should_collapse() {
-                                st.collapsed = true;
-                                if !silence {
-                                    eprintln!(
-                                        "[mining-collapse] High reflection EWMA {:.2} after {} attempts ({} reflections)",
-                                        st.ewma_ratio, st.attempts, st.reflections
-                                    );
-                                }
-                            }
-                        }
-                    } else {
-                        st.record_non_reflection();
-                    }
+        for param in param_chunk {
+            {
+                let st = stats.lock().await;
+                if st.collapsed {
+                    break 'outer;
                 }
             }
-
-            if delay > 0 {
-                sleep(Duration::from_millis(delay)).await;
+            // original body below
+            // Early collapse stop
+            {
+                let st = stats.lock().await;
+                if st.collapsed {
+                    break;
+                }
             }
-            drop(permit);
-            if let Some(ref pb) = pb_clone {
-                pb.inc(1);
+            // Skip if already discovered
+            let exists = reflection_params
+                .lock()
+                .await
+                .iter()
+                .any(|p| p.name == *param);
+            if exists {
+                continue;
             }
-            discovered
-        });
 
-        handles.push(handle);
-    }
+            let mut url = target.url.clone();
+            url.query_pairs_mut().append_pair(&param, "dalfox");
+
+            let client_clone = client.clone();
+            let headers = target.headers.clone();
+            let user_agent = target.user_agent.clone();
+            let cookies = target.cookies.clone();
+            let data = target.data.clone();
+            let method = target.method.clone();
+            let delay = target.delay;
+            let semaphore_clone = semaphore.clone();
+            let param_name = param.clone();
+            let pb_clone = pb.clone();
+            let stats_clone = stats.clone();
+
+            let handle = tokio::spawn(async move {
+                let permit = semaphore_clone.acquire().await.unwrap();
+                let mut request =
+                    client_clone.request(method.parse().unwrap_or(reqwest::Method::GET), url);
+                for (k, v) in &headers {
+                    request = request.header(k, v);
+                }
+                if let Some(ua) = &user_agent {
+                    request = request.header("User-Agent", ua);
+                }
+                if !cookies.is_empty() {
+                    let cookie_header = cookies
+                        .iter()
+                        .map(|(k, v)| format!("{}={}", k, v))
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    request = request.header("Cookie", cookie_header);
+                }
+                if let Some(data) = &data {
+                    request = request.body(data.clone());
+                }
+
+                let resp = request.send().await;
+                crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+
+                let mut discovered: Option<Param> = None;
+                if let Ok(r) = resp {
+                    if let Ok(text) = r.text().await {
+                        let mut st = stats_clone.lock().await;
+                        st.record_attempt();
+                        if text.contains("dalfox") {
+                            st.record_reflection();
+                            if !st.collapsed {
+                                let context = detect_injection_context(&text);
+                                let (valid, invalid) =
+                                    crate::parameter_analysis::classify_special_chars(&text);
+                                discovered = Some(Param {
+                                    name: param_name.clone(),
+                                    value: "dalfox".to_string(),
+                                    location: crate::parameter_analysis::Location::Query,
+                                    injection_context: Some(context),
+                                    valid_specials: Some(valid),
+                                    invalid_specials: Some(invalid),
+                                });
+                                if !silence {
+                                    eprintln!(
+                                        "Discovered parameter: {} (EWMA {:.2}, {}/{})",
+                                        param_name, st.ewma_ratio, st.reflections, st.attempts
+                                    );
+                                }
+                                if st.should_collapse() {
+                                    st.collapsed = true;
+                                    if !silence {
+                                        eprintln!(
+                                            "[mining-collapse] High reflection EWMA {:.2} after {} attempts ({} reflections)",
+                                            st.ewma_ratio, st.attempts, st.reflections
+                                        );
+                                    }
+                                }
+                            }
+                        } else {
+                            st.record_non_reflection();
+                        }
+                    }
+                }
+
+                if delay > 0 {
+                    sleep(Duration::from_millis(delay)).await;
+                }
+                drop(permit);
+                if let Some(ref pb) = pb_clone {
+                    pb.inc(1);
+                }
+                discovered
+            });
+
+            handles.push(handle);
+        }
+    } // end chunk loop
 
     // Batch collect discovered parameters
     let mut batch: Vec<Param> = Vec::new();
