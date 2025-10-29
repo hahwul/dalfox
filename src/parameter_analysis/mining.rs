@@ -5,10 +5,7 @@ use crate::target_parser::Target;
 use indicatif::ProgressBar;
 use reqwest::Client;
 use scraper;
-use std::sync::{
-    Arc,
-    atomic::{AtomicU64, Ordering},
-};
+use std::sync::{Arc, atomic::Ordering};
 
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{Duration, sleep};
@@ -256,9 +253,7 @@ pub async fn probe_dictionary_params(
             url.query_pairs_mut().append_pair(&param, "dalfox");
 
             let client_clone = client.clone();
-            let headers = target.headers.clone();
-            let user_agent = target.user_agent.clone();
-            let cookies = target.cookies.clone();
+
             let data = target.data.clone();
             let method = target.method.clone();
             let target_clone = target.clone();
@@ -436,9 +431,7 @@ pub async fn probe_body_params(
 
             let client_clone = client.clone();
             let url = target.url.clone();
-            let headers = target.headers.clone();
-            let user_agent = target.user_agent.clone();
-            let cookies = target.cookies.clone();
+
             let method = target.method.clone();
             let target_clone = target.clone();
             let delay = target.delay;
@@ -628,9 +621,7 @@ pub async fn probe_response_id_params(
                 let mut url = target.url.clone();
                 url.query_pairs_mut().append_pair(&param, "dalfox");
                 let client_clone = client.clone();
-                let headers = target.headers.clone();
-                let user_agent = target.user_agent.clone();
-                let cookies = target.cookies.clone();
+
                 let data = target.data.clone();
                 let method = target.method.clone();
                 let target_clone = target.clone();
@@ -753,6 +744,198 @@ pub async fn probe_response_id_params(
     }
 }
 
+pub async fn probe_json_body_params(
+    target: &Target,
+    args: &ScanArgs,
+    reflection_params: Arc<Mutex<Vec<Param>>>,
+    semaphore: Arc<Semaphore>,
+    pb: Option<ProgressBar>,
+) {
+    let silence = args.silence;
+    let client = target.build_client().unwrap_or_else(|_| Client::new());
+
+    // Detect JSON body from args.data; only proceed if it's a JSON object
+    let base_json: serde_json::Value = match &args.data {
+        Some(d) => match serde_json::from_str::<serde_json::Value>(d) {
+            Ok(v) => v,
+            Err(_) => return, // not JSON
+        },
+        None => return,
+    };
+    if !base_json.is_object() {
+        return;
+    }
+
+    // Collect top-level keys to mutate
+    let keys: Vec<String> = base_json.as_object().unwrap().keys().cloned().collect();
+
+    if let Some(ref pb) = pb {
+        pb.set_length(keys.len() as u64);
+        pb.set_message("Mining JSON body parameters");
+    }
+
+    // Adaptive EWMA stats shared across tasks
+    let stats = Arc::new(Mutex::new(MiningSampleStats::new()));
+
+    // Spawn tasks returning Option<Param> for batching
+    let mut handles: Vec<tokio::task::JoinHandle<Option<Param>>> = Vec::new();
+
+    for param_name in keys {
+        {
+            // Early collapse stop
+            let st = stats.lock().await;
+            if st.collapsed {
+                break;
+            }
+        }
+        // Skip if already discovered
+        let exists = reflection_params
+            .lock()
+            .await
+            .iter()
+            .any(|p| p.name == param_name);
+        if exists {
+            continue;
+        }
+
+        let client_clone = client.clone();
+        let url = target.url.clone();
+
+        let method = target.method.clone();
+        let target_clone = target.clone();
+        let delay = target.delay;
+        let semaphore_clone = semaphore.clone();
+        let param_name_cloned = param_name.clone();
+        let pb_clone = pb.clone();
+        let stats_clone = stats.clone();
+        let base_json_clone = base_json.clone();
+
+        let handle = tokio::spawn(async move {
+            let permit = semaphore_clone.acquire().await.unwrap();
+
+            // Build mutated JSON with this key set to "dalfox"
+            let mut root = base_json_clone;
+            if let Some(map) = root.as_object_mut() {
+                map.insert(
+                    param_name_cloned.clone(),
+                    serde_json::Value::String("dalfox".to_string()),
+                );
+            } else {
+                let mut map = serde_json::Map::new();
+                map.insert(
+                    param_name_cloned.clone(),
+                    serde_json::Value::String("dalfox".to_string()),
+                );
+                root = serde_json::Value::Object(map);
+            }
+            let body = serde_json::to_string(&root)
+                .unwrap_or_else(|_| format!("{{\"{}\":\"dalfox\"}}", param_name_cloned));
+
+            let m = method.parse().unwrap_or(reqwest::Method::POST);
+            let base =
+                crate::utils::build_request(&client_clone, &target_clone, m, url, Some(body));
+            let overrides = vec![("Content-Type".to_string(), "application/json".to_string())];
+            let request = crate::utils::apply_header_overrides(base, &overrides);
+
+            let resp = request.send().await;
+            crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+
+            let mut discovered: Option<Param> = None;
+            if let Ok(r) = resp {
+                if let Ok(text) = r.text().await {
+                    let mut st = stats_clone.lock().await;
+                    st.record_attempt();
+                    if text.contains("dalfox") {
+                        st.record_reflection();
+                        if !st.collapsed {
+                            let context = detect_injection_context(&text);
+                            let (valid, invalid) =
+                                crate::parameter_analysis::classify_special_chars(&text);
+                            discovered = Some(Param {
+                                name: param_name_cloned.clone(),
+                                value: "dalfox".to_string(),
+                                location: Location::JsonBody,
+                                injection_context: Some(context),
+                                valid_specials: Some(valid),
+                                invalid_specials: Some(invalid),
+                            });
+                            if !silence {
+                                eprintln!(
+                                    "Discovered JSON body param: {} (EWMA {:.2}, {}/{})",
+                                    param_name_cloned, st.ewma_ratio, st.reflections, st.attempts
+                                );
+                            }
+                            if st.should_collapse() {
+                                st.collapsed = true;
+                                if !silence {
+                                    eprintln!(
+                                        "[mining-collapse] JSON mining collapsed at EWMA {:.2} after {} attempts ({} reflections)",
+                                        st.ewma_ratio, st.attempts, st.reflections
+                                    );
+                                }
+                            }
+                        }
+                    } else {
+                        st.record_non_reflection();
+                    }
+                }
+            }
+
+            if delay > 0 {
+                sleep(Duration::from_millis(delay)).await;
+            }
+            drop(permit);
+            if let Some(ref pb) = pb_clone {
+                pb.inc(1);
+            }
+            discovered
+        });
+
+        handles.push(handle);
+    }
+
+    // Batch collect discovered params
+    let mut batch: Vec<Param> = Vec::new();
+    for h in handles {
+        if let Ok(opt) = h.await {
+            if let Some(p) = opt {
+                batch.push(p);
+            }
+        }
+    }
+    if !batch.is_empty() {
+        let mut guard = reflection_params.lock().await;
+        guard.extend(batch);
+    }
+
+    // Collapse normalization to single 'any' JSON param if triggered
+    let st_final = stats.lock().await;
+    if st_final.collapsed {
+        let mut guard = reflection_params.lock().await;
+        let preserved = guard.first().cloned();
+        guard.clear();
+        if let Some(orig) = preserved {
+            guard.push(Param {
+                name: "any".to_string(),
+                value: orig.value.clone(),
+                location: Location::JsonBody,
+                injection_context: orig.injection_context.clone(),
+                valid_specials: orig.valid_specials.clone(),
+                invalid_specials: orig.invalid_specials.clone(),
+            });
+        } else {
+            guard.push(Param {
+                name: "any".to_string(),
+                value: "dalfox".to_string(),
+                location: Location::JsonBody,
+                injection_context: Some(crate::parameter_analysis::InjectionContext::Html(None)),
+                valid_specials: None,
+                invalid_specials: None,
+            });
+        }
+    }
+}
+
 pub async fn mine_parameters(
     target: &mut Target,
     args: &ScanArgs,
@@ -771,6 +954,16 @@ pub async fn mine_parameters(
             )
             .await;
             probe_body_params(
+                target,
+                args,
+                reflection_params.clone(),
+                semaphore.clone(),
+                pb.clone(),
+            )
+            .await;
+
+            // JSON body mining (top-level keys)
+            probe_json_body_params(
                 target,
                 args,
                 reflection_params.clone(),
