@@ -1,4 +1,96 @@
 use base64::{Engine, engine::general_purpose::STANDARD};
+
+/// Apply encoder policy to a list of base payloads and return expanded, de-duplicated variants.
+/// Policy:
+/// - If encoders contains "none", return only the original payloads (deduplicated), no variants.
+/// - Otherwise, include original payload and, for each encoder present, append its variant(s).
+/// - Encoder application order is fixed to: url, html, 2url, base64
+/// - Results are de-duplicated while preserving the first occurrence order.
+pub fn apply_encoders_to_payloads(base_payloads: &[String], encoders: &[String]) -> Vec<String> {
+    // Dedup base first while preserving order
+    let mut seen = std::collections::HashSet::new();
+    let mut bases: Vec<String> = Vec::new();
+    for p in base_payloads {
+        if seen.insert(p.clone()) {
+            bases.push(p.clone());
+        }
+    }
+
+    // If "none" is selected, only originals should be used
+    if encoders.iter().any(|e| e == "none") {
+        return bases;
+    }
+
+    let mut out: Vec<String> = Vec::new();
+    let mut out_seen = std::collections::HashSet::new();
+
+    // Expansion order
+    let prio = ["url", "html", "2url", "base64"];
+
+    for p in bases {
+        // Always include original first
+        if out_seen.insert(p.clone()) {
+            out.push(p.clone());
+        }
+        // Then encoder variants in fixed order gated by encoders set
+        for e in prio {
+            if encoders.iter().any(|x| x == e) {
+                let v = match e {
+                    "url" => url_encode(&p),
+                    "html" => html_entity_encode(&p),
+                    "2url" => double_url_encode(&p),
+                    "base64" => base64_encode(&p),
+                    _ => continue,
+                };
+                if out_seen.insert(v.clone()) {
+                    out.push(v);
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Convenience helper to expand a single payload with encoders using the same policy.
+pub fn expand_payload_with_encoders(payload: &str, encoders: &[String]) -> Vec<String> {
+    apply_encoders_to_payloads(&[payload.to_string()], encoders)
+}
+
+#[cfg(test)]
+mod encoder_policy_tests {
+    use super::*;
+
+    #[test]
+    fn test_apply_encoders_none_only() {
+        let bases = vec!["<x>".to_string(), "<x>".to_string()];
+        let encs = vec!["none".to_string()];
+        let out = apply_encoders_to_payloads(&bases, &encs);
+        // Only unique originals
+        assert_eq!(out, vec!["<x>".to_string()]);
+    }
+
+    #[test]
+    fn test_apply_encoders_order_and_dedup() {
+        let bases = vec!["<x>".to_string()];
+        let encs = vec!["url".to_string(), "html".to_string()];
+        let out = apply_encoders_to_payloads(&bases, &encs);
+        assert!(out.contains(&"<x>".to_string()));
+        assert!(out.contains(&url_encode("<x>")));
+        assert!(out.contains(&html_entity_encode("<x>")));
+        // No duplicates
+        let mut set = std::collections::HashSet::new();
+        assert!(out.iter().all(|p| set.insert(p)));
+    }
+
+    #[test]
+    fn test_expand_single_payload() {
+        let out =
+            expand_payload_with_encoders("<", &vec!["2url".to_string(), "base64".to_string()]);
+        assert!(out.contains(&"<".to_string()));
+        assert!(out.contains(&double_url_encode("<")));
+        assert!(out.contains(&base64_encode("<")));
+    }
+}
 use urlencoding;
 
 /// URL-encodes the given payload string.

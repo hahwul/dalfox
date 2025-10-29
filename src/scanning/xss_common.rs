@@ -1,5 +1,5 @@
 use crate::cmd::scan::ScanArgs;
-use crate::encoding::{base64_encode, double_url_encode, html_entity_encode, url_encode};
+
 use crate::parameter_analysis::{DelimiterType, InjectionContext};
 
 // Context-specific payload lists
@@ -414,30 +414,8 @@ pub fn get_dynamic_payloads(
         }
     }
 
-    // Deduplicate base_payloads to prevent sending identical payloads multiple times
-    let mut unique_base_payloads = std::collections::HashSet::new();
-    base_payloads.retain(|p| unique_base_payloads.insert(p.clone()));
-
-    let mut payloads = vec![];
-    for payload in base_payloads {
-        if args.encoders.contains(&"none".to_string()) {
-            payloads.push(payload.clone()); // No encoding
-        } else {
-            payloads.push(payload.clone()); // Original
-            if args.encoders.contains(&"url".to_string()) {
-                payloads.push(url_encode(&payload)); // URL encoded
-            }
-            if args.encoders.contains(&"html".to_string()) {
-                payloads.push(html_entity_encode(&payload)); // HTML entity encoded
-            }
-            if args.encoders.contains(&"2url".to_string()) {
-                payloads.push(double_url_encode(&payload)); // Double URL encoded
-            }
-            if args.encoders.contains(&"base64".to_string()) {
-                payloads.push(base64_encode(&payload)); // Base64 encoded
-            }
-        }
-    }
+    // Expand with shared encoder policy helper; handles "none" and deduplication
+    let payloads = crate::encoding::apply_encoders_to_payloads(&base_payloads, &args.encoders);
 
     Ok(payloads)
 }

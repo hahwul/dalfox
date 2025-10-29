@@ -36,30 +36,8 @@ fn get_fallback_reflection_payloads(
         }
     }
 
-    // Deduplicate base_payloads to prevent sending identical payloads multiple times
-    let mut unique_base_payloads = std::collections::HashSet::new();
-    base_payloads.retain(|p| unique_base_payloads.insert(p.clone()));
-
-    let mut payloads = vec![];
-    for payload in base_payloads {
-        if args.encoders.contains(&"none".to_string()) {
-            payloads.push(payload.clone()); // No encoding
-        } else {
-            payloads.push(payload.clone()); // Original
-            if args.encoders.contains(&"url".to_string()) {
-                payloads.push(crate::encoding::url_encode(&payload)); // URL encoded
-            }
-            if args.encoders.contains(&"html".to_string()) {
-                payloads.push(crate::encoding::html_entity_encode(&payload)); // HTML entity encoded
-            }
-            if args.encoders.contains(&"2url".to_string()) {
-                payloads.push(crate::encoding::double_url_encode(&payload)); // Double URL encoded
-            }
-            if args.encoders.contains(&"base64".to_string()) {
-                payloads.push(crate::encoding::base64_encode(&payload)); // Base64 encoded
-            }
-        }
-    }
+    // Apply encoder policy to unique base payloads
+    let payloads = crate::encoding::apply_encoders_to_payloads(&base_payloads, &args.encoders);
 
     Ok(payloads)
 }
@@ -75,29 +53,8 @@ fn get_dom_payloads(
         Some(ctx) => {
             // Use locally generated payloads only (no remote) to avoid large cross-product in DOM verification
             let mut base_payloads = crate::scanning::xss_common::generate_dynamic_payloads(ctx);
-            // Deduplicate base_payloads
-            let mut unique_base = std::collections::HashSet::new();
-            base_payloads.retain(|p| unique_base.insert(p.clone()));
-            let mut out = vec![];
-            for p in base_payloads {
-                if args.encoders.contains(&"none".to_string()) {
-                    out.push(p.clone());
-                } else {
-                    out.push(p.clone());
-                    if args.encoders.contains(&"url".to_string()) {
-                        out.push(crate::encoding::url_encode(&p));
-                    }
-                    if args.encoders.contains(&"html".to_string()) {
-                        out.push(crate::encoding::html_entity_encode(&p));
-                    }
-                    if args.encoders.contains(&"2url".to_string()) {
-                        out.push(crate::encoding::double_url_encode(&p));
-                    }
-                    if args.encoders.contains(&"base64".to_string()) {
-                        out.push(crate::encoding::base64_encode(&p));
-                    }
-                }
-            }
+            // Expand with shared encoder policy helper
+            let out = crate::encoding::apply_encoders_to_payloads(&base_payloads, &args.encoders);
             Ok(out)
         }
         // Unknown context: use HTML + Attribute payloads (+ custom if provided), never error
@@ -130,30 +87,8 @@ fn get_dom_payloads(
                 base_payloads.extend(crate::payload::get_dynamic_xss_attribute_payloads());
             }
 
-            // Deduplicate base_payloads
-            let mut unique_base = std::collections::HashSet::new();
-            base_payloads.retain(|p| unique_base.insert(p.clone()));
-
-            let mut out = vec![];
-            for p in base_payloads {
-                if args.encoders.contains(&"none".to_string()) {
-                    out.push(p.clone());
-                } else {
-                    out.push(p.clone());
-                    if args.encoders.contains(&"url".to_string()) {
-                        out.push(crate::encoding::url_encode(&p));
-                    }
-                    if args.encoders.contains(&"html".to_string()) {
-                        out.push(crate::encoding::html_entity_encode(&p));
-                    }
-                    if args.encoders.contains(&"2url".to_string()) {
-                        out.push(crate::encoding::double_url_encode(&p));
-                    }
-                    if args.encoders.contains(&"base64".to_string()) {
-                        out.push(crate::encoding::base64_encode(&p));
-                    }
-                }
-            }
+            // Expand with shared encoder policy helper
+            let out = crate::encoding::apply_encoders_to_payloads(&base_payloads, &args.encoders);
             Ok(out)
         }
     }
