@@ -67,6 +67,7 @@ pub struct ScanConfig {
     pub skip_discovery: Option<bool>,
     pub skip_reflection_header: Option<bool>,
     pub skip_reflection_cookie: Option<bool>,
+    pub skip_reflection_path: Option<bool>,
     // PARAMETER MINING
     pub mining_dict_word: Option<String>,
     pub remote_wordlists: Option<Vec<String>>,
@@ -161,6 +162,9 @@ impl Config {
             }
             if let Some(v) = scan.skip_reflection_cookie {
                 args.skip_reflection_cookie = v;
+            }
+            if let Some(v) = scan.skip_reflection_path {
+                args.skip_reflection_path = v;
             }
             // PARAMETER MINING
             if let Some(v) = &scan.mining_dict_word {
@@ -312,6 +316,12 @@ impl Config {
                     args.sxss_url = Some(v.clone());
                 }
             }
+            // PARAMETER DISCOVERY (conservative mapping)
+            if let Some(v) = scan.skip_reflection_path {
+                if !args.skip_reflection_path {
+                    args.skip_reflection_path = v;
+                }
+            }
         }
     }
 
@@ -398,6 +408,12 @@ impl Config {
             if let Some(v) = &scan.user_agent {
                 if args.user_agent.is_none() {
                     args.user_agent = Some(v.clone());
+                }
+            }
+            // PARAMETER DISCOVERY (default mapping)
+            if let Some(v) = scan.skip_reflection_path {
+                if !args.skip_reflection_path {
+                    args.skip_reflection_path = v;
                 }
             }
             if let Some(v) = &scan.cookie_from_raw {
@@ -792,6 +808,7 @@ mod tests {
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
+            skip_reflection_path: false,
             mining_dict_word: None,
             remote_wordlists: vec![],
             skip_mining: false,
@@ -865,6 +882,7 @@ mod tests {
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
+            skip_reflection_path: false,
             mining_dict_word: None,
             remote_wordlists: vec![],
             skip_mining: false,

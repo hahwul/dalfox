@@ -314,6 +314,7 @@ async fn run_scan_job(
         skip_discovery: false,
         skip_reflection_header: false,
         skip_reflection_cookie: false,
+        skip_reflection_path: false,
 
         mining_dict_word: None,
         skip_mining: false,

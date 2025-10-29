@@ -158,6 +158,7 @@ mod tests {
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
+            skip_reflection_path: false,
             timeout: 10,
             delay: 0,
             proxy: None,

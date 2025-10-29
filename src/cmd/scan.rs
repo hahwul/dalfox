@@ -469,6 +469,11 @@ pub struct ScanArgs {
     #[arg(long)]
     pub skip_reflection_cookie: bool,
 
+    #[clap(help_heading = "PARAMETER DISCOVERY")]
+    /// Skip path-based reflection checks
+    #[arg(long)]
+    pub skip_reflection_path: bool,
+
     #[clap(help_heading = "PARAMETER MINING")]
     /// Dictionary analysis with wordlist file path
     #[arg(short = 'W', long)]

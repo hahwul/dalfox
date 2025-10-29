@@ -214,6 +214,7 @@ async fn main() {
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
+            skip_reflection_path: false,
             timeout: crate::cmd::scan::DEFAULT_TIMEOUT_SECS,
             delay: crate::cmd::scan::DEFAULT_DELAY_MS,
             proxy: None,

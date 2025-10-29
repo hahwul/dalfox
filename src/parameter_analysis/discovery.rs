@@ -20,8 +20,10 @@ pub async fn check_discovery(
         if !args.skip_reflection_cookie {
             check_cookie_discovery(target, reflection_params.clone(), semaphore.clone()).await;
         }
-        // Path discovery (no skip flag yet)
-        check_path_discovery(target, reflection_params.clone(), semaphore.clone()).await;
+        // Path discovery (respects --skip-reflection-path)
+        if !args.skip_reflection_path {
+            check_path_discovery(target, reflection_params.clone(), semaphore.clone()).await;
+        }
     }
     target.reflection_params = reflection_params.lock().await.clone();
 }
@@ -232,6 +234,70 @@ mod tests {
 
         // Should complete without blocking and without adding params
         check_path_discovery(&target, reflection_params.clone(), semaphore.clone()).await;
+        assert!(reflection_params.lock().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_check_discovery_skips_path_when_flag_set() {
+        let mut target = parse_target("https://example.com/a/b").unwrap();
+        target.timeout = 1;
+
+        let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+        let semaphore = Arc::new(Semaphore::new(1));
+
+        let args = crate::cmd::scan::ScanArgs {
+            input_type: "auto".to_string(),
+            format: "json".to_string(),
+            targets: vec![],
+            param: vec![],
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            method: "GET".to_string(),
+            user_agent: None,
+            cookie_from_raw: None,
+            skip_discovery: false,
+            skip_reflection_header: false,
+            skip_reflection_cookie: false,
+            skip_reflection_path: true,
+            mining_dict_word: None,
+            remote_wordlists: vec![],
+            skip_mining: false,
+            skip_mining_dict: false,
+            skip_mining_dom: false,
+            timeout: 10,
+            delay: 0,
+            proxy: None,
+            follow_redirects: false,
+            output: None,
+            include_request: false,
+            include_response: false,
+            silence: true,
+            poc_type: "plain".to_string(),
+            limit: None,
+            workers: 1,
+            max_concurrent_targets: 1,
+            max_targets_per_host: 100,
+            encoders: vec!["none".to_string()],
+            remote_payloads: vec![],
+            custom_blind_xss_payload: None,
+            blind_callback_url: None,
+            custom_payload: None,
+            only_custom_payload: false,
+            skip_xss_scanning: true,
+            deep_scan: false,
+            sxss: false,
+            sxss_url: None,
+            sxss_method: "GET".to_string(),
+        };
+
+        check_discovery(
+            &mut target,
+            &args,
+            reflection_params.clone(),
+            semaphore.clone(),
+        )
+        .await;
         assert!(reflection_params.lock().await.is_empty());
     }
 }
