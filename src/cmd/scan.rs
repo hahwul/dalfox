@@ -23,7 +23,7 @@ use crate::target_parser::*;
 
 /// Default encoders used when the user does not specify any via CLI or config.
 /// Centralizing this allows config.rs to reference the same canonical defaults.
-pub const DEFAULT_ENCODERS: &[&str] = &["none", "url", "html"];
+pub const DEFAULT_ENCODERS: &[&str] = &["url", "html"];
 // Centralized numeric defaults (used by CLI default_value_t and config precedence logic)
 pub const DEFAULT_TIMEOUT_SECS: u64 = 10;
 pub const DEFAULT_DELAY_MS: u64 = 0;
@@ -535,8 +535,8 @@ pub struct ScanArgs {
     pub max_targets_per_host: usize,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Specify payload encoders to use (comma-separated). Options: none, url, 2url, html, base64. Default: none,url,html
-    #[arg(short = 'e', long, value_delimiter = ',', default_values = &["none", "url", "html"])]
+    /// Specify payload encoders to use (comma-separated). Options: none, url, 2url, html, base64. Default: url,html
+    #[arg(short = 'e', long, value_delimiter = ',', default_values = &["url", "html"])]
     pub encoders: Vec<String>,
 
     #[clap(help_heading = "XSS SCANNING")]

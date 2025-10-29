@@ -508,7 +508,7 @@ impl Config {
             // XSS SCANNING
             if let Some(v) = &scan.encoders {
                 // Override only if current encoders equal the canonical defaults (user did not supply CLI override).
-                // Canonical defaults are defined in cmd::scan::DEFAULT_ENCODERS (["none","url","html"]).
+                // Canonical defaults are defined in cmd::scan::DEFAULT_ENCODERS (["url","html"]).
                 if args.encoders.iter().map(|s| s.as_str()).collect::<Vec<_>>()
                     == crate::cmd::scan::DEFAULT_ENCODERS
                 {
@@ -712,7 +712,7 @@ pub fn default_toml_template() -> String {
 # max_targets_per_host = 100
 
 # XSS SCANNING
-# encoders = ["none", "url", "html"]  # none, url, 2url, html, base64
+# encoders = ["url", "html"]  # none, url, 2url, html, base64
 # remote_payloads = ["payloadbox", "portswigger"]
 # custom_blind_xss_payload = "blind.txt"
 # blind_callback_url = "https://your-bxss-callback.com"
@@ -770,7 +770,7 @@ mod tests {
         assert_eq!(crate::cmd::scan::DEFAULT_MAX_CONCURRENT_TARGETS, 50);
         assert_eq!(crate::cmd::scan::DEFAULT_MAX_TARGETS_PER_HOST, 100);
         // DEFAULT_ENCODERS canonical defaults
-        assert_eq!(crate::cmd::scan::DEFAULT_ENCODERS, &["none", "url", "html"]);
+        assert_eq!(crate::cmd::scan::DEFAULT_ENCODERS, &["url", "html"]);
     }
 
     #[test]
@@ -788,7 +788,7 @@ mod tests {
             }),
         };
 
-        // Prepare ScanArgs with canonical defaults (["none","url","html"])
+        // Prepare ScanArgs with canonical defaults (["url","html"])
         let mut args = crate::cmd::scan::ScanArgs {
             input_type: "auto".to_string(),
             format: "plain".to_string(),

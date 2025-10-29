@@ -89,7 +89,7 @@ max_targets_per_host = 100
 # - 2url: double URL encode
 # - html: HTML hex entity encode
 # - base64: base64 encode
-encoders = ["none", "url", "html"]
+encoders = ["url", "html"]
 # Remote XSS payload providers (payloadbox, portswigger)
 # remote_payloads = ["payloadbox", "portswigger"]
 # Custom blind XSS payload templates file (uses "{}" placeholder for callback URL)
