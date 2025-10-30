@@ -192,6 +192,7 @@ func DalLog(level, text string, options model.Options) {
 		}
 
 	case "YELLOW":
+		ftext = text
 		if options.AuroraObject != nil {
 			text = options.AuroraObject.BrightYellow(text).String()
 		}
