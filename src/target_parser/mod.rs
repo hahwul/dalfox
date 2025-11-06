@@ -64,6 +64,41 @@ pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
     })
 }
 
+/// Parse a target string that may be in "METHOD URL [BODY]" format.
+/// Returns (method, url, optional_body).
+/// If the string doesn't start with a known HTTP method, it returns ("GET", original_string, None).
+pub fn parse_method_url_body(s: &str) -> (String, String, Option<String>) {
+    const METHODS: [&str; 7] = ["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH"];
+    
+    let parts: Vec<&str> = s.splitn(3, ' ').collect();
+    
+    if parts.len() >= 2 {
+        let potential_method = parts[0].to_uppercase();
+        if METHODS.iter().any(|m| m.eq(&potential_method)) {
+            let url = parts[1].to_string();
+            let body = if parts.len() >= 3 && !parts[2].is_empty() {
+                Some(parts[2].to_string())
+            } else {
+                None
+            };
+            return (potential_method, url, body);
+        }
+    }
+    
+    // Not in METHOD URL [BODY] format, return as-is with GET method
+    ("GET".to_string(), s.to_string(), None)
+}
+
+/// Parse a target string that may be in "METHOD URL [BODY]" format or a plain URL.
+/// This is a wrapper around parse_target that handles the METHOD URL [BODY] format.
+pub fn parse_target_with_method(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
+    let (method, url_str, body) = parse_method_url_body(s);
+    let mut target = parse_target(&url_str)?;
+    target.method = method;
+    target.data = body;
+    Ok(target)
+}
+
 /// Detect if the provided text looks like a raw HTTP request (starts with METHOD SP URI SP HTTP/x.y)
 pub fn is_raw_http_request(s: &str) -> bool {
     let first = s.lines().next().unwrap_or("").trim_start();
@@ -275,6 +310,94 @@ mod tests {
     #[test]
     fn test_parse_target_invalid_scheme() {
         assert!(parse_target("://example.com").is_err());
+    }
+
+    #[test]
+    fn test_parse_method_url_body_post_with_body() {
+        let (method, url, body) = parse_method_url_body("POST https://example.com/test a=b");
+        assert_eq!(method, "POST");
+        assert_eq!(url, "https://example.com/test");
+        assert_eq!(body, Some("a=b".to_string()));
+    }
+
+    #[test]
+    fn test_parse_method_url_body_get_without_body() {
+        let (method, url, body) = parse_method_url_body("GET https://example.com/path");
+        assert_eq!(method, "GET");
+        assert_eq!(url, "https://example.com/path");
+        assert_eq!(body, None);
+    }
+
+    #[test]
+    fn test_parse_method_url_body_put_with_json() {
+        let (method, url, body) = parse_method_url_body("PUT https://api.example.com {\"key\":\"value\"}");
+        assert_eq!(method, "PUT");
+        assert_eq!(url, "https://api.example.com");
+        assert_eq!(body, Some("{\"key\":\"value\"}".to_string()));
+    }
+
+    #[test]
+    fn test_parse_method_url_body_plain_url() {
+        let (method, url, body) = parse_method_url_body("https://example.com");
+        assert_eq!(method, "GET");
+        assert_eq!(url, "https://example.com");
+        assert_eq!(body, None);
+    }
+
+    #[test]
+    fn test_parse_method_url_body_lowercase_method() {
+        let (method, url, body) = parse_method_url_body("post https://example.com data=test");
+        assert_eq!(method, "POST");
+        assert_eq!(url, "https://example.com");
+        assert_eq!(body, Some("data=test".to_string()));
+    }
+
+    #[test]
+    fn test_parse_method_url_body_delete() {
+        let (method, url, body) = parse_method_url_body("DELETE https://api.example.com/resource/123");
+        assert_eq!(method, "DELETE");
+        assert_eq!(url, "https://api.example.com/resource/123");
+        assert_eq!(body, None);
+    }
+
+    #[test]
+    fn test_parse_method_url_body_options() {
+        let (method, url, body) = parse_method_url_body("OPTIONS https://example.com/api");
+        assert_eq!(method, "OPTIONS");
+        assert_eq!(url, "https://example.com/api");
+        assert_eq!(body, None);
+    }
+
+    #[test]
+    fn test_parse_target_with_method_post() {
+        let target = parse_target_with_method("POST https://www.hahwul.com/post-test a=b").unwrap();
+        assert_eq!(target.method, "POST");
+        assert_eq!(target.url.as_str(), "https://www.hahwul.com/post-test");
+        assert_eq!(target.data, Some("a=b".to_string()));
+    }
+
+    #[test]
+    fn test_parse_target_with_method_get() {
+        let target = parse_target_with_method("GET https://example.com/path").unwrap();
+        assert_eq!(target.method, "GET");
+        assert_eq!(target.url.as_str(), "https://example.com/path");
+        assert_eq!(target.data, None);
+    }
+
+    #[test]
+    fn test_parse_target_with_method_plain_url() {
+        let target = parse_target_with_method("https://example.com").unwrap();
+        assert_eq!(target.method, "GET");
+        assert_eq!(target.url.as_str(), "https://example.com/");
+        assert_eq!(target.data, None);
+    }
+
+    #[test]
+    fn test_parse_target_with_method_body_with_spaces() {
+        let target = parse_target_with_method("POST https://example.com/api name=John Doe").unwrap();
+        assert_eq!(target.method, "POST");
+        assert_eq!(target.url.as_str(), "https://example.com/api");
+        assert_eq!(target.data, Some("name=John Doe".to_string()));
     }
 }
 

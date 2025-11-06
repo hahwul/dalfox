@@ -846,9 +846,12 @@ pub async fn run_scan(args: &ScanArgs) {
                 }
             }
         } else {
-            match parse_target(&s) {
+            match crate::target_parser::parse_target_with_method(&s) {
                 Ok(mut target) => {
-                    target.data = args.data.clone();
+                    // Only override data if explicitly provided via CLI
+                    if let Some(d) = &args.data {
+                        target.data = Some(d.clone());
+                    }
                     target.headers = args
                         .headers
                         .iter()
@@ -862,7 +865,10 @@ pub async fn run_scan(args: &ScanArgs) {
                             Some((name.to_string(), value.to_string()))
                         })
                         .collect();
-                    target.method = args.method.clone();
+                    // Only override method if explicitly provided via CLI (not default "GET")
+                    if args.method != "GET" {
+                        target.method = args.method.clone();
+                    }
                     if let Some(ua) = &args.user_agent {
                         target.headers.push(("User-Agent".to_string(), ua.clone()));
                         target.user_agent = Some(ua.clone());
