@@ -69,9 +69,9 @@ pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
 /// If the string doesn't start with a known HTTP method, it returns ("GET", original_string, None).
 pub fn parse_method_url_body(s: &str) -> (String, String, Option<String>) {
     const METHODS: [&str; 7] = ["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH"];
-    
+
     let parts: Vec<&str> = s.splitn(3, ' ').collect();
-    
+
     if parts.len() >= 2 {
         let potential_method = parts[0].to_uppercase();
         if METHODS.iter().any(|m| m.eq(&potential_method)) {
@@ -84,7 +84,7 @@ pub fn parse_method_url_body(s: &str) -> (String, String, Option<String>) {
             return (potential_method, url, body);
         }
     }
-    
+
     // Not in METHOD URL [BODY] format, return as-is with GET method
     ("GET".to_string(), s.to_string(), None)
 }
@@ -330,7 +330,8 @@ mod tests {
 
     #[test]
     fn test_parse_method_url_body_put_with_json() {
-        let (method, url, body) = parse_method_url_body("PUT https://api.example.com {\"key\":\"value\"}");
+        let (method, url, body) =
+            parse_method_url_body("PUT https://api.example.com {\"key\":\"value\"}");
         assert_eq!(method, "PUT");
         assert_eq!(url, "https://api.example.com");
         assert_eq!(body, Some("{\"key\":\"value\"}".to_string()));
@@ -354,7 +355,8 @@ mod tests {
 
     #[test]
     fn test_parse_method_url_body_delete() {
-        let (method, url, body) = parse_method_url_body("DELETE https://api.example.com/resource/123");
+        let (method, url, body) =
+            parse_method_url_body("DELETE https://api.example.com/resource/123");
         assert_eq!(method, "DELETE");
         assert_eq!(url, "https://api.example.com/resource/123");
         assert_eq!(body, None);
@@ -394,7 +396,8 @@ mod tests {
 
     #[test]
     fn test_parse_target_with_method_body_with_spaces() {
-        let target = parse_target_with_method("POST https://example.com/api name=John Doe").unwrap();
+        let target =
+            parse_target_with_method("POST https://example.com/api name=John Doe").unwrap();
         assert_eq!(target.method, "POST");
         assert_eq!(target.url.as_str(), "https://example.com/api");
         assert_eq!(target.data, Some("name=John Doe".to_string()));
