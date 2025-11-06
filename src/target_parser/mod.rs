@@ -70,17 +70,17 @@ pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
 pub fn parse_method_url_body(s: &str) -> (String, String, Option<String>) {
     const METHODS: [&str; 7] = ["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH"];
 
+    // Use splitn(3, ' ') to preserve spaces in the body portion (e.g., "POST url name=John Doe")
     let parts: Vec<&str> = s.splitn(3, ' ').collect();
 
     if parts.len() >= 2 {
         let potential_method = parts[0].to_uppercase();
         if METHODS.iter().any(|m| m.eq(&potential_method)) {
             let url = parts[1].to_string();
-            let body = if parts.len() >= 3 && !parts[2].is_empty() {
-                Some(parts[2].to_string())
-            } else {
-                None
-            };
+            let body = parts
+                .get(2)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string());
             return (potential_method, url, body);
         }
     }

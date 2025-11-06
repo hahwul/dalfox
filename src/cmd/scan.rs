@@ -30,6 +30,8 @@ pub const DEFAULT_DELAY_MS: u64 = 0;
 pub const DEFAULT_WORKERS: usize = 50;
 pub const DEFAULT_MAX_CONCURRENT_TARGETS: usize = 50;
 pub const DEFAULT_MAX_TARGETS_PER_HOST: usize = 100;
+// Default HTTP method (used by CLI and target parsing)
+pub const DEFAULT_METHOD: &str = "GET";
 
 static GLOBAL_ENCODERS: OnceLock<Vec<String>> = OnceLock::new();
 
@@ -441,7 +443,7 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "TARGETS")]
     /// Override the HTTP method. Example: -X 'PUT' (default "GET")
-    #[arg(short = 'X', long, default_value = "GET")]
+    #[arg(short = 'X', long, default_value = DEFAULT_METHOD)]
     pub method: String,
 
     #[clap(help_heading = "TARGETS")]
@@ -865,8 +867,8 @@ pub async fn run_scan(args: &ScanArgs) {
                             Some((name.to_string(), value.to_string()))
                         })
                         .collect();
-                    // Only override method if explicitly provided via CLI (not default "GET")
-                    if args.method != "GET" {
+                    // Only override method if explicitly provided via CLI (not the default)
+                    if args.method != DEFAULT_METHOD {
                         target.method = args.method.clone();
                     }
                     if let Some(ua) = &args.user_agent {
