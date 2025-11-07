@@ -3,3 +3,4 @@ https://www.hahwul.com
 https://www.hahwul.com/about/
 https://xss-game.appspot.com/level1/frame?query=1
 http://testphp.vulnweb.com/search.php?test=query
+POST https://www.hahwul.com/post-test a=b
