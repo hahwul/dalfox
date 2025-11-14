@@ -8,7 +8,6 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Terminal,
 };
@@ -299,7 +298,7 @@ async fn execute_scan(target: String, state: &ConsoleState) -> Vec<String> {
     results.push(format!("Starting scan of: {}", target));
     
     // Build scan arguments from console state
-    let scan_args = crate::cmd::scan::ScanArgs {
+    let _scan_args = crate::cmd::scan::ScanArgs {
         input_type: "auto".to_string(),
         format: "plain".to_string(),
         targets: vec![target.clone()],
@@ -436,45 +435,45 @@ pub async fn run_console(_args: ConsoleArgs) {
         drop(current_state);
 
         // Handle input
-        if event::poll(std::time::Duration::from_millis(100)).expect("Failed to poll events") {
-            if let Event::Key(key) = event::read().expect("Failed to read event") {
-                let mut state_mut = state.lock().await;
-                
-                match key.code {
-                    KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
-                        break;
-                    }
-                    KeyCode::Enter => {
-                        let input = state_mut.current_input.clone();
-                        state_mut.command_history.push(input.clone());
-                        state_mut.current_input.clear();
-                        
-                        match parse_command(&input, &mut state_mut) {
-                            CommandResult::Exit => break,
-                            CommandResult::Scan(target) => {
-                                // Clone the state for the async scan
-                                let scan_state = state_mut.clone();
-                                drop(state_mut);
-                                
-                                // Execute scan asynchronously
-                                let scan_results = execute_scan(target, &scan_state).await;
-                                
-                                // Update state with results
-                                let mut state_mut = state.lock().await;
-                                state_mut.scan_results.extend(scan_results);
-                                state_mut.status_message = "Scan completed".to_string();
-                            }
-                            CommandResult::Continue => {}
-                        }
-                    }
-                    KeyCode::Char(c) => {
-                        state_mut.current_input.push(c);
-                    }
-                    KeyCode::Backspace => {
-                        state_mut.current_input.pop();
-                    }
-                    _ => {}
+        if event::poll(std::time::Duration::from_millis(100)).expect("Failed to poll events")
+            && let Event::Key(key) = event::read().expect("Failed to read event")
+        {
+            let mut state_mut = state.lock().await;
+            
+            match key.code {
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => {
+                    break;
                 }
+                KeyCode::Enter => {
+                    let input = state_mut.current_input.clone();
+                    state_mut.command_history.push(input.clone());
+                    state_mut.current_input.clear();
+                    
+                    match parse_command(&input, &mut state_mut) {
+                        CommandResult::Exit => break,
+                        CommandResult::Scan(target) => {
+                            // Clone the state for the async scan
+                            let scan_state = state_mut.clone();
+                            drop(state_mut);
+                            
+                            // Execute scan asynchronously
+                            let scan_results = execute_scan(target, &scan_state).await;
+                            
+                            // Update state with results
+                            let mut state_mut = state.lock().await;
+                            state_mut.scan_results.extend(scan_results);
+                            state_mut.status_message = "Scan completed".to_string();
+                        }
+                        CommandResult::Continue => {}
+                    }
+                }
+                KeyCode::Char(c) => {
+                    state_mut.current_input.push(c);
+                }
+                KeyCode::Backspace => {
+                    state_mut.current_input.pop();
+                }
+                _ => {}
             }
         }
     }
