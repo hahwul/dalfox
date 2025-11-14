@@ -1,3 +1,4 @@
+pub mod console;
 pub mod file;
 pub mod payload;
 pub mod pipe;
