@@ -13,13 +13,12 @@ Dalfox is a powerful open-source tool that focuses on automation, making it idea
 
 ## Key features
 
-* Modes: `URL`, `SXSS`, `Pipe`, `File`, `Server`, `Payload`, `Console`
+* Modes: `URL`, `SXSS`, `Pipe`, `File`, `Server`, `Payload`
 * Discovery: Parameter analysis, static analysis, BAV testing, parameter mining
 * XSS Scanning: Reflected, Stored, DOM-based, with optimization and DOM/headless verification
 * HTTP Options: Custom headers, cookies, methods, proxy, and more
 * Output: JSON/Plain formats, silence mode, detailed reports
 * Extensibility: REST API, custom payloads, remote wordlists
-* Interactive TUI: Console mode for easy configuration and testing
 
 And the various options required for the testing :D
 
@@ -55,29 +54,8 @@ dalfox [mode] [target] [flags]
 * Single URL: `dalfox url http://example.com -b https://callback`
 * File Mode: `dalfox file urls.txt --custom-payload mypayloads.txt`
 * Pipeline: `cat urls.txt | dalfox pipe -H "AuthToken: xxx"`
-* Interactive Console: `dalfox console` - TUI mode for easier configuration and testing
 
 Check the [Usage](https://dalfox.hahwul.com/page/usage/) and [Running](https://dalfox.hahwul.com/page/running/) documents for more examples.
-
-### Console Mode
-
-The interactive console provides a TUI (Terminal User Interface) for easier scanning:
-
-```bash
-dalfox console
-```
-
-Available commands:
-- `scan <url>` - Scan a target with current configuration
-- `header add <key:value>` - Add HTTP headers
-- `cookie add <name=value>` - Add cookies
-- `set method <method>` - Set HTTP method
-- `set timeout <seconds>` - Set timeout
-- `show config` - Display current settings
-- `help` - Show all commands
-- `exit` - Exit console
-
-The console mode maintains your configuration across multiple scans, making it perfect for interactive testing sessions.
 
 ## Contributing
 if you want to contribute to this project, please see [CONTRIBUTING.md](https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md) and Pull-Request with cool your contents.

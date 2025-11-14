@@ -26,5 +26,3 @@ regex = "1"
 atty = "0.2"
 rmcp = { version = "0.8.0", features = ["server", "macros"] }
 schemars = { version = "0.8", features = ["derive"] }
-ratatui = "0.29"
-crossterm = "0.28"

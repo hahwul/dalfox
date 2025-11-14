@@ -54,8 +54,6 @@ enum Commands {
     Payload(cmd::payload::PayloadArgs),
     /// Run MCP stdio server (Model Context Protocol) exposing Dalfox tools
     Mcp,
-    /// Run interactive console mode with TUI
-    Console(cmd::console::ConsoleArgs),
 
     #[clap(hide = true)]
     Url(cmd::url::UrlArgs),
@@ -77,9 +75,9 @@ async fn main() {
     let cli = Cli::parse();
     // Set global debug toggle for downstream modules
     crate::DEBUG.store(cli.debug, std::sync::atomic::Ordering::Relaxed);
-    // Skip banner for MCP and Console subcommands to keep stdout clean
-    let skip_banner = matches!(cli.command, Some(Commands::Mcp) | Some(Commands::Console(_)));
-    if !skip_banner {
+    // Skip banner for MCP subcommand to keep stdout clean for JSON-RPC
+    let is_mcp = matches!(cli.command, Some(Commands::Mcp));
+    if !is_mcp {
         crate::utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
     }
 
@@ -191,7 +189,6 @@ async fn main() {
                     eprintln!("MCP server error: {e}");
                 }
             }
-            Commands::Console(args) => cmd::console::run_console(args).await,
 
             Commands::Url(args) => cmd::url::run_url(args).await,
             Commands::File(args) => cmd::file::run_file(args).await,
