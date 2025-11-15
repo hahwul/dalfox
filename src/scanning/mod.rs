@@ -323,8 +323,8 @@ pub async fn run_scanning(
                                 &js_code,
                                 target_clone.url.as_str(),
                             );
-                            for finding in findings {
-                                // Create an AST-based DOM XSS result
+                            for (vuln, payload, description) in findings {
+                                // Create an AST-based DOM XSS result with actual executable payload
                                 let result_url = crate::scanning::url_inject::build_injected_url(
                                     &target_clone.url,
                                     &param_clone,
@@ -336,12 +336,14 @@ pub async fn run_scanning(
                                     target_clone.method.clone(),
                                     result_url.clone(),
                                     param_clone.name.clone(),
-                                    finding.clone(), // The finding description as payload
-                                    format!("AST-based DOM XSS vulnerability detected"),
+                                    payload, // Actual XSS payload
+                                    format!("{}:{}:{} - {} (Source: {}, Sink: {})",
+                                        target_clone.url.as_str(), vuln.line, vuln.column,
+                                        description, vuln.source, vuln.sink),
                                     "CWE-79".to_string(),
                                     "High".to_string(),
                                     0,
-                                    finding,
+                                    description,
                                 );
                                 ast_result.request = Some(build_request_text(
                                     &target_clone,

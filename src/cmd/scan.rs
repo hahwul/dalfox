@@ -1146,20 +1146,22 @@ pub async fn run_scan(args: &ScanArgs) {
                                 &js_code,
                                 target.url.as_str(),
                             );
-                            for finding in findings {
-                                // Create an AST-based DOM XSS result
+                            for (vuln, payload, description) in findings {
+                                // Create an AST-based DOM XSS result with actual executable payload
                                 let ast_result = crate::scanning::result::Result::new(
                                     "A".to_string(), // AST-detected
                                     "DOM-XSS".to_string(),
                                     target.method.clone(),
                                     target.url.to_string(),
                                     "-".to_string(), // No specific parameter
-                                    finding.clone(),
-                                    "AST-based static DOM XSS analysis".to_string(),
+                                    payload, // Actual XSS payload
+                                    format!("{}:{}:{} - {} (Source: {}, Sink: {})",
+                                        target.url.as_str(), vuln.line, vuln.column, 
+                                        description, vuln.source, vuln.sink),
                                     "CWE-79".to_string(),
                                     "High".to_string(),
                                     0,
-                                    finding,
+                                    description,
                                 );
                                 // Add to shared results
                                 results_clone.lock().await.push(ast_result);

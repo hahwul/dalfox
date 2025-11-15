@@ -398,7 +398,29 @@ impl<'a> DomXssVisitor<'a> {
                                 let source = self.extract_source_from_expr(&member.object);
                                 (source.is_some(), source)
                             } else {
-                                (false, None)
+                                // Check if any argument to the call is tainted
+                                // e.g., decodeURI(location.hash)
+                                let mut found_source = None;
+                                for arg in &call_arg.arguments {
+                                    match arg {
+                                        Argument::StaticMemberExpression(member) => {
+                                            if let Some(member_str) = self.get_member_string(member) {
+                                                if self.sources.contains(&member_str) {
+                                                    found_source = Some(member_str);
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        Argument::Identifier(id) => {
+                                            if self.tainted_vars.contains(id.name.as_str()) {
+                                                found_source = self.var_aliases.get(id.name.as_str()).cloned();
+                                                break;
+                                            }
+                                        }
+                                        _ => {}
+                                    }
+                                }
+                                (found_source.is_some(), found_source)
                             }
                         }
                         Argument::SpreadElement(spread) => {
@@ -637,6 +659,31 @@ document.body.innerHTML = html;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(js).unwrap();
         assert!(!result.is_empty(), "Should detect location.hash passed to document.write");
+        assert_eq!(result[0].sink, "document.write");
+    }
+
+    #[test]
+    fn test_decode_uri_with_source() {
+        // Test for decodeURI(location.hash) - decodeURI is NOT a sanitizer
+        let js = r#"document.write(decodeURI(location.hash))"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(js).unwrap();
+        assert!(!result.is_empty(), "Should detect decodeURI(location.hash) as vulnerable");
+        assert_eq!(result[0].sink, "document.write");
+        assert!(result[0].source.contains("location.hash"));
+    }
+
+    #[test]
+    fn test_decode_uri_component_with_variable() {
+        // Test for variable with decodeURIComponent
+        let js = r#"
+let hash = location.hash;
+let decoded = decodeURIComponent(hash);
+document.write(decoded);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(js).unwrap();
+        assert!(!result.is_empty(), "Should detect decodeURIComponent propagating taint");
         assert_eq!(result[0].sink, "document.write");
     }
 }

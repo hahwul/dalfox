@@ -20,22 +20,47 @@ pub fn extract_javascript_from_html(html: &str) -> Vec<String> {
     js_code
 }
 
+/// Generate an executable POC payload based on the source and sink
+/// Returns (payload, description)
+pub fn generate_dom_xss_poc(source: &str, sink: &str) -> (String, String) {
+    // Generate payload based on the source type
+    let payload = if source.contains("location.hash") {
+        // Hash-based XSS - use fragment identifier
+        "#<img src=x onerror=alert(1)>".to_string()
+    } else if source.contains("location.search") {
+        // Query-based XSS
+        "xss=<img src=x onerror=alert(1)>".to_string()
+    } else if source.contains("location.href") || source.contains("document.URL") {
+        // URL-based - could be anywhere
+        "#<img src=x onerror=alert(1)>".to_string()
+    } else {
+        // Generic payload for other sources
+        "<img src=x onerror=alert(1)>".to_string()
+    };
+    
+    let description = format!(
+        "DOM-based XSS via {} to {}", 
+        source, 
+        sink
+    );
+    
+    (payload, description)
+}
+
 /// Analyze JavaScript code for DOM XSS vulnerabilities using AST analysis
-/// Returns a list of vulnerability descriptions
+/// Returns a list of (vulnerability, payload, description) tuples
 pub fn analyze_javascript_for_dom_xss(
     js_code: &str,
-    url: &str,
-) -> Vec<String> {
+    _url: &str,
+) -> Vec<(crate::scanning::ast_dom_analysis::DomXssVulnerability, String, String)> {
     let analyzer = crate::scanning::ast_dom_analysis::AstDomAnalyzer::new();
     
     match analyzer.analyze(js_code) {
         Ok(vulnerabilities) => {
             let mut findings = Vec::new();
             for vuln in vulnerabilities {
-                findings.push(format!(
-                    "DOM XSS at {}:{}:{} - {} (Source: {}, Sink: {})",
-                    url, vuln.line, vuln.column, vuln.description, vuln.source, vuln.sink
-                ));
+                let (payload, description) = generate_dom_xss_poc(&vuln.source, &vuln.sink);
+                findings.push((vuln, payload, description));
             }
             findings
         }
@@ -80,7 +105,9 @@ document.getElementById('x').innerHTML = param;
 "#;
         let findings = analyze_javascript_for_dom_xss(js, "https://example.com");
         assert!(!findings.is_empty());
-        assert!(findings[0].contains("DOM XSS"));
-        assert!(findings[0].contains("innerHTML"));
+        let (vuln, payload, description) = &findings[0];
+        assert!(description.contains("DOM-based XSS"));
+        assert!(description.contains("innerHTML"));
+        assert!(payload.contains("alert"));
     }
 }
