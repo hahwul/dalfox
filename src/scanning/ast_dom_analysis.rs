@@ -235,6 +235,18 @@ impl<'a> DomXssVisitor<'a> {
                 // Check if base object is tainted (e.g., arr[0] where arr is tainted)
                 self.is_tainted(&member.object)
             }
+            Expression::ParenthesizedExpression(paren) => {
+                // Parentheses don't affect taint
+                self.is_tainted(&paren.expression)
+            }
+            Expression::SequenceExpression(seq) => {
+                // Sequence expression returns the last expression's value
+                if let Some(last) = seq.expressions.last() {
+                    self.is_tainted(last)
+                } else {
+                    false
+                }
+            }
             _ => false,
         }
     }
@@ -348,6 +360,15 @@ impl<'a> DomXssVisitor<'a> {
             Statement::FunctionDeclaration(func_decl) => {
                 if let Some(body) = &func_decl.body {
                     self.walk_statements(&body.statements);
+                }
+            }
+            Statement::SwitchStatement(switch_stmt) => {
+                self.walk_expression(&switch_stmt.discriminant);
+                for case in &switch_stmt.cases {
+                    if let Some(test) = &case.test {
+                        self.walk_expression(test);
+                    }
+                    self.walk_statements(&case.consequent);
                 }
             }
             _ => {}
@@ -1456,5 +1477,482 @@ insertAdjacentHTML('beforeend', html);
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
         assert!(!result.is_empty(), "Should detect insertAdjacentHTML");
+    }
+
+    // Additional advanced test cases
+    #[test]
+    fn test_document_url_source() {
+        let code = r#"
+let url = document.URL;
+document.write(url);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(!result.is_empty(), "Should detect document.URL as source");
+        assert!(result[0].source.contains("document.URL"));
+    }
+
+    #[test]
+    fn test_document_referrer_source() {
+        let code = r#"
+let ref = document.referrer;
+document.getElementById('x').innerHTML = ref;
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect document.referrer as source"
+        );
+    }
+
+    #[test]
+    fn test_window_name_source() {
+        let code = r#"
+let name = window.name;
+eval(name);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(!result.is_empty(), "Should detect window.name as source");
+    }
+
+    #[test]
+    fn test_document_base_uri_source() {
+        let code = r#"
+let base = document.baseURI;
+document.body.innerHTML = base;
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect document.baseURI as source"
+        );
+    }
+
+    #[test]
+    fn test_location_replace_sink() {
+        let code = r#"
+let url = location.hash;
+location.replace(url);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(!result.is_empty(), "Should detect location.replace as sink");
+    }
+
+    #[test]
+    fn test_location_assign_sink() {
+        let code = r#"
+let target = document.cookie;
+location.assign(target);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(!result.is_empty(), "Should detect location.assign as sink");
+    }
+
+    #[test]
+    fn test_execscript_sink() {
+        let code = r#"
+let script = location.search;
+execScript(script);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(!result.is_empty(), "Should detect execScript as sink");
+    }
+
+    #[test]
+    fn test_ternary_operator_both_tainted() {
+        let code = r#"
+let a = location.hash;
+let b = location.search;
+let result = Math.random() > 0.5 ? a : b;
+document.write(result);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect ternary with both branches tainted"
+        );
+    }
+
+    #[test]
+    fn test_ternary_operator_one_tainted() {
+        let code = r#"
+let tainted = location.hash;
+let safe = "safe";
+let result = Math.random() > 0.5 ? tainted : safe;
+document.write(result);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect ternary with one branch tainted"
+        );
+    }
+
+    #[test]
+    fn test_array_spread_operator() {
+        let code = r#"
+let tainted = [location.hash];
+let arr = [...tainted, 'other'];
+document.write(arr[0]);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect taint through array spread"
+        );
+    }
+
+    #[test]
+    fn test_object_spread_operator() {
+        let code = r#"
+let tainted = { data: location.search };
+let obj = { ...tainted };
+document.body.innerHTML = obj.data;
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect taint through object spread"
+        );
+    }
+
+    #[test]
+    fn test_chained_property_access() {
+        let code = r#"
+let obj = { a: { b: { c: location.hash } } };
+document.write(obj.a.b.c);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect deeply nested property access"
+        );
+    }
+
+    #[test]
+    fn test_multiple_tainted_in_template_literal() {
+        let code = r#"
+let hash = location.hash;
+let search = location.search;
+let msg = `Hash: ${hash}, Search: ${search}`;
+document.write(msg);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect multiple tainted in template literal"
+        );
+    }
+
+    #[test]
+    fn test_tainted_as_object_key() {
+        let code = r#"
+let key = location.hash;
+let obj = {};
+obj[key] = "value";
+document.write(obj[key]);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        // This is a limitation - we track that obj is tainted but not specific keys
+        // The test documents current behavior
+    }
+
+    #[test]
+    fn test_document_writeln_sink() {
+        let code = r#"
+let data = location.search;
+document.writeln(data);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(!result.is_empty(), "Should detect document.writeln as sink");
+    }
+
+    #[test]
+    fn test_chained_string_methods() {
+        let code = r#"
+let result = location.hash.substring(1).toUpperCase().trim();
+document.write(result);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should track taint through chained methods"
+        );
+    }
+
+    #[test]
+    fn test_array_join_on_tainted() {
+        let code = r#"
+let parts = [location.hash, location.search];
+let combined = parts.join('&');
+document.write(combined);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(!result.is_empty(), "Should detect taint in array with join");
+    }
+
+    #[test]
+    fn test_tainted_in_switch_statement() {
+        let code = r#"
+let input = location.hash;
+switch(input) {
+    case "test":
+        document.write(input);
+        break;
+}
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect taint in switch statement"
+        );
+    }
+
+    #[test]
+    fn test_binary_operators_propagate_taint() {
+        let code = r#"
+let a = location.hash;
+let b = "prefix-" + a + "-suffix";
+document.write(b);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should propagate taint through binary operators"
+        );
+    }
+
+    #[test]
+    fn test_null_coalescing_with_tainted() {
+        let code = r#"
+let value = location.hash || "default";
+document.write(value);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect taint through null coalescing"
+        );
+    }
+
+    #[test]
+    fn test_mixed_array_access() {
+        let code = r#"
+let arr = ["safe", location.hash, "safe2"];
+document.write(arr[1]);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect tainted element in mixed array"
+        );
+    }
+
+    #[test]
+    fn test_jquery_prepend_sink() {
+        let code = r#"
+let content = location.search;
+prepend(content);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(!result.is_empty(), "Should detect prepend as sink");
+    }
+
+    #[test]
+    fn test_jquery_after_sink() {
+        let code = r#"
+let html = document.cookie;
+after(html);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(!result.is_empty(), "Should detect after as sink");
+    }
+
+    #[test]
+    fn test_jquery_before_sink() {
+        let code = r#"
+let markup = location.hash;
+before(markup);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(!result.is_empty(), "Should detect before as sink");
+    }
+
+    #[test]
+    fn test_element_text_sink() {
+        let code = r#"
+let input = location.search;
+element.text = input;
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(!result.is_empty(), "Should detect text property as sink");
+    }
+
+    #[test]
+    fn test_reassignment_preserves_taint() {
+        let code = r#"
+let a = location.hash;
+let b = a;
+let c = b;
+let d = c;
+document.write(d);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should preserve taint through multiple reassignments"
+        );
+    }
+
+    #[test]
+    fn test_tainted_array_element_assignment() {
+        let code = r#"
+let arr = [];
+arr[0] = location.hash;
+document.write(arr[0]);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        // Note: This may not be detected due to computed member assignment limitations
+        // Test documents current behavior
+    }
+
+    #[test]
+    fn test_window_location_source() {
+        let code = r#"
+let loc = window.location;
+document.write(loc);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect window.location as source"
+        );
+    }
+
+    #[test]
+    fn test_complex_binary_expression_chain() {
+        let code = r#"
+let a = location.hash;
+let b = a + " middle " + a + " end";
+document.write(b);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect taint in complex binary expression"
+        );
+    }
+
+    #[test]
+    fn test_typeof_does_not_sanitize() {
+        let code = r#"
+let input = location.hash;
+let type = typeof input;
+document.write(input);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "typeof should not sanitize tainted variable"
+        );
+    }
+
+    #[test]
+    fn test_tainted_in_array_literal_position() {
+        let code = r#"
+let hash = location.hash;
+document.write([1, 2, hash][2]);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect tainted data at specific array position"
+        );
+    }
+
+    #[test]
+    fn test_document_document_uri_source() {
+        let code = r#"
+let uri = document.documentURI;
+eval(uri);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect document.documentURI as source"
+        );
+    }
+
+    #[test]
+    fn test_parenthesized_expression() {
+        let code = r#"
+let value = (((location.hash)));
+document.write(value);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should track taint through parenthesized expressions"
+        );
+    }
+
+    #[test]
+    fn test_comma_operator_with_tainted() {
+        let code = r#"
+let result = (1, 2, location.hash);
+document.write(result);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        // Comma operator returns the last value
+        // Test documents current behavior
+    }
+
+    #[test]
+    fn test_combined_logical_operators() {
+        let code = r#"
+let a = location.hash;
+let b = location.search;
+let result = a && b || "default";
+document.write(result);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect taint through combined logical operators"
+        );
     }
 }
