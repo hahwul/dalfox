@@ -4,9 +4,9 @@ use scraper::{Html, Selector};
 /// Looks for <script> tags and inline event handlers
 pub fn extract_javascript_from_html(html: &str) -> Vec<String> {
     let mut js_code = Vec::new();
-    
+
     let document = Html::parse_document(html);
-    
+
     // Extract from <script> tags
     if let Ok(selector) = Selector::parse("script") {
         for element in document.select(&selector) {
@@ -16,7 +16,7 @@ pub fn extract_javascript_from_html(html: &str) -> Vec<String> {
             }
         }
     }
-    
+
     js_code
 }
 
@@ -37,13 +37,9 @@ pub fn generate_dom_xss_poc(source: &str, sink: &str) -> (String, String) {
         // Generic payload for other sources
         "<img src=x onerror=alert(1)>".to_string()
     };
-    
-    let description = format!(
-        "DOM-based XSS via {} to {}", 
-        source, 
-        sink
-    );
-    
+
+    let description = format!("DOM-based XSS via {} to {}", source, sink);
+
     (payload, description)
 }
 
@@ -52,9 +48,13 @@ pub fn generate_dom_xss_poc(source: &str, sink: &str) -> (String, String) {
 pub fn analyze_javascript_for_dom_xss(
     js_code: &str,
     _url: &str,
-) -> Vec<(crate::scanning::ast_dom_analysis::DomXssVulnerability, String, String)> {
+) -> Vec<(
+    crate::scanning::ast_dom_analysis::DomXssVulnerability,
+    String,
+    String,
+)> {
     let analyzer = crate::scanning::ast_dom_analysis::AstDomAnalyzer::new();
-    
+
     match analyzer.analyze(js_code) {
         Ok(vulnerabilities) => {
             let mut findings = Vec::new();

@@ -313,16 +313,20 @@ pub async fn run_scanning(
                 };
                 let reflected = reflection_tuple.0;
                 let reflection_response_text = reflection_tuple.1;
-                
+
                 // AST-based DOM XSS analysis (enabled by default unless skipped)
                 if !args_clone.skip_ast_analysis {
                     if let Some(ref response_text) = reflection_response_text {
-                        let js_blocks = crate::scanning::ast_integration::extract_javascript_from_html(response_text);
-                        for js_code in js_blocks {
-                            let findings = crate::scanning::ast_integration::analyze_javascript_for_dom_xss(
-                                &js_code,
-                                target_clone.url.as_str(),
+                        let js_blocks =
+                            crate::scanning::ast_integration::extract_javascript_from_html(
+                                response_text,
                             );
+                        for js_code in js_blocks {
+                            let findings =
+                                crate::scanning::ast_integration::analyze_javascript_for_dom_xss(
+                                    &js_code,
+                                    target_clone.url.as_str(),
+                                );
                             for (vuln, payload, description) in findings {
                                 // Create an AST-based DOM XSS result with actual executable payload
                                 let result_url = crate::scanning::url_inject::build_injected_url(
@@ -337,9 +341,15 @@ pub async fn run_scanning(
                                     result_url.clone(),
                                     param_clone.name.clone(),
                                     payload, // Actual XSS payload
-                                    format!("{}:{}:{} - {} (Source: {}, Sink: {})",
-                                        target_clone.url.as_str(), vuln.line, vuln.column,
-                                        description, vuln.source, vuln.sink),
+                                    format!(
+                                        "{}:{}:{} - {} (Source: {}, Sink: {})",
+                                        target_clone.url.as_str(),
+                                        vuln.line,
+                                        vuln.column,
+                                        description,
+                                        vuln.source,
+                                        vuln.sink
+                                    ),
                                     "CWE-79".to_string(),
                                     "High".to_string(),
                                     0,
@@ -356,7 +366,7 @@ pub async fn run_scanning(
                         }
                     }
                 }
-                
+
                 if let Some(ref pb) = pb_clone {
                     pb.inc(1);
                 }
