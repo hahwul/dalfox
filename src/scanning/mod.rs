@@ -1,3 +1,4 @@
+pub mod ast_dom_analysis;
 pub mod check_dom_verification;
 pub mod check_reflection;
 pub mod result;
@@ -52,7 +53,7 @@ fn get_dom_payloads(
         // Known non-JS contexts: use locally generated payloads only (exclude remote) to avoid large cross-product
         Some(ctx) => {
             // Use locally generated payloads only (no remote) to avoid large cross-product in DOM verification
-            let mut base_payloads = crate::scanning::xss_common::generate_dynamic_payloads(ctx);
+            let base_payloads = crate::scanning::xss_common::generate_dynamic_payloads(ctx);
             // Expand with shared encoder policy helper
             let out = crate::encoding::apply_encoders_to_payloads(&base_payloads, &args.encoders);
             Ok(out)
