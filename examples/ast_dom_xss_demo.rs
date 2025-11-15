@@ -69,9 +69,9 @@ impl<'a> DomXssVisitor<'a> {
         let property = member.property.name.as_str();
         match &member.object {
             Expression::Identifier(id) => Some(format!("{}.{}", id.name.as_str(), property)),
-            Expression::StaticMemberExpression(inner) => {
-                self.get_member_string(inner).map(|obj| format!("{}.{}", obj, property))
-            }
+            Expression::StaticMemberExpression(inner) => self
+                .get_member_string(inner)
+                .map(|obj| format!("{}.{}", obj, property)),
             _ => None,
         }
     }
@@ -157,7 +157,8 @@ impl<'a> DomXssVisitor<'a> {
                 if let Some(source_expr) = self.get_expr_string(init) {
                     if self.sources.contains(&source_expr) {
                         self.tainted_vars.insert(var_name.to_string());
-                        self.var_aliases.insert(var_name.to_string(), source_expr.clone());
+                        self.var_aliases
+                            .insert(var_name.to_string(), source_expr.clone());
                     }
                 }
                 if self.is_tainted(init) {
@@ -201,7 +202,9 @@ impl<'a> DomXssVisitor<'a> {
             if self.sinks.contains(&func_name) {
                 for arg in &call.arguments {
                     match arg {
-                        Argument::Identifier(id) if self.tainted_vars.contains(id.name.as_str()) => {
+                        Argument::Identifier(id)
+                            if self.tainted_vars.contains(id.name.as_str()) =>
+                        {
                             self.report_vulnerability(
                                 call.span(),
                                 &func_name,
@@ -273,13 +276,23 @@ document.getElementById('bar').innerHTML = safeData;
     if visitor.vulnerabilities.is_empty() {
         println!("✓ No DOM XSS vulnerabilities detected!");
     } else {
-        println!("⚠️  Found {} potential DOM XSS vulnerabilit{}:\n",
+        println!(
+            "⚠️  Found {} potential DOM XSS vulnerabilit{}:\n",
             visitor.vulnerabilities.len(),
-            if visitor.vulnerabilities.len() == 1 { "y" } else { "ies" }
+            if visitor.vulnerabilities.len() == 1 {
+                "y"
+            } else {
+                "ies"
+            }
         );
 
         for (i, vuln) in visitor.vulnerabilities.iter().enumerate() {
-            println!("{}. Vulnerability at line {}:{}:", i + 1, vuln.line, vuln.column);
+            println!(
+                "{}. Vulnerability at line {}:{}:",
+                i + 1,
+                vuln.line,
+                vuln.column
+            );
             println!("   Description: {}", vuln.description);
             println!("   Source: {}", vuln.source);
             println!("   Sink: {}", vuln.sink);
@@ -288,4 +301,3 @@ document.getElementById('bar').innerHTML = safeData;
         }
     }
 }
-
