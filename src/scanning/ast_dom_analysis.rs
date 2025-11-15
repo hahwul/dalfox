@@ -181,6 +181,11 @@ impl<'a> DomXssVisitor<'a> {
 
     /// Report a vulnerability
     fn report_vulnerability(&mut self, span: oxc_span::Span, sink: &str, description: &str) {
+        self.report_vulnerability_with_source(span, sink, description, None);
+    }
+    
+    /// Report a vulnerability with an optional explicit source
+    fn report_vulnerability_with_source(&mut self, span: oxc_span::Span, sink: &str, description: &str, explicit_source: Option<String>) {
         let lines: Vec<&str> = self.source_code.lines().collect();
         let mut line = 1u32;
         let mut column = 1u32;
@@ -203,13 +208,13 @@ impl<'a> DomXssVisitor<'a> {
         };
 
         // Find the source that led to this
-        let source = self
-            .tainted_vars
-            .iter()
-            .next()
-            .and_then(|var| self.var_aliases.get(var))
-            .cloned()
-            .unwrap_or_else(|| "unknown source".to_string());
+        let source = explicit_source.or_else(|| {
+            self.tainted_vars
+                .iter()
+                .next()
+                .and_then(|var| self.var_aliases.get(var))
+                .cloned()
+        }).unwrap_or_else(|| "unknown source".to_string());
 
         self.vulnerabilities.push(DomXssVulnerability {
             line,
@@ -368,34 +373,46 @@ impl<'a> DomXssVisitor<'a> {
             if self.sinks.contains(&func_name) {
                 // Check if any argument is tainted
                 for arg in &call.arguments {
-                    let is_arg_tainted = match arg {
-                        Argument::Identifier(id) => self.tainted_vars.contains(id.name.as_str()),
+                    let (is_arg_tainted, source_hint) = match arg {
+                        Argument::Identifier(id) => {
+                            let tainted = self.tainted_vars.contains(id.name.as_str());
+                            let source = if tainted {
+                                self.var_aliases.get(id.name.as_str()).cloned()
+                            } else {
+                                None
+                            };
+                            (tainted, source)
+                        }
                         Argument::StaticMemberExpression(member) => {
                             if let Some(member_str) = self.get_member_string(member) {
-                                self.sources.contains(&member_str)
+                                (self.sources.contains(&member_str), Some(member_str))
                             } else {
-                                false
+                                (false, None)
                             }
                         }
                         Argument::CallExpression(call_arg) => {
                             // Check if the call expression is tainted (e.g., location.hash.slice(1))
                             // The callee might be a member expression on a source
                             if let Expression::StaticMemberExpression(member) = &call_arg.callee {
-                                // Check if the object is a source
-                                self.is_tainted(&member.object)
+                                // Try to extract the source from the object
+                                let source = self.extract_source_from_expr(&member.object);
+                                (source.is_some(), source)
                             } else {
-                                false
+                                (false, None)
                             }
                         }
-                        Argument::SpreadElement(spread) => self.is_tainted(&spread.argument),
-                        _ => false,
+                        Argument::SpreadElement(spread) => {
+                            (self.is_tainted(&spread.argument), None)
+                        }
+                        _ => (false, None),
                     };
                     
                     if is_arg_tainted {
-                        self.report_vulnerability(
+                        self.report_vulnerability_with_source(
                             call.span(),
                             &func_name,
                             "Tainted data passed to sink function",
+                            source_hint,
                         );
                         break;
                     }
@@ -404,6 +421,20 @@ impl<'a> DomXssVisitor<'a> {
         }
         // Walk the callee
         self.walk_expression(&call.callee);
+    }
+    
+    /// Extract the source name from an expression (for direct source usage)
+    fn extract_source_from_expr(&self, expr: &Expression) -> Option<String> {
+        if let Some(member_str) = self.get_expr_string(expr) {
+            if self.sources.contains(&member_str) {
+                return Some(member_str);
+            }
+        }
+        // Try to get from StaticMemberExpression
+        if let Expression::StaticMemberExpression(member) = expr {
+            return self.get_member_string(member).filter(|s| self.sources.contains(s));
+        }
+        None
     }
 }
 
