@@ -591,6 +591,11 @@ pub struct ScanArgs {
     #[arg(long, default_value = "GET")]
     pub sxss_method: String,
 
+    #[clap(help_heading = "XSS SCANNING")]
+    /// Enable AST-based DOM XSS detection (analyzes JavaScript in responses)
+    #[arg(long)]
+    pub ast_analysis: bool,
+
     #[clap(help_heading = "TARGETS")]
     /// Targets (URLs or file paths)
     #[arg(value_name = "TARGET")]

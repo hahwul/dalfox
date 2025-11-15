@@ -1,4 +1,5 @@
 pub mod ast_dom_analysis;
+pub mod ast_integration;
 pub mod check_dom_verification;
 pub mod check_reflection;
 pub mod result;
@@ -312,6 +313,48 @@ pub async fn run_scanning(
                 };
                 let reflected = reflection_tuple.0;
                 let reflection_response_text = reflection_tuple.1;
+                
+                // AST-based DOM XSS analysis if enabled and response is available
+                if args_clone.ast_analysis {
+                    if let Some(ref response_text) = reflection_response_text {
+                        let js_blocks = crate::scanning::ast_integration::extract_javascript_from_html(response_text);
+                        for js_code in js_blocks {
+                            let findings = crate::scanning::ast_integration::analyze_javascript_for_dom_xss(
+                                &js_code,
+                                target_clone.url.as_str(),
+                            );
+                            for finding in findings {
+                                // Create an AST-based DOM XSS result
+                                let result_url = crate::scanning::url_inject::build_injected_url(
+                                    &target_clone.url,
+                                    &param_clone,
+                                    &reflection_payload,
+                                );
+                                let mut ast_result = crate::scanning::result::Result::new(
+                                    "A".to_string(), // AST-detected
+                                    "DOM-XSS".to_string(),
+                                    target_clone.method.clone(),
+                                    result_url.clone(),
+                                    param_clone.name.clone(),
+                                    finding.clone(), // The finding description as payload
+                                    format!("AST-based DOM XSS vulnerability detected"),
+                                    "CWE-79".to_string(),
+                                    "High".to_string(),
+                                    0,
+                                    finding,
+                                );
+                                ast_result.request = Some(build_request_text(
+                                    &target_clone,
+                                    &param_clone,
+                                    &reflection_payload,
+                                ));
+                                ast_result.response = Some(response_text.clone());
+                                local_results.push(ast_result);
+                            }
+                        }
+                    }
+                }
+                
                 if let Some(ref pb) = pb_clone {
                     pb.inc(1);
                 }
@@ -534,6 +577,7 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            ast_analysis: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -595,6 +639,7 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            ast_analysis: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -663,6 +708,7 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            ast_analysis: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -720,6 +766,7 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            ast_analysis: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
