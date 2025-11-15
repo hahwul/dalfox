@@ -145,16 +145,35 @@ impl<'a> DomXssVisitor<'a> {
                         return false; // Sanitized
                     }
                 }
-                // Check if any argument is tainted
-                call.arguments.iter().any(|arg| {
-                    if let Argument::SpreadElement(spread) = arg {
-                        self.is_tainted(&spread.argument)
-                    } else {
-                        // For other argument types, check if they're expressions that are tainted
-                        // This is a simplified check - a real implementation would handle all argument types
-                        false
+                
+                // Check if the callee itself is tainted (e.g., location.hash.slice())
+                // The callee could be a method call on a tainted source
+                if let Expression::StaticMemberExpression(member) = &call.callee {
+                    // Check if the object of the member expression is tainted
+                    if self.is_tainted(&member.object) {
+                        return true;
                     }
-                })
+                }
+                
+                // Also check if any argument is tainted
+                for arg in &call.arguments {
+                    let arg_tainted = match arg {
+                        Argument::Identifier(id) => self.tainted_vars.contains(id.name.as_str()),
+                        Argument::StaticMemberExpression(member) => {
+                            if let Some(member_str) = self.get_member_string(member) {
+                                self.sources.contains(&member_str)
+                            } else {
+                                false
+                            }
+                        }
+                        Argument::SpreadElement(spread) => self.is_tainted(&spread.argument),
+                        _ => false,
+                    };
+                    if arg_tainted {
+                        return true;
+                    }
+                }
+                false
             }
             _ => false,
         }
@@ -349,30 +368,36 @@ impl<'a> DomXssVisitor<'a> {
             if self.sinks.contains(&func_name) {
                 // Check if any argument is tainted
                 for arg in &call.arguments {
-                    match arg {
-                        Argument::Identifier(id)
-                            if self.tainted_vars.contains(id.name.as_str()) =>
-                        {
-                            self.report_vulnerability(
-                                call.span(),
-                                &func_name,
-                                "Tainted data passed to sink function",
-                            );
-                            break;
-                        }
+                    let is_arg_tainted = match arg {
+                        Argument::Identifier(id) => self.tainted_vars.contains(id.name.as_str()),
                         Argument::StaticMemberExpression(member) => {
                             if let Some(member_str) = self.get_member_string(member) {
-                                if self.sources.contains(&member_str) {
-                                    self.report_vulnerability(
-                                        call.span(),
-                                        &func_name,
-                                        "Source data passed directly to sink function",
-                                    );
-                                    break;
-                                }
+                                self.sources.contains(&member_str)
+                            } else {
+                                false
                             }
                         }
-                        _ => {}
+                        Argument::CallExpression(call_arg) => {
+                            // Check if the call expression is tainted (e.g., location.hash.slice(1))
+                            // The callee might be a member expression on a source
+                            if let Expression::StaticMemberExpression(member) = &call_arg.callee {
+                                // Check if the object is a source
+                                self.is_tainted(&member.object)
+                            } else {
+                                false
+                            }
+                        }
+                        Argument::SpreadElement(spread) => self.is_tainted(&spread.argument),
+                        _ => false,
+                    };
+                    
+                    if is_arg_tainted {
+                        self.report_vulnerability(
+                            call.span(),
+                            &func_name,
+                            "Tainted data passed to sink function",
+                        );
+                        break;
                     }
                 }
             }
@@ -558,6 +583,29 @@ document.body.innerHTML = html;
 
         assert!(result.is_ok());
         let vulnerabilities = result.unwrap();
-        assert!(!vulnerabilities.is_empty());
+        assert!(
+            !vulnerabilities.is_empty(),
+            "Should detect tainted data in template literal"
+        );
+    }
+
+    #[test]
+    fn test_method_call_on_source() {
+        // Test for location.hash.slice(1) pattern - the issue reported by @hahwul
+        let js = r#"document.write(location.hash.slice(1))"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(js).unwrap();
+        assert!(!result.is_empty(), "Should detect location.hash.slice(1) passed to document.write");
+        assert_eq!(result[0].sink, "document.write");
+    }
+
+    #[test]
+    fn test_direct_location_hash_to_sink() {
+        // Test for direct location.hash usage
+        let js = r#"document.write(location.hash)"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(js).unwrap();
+        assert!(!result.is_empty(), "Should detect location.hash passed to document.write");
+        assert_eq!(result[0].sink, "document.write");
     }
 }
