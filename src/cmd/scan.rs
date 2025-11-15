@@ -592,9 +592,9 @@ pub struct ScanArgs {
     pub sxss_method: String,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Enable AST-based DOM XSS detection (analyzes JavaScript in responses)
+    /// Skip AST-based DOM XSS detection (analyzes JavaScript in responses)
     #[arg(long)]
-    pub ast_analysis: bool,
+    pub skip_ast_analysis: bool,
 
     #[clap(help_heading = "TARGETS")]
     /// Targets (URLs or file paths)

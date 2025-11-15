@@ -314,8 +314,8 @@ pub async fn run_scanning(
                 let reflected = reflection_tuple.0;
                 let reflection_response_text = reflection_tuple.1;
                 
-                // AST-based DOM XSS analysis if enabled and response is available
-                if args_clone.ast_analysis {
+                // AST-based DOM XSS analysis (enabled by default unless skipped)
+                if !args_clone.skip_ast_analysis {
                     if let Some(ref response_text) = reflection_response_text {
                         let js_blocks = crate::scanning::ast_integration::extract_javascript_from_html(response_text);
                         for js_code in js_blocks {
@@ -577,7 +577,7 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
-            ast_analysis: false,
+            skip_ast_analysis: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -639,7 +639,7 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
-            ast_analysis: false,
+            skip_ast_analysis: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -708,7 +708,7 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
-            ast_analysis: false,
+            skip_ast_analysis: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -766,7 +766,7 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
-            ast_analysis: false,
+            skip_ast_analysis: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };

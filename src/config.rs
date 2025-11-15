@@ -95,7 +95,7 @@ pub struct ScanConfig {
     pub sxss: Option<bool>,
     pub sxss_url: Option<String>,
     pub sxss_method: Option<String>,
-    pub ast_analysis: Option<bool>,
+    pub skip_ast_analysis: Option<bool>,
     // LOGGING/DEBUG
     pub debug: Option<bool>,
 }
@@ -566,9 +566,9 @@ impl Config {
                     args.sxss_method = v.clone();
                 }
             }
-            if let Some(v) = scan.ast_analysis {
-                if !args.ast_analysis {
-                    args.ast_analysis = v;
+            if let Some(v) = scan.skip_ast_analysis {
+                if !args.skip_ast_analysis {
+                    args.skip_ast_analysis = v;
                 }
             }
         }
@@ -841,7 +841,7 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
-            ast_analysis: false,
+            skip_ast_analysis: false,
             targets: vec![],
         };
 
@@ -913,7 +913,7 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
-            ast_analysis: false,
+            skip_ast_analysis: false,
             targets: vec![],
         };
 
