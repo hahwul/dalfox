@@ -767,6 +767,7 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            skip_ast_analysis: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -830,6 +831,7 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            skip_ast_analysis: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -885,6 +887,7 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            skip_ast_analysis: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -991,6 +994,7 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            skip_ast_analysis: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -1067,6 +1071,7 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            skip_ast_analysis: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };

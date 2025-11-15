@@ -290,7 +290,7 @@ mod tests {
 async fn preflight_content_type(
     target: &crate::target_parser::Target,
     args: &ScanArgs,
-) -> Option<(String, Option<(String, String)>)> {
+) -> Option<(String, Option<(String, String)>, Option<String>)> {
     let client = target.build_client().ok()?;
 
     // Prefer HEAD for fast Content-Type detection; fallback GET with Range elsewhere if needed
@@ -343,12 +343,15 @@ async fn preflight_content_type(
     } else {
         None
     };
-    // If no CSP header present, try fetching a small body to parse <meta http-equiv="Content-Security-Policy">
-    if csp_header.is_none() {
-        let get_req = crate::utils::build_preflight_request(&client, target, false, Some(8192));
-        crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        if let Ok(get_resp) = get_req.send().await {
-            if let Ok(body) = get_resp.text().await {
+    // Always fetch a small body for CSP parsing and AST analysis
+    let mut response_body: Option<String> = None;
+    let get_req = crate::utils::build_preflight_request(&client, target, false, Some(8192));
+    crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    if let Ok(get_resp) = get_req.send().await {
+        if let Ok(body) = get_resp.text().await {
+            response_body = Some(body.clone());
+            // Only parse CSP if not already found
+            if csp_header.is_none() {
                 let doc = Html::parse_document(&body);
                 if let Ok(sel) = Selector::parse("meta[http-equiv][content]") {
                     for el in doc.select(&sel) {
@@ -376,7 +379,7 @@ async fn preflight_content_type(
             }
         }
     }
-    ct_opt.map(|ct| (ct, csp_header))
+    ct_opt.map(|ct| (ct, csp_header, response_body))
 }
 
 #[derive(Clone, Args)]
@@ -590,6 +593,11 @@ pub struct ScanArgs {
     /// HTTP method for checking Stored XSS (default "GET")
     #[arg(long, default_value = "GET")]
     pub sxss_method: String,
+
+    #[clap(help_heading = "XSS SCANNING")]
+    /// Skip AST-based DOM XSS detection (analyzes JavaScript in responses)
+    #[arg(long)]
+    pub skip_ast_analysis: bool,
 
     #[clap(help_heading = "TARGETS")]
     /// Targets (URLs or file paths)
@@ -1028,6 +1036,7 @@ pub async fn run_scan(args: &ScanArgs) {
             let pre_analyze_semaphore_outer = pre_analyze_semaphore.clone();
             let total_targets_outer = total_targets;
             let multi_pb_outer = multi_pb.clone();
+            let results_outer = results.clone();
             local.run_until(async move {
                 let mut handles = vec![];
 
@@ -1038,12 +1047,14 @@ pub async fn run_scan(args: &ScanArgs) {
             let analyze_idx_clone = analyze_idx_outer.clone();
             let total_targets_copy = total_targets_outer;
             let multi_pb_clone = multi_pb_outer.clone();
+            let results_clone = results_outer.clone();
 
             handles.push(tokio::task::spawn_local(async move {
                 // Bound concurrency across targets for preflight + analysis
                 let _permit = sem.acquire_owned().await.unwrap();
                 let mut __preflight_csp_present = false;
                 let mut __preflight_csp_header: Option<(String, String)> = None;
+                let mut preflight_response_body: Option<String> = None;
 
                 // Preflight Content-Type check (skip denylisted types unless deep-scan)
                 if !args_clone.deep_scan {
@@ -1064,7 +1075,9 @@ pub async fn run_scan(args: &ScanArgs) {
                         let _ = tx.send(());
                         let _ = done_rx.await;
                     }
-                    if let Some((ct, csp_header)) = __preflight_info {
+                    
+                    if let Some((ct, csp_header, response_body)) = __preflight_info {
+                        preflight_response_body = response_body;
                         if let Some((hn, hv)) = csp_header {
                             __preflight_csp_present = true;
                             __preflight_csp_header = Some((hn, hv));
@@ -1122,6 +1135,39 @@ pub async fn run_scan(args: &ScanArgs) {
                 if let Some((tx, done_rx)) = __analyze_spinner {
                     let _ = tx.send(());
                     let _ = done_rx.await;
+                }
+
+                // Run AST-based DOM XSS analysis on the initial response (enabled by default)
+                if !args_clone.skip_ast_analysis {
+                    if let Some(response_text) = preflight_response_body {
+                        let js_blocks = crate::scanning::ast_integration::extract_javascript_from_html(&response_text);
+                        for js_code in js_blocks {
+                            let findings = crate::scanning::ast_integration::analyze_javascript_for_dom_xss(
+                                &js_code,
+                                target.url.as_str(),
+                            );
+                            for (vuln, payload, description) in findings {
+                                // Create an AST-based DOM XSS result with actual executable payload
+                                let ast_result = crate::scanning::result::Result::new(
+                                    "A".to_string(), // AST-detected
+                                    "DOM-XSS".to_string(),
+                                    target.method.clone(),
+                                    target.url.to_string(),
+                                    "-".to_string(), // No specific parameter
+                                    payload, // Actual XSS payload
+                                    format!("{}:{}:{} - {} (Source: {}, Sink: {})",
+                                        target.url.as_str(), vuln.line, vuln.column, 
+                                        description, vuln.source, vuln.sink),
+                                    "CWE-79".to_string(),
+                                    "High".to_string(),
+                                    0,
+                                    description,
+                                );
+                                // Add to shared results
+                                results_clone.lock().await.push(ast_result);
+                            }
+                        }
+                    }
                 }
 
                 // Pretty reflection summary (plain only)

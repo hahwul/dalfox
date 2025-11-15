@@ -1,3 +1,5 @@
+pub mod ast_dom_analysis;
+pub mod ast_integration;
 pub mod check_dom_verification;
 pub mod check_reflection;
 pub mod result;
@@ -52,7 +54,7 @@ fn get_dom_payloads(
         // Known non-JS contexts: use locally generated payloads only (exclude remote) to avoid large cross-product
         Some(ctx) => {
             // Use locally generated payloads only (no remote) to avoid large cross-product in DOM verification
-            let mut base_payloads = crate::scanning::xss_common::generate_dynamic_payloads(ctx);
+            let base_payloads = crate::scanning::xss_common::generate_dynamic_payloads(ctx);
             // Expand with shared encoder policy helper
             let out = crate::encoding::apply_encoders_to_payloads(&base_payloads, &args.encoders);
             Ok(out)
@@ -311,6 +313,50 @@ pub async fn run_scanning(
                 };
                 let reflected = reflection_tuple.0;
                 let reflection_response_text = reflection_tuple.1;
+                
+                // AST-based DOM XSS analysis (enabled by default unless skipped)
+                if !args_clone.skip_ast_analysis {
+                    if let Some(ref response_text) = reflection_response_text {
+                        let js_blocks = crate::scanning::ast_integration::extract_javascript_from_html(response_text);
+                        for js_code in js_blocks {
+                            let findings = crate::scanning::ast_integration::analyze_javascript_for_dom_xss(
+                                &js_code,
+                                target_clone.url.as_str(),
+                            );
+                            for (vuln, payload, description) in findings {
+                                // Create an AST-based DOM XSS result with actual executable payload
+                                let result_url = crate::scanning::url_inject::build_injected_url(
+                                    &target_clone.url,
+                                    &param_clone,
+                                    &reflection_payload,
+                                );
+                                let mut ast_result = crate::scanning::result::Result::new(
+                                    "A".to_string(), // AST-detected
+                                    "DOM-XSS".to_string(),
+                                    target_clone.method.clone(),
+                                    result_url.clone(),
+                                    param_clone.name.clone(),
+                                    payload, // Actual XSS payload
+                                    format!("{}:{}:{} - {} (Source: {}, Sink: {})",
+                                        target_clone.url.as_str(), vuln.line, vuln.column,
+                                        description, vuln.source, vuln.sink),
+                                    "CWE-79".to_string(),
+                                    "High".to_string(),
+                                    0,
+                                    description,
+                                );
+                                ast_result.request = Some(build_request_text(
+                                    &target_clone,
+                                    &param_clone,
+                                    &reflection_payload,
+                                ));
+                                ast_result.response = Some(response_text.clone());
+                                local_results.push(ast_result);
+                            }
+                        }
+                    }
+                }
+                
                 if let Some(ref pb) = pb_clone {
                     pb.inc(1);
                 }
@@ -533,6 +579,7 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            skip_ast_analysis: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -594,6 +641,7 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            skip_ast_analysis: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -662,6 +710,7 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            skip_ast_analysis: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -719,6 +768,7 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            skip_ast_analysis: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
