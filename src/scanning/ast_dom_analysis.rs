@@ -170,7 +170,7 @@ impl<'a> DomXssVisitor<'a> {
                         return false; // Sanitized
                     }
                 }
-                
+
                 // Check if the callee itself is tainted (e.g., location.hash.slice())
                 // The callee could be a method call on a tainted source
                 if let Expression::StaticMemberExpression(member) = &call.callee {
@@ -179,7 +179,7 @@ impl<'a> DomXssVisitor<'a> {
                         return true;
                     }
                 }
-                
+
                 // Also check if any argument is tainted
                 for arg in &call.arguments {
                     let arg_tainted = match arg {
@@ -222,14 +222,12 @@ impl<'a> DomXssVisitor<'a> {
             }
             Expression::ObjectExpression(obj) => {
                 // Object is tainted if any property value is tainted
-                obj.properties.iter().any(|prop| {
-                    match prop {
-                        oxc_ast::ast::ObjectPropertyKind::ObjectProperty(p) => {
-                            self.is_tainted(&p.value)
-                        }
-                        oxc_ast::ast::ObjectPropertyKind::SpreadProperty(spread) => {
-                            self.is_tainted(&spread.argument)
-                        }
+                obj.properties.iter().any(|prop| match prop {
+                    oxc_ast::ast::ObjectPropertyKind::ObjectProperty(p) => {
+                        self.is_tainted(&p.value)
+                    }
+                    oxc_ast::ast::ObjectPropertyKind::SpreadProperty(spread) => {
+                        self.is_tainted(&spread.argument)
                     }
                 })
             }
@@ -245,9 +243,15 @@ impl<'a> DomXssVisitor<'a> {
     fn report_vulnerability(&mut self, span: oxc_span::Span, sink: &str, description: &str) {
         self.report_vulnerability_with_source(span, sink, description, None);
     }
-    
+
     /// Report a vulnerability with an optional explicit source
-    fn report_vulnerability_with_source(&mut self, span: oxc_span::Span, sink: &str, description: &str, explicit_source: Option<String>) {
+    fn report_vulnerability_with_source(
+        &mut self,
+        span: oxc_span::Span,
+        sink: &str,
+        description: &str,
+        explicit_source: Option<String>,
+    ) {
         let lines: Vec<&str> = self.source_code.lines().collect();
         let mut line = 1u32;
         let mut column = 1u32;
@@ -270,13 +274,15 @@ impl<'a> DomXssVisitor<'a> {
         };
 
         // Find the source that led to this
-        let source = explicit_source.or_else(|| {
-            self.tainted_vars
-                .iter()
-                .next()
-                .and_then(|var| self.var_aliases.get(var))
-                .cloned()
-        }).unwrap_or_else(|| "unknown source".to_string());
+        let source = explicit_source
+            .or_else(|| {
+                self.tainted_vars
+                    .iter()
+                    .next()
+                    .and_then(|var| self.var_aliases.get(var))
+                    .cloned()
+            })
+            .unwrap_or_else(|| "unknown source".to_string());
 
         self.vulnerabilities.push(DomXssVulnerability {
             line,
@@ -374,7 +380,7 @@ impl<'a> DomXssVisitor<'a> {
                     }
                 }
             }
-            
+
             // Walk the init expression to detect any sinks used in the initializer
             self.walk_expression(init);
         }
@@ -383,9 +389,7 @@ impl<'a> DomXssVisitor<'a> {
     /// Find a source in an expression (for alias tracking)
     fn find_source_in_expr(&self, expr: &Expression<'a>) -> Option<String> {
         match expr {
-            Expression::Identifier(id) => {
-                self.var_aliases.get(id.name.as_str()).cloned()
-            }
+            Expression::Identifier(id) => self.var_aliases.get(id.name.as_str()).cloned(),
             Expression::StaticMemberExpression(member) => {
                 if let Some(full_path) = self.get_member_string(member) {
                     if self.sources.contains(&full_path) {
@@ -440,18 +444,15 @@ impl<'a> DomXssVisitor<'a> {
                 }
                 None
             }
-            Expression::BinaryExpression(binary) => {
-                self.find_source_in_expr(&binary.left)
-                    .or_else(|| self.find_source_in_expr(&binary.right))
-            }
-            Expression::LogicalExpression(logical) => {
-                self.find_source_in_expr(&logical.left)
-                    .or_else(|| self.find_source_in_expr(&logical.right))
-            }
-            Expression::ConditionalExpression(cond) => {
-                self.find_source_in_expr(&cond.consequent)
-                    .or_else(|| self.find_source_in_expr(&cond.alternate))
-            }
+            Expression::BinaryExpression(binary) => self
+                .find_source_in_expr(&binary.left)
+                .or_else(|| self.find_source_in_expr(&binary.right)),
+            Expression::LogicalExpression(logical) => self
+                .find_source_in_expr(&logical.left)
+                .or_else(|| self.find_source_in_expr(&logical.right)),
+            Expression::ConditionalExpression(cond) => self
+                .find_source_in_expr(&cond.consequent)
+                .or_else(|| self.find_source_in_expr(&cond.alternate)),
             Expression::CallExpression(call) => {
                 // Check callee first (e.g., location.hash.slice())
                 if let Expression::StaticMemberExpression(member) = &call.callee {
@@ -524,21 +525,22 @@ impl<'a> DomXssVisitor<'a> {
             AssignmentTarget::StaticMemberExpression(member) => {
                 let prop_name = member.property.name.as_str();
                 let is_sink = self.sinks.contains(prop_name);
-                
+
                 // Also check if the full member path is a sink (e.g., location.href)
                 let full_path_is_sink = if let Some(full_path) = self.get_member_string(member) {
                     self.sinks.contains(&full_path)
                 } else {
                     false
                 };
-                
+
                 if (is_sink || full_path_is_sink) && self.is_tainted(&assign.right) {
                     let sink_name = if full_path_is_sink {
-                        self.get_member_string(member).unwrap_or_else(|| prop_name.to_string())
+                        self.get_member_string(member)
+                            .unwrap_or_else(|| prop_name.to_string())
                     } else {
                         prop_name.to_string()
                     };
-                    
+
                     self.report_vulnerability(
                         assign.span(),
                         &sink_name,
@@ -577,19 +579,27 @@ impl<'a> DomXssVisitor<'a> {
                         }
                         Argument::StaticMemberExpression(member) => {
                             // Check if this is a known source first
-                            let is_known_source = if let Some(member_str) = self.get_member_string(member) {
-                                self.sources.contains(&member_str)
-                            } else {
-                                false
-                            };
-                            
+                            let is_known_source =
+                                if let Some(member_str) = self.get_member_string(member) {
+                                    self.sources.contains(&member_str)
+                                } else {
+                                    false
+                                };
+
                             if is_known_source {
                                 // It's a known source like location.search
                                 (true, self.get_member_string(member))
                             } else {
                                 // Not a known source, check if the base object or any part is tainted
                                 let tainted = self.is_tainted(&member.object);
-                                (tainted, if tainted { self.find_source_in_expr(&member.object) } else { None })
+                                (
+                                    tainted,
+                                    if tainted {
+                                        self.find_source_in_expr(&member.object)
+                                    } else {
+                                        None
+                                    },
+                                )
                             }
                         }
                         Argument::CallExpression(call_arg) => {
@@ -606,7 +616,8 @@ impl<'a> DomXssVisitor<'a> {
                                 for arg in &call_arg.arguments {
                                     match arg {
                                         Argument::StaticMemberExpression(member) => {
-                                            if let Some(member_str) = self.get_member_string(member) {
+                                            if let Some(member_str) = self.get_member_string(member)
+                                            {
                                                 if self.sources.contains(&member_str) {
                                                     found_source = Some(member_str);
                                                     break;
@@ -615,7 +626,8 @@ impl<'a> DomXssVisitor<'a> {
                                         }
                                         Argument::Identifier(id) => {
                                             if self.tainted_vars.contains(id.name.as_str()) {
-                                                found_source = self.var_aliases.get(id.name.as_str()).cloned();
+                                                found_source =
+                                                    self.var_aliases.get(id.name.as_str()).cloned();
                                                 break;
                                             }
                                         }
@@ -627,19 +639,33 @@ impl<'a> DomXssVisitor<'a> {
                         }
                         Argument::SpreadElement(spread) => {
                             let tainted = self.is_tainted(&spread.argument);
-                            (tainted, if tainted { self.find_source_in_expr(&spread.argument) } else { None })
+                            (
+                                tainted,
+                                if tainted {
+                                    self.find_source_in_expr(&spread.argument)
+                                } else {
+                                    None
+                                },
+                            )
                         }
                         // Handle all other expression types via as_expression()
                         _ => {
                             if let Some(expr) = arg.as_expression() {
                                 let tainted = self.is_tainted(expr);
-                                (tainted, if tainted { self.find_source_in_expr(expr) } else { None })
+                                (
+                                    tainted,
+                                    if tainted {
+                                        self.find_source_in_expr(expr)
+                                    } else {
+                                        None
+                                    },
+                                )
                             } else {
                                 (false, None)
                             }
                         }
                     };
-                    
+
                     if is_arg_tainted {
                         self.report_vulnerability_with_source(
                             call.span(),
@@ -655,7 +681,7 @@ impl<'a> DomXssVisitor<'a> {
         // Walk the callee
         self.walk_expression(&call.callee);
     }
-    
+
     /// Extract the source name from an expression (for direct source usage)
     fn extract_source_from_expr(&self, expr: &Expression) -> Option<String> {
         if let Some(member_str) = self.get_expr_string(expr) {
@@ -665,7 +691,9 @@ impl<'a> DomXssVisitor<'a> {
         }
         // Try to get from StaticMemberExpression
         if let Expression::StaticMemberExpression(member) = expr {
-            return self.get_member_string(member).filter(|s| self.sources.contains(s));
+            return self
+                .get_member_string(member)
+                .filter(|s| self.sources.contains(s));
         }
         None
     }
@@ -859,7 +887,10 @@ document.body.innerHTML = html;
         let js = r#"document.write(location.hash.slice(1))"#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(js).unwrap();
-        assert!(!result.is_empty(), "Should detect location.hash.slice(1) passed to document.write");
+        assert!(
+            !result.is_empty(),
+            "Should detect location.hash.slice(1) passed to document.write"
+        );
         assert_eq!(result[0].sink, "document.write");
     }
 
@@ -869,7 +900,10 @@ document.body.innerHTML = html;
         let js = r#"document.write(location.hash)"#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(js).unwrap();
-        assert!(!result.is_empty(), "Should detect location.hash passed to document.write");
+        assert!(
+            !result.is_empty(),
+            "Should detect location.hash passed to document.write"
+        );
         assert_eq!(result[0].sink, "document.write");
     }
 
@@ -879,7 +913,10 @@ document.body.innerHTML = html;
         let js = r#"document.write(decodeURI(location.hash))"#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(js).unwrap();
-        assert!(!result.is_empty(), "Should detect decodeURI(location.hash) as vulnerable");
+        assert!(
+            !result.is_empty(),
+            "Should detect decodeURI(location.hash) as vulnerable"
+        );
         assert_eq!(result[0].sink, "document.write");
         assert!(result[0].source.contains("location.hash"));
     }
@@ -894,7 +931,10 @@ document.write(decoded);
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(js).unwrap();
-        assert!(!result.is_empty(), "Should detect decodeURIComponent propagating taint");
+        assert!(
+            !result.is_empty(),
+            "Should detect decodeURIComponent propagating taint"
+        );
         assert_eq!(result[0].sink, "document.write");
     }
 
@@ -932,7 +972,10 @@ document.getElementById('msg').innerHTML = data;
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should detect e.data (postMessage) as source");
+        assert!(
+            !result.is_empty(),
+            "Should detect e.data (postMessage) as source"
+        );
     }
 
     #[test]
@@ -954,7 +997,10 @@ document.body.innerHTML = path;
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should detect location.pathname as source");
+        assert!(
+            !result.is_empty(),
+            "Should detect location.pathname as source"
+        );
     }
 
     // Tests for new sinks
@@ -1040,7 +1086,10 @@ document.write(value);
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should propagate taint through property access");
+        assert!(
+            !result.is_empty(),
+            "Should propagate taint through property access"
+        );
     }
 
     #[test]
@@ -1053,7 +1102,10 @@ document.getElementById('x').innerHTML = c;
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should track taint through multiple assignments");
+        assert!(
+            !result.is_empty(),
+            "Should track taint through multiple assignments"
+        );
     }
 
     #[test]
@@ -1065,7 +1117,10 @@ document.write(msg);
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should detect taint in string concatenation");
+        assert!(
+            !result.is_empty(),
+            "Should detect taint in string concatenation"
+        );
     }
 
     #[test]
@@ -1077,7 +1132,10 @@ document.body.innerHTML = output;
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should detect taint in conditional expression");
+        assert!(
+            !result.is_empty(),
+            "Should detect taint in conditional expression"
+        );
     }
 
     #[test]
@@ -1128,7 +1186,10 @@ document.write(result);
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should track taint through string methods");
+        assert!(
+            !result.is_empty(),
+            "Should track taint through string methods"
+        );
     }
 
     #[test]
@@ -1139,7 +1200,10 @@ document.write(parts[0]);
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should track taint through split method");
+        assert!(
+            !result.is_empty(),
+            "Should track taint through split method"
+        );
     }
 
     #[test]
@@ -1151,7 +1215,10 @@ document.write(arr[index]);
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should track taint through computed member access");
+        assert!(
+            !result.is_empty(),
+            "Should track taint through computed member access"
+        );
     }
 
     #[test]
@@ -1161,7 +1228,10 @@ document.write([location.hash][0]);
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should detect taint in array literal to sink");
+        assert!(
+            !result.is_empty(),
+            "Should detect taint in array literal to sink"
+        );
     }
 
     #[test]
@@ -1171,7 +1241,10 @@ document.body.innerHTML = {x: location.search}.x;
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should detect taint in object literal to sink");
+        assert!(
+            !result.is_empty(),
+            "Should detect taint in object literal to sink"
+        );
     }
 
     #[test]
@@ -1182,7 +1255,10 @@ setTimeout(hash, 100);
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should detect setTimeout with tainted string");
+        assert!(
+            !result.is_empty(),
+            "Should detect setTimeout with tainted string"
+        );
     }
 
     #[test]
@@ -1193,7 +1269,10 @@ setInterval(code, 1000);
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should detect setInterval with tainted code");
+        assert!(
+            !result.is_empty(),
+            "Should detect setInterval with tainted code"
+        );
     }
 
     #[test]
@@ -1204,7 +1283,10 @@ let f = Function(input);
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should detect Function constructor with tainted input");
+        assert!(
+            !result.is_empty(),
+            "Should detect Function constructor with tainted input"
+        );
     }
 
     #[test]
@@ -1257,7 +1339,10 @@ document.write(obj.value);
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should track taint through simple object property");
+        assert!(
+            !result.is_empty(),
+            "Should track taint through simple object property"
+        );
     }
 
     #[test]
@@ -1269,7 +1354,10 @@ document.write(obj.inner.value);
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should track taint through nested properties");
+        assert!(
+            !result.is_empty(),
+            "Should track taint through nested properties"
+        );
     }
 
     #[test]

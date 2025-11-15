@@ -1075,7 +1075,7 @@ pub async fn run_scan(args: &ScanArgs) {
                         let _ = tx.send(());
                         let _ = done_rx.await;
                     }
-                    
+
                     if let Some((ct, csp_header, response_body)) = __preflight_info {
                         preflight_response_body = response_body;
                         if let Some((hn, hv)) = csp_header {
@@ -1156,7 +1156,7 @@ pub async fn run_scan(args: &ScanArgs) {
                                     "-".to_string(), // No specific parameter
                                     payload, // Actual XSS payload
                                     format!("{}:{}:{} - {} (Source: {}, Sink: {})",
-                                        target.url.as_str(), vuln.line, vuln.column, 
+                                        target.url.as_str(), vuln.line, vuln.column,
                                         description, vuln.source, vuln.sink),
                                     "CWE-79".to_string(),
                                     "High".to_string(),
