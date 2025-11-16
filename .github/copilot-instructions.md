@@ -21,38 +21,20 @@ Key capabilities:
 
 - Language: Rust (edition 2024)
 - Async runtime: tokio (full features)
-- HTTP client: reqwest 0.11
-- Web server: axum 0.7
-- CLI: clap 4 (derive, env)
+- HTTP client: reqwest
+- Web server: axum
+- CLI: clap (derive, env)
 - HTML parsing: scraper
+- JavaScript AST parsing: oxc_parser, oxc_ast, oxc_allocator, oxc_span
 - Serialization: serde / serde_json
 - URL handling: url + urlencoding
 - Regex: regex
 - TTY detection: atty
-- MCP: rmcp 0.8
+- MCP: rmcp (server, macros)
 - JSON schema (server/MCP tooling): schemars
 - Misc: indicatif, base64, chrono, toml, sha2, hex
 
-Crate versions (Cargo.toml):
-- clap = 4.0 (features: derive, env)
-- tokio = 1 (features: full)
-- reqwest = 0.11
-- scraper = 0.18
-- serde = 1.0 (features: derive)
-- serde_json = 1.0
-- url = 2.0
-- urlencoding = 2.1
-- indicatif = 0.17
-- base64 = 0.21
-- chrono = 0.4
-- toml = 0.8
-- axum = 0.7
-- regex = 1
-- atty = 0.2
-- rmcp = 0.8.0 (features: server, macros)
-- schemars = 0.8 (features: derive)
-- sha2 = 0.10
-- hex = 0.4
+See `Cargo.toml` for specific version constraints.
 
 ## Project Structure (current)
 
@@ -93,6 +75,8 @@ src/
   - xss_blind.rs                   Blind XSS dispatcher using callback URL
   - check_reflection.rs            Reflection detector with response capture
   - check_dom_verification.rs      DOM verification via presence of .dalfox elements
+  - ast_integration.rs             JavaScript extraction and DOM XSS POC generation
+  - ast_dom_analysis.rs            AST-based taint analysis for DOM-based XSS detection
   - result.rs                      Result model (JSON-compatible shape)
 - target_parser/
   - mod.rs                         URL parsing, default target settings
@@ -253,6 +237,13 @@ Context-aware payload generation (scanning/xss_common.rs):
 
 - Reflection (scanning/check_reflection.rs): inject per discovered param and check if payload appears in response; supports sxss check on post-injection page
 - DOM verification (scanning/check_dom_verification.rs): inject and parse HTML for presence of .dalfox element(s); supports sxss check URL
+- AST-based DOM XSS detection (scanning/ast_dom_analysis.rs): JavaScript AST parsing and taint analysis
+  - Parses JavaScript code using oxc_parser to build an Abstract Syntax Tree
+  - Tracks data flow from untrusted sources (location.search, location.hash, document.URL, window.name, etc.) to dangerous sinks (innerHTML, eval, document.write, etc.)
+  - Identifies tainted variables through assignment, property access, function calls, and control flow
+  - Detects sanitizer usage and excludes sanitized flows from vulnerability reporting
+  - Returns detailed vulnerability reports including line/column, source, sink, and code snippet
+- JavaScript extraction (scanning/ast_integration.rs): extracts JavaScript from HTML responses and generates executable DOM XSS POCs
 - Orchestrator (scanning/mod.rs): builds request text (for optional inclusion), iterates params and payloads, and pushes results to shared vector
 - Blind scanning (scanning/xss_blind.rs): dispatches callback-based payloads across all known locations
 - POC generation (cmd/scan.rs: generate_poc): supports plain|curl|httpie|http-request; for path injections, applies user-selected path encoders
@@ -326,6 +317,12 @@ Enhance discovery/mining
 - Wire into analyze_parameters in parameter_analysis/mod.rs
 - Add tests for each new probing routine; mock reqwest as needed
 
+Enhance AST-based DOM XSS detection
+- Add new sources/sinks: edit src/scanning/ast_dom_analysis.rs (DomXssVisitor::new)
+- Extend taint tracking: modify visitor methods to handle new AST node types
+- Add sanitizers: update the sanitizers HashSet to recognize new sanitization functions
+- Test coverage: add test cases in ast_dom_analysis.rs tests module with representative code patterns
+
 Add or customize remote providers
 - Register new providers via payload::register_payload_provider / register_wordlist_provider
 - Ensure network fetch options (timeout/proxy) are honored
@@ -351,6 +348,7 @@ Unit tests live alongside modules using #[cfg(test)] with a tests module.
   - xss_common payload generation per injection context
   - preflight content-type/CSP filtering logic
   - result serialization/deserialization
+  - AST-based DOM XSS taint analysis (tracking sources to sinks, sanitizer detection)
   - server API behaviors (CORS/JSONP/auth), MCP flows when practical
 - CI policy: cargo fmt, cargo clippy -- --deny warnings, cargo test pass before merging
 
