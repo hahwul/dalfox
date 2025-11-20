@@ -289,7 +289,7 @@ mod tests {
 
 async fn preflight_content_type(
     target: &crate::target_parser::Target,
-    args: &ScanArgs,
+    _args: &ScanArgs,
 ) -> Option<(String, Option<(String, String)>, Option<String>)> {
     let client = target.build_client().ok()?;
 

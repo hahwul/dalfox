@@ -2,7 +2,7 @@ use crate::target_parser::Target;
 
 pub async fn blind_scanning(target: &Target, callback_url: &str) {
     let template = crate::payload::XSS_BLIND_PAYLOADS
-        .get(0)
+        .first()
         .copied()
         .unwrap_or("\"'><script src={}></script>");
     let payload = template.replace("{}", callback_url);
@@ -41,8 +41,8 @@ pub async fn blind_scanning(target: &Target, callback_url: &str) {
 }
 
 async fn send_blind_request(target: &Target, param_name: &str, payload: &str, param_type: &str) {
-    use reqwest::{Client, redirect};
-    use tokio::time::{Duration, sleep};
+    use reqwest::Client;
+    use tokio::time::{sleep, Duration};
     use url::form_urlencoded;
     // use global request counter: crate::REQUEST_COUNT
 

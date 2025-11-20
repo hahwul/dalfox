@@ -30,8 +30,8 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
                     }
                 }
                 _ => {
-                    payloads.extend(html_payloads.into_iter());
-                    payloads.extend(attr_payloads.into_iter());
+                    payloads.extend(html_payloads);
+                    payloads.extend(attr_payloads);
                 }
             }
         }
@@ -72,7 +72,7 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
                     }
                 }
                 _ => {
-                    payloads.extend(html_payloads.into_iter());
+                    payloads.extend(html_payloads);
                 }
             }
         }
@@ -411,10 +411,10 @@ pub fn get_dynamic_payloads(
     }
 
     // Include remote payloads if available (initialized via --remote-payloads at runtime)
-    if let Some(remotes) = crate::payload::get_remote_payloads() {
-        if !remotes.is_empty() {
-            base_payloads.extend(remotes.as_ref().clone());
-        }
+    if let Some(remotes) = crate::payload::get_remote_payloads()
+        && !remotes.is_empty()
+    {
+        base_payloads.extend(remotes.as_ref().clone());
     }
 
     // Expand with shared encoder policy helper; handles "none" and deduplication

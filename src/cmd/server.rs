@@ -271,7 +271,7 @@ fn log(state: &AppState, level: &str, message: &str) {
 }
 
 async fn run_scan_job(
-    mut state: AppState,
+    state: AppState,
     job_id: String,
     url: String,
     opts: ScanOptions,
@@ -285,7 +285,7 @@ async fn run_scan_job(
         }
     }
 
-    let mut args = ScanArgs {
+    let args = ScanArgs {
         input_type: "url".to_string(),
         format: "json".to_string(),
         output: None,
