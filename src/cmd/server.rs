@@ -176,10 +176,7 @@ fn validate_jsonp_callback(cb: &str) -> Option<String> {
         return None;
     }
     let mut chars = cb.chars();
-    let first = match chars.next() {
-        Some(c) => c,
-        None => return None,
-    };
+    let first = chars.next()?;
     if !(first.is_ascii_alphabetic() || first == '_' || first == '$') {
         return None;
     }

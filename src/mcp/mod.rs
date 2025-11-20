@@ -330,7 +330,7 @@ impl DalfoxMcp {
             if let Ok(content) = std::fs::read_to_string(&raw_path) {
                 for line in content.lines() {
                     if line.to_ascii_lowercase().starts_with("cookie:") {
-                        let rest = line.splitn(2, ':').nth(1).unwrap_or("").trim();
+                        let rest = line.split_once(':').map(|x| x.1).unwrap_or("").trim();
                         for part in rest.split(';') {
                             let trimmed = part.trim();
                             if trimmed.contains('=') {
@@ -392,7 +392,7 @@ impl DalfoxMcp {
             .get("delay")
             .and_then(|v| v.as_i64())
             .and_then(|n| {
-                if n >= 0 && n < 10_000 {
+                if (0..10_000).contains(&n) {
                     Some(n as u64)
                 } else {
                     None

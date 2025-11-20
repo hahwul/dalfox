@@ -84,25 +84,15 @@ pub fn detect_injection_context(text: &str) -> InjectionContext {
     }
 
     // Check for comment context
-    if let Some(comment_start) = text.find("<!--") {
-        if let Some(comment_end) = text.find("-->") {
-            if comment_start < dalfox_pos && dalfox_pos < comment_end {
-                // Check for delimiter type in comment
-                if text.contains("\"dalfox\"") {
-                    return InjectionContext::Html(Some(
-                        crate::parameter_analysis::DelimiterType::Comment,
-                    ));
-                } else if text.contains("'dalfox'") {
-                    return InjectionContext::Html(Some(
-                        crate::parameter_analysis::DelimiterType::Comment,
-                    ));
-                } else {
-                    return InjectionContext::Html(Some(
-                        crate::parameter_analysis::DelimiterType::Comment,
-                    ));
-                }
-            }
-        }
+    if let Some(comment_start) = text.find("<!--")
+        && let Some(comment_end) = text.find("-->")
+        && comment_start < dalfox_pos
+        && dalfox_pos < comment_end
+    {
+        // In comment context, delimiter type is always Comment regardless of quotes
+        return InjectionContext::Html(Some(
+            crate::parameter_analysis::DelimiterType::Comment,
+        ));
     }
 
     // Check for attribute context
