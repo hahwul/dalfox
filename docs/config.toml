@@ -29,7 +29,7 @@ twitter_site = "@hahwul"
 twitter_creator = "@hahwul"
 default_colorset = "dark"
 brightness = "darker"
-sidebar_expand_depth = 1
+sidebar_expand_depth = 0
 disable_root_sidebar_hide = false
 
 # lang_aliases = { en = "English", ko = "한국어" }
