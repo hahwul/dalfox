@@ -176,10 +176,7 @@ fn validate_jsonp_callback(cb: &str) -> Option<String> {
         return None;
     }
     let mut chars = cb.chars();
-    let first = match chars.next() {
-        Some(c) => c,
-        None => return None,
-    };
+    let first = chars.next()?;
     if !(first.is_ascii_alphabetic() || first == '_' || first == '$') {
         return None;
     }
@@ -271,7 +268,7 @@ fn log(state: &AppState, level: &str, message: &str) {
 }
 
 async fn run_scan_job(
-    mut state: AppState,
+    state: AppState,
     job_id: String,
     url: String,
     opts: ScanOptions,
@@ -285,7 +282,7 @@ async fn run_scan_job(
         }
     }
 
-    let mut args = ScanArgs {
+    let args = ScanArgs {
         input_type: "url".to_string(),
         format: "json".to_string(),
         output: None,

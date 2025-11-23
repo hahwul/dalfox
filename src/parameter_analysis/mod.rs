@@ -179,7 +179,7 @@ pub async fn active_probe_param(
                     request_builder = client_clone.request(req_method, url);
                 }
                 Location::Body => {
-                    let mut body_string;
+                    let body_string;
                     if let Some(d) = &data {
                         let mut pairs: Vec<(String, String)> =
                             url::form_urlencoded::parse(d.as_bytes())
@@ -397,7 +397,7 @@ pub async fn active_probe_param(
                             request_builder2 = client_clone.request(req_method2, url2);
                         }
                         Location::Body => {
-                            let mut body_string;
+                            let body_string;
                             if let Some(d) = &data {
                                 let mut pairs: Vec<(String, String)> =
                                     url::form_urlencoded::parse(d.as_bytes())

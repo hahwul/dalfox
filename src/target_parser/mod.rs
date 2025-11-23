@@ -25,10 +25,10 @@ impl Target {
             .timeout(Duration::from_secs(self.timeout))
             .danger_accept_invalid_certs(true); // Insecure mode for scanner
 
-        if let Some(proxy_url) = &self.proxy {
-            if let Ok(proxy) = reqwest::Proxy::all(proxy_url) {
-                client_builder = client_builder.proxy(proxy);
-            }
+        if let Some(proxy_url) = &self.proxy
+            && let Ok(proxy) = reqwest::Proxy::all(proxy_url)
+        {
+            client_builder = client_builder.proxy(proxy);
         }
 
         if self.follow_redirects {

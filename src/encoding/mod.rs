@@ -91,7 +91,6 @@ mod encoder_policy_tests {
         assert!(out.contains(&base64_encode("<")));
     }
 }
-use urlencoding;
 
 /// URL-encodes the given payload string.
 /// Example: "<" becomes "%3C"

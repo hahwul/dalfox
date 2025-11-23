@@ -81,28 +81,27 @@ fn apply_headers_ua_cookies(
     }
 
     // Apply UA (override any existing UA header)
-    if let Some(ua) = &target.user_agent {
-        if !ua.is_empty() {
-            rb = rb.header("User-Agent", ua);
-        }
+    if let Some(ua) = &target.user_agent
+        && !ua.is_empty()
+    {
+        rb = rb.header("User-Agent", ua);
     }
 
     // Cookie precedence:
     // 1) explicit cookie_header (override)
     // 2) if no explicit, but target.headers already had Cookie => honor it (do nothing)
     // 3) otherwise auto-attach the cookie header composed from target.cookies
-    if let Some(ch) = cookie_header {
-        if !ch.is_empty() {
-            rb = rb.header("Cookie", ch);
-            return rb;
-        }
+    if let Some(ch) = cookie_header
+        && !ch.is_empty()
+    {
+        rb = rb.header("Cookie", ch);
+        return rb;
     }
-    if !has_header(&target.headers, "Cookie") {
-        if let Some(ch) = compose_cookie_header(&target.cookies) {
-            if !ch.is_empty() {
-                rb = rb.header("Cookie", ch);
-            }
-        }
+    if !has_header(&target.headers, "Cookie")
+        && let Some(ch) = compose_cookie_header(&target.cookies)
+        && !ch.is_empty()
+    {
+        rb = rb.header("Cookie", ch);
     }
 
     rb
@@ -232,14 +231,13 @@ pub fn build_preflight_request(
     // Reuse the same consistent header/UA/Cookie application
     rb = apply_headers_ua_cookies(rb, target, None);
 
-    if method == Method::GET {
-        if let Some(n) = range_bytes {
-            if n > 0 {
-                // bytes are inclusive
-                let end = n.saturating_sub(1);
-                rb = rb.header("Range", format!("bytes=0-{}", end));
-            }
-        }
+    if method == Method::GET
+        && let Some(n) = range_bytes
+        && n > 0
+    {
+        // bytes are inclusive
+        let end = n.saturating_sub(1);
+        rb = rb.header("Range", format!("bytes=0-{}", end));
     }
 
     rb

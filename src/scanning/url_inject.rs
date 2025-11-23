@@ -67,28 +67,28 @@ pub fn build_injected_url(base: &url::Url, param: &Param, injected: &str) -> Str
         }
         Location::Path => {
             let mut url = base.clone();
-            if let Some(idx_str) = param.name.strip_prefix("path_segment_") {
-                if let Ok(idx) = idx_str.parse::<usize>() {
-                    let original_path = url.path();
-                    let mut segments: Vec<String> = if original_path == "/" {
-                        Vec::new()
+            if let Some(idx_str) = param.name.strip_prefix("path_segment_")
+                && let Ok(idx) = idx_str.parse::<usize>()
+            {
+                let original_path = url.path();
+                let mut segments: Vec<String> = if original_path == "/" {
+                    Vec::new()
+                } else {
+                    original_path
+                        .trim_matches('/')
+                        .split('/')
+                        .filter(|s| !s.is_empty())
+                        .map(|s| s.to_string())
+                        .collect()
+                };
+                if idx < segments.len() {
+                    segments[idx] = selective_path_segment_encode(injected);
+                    let new_path = if segments.is_empty() {
+                        "/".to_string()
                     } else {
-                        original_path
-                            .trim_matches('/')
-                            .split('/')
-                            .filter(|s| !s.is_empty())
-                            .map(|s| s.to_string())
-                            .collect()
+                        format!("/{}", segments.join("/"))
                     };
-                    if idx < segments.len() {
-                        segments[idx] = selective_path_segment_encode(injected);
-                        let new_path = if segments.is_empty() {
-                            "/".to_string()
-                        } else {
-                            format!("/{}", segments.join("/"))
-                        };
-                        url.set_path(&new_path);
-                    }
+                    url.set_path(&new_path);
                 }
             }
             url.to_string()

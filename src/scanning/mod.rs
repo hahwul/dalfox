@@ -125,27 +125,27 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
         crate::parameter_analysis::Location::Path => {
             // Inject into a specific path segment (param.name pattern: path_segment_{idx})
             let mut url = target.url.clone();
-            if let Some(idx_str) = param.name.strip_prefix("path_segment_") {
-                if let Ok(idx) = idx_str.parse::<usize>() {
-                    let original_path = url.path();
-                    let mut segments: Vec<&str> = if original_path == "/" {
-                        Vec::new()
+            if let Some(idx_str) = param.name.strip_prefix("path_segment_")
+                && let Ok(idx) = idx_str.parse::<usize>()
+            {
+                let original_path = url.path();
+                let mut segments: Vec<&str> = if original_path == "/" {
+                    Vec::new()
+                } else {
+                    original_path
+                        .trim_matches('/')
+                        .split('/')
+                        .filter(|s| !s.is_empty())
+                        .collect()
+                };
+                if idx < segments.len() {
+                    segments[idx] = payload;
+                    let new_path = if segments.is_empty() {
+                        "/".to_string()
                     } else {
-                        original_path
-                            .trim_matches('/')
-                            .split('/')
-                            .filter(|s| !s.is_empty())
-                            .collect()
+                        format!("/{}", segments.join("/"))
                     };
-                    if idx < segments.len() {
-                        segments[idx] = payload;
-                        let new_path = if segments.is_empty() {
-                            "/".to_string()
-                        } else {
-                            format!("/{}", segments.join("/"))
-                        };
-                        url.set_path(&new_path);
-                    }
+                    url.set_path(&new_path);
                 }
             }
             url
@@ -154,14 +154,14 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
     };
 
     let mut request_lines = vec![];
+    let path_and_query = format!(
+        "{}{}",
+        url.path(),
+        url.query().map(|q| format!("?{}", q)).unwrap_or_default()
+    );
     request_lines.push(format!(
         "{} {} HTTP/1.1",
-        target.method,
-        format!(
-            "{}{}",
-            url.path(),
-            url.query().map(|q| format!("?{}", q)).unwrap_or_default()
-        )
+        target.method, path_and_query
     ));
     request_lines.push(format!("Host: {}", url.host_str().unwrap_or("")));
     for (k, v) in &target.headers {
@@ -251,13 +251,13 @@ pub async fn run_scanning(
             continue;
         }
         // Early stop if global limit reached
-        if let Some(lim) = limit {
-            if results.lock().await.len() >= lim {
-                if let Some(ref pb) = pb {
-                    pb.finish_with_message(format!("Completed scanning {}", target.url));
-                }
-                return;
+        if let Some(lim) = limit
+            && results.lock().await.len() >= lim
+        {
+            if let Some(ref pb) = pb {
+                pb.finish_with_message(format!("Completed scanning {}", target.url));
             }
+            return;
         }
 
         let reflection_payloads = if let Some(context) = &param.injection_context {
@@ -288,10 +288,10 @@ pub async fn run_scanning(
             // Sequential testing for this param
             for reflection_payload in reflection_payloads_clone {
                 // Early stop if global limit reached
-                if let Some(lim) = args_clone.limit {
-                    if results_clone.lock().await.len() >= lim {
-                        return;
-                    }
+                if let Some(lim) = args_clone.limit
+                    && results_clone.lock().await.len() >= lim
+                {
+                    return;
                 }
                 // Skip reflection if already found for this param
                 let reflection_tuple = {
@@ -315,54 +315,54 @@ pub async fn run_scanning(
                 let reflection_response_text = reflection_tuple.1;
 
                 // AST-based DOM XSS analysis (enabled by default unless skipped)
-                if !args_clone.skip_ast_analysis {
-                    if let Some(ref response_text) = reflection_response_text {
-                        let js_blocks =
-                            crate::scanning::ast_integration::extract_javascript_from_html(
-                                response_text,
+                if !args_clone.skip_ast_analysis
+                    && let Some(ref response_text) = reflection_response_text
+                {
+                    let js_blocks =
+                        crate::scanning::ast_integration::extract_javascript_from_html(
+                            response_text,
+                        );
+                    for js_code in js_blocks {
+                        let findings =
+                            crate::scanning::ast_integration::analyze_javascript_for_dom_xss(
+                                &js_code,
+                                target_clone.url.as_str(),
                             );
-                        for js_code in js_blocks {
-                            let findings =
-                                crate::scanning::ast_integration::analyze_javascript_for_dom_xss(
-                                    &js_code,
+                        for (vuln, payload, description) in findings {
+                            // Create an AST-based DOM XSS result with actual executable payload
+                            let result_url = crate::scanning::url_inject::build_injected_url(
+                                &target_clone.url,
+                                &param_clone,
+                                &reflection_payload,
+                            );
+                            let mut ast_result = crate::scanning::result::Result::new(
+                                "A".to_string(), // AST-detected
+                                "DOM-XSS".to_string(),
+                                target_clone.method.clone(),
+                                result_url.clone(),
+                                param_clone.name.clone(),
+                                payload, // Actual XSS payload
+                                format!(
+                                    "{}:{}:{} - {} (Source: {}, Sink: {})",
                                     target_clone.url.as_str(),
-                                );
-                            for (vuln, payload, description) in findings {
-                                // Create an AST-based DOM XSS result with actual executable payload
-                                let result_url = crate::scanning::url_inject::build_injected_url(
-                                    &target_clone.url,
-                                    &param_clone,
-                                    &reflection_payload,
-                                );
-                                let mut ast_result = crate::scanning::result::Result::new(
-                                    "A".to_string(), // AST-detected
-                                    "DOM-XSS".to_string(),
-                                    target_clone.method.clone(),
-                                    result_url.clone(),
-                                    param_clone.name.clone(),
-                                    payload, // Actual XSS payload
-                                    format!(
-                                        "{}:{}:{} - {} (Source: {}, Sink: {})",
-                                        target_clone.url.as_str(),
-                                        vuln.line,
-                                        vuln.column,
-                                        description,
-                                        vuln.source,
-                                        vuln.sink
-                                    ),
-                                    "CWE-79".to_string(),
-                                    "High".to_string(),
-                                    0,
+                                    vuln.line,
+                                    vuln.column,
                                     description,
-                                );
-                                ast_result.request = Some(build_request_text(
-                                    &target_clone,
-                                    &param_clone,
-                                    &reflection_payload,
-                                ));
-                                ast_result.response = Some(response_text.clone());
-                                local_results.push(ast_result);
-                            }
+                                    vuln.source,
+                                    vuln.sink
+                                ),
+                                "CWE-79".to_string(),
+                                "High".to_string(),
+                                0,
+                                description,
+                            );
+                            ast_result.request = Some(build_request_text(
+                                &target_clone,
+                                &param_clone,
+                                &reflection_payload,
+                            ));
+                            ast_result.response = Some(response_text.clone());
+                            local_results.push(ast_result);
                         }
                     }
                 }
@@ -427,10 +427,10 @@ pub async fn run_scanning(
             // DOM verification
             for dom_payload in dom_payloads_clone {
                 // Early stop if global limit reached
-                if let Some(lim) = args_clone.limit {
-                    if results_clone.lock().await.len() >= lim {
-                        return;
-                    }
+                if let Some(lim) = args_clone.limit
+                    && results_clone.lock().await.len() >= lim
+                {
+                    return;
                 }
                 // Skip DOM verification if already found for this param
                 let already_dom_found = found_dom_params_clone

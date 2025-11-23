@@ -4,7 +4,6 @@ pub mod xss_blind;
 pub mod xss_event;
 pub mod xss_html;
 pub mod xss_javascript;
-pub use mining::*;
 pub use remote::*;
 pub use xss_blind::*;
 pub use xss_event::*;

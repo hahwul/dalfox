@@ -289,7 +289,7 @@ mod tests {
 
 async fn preflight_content_type(
     target: &crate::target_parser::Target,
-    args: &ScanArgs,
+    _args: &ScanArgs,
 ) -> Option<(String, Option<(String, String)>, Option<String>)> {
     let client = target.build_client().ok()?;
 
@@ -327,22 +327,21 @@ async fn preflight_content_type(
         .get(CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
-    let mut csp_header = if let Some(v) = headers
+    let mut csp_header = headers
         .get("content-security-policy")
         .and_then(|v| v.to_str().ok())
-    {
-        Some(("Content-Security-Policy".to_string(), v.to_string()))
-    } else if let Some(v) = headers
-        .get("content-security-policy-report-only")
-        .and_then(|v| v.to_str().ok())
-    {
-        Some((
-            "Content-Security-Policy-Report-Only".to_string(),
-            v.to_string(),
-        ))
-    } else {
-        None
-    };
+        .map(|v| ("Content-Security-Policy".to_string(), v.to_string()))
+        .or_else(|| {
+            headers
+                .get("content-security-policy-report-only")
+                .and_then(|v| v.to_str().ok())
+                .map(|v| {
+                    (
+                        "Content-Security-Policy-Report-Only".to_string(),
+                        v.to_string(),
+                    )
+                })
+        });
     // Always fetch a small body for CSP parsing and AST analysis
     let mut response_body: Option<String> = None;
     let get_req = crate::utils::build_preflight_request(&client, target, false, Some(8192));

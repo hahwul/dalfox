@@ -1,5 +1,4 @@
 use clap::{Parser, Subcommand};
-use tokio;
 
 mod cmd;
 mod config;
@@ -142,26 +141,24 @@ async fn main() {
                                 "Failed to parse config as JSON or TOML",
                             ))
                         }
+                    } else if let Ok(cfg) = toml::from_str::<config::Config>(&content) {
+                        Ok(config::LoadResult {
+                            config: cfg,
+                            path: p.to_path_buf(),
+                            format: config::ConfigFormat::Toml,
+                            created: false,
+                        })
+                    } else if let Ok(cfg) = serde_json::from_str::<config::Config>(&content) {
+                        Ok(config::LoadResult {
+                            config: cfg,
+                            path: p.to_path_buf(),
+                            format: config::ConfigFormat::Json,
+                            created: false,
+                        })
                     } else {
-                        if let Ok(cfg) = toml::from_str::<config::Config>(&content) {
-                            Ok(config::LoadResult {
-                                config: cfg,
-                                path: p.to_path_buf(),
-                                format: config::ConfigFormat::Toml,
-                                created: false,
-                            })
-                        } else if let Ok(cfg) = serde_json::from_str::<config::Config>(&content) {
-                            Ok(config::LoadResult {
-                                config: cfg,
-                                path: p.to_path_buf(),
-                                format: config::ConfigFormat::Json,
-                                created: false,
-                            })
-                        } else {
-                            Err(Box::<dyn std::error::Error>::from(
-                                "Failed to parse config as TOML or JSON",
-                            ))
-                        }
+                        Err(Box::<dyn std::error::Error>::from(
+                            "Failed to parse config as TOML or JSON",
+                        ))
                     }
                 }
                 Err(e) => Err(Box::<dyn std::error::Error>::from(e)),

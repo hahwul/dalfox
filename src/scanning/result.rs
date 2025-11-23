@@ -118,25 +118,23 @@ impl Result {
             "message_id": self.message_id,
             "message_str": self.message_str
         });
-        if include_request {
-            if let Some(req) = &self.request {
-                if let serde_json::Value::Object(ref mut map) = obj {
-                    map.insert(
-                        "request".to_string(),
-                        serde_json::Value::String(req.clone()),
-                    );
-                }
-            }
+        if include_request
+            && let Some(req) = &self.request
+            && let serde_json::Value::Object(ref mut map) = obj
+        {
+            map.insert(
+                "request".to_string(),
+                serde_json::Value::String(req.clone()),
+            );
         }
-        if include_response {
-            if let Some(resp) = &self.response {
-                if let serde_json::Value::Object(ref mut map) = obj {
-                    map.insert(
-                        "response".to_string(),
-                        serde_json::Value::String(resp.clone()),
-                    );
-                }
-            }
+        if include_response
+            && let Some(resp) = &self.response
+            && let serde_json::Value::Object(ref mut map) = obj
+        {
+            map.insert(
+                "response".to_string(),
+                serde_json::Value::String(resp.clone()),
+            );
         }
         obj
     }
