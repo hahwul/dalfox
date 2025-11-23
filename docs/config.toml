@@ -1,6 +1,10 @@
 # The URL the site will be built for
 base_url = "https://dalfox.hahwul.com"
 
+title = "Dalfox"
+theme = "goyo"
+description = "Powerful open-source XSS scanner and utility focused on automation"
+
 # Whether to automatically compile all Sass files in the sass directory
 compile_sass = false
 
@@ -11,6 +15,39 @@ build_search_index = true
 # Whether to do syntax highlighting
 # Theme can be customised by setting the `highlight_theme` variable to a theme supported by Zola
 highlight_code = true
+bottom_footnotes = true
+highlight_theme = "ayu-mirage"
 
 [extra]
-# Put all your custom variables here
+logo_text = "dalfox"
+badge = "v3.0.0"
+logo_image_path = "images/logo.png"
+logo_image_padding = "10px"
+default_thumbnail = "images/preview.jpg"
+footer_html = "<div style='display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap;'><a href='https://www.hahwul.com' target='_blank' rel='noopener noreferrer' style='display: inline-flex; align-items: center;'><img src='https://www.hahwul.com/images/logo.png' alt='HAHWUL' style='height: 30px' /></a><span style='opacity: 0.6;'>•</span><span>Powered by <a href='https://www.getzola.org' class='font-medium text-base-content/70 hover:text-base-content transition-colors duration-200'>Zola</a> and <a href='https://github.com/hahwul/goyo' class='font-medium text-base-content/70 hover:text-base-content transition-colors duration-200'>Goyo</a></span></div>"
+twitter_site = "@hahwul"
+twitter_creator = "@hahwul"
+default_colorset = "dark"
+brightness = "darker"
+sidebar_expand_depth = 1
+disable_root_sidebar_hide = false
+
+# lang_aliases = { en = "English", ko = "한국어" }
+
+nav = [
+    { name = "Documents", url = "/get_started/installation", type = "url", icon = "fa-solid fa-book" },
+    { name = "GitHub", url = "https://github.com/hahwul/dalfox", type = "url", icon = "fa-brands fa-github" },
+    { name = "Links", type = "dropdown", icon = "fa-solid fa-link", members = [
+        { name = "Crates", url = "https://crates.io/crates/dalfox", type = "url", icon = "fa-solid fa-box" },
+        { name = "Creator Blog", url = "https://www.hahwul.com", type = "url", icon = "fa-solid fa-fire-flame-curved" },
+    ] },
+]
+
+# nav_ko = [
+#     { name = "문서", url = "/ko/get_started/installation", type = "url", icon = "fa-solid fa-book" },
+#     { name = "GitHub", url = "https://github.com/hahwul/goyo", type = "url", icon = "fa-brands fa-github" },
+#     { name = "링크", type = "dropdown", icon = "fa-solid fa-link", members = [
+#         { name = "제작자 블로그", url = "https://www.hahwul.com", type = "url", icon = "fa-solid fa-fire-flame-curved" },
+#         { name = "Zola 공식", url = "https://getzola.org", type = "url", icon = "fa-solid fa-z" },
+#     ] },
+# ]
