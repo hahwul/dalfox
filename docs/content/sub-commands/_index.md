@@ -1,7 +1,7 @@
 +++
 title = "Sub Commands"
 description = ""
-weight = 2
+weight = 3
 sort_by = "weight"
 
 [extra]

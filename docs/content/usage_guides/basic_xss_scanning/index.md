@@ -1,10 +1,8 @@
 +++
-title = "Resources"
+title = "Basic XSS Scanning"
 description = ""
-weight = 4
+weight = 1
 sort_by = "weight"
 
 [extra]
 +++
-
-..

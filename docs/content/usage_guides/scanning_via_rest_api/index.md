@@ -1,7 +1,7 @@
 +++
-title = "Usage"
+title = "Scanning via REST API"
 description = ""
-weight = 3
+weight = 2
 sort_by = "weight"
 
 [extra]
