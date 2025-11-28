@@ -6,6 +6,11 @@ on:
     - cron: "0 9 * * 1"
   workflow_dispatch: # Allow manual trigger
 
+env:
+  GIT_USER_NAME: "hahwul"
+  GIT_USER_EMAIL: "hahwul@gmail.com"
+  THEME_PATH: "docs/themes/goyo"
+
 jobs:
   update-theme:
     runs-on: ubuntu-latest
@@ -23,18 +28,18 @@ jobs:
       - name: Update Goyo submodule
         id: update
         run: |
-          git config user.name "hahwul"
-          git config user.email "hahwul@gmail.com"
+          git config user.name "${{ env.GIT_USER_NAME }}"
+          git config user.email "${{ env.GIT_USER_EMAIL }}"
 
           # Get current commit hash
-          OLD_COMMIT=$(git rev-parse HEAD:docs/themes/goyo)
+          OLD_COMMIT=$(git rev-parse HEAD:${{ env.THEME_PATH }})
 
           # Update submodule to latest
-          git submodule update --remote docs/themes/goyo
-          git add docs/themes/goyo
+          git submodule update --remote ${{ env.THEME_PATH }}
+          git add ${{ env.THEME_PATH }}
 
           # Get new commit hash
-          NEW_COMMIT=$(git --git-dir=docs/themes/goyo/.git rev-parse HEAD)
+          NEW_COMMIT=$(git --git-dir=${{ env.THEME_PATH }}/.git rev-parse HEAD)
 
           # Check if there are changes
           if [ "$OLD_COMMIT" != "$NEW_COMMIT" ]; then
