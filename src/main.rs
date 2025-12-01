@@ -1,17 +1,6 @@
 use clap::{Parser, Subcommand};
 
-mod cmd;
-mod config;
-mod encoding;
-mod mcp;
-mod parameter_analysis;
-mod payload;
-mod scanning;
-mod target_parser;
-mod utils;
-
-pub static DEBUG: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-pub static REQUEST_COUNT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+use dalfox::{cmd, config, mcp, utils, DEBUG};
 
 #[derive(Parser)]
 #[command(name = "dalfox")]
@@ -68,16 +57,16 @@ async fn main() {
     let __args: Vec<String> = std::env::args().collect();
     let color_enabled = atty::is(atty::Stream::Stdout);
     if __args.iter().any(|a| a == "-h" || a == "--help") {
-        crate::utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
+        utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
     }
 
     let cli = Cli::parse();
     // Set global debug toggle for downstream modules
-    crate::DEBUG.store(cli.debug, std::sync::atomic::Ordering::Relaxed);
+    DEBUG.store(cli.debug, std::sync::atomic::Ordering::Relaxed);
     // Skip banner for MCP subcommand to keep stdout clean for JSON-RPC
     let is_mcp = matches!(cli.command, Some(Commands::Mcp));
     if !is_mcp {
-        crate::utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
+        utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
     }
 
     // Load configuration with optional --config override
@@ -182,7 +171,7 @@ async fn main() {
             Commands::Payload(args) => cmd::payload::run_payload(args),
             Commands::Mcp => {
                 // Run MCP stdio server (no banner already)
-                if let Err(e) = crate::mcp::run_mcp_server().await {
+                if let Err(e) = mcp::run_mcp_server().await {
                     eprintln!("MCP server error: {e}");
                 }
             }
@@ -212,8 +201,8 @@ async fn main() {
             skip_reflection_header: false,
             skip_reflection_cookie: false,
             skip_reflection_path: false,
-            timeout: crate::cmd::scan::DEFAULT_TIMEOUT_SECS,
-            delay: crate::cmd::scan::DEFAULT_DELAY_MS,
+            timeout: cmd::scan::DEFAULT_TIMEOUT_SECS,
+            delay: cmd::scan::DEFAULT_DELAY_MS,
             proxy: None,
             follow_redirects: false,
             output: None,
@@ -222,10 +211,10 @@ async fn main() {
             silence: false,
             poc_type: "plain".to_string(),
             limit: None,
-            workers: crate::cmd::scan::DEFAULT_WORKERS,
-            max_concurrent_targets: crate::cmd::scan::DEFAULT_MAX_CONCURRENT_TARGETS,
-            max_targets_per_host: crate::cmd::scan::DEFAULT_MAX_TARGETS_PER_HOST,
-            encoders: crate::cmd::scan::DEFAULT_ENCODERS
+            workers: cmd::scan::DEFAULT_WORKERS,
+            max_concurrent_targets: cmd::scan::DEFAULT_MAX_CONCURRENT_TARGETS,
+            max_targets_per_host: cmd::scan::DEFAULT_MAX_TARGETS_PER_HOST,
+            encoders: cmd::scan::DEFAULT_ENCODERS
                 .iter()
                 .map(|s| s.to_string())
                 .collect(),
@@ -247,7 +236,7 @@ async fn main() {
             res.config.apply_to_scan_args_if_default(&mut args);
         }
 
-        crate::utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
+        utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
         cmd::scan::run_scan(&args).await;
     }
 }
