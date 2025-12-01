@@ -89,7 +89,7 @@ mod scan_id {
         assert_eq!(id.len(), 64);
         assert!(
             id.chars()
-                .all(|c| c.is_ascii_hexdigit() && c.is_ascii_lowercase() || c.is_ascii_digit())
+                .all(|c| c.is_ascii_hexdigit() && (c.is_ascii_lowercase() || c.is_ascii_digit()))
         );
     }
 
