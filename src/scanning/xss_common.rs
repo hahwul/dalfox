@@ -14,6 +14,7 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
             let attr_payloads = crate::payload::get_dynamic_xss_attribute_payloads();
             match delimiter_type {
                 Some(DelimiterType::SingleQuote) => {
+                    // Standard attribute breakout with single quote
                     for payload in html_payloads.iter() {
                         payloads.push(format!("'>{}'", payload));
                     }
@@ -22,6 +23,7 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
                     }
                 }
                 Some(DelimiterType::DoubleQuote) => {
+                    // Standard attribute breakout with double quote
                     for payload in html_payloads.iter() {
                         payloads.push(format!("\">{}\"", payload));
                     }
@@ -30,8 +32,13 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
                     }
                 }
                 _ => {
-                    payloads.extend(html_payloads);
-                    payloads.extend(attr_payloads);
+                    // Unquoted or unknown attribute context - try both quote styles
+                    payloads.extend(html_payloads.clone());
+                    payloads.extend(attr_payloads.clone());
+                    for payload in html_payloads.iter() {
+                        payloads.push(format!("\">{}\"", payload));
+                        payloads.push(format!("'>{}'", payload));
+                    }
                 }
             }
         }

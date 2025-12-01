@@ -974,3 +974,80 @@ pub async fn mine_parameters(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::parameter_analysis::InjectionContext;
+
+    #[test]
+    fn test_detect_injection_context_html_body() {
+        // Basic HTML body context - "dalfox" appears outside any quotes/script
+        let html = "<p>Search result for: dalfox</p>";
+        let ctx = detect_injection_context(html);
+        assert!(matches!(ctx, InjectionContext::Html(None)));
+    }
+
+    #[test]
+    fn test_detect_injection_context_attribute_double_quote() {
+        // Double-quoted attribute context
+        let html = r#"<button aria-label="dalfox">Button</button>"#;
+        let ctx = detect_injection_context(html);
+        assert!(matches!(
+            ctx,
+            InjectionContext::Attribute(Some(crate::parameter_analysis::DelimiterType::DoubleQuote))
+        ));
+    }
+
+    #[test]
+    fn test_detect_injection_context_attribute_single_quote() {
+        // Single-quoted attribute context
+        let html = r#"<input placeholder='dalfox'>"#;
+        let ctx = detect_injection_context(html);
+        assert!(matches!(
+            ctx,
+            InjectionContext::Attribute(Some(crate::parameter_analysis::DelimiterType::SingleQuote))
+        ));
+    }
+
+    #[test]
+    fn test_detect_injection_context_javascript_double_quote() {
+        // JavaScript context with double quotes
+        let html = r#"<script>var x = "dalfox";</script>"#;
+        let ctx = detect_injection_context(html);
+        assert!(matches!(
+            ctx,
+            InjectionContext::Javascript(Some(crate::parameter_analysis::DelimiterType::DoubleQuote))
+        ));
+    }
+
+    #[test]
+    fn test_detect_injection_context_javascript_single_quote() {
+        // JavaScript context with single quotes
+        let html = r#"<script>var x = 'dalfox';</script>"#;
+        let ctx = detect_injection_context(html);
+        assert!(matches!(
+            ctx,
+            InjectionContext::Javascript(Some(crate::parameter_analysis::DelimiterType::SingleQuote))
+        ));
+    }
+
+    #[test]
+    fn test_detect_injection_context_html_comment() {
+        // HTML comment context
+        let html = r#"<!-- This is dalfox comment -->"#;
+        let ctx = detect_injection_context(html);
+        assert!(matches!(
+            ctx,
+            InjectionContext::Html(Some(crate::parameter_analysis::DelimiterType::Comment))
+        ));
+    }
+
+    #[test]
+    fn test_detect_injection_context_no_marker() {
+        // No marker present - defaults to HTML
+        let html = r#"<p>No marker here</p>"#;
+        let ctx = detect_injection_context(html);
+        assert!(matches!(ctx, InjectionContext::Html(None)));
+    }
+}
