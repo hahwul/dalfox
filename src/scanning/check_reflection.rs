@@ -10,15 +10,16 @@ use tokio::time::{Duration, sleep};
 ///   "&#x3c;script&#x3e;" -> "<script>"
 ///   "&#60;alert(1)&#62;"  -> "<alert(1)>"
 fn decode_html_entities(input: &str) -> String {
-    // Match patterns like &#xHH; or &#xHHHH; or &#DDDD;
+    // Match patterns like &#xHH; or &#xHHHH; or &#DDDD; (hex 'x' is case-insensitive)
     // We purposely limit to reasonable length to avoid catastrophic replacements.
-    let re = Regex::new(r"&#(x[0-9a-fA-F]{2,6}|[0-9]{2,6});").unwrap();
+    let re = Regex::new(r"&#([xX][0-9a-fA-F]{2,6}|[0-9]{2,6});").unwrap();
     let mut out = String::with_capacity(input.len());
     let mut last = 0;
     for m in re.find_iter(input) {
         out.push_str(&input[last..m.start()]);
         let entity = &input[m.start() + 2..m.end() - 1]; // strip &# and ;
-        let decoded = if let Some(hex) = entity.strip_prefix('x') {
+        let decoded = if entity.starts_with('x') || entity.starts_with('X') {
+            let hex = &entity[1..];
             u32::from_str_radix(hex, 16)
                 .ok()
                 .and_then(std::char::from_u32)
@@ -34,7 +35,16 @@ fn decode_html_entities(input: &str) -> String {
         last = m.end();
     }
     out.push_str(&input[last..]);
-    out
+
+    // Handle a minimal set of named entities commonly encountered in XSS contexts.
+    // This is intentionally small to avoid unexpected transformations.
+    let mut named = out;
+    named = named.replace("&lt;", "<");
+    named = named.replace("&gt;", ">");
+    named = named.replace("&amp;", "&");
+    named = named.replace("&quot;", "\"");
+    named = named.replace("&apos;", "'");
+    named
 }
 
 /// Generate normalization variants of a response body to test for reflected payload.
@@ -341,6 +351,23 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_html_entities_uppercase_hex_x() {
+        let s = "&#X3C;img src=x onerror=alert(1)&#X3E;";
+        let d = decode_html_entities(s);
+        assert!(d.contains("<img src=x onerror=alert(1)>") );
+    }
+
+    #[test]
+    fn test_decode_html_entities_named_common() {
+        let s = "&lt;svg onload=alert(1)&gt; &amp; &quot; &apos;";
+        let d = decode_html_entities(s);
+        assert!(d.contains("<svg onload=alert(1)>") );
+        assert!(d.contains("&"));
+        assert!(d.contains("\""));
+        assert!(d.contains("'"));
+    }
+
+    #[test]
     fn test_normalization_variants_dedup() {
         let raw = "Hello";
         let vars = normalization_variants(raw);
@@ -361,6 +388,19 @@ mod tests {
         let encoded = urlencoding::encode(payload).to_string();
         let resp = format!("ok {} end", encoded);
         assert!(is_payload_reflected(&resp, payload));
+    }
+
+    #[test]
+    fn test_is_payload_reflected_double_layer_percent_entity_then_url() {
+        // Server returns percent sign as HTML-entity, which then precedes URL-encoded payload
+        let payload = "<script>alert(1)</script>";
+        // Build a string like: &#37;3Cscript%3Ealert(1)%3C%2Fscript%3E
+        let url_once = urlencoding::encode(payload).to_string();
+        let resp = url_once.replace("%", "&#37;");
+        assert!(
+            is_payload_reflected(&resp, payload),
+            "Should detect after decoding &#37; to % then URL-decoding"
+        );
     }
 
     #[test]
