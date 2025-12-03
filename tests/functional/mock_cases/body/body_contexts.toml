@@ -107,3 +107,129 @@ handler_type = "body"
 param_name = "message"
 reflection = "<div class=\"alert\">You submitted: {input}</div>"
 expected_detection = true
+
+[[case]]
+id = 13
+name = "json_property_value"
+description = "JSON property value in response"
+handler_type = "body"
+param_name = "value"
+reflection = "{\"result\": \"{input}\", \"status\": \"ok\"}"
+expected_detection = true
+
+[[case]]
+id = 14
+name = "form_field_echo"
+description = "Form field echoed back to user"
+handler_type = "body"
+param_name = "username"
+reflection = "<div>Welcome, {input}!</div>"
+expected_detection = true
+
+[[case]]
+id = 15
+name = "search_term_result"
+description = "Search term in result page"
+handler_type = "body"
+param_name = "q"
+reflection = "<h2>Results for: {input}</h2>"
+expected_detection = true
+
+[[case]]
+id = 16
+name = "comment_submission"
+description = "Comment submission reflection"
+handler_type = "body"
+param_name = "comment"
+reflection = "<div class=\"comment\">{input}</div>"
+expected_detection = true
+
+[[case]]
+id = 17
+name = "email_field"
+description = "Email field reflection"
+handler_type = "body"
+param_name = "email"
+reflection = "<span>Email sent to: {input}</span>"
+expected_detection = true
+
+[[case]]
+id = 18
+name = "url_submission"
+description = "URL submission in POST body"
+handler_type = "body"
+param_name = "url"
+reflection = "<a href=\"{input}\">Your link</a>"
+expected_detection = true
+
+[[case]]
+id = 19
+name = "json_nested_value"
+description = "Nested JSON value reflection"
+handler_type = "body"
+param_name = "nested"
+reflection = "{\"data\": {\"value\": \"{input}\"}}"
+expected_detection = true
+
+[[case]]
+id = 20
+name = "file_upload_name"
+description = "Uploaded file name reflection"
+handler_type = "body"
+param_name = "filename"
+reflection = "<div>Uploaded: {input}</div>"
+expected_detection = true
+
+[[case]]
+id = 21
+name = "textarea_content"
+description = "Textarea content submission"
+handler_type = "body"
+param_name = "content"
+reflection = "<pre>{input}</pre>"
+expected_detection = true
+
+[[case]]
+id = 22
+name = "json_array_element"
+description = "JSON array element reflection"
+handler_type = "body"
+param_name = "item"
+reflection = "{\"items\": [\"{input}\"]}"
+expected_detection = true
+
+[[case]]
+id = 23
+name = "xml_tag_content"
+description = "XML tag content reflection"
+handler_type = "body"
+param_name = "xmldata"
+reflection = "<response><data>{input}</data></response>"
+expected_detection = true
+
+[[case]]
+id = 24
+name = "form_validation_error"
+description = "Form validation error with user input"
+handler_type = "body"
+param_name = "field"
+reflection = "<div class=\"error\">Invalid value: {input}</div>"
+expected_detection = true
+
+[[case]]
+id = 25
+name = "api_response_message"
+description = "API response message with user data"
+handler_type = "body"
+param_name = "msg"
+reflection = "{\"message\": \"{input}\", \"code\": 200}"
+expected_detection = true
+
+[[case]]
+id = 26
+name = "webhook_payload"
+description = "Webhook payload reflection"
+handler_type = "body"
+param_name = "payload"
+reflection = "<script>processWebhook('{input}');</script>"
+expected_detection = true

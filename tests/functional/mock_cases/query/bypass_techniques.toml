@@ -79,3 +79,91 @@ description = "JavaScript comment break"
 handler_type = "query"
 reflection = "<script>//comment\nvar x='{input}';</script>"
 expected_detection = true
+
+[[case]]
+id = 143
+name = "case_variation_script"
+description = "Case variation in script tag"
+handler_type = "query"
+reflection = "<sCrIpT>{input}</ScRiPt>"
+expected_detection = true
+
+[[case]]
+id = 144
+name = "attribute_without_quotes"
+description = "Attribute value without quotes"
+handler_type = "query"
+reflection = "<img src=x onerror={input}>"
+expected_detection = true
+
+[[case]]
+id = 145
+name = "slash_before_attribute"
+description = "Forward slash before attribute"
+handler_type = "query"
+reflection = "<img/src=x/onerror=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 146
+name = "grave_accent_delimiter"
+description = "Grave accent as attribute delimiter"
+handler_type = "query"
+reflection = "<img src=`{input}`>"
+expected_detection = true
+
+[[case]]
+id = 147
+name = "unicode_escape_js"
+description = "Unicode escape sequences in JavaScript"
+handler_type = "query"
+reflection = "<script>var x='\\u{input}';</script>"
+expected_detection = true
+
+[[case]]
+id = 148
+name = "octal_escape_js"
+description = "Octal escape in JavaScript string"
+handler_type = "query"
+reflection = "<script>var x='\\{input}';</script>"
+expected_detection = true
+
+[[case]]
+id = 149
+name = "overlong_utf8"
+description = "Overlong UTF-8 encoding bypass"
+handler_type = "query"
+reflection = "{input}"
+expected_detection = true
+
+[[case]]
+id = 150
+name = "utf7_encoding"
+description = "UTF-7 encoding bypass"
+handler_type = "query"
+reflection = "{input}"
+expected_detection = true
+
+[[case]]
+id = 151
+name = "html_tag_fuzzing"
+description = "HTML tag with unusual spacing"
+handler_type = "query"
+reflection = "< script >{input}</ script >"
+expected_detection = true
+
+[[case]]
+id = 152
+name = "polyglot_payload"
+description = "Polyglot XSS context"
+handler_type = "query"
+reflection = "<!--{input}--><script>{input}</script>"
+expected_detection = true
+
+[[case]]
+id = 153
+name = "mutation_xss"
+description = "DOM mutation XSS with mXSS vector"
+handler_type = "query"
+reflection = "<noscript><p title=\"</noscript>{input}<noscript>\">"
+expected_detection = true

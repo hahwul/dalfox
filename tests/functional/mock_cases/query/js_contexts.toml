@@ -31,3 +31,107 @@ description = "Reflection inside JavaScript string with single quotes"
 handler_type = "query"
 reflection = "<script>var s='{input}';</script>"
 expected_detection = true
+
+[[case]]
+id = 91
+name = "js_template_literal"
+description = "Reflection inside JavaScript template literal"
+handler_type = "query"
+reflection = "<script>const s=`{input}`;</script>"
+expected_detection = true
+
+[[case]]
+id = 92
+name = "js_object_property"
+description = "Reflection in JavaScript object property value"
+handler_type = "query"
+reflection = "<script>var obj = {key: '{input}'};</script>"
+expected_detection = true
+
+[[case]]
+id = 93
+name = "js_array_element"
+description = "Reflection in JavaScript array element"
+handler_type = "query"
+reflection = "<script>var arr = ['{input}'];</script>"
+expected_detection = true
+
+[[case]]
+id = 94
+name = "js_function_argument"
+description = "Reflection as JavaScript function argument"
+handler_type = "query"
+reflection = "<script>console.log('{input}');</script>"
+expected_detection = true
+
+[[case]]
+id = 95
+name = "js_inline_event_handler"
+description = "Reflection in inline JavaScript event handler"
+handler_type = "query"
+reflection = "<a href=\"#\" onclick=\"handler('{input}')\">Link</a>"
+expected_detection = true
+
+[[case]]
+id = 96
+name = "js_comment_single_line"
+description = "Reflection inside JavaScript single-line comment"
+handler_type = "query"
+reflection = "<script>// {input}</script>"
+expected_detection = true
+
+[[case]]
+id = 97
+name = "js_comment_multi_line"
+description = "Reflection inside JavaScript multi-line comment"
+handler_type = "query"
+reflection = "<script>/* {input} */</script>"
+expected_detection = true
+
+[[case]]
+id = 98
+name = "js_eval_context"
+description = "Reflection in eval() call"
+handler_type = "query"
+reflection = "<script>eval('{input}');</script>"
+expected_detection = true
+
+[[case]]
+id = 99
+name = "js_settimeout_string"
+description = "Reflection in setTimeout with string"
+handler_type = "query"
+reflection = "<script>setTimeout('{input}', 1000);</script>"
+expected_detection = true
+
+[[case]]
+id = 100
+name = "js_json_parse"
+description = "Reflection in JSON.parse argument"
+handler_type = "query"
+reflection = "<script>JSON.parse('{input}');</script>"
+expected_detection = true
+
+[[case]]
+id = 101
+name = "js_constructor_function"
+description = "Reflection in Function constructor"
+handler_type = "query"
+reflection = "<script>new Function('{input}')();</script>"
+expected_detection = true
+
+[[case]]
+id = 102
+name = "js_backtick_in_string"
+description = "Reflection with backtick in regular string"
+handler_type = "query"
+reflection = "<script>var s=\"`{input}`\";</script>"
+expected_detection = true
+
+[[case]]
+id = 103
+name = "js_regex_literal"
+description = "Reflection in JavaScript regex literal"
+handler_type = "query"
+reflection = "<script>var r = /{input}/;</script>"
+expected_detection = true

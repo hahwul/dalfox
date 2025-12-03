@@ -71,3 +71,91 @@ description = "Reflection in input value attribute"
 handler_type = "query"
 reflection = "<input value=\"{input}\">"
 expected_detection = true
+
+[[case]]
+id = 168
+name = "p_element"
+description = "Reflection inside paragraph element"
+handler_type = "query"
+reflection = "<p>{input}</p>"
+expected_detection = true
+
+[[case]]
+id = 169
+name = "span_element"
+description = "Reflection inside span element"
+handler_type = "query"
+reflection = "<span>{input}</span>"
+expected_detection = true
+
+[[case]]
+id = 170
+name = "h1_element"
+description = "Reflection inside h1 heading"
+handler_type = "query"
+reflection = "<h1>{input}</h1>"
+expected_detection = true
+
+[[case]]
+id = 171
+name = "li_element"
+description = "Reflection inside list item"
+handler_type = "query"
+reflection = "<ul><li>{input}</li></ul>"
+expected_detection = true
+
+[[case]]
+id = 172
+name = "td_element"
+description = "Reflection inside table cell"
+handler_type = "query"
+reflection = "<table><tr><td>{input}</td></tr></table>"
+expected_detection = true
+
+[[case]]
+id = 173
+name = "textarea_element"
+description = "Reflection inside textarea"
+handler_type = "query"
+reflection = "<textarea>{input}</textarea>"
+expected_detection = true
+
+[[case]]
+id = 174
+name = "title_element"
+description = "Reflection inside title element"
+handler_type = "query"
+reflection = "<title>{input}</title>"
+expected_detection = true
+
+[[case]]
+id = 175
+name = "option_element"
+description = "Reflection inside option element"
+handler_type = "query"
+reflection = "<select><option>{input}</option></select>"
+expected_detection = true
+
+[[case]]
+id = 176
+name = "button_element"
+description = "Reflection inside button element"
+handler_type = "query"
+reflection = "<button>{input}</button>"
+expected_detection = true
+
+[[case]]
+id = 177
+name = "label_element"
+description = "Reflection inside label element"
+handler_type = "query"
+reflection = "<label>{input}</label>"
+expected_detection = true
+
+[[case]]
+id = 178
+name = "noscript_element"
+description = "Reflection inside noscript element"
+handler_type = "query"
+reflection = "<noscript>{input}</noscript>"
+expected_detection = true

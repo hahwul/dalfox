@@ -174,11 +174,11 @@ cargo test mock_case_loader -- --nocapture
 
 Each injection type has its own ID namespace:
 
-- **Query**: Currently 1-90 (can go higher)
-- **Header**: Currently 1-22
-- **Cookie**: Currently 1-20
-- **Path**: Currently 1-12
-- **Body**: Currently 1-12
+- **Query**: Currently 1-190 (can go higher)
+- **Header**: Currently 1-40
+- **Cookie**: Currently 1-30
+- **Path**: Currently 1-23
+- **Body**: Currently 1-26
 
 When adding a new case:
 1. Find the highest ID in that directory
@@ -248,13 +248,13 @@ If a test fails:
 
 As of the latest commit:
 
-- **Query parameters**: 90 cases
-- **Headers**: 22 cases  
-- **Cookies**: 20 cases
-- **Path parameters**: 12 cases
-- **Body parameters**: 12 cases
+- **Query parameters**: 190 cases
+- **Headers**: 40 cases  
+- **Cookies**: 30 cases
+- **Path parameters**: 23 cases
+- **Body parameters**: 26 cases
 
-**Total**: 156 test cases
+**Total**: 309 test cases
 
 ## Adding New Categories
 

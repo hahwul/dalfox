@@ -39,3 +39,75 @@ description = "Reflection in CSS @import statement"
 handler_type = "query"
 reflection = "<style>@import '{input}';</style>"
 expected_detection = true
+
+[[case]]
+id = 104
+name = "css_font_face_url"
+description = "Reflection in CSS @font-face URL"
+handler_type = "query"
+reflection = "<style>@font-face { src: url('{input}'); }</style>"
+expected_detection = true
+
+[[case]]
+id = 105
+name = "css_animation_name"
+description = "Reflection in CSS animation name"
+handler_type = "query"
+reflection = "<style>div { animation: {input} 1s; }</style>"
+expected_detection = true
+
+[[case]]
+id = 106
+name = "css_property_value"
+description = "Reflection in CSS property value"
+handler_type = "query"
+reflection = "<style>div { color: {input}; }</style>"
+expected_detection = true
+
+[[case]]
+id = 107
+name = "css_calc_expression"
+description = "Reflection in CSS calc() function"
+handler_type = "query"
+reflection = "<style>div { width: calc({input}); }</style>"
+expected_detection = true
+
+[[case]]
+id = 108
+name = "css_var_reference"
+description = "Reflection in CSS variable reference"
+handler_type = "query"
+reflection = "<style>div { color: var(--{input}); }</style>"
+expected_detection = true
+
+[[case]]
+id = 109
+name = "css_gradient"
+description = "Reflection in CSS gradient function"
+handler_type = "query"
+reflection = "<style>div { background: linear-gradient({input}); }</style>"
+expected_detection = true
+
+[[case]]
+id = 110
+name = "css_content_property"
+description = "Reflection in CSS content property"
+handler_type = "query"
+reflection = "<style>div::before { content: '{input}'; }</style>"
+expected_detection = true
+
+[[case]]
+id = 111
+name = "css_attribute_selector"
+description = "Reflection in CSS attribute selector"
+handler_type = "query"
+reflection = "<style>div[data-value=\"{input}\"] { color: red; }</style>"
+expected_detection = true
+
+[[case]]
+id = 112
+name = "css_keyframes"
+description = "Reflection in CSS @keyframes name"
+handler_type = "query"
+reflection = "<style>@keyframes {input} { from {} to {} }</style>"
+expected_detection = true

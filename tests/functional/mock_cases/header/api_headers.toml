@@ -1,0 +1,73 @@
+# API-specific header injection scenarios
+
+[[case]]
+id = 33
+name = "content_disposition"
+description = "Content-Disposition header reflection in file download"
+handler_type = "header"
+header_name = "Content-Disposition"
+reflection = "<div>Download: {input}</div>"
+expected_detection = true
+
+[[case]]
+id = 34
+name = "x_rate_limit_info"
+description = "X-RateLimit custom header reflection"
+handler_type = "header"
+header_name = "X-RateLimit-Info"
+reflection = "<div>Rate limit: {input}</div>"
+expected_detection = true
+
+[[case]]
+id = 35
+name = "api_version_header"
+description = "API-Version header reflection"
+handler_type = "header"
+header_name = "API-Version"
+reflection = "<script>var apiVersion='{input}';</script>"
+expected_detection = true
+
+[[case]]
+id = 36
+name = "x_tenant_id"
+description = "X-Tenant-ID header in multi-tenant applications"
+handler_type = "header"
+header_name = "X-Tenant-ID"
+reflection = "<div>Tenant: {input}</div>"
+expected_detection = true
+
+[[case]]
+id = 37
+name = "x_client_version"
+description = "X-Client-Version header reflection"
+handler_type = "header"
+header_name = "X-Client-Version"
+reflection = "<meta name=\"client-version\" content=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 38
+name = "x_session_token"
+description = "X-Session-Token header reflection"
+handler_type = "header"
+header_name = "X-Session-Token"
+reflection = "<input type=\"hidden\" value=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 39
+name = "graphql_operation"
+description = "X-GraphQL-Operation header reflection"
+handler_type = "header"
+header_name = "X-GraphQL-Operation"
+reflection = "<div>Operation: {input}</div>"
+expected_detection = true
+
+[[case]]
+id = 40
+name = "x_webhook_signature"
+description = "X-Webhook-Signature header reflection"
+handler_type = "header"
+header_name = "X-Webhook-Signature"
+reflection = "<pre>Signature: {input}</pre>"
+expected_detection = true

@@ -71,3 +71,93 @@ handler_type = "cookie"
 cookie_name = "ga"
 reflection = "<script>ga('create', '{input}');</script>"
 expected_detection = true
+
+[[case]]
+id = 21
+name = "tracking_pixel_cookie"
+description = "Tracking pixel cookie reflection"
+handler_type = "cookie"
+cookie_name = "px"
+reflection = "<img src=\"/pixel?id={input}\">"
+expected_detection = true
+
+[[case]]
+id = 22
+name = "user_id_cookie"
+description = "User ID cookie reflection"
+handler_type = "cookie"
+cookie_name = "uid"
+reflection = "<div data-user-id=\"{input}\">Profile</div>"
+expected_detection = true
+
+[[case]]
+id = 23
+name = "experiment_cookie"
+description = "A/B test experiment cookie"
+handler_type = "cookie"
+cookie_name = "exp"
+reflection = "<script>window.experiment='{input}';</script>"
+expected_detection = true
+
+[[case]]
+id = 24
+name = "affiliate_cookie"
+description = "Affiliate tracking cookie"
+handler_type = "cookie"
+cookie_name = "aff"
+reflection = "<a href=\"/ref/{input}\">Affiliate link</a>"
+expected_detection = true
+
+[[case]]
+id = 25
+name = "consent_cookie"
+description = "Cookie consent preference"
+handler_type = "cookie"
+cookie_name = "consent"
+reflection = "<script>var consent='{input}';</script>"
+expected_detection = true
+
+[[case]]
+id = 26
+name = "device_id_cookie"
+description = "Device identifier cookie"
+handler_type = "cookie"
+cookie_name = "did"
+reflection = "<meta name=\"device-id\" content=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 27
+name = "feature_flag_cookie"
+description = "Feature flag cookie"
+handler_type = "cookie"
+cookie_name = "features"
+reflection = "<script>enableFeature('{input}');</script>"
+expected_detection = true
+
+[[case]]
+id = 28
+name = "campaign_cookie"
+description = "Marketing campaign cookie"
+handler_type = "cookie"
+cookie_name = "campaign"
+reflection = "<div class=\"campaign-{input}\">Ad content</div>"
+expected_detection = true
+
+[[case]]
+id = 29
+name = "referrer_cookie"
+description = "Referrer tracking cookie"
+handler_type = "cookie"
+cookie_name = "ref"
+reflection = "<a href=\"{input}\">Source</a>"
+expected_detection = true
+
+[[case]]
+id = 30
+name = "cart_id_cookie"
+description = "Shopping cart ID cookie"
+handler_type = "cookie"
+cookie_name = "cart"
+reflection = "<input name=\"cart_id\" value=\"{input}\">"
+expected_detection = true
