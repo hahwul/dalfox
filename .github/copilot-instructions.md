@@ -94,6 +94,17 @@ Top-level subcommands:
 
 When no subcommand is given, the CLI defaults to scan with positional targets.
 
+Centralized defaults (src/cmd/scan.rs):
+- DEFAULT_ENCODERS: &["url", "html"]
+- DEFAULT_TIMEOUT_SECS: 10
+- DEFAULT_DELAY_MS: 0
+- DEFAULT_WORKERS: 50
+- DEFAULT_MAX_CONCURRENT_TARGETS: 50
+- DEFAULT_MAX_TARGETS_PER_HOST: 100
+- DEFAULT_METHOD: "GET"
+
+These constants are referenced by both CLI default values and config precedence logic.
+
 Scan flags (as of src/cmd/scan.rs):
 - INPUT
   - -i, --input-type: auto | url | file | pipe | raw-http
@@ -117,6 +128,7 @@ Scan flags (as of src/cmd/scan.rs):
   - --skip-discovery
   - --skip-reflection-header
   - --skip-reflection-cookie
+  - --skip-reflection-path
 - PARAMETER MINING
   - -W, --mining-dict-word: wordlist file for dictionary probing
   - --remote-wordlists: comma-separated providers; options: burp, assetnote
@@ -133,8 +145,9 @@ Scan flags (as of src/cmd/scan.rs):
   - --max-concurrent-targets: global target concurrency (default: 50)
   - --max-targets-per-host: per-host cap (default: 100)
 - XSS SCANNING
-  - -e, --encoders: comma-separated; options: none, url, 2url, html, base64
+  - -e, --encoders: comma-separated; options: none, url, 2url, html, base64 (default: url,html)
     - Note: if list contains "none", only original payloads are used (no encoder variants).
+    - Default values are centralized in cmd/scan.rs::DEFAULT_ENCODERS
   - --remote-payloads: comma-separated providers; options: portswigger, payloadbox
   - --custom-blind-xss-payload: file with blind payload templates
   - -b, --blind: blind XSS callback URL (enables blind scanning pass)
@@ -145,6 +158,7 @@ Scan flags (as of src/cmd/scan.rs):
   - --sxss: enable Stored XSS workflow
   - --sxss-url: URL to check for stored reflection (required with --sxss)
   - --sxss-method: method for stored check (default: GET)
+  - --skip-ast-analysis: skip AST-based DOM XSS detection (analyzes JavaScript in responses)
 - TARGETS (positional)
   - URLs or file paths depending on input-type
 
@@ -221,6 +235,10 @@ Filtering:
 - Dynamic HTML payloads: xss_html.rs renders templates with JS payloads; includes class/id variants and obfuscated tag variants
 - Dynamic attribute payloads: xss_event.rs renders common event handlers (onerror/onload) with JS payloads
 - Encoders (src/encoding/mod.rs): url, 2url, html-entity (hex), base64
+  - Centralized encoder policy via apply_encoders_to_payloads function
+  - If encoders contains "none", only original payloads are used (no variants)
+  - Otherwise, includes original payload plus encoder variants in fixed order: url, html, 2url, base64
+  - Results are de-duplicated while preserving first occurrence order
   - scan.rs uses a global encoder set (GLOBAL_ENCODERS) to influence PoC generation for path-segment injections
 - Blind payload templates: xss_blind.rs (string templates using "{}" for callback URLs)
 - Remote payloads/wordlists: src/payload/remote.rs
@@ -230,7 +248,7 @@ Filtering:
 
 Context-aware payload generation (scanning/xss_common.rs):
 - The scanning engine chooses payloads per InjectionContext with delimiter hints (Attribute, Javascript, Html, with optional SingleQuote, DoubleQuote, Comment).
-- Encoders are applied in scanning/xss_common.rs to produce variants unless encoders include "none".
+- Encoders are applied via encoding::apply_encoders_to_payloads to produce variants unless encoders include "none".
 - Remote payloads and custom payload files are appended then de-duplicated.
 
 ## Scanning Engine
@@ -256,14 +274,21 @@ Result model (scanning/result.rs):
 ## Development Workflow
 
 Build
-- Development: cargo build
-- Release: cargo build --release
-- justfile exists; common aliases are available (e.g., just dev, just build, just test)
+- Development: cargo build (or just dev)
+- Release: cargo build --release (or just build)
+- justfile exists with common tasks:
+  - just test: run cargo test
+  - just build: release build
+  - just dev: development build
+  - just xss_maze: run dalfox against xssmaze test suite (requires xssmaze running on localhost:3000)
 
 Test
-- Run all: cargo test
+- Run all: cargo test (or just test)
 - With output: cargo test -- --nocapture
 - Specific: cargo test test_name
+- Unit tests only: cargo test --lib
+- Integration tests only: cargo test --test integration
+- E2E tests: cargo test --test e2e
 
 Quality
 - Format: cargo fmt
@@ -306,10 +331,12 @@ Add a new JavaScript payload
 - Add/adjust tests under scanning/xss_common.rs or payload modules
 
 Add a new encoder
-- Implement in src/encoding/mod.rs
-- Update encoder handling in scanning/xss_common.rs (for scanning variants)
-- Consider PoC path-encoder in cmd/scan.rs (GLOBAL_ENCODERS handling)
+- Implement encoder function in src/encoding/mod.rs (follow pattern of url_encode, html_entity_encode, etc.)
+- Add to the prio array in apply_encoders_to_payloads (defines application order)
+- Add to encoder matching logic in apply_encoders_to_payloads and expand_payload_with_encoders
+- Update PoC path-encoder handling in cmd/scan.rs (apply_path_encoders_if_requested function)
 - Update CLI help and documentation of -e, --encoders
+- Add test cases in encoding/mod.rs tests module
 
 Enhance discovery/mining
 - Discovery: src/parameter_analysis/discovery.rs
@@ -351,6 +378,22 @@ Unit tests live alongside modules using #[cfg(test)] with a tests module.
   - AST-based DOM XSS taint analysis (tracking sources to sinks, sanitizer detection)
   - server API behaviors (CORS/JSONP/auth), MCP flows when practical
 - CI policy: cargo fmt, cargo clippy -- --deny warnings, cargo test pass before merging
+
+Test organization (tests/ directory):
+- tests/unit/: Unit tests for isolated module functionality
+  - encoding.rs: encoder correctness and policy tests
+  - target_parser.rs: URL parsing and target configuration tests
+  - utils.rs: utility function tests
+- tests/integration/: Integration tests for multi-module workflows
+  - scanner_pipeline.rs: end-to-end scanning pipeline tests
+- tests/functional/: Functional tests with mock servers
+  - xss_mock_server.rs: Mock HTTP server for XSS testing scenarios
+  - mock_case_loader.rs: Loads test cases from mock_cases/ subdirectories
+  - mock_cases/: Organized by parameter location (query, body, header, cookie, path)
+  - basic/: Basic CLI flag and behavior tests
+- tests/e2e/: End-to-end tests
+  - cli_smoke_test.rs: CLI smoke tests ensuring basic commands work
+- tests/common/: Shared test utilities and helpers
 
 ## CLI Examples
 
