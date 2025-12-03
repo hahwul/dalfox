@@ -1,13 +1,16 @@
 //! Integration test: run dalfox scan against a local mock server
 //! and verify that reflected XSS is detected and reported.
+//!
+//! This version uses structured mock cases loaded from TOML files.
 
 use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::{
     Router,
-    extract::{Form, Path, Query},
+    extract::{Form, Path, Query, State},
     http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse},
     routing::{get, post},
@@ -15,6 +18,17 @@ use axum::{
 use base64::prelude::*;
 
 use dalfox::cmd::scan::{self, ScanArgs};
+use super::mock_case_loader::{self, MockCase};
+
+/// Application state holding all loaded mock cases
+#[derive(Clone)]
+struct AppState {
+    query_cases: Arc<HashMap<u32, MockCase>>,
+    header_cases: Arc<HashMap<u32, MockCase>>,
+    cookie_cases: Arc<HashMap<u32, MockCase>>,
+    path_cases: Arc<HashMap<u32, MockCase>>,
+    body_cases: Arc<HashMap<u32, MockCase>>,
+}
 
 // Helpers for mock encoding behaviors
 fn html_named_encode_all(input: &str) -> String {
@@ -45,44 +59,32 @@ fn html_numeric_hex_upper_x(input: &str) -> String {
         .collect::<String>()
 }
 
-async fn query_handler(
+/// Apply the reflection pattern defined in the mock case
+fn apply_reflection(reflection_pattern: &str, input: &str) -> String {
+    match reflection_pattern {
+        "encoded_html_named" => html_named_encode_all(input),
+        "encoded_html_hex_lower" => html_numeric_hex_lower(input),
+        "encoded_html_hex_upper" => html_numeric_hex_upper_x(input),
+        "percent_to_entity" => input.replace('%', "&#37;"),
+        "encoded_base64" => BASE64_STANDARD.encode(input),
+        "encoded_url" => urlencoding::encode(input).to_string(),
+        _ => reflection_pattern.replace("{input}", input),
+    }
+}
+
+async fn query_handler_v2(
     Path(case_id): Path<u32>,
     Query(params): Query<HashMap<String, String>>,
+    State(state): State<AppState>,
 ) -> impl IntoResponse {
     let q = params.get("query").cloned().unwrap_or_default();
-    let reflected = match case_id {
-        1 => q.clone(),
-        2 => html_named_encode_all(&q),
-        3 => html_numeric_hex_lower(&q),
-        4 => html_numeric_hex_upper_x(&q),
-        5 => q.replace('%', "&#37;"),
-        6 => format!("<img src=x alt=\"{}\">", q), // attribute context double quote
-        7 => format!("<script>var s=\"{}\";</script>", q), // JS context double quote
-        8 => format!("<!-- {} -->", q),            // comment context
-        9 => format!("<div>{}</div>", q),          // HTML element
-        10 => format!("<script>{}</script>", q),   // JS block
-        11 => format!("<img src=\"{}\">", q),      // attribute src
-        12 => format!("<a href=\"{}\">", q),       // attribute href
-        13 => format!("{{\"data\": \"{}\"}}", q),  // JSON
-        14 => format!("<meta http-equiv=\"refresh\" content=\"0; url={}\">", q), // meta refresh
-        15 => format!("<form action=\"{}\">", q),  // form action
-        16 => format!("<input value=\"{}\">", q),  // input value
-        17 => format!("<script>alert({})</script>", q), // JS no quotes
-        18 => format!("<img alt='{}'>", q),        // attribute single quote
-        19 => format!("<script>var s='{}';</script>", q), // JS single quote
-        20 => format!("<p title=\"{}\">", q),      // attribute title
-        21 => format!("<iframe src=\"{}\">", q),   // iframe src
-        22 => format!("<object data=\"{}\">", q),  // object data
-        23 => format!("<embed src=\"{}\">", q),    // embed src
-        24 => format!("<link href=\"{}\">", q),    // link href
-        25 => format!("<area href=\"{}\">", q),    // area href
-        26 => format!("<base href=\"{}\">", q),    // base href
-        27 => format!("<script src=\"{}\"></script>", q), // script src
-        28 => format!("<style>@import url({});</style>", q), // CSS import
-        29 => format!("javascript:{}", q),         // javascript: URL
-        30 => format!("data:text/html,{}", q),     // data URL
-        _ => q.clone(),
+    
+    let reflected = if let Some(case) = state.query_cases.get(&case_id) {
+        apply_reflection(&case.reflection, &q)
+    } else {
+        q.clone()
     };
+    
     let body = format!(
         "<html><head><title>mock</title></head><body><div id=out>{}</div></body></html>",
         reflected
@@ -90,25 +92,30 @@ async fn query_handler(
     (StatusCode::OK, Html(body))
 }
 
-async fn header_handler(Path(case_id): Path<u32>, headers: HeaderMap) -> impl IntoResponse {
+async fn header_handler_v2(
+    Path(case_id): Path<u32>,
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let case = state.header_cases.get(&case_id);
+    
+    let header_name = case
+        .and_then(|c| c.header_name.as_ref())
+        .map(|s| s.to_lowercase())
+        .unwrap_or_else(|| "x-test".to_string());
+    
     let q = headers
-        .get("x-test")
+        .get(&header_name)
         .and_then(|h| h.to_str().ok())
         .unwrap_or("")
         .to_string();
-    let reflected = match case_id {
-        1 => q.clone(),
-        2 => html_named_encode_all(&q),
-        3 => html_numeric_hex_lower(&q),
-        4 => html_numeric_hex_upper_x(&q),
-        5 => q.replace('%', "&#37;"),
-        6 => BASE64_STANDARD.encode(&q),
-        7 => urlencoding::encode(&q).to_string(),
-        8 => format!("<div>{}</div>", q),
-        9 => format!("<script>{}</script>", q),
-        10 => format!("<!-- {} -->", q),
-        _ => q.clone(),
+    
+    let reflected = if let Some(case) = case {
+        apply_reflection(&case.reflection, &q)
+    } else {
+        q.clone()
     };
+    
     let body = format!(
         "<html><head><title>mock</title></head><body><div id=out>{}</div></body></html>",
         reflected
@@ -116,35 +123,42 @@ async fn header_handler(Path(case_id): Path<u32>, headers: HeaderMap) -> impl In
     (StatusCode::OK, Html(body))
 }
 
-async fn cookie_handler(Path(case_id): Path<u32>, headers: HeaderMap) -> impl IntoResponse {
+async fn cookie_handler_v2(
+    Path(case_id): Path<u32>,
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let case = state.cookie_cases.get(&case_id);
+    
+    let cookie_name = case
+        .and_then(|c| c.cookie_name.as_ref())
+        .map(|s| s.as_str())
+        .unwrap_or("test");
+    
     let cookie_header = headers
         .get("cookie")
         .and_then(|h| h.to_str().ok())
         .unwrap_or("");
+    
     let q = cookie_header
         .split(';')
         .find_map(|c| {
             let c = c.trim();
-            if c.starts_with("test=") {
-                Some(c[5..].to_string())
+            let prefix = format!("{}=", cookie_name);
+            if c.starts_with(&prefix) {
+                Some(c[prefix.len()..].to_string())
             } else {
                 None
             }
         })
         .unwrap_or_default();
-    let reflected = match case_id {
-        1 => q.clone(),
-        2 => html_named_encode_all(&q),
-        3 => html_numeric_hex_lower(&q),
-        4 => html_numeric_hex_upper_x(&q),
-        5 => q.replace('%', "&#37;"),
-        6 => BASE64_STANDARD.encode(&q),
-        7 => urlencoding::encode(&q).to_string(),
-        8 => format!("<div>{}</div>", q),
-        9 => format!("<script>{}</script>", q),
-        10 => format!("<!-- {} -->", q),
-        _ => q.clone(),
+    
+    let reflected = if let Some(case) = case {
+        apply_reflection(&case.reflection, &q)
+    } else {
+        q.clone()
     };
+    
     let body = format!(
         "<html><head><title>mock</title></head><body><div id=out>{}</div></body></html>",
         reflected
@@ -152,21 +166,16 @@ async fn cookie_handler(Path(case_id): Path<u32>, headers: HeaderMap) -> impl In
     (StatusCode::OK, Html(body))
 }
 
-async fn path_handler(Path((case_id, param)): Path<(u32, String)>) -> impl IntoResponse {
-    let q = param;
-    let reflected = match case_id {
-        1 => q.clone(),
-        2 => html_named_encode_all(&q),
-        3 => html_numeric_hex_lower(&q),
-        4 => html_numeric_hex_upper_x(&q),
-        5 => q.replace('%', "&#37;"),
-        6 => BASE64_STANDARD.encode(&q),
-        7 => urlencoding::encode(&q).to_string(),
-        8 => format!("<div>{}</div>", q),
-        9 => format!("<script>{}</script>", q),
-        10 => format!("<!-- {} -->", q),
-        _ => q.clone(),
+async fn path_handler_v2(
+    Path((case_id, param)): Path<(u32, String)>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let reflected = if let Some(case) = state.path_cases.get(&case_id) {
+        apply_reflection(&case.reflection, &param)
+    } else {
+        param.clone()
     };
+    
     let body = format!(
         "<html><head><title>mock</title></head><body><div id=out>{}</div></body></html>",
         reflected
@@ -174,24 +183,26 @@ async fn path_handler(Path((case_id, param)): Path<(u32, String)>) -> impl IntoR
     (StatusCode::OK, Html(body))
 }
 
-async fn body_handler(
+async fn body_handler_v2(
+    State(state): State<AppState>,
     Path(case_id): Path<u32>,
     Form(params): Form<HashMap<String, String>>,
 ) -> impl IntoResponse {
-    let q = params.get("query").cloned().unwrap_or_default();
-    let reflected = match case_id {
-        1 => q.clone(),
-        2 => html_named_encode_all(&q),
-        3 => html_numeric_hex_lower(&q),
-        4 => html_numeric_hex_upper_x(&q),
-        5 => q.replace('%', "&#37;"),
-        6 => BASE64_STANDARD.encode(&q),
-        7 => urlencoding::encode(&q).to_string(),
-        8 => format!("<div>{}</div>", q),
-        9 => format!("<script>{}</script>", q),
-        10 => format!("<!-- {} -->", q),
-        _ => q.clone(),
+    let case = state.body_cases.get(&case_id);
+    
+    let param_name = case
+        .and_then(|c| c.param_name.as_ref())
+        .map(|s| s.as_str())
+        .unwrap_or("query");
+    
+    let q = params.get(param_name).cloned().unwrap_or_default();
+    
+    let reflected = if let Some(case) = case {
+        apply_reflection(&case.reflection, &q)
+    } else {
+        q.clone()
     };
+    
     let body = format!(
         "<html><head><title>mock</title></head><body><div id=out>{}</div></body></html>",
         reflected
@@ -199,452 +210,387 @@ async fn body_handler(
     (StatusCode::OK, Html(body))
 }
 
-async fn start_mock_server() -> SocketAddr {
+async fn start_mock_server_v2() -> (SocketAddr, AppState) {
+    // Load all mock cases
+    let base_dir = mock_case_loader::get_mock_cases_base_dir();
+    let cases_by_type = mock_case_loader::load_all_mock_cases(&base_dir)
+        .expect("Failed to load mock cases");
+    
+    // Organize cases by ID for quick lookup
+    let mut query_cases = HashMap::new();
+    let mut header_cases = HashMap::new();
+    let mut cookie_cases = HashMap::new();
+    let mut path_cases = HashMap::new();
+    let mut body_cases = HashMap::new();
+    
+    for (handler_type, cases) in cases_by_type {
+        for case in cases {
+            match handler_type.as_str() {
+                "query" => { query_cases.insert(case.id, case); },
+                "header" => { header_cases.insert(case.id, case); },
+                "cookie" => { cookie_cases.insert(case.id, case); },
+                "path" => { path_cases.insert(case.id, case); },
+                "body" => { body_cases.insert(case.id, case); },
+                _ => {},
+            }
+        }
+    }
+    
+    let state = AppState {
+        query_cases: Arc::new(query_cases),
+        header_cases: Arc::new(header_cases),
+        cookie_cases: Arc::new(cookie_cases),
+        path_cases: Arc::new(path_cases),
+        body_cases: Arc::new(body_cases),
+    };
+    
     let app = Router::new()
-        .route("/query/:case_id", get(query_handler))
-        .route("/header/:case_id", get(header_handler))
-        .route("/cookie/:case_id", get(cookie_handler))
-        .route("/path/:case_id/:param", get(path_handler))
-        .route("/body/:case_id", post(body_handler));
+        .route("/query/:case_id", get(query_handler_v2))
+        .route("/header/:case_id", get(header_handler_v2))
+        .route("/cookie/:case_id", get(cookie_handler_v2))
+        .route("/path/:case_id/:param", get(path_handler_v2))
+        .route("/body/:case_id", post(body_handler_v2))
+        .with_state(state.clone());
 
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
         .await
         .expect("bind listener");
     let addr = listener.local_addr().unwrap();
+    
     tokio::spawn(async move {
         axum::serve(listener, app)
             .with_graceful_shutdown(async {
-                // Keep server alive for the duration of the test; no external shutdown
-                tokio::time::sleep(Duration::from_millis(1)).await;
+                // Keep server alive for the duration of the test
+                tokio::time::sleep(Duration::from_secs(300)).await;
             })
             .await
             .ok();
     });
-    addr
+    
+    (addr, state)
+}
+
+/// Helper to run a scan test for a specific case
+async fn run_scan_test(
+    addr: SocketAddr,
+    endpoint: &str,
+    case_id: u32,
+    scan_config: ScanTestConfig,
+) -> Vec<serde_json::Value> {
+    let target = format!(
+        "http://{}:{}/{}{}",
+        addr.ip(),
+        addr.port(),
+        endpoint,
+        scan_config.url_suffix
+    );
+
+    let out_path = std::env::temp_dir().join(format!(
+        "dalfox_mock_{}_case{}_{}_{}.json",
+        endpoint.replace('/', "_"),
+        case_id,
+        addr.ip(),
+        addr.port()
+    ));
+    let out_path_str = out_path.to_string_lossy().to_string();
+
+    let args = ScanArgs {
+        input_type: "url".to_string(),
+        format: "json".to_string(),
+        targets: vec![target],
+        param: scan_config.param.clone(),
+        data: scan_config.data.clone(),
+        headers: scan_config.headers.clone(),
+        cookies: scan_config.cookies.clone(),
+        method: scan_config.method.clone(),
+        user_agent: None,
+        cookie_from_raw: None,
+        mining_dict_word: None,
+        skip_mining: true,
+        skip_mining_dict: true,
+        skip_mining_dom: true,
+        skip_discovery: false,
+        skip_reflection_header: scan_config.skip_reflection_header,
+        skip_reflection_cookie: scan_config.skip_reflection_cookie,
+        skip_reflection_path: scan_config.skip_reflection_path,
+        timeout: 5,
+        delay: 0,
+        proxy: None,
+        follow_redirects: false,
+        output: Some(out_path_str.clone()),
+        include_request: false,
+        include_response: false,
+        silence: true,
+        poc_type: "plain".to_string(),
+        limit: None,
+        workers: 10,
+        max_concurrent_targets: 10,
+        max_targets_per_host: 100,
+        encoders: vec!["url".to_string(), "html".to_string(), "base64".to_string()],
+        custom_blind_xss_payload: None,
+        blind_callback_url: None,
+        custom_payload: None,
+        only_custom_payload: false,
+        skip_xss_scanning: false,
+        deep_scan: false,
+        sxss: false,
+        sxss_url: None,
+        sxss_method: "GET".to_string(),
+        skip_ast_analysis: true,
+        remote_payloads: vec![],
+        remote_wordlists: vec![],
+    };
+
+    scan::run_scan(&args).await;
+
+    let content = std::fs::read_to_string(&out_path)
+        .expect("scan should write JSON output file");
+    let v: serde_json::Value = serde_json::from_str(&content)
+        .expect("output should be valid JSON array");
+    
+    v.as_array().expect("json should be an array").clone()
+}
+
+struct ScanTestConfig {
+    url_suffix: String,
+    param: Vec<String>,
+    data: Option<String>,
+    headers: Vec<String>,
+    cookies: Vec<String>,
+    method: String,
+    skip_reflection_header: bool,
+    skip_reflection_cookie: bool,
+    skip_reflection_path: bool,
 }
 
 #[tokio::test]
 #[ignore]
-async fn test_query_reflection() {
-    let addr = start_mock_server().await;
+async fn test_query_reflection_v2() {
+    let (addr, state) = start_mock_server_v2().await;
+    
+    // Wait a moment for server to be ready
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
-    // Run across several cases (1..=30) with fixed param name 'query'
-    for case_id in 1u32..=30u32 {
-        let target = format!(
-            "http://{}:{}/query/{}?query=seed",
-            addr.ip(),
-            addr.port(),
-            case_id
-        );
+    let total_cases = state.query_cases.len();
+    println!("Testing {} query reflection cases", total_cases);
 
-        let out_path = std::env::temp_dir().join(format!(
-            "dalfox_mock_query_out_case{}_{}_{}.json",
-            case_id,
-            addr.ip(),
-            addr.port()
-        ));
-        let out_path_str = out_path.to_string_lossy().to_string();
-
-        let args = ScanArgs {
-            input_type: "url".to_string(),
-            format: "json".to_string(),
-            targets: vec![target],
+    for (case_id, case) in state.query_cases.iter() {
+        println!("Testing case {}: {} - {}", case_id, case.name, case.description);
+        
+        let config = ScanTestConfig {
+            url_suffix: format!("/{case_id}?query=seed"),
             param: vec![],
             data: None,
             headers: vec![],
             cookies: vec![],
             method: "GET".to_string(),
-            user_agent: None,
-            cookie_from_raw: None,
-            mining_dict_word: None,
-            skip_mining: true,
-            skip_mining_dict: true,
-            skip_mining_dom: true,
-            skip_discovery: false,
             skip_reflection_header: true,
             skip_reflection_cookie: true,
             skip_reflection_path: true,
-            timeout: 5,
-            delay: 0,
-            proxy: None,
-            follow_redirects: false,
-            output: Some(out_path_str.clone()),
-            include_request: false,
-            include_response: false,
-            silence: true,
-            poc_type: "plain".to_string(),
-            limit: None,
-            workers: 10,
-            max_concurrent_targets: 10,
-            max_targets_per_host: 100,
-            encoders: vec!["url".to_string(), "html".to_string(), "base64".to_string()],
-            custom_blind_xss_payload: None,
-            blind_callback_url: None,
-            custom_payload: None,
-            only_custom_payload: false,
-            skip_xss_scanning: false,
-            deep_scan: false,
-            sxss: false,
-            sxss_url: None,
-            sxss_method: "GET".to_string(),
-            skip_ast_analysis: true,
-            remote_payloads: vec![],
-            remote_wordlists: vec![],
         };
 
-        scan::run_scan(&args).await;
+        let results = run_scan_test(addr, "query", *case_id, config).await;
 
-        let content =
-            std::fs::read_to_string(&out_path).expect("scan should write JSON output file");
-        let v: serde_json::Value =
-            serde_json::from_str(&content).expect("output should be valid JSON array");
-        let arr = v.as_array().expect("json should be an array");
-        assert!(
-            !arr.is_empty(),
-            "case {case_id}: should detect at least one XSS on the mock server"
-        );
-        let has_query = arr
-            .iter()
-            .any(|item| item.get("param").and_then(|p| p.as_str()) == Some("query"));
-        assert!(
-            has_query,
-            "case {case_id}: at least one result should target param 'query'"
-        );
+        if case.expected_detection {
+            assert!(
+                !results.is_empty(),
+                "case {} ({}): should detect at least one XSS",
+                case_id, case.name
+            );
+            let has_query = results
+                .iter()
+                .any(|item| item.get("param").and_then(|p| p.as_str()) == Some("query"));
+            assert!(
+                has_query,
+                "case {} ({}): at least one result should target param 'query'",
+                case_id, case.name
+            );
+        }
     }
 }
 
 #[tokio::test]
 #[ignore]
-async fn test_header_reflection() {
-    let addr = start_mock_server().await;
+async fn test_header_reflection_v2() {
+    let (addr, state) = start_mock_server_v2().await;
+    
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
-    for case_id in 1u32..=10u32 {
-        let target = format!("http://{}:{}/header/{}", addr.ip(), addr.port(), case_id);
+    let total_cases = state.header_cases.len();
+    println!("Testing {} header reflection cases", total_cases);
 
-        let out_path = std::env::temp_dir().join(format!(
-            "dalfox_mock_header_out_case{}_{}_{}.json",
-            case_id,
-            addr.ip(),
-            addr.port()
-        ));
-        let out_path_str = out_path.to_string_lossy().to_string();
-
-        let args = ScanArgs {
-            input_type: "url".to_string(),
-            format: "json".to_string(),
-            targets: vec![target],
-            param: vec!["X-Test:header".to_string()],
+    for (case_id, case) in state.header_cases.iter() {
+        println!("Testing case {}: {} - {}", case_id, case.name, case.description);
+        
+        let header_name = case.header_name.as_deref().unwrap_or("X-Test");
+        
+        let config = ScanTestConfig {
+            url_suffix: format!("/{case_id}"),
+            param: vec![format!("{}:header", header_name)],
             data: None,
-            headers: vec!["X-Test: seed".to_string()],
+            headers: vec![format!("{}: seed", header_name)],
             cookies: vec![],
             method: "GET".to_string(),
-            user_agent: None,
-            cookie_from_raw: None,
-            mining_dict_word: None,
-            skip_mining: true,
-            skip_mining_dict: true,
-            skip_mining_dom: true,
-            skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: true,
             skip_reflection_path: true,
-            timeout: 5,
-            delay: 0,
-            proxy: None,
-            follow_redirects: false,
-            output: Some(out_path_str.clone()),
-            include_request: false,
-            include_response: false,
-            silence: true,
-            poc_type: "plain".to_string(),
-            limit: None,
-            workers: 10,
-            max_concurrent_targets: 10,
-            max_targets_per_host: 100,
-            encoders: vec!["url".to_string(), "html".to_string(), "base64".to_string()],
-            custom_blind_xss_payload: None,
-            blind_callback_url: None,
-            custom_payload: None,
-            only_custom_payload: false,
-            skip_xss_scanning: false,
-            deep_scan: false,
-            sxss: false,
-            sxss_url: None,
-            sxss_method: "GET".to_string(),
-            skip_ast_analysis: true,
-            remote_payloads: vec![],
-            remote_wordlists: vec![],
         };
 
-        scan::run_scan(&args).await;
+        let results = run_scan_test(addr, "header", *case_id, config).await;
 
-        let content =
-            std::fs::read_to_string(&out_path).expect("scan should write JSON output file");
-        let v: serde_json::Value =
-            serde_json::from_str(&content).expect("output should be valid JSON array");
-        let arr = v.as_array().expect("json should be an array");
-        assert!(
-            !arr.is_empty(),
-            "case {case_id}: should detect at least one XSS on the mock server"
-        );
-        let has_header = arr
-            .iter()
-            .any(|item| item.get("param").and_then(|p| p.as_str()) == Some("X-Test"));
-        assert!(
-            has_header,
-            "case {case_id}: at least one result should target param 'X-Test'"
-        );
+        if case.expected_detection {
+            assert!(
+                !results.is_empty(),
+                "case {} ({}): should detect at least one XSS",
+                case_id, case.name
+            );
+            let has_header = results
+                .iter()
+                .any(|item| item.get("param").and_then(|p| p.as_str()) == Some(header_name));
+            assert!(
+                has_header,
+                "case {} ({}): at least one result should target param '{}'",
+                case_id, case.name, header_name
+            );
+        }
     }
 }
 
 #[tokio::test]
 #[ignore]
-async fn test_cookie_reflection() {
-    let addr = start_mock_server().await;
+async fn test_cookie_reflection_v2() {
+    let (addr, state) = start_mock_server_v2().await;
+    
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
-    for case_id in 1u32..=10u32 {
-        let target = format!("http://{}:{}/cookie/{}", addr.ip(), addr.port(), case_id);
+    let total_cases = state.cookie_cases.len();
+    println!("Testing {} cookie reflection cases", total_cases);
 
-        let out_path = std::env::temp_dir().join(format!(
-            "dalfox_mock_cookie_out_case{}_{}_{}.json",
-            case_id,
-            addr.ip(),
-            addr.port()
-        ));
-        let out_path_str = out_path.to_string_lossy().to_string();
-
-        let args = ScanArgs {
-            input_type: "url".to_string(),
-            format: "json".to_string(),
-            targets: vec![target],
-            param: vec!["test:cookie".to_string()],
+    for (case_id, case) in state.cookie_cases.iter() {
+        println!("Testing case {}: {} - {}", case_id, case.name, case.description);
+        
+        let cookie_name = case.cookie_name.as_deref().unwrap_or("test");
+        
+        let config = ScanTestConfig {
+            url_suffix: format!("/{case_id}"),
+            param: vec![format!("{}:cookie", cookie_name)],
             data: None,
             headers: vec![],
-            cookies: vec!["test=seed".to_string()],
+            cookies: vec![format!("{}=seed", cookie_name)],
             method: "GET".to_string(),
-            user_agent: None,
-            cookie_from_raw: None,
-            mining_dict_word: None,
-            skip_mining: true,
-            skip_mining_dict: true,
-            skip_mining_dom: true,
-            skip_discovery: false,
             skip_reflection_header: true,
             skip_reflection_cookie: false,
             skip_reflection_path: true,
-            timeout: 5,
-            delay: 0,
-            proxy: None,
-            follow_redirects: false,
-            output: Some(out_path_str.clone()),
-            include_request: false,
-            include_response: false,
-            silence: true,
-            poc_type: "plain".to_string(),
-            limit: None,
-            workers: 10,
-            max_concurrent_targets: 10,
-            max_targets_per_host: 100,
-            encoders: vec!["url".to_string(), "html".to_string(), "base64".to_string()],
-            custom_blind_xss_payload: None,
-            blind_callback_url: None,
-            custom_payload: None,
-            only_custom_payload: false,
-            skip_xss_scanning: false,
-            deep_scan: false,
-            sxss: false,
-            sxss_url: None,
-            sxss_method: "GET".to_string(),
-            skip_ast_analysis: true,
-            remote_payloads: vec![],
-            remote_wordlists: vec![],
         };
 
-        scan::run_scan(&args).await;
+        let results = run_scan_test(addr, "cookie", *case_id, config).await;
 
-        let content =
-            std::fs::read_to_string(&out_path).expect("scan should write JSON output file");
-        let v: serde_json::Value =
-            serde_json::from_str(&content).expect("output should be valid JSON array");
-        let arr = v.as_array().expect("json should be an array");
-        assert!(
-            !arr.is_empty(),
-            "case {case_id}: should detect at least one XSS on the mock server"
-        );
-        let has_cookie = arr
-            .iter()
-            .any(|item| item.get("param").and_then(|p| p.as_str()) == Some("test"));
-        assert!(
-            has_cookie,
-            "case {case_id}: at least one result should target param 'test'"
-        );
+        if case.expected_detection {
+            assert!(
+                !results.is_empty(),
+                "case {} ({}): should detect at least one XSS",
+                case_id, case.name
+            );
+            let has_cookie = results
+                .iter()
+                .any(|item| item.get("param").and_then(|p| p.as_str()) == Some(cookie_name));
+            assert!(
+                has_cookie,
+                "case {} ({}): at least one result should target param '{}'",
+                case_id, case.name, cookie_name
+            );
+        }
     }
 }
 
 #[tokio::test]
 #[ignore]
-async fn test_path_reflection() {
-    let addr = start_mock_server().await;
+async fn test_path_reflection_v2() {
+    let (addr, state) = start_mock_server_v2().await;
+    
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
-    for case_id in 1u32..=10u32 {
-        let target = format!("http://{}:{}/path/{}/seed", addr.ip(), addr.port(), case_id);
+    let total_cases = state.path_cases.len();
+    println!("Testing {} path reflection cases", total_cases);
 
-        let out_path = std::env::temp_dir().join(format!(
-            "dalfox_mock_path_out_case{}_{}_{}.json",
-            case_id,
-            addr.ip(),
-            addr.port()
-        ));
-        let out_path_str = out_path.to_string_lossy().to_string();
-
-        let args = ScanArgs {
-            input_type: "url".to_string(),
-            format: "json".to_string(),
-            targets: vec![target],
+    for (case_id, case) in state.path_cases.iter() {
+        println!("Testing case {}: {} - {}", case_id, case.name, case.description);
+        
+        let config = ScanTestConfig {
+            url_suffix: format!("/{case_id}/seed"),
             param: vec!["seed:path".to_string()],
             data: None,
             headers: vec![],
             cookies: vec![],
             method: "GET".to_string(),
-            user_agent: None,
-            cookie_from_raw: None,
-            mining_dict_word: None,
-            skip_mining: true,
-            skip_mining_dict: true,
-            skip_mining_dom: true,
-            skip_discovery: false,
             skip_reflection_header: true,
             skip_reflection_cookie: true,
             skip_reflection_path: false,
-            timeout: 5,
-            delay: 0,
-            proxy: None,
-            follow_redirects: false,
-            output: Some(out_path_str.clone()),
-            include_request: false,
-            include_response: false,
-            silence: true,
-            poc_type: "plain".to_string(),
-            limit: None,
-            workers: 10,
-            max_concurrent_targets: 10,
-            max_targets_per_host: 100,
-            encoders: vec!["url".to_string(), "html".to_string(), "base64".to_string()],
-            custom_blind_xss_payload: None,
-            blind_callback_url: None,
-            custom_payload: None,
-            only_custom_payload: false,
-            skip_xss_scanning: false,
-            deep_scan: false,
-            sxss: false,
-            sxss_url: None,
-            sxss_method: "GET".to_string(),
-            skip_ast_analysis: true,
-            remote_payloads: vec![],
-            remote_wordlists: vec![],
         };
 
-        scan::run_scan(&args).await;
+        let results = run_scan_test(addr, "path", *case_id, config).await;
 
-        let content =
-            std::fs::read_to_string(&out_path).expect("scan should write JSON output file");
-        let v: serde_json::Value =
-            serde_json::from_str(&content).expect("output should be valid JSON array");
-        let arr = v.as_array().expect("json should be an array");
-        assert!(
-            !arr.is_empty(),
-            "case {case_id}: should detect at least one XSS on the mock server"
-        );
-        let has_path = arr
-            .iter()
-            .any(|item| item.get("param").and_then(|p| p.as_str()) == Some("seed"));
-        assert!(
-            has_path,
-            "case {case_id}: at least one result should target param 'seed'"
-        );
+        if case.expected_detection {
+            assert!(
+                !results.is_empty(),
+                "case {} ({}): should detect at least one XSS",
+                case_id, case.name
+            );
+            let has_path = results
+                .iter()
+                .any(|item| item.get("param").and_then(|p| p.as_str()) == Some("seed"));
+            assert!(
+                has_path,
+                "case {} ({}): at least one result should target param 'seed'",
+                case_id, case.name
+            );
+        }
     }
 }
 
 #[tokio::test]
 #[ignore]
-async fn test_body_reflection() {
-    let addr = start_mock_server().await;
+async fn test_body_reflection_v2() {
+    let (addr, state) = start_mock_server_v2().await;
+    
+    tokio::time::sleep(Duration::from_millis(100)).await;
 
-    for case_id in 1u32..=10u32 {
-        let target = format!("http://{}:{}/body/{}", addr.ip(), addr.port(), case_id);
+    let total_cases = state.body_cases.len();
+    println!("Testing {} body reflection cases", total_cases);
 
-        let out_path = std::env::temp_dir().join(format!(
-            "dalfox_mock_body_out_case{}_{}_{}.json",
-            case_id,
-            addr.ip(),
-            addr.port()
-        ));
-        let out_path_str = out_path.to_string_lossy().to_string();
-
-        let args = ScanArgs {
-            input_type: "url".to_string(),
-            format: "json".to_string(),
-            targets: vec![target],
-            param: vec!["query:body".to_string()],
-            data: Some("query=seed".to_string()),
+    for (case_id, case) in state.body_cases.iter() {
+        println!("Testing case {}: {} - {}", case_id, case.name, case.description);
+        
+        let param_name = case.param_name.as_deref().unwrap_or("query");
+        
+        let config = ScanTestConfig {
+            url_suffix: format!("/{case_id}"),
+            param: vec![format!("{}:body", param_name)],
+            data: Some(format!("{}=seed", param_name)),
             headers: vec![],
             cookies: vec![],
             method: "POST".to_string(),
-            user_agent: None,
-            cookie_from_raw: None,
-            mining_dict_word: None,
-            skip_mining: true,
-            skip_mining_dict: true,
-            skip_mining_dom: true,
-            skip_discovery: false,
             skip_reflection_header: true,
             skip_reflection_cookie: true,
             skip_reflection_path: true,
-            timeout: 5,
-            delay: 0,
-            proxy: None,
-            follow_redirects: false,
-            output: Some(out_path_str.clone()),
-            include_request: false,
-            include_response: false,
-            silence: true,
-            poc_type: "plain".to_string(),
-            limit: None,
-            workers: 10,
-            max_concurrent_targets: 10,
-            max_targets_per_host: 100,
-            encoders: vec!["url".to_string(), "html".to_string(), "base64".to_string()],
-            custom_blind_xss_payload: None,
-            blind_callback_url: None,
-            custom_payload: None,
-            only_custom_payload: false,
-            skip_xss_scanning: false,
-            deep_scan: false,
-            sxss: false,
-            sxss_url: None,
-            sxss_method: "GET".to_string(),
-            skip_ast_analysis: true,
-            remote_payloads: vec![],
-            remote_wordlists: vec![],
         };
 
-        scan::run_scan(&args).await;
+        let results = run_scan_test(addr, "body", *case_id, config).await;
 
-        let content =
-            std::fs::read_to_string(&out_path).expect("scan should write JSON output file");
-        let v: serde_json::Value =
-            serde_json::from_str(&content).expect("output should be valid JSON array");
-        let arr = v.as_array().expect("json should be an array");
-        assert!(
-            !arr.is_empty(),
-            "case {case_id}: should detect at least one XSS on the mock server"
-        );
-        let has_body = arr
-            .iter()
-            .any(|item| item.get("param").and_then(|p| p.as_str()) == Some("query"));
-        assert!(
-            has_body,
-            "case {case_id}: at least one result should target param 'query'"
-        );
+        if case.expected_detection {
+            assert!(
+                !results.is_empty(),
+                "case {} ({}): should detect at least one XSS",
+                case_id, case.name
+            );
+            let has_body = results
+                .iter()
+                .any(|item| item.get("param").and_then(|p| p.as_str()) == Some(param_name));
+            assert!(
+                has_body,
+                "case {} ({}): at least one result should target param '{}'",
+                case_id, case.name, param_name
+            );
+        }
     }
 }
