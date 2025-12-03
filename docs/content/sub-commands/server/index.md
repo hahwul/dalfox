@@ -7,8 +7,6 @@ sort_by = "weight"
 [extra]
 +++
 
-# Server Command
-
 The `server` command runs Dalfox as a REST API server, allowing remote orchestration and integration with other tools, CI/CD pipelines, or web interfaces.
 
 ## Basic Usage

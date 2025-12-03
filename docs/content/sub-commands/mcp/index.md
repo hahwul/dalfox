@@ -7,8 +7,6 @@ sort_by = "weight"
 [extra]
 +++
 
-# MCP Command
-
 The `mcp` command runs Dalfox as a Model Context Protocol (MCP) stdio server, enabling AI models and assistants to use Dalfox's XSS scanning capabilities.
 
 ## What is MCP?

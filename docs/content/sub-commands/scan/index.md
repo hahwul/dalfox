@@ -7,8 +7,6 @@ sort_by = "weight"
 [extra]
 +++
 
-# Scan Command
-
 The `scan` command is the primary tool for detecting XSS vulnerabilities in web applications. It supports multiple input modes, parameter discovery, and comprehensive XSS testing.
 
 ## Basic Usage

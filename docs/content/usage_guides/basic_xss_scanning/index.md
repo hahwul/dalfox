@@ -7,8 +7,6 @@ sort_by = "weight"
 [extra]
 +++
 
-# Basic XSS Scanning
-
 This guide covers the fundamentals of scanning for XSS vulnerabilities using Dalfox.
 
 ## Prerequisites

@@ -7,8 +7,6 @@ sort_by = "weight"
 [extra]
 +++
 
-# Payload Command
-
 The `payload` command allows you to enumerate and explore various XSS payloads and resources without performing an actual scan. This is useful for research, payload development, and understanding Dalfox's payload database.
 
 ## Basic Usage

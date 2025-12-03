@@ -7,8 +7,6 @@ sort_by = "weight"
 [extra]
 +++
 
-# Custom Payloads
-
 Learn how to create, manage, and use custom XSS payloads with Dalfox to bypass filters, target specific contexts, and improve detection rates.
 
 ## Why Custom Payloads?

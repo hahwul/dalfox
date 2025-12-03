@@ -7,8 +7,6 @@ sort_by = "weight"
 [extra]
 +++
 
-# What is Dalfox?
-
 Dalfox is a powerful open-source tool that focuses on automation, making it ideal for quickly scanning for XSS (Cross-Site Scripting) flaws and analyzing parameters. Its advanced testing engine and niche features are designed to streamline the process of detecting and verifying vulnerabilities.
 
 {% alert_info() %}

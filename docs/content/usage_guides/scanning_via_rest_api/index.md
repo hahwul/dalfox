@@ -7,8 +7,6 @@ sort_by = "weight"
 [extra]
 +++
 
-# Scanning via REST API
-
 Learn how to use Dalfox in server mode to perform XSS scans via REST API. This is ideal for remote orchestration, CI/CD integration, and building custom security tools.
 
 ## Prerequisites

@@ -7,8 +7,6 @@ sort_by = "weight"
 [extra]
 +++
 
-# Stored XSS Testing
-
 Stored XSS (also called Persistent XSS) occurs when malicious input is saved by the application and later displayed to users without proper sanitization.
 
 ## What is Stored XSS?

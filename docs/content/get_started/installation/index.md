@@ -7,8 +7,6 @@ sort_by = "weight"
 [extra]
 +++
 
-# Installation
-
 Dalfox can be installed using various package managers and methods. Choose the one that best fits your system and workflow.
 
 ## Cargo (Recommended for Latest Version)

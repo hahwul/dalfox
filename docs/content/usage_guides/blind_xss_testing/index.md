@@ -7,8 +7,6 @@ sort_by = "weight"
 [extra]
 +++
 
-# Blind XSS Testing
-
 Blind XSS vulnerabilities occur when malicious JavaScript is injected into an application but executes in a different context, often viewed by administrators, support staff, or other users at a later time.
 
 ## What is Blind XSS?
