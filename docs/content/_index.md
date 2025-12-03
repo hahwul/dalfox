@@ -12,37 +12,37 @@ cta_buttons = [
 ]
 
 [[extra.features]]
-title = "JWT/JWE Encoding & Decoding"
-desc = "Encode and decode JWT and JWE tokens with support for multiple algorithms, custom headers, and DEFLATE compression."
-icon = "fa-solid fa-code"
+title = "Multiple Scanning Modes"
+desc = "URL, File, Pipe, Raw HTTP, and Server modes for flexible testing workflows and integration with your tools."
+icon = "fa-solid fa-network-wired"
 
 [[extra.features]]
-title = "Signature Verification"
-desc = "Verify JWT signatures using secrets or keys for symmetric and asymmetric algorithms with expiration validation."
-icon = "fa-solid fa-shield-check"
+title = "Parameter Analysis"
+desc = "Automatic parameter discovery across query, body, headers, cookies, and path segments with advanced mining techniques."
+icon = "fa-solid fa-magnifying-glass"
 
 [[extra.features]]
-title = "Advanced Cracking"
-desc = "Crack JWT secrets using dictionary attacks or brute force methods with support for compressed tokens."
-icon = "fa-solid fa-key"
+title = "XSS Detection"
+desc = "Detect Reflected, Stored, and DOM-based XSS with context-aware payload generation and DOM/AST verification."
+icon = "fa-solid fa-shield-halved"
 
 [[extra.features]]
-title = "Attack Payload Generation"
-desc = "Generate various JWT attack payloads including none algorithm, algorithm confusion, and header manipulation attacks."
-icon = "fa-solid fa-bomb"
+title = "Blind XSS Support"
+desc = "Built-in blind XSS testing with callback URL support for detecting out-of-band vulnerabilities."
+icon = "fa-solid fa-eye-slash"
 
 [[extra.features]]
 title = "High Performance"
-desc = "Built with Rust for maximum speed and efficiency, leveraging parallel processing for intensive operations."
+desc = "Built with Rust for maximum speed and efficiency, featuring concurrent scanning with smart rate limiting and host grouping."
 icon = "fa-solid fa-bolt"
 
 [[extra.features]]
 title = "MCP Server Support"
-desc = "Integrates with AI models via Model Context Protocol for intelligent JWT analysis and testing."
+desc = "Integrates with AI models via Model Context Protocol for intelligent XSS analysis and automated testing workflows."
 icon = "fa-solid fa-robot"
 
 [extra.final_cta_section]
 title = "Contributing"
-description = "JWT-HACK is an open-source project made with ❤️. If you want to contribute to this project, please see CONTRIBUTING.md and submit a pull request with your cool content!"
-button = { text = "View Contributing Guide", url = "https://github.com/hahwul/jwt-hack/blob/main/CONTRIBUTING.md" }
+description = "Dalfox is an open-source project made with ❤️. If you want to contribute to this project, please see CONTRIBUTING.md and submit a pull request with your cool content!"
+button = { text = "View Contributing Guide", url = "https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" }
 +++
