@@ -79,3 +79,115 @@ description = "sessionStorage value reflection"
 handler_type = "query"
 reflection = "<script>sessionStorage.setItem('key','{input}');document.write(sessionStorage.getItem('key'));</script>"
 expected_detection = true
+
+[[case]]
+id = 154
+name = "dom_createelement"
+description = "createElement with innerHTML"
+handler_type = "query"
+reflection = "<script>var el=document.createElement('div');el.innerHTML='{input}';document.body.appendChild(el);</script>"
+expected_detection = true
+
+[[case]]
+id = 155
+name = "dom_textcontent"
+description = "textContent assignment (should be safe but testing)"
+handler_type = "query"
+reflection = "<script>document.getElementById('x').textContent='{input}';</script>"
+expected_detection = true
+
+[[case]]
+id = 156
+name = "dom_location_href"
+description = "location.href assignment"
+handler_type = "query"
+reflection = "<script>location.href='{input}';</script>"
+expected_detection = true
+
+[[case]]
+id = 157
+name = "dom_location_assign"
+description = "location.assign() call"
+handler_type = "query"
+reflection = "<script>location.assign('{input}');</script>"
+expected_detection = true
+
+[[case]]
+id = 158
+name = "dom_location_replace"
+description = "location.replace() call"
+handler_type = "query"
+reflection = "<script>location.replace('{input}');</script>"
+expected_detection = true
+
+[[case]]
+id = 159
+name = "dom_window_open"
+description = "window.open() with user input"
+handler_type = "query"
+reflection = "<script>window.open('{input}');</script>"
+expected_detection = true
+
+[[case]]
+id = 160
+name = "dom_anchor_href"
+description = "Anchor element href manipulation"
+handler_type = "query"
+reflection = "<script>document.createElement('a').href='{input}';</script>"
+expected_detection = true
+
+[[case]]
+id = 161
+name = "dom_script_src"
+description = "Script element src manipulation"
+handler_type = "query"
+reflection = "<script>var s=document.createElement('script');s.src='{input}';document.head.appendChild(s);</script>"
+expected_detection = true
+
+[[case]]
+id = 162
+name = "dom_form_action"
+description = "Form action manipulation"
+handler_type = "query"
+reflection = "<script>document.forms[0].action='{input}';</script>"
+expected_detection = true
+
+[[case]]
+id = 163
+name = "dom_iframe_src"
+description = "iframe src manipulation"
+handler_type = "query"
+reflection = "<script>var f=document.createElement('iframe');f.src='{input}';document.body.appendChild(f);</script>"
+expected_detection = true
+
+[[case]]
+id = 164
+name = "dom_embed_src"
+description = "embed element src manipulation"
+handler_type = "query"
+reflection = "<script>var e=document.createElement('embed');e.src='{input}';document.body.appendChild(e);</script>"
+expected_detection = true
+
+[[case]]
+id = 165
+name = "dom_object_data"
+description = "object element data manipulation"
+handler_type = "query"
+reflection = "<script>var o=document.createElement('object');o.data='{input}';document.body.appendChild(o);</script>"
+expected_detection = true
+
+[[case]]
+id = 166
+name = "websql_injection"
+description = "WebSQL database injection"
+handler_type = "query"
+reflection = "<script>db.executeSql('SELECT * FROM data WHERE val=\"' + '{input}' + '\"');</script>"
+expected_detection = true
+
+[[case]]
+id = 167
+name = "indexeddb_injection"
+description = "IndexedDB value reflection"
+handler_type = "query"
+reflection = "<script>var req=db.put({{key: '{input}'}});</script>"
+expected_detection = true

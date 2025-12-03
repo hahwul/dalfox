@@ -39,3 +39,99 @@ description = "Reflection in data URL"
 handler_type = "query"
 reflection = "data:text/html,{input}"
 expected_detection = true
+
+[[case]]
+id = 131
+name = "xml_external_entity"
+description = "XML external entity reference"
+handler_type = "query"
+reflection = "<?xml version=\"1.0\"?><!DOCTYPE foo [<!ENTITY xxe \"{input}\">]><foo>&xxe;</foo>"
+expected_detection = true
+
+[[case]]
+id = 132
+name = "jsonp_callback"
+description = "JSONP callback parameter"
+handler_type = "query"
+reflection = "{input}({{\"data\": \"value\"}})"
+expected_detection = true
+
+[[case]]
+id = 133
+name = "markdown_injection"
+description = "Markdown content injection"
+handler_type = "query"
+reflection = "<div>{input}</div>"
+expected_detection = true
+
+[[case]]
+id = 134
+name = "sql_comment_escape"
+description = "SQL comment with reflection"
+handler_type = "query"
+reflection = "<!-- SQL: SELECT * FROM users WHERE id = '{input}' -->"
+expected_detection = true
+
+[[case]]
+id = 135
+name = "base64_in_attribute"
+description = "Base64 encoded data in attribute"
+handler_type = "query"
+reflection = "<img src=\"data:image/png;base64,{input}\">"
+expected_detection = true
+
+[[case]]
+id = 136
+name = "websocket_message"
+description = "WebSocket message reflection"
+handler_type = "query"
+reflection = "<script>ws.send('{input}');</script>"
+expected_detection = true
+
+[[case]]
+id = 137
+name = "postmessage_origin"
+description = "postMessage reflection"
+handler_type = "query"
+reflection = "<script>window.postMessage('{input}', '*');</script>"
+expected_detection = true
+
+[[case]]
+id = 138
+name = "csp_report_uri"
+description = "CSP report-uri reflection"
+handler_type = "query"
+reflection = "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'self'; report-uri {input}\">"
+expected_detection = true
+
+[[case]]
+id = 139
+name = "srcdoc_attribute"
+description = "iframe srcdoc attribute"
+handler_type = "query"
+reflection = "<iframe srcdoc=\"{input}\"></iframe>"
+expected_detection = true
+
+[[case]]
+id = 140
+name = "link_prefetch"
+description = "Link prefetch/preload reflection"
+handler_type = "query"
+reflection = "<link rel=\"prefetch\" href=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 141
+name = "manifest_json"
+description = "Web manifest JSON reflection"
+handler_type = "query"
+reflection = "{{\"name\": \"{input}\", \"start_url\": \"/\"}}"
+expected_detection = true
+
+[[case]]
+id = 142
+name = "service_worker_scope"
+description = "Service worker scope reflection"
+handler_type = "query"
+reflection = "<script>navigator.serviceWorker.register('/sw.js', {{scope: '{input}'}});</script>"
+expected_detection = true

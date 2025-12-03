@@ -95,3 +95,99 @@ description = "Reflection in script src attribute"
 handler_type = "query"
 reflection = "<script src=\"{input}\"></script>"
 expected_detection = true
+
+[[case]]
+id = 179
+name = "video_src"
+description = "Reflection in video src attribute"
+handler_type = "query"
+reflection = "<video src=\"{input}\"></video>"
+expected_detection = true
+
+[[case]]
+id = 180
+name = "audio_src"
+description = "Reflection in audio src attribute"
+handler_type = "query"
+reflection = "<audio src=\"{input}\"></audio>"
+expected_detection = true
+
+[[case]]
+id = 181
+name = "source_src"
+description = "Reflection in source src attribute"
+handler_type = "query"
+reflection = "<video><source src=\"{input}\"></video>"
+expected_detection = true
+
+[[case]]
+id = 182
+name = "track_src"
+description = "Reflection in track src attribute"
+handler_type = "query"
+reflection = "<video><track src=\"{input}\"></video>"
+expected_detection = true
+
+[[case]]
+id = 183
+name = "input_formaction"
+description = "Reflection in input formaction attribute"
+handler_type = "query"
+reflection = "<input type=\"submit\" formaction=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 184
+name = "button_formaction"
+description = "Reflection in button formaction attribute"
+handler_type = "query"
+reflection = "<button formaction=\"{input}\">Submit</button>"
+expected_detection = true
+
+[[case]]
+id = 185
+name = "data_custom_attribute"
+description = "Reflection in custom data attribute"
+handler_type = "query"
+reflection = "<div data-value=\"{input}\">Content</div>"
+expected_detection = true
+
+[[case]]
+id = 186
+name = "aria_label"
+description = "Reflection in ARIA label attribute"
+handler_type = "query"
+reflection = "<button aria-label=\"{input}\">Button</button>"
+expected_detection = true
+
+[[case]]
+id = 187
+name = "placeholder_attribute"
+description = "Reflection in placeholder attribute"
+handler_type = "query"
+reflection = "<input placeholder=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 188
+name = "content_attribute"
+description = "Reflection in meta content attribute"
+handler_type = "query"
+reflection = "<meta name=\"description\" content=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 189
+name = "cite_attribute"
+description = "Reflection in cite attribute"
+handler_type = "query"
+reflection = "<blockquote cite=\"{input}\">Quote</blockquote>"
+expected_detection = true
+
+[[case]]
+id = 190
+name = "poster_attribute"
+description = "Reflection in video poster attribute"
+handler_type = "query"
+reflection = "<video poster=\"{input}\"></video>"
+expected_detection = true
