@@ -46,7 +46,7 @@ dalfox scan https://example.com/comment/submit \
 **How it works:**
 1. Dalfox injects payloads at `/comment/submit`
 2. Then checks `/comment/view?id=1` for payload execution
-3. Reports findings if payloads are found and verify
+3. Reports findings if payloads are found and verified
 
 ### With POST Data
 
