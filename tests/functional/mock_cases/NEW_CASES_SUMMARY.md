@@ -1,13 +1,13 @@
 # New Test Cases Summary
 
-This document summarizes the 122 new XSS test cases added to expand the mock_cases test suite.
+This document summarizes the 116 new XSS test cases added to expand the mock_cases test suite.
 
 ## Overview
 
-**Total new cases**: 122
+**Total new cases**: 116
 **Previous total**: 309 cases
-**New total**: 431 cases
-**Increase**: +39.5%
+**New total**: 425 cases
+**Increase**: +37.5%
 
 ## New Files Created
 
@@ -171,11 +171,11 @@ Each test case follows these principles:
 
 ## ID Ranges (After Addition)
 
-- **Query**: 1-266 (was 1-190, added 76)
-- **Header**: 1-50 (was 1-40, added 10)
-- **Cookie**: 1-40 (was 1-30, added 10)
-- **Path**: 1-33 (was 1-23, added 10)
-- **Body**: 1-36 (was 1-26, added 10)
+- **Query**: 1-266 (previous highest: 190, added 76 cases)
+- **Header**: 1-50 (previous highest: 40, added 10 cases)
+- **Cookie**: 1-40 (previous highest: 30, added 10 cases)
+- **Path**: 1-33 (previous highest: 23, added 10 cases)
+- **Body**: 1-36 (previous highest: 26, added 10 cases)
 
 ## How to Use These Tests
 
