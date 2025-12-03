@@ -95,3 +95,91 @@ description = "Path reflected in canonical URL"
 handler_type = "path"
 reflection = "<link rel=\"canonical\" href=\"https://example.com/{input}\">"
 expected_detection = true
+
+[[case]]
+id = 13
+name = "rest_api_resource"
+description = "REST API resource ID in path"
+handler_type = "path"
+reflection = "<div>Resource ID: {input}</div>"
+expected_detection = true
+
+[[case]]
+id = 14
+name = "file_path_traversal"
+description = "File path reflection in directory listing"
+handler_type = "path"
+reflection = "<a href=\"/download/{input}\">Download</a>"
+expected_detection = true
+
+[[case]]
+id = 15
+name = "user_profile_path"
+description = "User profile path reflection"
+handler_type = "path"
+reflection = "<h1>Profile: {input}</h1>"
+expected_detection = true
+
+[[case]]
+id = 16
+name = "category_slug"
+description = "Category slug in path"
+handler_type = "path"
+reflection = "<div class=\"category-{input}\">Items</div>"
+expected_detection = true
+
+[[case]]
+id = 17
+name = "redirect_path"
+description = "Path reflected in redirect URL"
+handler_type = "path"
+reflection = "<meta http-equiv=\"refresh\" content=\"0; url=/{input}\">"
+expected_detection = true
+
+[[case]]
+id = 18
+name = "api_version_path"
+description = "API version in path"
+handler_type = "path"
+reflection = "<script>var apiPath='/{input}/resource';</script>"
+expected_detection = true
+
+[[case]]
+id = 19
+name = "locale_path"
+description = "Locale/language in path"
+handler_type = "path"
+reflection = "<html lang=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 20
+name = "slug_with_id"
+description = "URL slug with ID in path"
+handler_type = "path"
+reflection = "<article id=\"{input}\">Content</article>"
+expected_detection = true
+
+[[case]]
+id = 21
+name = "namespace_path"
+description = "Namespace or organization in path"
+handler_type = "path"
+reflection = "<div data-namespace=\"{input}\">Content</div>"
+expected_detection = true
+
+[[case]]
+id = 22
+name = "shortlink_path"
+description = "Short link ID in path"
+handler_type = "path"
+reflection = "<script>trackShortlink('{input}');</script>"
+expected_detection = true
+
+[[case]]
+id = 23
+name = "feed_identifier"
+description = "Feed or channel identifier in path"
+handler_type = "path"
+reflection = "<link rel=\"alternate\" type=\"application/rss+xml\" href=\"/feed/{input}\">"
+expected_detection = true

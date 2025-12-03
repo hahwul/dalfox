@@ -79,3 +79,75 @@ description = "Reflection in details ontoggle event handler"
 handler_type = "query"
 reflection = "<details ontoggle=\"{input}\" open>"
 expected_detection = true
+
+[[case]]
+id = 122
+name = "iframe_onload"
+description = "Reflection in iframe onload event handler"
+handler_type = "query"
+reflection = "<iframe onload=\"{input}\"></iframe>"
+expected_detection = true
+
+[[case]]
+id = 123
+name = "marquee_onstart"
+description = "Reflection in marquee onstart event handler"
+handler_type = "query"
+reflection = "<marquee onstart=\"{input}\">text</marquee>"
+expected_detection = true
+
+[[case]]
+id = 124
+name = "select_onchange"
+description = "Reflection in select onchange event handler"
+handler_type = "query"
+reflection = "<select onchange=\"{input}\"><option>1</option></select>"
+expected_detection = true
+
+[[case]]
+id = 125
+name = "textarea_oninput"
+description = "Reflection in textarea oninput event handler"
+handler_type = "query"
+reflection = "<textarea oninput=\"{input}\"></textarea>"
+expected_detection = true
+
+[[case]]
+id = 126
+name = "object_onerror"
+description = "Reflection in object onerror event handler"
+handler_type = "query"
+reflection = "<object onerror=\"{input}\"></object>"
+expected_detection = true
+
+[[case]]
+id = 127
+name = "script_onerror"
+description = "Reflection in script onerror event handler"
+handler_type = "query"
+reflection = "<script src=\"invalid.js\" onerror=\"{input}\"></script>"
+expected_detection = true
+
+[[case]]
+id = 128
+name = "link_onerror"
+description = "Reflection in link onerror event handler"
+handler_type = "query"
+reflection = "<link rel=\"stylesheet\" href=\"x\" onerror=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 129
+name = "bgsound_onpropertychange"
+description = "Reflection in bgsound onpropertychange event handler (IE)"
+handler_type = "query"
+reflection = "<bgsound onpropertychange=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 130
+name = "isindex_onsubmit"
+description = "Reflection in isindex onsubmit event handler"
+handler_type = "query"
+reflection = "<isindex onsubmit=\"{input}\">"
+expected_detection = true

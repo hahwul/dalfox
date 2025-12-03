@@ -89,3 +89,93 @@ handler_type = "header"
 header_name = "X-CSRF-Token"
 reflection = "<input type=\"hidden\" name=\"csrf\" value=\"{input}\">"
 expected_detection = true
+
+[[case]]
+id = 23
+name = "x_api_key"
+description = "X-API-Key header reflection in debug mode"
+handler_type = "header"
+header_name = "X-API-Key"
+reflection = "<pre>API Key: {input}</pre>"
+expected_detection = true
+
+[[case]]
+id = 24
+name = "x_correlation_id"
+description = "X-Correlation-ID header reflection in logs"
+handler_type = "header"
+header_name = "X-Correlation-ID"
+reflection = "<div class=\"log\">Correlation ID: {input}</div>"
+expected_detection = true
+
+[[case]]
+id = 25
+name = "x_request_id"
+description = "X-Request-ID header reflection in response"
+handler_type = "header"
+header_name = "X-Request-ID"
+reflection = "<span>Request ID: {input}</span>"
+expected_detection = true
+
+[[case]]
+id = 26
+name = "x_frame_options_bypass"
+description = "X-Frame-Options header reflection for bypass testing"
+handler_type = "header"
+header_name = "X-Frame-Options"
+reflection = "<meta http-equiv=\"X-Frame-Options\" content=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 27
+name = "x_content_type_options"
+description = "X-Content-Type-Options header reflection"
+handler_type = "header"
+header_name = "X-Content-Type-Options"
+reflection = "<div>XCTO: {input}</div>"
+expected_detection = true
+
+[[case]]
+id = 28
+name = "strict_transport_security"
+description = "Strict-Transport-Security header reflection"
+handler_type = "header"
+header_name = "Strict-Transport-Security"
+reflection = "<meta http-equiv=\"Strict-Transport-Security\" content=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 29
+name = "x_xss_protection"
+description = "X-XSS-Protection header reflection (ironic)"
+handler_type = "header"
+header_name = "X-XSS-Protection"
+reflection = "<script>var xss_protection='{input}';</script>"
+expected_detection = true
+
+[[case]]
+id = 30
+name = "sec_fetch_site"
+description = "Sec-Fetch-Site header reflection"
+handler_type = "header"
+header_name = "Sec-Fetch-Site"
+reflection = "<div>Fetch site: {input}</div>"
+expected_detection = true
+
+[[case]]
+id = 31
+name = "x_forwarded_proto"
+description = "X-Forwarded-Proto header reflection"
+handler_type = "header"
+header_name = "X-Forwarded-Proto"
+reflection = "<a href=\"{input}://example.com\">link</a>"
+expected_detection = true
+
+[[case]]
+id = 32
+name = "x_custom_data"
+description = "Custom application header reflection"
+handler_type = "header"
+header_name = "X-Custom-Data"
+reflection = "<div data-value=\"{input}\">content</div>"
+expected_detection = true

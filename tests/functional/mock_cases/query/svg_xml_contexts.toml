@@ -39,3 +39,75 @@ description = "Reflection in SVG foreignObject"
 handler_type = "query"
 reflection = "<svg><foreignObject>{input}</foreignObject></svg>"
 expected_detection = true
+
+[[case]]
+id = 113
+name = "svg_a_href"
+description = "Reflection in SVG anchor href"
+handler_type = "query"
+reflection = "<svg><a href=\"{input}\">link</a></svg>"
+expected_detection = true
+
+[[case]]
+id = 114
+name = "svg_image_href"
+description = "Reflection in SVG image href"
+handler_type = "query"
+reflection = "<svg><image href=\"{input}\"/></svg>"
+expected_detection = true
+
+[[case]]
+id = 115
+name = "svg_text_content"
+description = "Reflection in SVG text element"
+handler_type = "query"
+reflection = "<svg><text>{input}</text></svg>"
+expected_detection = true
+
+[[case]]
+id = 116
+name = "svg_title"
+description = "Reflection in SVG title element"
+handler_type = "query"
+reflection = "<svg><title>{input}</title></svg>"
+expected_detection = true
+
+[[case]]
+id = 117
+name = "svg_desc"
+description = "Reflection in SVG desc element"
+handler_type = "query"
+reflection = "<svg><desc>{input}</desc></svg>"
+expected_detection = true
+
+[[case]]
+id = 118
+name = "svg_set_to_attribute"
+description = "Reflection in SVG set to attribute"
+handler_type = "query"
+reflection = "<svg><set to=\"{input}\"/></svg>"
+expected_detection = true
+
+[[case]]
+id = 119
+name = "xml_cdata"
+description = "Reflection in XML CDATA section"
+handler_type = "query"
+reflection = "<![CDATA[{input}]]>"
+expected_detection = true
+
+[[case]]
+id = 120
+name = "svg_pattern_href"
+description = "Reflection in SVG pattern href"
+handler_type = "query"
+reflection = "<svg><pattern href=\"{input}\"/></svg>"
+expected_detection = true
+
+[[case]]
+id = 121
+name = "svg_filter_primitive"
+description = "Reflection in SVG filter primitive"
+handler_type = "query"
+reflection = "<svg><filter><feImage href=\"{input}\"/></filter></svg>"
+expected_detection = true
