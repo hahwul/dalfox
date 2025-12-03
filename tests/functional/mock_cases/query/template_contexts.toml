@@ -13,7 +13,7 @@ id = 62
 name = "template_vue"
 description = "Vue.js template injection"
 handler_type = "query"
-reflection = "<div id=app>{{{{input}}}}</div>"
+reflection = "<div id=app>{{input}}</div>"
 expected_detection = true
 
 [[case]]
@@ -21,7 +21,7 @@ id = 63
 name = "template_react_jsx"
 description = "React JSX injection"
 handler_type = "query"
-reflection = "<div dangerouslySetInnerHTML={{{{__html: '{input}'}}}}/>"
+reflection = "<div dangerouslySetInnerHTML={{__html: '{input}'}}></div>"
 expected_detection = true
 
 [[case]]
@@ -29,7 +29,7 @@ id = 64
 name = "template_handlebars"
 description = "Handlebars template injection"
 handler_type = "query"
-reflection = "<div>{{{{input}}}}</div>"
+reflection = "<div>{{input}}</div>"
 expected_detection = true
 
 [[case]]
@@ -37,7 +37,7 @@ id = 65
 name = "template_jinja"
 description = "Jinja2 template injection"
 handler_type = "query"
-reflection = "<div>{{{{input}}}}</div>"
+reflection = "<div>{{input}}</div>"
 expected_detection = true
 
 [[case]]

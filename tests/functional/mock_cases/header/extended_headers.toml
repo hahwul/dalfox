@@ -2,10 +2,10 @@
 
 [[case]]
 id = 13
-name = "accept_header"
-description = "Accept header reflection in content negotiation"
+name = "accept_type_custom"
+description = "Custom Accept-Type header reflection in content negotiation"
 handler_type = "header"
-header_name = "Accept"
+header_name = "X-Accept-Type"
 reflection = "<div>Content type requested: {input}</div>"
 expected_detection = true
 

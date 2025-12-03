@@ -66,7 +66,7 @@ fn apply_reflection(reflection_pattern: &str, input: &str) -> String {
         "encoded_html_hex_lower" => html_numeric_hex_lower(input),
         "encoded_html_hex_upper" => html_numeric_hex_upper_x(input),
         "percent_to_entity" => input.replace('%', "&#37;"),
-        "encoded_base64" => base64::prelude::BASE64_STANDARD.encode(input),
+        "encoded_base64" => BASE64_STANDARD.encode(input),
         "encoded_url" => urlencoding::encode(input).to_string(),
         _ => reflection_pattern.replace("{input}", input),
     }
