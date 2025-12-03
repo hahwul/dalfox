@@ -1,0 +1,81 @@
+# Advanced encoding and filtering bypass test cases
+
+[[case]]
+id = 51
+name = "double_encoding"
+description = "Test double URL encoding bypass"
+handler_type = "query"
+reflection = "{input}"
+expected_detection = true
+
+[[case]]
+id = 52
+name = "unicode_normalization"
+description = "Unicode normalization bypass"
+handler_type = "query"
+reflection = "{input}"
+expected_detection = true
+
+[[case]]
+id = 53
+name = "null_byte_bypass"
+description = "Null byte injection bypass"
+handler_type = "query"
+reflection = "{input}"
+expected_detection = true
+
+[[case]]
+id = 54
+name = "newline_bypass"
+description = "Newline character bypass"
+handler_type = "query"
+reflection = "{input}"
+expected_detection = true
+
+[[case]]
+id = 55
+name = "tab_bypass"
+description = "Tab character bypass in attributes"
+handler_type = "query"
+reflection = "<img\tsrc=x\tonerror={input}>"
+expected_detection = true
+
+[[case]]
+id = 56
+name = "mixed_case_tags"
+description = "Mixed case HTML tags"
+handler_type = "query"
+reflection = "<ScRiPt>{input}</sCrIpT>"
+expected_detection = true
+
+[[case]]
+id = 57
+name = "html5_entities"
+description = "HTML5 entity encoding without semicolon"
+handler_type = "query"
+reflection = "<div>{input}</div>"
+expected_detection = true
+
+[[case]]
+id = 58
+name = "backslash_escape"
+description = "Backslash escape in JavaScript context"
+handler_type = "query"
+reflection = "<script>var x='\\{input}\\';</script>"
+expected_detection = true
+
+[[case]]
+id = 59
+name = "comment_break_html"
+description = "HTML comment break attempt"
+handler_type = "query"
+reflection = "<!-- {input} -->"
+expected_detection = true
+
+[[case]]
+id = 60
+name = "comment_break_js"
+description = "JavaScript comment break"
+handler_type = "query"
+reflection = "<script>//comment\nvar x='{input}';</script>"
+expected_detection = true

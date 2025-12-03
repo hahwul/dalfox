@@ -1,0 +1,81 @@
+# DOM manipulation and client-side storage contexts
+
+[[case]]
+id = 71
+name = "dom_innerhtml"
+description = "DOM innerHTML assignment"
+handler_type = "query"
+reflection = "<script>document.getElementById('x').innerHTML='{input}';</script>"
+expected_detection = true
+
+[[case]]
+id = 72
+name = "dom_outerhtml"
+description = "DOM outerHTML assignment"
+handler_type = "query"
+reflection = "<script>document.getElementById('x').outerHTML='{input}';</script>"
+expected_detection = true
+
+[[case]]
+id = 73
+name = "dom_document_write"
+description = "document.write injection"
+handler_type = "query"
+reflection = "<script>document.write('{input}');</script>"
+expected_detection = true
+
+[[case]]
+id = 74
+name = "dom_insertadjacenthtml"
+description = "insertAdjacentHTML injection"
+handler_type = "query"
+reflection = "<script>el.insertAdjacentHTML('beforeend', '{input}');</script>"
+expected_detection = true
+
+[[case]]
+id = 75
+name = "dom_eval"
+description = "eval() injection"
+handler_type = "query"
+reflection = "<script>eval('{input}');</script>"
+expected_detection = true
+
+[[case]]
+id = 76
+name = "dom_settimeout"
+description = "setTimeout string injection"
+handler_type = "query"
+reflection = "<script>setTimeout('{input}', 100);</script>"
+expected_detection = true
+
+[[case]]
+id = 77
+name = "dom_setinterval"
+description = "setInterval string injection"
+handler_type = "query"
+reflection = "<script>setInterval('{input}', 100);</script>"
+expected_detection = true
+
+[[case]]
+id = 78
+name = "dom_function_constructor"
+description = "Function constructor injection"
+handler_type = "query"
+reflection = "<script>new Function('{input}')();</script>"
+expected_detection = true
+
+[[case]]
+id = 79
+name = "localstorage_reflection"
+description = "localStorage value reflection"
+handler_type = "query"
+reflection = "<script>localStorage.setItem('key','{input}');document.write(localStorage.getItem('key'));</script>"
+expected_detection = true
+
+[[case]]
+id = 80
+name = "sessionstorage_reflection"
+description = "sessionStorage value reflection"
+handler_type = "query"
+reflection = "<script>sessionStorage.setItem('key','{input}');document.write(sessionStorage.getItem('key'));</script>"
+expected_detection = true
