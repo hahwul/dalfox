@@ -285,6 +285,91 @@ pub async fn run_scanning(
             // Batch local results to reduce mutex contention
             let mut local_results: Vec<crate::scanning::result::Result> = Vec::new();
 
+            // Stage 0: fast probe to avoid large payload blasts on non-reflective params
+            // Use a minimal alphanumeric token to check generic reflection across contexts.
+            let probe_payloads: [&str; 1] = ["dalfox"]; // small, context-agnostic
+            let mut probe_reflected = false;
+            let mut probe_response_text: Option<String> = None;
+            for pp in probe_payloads {
+                let (reflected, response_text) =
+                    check_reflection_with_response(
+                        &target_clone,
+                        &param_clone,
+                        pp,
+                        &args_clone,
+                    )
+                    .await;
+                if reflected {
+                    probe_reflected = true;
+                    probe_response_text = response_text;
+                    break;
+                } else if response_text.is_some() {
+                    // Even without direct reflection, keep one response for AST analysis below.
+                    probe_response_text = response_text;
+                }
+            }
+
+            // Run AST-based DOM XSS static analysis once using the probe response (if available)
+            if !args_clone.skip_ast_analysis
+                && let Some(ref response_text) = probe_response_text
+            {
+                let js_blocks =
+                    crate::scanning::ast_integration::extract_javascript_from_html(response_text);
+                for js_code in js_blocks {
+                    let findings =
+                        crate::scanning::ast_integration::analyze_javascript_for_dom_xss(
+                            &js_code,
+                            target_clone.url.as_str(),
+                        );
+                    for (vuln, payload, description) in findings {
+                        let result_url = crate::scanning::url_inject::build_injected_url(
+                            &target_clone.url,
+                            &param_clone,
+                            // Use the actual executable payload from analysis for POC path
+                            &payload,
+                        );
+                        let mut ast_result = crate::scanning::result::Result::new(
+                            "A".to_string(),
+                            "DOM-XSS".to_string(),
+                            target_clone.method.clone(),
+                            result_url.clone(),
+                            param_clone.name.clone(),
+                            payload.clone(),
+                            format!(
+                                "{}:{}:{} - {} (Source: {}, Sink: {})",
+                                target_clone.url.as_str(),
+                                vuln.line,
+                                vuln.column,
+                                description,
+                                vuln.source,
+                                vuln.sink
+                            ),
+                            "CWE-79".to_string(),
+                            "High".to_string(),
+                            0,
+                            description,
+                        );
+                        ast_result.request = Some(build_request_text(
+                            &target_clone,
+                            &param_clone,
+                            // For request text, show probe payload to keep noise low
+                            probe_payloads[0],
+                        ));
+                        ast_result.response = Some(response_text.clone());
+                        local_results.push(ast_result);
+                    }
+                }
+            }
+
+            // If probe found no reflection and not in deep_scan, skip heavy payload loops for this param
+            if !probe_reflected && !args_clone.deep_scan {
+                if !local_results.is_empty() {
+                    let mut guard = results_clone.lock().await;
+                    guard.extend(local_results);
+                }
+                return;
+            }
+
             // Sequential testing for this param
             for reflection_payload in reflection_payloads_clone {
                 // Early stop if global limit reached

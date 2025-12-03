@@ -5,7 +5,7 @@
 
 pub mod basic;
 // XSS detection tests (requires mock server - placeholder)
-// pub mod xss_detection;
+pub mod xss_mock_server;
 // Mining tests (placeholder)
 // pub mod mining;
 // Pipeline tests (placeholder)
