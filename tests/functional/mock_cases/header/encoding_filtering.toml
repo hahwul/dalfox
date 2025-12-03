@@ -1,0 +1,91 @@
+# Advanced header injection test cases with encoding and filtering
+
+[[case]]
+id = 41
+name = "header_html_entity_encode"
+description = "Test header injection with HTML entity encoding"
+handler_type = "header"
+header_name = "X-Custom-Header"
+reflection = "<div>&lt;{input}&gt;</div>"
+expected_detection = true
+
+[[case]]
+id = 42
+name = "header_url_encoded"
+description = "Test header injection with URL encoding"
+handler_type = "header"
+header_name = "X-Encoded"
+reflection = "encoded_url"
+expected_detection = true
+
+[[case]]
+id = 43
+name = "header_base64_encoded"
+description = "Test header injection with Base64 encoding"
+handler_type = "header"
+header_name = "X-Auth-Token"
+reflection = "encoded_base64"
+expected_detection = true
+
+[[case]]
+id = 44
+name = "header_crlf_injection"
+description = "Test CRLF injection in header reflection"
+handler_type = "header"
+header_name = "X-Injection"
+reflection = "<div>Header: {input}</div>"
+expected_detection = true
+
+[[case]]
+id = 45
+name = "header_json_context"
+description = "Test header reflected in JSON context"
+handler_type = "header"
+header_name = "X-User-Data"
+reflection = "<script>var config = {\"header\": \"{input}\"};</script>"
+expected_detection = true
+
+[[case]]
+id = 46
+name = "header_js_string_context"
+description = "Test header reflected in JavaScript string"
+handler_type = "header"
+header_name = "X-Tracking-Id"
+reflection = "<script>var trackingId = '{input}';</script>"
+expected_detection = true
+
+[[case]]
+id = 47
+name = "header_meta_tag"
+description = "Test header reflected in meta tag"
+handler_type = "header"
+header_name = "X-Meta-Content"
+reflection = "<meta name='custom' content='{input}'>"
+expected_detection = true
+
+[[case]]
+id = 48
+name = "header_comment_context"
+description = "Test header reflected in HTML comment"
+handler_type = "header"
+header_name = "X-Debug-Info"
+reflection = "<!-- Debug: {input} -->"
+expected_detection = true
+
+[[case]]
+id = 49
+name = "header_style_context"
+description = "Test header reflected in style attribute"
+handler_type = "header"
+header_name = "X-Style-Color"
+reflection = "<div style='color: {input};'>content</div>"
+expected_detection = true
+
+[[case]]
+id = 50
+name = "header_data_attribute"
+description = "Test header reflected in data attribute"
+handler_type = "header"
+header_name = "X-Data-Value"
+reflection = "<div data-value='{input}'>content</div>"
+expected_detection = true

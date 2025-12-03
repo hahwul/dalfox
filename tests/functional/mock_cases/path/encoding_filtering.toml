@@ -1,0 +1,81 @@
+# Advanced path injection test cases with encoding and filtering
+
+[[case]]
+id = 24
+name = "path_html_entity_encode"
+description = "Test path injection with HTML entity encoding"
+handler_type = "path"
+reflection = "<div>&lt;{input}&gt;</div>"
+expected_detection = true
+
+[[case]]
+id = 25
+name = "path_url_encoded"
+description = "Test path injection with URL encoding"
+handler_type = "path"
+reflection = "encoded_url"
+expected_detection = true
+
+[[case]]
+id = 26
+name = "path_base64_encoded"
+description = "Test path injection with Base64 encoding"
+handler_type = "path"
+reflection = "encoded_base64"
+expected_detection = true
+
+[[case]]
+id = 27
+name = "path_json_context"
+description = "Test path parameter reflected in JSON"
+handler_type = "path"
+reflection = "<script>var path = {\"value\": \"{input}\"};</script>"
+expected_detection = true
+
+[[case]]
+id = 28
+name = "path_js_string_context"
+description = "Test path parameter in JavaScript string"
+handler_type = "path"
+reflection = "<script>var pathParam = '{input}';</script>"
+expected_detection = true
+
+[[case]]
+id = 29
+name = "path_svg_context"
+description = "Test path parameter in SVG context"
+handler_type = "path"
+reflection = "<svg><text>{input}</text></svg>"
+expected_detection = true
+
+[[case]]
+id = 30
+name = "path_href_context"
+description = "Test path parameter in href attribute"
+handler_type = "path"
+reflection = "<a href='/page/{input}'>link</a>"
+expected_detection = true
+
+[[case]]
+id = 31
+name = "path_src_context"
+description = "Test path parameter in src attribute"
+handler_type = "path"
+reflection = "<img src='/images/{input}'>"
+expected_detection = true
+
+[[case]]
+id = 32
+name = "path_meta_tag"
+description = "Test path parameter in meta tag"
+handler_type = "path"
+reflection = "<meta name='path' content='{input}'>"
+expected_detection = true
+
+[[case]]
+id = 33
+name = "path_double_reflection"
+description = "Test path parameter reflected twice"
+handler_type = "path"
+reflection = "<div id='{input}' data-path='{input}'>content</div>"
+expected_detection = true

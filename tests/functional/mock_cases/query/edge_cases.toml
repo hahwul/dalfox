@@ -1,0 +1,162 @@
+# Advanced edge cases and corner cases for XSS detection
+# Testing unusual patterns and edge cases
+
+[[case]]
+id = 247
+name = "null_byte_injection"
+description = "Test null byte injection in string"
+handler_type = "query"
+reflection = "<script>var x = '{input}';</script>"
+expected_detection = true
+
+[[case]]
+id = 248
+name = "bom_marker_injection"
+description = "Test BOM (Byte Order Mark) injection"
+handler_type = "query"
+reflection = "{input}"
+expected_detection = true
+
+[[case]]
+id = 249
+name = "rtlo_unicode_override"
+description = "Test RTLO (Right-to-Left Override) Unicode attack"
+handler_type = "query"
+reflection = "<div>{input}</div>"
+expected_detection = true
+
+[[case]]
+id = 250
+name = "zero_width_characters"
+description = "Test zero-width character obfuscation"
+handler_type = "query"
+reflection = "<script>{input}</script>"
+expected_detection = true
+
+[[case]]
+id = 251
+name = "newline_normalization"
+description = "Test newline normalization bypass"
+handler_type = "query"
+reflection = "<script>var x = '{input}';</script>"
+expected_detection = true
+
+[[case]]
+id = 252
+name = "carriage_return_bypass"
+description = "Test carriage return bypass"
+handler_type = "query"
+reflection = "<img src=x onerror='{input}'>"
+expected_detection = true
+
+[[case]]
+id = 253
+name = "line_separator_unicode"
+description = "Test Unicode line separator bypass"
+handler_type = "query"
+reflection = "<script>{input}</script>"
+expected_detection = true
+
+[[case]]
+id = 254
+name = "paragraph_separator_unicode"
+description = "Test Unicode paragraph separator bypass"
+handler_type = "query"
+reflection = "<script>{input}</script>"
+expected_detection = true
+
+[[case]]
+id = 255
+name = "homoglyph_attack"
+description = "Test homoglyph character substitution"
+handler_type = "query"
+reflection = "<script>{input}</script>"
+expected_detection = true
+
+[[case]]
+id = 256
+name = "combining_characters"
+description = "Test combining diacritical marks"
+handler_type = "query"
+reflection = "<script>{input}</script>"
+expected_detection = true
+
+[[case]]
+id = 257
+name = "surrogate_pairs_unicode"
+description = "Test Unicode surrogate pairs"
+handler_type = "query"
+reflection = "<script>{input}</script>"
+expected_detection = true
+
+[[case]]
+id = 258
+name = "emoji_in_payload"
+description = "Test emoji characters in XSS payload"
+handler_type = "query"
+reflection = "<div>{input}</div>"
+expected_detection = true
+
+[[case]]
+id = 259
+name = "fullwidth_characters"
+description = "Test fullwidth character bypass"
+handler_type = "query"
+reflection = "<script>{input}</script>"
+expected_detection = true
+
+[[case]]
+id = 260
+name = "halfwidth_katakana"
+description = "Test halfwidth katakana characters"
+handler_type = "query"
+reflection = "<script>{input}</script>"
+expected_detection = true
+
+[[case]]
+id = 261
+name = "ideographic_space"
+description = "Test ideographic space character bypass"
+handler_type = "query"
+reflection = "<img{input}>"
+expected_detection = true
+
+[[case]]
+id = 262
+name = "vertical_tab_bypass"
+description = "Test vertical tab character bypass"
+handler_type = "query"
+reflection = "<img\vsrc=x\vonerror={input}>"
+expected_detection = true
+
+[[case]]
+id = 263
+name = "form_feed_bypass"
+description = "Test form feed character bypass"
+handler_type = "query"
+reflection = "<img\fsrc=x\fonerror={input}>"
+expected_detection = true
+
+[[case]]
+id = 264
+name = "no_break_space"
+description = "Test non-breaking space bypass"
+handler_type = "query"
+reflection = "<img src=x onerror={input}>"
+expected_detection = true
+
+[[case]]
+id = 265
+name = "thin_space_bypass"
+description = "Test thin space character bypass"
+handler_type = "query"
+reflection = "<img src=x onerror={input}>"
+expected_detection = true
+
+[[case]]
+id = 266
+name = "hair_space_bypass"
+description = "Test hair space character bypass"
+handler_type = "query"
+reflection = "<img src=x onerror={input}>"
+expected_detection = true

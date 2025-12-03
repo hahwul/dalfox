@@ -1,0 +1,91 @@
+# Advanced body parameter injection test cases with encoding and filtering
+
+[[case]]
+id = 27
+name = "body_html_entity_encode"
+description = "Test body injection with HTML entity encoding"
+handler_type = "body"
+param_name = "data"
+reflection = "<div>&lt;{input}&gt;</div>"
+expected_detection = true
+
+[[case]]
+id = 28
+name = "body_url_encoded"
+description = "Test body injection with URL encoding"
+handler_type = "body"
+param_name = "content"
+reflection = "encoded_url"
+expected_detection = true
+
+[[case]]
+id = 29
+name = "body_base64_encoded"
+description = "Test body injection with Base64 encoding"
+handler_type = "body"
+param_name = "payload"
+reflection = "encoded_base64"
+expected_detection = true
+
+[[case]]
+id = 30
+name = "body_json_context"
+description = "Test body parameter reflected in JSON"
+handler_type = "body"
+param_name = "message"
+reflection = "<script>var msg = {\"data\": \"{input}\"};</script>"
+expected_detection = true
+
+[[case]]
+id = 31
+name = "body_js_string_context"
+description = "Test body parameter in JavaScript string"
+handler_type = "body"
+param_name = "text"
+reflection = "<script>var text = '{input}';</script>"
+expected_detection = true
+
+[[case]]
+id = 32
+name = "body_textarea_context"
+description = "Test body parameter in textarea"
+handler_type = "body"
+param_name = "comment"
+reflection = "<textarea>{input}</textarea>"
+expected_detection = true
+
+[[case]]
+id = 33
+name = "body_input_value"
+description = "Test body parameter in input value"
+handler_type = "body"
+param_name = "username"
+reflection = "<input type='text' value='{input}'>"
+expected_detection = true
+
+[[case]]
+id = 34
+name = "body_title_attribute"
+description = "Test body parameter in title attribute"
+handler_type = "body"
+param_name = "tooltip"
+reflection = "<div title='{input}'>hover me</div>"
+expected_detection = true
+
+[[case]]
+id = 35
+name = "body_placeholder_attribute"
+description = "Test body parameter in placeholder attribute"
+handler_type = "body"
+param_name = "hint"
+reflection = "<input type='text' placeholder='{input}'>"
+expected_detection = true
+
+[[case]]
+id = 36
+name = "body_nested_json"
+description = "Test body parameter in nested JSON structure"
+handler_type = "body"
+param_name = "nested_data"
+reflection = "<script>var config = {\"user\": {\"input\": \"{input}\"}};</script>"
+expected_detection = true

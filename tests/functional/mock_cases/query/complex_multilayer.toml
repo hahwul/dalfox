@@ -1,0 +1,170 @@
+# Complex multi-layer and context-switching XSS cases
+# Testing advanced scenarios with nested contexts and mutations
+
+[[case]]
+id = 226
+name = "nested_html_js_context"
+description = "Test nested HTML and JavaScript context"
+handler_type = "query"
+reflection = "<div onclick='var x=\"{input}\";'></div>"
+expected_detection = true
+
+[[case]]
+id = 227
+name = "triple_nested_quotes"
+description = "Test triple nested quoting context"
+handler_type = "query"
+reflection = "<script>var a = '<div onclick=\"{input}\"></div>';</script>"
+expected_detection = true
+
+[[case]]
+id = 228
+name = "json_in_script_in_html"
+description = "Test JSON inside script inside HTML"
+handler_type = "query"
+reflection = "<script>var config = {\"data\": \"{input}\"};</script>"
+expected_detection = true
+
+[[case]]
+id = 229
+name = "svg_foreignobject_html"
+description = "Test SVG foreignObject with HTML context"
+handler_type = "query"
+reflection = "<svg><foreignObject><div>{input}</div></foreignObject></svg>"
+expected_detection = true
+
+[[case]]
+id = 230
+name = "template_literal_js"
+description = "Test JavaScript template literal context"
+handler_type = "query"
+reflection = "<script>var x = `{input}`;</script>"
+expected_detection = true
+
+[[case]]
+id = 231
+name = "regex_pattern_js"
+description = "Test JavaScript regex pattern context"
+handler_type = "query"
+reflection = "<script>var re = /{input}/;</script>"
+expected_detection = true
+
+[[case]]
+id = 232
+name = "mutation_xss_noscript"
+description = "Test mXSS with noscript tag mutation"
+handler_type = "query"
+reflection = "<noscript><p title=\"</noscript>{input}<noscript>\">"
+expected_detection = true
+
+[[case]]
+id = 233
+name = "mutation_xss_listing"
+description = "Test mXSS with listing tag mutation"
+handler_type = "query"
+reflection = "<listing>&lt;img src=x onerror={input}&gt;</listing>"
+expected_detection = true
+
+[[case]]
+id = 234
+name = "cdata_section_xml"
+description = "Test CDATA section in XML/SVG context"
+handler_type = "query"
+reflection = "<svg><script><![CDATA[{input}]]></script></svg>"
+expected_detection = true
+
+[[case]]
+id = 235
+name = "css_expression_ie"
+description = "Test CSS expression (IE legacy)"
+handler_type = "query"
+reflection = "<style>div { width: expression({input}); }</style>"
+expected_detection = true
+
+[[case]]
+id = 236
+name = "meta_refresh_url"
+description = "Test meta refresh with URL"
+handler_type = "query"
+reflection = "<meta http-equiv='refresh' content='0;url={input}'>"
+expected_detection = true
+
+[[case]]
+id = 237
+name = "base_href_injection"
+description = "Test base href tag injection"
+handler_type = "query"
+reflection = "<base href='{input}'>"
+expected_detection = true
+
+[[case]]
+id = 238
+name = "form_action_injection"
+description = "Test form action attribute injection"
+handler_type = "query"
+reflection = "<form action='{input}'><input type='submit'></form>"
+expected_detection = true
+
+[[case]]
+id = 239
+name = "iframe_srcdoc_html"
+description = "Test iframe srcdoc with HTML injection"
+handler_type = "query"
+reflection = "<iframe srcdoc='{input}'></iframe>"
+expected_detection = true
+
+[[case]]
+id = 240
+name = "object_data_injection"
+description = "Test object data attribute injection"
+handler_type = "query"
+reflection = "<object data='{input}'></object>"
+expected_detection = true
+
+[[case]]
+id = 241
+name = "embed_src_injection"
+description = "Test embed src attribute injection"
+handler_type = "query"
+reflection = "<embed src='{input}'>"
+expected_detection = true
+
+[[case]]
+id = 242
+name = "link_href_import"
+description = "Test link href with import"
+handler_type = "query"
+reflection = "<link rel='import' href='{input}'>"
+expected_detection = true
+
+[[case]]
+id = 243
+name = "html_import_xss"
+description = "Test HTML import XSS vector"
+handler_type = "query"
+reflection = "<link rel='import' href='{input}.html'>"
+expected_detection = true
+
+[[case]]
+id = 244
+name = "xml_external_entity"
+description = "Test XML external entity context"
+handler_type = "query"
+reflection = "<?xml version='1.0'?><!DOCTYPE foo [<!ENTITY xxe SYSTEM '{input}'>]><foo>&xxe;</foo>"
+expected_detection = true
+
+[[case]]
+id = 245
+name = "mathml_injection"
+description = "Test MathML injection context"
+handler_type = "query"
+reflection = "<math><mtext>{input}</mtext></math>"
+expected_detection = true
+
+[[case]]
+id = 246
+name = "xlink_href_svg"
+description = "Test SVG xlink:href attribute"
+handler_type = "query"
+reflection = "<svg><use xlink:href='{input}'></use></svg>"
+expected_detection = true
