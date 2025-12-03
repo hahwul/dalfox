@@ -1,0 +1,41 @@
+# Special context test cases for query parameter injection
+
+[[case]]
+id = 8
+name = "html_comment"
+description = "Reflection inside HTML comment"
+handler_type = "query"
+reflection = "<!-- {input} -->"
+expected_detection = true
+
+[[case]]
+id = 13
+name = "json_value"
+description = "Reflection inside JSON value"
+handler_type = "query"
+reflection = "{{\"data\": \"{input}\"}}"
+expected_detection = true
+
+[[case]]
+id = 28
+name = "css_import"
+description = "Reflection in CSS import URL"
+handler_type = "query"
+reflection = "<style>@import url({input});</style>"
+expected_detection = true
+
+[[case]]
+id = 29
+name = "javascript_url"
+description = "Reflection in javascript: URL"
+handler_type = "query"
+reflection = "javascript:{input}"
+expected_detection = true
+
+[[case]]
+id = 30
+name = "data_url"
+description = "Reflection in data URL"
+handler_type = "query"
+reflection = "data:text/html,{input}"
+expected_detection = true

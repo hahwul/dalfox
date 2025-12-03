@@ -12,6 +12,7 @@ use axum::{
     response::{Html, IntoResponse},
     routing::{get, post},
 };
+use base64::prelude::*;
 
 use dalfox::cmd::scan::{self, ScanArgs};
 
@@ -101,7 +102,7 @@ async fn header_handler(Path(case_id): Path<u32>, headers: HeaderMap) -> impl In
         3 => html_numeric_hex_lower(&q),
         4 => html_numeric_hex_upper_x(&q),
         5 => q.replace('%', "&#37;"),
-        6 => base64::encode(&q),
+        6 => BASE64_STANDARD.encode(&q),
         7 => urlencoding::encode(&q).to_string(),
         8 => format!("<div>{}</div>", q),
         9 => format!("<script>{}</script>", q),
@@ -137,7 +138,7 @@ async fn cookie_handler(Path(case_id): Path<u32>, headers: HeaderMap) -> impl In
         3 => html_numeric_hex_lower(&q),
         4 => html_numeric_hex_upper_x(&q),
         5 => q.replace('%', "&#37;"),
-        6 => base64::encode(&q),
+        6 => BASE64_STANDARD.encode(&q),
         7 => urlencoding::encode(&q).to_string(),
         8 => format!("<div>{}</div>", q),
         9 => format!("<script>{}</script>", q),
@@ -159,7 +160,7 @@ async fn path_handler(Path((case_id, param)): Path<(u32, String)>) -> impl IntoR
         3 => html_numeric_hex_lower(&q),
         4 => html_numeric_hex_upper_x(&q),
         5 => q.replace('%', "&#37;"),
-        6 => base64::encode(&q),
+        6 => BASE64_STANDARD.encode(&q),
         7 => urlencoding::encode(&q).to_string(),
         8 => format!("<div>{}</div>", q),
         9 => format!("<script>{}</script>", q),
@@ -184,7 +185,7 @@ async fn body_handler(
         3 => html_numeric_hex_lower(&q),
         4 => html_numeric_hex_upper_x(&q),
         5 => q.replace('%', "&#37;"),
-        6 => base64::encode(&q),
+        6 => BASE64_STANDARD.encode(&q),
         7 => urlencoding::encode(&q).to_string(),
         8 => format!("<div>{}</div>", q),
         9 => format!("<script>{}</script>", q),

@@ -1,0 +1,109 @@
+# Cookie injection test cases
+
+[[case]]
+id = 1
+name = "raw_reflection"
+description = "Direct reflection without any encoding"
+handler_type = "cookie"
+cookie_name = "test"
+reflection = "{input}"
+expected_detection = true
+
+[[case]]
+id = 2
+name = "html_named_encode"
+description = "HTML entity encoding (named)"
+handler_type = "cookie"
+cookie_name = "test"
+reflection = "encoded_html_named"
+expected_detection = true
+
+[[case]]
+id = 3
+name = "html_hex_lower"
+description = "HTML numeric hex encoding (lowercase)"
+handler_type = "cookie"
+cookie_name = "test"
+reflection = "encoded_html_hex_lower"
+expected_detection = true
+
+[[case]]
+id = 4
+name = "html_hex_upper"
+description = "HTML numeric hex encoding (uppercase X)"
+handler_type = "cookie"
+cookie_name = "test"
+reflection = "encoded_html_hex_upper"
+expected_detection = true
+
+[[case]]
+id = 5
+name = "percent_encode"
+description = "Percent sign encoded"
+handler_type = "cookie"
+cookie_name = "test"
+reflection = "percent_to_entity"
+expected_detection = true
+
+[[case]]
+id = 6
+name = "base64_encode"
+description = "Base64 encoding"
+handler_type = "cookie"
+cookie_name = "test"
+reflection = "encoded_base64"
+expected_detection = true
+
+[[case]]
+id = 7
+name = "url_encode"
+description = "URL encoding"
+handler_type = "cookie"
+cookie_name = "test"
+reflection = "encoded_url"
+expected_detection = true
+
+[[case]]
+id = 8
+name = "div_element"
+description = "Reflection inside div element"
+handler_type = "cookie"
+cookie_name = "test"
+reflection = "<div>{input}</div>"
+expected_detection = true
+
+[[case]]
+id = 9
+name = "script_block"
+description = "Reflection inside script block"
+handler_type = "cookie"
+cookie_name = "test"
+reflection = "<script>{input}</script>"
+expected_detection = true
+
+[[case]]
+id = 10
+name = "html_comment"
+description = "Reflection inside HTML comment"
+handler_type = "cookie"
+cookie_name = "test"
+reflection = "<!-- {input} -->"
+expected_detection = true
+
+[[case]]
+id = 11
+name = "session_cookie"
+description = "Session cookie reflection"
+handler_type = "cookie"
+cookie_name = "sessionid"
+reflection = "<div>Session: {input}</div>"
+expected_detection = true
+
+[[case]]
+id = 12
+name = "tracking_cookie"
+description = "Tracking cookie reflection in script"
+handler_type = "cookie"
+cookie_name = "tracking"
+reflection = "<script>var track='{input}';</script>"
+expected_detection = true

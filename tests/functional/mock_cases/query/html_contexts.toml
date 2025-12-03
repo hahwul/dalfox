@@ -1,0 +1,73 @@
+# HTML context test cases for query parameter injection
+
+[[case]]
+id = 1
+name = "raw_reflection"
+description = "Direct reflection without any encoding"
+handler_type = "query"
+reflection = "{input}"
+expected_detection = true
+
+[[case]]
+id = 2
+name = "html_named_encode_all"
+description = "Full HTML entity encoding (named)"
+handler_type = "query"
+reflection = "encoded_html_named"
+expected_detection = true
+
+[[case]]
+id = 3
+name = "html_numeric_hex_lower"
+description = "HTML numeric hex encoding (lowercase)"
+handler_type = "query"
+reflection = "encoded_html_hex_lower"
+expected_detection = true
+
+[[case]]
+id = 4
+name = "html_numeric_hex_upper"
+description = "HTML numeric hex encoding (uppercase X)"
+handler_type = "query"
+reflection = "encoded_html_hex_upper"
+expected_detection = true
+
+[[case]]
+id = 5
+name = "percent_encode"
+description = "Percent sign encoded to HTML entity"
+handler_type = "query"
+reflection = "percent_to_entity"
+expected_detection = true
+
+[[case]]
+id = 9
+name = "div_element"
+description = "Reflection inside div element"
+handler_type = "query"
+reflection = "<div>{input}</div>"
+expected_detection = true
+
+[[case]]
+id = 14
+name = "meta_refresh"
+description = "Reflection in meta refresh URL"
+handler_type = "query"
+reflection = "<meta http-equiv=\"refresh\" content=\"0; url={input}\">"
+expected_detection = true
+
+[[case]]
+id = 15
+name = "form_action"
+description = "Reflection in form action attribute"
+handler_type = "query"
+reflection = "<form action=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 16
+name = "input_value"
+description = "Reflection in input value attribute"
+handler_type = "query"
+reflection = "<input value=\"{input}\">"
+expected_detection = true
