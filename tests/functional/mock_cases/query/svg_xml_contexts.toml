@@ -1,0 +1,41 @@
+# SVG and XML context test cases
+
+[[case]]
+id = 41
+name = "svg_script_block"
+description = "Reflection inside SVG script block"
+handler_type = "query"
+reflection = "<svg><script>{input}</script></svg>"
+expected_detection = true
+
+[[case]]
+id = 42
+name = "svg_animate_href"
+description = "Reflection in SVG animate href"
+handler_type = "query"
+reflection = "<svg><animate href=\"{input}\"/></svg>"
+expected_detection = true
+
+[[case]]
+id = 43
+name = "svg_use_href"
+description = "Reflection in SVG use href"
+handler_type = "query"
+reflection = "<svg><use href=\"{input}\"/></svg>"
+expected_detection = true
+
+[[case]]
+id = 44
+name = "math_ml"
+description = "Reflection in MathML context"
+handler_type = "query"
+reflection = "<math><mtext>{input}</mtext></math>"
+expected_detection = true
+
+[[case]]
+id = 45
+name = "svg_foreignobject"
+description = "Reflection in SVG foreignObject"
+handler_type = "query"
+reflection = "<svg><foreignObject>{input}</foreignObject></svg>"
+expected_detection = true

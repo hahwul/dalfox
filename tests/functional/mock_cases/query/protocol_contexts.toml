@@ -1,0 +1,81 @@
+# Protocol and scheme-based injection contexts
+
+[[case]]
+id = 81
+name = "vbscript_url"
+description = "VBScript URL (IE legacy)"
+handler_type = "query"
+reflection = "<a href=\"vbscript:{input}\">click</a>"
+expected_detection = true
+
+[[case]]
+id = 82
+name = "data_url_base64"
+description = "Data URL with base64"
+handler_type = "query"
+reflection = "<iframe src=\"data:text/html;base64,{input}\"></iframe>"
+expected_detection = true
+
+[[case]]
+id = 83
+name = "file_url"
+description = "File URL protocol"
+handler_type = "query"
+reflection = "<a href=\"file:///{input}\">link</a>"
+expected_detection = true
+
+[[case]]
+id = 84
+name = "blob_url"
+description = "Blob URL injection"
+handler_type = "query"
+reflection = "<script>var blob=new Blob(['{input}'],{{type:'text/html'}});window.location=URL.createObjectURL(blob);</script>"
+expected_detection = true
+
+[[case]]
+id = 85
+name = "about_blank"
+description = "about:blank srcdoc injection"
+handler_type = "query"
+reflection = "<iframe srcdoc=\"{input}\"></iframe>"
+expected_detection = true
+
+[[case]]
+id = 86
+name = "tel_protocol"
+description = "Tel protocol injection"
+handler_type = "query"
+reflection = "<a href=\"tel:{input}\">call</a>"
+expected_detection = true
+
+[[case]]
+id = 87
+name = "mailto_protocol"
+description = "Mailto protocol injection"
+handler_type = "query"
+reflection = "<a href=\"mailto:{input}\">email</a>"
+expected_detection = true
+
+[[case]]
+id = 88
+name = "ws_protocol"
+description = "WebSocket protocol"
+handler_type = "query"
+reflection = "<script>new WebSocket('ws://{input}');</script>"
+expected_detection = true
+
+[[case]]
+id = 89
+name = "wss_protocol"
+description = "Secure WebSocket protocol"
+handler_type = "query"
+reflection = "<script>new WebSocket('wss://{input}');</script>"
+expected_detection = true
+
+[[case]]
+id = 90
+name = "intent_protocol"
+description = "Android intent URL (mobile)"
+handler_type = "query"
+reflection = "<a href=\"intent://{input}#Intent;end\">open</a>"
+expected_detection = true

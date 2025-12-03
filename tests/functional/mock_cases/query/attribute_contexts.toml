@@ -1,0 +1,97 @@
+# Attribute context test cases for query parameter injection
+
+[[case]]
+id = 6
+name = "img_alt_double_quote"
+description = "Reflection in img alt attribute with double quotes"
+handler_type = "query"
+reflection = "<img src=x alt=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 11
+name = "img_src"
+description = "Reflection in img src attribute"
+handler_type = "query"
+reflection = "<img src=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 12
+name = "a_href"
+description = "Reflection in anchor href attribute"
+handler_type = "query"
+reflection = "<a href=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 18
+name = "img_alt_single_quote"
+description = "Reflection in img alt attribute with single quotes"
+handler_type = "query"
+reflection = "<img alt='{input}'>"
+expected_detection = true
+
+[[case]]
+id = 20
+name = "p_title"
+description = "Reflection in paragraph title attribute"
+handler_type = "query"
+reflection = "<p title=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 21
+name = "iframe_src"
+description = "Reflection in iframe src attribute"
+handler_type = "query"
+reflection = "<iframe src=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 22
+name = "object_data"
+description = "Reflection in object data attribute"
+handler_type = "query"
+reflection = "<object data=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 23
+name = "embed_src"
+description = "Reflection in embed src attribute"
+handler_type = "query"
+reflection = "<embed src=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 24
+name = "link_href"
+description = "Reflection in link href attribute"
+handler_type = "query"
+reflection = "<link href=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 25
+name = "area_href"
+description = "Reflection in area href attribute"
+handler_type = "query"
+reflection = "<area href=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 26
+name = "base_href"
+description = "Reflection in base href attribute"
+handler_type = "query"
+reflection = "<base href=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 27
+name = "script_src"
+description = "Reflection in script src attribute"
+handler_type = "query"
+reflection = "<script src=\"{input}\"></script>"
+expected_detection = true

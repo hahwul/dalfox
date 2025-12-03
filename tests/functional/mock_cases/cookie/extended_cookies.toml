@@ -1,0 +1,73 @@
+# Extended cookie injection scenarios
+
+[[case]]
+id = 13
+name = "jwt_cookie"
+description = "JWT cookie reflection"
+handler_type = "cookie"
+cookie_name = "jwt"
+reflection = "<script>var token='{input}';</script>"
+expected_detection = true
+
+[[case]]
+id = 14
+name = "auth_cookie"
+description = "Authentication cookie reflection"
+handler_type = "cookie"
+cookie_name = "auth"
+reflection = "<div>Auth: {input}</div>"
+expected_detection = true
+
+[[case]]
+id = 15
+name = "preferences_cookie"
+description = "User preferences cookie"
+handler_type = "cookie"
+cookie_name = "prefs"
+reflection = "<script>loadPrefs('{input}');</script>"
+expected_detection = true
+
+[[case]]
+id = 16
+name = "lang_cookie"
+description = "Language preference cookie"
+handler_type = "cookie"
+cookie_name = "lang"
+reflection = "<html lang=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 17
+name = "theme_cookie"
+description = "Theme cookie in style tag"
+handler_type = "cookie"
+cookie_name = "theme"
+reflection = "<style>body {{ theme: {input}; }}</style>"
+expected_detection = true
+
+[[case]]
+id = 18
+name = "remember_me_cookie"
+description = "Remember me cookie reflection"
+handler_type = "cookie"
+cookie_name = "remember"
+reflection = "<input type=\"checkbox\" {input}>"
+expected_detection = true
+
+[[case]]
+id = 19
+name = "csrf_cookie"
+description = "CSRF token cookie"
+handler_type = "cookie"
+cookie_name = "csrf_token"
+reflection = "<meta name=\"csrf-token\" content=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 20
+name = "analytics_cookie"
+description = "Analytics ID cookie"
+handler_type = "cookie"
+cookie_name = "ga"
+reflection = "<script>ga('create', '{input}');</script>"
+expected_detection = true

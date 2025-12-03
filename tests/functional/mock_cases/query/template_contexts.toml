@@ -1,0 +1,81 @@
+# Template engine and framework-specific injection contexts
+
+[[case]]
+id = 61
+name = "template_angular"
+description = "AngularJS template injection"
+handler_type = "query"
+reflection = "<div ng-app>{{input}}</div>"
+expected_detection = true
+
+[[case]]
+id = 62
+name = "template_vue"
+description = "Vue.js template injection"
+handler_type = "query"
+reflection = "<div id=app>{{input}}</div>"
+expected_detection = true
+
+[[case]]
+id = 63
+name = "template_react_jsx"
+description = "React JSX injection"
+handler_type = "query"
+reflection = "<div dangerouslySetInnerHTML={{__html: '{input}'}}></div>"
+expected_detection = true
+
+[[case]]
+id = 64
+name = "template_handlebars"
+description = "Handlebars template injection"
+handler_type = "query"
+reflection = "<div>{{input}}</div>"
+expected_detection = true
+
+[[case]]
+id = 65
+name = "template_jinja"
+description = "Jinja2 template injection"
+handler_type = "query"
+reflection = "<div>{{input}}</div>"
+expected_detection = true
+
+[[case]]
+id = 66
+name = "markdown_injection"
+description = "Markdown to HTML injection"
+handler_type = "query"
+reflection = "<p>{input}</p>"
+expected_detection = true
+
+[[case]]
+id = 67
+name = "json_callback_jsonp"
+description = "JSONP callback injection"
+handler_type = "query"
+reflection = "{input}({{\"data\": \"value\"}})"
+expected_detection = true
+
+[[case]]
+id = 68
+name = "xml_cdata"
+description = "XML CDATA injection"
+handler_type = "query"
+reflection = "<![CDATA[{input}]]>"
+expected_detection = true
+
+[[case]]
+id = 69
+name = "pdf_javascript"
+description = "PDF JavaScript injection context"
+handler_type = "query"
+reflection = "/JS ({input})"
+expected_detection = true
+
+[[case]]
+id = 70
+name = "flash_actionscript"
+description = "Flash ActionScript context (legacy)"
+handler_type = "query"
+reflection = "getURL('{input}')"
+expected_detection = true

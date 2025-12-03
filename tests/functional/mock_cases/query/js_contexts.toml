@@ -1,0 +1,33 @@
+# JavaScript context test cases for query parameter injection
+
+[[case]]
+id = 7
+name = "js_string_double_quote"
+description = "Reflection inside JavaScript string with double quotes"
+handler_type = "query"
+reflection = "<script>var s=\"{input}\";</script>"
+expected_detection = true
+
+[[case]]
+id = 10
+name = "js_script_block"
+description = "Reflection inside script block"
+handler_type = "query"
+reflection = "<script>{input}</script>"
+expected_detection = true
+
+[[case]]
+id = 17
+name = "js_alert_no_quotes"
+description = "Reflection in alert call without quotes"
+handler_type = "query"
+reflection = "<script>alert({input})</script>"
+expected_detection = true
+
+[[case]]
+id = 19
+name = "js_string_single_quote"
+description = "Reflection inside JavaScript string with single quotes"
+handler_type = "query"
+reflection = "<script>var s='{input}';</script>"
+expected_detection = true

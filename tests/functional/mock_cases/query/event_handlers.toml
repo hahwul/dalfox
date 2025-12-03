@@ -1,0 +1,81 @@
+# Extended HTML attribute event handler test cases
+
+[[case]]
+id = 31
+name = "img_onerror"
+description = "Reflection in img onerror event handler"
+handler_type = "query"
+reflection = "<img src=x onerror=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 32
+name = "body_onload"
+description = "Reflection in body onload event handler"
+handler_type = "query"
+reflection = "<body onload=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 33
+name = "svg_onload"
+description = "Reflection in SVG onload event handler"
+handler_type = "query"
+reflection = "<svg onload=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 34
+name = "input_onfocus"
+description = "Reflection in input onfocus event handler"
+handler_type = "query"
+reflection = "<input onfocus=\"{input}\" autofocus>"
+expected_detection = true
+
+[[case]]
+id = 35
+name = "button_onclick"
+description = "Reflection in button onclick event handler"
+handler_type = "query"
+reflection = "<button onclick=\"{input}\">Click</button>"
+expected_detection = true
+
+[[case]]
+id = 36
+name = "div_onmouseover"
+description = "Reflection in div onmouseover event handler"
+handler_type = "query"
+reflection = "<div onmouseover=\"{input}\">Hover</div>"
+expected_detection = true
+
+[[case]]
+id = 37
+name = "form_onsubmit"
+description = "Reflection in form onsubmit event handler"
+handler_type = "query"
+reflection = "<form onsubmit=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 38
+name = "video_onplay"
+description = "Reflection in video onplay event handler"
+handler_type = "query"
+reflection = "<video onplay=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 39
+name = "audio_oncanplay"
+description = "Reflection in audio oncanplay event handler"
+handler_type = "query"
+reflection = "<audio oncanplay=\"{input}\">"
+expected_detection = true
+
+[[case]]
+id = 40
+name = "details_ontoggle"
+description = "Reflection in details ontoggle event handler"
+handler_type = "query"
+reflection = "<details ontoggle=\"{input}\" open>"
+expected_detection = true

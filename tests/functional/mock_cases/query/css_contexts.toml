@@ -1,0 +1,41 @@
+# CSS context test cases
+
+[[case]]
+id = 46
+name = "style_tag_content"
+description = "Reflection inside style tag"
+handler_type = "query"
+reflection = "<style>{input}</style>"
+expected_detection = true
+
+[[case]]
+id = 47
+name = "inline_style_attribute"
+description = "Reflection in inline style attribute"
+handler_type = "query"
+reflection = "<div style=\"{input}\"></div>"
+expected_detection = true
+
+[[case]]
+id = 48
+name = "css_expression"
+description = "Reflection in CSS expression (IE specific)"
+handler_type = "query"
+reflection = "<div style=\"width: expression({input})\"></div>"
+expected_detection = true
+
+[[case]]
+id = 49
+name = "css_url_background"
+description = "Reflection in CSS background URL"
+handler_type = "query"
+reflection = "<div style=\"background: url({input})\"></div>"
+expected_detection = true
+
+[[case]]
+id = 50
+name = "css_import_statement"
+description = "Reflection in CSS @import statement"
+handler_type = "query"
+reflection = "<style>@import '{input}';</style>"
+expected_detection = true
