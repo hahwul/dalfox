@@ -126,7 +126,7 @@ id = 262
 name = "vertical_tab_bypass"
 description = "Test vertical tab character bypass"
 handler_type = "query"
-reflection = "<img\vsrc=x\vonerror={input}>"
+reflection = '<img\vsrc=x\vonerror={input}>'
 expected_detection = true
 
 [[case]]
