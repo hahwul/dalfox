@@ -11,7 +11,7 @@ require (
 	github.com/hahwul/volt v1.0.7
 	github.com/labstack/echo/v4 v4.13.4
 	github.com/logrusorgru/aurora v2.0.3+incompatible
-	github.com/mark3labs/mcp-go v0.41.1
+	github.com/mark3labs/mcp-go v0.43.2
 	github.com/olekukonko/tablewriter v1.1.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.10.1
