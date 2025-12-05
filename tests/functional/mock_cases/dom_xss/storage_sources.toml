@@ -1,0 +1,82 @@
+# DOM XSS test cases using storage-based sources
+# These test cases focus on DOM XSS vulnerabilities using localStorage, sessionStorage
+
+[[case]]
+id = 1101
+name = "localstorage_to_innerhtml"
+description = "localStorage value to innerHTML sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="stored"></div>
+<script>
+var data = localStorage.getItem('userdata');
+if (data) {
+  document.getElementById('stored').innerHTML = data;
+}
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1102
+name = "sessionstorage_to_eval"
+description = "sessionStorage value to eval() sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var code = sessionStorage.getItem('callback');
+if (code) {
+  eval(code);
+}
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1103
+name = "localstorage_to_script_src"
+description = "localStorage value to script src attribute"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var scriptUrl = localStorage.getItem('plugin');
+if (scriptUrl) {
+  var s = document.createElement('script');
+  s.src = scriptUrl;
+  document.head.appendChild(s);
+}
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1104
+name = "sessionstorage_to_insertadjacenthtml"
+description = "sessionStorage to insertAdjacentHTML sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="container"></div>
+<script>
+var html = sessionStorage.getItem('content');
+if (html) {
+  document.getElementById('container').insertAdjacentHTML('beforeend', html);
+}
+</script>
+</body>
+</html>
+"""
+expected_detection = true

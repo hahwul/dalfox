@@ -8,6 +8,8 @@ pub mod basic;
 pub mod xss_mock_server;
 // Mock case loader for structured test case management
 pub mod mock_case_loader;
+// DOM XSS detection tests
+pub mod dom_xss_tests;
 // Mining tests (placeholder)
 // pub mod mining;
 // Pipeline tests (placeholder)
