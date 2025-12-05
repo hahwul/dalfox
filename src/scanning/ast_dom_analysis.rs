@@ -1537,14 +1537,15 @@ document.write(output);
     }
 
     #[test]
-    fn test_textcontent_sink() {
+    fn test_textcontent_safe() {
+        // textContent is SAFE - it does not parse HTML, just sets text
         let code = r#"
 let input = location.hash;
 document.getElementById('x').textContent = input;
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should detect textContent as sink");
+        assert!(result.is_empty(), "textContent is safe and should NOT be detected as a sink");
     }
 
     #[test]
@@ -1893,14 +1894,15 @@ before(markup);
     }
 
     #[test]
-    fn test_element_text_sink() {
+    fn test_element_text_safe() {
+        // element.text is typically safe (similar to textContent)
         let code = r#"
 let input = location.search;
 element.text = input;
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should detect text property as sink");
+        assert!(result.is_empty(), "text property is typically safe and should NOT be detected");
     }
 
     #[test]
