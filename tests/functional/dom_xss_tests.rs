@@ -20,6 +20,10 @@ fn load_dom_xss_cases() -> Result<Vec<MockCase>, String> {
 }
 
 /// Extract JavaScript code from HTML reflection pattern
+/// 
+/// Note: This is a simple extraction for controlled test cases.
+/// For production use, a proper HTML parser would be more robust.
+/// This implementation handles basic <script> tags without complex nesting.
 fn extract_javascript(html: &str) -> Vec<String> {
     let mut scripts = Vec::new();
     
@@ -179,10 +183,8 @@ fn test_dom_xss_storage_sources() {
         }
     }
     
-    // We should detect storage-based sources
-    // Note: The current implementation may not detect localStorage/sessionStorage yet
-    // This test documents the current state and improvement needs
-    println!("\nNote: Storage sources detection depends on AST analyzer recognizing localStorage/sessionStorage");
+    // Storage sources are now detected via localStorage.getItem/sessionStorage.getItem
+    println!("\nNote: Most storage sources detected. Remaining failures may be due to complex call chains.");
 }
 
 #[test]

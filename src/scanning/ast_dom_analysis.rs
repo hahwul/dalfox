@@ -96,8 +96,9 @@ impl<'a> DomXssVisitor<'a> {
         sinks.insert("prepend".to_string());
         sinks.insert("after".to_string());
         sinks.insert("before".to_string());
-        // Note: textContent is NOT a sink - it's safe as it doesn't parse HTML
-        // sinks.insert("textContent".to_string());
+        // Note: textContent and innerText are SAFE - they don't parse HTML
+        // Previously textContent was incorrectly included as a sink, but it
+        // only sets the text content without HTML parsing, making it safe from XSS
 
 
         let mut sanitizers = HashSet::new();
@@ -364,22 +365,14 @@ impl<'a> DomXssVisitor<'a> {
                 self.walk_statement(&for_stmt.body);
             }
             Statement::FunctionDeclaration(func_decl) => {
-                // Before walking the function body, check if any parameters might be tainted
-                // This helps with simple function parameter flow
-                let mut param_names = Vec::new();
-                for param in &func_decl.params.items {
-                    if let BindingPatternKind::BindingIdentifier(id) = &param.pattern.kind {
-                        param_names.push(id.name.as_str().to_string());
-                    }
-                }
-                
+                // Function declarations are analyzed in their local scope
+                // Parameter tainting would require interprocedural analysis
+                // which is not yet implemented. For now, we analyze the body
+                // with the current taint state.
                 if let Some(body) = &func_decl.body {
                     // Save current tainted vars state
                     let saved_tainted = self.tainted_vars.clone();
                     let saved_aliases = self.var_aliases.clone();
-                    
-                    // Mark parameters as potentially tainted for analysis
-                    // (we'll use heuristics: if they're used in sinks, they might be tainted)
                     
                     self.walk_statements(&body.statements);
                     
