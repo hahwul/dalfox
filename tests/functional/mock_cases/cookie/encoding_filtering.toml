@@ -1,0 +1,91 @@
+# Advanced cookie injection test cases with encoding and filtering
+
+[[case]]
+id = 31
+name = "cookie_html_entity_encode"
+description = "Test cookie injection with HTML entity encoding"
+handler_type = "cookie"
+cookie_name = "session"
+reflection = "<div>&lt;{input}&gt;</div>"
+expected_detection = true
+
+[[case]]
+id = 32
+name = "cookie_url_encoded"
+description = "Test cookie injection with URL encoding"
+handler_type = "cookie"
+cookie_name = "prefs"
+reflection = "encoded_url"
+expected_detection = true
+
+[[case]]
+id = 33
+name = "cookie_base64_encoded"
+description = "Test cookie injection with Base64 encoding"
+handler_type = "cookie"
+cookie_name = "auth_token"
+reflection = "encoded_base64"
+expected_detection = true
+
+[[case]]
+id = 34
+name = "cookie_json_context"
+description = "Test cookie reflected in JSON context"
+handler_type = "cookie"
+cookie_name = "user_data"
+reflection = "<script>var userData = {\"cookie\": \"{input}\"};</script>"
+expected_detection = true
+
+[[case]]
+id = 35
+name = "cookie_js_string_context"
+description = "Test cookie reflected in JavaScript string"
+handler_type = "cookie"
+cookie_name = "tracking_id"
+reflection = "<script>var trackingId = '{input}';</script>"
+expected_detection = true
+
+[[case]]
+id = 36
+name = "cookie_attribute_context"
+description = "Test cookie reflected in HTML attribute"
+handler_type = "cookie"
+cookie_name = "theme"
+reflection = "<div class='{input}'>content</div>"
+expected_detection = true
+
+[[case]]
+id = 37
+name = "cookie_svg_context"
+description = "Test cookie reflected in SVG context"
+handler_type = "cookie"
+cookie_name = "color"
+reflection = "<svg><text>{input}</text></svg>"
+expected_detection = true
+
+[[case]]
+id = 38
+name = "cookie_meta_refresh"
+description = "Test cookie reflected in meta refresh"
+handler_type = "cookie"
+cookie_name = "redirect"
+reflection = "<meta http-equiv='refresh' content='0;url={input}'>"
+expected_detection = true
+
+[[case]]
+id = 39
+name = "cookie_style_tag"
+description = "Test cookie reflected in style tag"
+handler_type = "cookie"
+cookie_name = "css_var"
+reflection = "<style>.theme { color: {input}; }</style>"
+expected_detection = true
+
+[[case]]
+id = 40
+name = "cookie_nested_quotes"
+description = "Test cookie with nested quote context"
+handler_type = "cookie"
+cookie_name = "nested"
+reflection = "<div onclick='var x=\"{input}\";'>click</div>"
+expected_detection = true

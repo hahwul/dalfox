@@ -4,10 +4,9 @@ default:
 
 test:
     cargo test
-#    cargo clippy -- --deny warnings
-#    cargo clippy --tests -- --deny warnings
-#    cargo fmt --check
-#    cargo doc --workspace --all-features --no-deps --document-private-items
+
+test_all:
+    cargo test -- --include-ignored
 
 #fix:
 #    cargo fmt

@@ -1,0 +1,162 @@
+# Character filtering and blocking test cases
+# Testing XSS when specific characters are blocked or filtered
+
+[[case]]
+id = 206
+name = "block_angle_brackets"
+description = "Test XSS when < and > are completely blocked (removed)"
+handler_type = "query"
+reflection = "<div>{input}</div>"
+expected_detection = true
+
+[[case]]
+id = 207
+name = "block_quotes_single"
+description = "Test XSS when single quotes are blocked"
+handler_type = "query"
+reflection = "<img src=x onerror={input}>"
+expected_detection = true
+
+[[case]]
+id = 208
+name = "block_quotes_double"
+description = "Test XSS when double quotes are blocked"
+handler_type = "query"
+reflection = "<img src=x onerror='{input}'>"
+expected_detection = true
+
+[[case]]
+id = 209
+name = "block_quotes_both"
+description = "Test XSS when both single and double quotes are blocked"
+handler_type = "query"
+reflection = "<img src=x onerror={input}>"
+expected_detection = true
+
+[[case]]
+id = 210
+name = "block_parentheses"
+description = "Test XSS when parentheses are blocked"
+handler_type = "query"
+reflection = "<img src=x onerror='{input}'>"
+expected_detection = true
+
+[[case]]
+id = 211
+name = "block_script_tag"
+description = "Test XSS when 'script' keyword is blocked"
+handler_type = "query"
+reflection = "<div>{input}</div>"
+expected_detection = true
+
+[[case]]
+id = 212
+name = "block_on_event_handlers"
+description = "Test XSS when 'on' prefix is blocked"
+handler_type = "query"
+reflection = "<img src=x {input}>"
+expected_detection = true
+
+[[case]]
+id = 213
+name = "block_slash_forward"
+description = "Test XSS when forward slash is blocked"
+handler_type = "query"
+reflection = "<div>{input}</div>"
+expected_detection = true
+
+[[case]]
+id = 214
+name = "block_equals_sign"
+description = "Test XSS when equals sign is blocked"
+handler_type = "query"
+reflection = "<img src {input}>"
+expected_detection = true
+
+[[case]]
+id = 215
+name = "block_space_character"
+description = "Test XSS when space is blocked (can use tab/newline)"
+handler_type = "query"
+reflection = "<img{input}>"
+expected_detection = true
+
+[[case]]
+id = 216
+name = "allow_alphanumeric_only"
+description = "Test XSS when only alphanumeric chars allowed"
+handler_type = "query"
+reflection = "<div>{input}</div>"
+expected_detection = true
+
+[[case]]
+id = 217
+name = "block_semicolon"
+description = "Test XSS when semicolon is blocked"
+handler_type = "query"
+reflection = "<script>{input}</script>"
+expected_detection = true
+
+[[case]]
+id = 218
+name = "block_alert_keyword"
+description = "Test XSS when 'alert' keyword is blocked"
+handler_type = "query"
+reflection = "<script>{input}</script>"
+expected_detection = true
+
+[[case]]
+id = 219
+name = "block_javascript_keyword"
+description = "Test XSS when 'javascript:' protocol is blocked"
+handler_type = "query"
+reflection = "<a href='{input}'>click</a>"
+expected_detection = true
+
+[[case]]
+id = 220
+name = "block_backslash"
+description = "Test XSS when backslash is blocked"
+handler_type = "query"
+reflection = "<script>var x = '{input}';</script>"
+expected_detection = true
+
+[[case]]
+id = 221
+name = "whitelist_safe_tags"
+description = "Test XSS with whitelist of safe HTML tags"
+handler_type = "query"
+reflection = "<p>{input}</p>"
+expected_detection = true
+
+[[case]]
+id = 222
+name = "strip_script_tags"
+description = "Test XSS when script tags are stripped"
+handler_type = "query"
+reflection = "<div>{input}</div>"
+expected_detection = true
+
+[[case]]
+id = 223
+name = "escape_then_reflect"
+description = "Test when input is escaped then reflected in HTML"
+handler_type = "query"
+reflection = "<div title='{input}'>content</div>"
+expected_detection = true
+
+[[case]]
+id = 224
+name = "block_dot_notation"
+description = "Test XSS when dot character is blocked"
+handler_type = "query"
+reflection = "<script>{input}</script>"
+expected_detection = true
+
+[[case]]
+id = 225
+name = "block_square_brackets"
+description = "Test XSS when square brackets are blocked"
+handler_type = "query"
+reflection = "<script>{input}</script>"
+expected_detection = true

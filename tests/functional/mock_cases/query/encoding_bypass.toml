@@ -1,0 +1,122 @@
+# Advanced encoding bypass test cases for query parameters
+# Testing how dalfox handles various encoding scenarios
+
+[[case]]
+id = 191
+name = "html_entity_encode_lt_gt"
+description = "Test XSS with < and > encoded as HTML entities"
+handler_type = "query"
+reflection = "<div>&lt;script&gt;{input}&lt;/script&gt;</div>"
+expected_detection = true
+
+[[case]]
+id = 192
+name = "partial_html_encode_script"
+description = "Test with partial HTML encoding in script tag"
+handler_type = "query"
+reflection = "&lt;script&gt;alert('{input}')&lt;/script&gt;"
+expected_detection = true
+
+[[case]]
+id = 193
+name = "url_encoded_reflection"
+description = "Test URL encoded reflection"
+handler_type = "query"
+reflection = "encoded_url"
+expected_detection = true
+
+[[case]]
+id = 194
+name = "base64_encoded_reflection"
+description = "Test Base64 encoded reflection"
+handler_type = "query"
+reflection = "encoded_base64"
+expected_detection = true
+
+[[case]]
+id = 195
+name = "double_html_encode"
+description = "Test double HTML entity encoding"
+handler_type = "query"
+reflection = "<div>&amp;lt;script&amp;gt;{input}&amp;lt;/script&amp;gt;</div>"
+expected_detection = true
+
+[[case]]
+id = 196
+name = "mixed_entity_numeric_hex"
+description = "Test mixed HTML entity and numeric hex encoding"
+handler_type = "query"
+reflection = "<div>&lt;&#x73;cript&gt;{input}&lt;/script&gt;</div>"
+expected_detection = true
+
+[[case]]
+id = 197
+name = "html_entity_decimal"
+description = "Test HTML decimal entity encoding"
+handler_type = "query"
+reflection = "<div>&#60;script&#62;{input}&#60;/script&#62;</div>"
+expected_detection = true
+
+[[case]]
+id = 198
+name = "partial_url_encode_tag"
+description = "Test partial URL encoding in tag"
+handler_type = "query"
+reflection = "<%73cript>{input}</script>"
+expected_detection = true
+
+[[case]]
+id = 199
+name = "unicode_escape_angle_bracket"
+description = "Test Unicode escape for angle brackets"
+handler_type = "query"
+reflection = "<script>var x = '\\u003c{input}\\u003e';</script>"
+expected_detection = true
+
+[[case]]
+id = 200
+name = "hex_escape_in_attribute"
+description = "Test hex escape sequences in HTML attribute"
+handler_type = "query"
+reflection = "<img src='x' alt='\\x3c{input}\\x3e'>"
+expected_detection = true
+
+[[case]]
+id = 201
+name = "octal_escape_js_string"
+description = "Test octal escape in JavaScript string"
+handler_type = "query"
+reflection = "<script>var x = '\\74{input}\\76';</script>"
+expected_detection = true
+
+[[case]]
+id = 202
+name = "utf8_overlong_encoding"
+description = "Test UTF-8 overlong encoding detection"
+handler_type = "query"
+reflection = "{input}"
+expected_detection = true
+
+[[case]]
+id = 203
+name = "json_unicode_escape"
+description = "Test JSON Unicode escape sequences"
+handler_type = "query"
+reflection = "<script>var data = {\"key\": \"\\u{input}\"};</script>"
+expected_detection = true
+
+[[case]]
+id = 204
+name = "css_unicode_escape"
+description = "Test CSS Unicode escape sequences"
+handler_type = "query"
+reflection = "<style>.class { content: '\\{input}'; }</style>"
+expected_detection = true
+
+[[case]]
+id = 205
+name = "base64_in_data_uri"
+description = "Test Base64 in data URI context"
+handler_type = "query"
+reflection = "<img src='data:text/html;base64,{input}'>"
+expected_detection = true
