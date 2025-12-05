@@ -1,0 +1,147 @@
+# DOM XSS test cases using location-based sources
+# These test cases focus on DOM XSS vulnerabilities that use location properties as sources
+
+[[case]]
+id = 1001
+name = "location_search_to_innerhtml"
+description = "Location search parameter to innerHTML sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="output"></div>
+<script>
+var search = location.search.substring(1);
+document.getElementById('output').innerHTML = search;
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1002
+name = "location_hash_to_eval"
+description = "Location hash to eval() sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var hash = location.hash.substring(1);
+eval(hash);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1003
+name = "location_href_to_document_write"
+description = "Location href to document.write() sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var url = location.href;
+var param = url.split('?')[1];
+document.write(param);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1004
+name = "location_pathname_to_outerhtml"
+description = "Location pathname to outerHTML sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="target">Original</div>
+<script>
+var path = location.pathname;
+document.getElementById('target').outerHTML = '<div>' + path + '</div>';
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1005
+name = "document_url_to_settimeout"
+description = "document.URL to setTimeout string sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var url = document.URL;
+var code = url.split('#')[1];
+setTimeout(code, 100);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1006
+name = "document_referrer_to_location_href"
+description = "document.referrer to location.href sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var ref = document.referrer;
+if (ref.indexOf('redirect') > -1) {
+  location.href = ref.split('=')[1];
+}
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1007
+name = "window_name_to_innerhtml"
+description = "window.name to innerHTML sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="content"></div>
+<script>
+var name = window.name;
+document.getElementById('content').innerHTML = name;
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1008
+name = "location_search_split_array_to_innerhtml"
+description = "Location search split into array then to innerHTML"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="msg"></div>
+<script>
+var params = location.search.substring(1).split('&');
+var msg = params[0].split('=')[1];
+document.getElementById('msg').innerHTML = msg;
+</script>
+</body>
+</html>
+"""
+expected_detection = true

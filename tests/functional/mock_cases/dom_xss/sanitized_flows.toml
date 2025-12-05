@@ -1,0 +1,90 @@
+# DOM XSS test cases with sanitization (should NOT be detected as vulnerable)
+# These test cases represent safe patterns that use proper sanitization
+
+[[case]]
+id = 1401
+name = "textcontent_safe"
+description = "Using textContent instead of innerHTML (safe)"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="safe"></div>
+<script>
+var param = location.search.substring(1);
+document.getElementById('safe').textContent = param;
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1402
+name = "dompurify_sanitized"
+description = "Using DOMPurify sanitization before innerHTML"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="sanitized"></div>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@2.4.0/dist/purify.min.js"></script>
+<script>
+var dirty = location.search.substring(1);
+var clean = DOMPurify.sanitize(dirty);
+document.getElementById('sanitized').innerHTML = clean;
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1403
+name = "createtextnode_safe"
+description = "Using createTextNode (safe)"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="container"></div>
+<script>
+var param = location.hash.substring(1);
+var textNode = document.createTextNode(param);
+document.getElementById('container').appendChild(textNode);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1404
+name = "encodehtml_sanitized"
+description = "Custom HTML encoding before insertion"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="encoded"></div>
+<script>
+function encodeHTML(str) {
+  return str.replace(/[&<>"']/g, function(match) {
+    return {
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;'
+    }[match];
+  });
+}
+
+var param = location.search.substring(1);
+var safe = encodeHTML(param);
+document.getElementById('encoded').innerHTML = safe;
+</script>
+</body>
+</html>
+"""
+expected_detection = false

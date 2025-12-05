@@ -64,6 +64,8 @@ impl<'a> DomXssVisitor<'a> {
         // Storage APIs
         sources.insert("localStorage".to_string());
         sources.insert("sessionStorage".to_string());
+        sources.insert("localStorage.getItem".to_string());
+        sources.insert("sessionStorage.getItem".to_string());
         // PostMessage data (event.data, e.data)
         sources.insert("event.data".to_string());
         sources.insert("e.data".to_string());
@@ -94,15 +96,20 @@ impl<'a> DomXssVisitor<'a> {
         sinks.insert("prepend".to_string());
         sinks.insert("after".to_string());
         sinks.insert("before".to_string());
-        // Script manipulation
-        sinks.insert("text".to_string());
-        sinks.insert("textContent".to_string());
+        // Note: textContent and innerText are SAFE - they don't parse HTML
+        // Previously textContent was incorrectly included as a sink, but it
+        // only sets the text content without HTML parsing, making it safe from XSS
+
 
         let mut sanitizers = HashSet::new();
         sanitizers.insert("DOMPurify.sanitize".to_string());
         sanitizers.insert("sanitize".to_string());
         sanitizers.insert("encodeURIComponent".to_string());
         sanitizers.insert("encodeURI".to_string());
+        sanitizers.insert("encodeHTML".to_string());
+        sanitizers.insert("escapeHTML".to_string());
+        sanitizers.insert("document.createTextNode".to_string());
+        sanitizers.insert("createTextNode".to_string());
 
         Self {
             tainted_vars: HashSet::new(),
@@ -358,8 +365,20 @@ impl<'a> DomXssVisitor<'a> {
                 self.walk_statement(&for_stmt.body);
             }
             Statement::FunctionDeclaration(func_decl) => {
+                // Function declarations are analyzed in their local scope
+                // Parameter tainting would require interprocedural analysis
+                // which is not yet implemented. For now, we analyze the body
+                // with the current taint state.
                 if let Some(body) = &func_decl.body {
+                    // Save current tainted vars state
+                    let saved_tainted = self.tainted_vars.clone();
+                    let saved_aliases = self.var_aliases.clone();
+                    
                     self.walk_statements(&body.statements);
+                    
+                    // Restore state after function (parameters are local scope)
+                    self.tainted_vars = saved_tainted;
+                    self.var_aliases = saved_aliases;
                 }
             }
             Statement::SwitchStatement(switch_stmt) => {
@@ -387,6 +406,19 @@ impl<'a> DomXssVisitor<'a> {
                         self.tainted_vars.insert(var_name.to_string());
                         self.var_aliases
                             .insert(var_name.to_string(), source_expr.clone());
+                    }
+                }
+                
+                // Check for localStorage.getItem() and sessionStorage.getItem() calls
+                if let Expression::CallExpression(call) = init {
+                    if let Expression::StaticMemberExpression(member) = &call.callee {
+                        if let Some(callee_str) = self.get_member_string(member) {
+                            if callee_str == "localStorage.getItem" || callee_str == "sessionStorage.getItem" {
+                                // Mark this variable as tainted
+                                self.tainted_vars.insert(var_name.to_string());
+                                self.var_aliases.insert(var_name.to_string(), callee_str);
+                            }
+                        }
                     }
                 }
 
@@ -583,6 +615,58 @@ impl<'a> DomXssVisitor<'a> {
 
     /// Walk through a call expression
     fn walk_call_expression(&mut self, call: &CallExpression<'a>) {
+        // Check if this is an addEventListener call with a function argument
+        if let Expression::StaticMemberExpression(member) = &call.callee {
+            if member.property.name.as_str() == "addEventListener" && call.arguments.len() >= 2 {
+                // The second argument might be a function with event parameter
+                if let Some(Argument::FunctionExpression(func)) = call.arguments.get(1) {
+                    // Mark the first parameter as tainted (it's the event object)
+                    if let Some(param) = func.params.items.first() {
+                        if let BindingPatternKind::BindingIdentifier(id) = &param.pattern.kind {
+                            let param_name = id.name.as_str();
+                            // Save state before analyzing event handler
+                            let saved_tainted = self.tainted_vars.clone();
+                            let saved_aliases = self.var_aliases.clone();
+                            
+                            // Mark event parameter as tainted
+                            self.tainted_vars.insert(param_name.to_string());
+                            self.var_aliases.insert(param_name.to_string(), "event.data".to_string());
+                            
+                            // Walk the function body
+                            if let Some(body) = &func.body {
+                                self.walk_statements(&body.statements);
+                            }
+                            
+                            // Restore state
+                            self.tainted_vars = saved_tainted;
+                            self.var_aliases = saved_aliases;
+                            return;
+                        }
+                    }
+                }
+                // Also handle arrow functions
+                if let Some(Argument::ArrowFunctionExpression(arrow)) = call.arguments.get(1) {
+                    if let Some(param) = arrow.params.items.first() {
+                        if let BindingPatternKind::BindingIdentifier(id) = &param.pattern.kind {
+                            let param_name = id.name.as_str();
+                            let saved_tainted = self.tainted_vars.clone();
+                            let saved_aliases = self.var_aliases.clone();
+                            
+                            self.tainted_vars.insert(param_name.to_string());
+                            self.var_aliases.insert(param_name.to_string(), "event.data".to_string());
+                            
+                            // Arrow functions have a FunctionBody
+                            self.walk_statements(&arrow.body.statements);
+                            
+                            self.tainted_vars = saved_tainted;
+                            self.var_aliases = saved_aliases;
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
         // Check if calling a sink function
         if let Some(func_name) = self.get_expr_string(&call.callee) {
             if self.sinks.contains(&func_name) {
@@ -1446,14 +1530,15 @@ document.write(output);
     }
 
     #[test]
-    fn test_textcontent_sink() {
+    fn test_textcontent_safe() {
+        // textContent is SAFE - it does not parse HTML, just sets text
         let code = r#"
 let input = location.hash;
 document.getElementById('x').textContent = input;
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should detect textContent as sink");
+        assert!(result.is_empty(), "textContent is safe and should NOT be detected as a sink");
     }
 
     #[test]
@@ -1802,14 +1887,15 @@ before(markup);
     }
 
     #[test]
-    fn test_element_text_sink() {
+    fn test_element_text_safe() {
+        // element.text is typically safe (similar to textContent)
         let code = r#"
 let input = location.search;
 element.text = input;
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should detect text property as sink");
+        assert!(result.is_empty(), "text property is typically safe and should NOT be detected");
     }
 
     #[test]

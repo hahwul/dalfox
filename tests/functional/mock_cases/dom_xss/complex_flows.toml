@@ -1,0 +1,150 @@
+# DOM XSS test cases with complex data flows
+# These test cases focus on multi-step taint propagation
+
+[[case]]
+id = 1301
+name = "multi_variable_assignment"
+description = "Taint flow through multiple variable assignments"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="output"></div>
+<script>
+var a = location.search;
+var b = a.substring(1);
+var c = b.split('=')[1];
+var d = decodeURIComponent(c);
+document.getElementById('output').innerHTML = d;
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1302
+name = "function_parameter_taint"
+description = "Taint flow through function parameters"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="display"></div>
+<script>
+function render(content) {
+  document.getElementById('display').innerHTML = content;
+}
+
+var param = location.hash.substring(1);
+render(param);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1303
+name = "object_property_taint"
+description = "Taint flow through object properties"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="content"></div>
+<script>
+var config = {
+  data: location.search.substring(1)
+};
+document.getElementById('content').innerHTML = config.data;
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1304
+name = "array_element_taint"
+description = "Taint flow through array elements"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="item"></div>
+<script>
+var items = [];
+items.push(location.hash);
+items.push('safe');
+document.getElementById('item').innerHTML = items[0];
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1305
+name = "template_literal_taint"
+description = "Taint flow through template literals"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="message"></div>
+<script>
+var user = location.search.split('user=')[1];
+var greeting = `Hello ${user}!`;
+document.getElementById('message').innerHTML = greeting;
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1306
+name = "conditional_taint_flow"
+description = "Taint flow through conditional statements"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="result"></div>
+<script>
+var input = location.search;
+var output;
+if (input.length > 0) {
+  output = input.substring(1);
+} else {
+  output = 'default';
+}
+document.getElementById('result').innerHTML = output;
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1307
+name = "loop_taint_propagation"
+description = "Taint flow through loop iterations"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="list"></div>
+<script>
+var params = location.search.substring(1).split('&');
+var result = '';
+for (var i = 0; i < params.length; i++) {
+  result += params[i] + '<br>';
+}
+document.getElementById('list').innerHTML = result;
+</script>
+</body>
+</html>
+"""
+expected_detection = true

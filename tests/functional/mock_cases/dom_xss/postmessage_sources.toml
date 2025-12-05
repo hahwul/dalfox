@@ -1,0 +1,79 @@
+# DOM XSS test cases using postMessage event.data as source
+# These test cases focus on DOM XSS vulnerabilities from postMessage handlers
+
+[[case]]
+id = 1201
+name = "postmessage_to_innerhtml"
+description = "postMessage event.data to innerHTML sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="result"></div>
+<script>
+window.addEventListener('message', function(event) {
+  document.getElementById('result').innerHTML = event.data;
+});
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1202
+name = "postmessage_to_eval"
+description = "postMessage event.data to eval() sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+window.addEventListener('message', function(e) {
+  eval(e.data);
+});
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1203
+name = "postmessage_to_location_assign"
+description = "postMessage event.data to location.assign() sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+window.addEventListener('message', function(event) {
+  if (event.data.redirect) {
+    location.assign(event.data.redirect);
+  }
+});
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1204
+name = "postmessage_json_to_function"
+description = "postMessage with JSON data to Function constructor"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+window.addEventListener('message', function(event) {
+  var msg = JSON.parse(event.data);
+  var fn = new Function(msg.code);
+  fn();
+});
+</script>
+</body>
+</html>
+"""
+expected_detection = true
