@@ -42,7 +42,7 @@ pub async fn blind_scanning(target: &Target, callback_url: &str) {
 
 async fn send_blind_request(target: &Target, param_name: &str, payload: &str, param_type: &str) {
     use reqwest::Client;
-    use tokio::time::{sleep, Duration};
+    use tokio::time::{Duration, sleep};
     use url::form_urlencoded;
     // use global request counter: crate::REQUEST_COUNT
 

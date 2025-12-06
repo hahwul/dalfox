@@ -173,6 +173,95 @@ impl Result {
         }
         out
     }
+
+    /// Serialize a slice of Result into Markdown string.
+    pub fn results_to_markdown(
+        results: &[Result],
+        include_request: bool,
+        include_response: bool,
+    ) -> String {
+        let mut out = String::new();
+
+        // Add header
+        out.push_str("# Dalfox Scan Results\n\n");
+
+        // Add summary
+        let v_count = results.iter().filter(|r| r.result_type == "V").count();
+        let r_count = results.iter().filter(|r| r.result_type == "R").count();
+        out.push_str(&format!("## Summary\n\n"));
+        out.push_str(&format!("- **Total Findings**: {}\n", results.len()));
+        out.push_str(&format!("- **Vulnerabilities (V)**: {}\n", v_count));
+        out.push_str(&format!("- **Reflections (R)**: {}\n\n", r_count));
+
+        // Add findings table
+        if !results.is_empty() {
+            out.push_str("## Findings\n\n");
+
+            for (idx, result) in results.iter().enumerate() {
+                out.push_str(&format!(
+                    "### {}. {} - {} ({})\n\n",
+                    idx + 1,
+                    if result.result_type == "V" {
+                        "Vulnerability"
+                    } else {
+                        "Reflection"
+                    },
+                    result.param,
+                    result.inject_type
+                ));
+
+                out.push_str("| Field | Value |\n");
+                out.push_str("|-------|-------|\n");
+                out.push_str(&format!("| **Type** | {} |\n", result.result_type));
+                out.push_str(&format!("| **Parameter** | `{}` |\n", result.param));
+                out.push_str(&format!("| **Method** | {} |\n", result.method));
+                out.push_str(&format!(
+                    "| **Injection Type** | {} |\n",
+                    result.inject_type
+                ));
+                out.push_str(&format!("| **Severity** | {} |\n", result.severity));
+                out.push_str(&format!("| **CWE** | {} |\n", result.cwe));
+                out.push_str(&format!("| **URL** | {} |\n", result.data));
+                out.push_str(&format!(
+                    "| **Payload** | `{}` |\n",
+                    result.payload.replace('|', "\\|")
+                ));
+
+                if !result.evidence.is_empty() {
+                    out.push_str(&format!(
+                        "| **Evidence** | {} |\n",
+                        result.evidence.replace('|', "\\|")
+                    ));
+                }
+
+                out.push_str("\n");
+
+                // Include request if requested
+                if include_request
+                    && let Some(req) = &result.request
+                {
+                    out.push_str("**Request:**\n\n");
+                    out.push_str("```http\n");
+                    out.push_str(req);
+                    out.push_str("\n```\n\n");
+                }
+
+                // Include response if requested
+                if include_response
+                    && let Some(resp) = &result.response
+                {
+                    out.push_str("**Response:**\n\n");
+                    out.push_str("```http\n");
+                    out.push_str(resp);
+                    out.push_str("\n```\n\n");
+                }
+
+                out.push_str("---\n\n");
+            }
+        }
+
+        out
+    }
 }
 
 #[cfg(test)]
@@ -371,5 +460,105 @@ mod tests {
         let json = serde_json::to_string(&result).unwrap();
         // Ensure special chars are properly handled in JSON
         assert!(json.contains("\"payload\":\"<>\\\""));
+    }
+
+    #[test]
+    fn test_results_to_markdown() {
+        let result1 = Result::new(
+            "V".to_string(),
+            "inHTML".to_string(),
+            "GET".to_string(),
+            "https://example.com?q=test".to_string(),
+            "q".to_string(),
+            "<script>alert(1)</script>".to_string(),
+            "Found script tag".to_string(),
+            "CWE-79".to_string(),
+            "High".to_string(),
+            606,
+            "XSS detected".to_string(),
+        );
+
+        let result2 = Result::new(
+            "R".to_string(),
+            "inJS".to_string(),
+            "POST".to_string(),
+            "https://example.com/api".to_string(),
+            "data".to_string(),
+            "alert(2)".to_string(),
+            "Reflected in JS".to_string(),
+            "CWE-79".to_string(),
+            "Medium".to_string(),
+            200,
+            "Reflection found".to_string(),
+        );
+
+        let results = vec![result1, result2];
+        let markdown = Result::results_to_markdown(&results, false, false);
+
+        // Check header
+        assert!(markdown.contains("# Dalfox Scan Results"));
+
+        // Check summary
+        assert!(markdown.contains("## Summary"));
+        assert!(markdown.contains("**Total Findings**: 2"));
+        assert!(markdown.contains("**Vulnerabilities (V)**: 1"));
+        assert!(markdown.contains("**Reflections (R)**: 1"));
+
+        // Check findings section
+        assert!(markdown.contains("## Findings"));
+        assert!(markdown.contains("### 1. Vulnerability - q (inHTML)"));
+        assert!(markdown.contains("### 2. Reflection - data (inJS)"));
+
+        // Check table content
+        assert!(markdown.contains("| **Type** | V |"));
+        assert!(markdown.contains("| **Type** | R |"));
+        assert!(markdown.contains("| **Parameter** | `q` |"));
+        assert!(markdown.contains("| **Parameter** | `data` |"));
+        assert!(markdown.contains("| **Severity** | High |"));
+        assert!(markdown.contains("| **Severity** | Medium |"));
+        assert!(markdown.contains("| **CWE** | CWE-79 |"));
+        assert!(markdown.contains("| **Payload** | `<script>alert(1)</script>` |"));
+    }
+
+    #[test]
+    fn test_results_to_markdown_with_request_response() {
+        let mut result = Result::new(
+            "V".to_string(),
+            "inHTML".to_string(),
+            "GET".to_string(),
+            "https://example.com".to_string(),
+            "test".to_string(),
+            "<x>".to_string(),
+            "test evidence".to_string(),
+            "CWE-79".to_string(),
+            "High".to_string(),
+            606,
+            "XSS".to_string(),
+        );
+
+        result.request = Some("GET /?test=%3Cx%3E HTTP/1.1\nHost: example.com".to_string());
+        result.response =
+            Some("HTTP/1.1 200 OK\nContent-Type: text/html\n\n<html><x></html>".to_string());
+
+        let results = vec![result];
+        let markdown = Result::results_to_markdown(&results, true, true);
+
+        // Check request and response sections
+        assert!(markdown.contains("**Request:**"));
+        assert!(markdown.contains("```http"));
+        assert!(markdown.contains("GET /?test=%3Cx%3E HTTP/1.1"));
+        assert!(markdown.contains("**Response:**"));
+        assert!(markdown.contains("<html><x></html>"));
+    }
+
+    #[test]
+    fn test_results_to_markdown_empty() {
+        let results: Vec<Result> = vec![];
+        let markdown = Result::results_to_markdown(&results, false, false);
+
+        assert!(markdown.contains("# Dalfox Scan Results"));
+        assert!(markdown.contains("**Total Findings**: 0"));
+        assert!(markdown.contains("**Vulnerabilities (V)**: 0"));
+        assert!(markdown.contains("**Reflections (R)**: 0"));
     }
 }
