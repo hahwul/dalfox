@@ -40,6 +40,7 @@ See `Cargo.toml` for specific version constraints.
 
 src/
 - main.rs                          Entry point + CLI
+- lib.rs                           Library exports and global state (DEBUG, REQUEST_COUNT)
 - config.rs                        Config loading, defaults, and apply helpers
 - utils/                           Common helpers (banner, http builders, scan_id, remote init)
   - mod.rs
@@ -109,7 +110,7 @@ Scan flags (as of src/cmd/scan.rs):
 - INPUT
   - -i, --input-type: auto | url | file | pipe | raw-http
 - OUTPUT
-  - -f, --format: plain | json | jsonl (default: plain)
+  - -f, --format: plain | json | jsonl | markdown | sarif (default: plain)
   - -o, --output: file path to write results
   - --include-request: include HTTP request in JSON/plain details
   - --include-response: include HTTP response in JSON/plain details
@@ -269,6 +270,11 @@ Context-aware payload generation (scanning/xss_common.rs):
 Result model (scanning/result.rs):
 - Fields: type, inject_type, method, data, param, payload, evidence, cwe, severity, message_id, message_str
 - Optional: request, response (controlled by flags)
+- Output methods:
+  - results_to_json: JSON array format
+  - results_to_jsonl: JSON Lines format (one result per line)
+  - results_to_markdown: Markdown report with summary and detailed findings
+  - results_to_sarif: SARIF 2.1.0 format for security tool integration
 - JSON and JSONL outputs omit null request/response; plain output prints colorized POC lines and detail sections (Issue, Payload, L#, Request, Response)
 
 ## Development Workflow
@@ -284,6 +290,7 @@ Build
 
 Test
 - Run all: cargo test (or just test)
+- Run all including ignored: cargo test -- --include-ignored (or just test_all)
 - With output: cargo test -- --nocapture
 - Specific: cargo test test_name
 - Unit tests only: cargo test --lib
@@ -322,6 +329,8 @@ Concurrency and performance
 Output format
 - JSON/JSONL: machine-readable; include request/response only when flags are set
 - Plain: colorized POC lines and a detail tree per finding; includes optional request/response blocks
+- Markdown: formatted report with summary statistics and detailed findings in markdown tables
+- SARIF: Static Analysis Results Interchange Format (SARIF) 2.1.0 compatible output for integration with security tools
 
 ## Adding or Modifying Features
 
@@ -386,10 +395,14 @@ Test organization (tests/ directory):
   - utils.rs: utility function tests
 - tests/integration/: Integration tests for multi-module workflows
   - scanner_pipeline.rs: end-to-end scanning pipeline tests
+  - markdown_output_test.rs: markdown output format validation
+  - sarif_output_test.rs: SARIF output format tests
+  - sarif_validation_test.rs: SARIF schema compliance validation
 - tests/functional/: Functional tests with mock servers
   - xss_mock_server.rs: Mock HTTP server for XSS testing scenarios
   - mock_case_loader.rs: Loads test cases from mock_cases/ subdirectories
-  - mock_cases/: Organized by parameter location (query, body, header, cookie, path)
+  - dom_xss_tests.rs: DOM-based XSS detection tests
+  - mock_cases/: Organized by parameter location (query, body, header, cookie, path, dom_xss)
   - basic/: Basic CLI flag and behavior tests
 - tests/e2e/: End-to-end tests
   - cli_smoke_test.rs: CLI smoke tests ensuring basic commands work
@@ -403,6 +416,10 @@ Test organization (tests/ directory):
   - dalfox -i file urls.txt
 - Include request/response in JSON
   - dalfox scan https://example.com -f json --include-request --include-response
+- Markdown output
+  - dalfox scan https://example.com -f markdown -o report.md
+- SARIF output
+  - dalfox scan https://example.com -f sarif -o results.sarif
 - Blind XSS
   - dalfox scan https://example.com -b https://collab.example/x/callback
 - Stored XSS flow
