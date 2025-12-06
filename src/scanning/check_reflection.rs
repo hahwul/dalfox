@@ -354,14 +354,14 @@ mod tests {
     fn test_decode_html_entities_uppercase_hex_x() {
         let s = "&#X3C;img src=x onerror=alert(1)&#X3E;";
         let d = decode_html_entities(s);
-        assert!(d.contains("<img src=x onerror=alert(1)>") );
+        assert!(d.contains("<img src=x onerror=alert(1)>"));
     }
 
     #[test]
     fn test_decode_html_entities_named_common() {
         let s = "&lt;svg onload=alert(1)&gt; &amp; &quot; &apos;";
         let d = decode_html_entities(s);
-        assert!(d.contains("<svg onload=alert(1)>") );
+        assert!(d.contains("<svg onload=alert(1)>"));
         assert!(d.contains("&"));
         assert!(d.contains("\""));
         assert!(d.contains("'"));

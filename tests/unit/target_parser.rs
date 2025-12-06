@@ -168,8 +168,7 @@ mod parse_method_url_body {
 
     #[test]
     fn test_parse_method_url_body_with_spaces_in_body() {
-        let (method, url, body) =
-            parse_method_url_body("POST https://example.com name=John Doe");
+        let (method, url, body) = parse_method_url_body("POST https://example.com name=John Doe");
         assert_eq!(method, "POST");
         assert_eq!(url, "https://example.com");
         assert_eq!(body, Some("name=John Doe".to_string()));

@@ -105,18 +105,26 @@ mod tests {
     #[test]
     fn test_load_mock_cases_structure() {
         let base_dir = get_mock_cases_base_dir();
-        
+
         // Just verify the structure exists - don't fail if files don't exist yet
         if base_dir.exists() {
             let result = load_all_mock_cases(&base_dir);
             if let Ok(cases) = result {
                 // Verify we got some cases
                 assert!(!cases.is_empty(), "Should load at least one handler type");
-                
+
                 // Verify structure
                 for (handler_type, cases_list) in cases.iter() {
-                    println!("Handler type: {}, cases: {}", handler_type, cases_list.len());
-                    assert!(!cases_list.is_empty(), "Handler type {} should have cases", handler_type);
+                    println!(
+                        "Handler type: {}, cases: {}",
+                        handler_type,
+                        cases_list.len()
+                    );
+                    assert!(
+                        !cases_list.is_empty(),
+                        "Handler type {} should have cases",
+                        handler_type
+                    );
                 }
             }
         }

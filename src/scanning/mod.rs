@@ -159,10 +159,7 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
         url.path(),
         url.query().map(|q| format!("?{}", q)).unwrap_or_default()
     );
-    request_lines.push(format!(
-        "{} {} HTTP/1.1",
-        target.method, path_and_query
-    ));
+    request_lines.push(format!("{} {} HTTP/1.1", target.method, path_and_query));
     request_lines.push(format!("Host: {}", url.host_str().unwrap_or("")));
     for (k, v) in &target.headers {
         request_lines.push(format!("{}: {}", k, v));
@@ -292,13 +289,8 @@ pub async fn run_scanning(
             let mut probe_response_text: Option<String> = None;
             for pp in probe_payloads {
                 let (reflected, response_text) =
-                    check_reflection_with_response(
-                        &target_clone,
-                        &param_clone,
-                        pp,
-                        &args_clone,
-                    )
-                    .await;
+                    check_reflection_with_response(&target_clone, &param_clone, pp, &args_clone)
+                        .await;
                 if reflected {
                     probe_reflected = true;
                     probe_response_text = response_text;
@@ -316,11 +308,10 @@ pub async fn run_scanning(
                 let js_blocks =
                     crate::scanning::ast_integration::extract_javascript_from_html(response_text);
                 for js_code in js_blocks {
-                    let findings =
-                        crate::scanning::ast_integration::analyze_javascript_for_dom_xss(
-                            &js_code,
-                            target_clone.url.as_str(),
-                        );
+                    let findings = crate::scanning::ast_integration::analyze_javascript_for_dom_xss(
+                        &js_code,
+                        target_clone.url.as_str(),
+                    );
                     for (vuln, payload, description) in findings {
                         let result_url = crate::scanning::url_inject::build_injected_url(
                             &target_clone.url,
@@ -403,10 +394,9 @@ pub async fn run_scanning(
                 if !args_clone.skip_ast_analysis
                     && let Some(ref response_text) = reflection_response_text
                 {
-                    let js_blocks =
-                        crate::scanning::ast_integration::extract_javascript_from_html(
-                            response_text,
-                        );
+                    let js_blocks = crate::scanning::ast_integration::extract_javascript_from_html(
+                        response_text,
+                    );
                     for js_code in js_blocks {
                         let findings =
                             crate::scanning::ast_integration::analyze_javascript_for_dom_xss(

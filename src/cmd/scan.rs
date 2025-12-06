@@ -389,7 +389,7 @@ pub struct ScanArgs {
     pub input_type: String,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Output format: json, jsonl, plain
+    /// Output format: json, jsonl, plain, markdown
     #[arg(short, long, default_value = "plain")]
     pub format: String,
 
@@ -1427,6 +1427,12 @@ pub async fn run_scan(args: &ScanArgs) {
         )
     } else if args.format == "jsonl" {
         crate::scanning::result::Result::results_to_jsonl(
+            display_results,
+            args.include_request,
+            args.include_response,
+        )
+    } else if args.format == "markdown" {
+        crate::scanning::result::Result::results_to_markdown(
             display_results,
             args.include_request,
             args.include_response,

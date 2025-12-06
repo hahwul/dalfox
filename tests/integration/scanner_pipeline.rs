@@ -3,8 +3,8 @@
 //! These tests verify the interaction between internal modules:
 //! target parser → parameter analyzer → scanner → result reporter
 
+use dalfox::parameter_analysis::{DelimiterType, InjectionContext, Location, Param};
 use dalfox::target_parser::parse_target;
-use dalfox::parameter_analysis::{Param, Location, InjectionContext, DelimiterType};
 use serde_json;
 
 /// Test that the target parser correctly parses various URL formats
@@ -12,7 +12,7 @@ use serde_json;
 fn test_target_parsing_basic_url() {
     let result = parse_target("http://example.com/test?id=123");
     assert!(result.is_ok(), "Should parse valid URL");
-    
+
     let target = result.unwrap();
     assert_eq!(target.url.scheme(), "http");
     assert_eq!(target.url.host_str(), Some("example.com"));
@@ -23,8 +23,11 @@ fn test_target_parsing_basic_url() {
 #[test]
 fn test_target_parsing_url_without_scheme() {
     let result = parse_target("example.com/test");
-    assert!(result.is_ok(), "Should parse URL without scheme and add http://");
-    
+    assert!(
+        result.is_ok(),
+        "Should parse URL without scheme and add http://"
+    );
+
     let target = result.unwrap();
     assert_eq!(target.url.scheme(), "http");
     assert_eq!(target.url.host_str(), Some("example.com"));
@@ -35,7 +38,7 @@ fn test_target_parsing_url_without_scheme() {
 fn test_target_parsing_https_url() {
     let result = parse_target("https://secure.example.com/api");
     assert!(result.is_ok(), "Should parse HTTPS URL");
-    
+
     let target = result.unwrap();
     assert_eq!(target.url.scheme(), "https");
     assert_eq!(target.url.host_str(), Some("secure.example.com"));
@@ -46,7 +49,7 @@ fn test_target_parsing_https_url() {
 fn test_target_parsing_with_port() {
     let result = parse_target("http://example.com:8080/test");
     assert!(result.is_ok(), "Should parse URL with port");
-    
+
     let target = result.unwrap();
     assert_eq!(target.url.port(), Some(8080));
 }
@@ -54,8 +57,11 @@ fn test_target_parsing_with_port() {
 #[test]
 fn test_target_parsing_with_multiple_query_params() {
     let result = parse_target("http://example.com/search?q=test&page=1&sort=asc");
-    assert!(result.is_ok(), "Should parse URL with multiple query parameters");
-    
+    assert!(
+        result.is_ok(),
+        "Should parse URL with multiple query parameters"
+    );
+
     let target = result.unwrap();
     assert!(target.url.query().unwrap().contains("q=test"));
     assert!(target.url.query().unwrap().contains("page=1"));
@@ -73,7 +79,7 @@ fn test_param_structure_query_location() {
         valid_specials: None,
         invalid_specials: None,
     };
-    
+
     assert_eq!(param.name, "id");
     assert_eq!(param.value, "123");
     assert_eq!(param.location, Location::Query);
@@ -89,7 +95,7 @@ fn test_param_structure_with_injection_context() {
         valid_specials: Some(vec!['<', '>', '"']),
         invalid_specials: Some(vec!['\'', '`']),
     };
-    
+
     assert_eq!(param.injection_context, Some(InjectionContext::Html(None)));
     assert!(param.valid_specials.is_some());
     assert_eq!(param.valid_specials.as_ref().unwrap().len(), 3);
@@ -102,11 +108,13 @@ fn test_param_structure_javascript_context() {
         name: "callback".to_string(),
         value: "func".to_string(),
         location: Location::Query,
-        injection_context: Some(InjectionContext::Javascript(Some(DelimiterType::SingleQuote))),
+        injection_context: Some(InjectionContext::Javascript(Some(
+            DelimiterType::SingleQuote,
+        ))),
         valid_specials: None,
         invalid_specials: None,
     };
-    
+
     match &param.injection_context {
         Some(InjectionContext::Javascript(delimiter)) => {
             assert_eq!(*delimiter, Some(DelimiterType::SingleQuote));
@@ -121,11 +129,13 @@ fn test_param_structure_attribute_context() {
         name: "attr".to_string(),
         value: "value".to_string(),
         location: Location::Query,
-        injection_context: Some(InjectionContext::Attribute(Some(DelimiterType::DoubleQuote))),
+        injection_context: Some(InjectionContext::Attribute(Some(
+            DelimiterType::DoubleQuote,
+        ))),
         valid_specials: None,
         invalid_specials: None,
     };
-    
+
     match &param.injection_context {
         Some(InjectionContext::Attribute(delimiter)) => {
             assert_eq!(*delimiter, Some(DelimiterType::DoubleQuote));
@@ -143,10 +153,10 @@ fn test_param_location_types() {
         Location::Header,
         Location::Path,
     ];
-    
+
     // Verify all location types are distinct
     assert_eq!(locations.len(), 5);
-    
+
     // Verify specific location comparisons
     assert_eq!(Location::Query, Location::Query);
     assert_ne!(Location::Query, Location::Body);
@@ -158,10 +168,10 @@ fn test_param_location_types() {
 fn test_url_query_parameter_extraction() {
     let result = parse_target("http://example.com/page?name=john&age=25");
     assert!(result.is_ok());
-    
+
     let target = result.unwrap();
     let query_string = target.url.query().unwrap_or("");
-    
+
     // Verify query parameters can be accessed
     assert!(query_string.contains("name=john"));
     assert!(query_string.contains("age=25"));
@@ -171,7 +181,7 @@ fn test_url_query_parameter_extraction() {
 fn test_url_fragment_handling() {
     let result = parse_target("http://example.com/page#section");
     assert!(result.is_ok());
-    
+
     let target = result.unwrap();
     assert_eq!(target.url.fragment(), Some("section"));
 }
@@ -181,9 +191,9 @@ fn test_url_fragment_handling() {
 fn test_target_default_configuration() {
     let result = parse_target("http://example.com/test");
     assert!(result.is_ok());
-    
+
     let target = result.unwrap();
-    
+
     // Verify default values are set properly
     assert_eq!(target.method, "GET");
     assert!(target.data.is_none());
@@ -203,16 +213,16 @@ fn test_param_serialization() {
         valid_specials: Some(vec!['<', '>']),
         invalid_specials: Some(vec!['\'']),
     };
-    
+
     // Test serialization
     let json = serde_json::to_string(&param);
     assert!(json.is_ok(), "Should serialize param to JSON");
-    
+
     // Test deserialization
     let json_str = json.unwrap();
     let deserialized: Result<Param, _> = serde_json::from_str(&json_str);
     assert!(deserialized.is_ok(), "Should deserialize param from JSON");
-    
+
     let restored = deserialized.unwrap();
     assert_eq!(restored.name, param.name);
     assert_eq!(restored.value, param.value);
@@ -225,7 +235,7 @@ fn test_delimiter_types() {
     let single_quote = DelimiterType::SingleQuote;
     let double_quote = DelimiterType::DoubleQuote;
     let comment = DelimiterType::Comment;
-    
+
     assert_eq!(single_quote, DelimiterType::SingleQuote);
     assert_ne!(single_quote, double_quote);
     assert_ne!(double_quote, comment);
@@ -238,7 +248,7 @@ fn test_injection_context_variants() {
     let html_ctx_sq = InjectionContext::Html(Some(DelimiterType::SingleQuote));
     let js_ctx = InjectionContext::Javascript(None);
     let attr_ctx = InjectionContext::Attribute(Some(DelimiterType::DoubleQuote));
-    
+
     // Verify contexts are properly distinguished
     assert_eq!(html_ctx, InjectionContext::Html(None));
     assert_ne!(html_ctx, html_ctx_sq);
@@ -251,12 +261,14 @@ fn test_injection_context_variants() {
 fn test_url_path_segments() {
     let result = parse_target("http://example.com/path/to/resource");
     assert!(result.is_ok());
-    
+
     let target = result.unwrap();
-    let path_segments: Vec<&str> = target.url.path_segments()
+    let path_segments: Vec<&str> = target
+        .url
+        .path_segments()
         .map(|c| c.collect())
         .unwrap_or_default();
-    
+
     assert_eq!(path_segments.len(), 3);
     assert_eq!(path_segments[0], "path");
     assert_eq!(path_segments[1], "to");
@@ -268,7 +280,7 @@ fn test_url_path_segments() {
 fn test_special_chars_classification() {
     let valid_chars = vec!['<', '>', '"', '\''];
     let invalid_chars = vec!['`', '{', '}'];
-    
+
     let param = Param {
         name: "input".to_string(),
         value: "test".to_string(),
@@ -277,7 +289,7 @@ fn test_special_chars_classification() {
         valid_specials: Some(valid_chars.clone()),
         invalid_specials: Some(invalid_chars.clone()),
     };
-    
+
     assert!(param.valid_specials.as_ref().unwrap().contains(&'<'));
     assert!(param.valid_specials.as_ref().unwrap().contains(&'>'));
     assert!(param.invalid_specials.as_ref().unwrap().contains(&'`'));
@@ -312,7 +324,7 @@ fn test_multiple_parameters() {
             invalid_specials: None,
         },
     ];
-    
+
     assert_eq!(params.len(), 3);
     assert_eq!(params[0].location, Location::Query);
     assert_eq!(params[1].location, Location::Query);
@@ -324,10 +336,10 @@ fn test_multiple_parameters() {
 fn test_url_with_encoded_query() {
     let result = parse_target("http://example.com/search?q=hello%20world&filter=%3Ctest%3E");
     assert!(result.is_ok());
-    
+
     let target = result.unwrap();
     let query = target.url.query().unwrap();
-    
+
     // URL parser should preserve the encoded form
     assert!(query.contains("q=hello%20world") || query.contains("q=hello+world"));
 }
@@ -337,7 +349,7 @@ fn test_url_with_encoded_query() {
 fn test_url_path_normalization() {
     let result = parse_target("http://example.com//double//slash///path");
     assert!(result.is_ok());
-    
+
     let target = result.unwrap();
     // URL parser may normalize paths
     let path = target.url.path();

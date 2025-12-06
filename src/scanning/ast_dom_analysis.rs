@@ -100,7 +100,6 @@ impl<'a> DomXssVisitor<'a> {
         // Previously textContent was incorrectly included as a sink, but it
         // only sets the text content without HTML parsing, making it safe from XSS
 
-
         let mut sanitizers = HashSet::new();
         sanitizers.insert("DOMPurify.sanitize".to_string());
         sanitizers.insert("sanitize".to_string());
@@ -373,9 +372,9 @@ impl<'a> DomXssVisitor<'a> {
                     // Save current tainted vars state
                     let saved_tainted = self.tainted_vars.clone();
                     let saved_aliases = self.var_aliases.clone();
-                    
+
                     self.walk_statements(&body.statements);
-                    
+
                     // Restore state after function (parameters are local scope)
                     self.tainted_vars = saved_tainted;
                     self.var_aliases = saved_aliases;
@@ -408,12 +407,14 @@ impl<'a> DomXssVisitor<'a> {
                             .insert(var_name.to_string(), source_expr.clone());
                     }
                 }
-                
+
                 // Check for localStorage.getItem() and sessionStorage.getItem() calls
                 if let Expression::CallExpression(call) = init {
                     if let Expression::StaticMemberExpression(member) = &call.callee {
                         if let Some(callee_str) = self.get_member_string(member) {
-                            if callee_str == "localStorage.getItem" || callee_str == "sessionStorage.getItem" {
+                            if callee_str == "localStorage.getItem"
+                                || callee_str == "sessionStorage.getItem"
+                            {
                                 // Mark this variable as tainted
                                 self.tainted_vars.insert(var_name.to_string());
                                 self.var_aliases.insert(var_name.to_string(), callee_str);
@@ -627,16 +628,17 @@ impl<'a> DomXssVisitor<'a> {
                             // Save state before analyzing event handler
                             let saved_tainted = self.tainted_vars.clone();
                             let saved_aliases = self.var_aliases.clone();
-                            
+
                             // Mark event parameter as tainted
                             self.tainted_vars.insert(param_name.to_string());
-                            self.var_aliases.insert(param_name.to_string(), "event.data".to_string());
-                            
+                            self.var_aliases
+                                .insert(param_name.to_string(), "event.data".to_string());
+
                             // Walk the function body
                             if let Some(body) = &func.body {
                                 self.walk_statements(&body.statements);
                             }
-                            
+
                             // Restore state
                             self.tainted_vars = saved_tainted;
                             self.var_aliases = saved_aliases;
@@ -651,13 +653,14 @@ impl<'a> DomXssVisitor<'a> {
                             let param_name = id.name.as_str();
                             let saved_tainted = self.tainted_vars.clone();
                             let saved_aliases = self.var_aliases.clone();
-                            
+
                             self.tainted_vars.insert(param_name.to_string());
-                            self.var_aliases.insert(param_name.to_string(), "event.data".to_string());
-                            
+                            self.var_aliases
+                                .insert(param_name.to_string(), "event.data".to_string());
+
                             // Arrow functions have a FunctionBody
                             self.walk_statements(&arrow.body.statements);
-                            
+
                             self.tainted_vars = saved_tainted;
                             self.var_aliases = saved_aliases;
                             return;
@@ -1538,7 +1541,10 @@ document.getElementById('x').textContent = input;
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(result.is_empty(), "textContent is safe and should NOT be detected as a sink");
+        assert!(
+            result.is_empty(),
+            "textContent is safe and should NOT be detected as a sink"
+        );
     }
 
     #[test]
@@ -1895,7 +1901,10 @@ element.text = input;
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(result.is_empty(), "text property is typically safe and should NOT be detected");
+        assert!(
+            result.is_empty(),
+            "text property is typically safe and should NOT be detected"
+        );
     }
 
     #[test]

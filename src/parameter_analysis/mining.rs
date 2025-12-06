@@ -90,9 +90,7 @@ pub fn detect_injection_context(text: &str) -> InjectionContext {
         && dalfox_pos < comment_end
     {
         // In comment context, delimiter type is always Comment regardless of quotes
-        return InjectionContext::Html(Some(
-            crate::parameter_analysis::DelimiterType::Comment,
-        ));
+        return InjectionContext::Html(Some(crate::parameter_analysis::DelimiterType::Comment));
     }
 
     // Check for attribute context

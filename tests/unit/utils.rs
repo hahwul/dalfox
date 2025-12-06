@@ -3,9 +3,7 @@
 //! Tests HTTP helpers and scan ID utilities.
 
 mod http {
-    use dalfox::utils::http::{
-        compose_cookie_header, compose_cookie_header_excluding, has_header,
-    };
+    use dalfox::utils::http::{compose_cookie_header, compose_cookie_header_excluding, has_header};
 
     #[test]
     fn test_compose_cookie_header_empty() {

@@ -1,6 +1,6 @@
 use clap::{Parser, Subcommand};
 
-use dalfox::{cmd, config, mcp, utils, DEBUG};
+use dalfox::{DEBUG, cmd, config, mcp, utils};
 
 #[derive(Parser)]
 #[command(name = "dalfox")]

@@ -17,10 +17,10 @@ use axum::{
 };
 use base64::prelude::*;
 
-use dalfox::cmd::scan::{self, ScanArgs};
-use dalfox::target_parser::parse_target;
-use dalfox::parameter_analysis::analyze_parameters;
 use super::mock_case_loader::{self, MockCase};
+use dalfox::cmd::scan::{self, ScanArgs};
+use dalfox::parameter_analysis::analyze_parameters;
+use dalfox::target_parser::parse_target;
 
 /// Application state holding all loaded mock cases
 #[derive(Clone)]
@@ -80,13 +80,13 @@ async fn query_handler_v2(
     State(state): State<AppState>,
 ) -> impl IntoResponse {
     let q = params.get("query").cloned().unwrap_or_default();
-    
+
     let reflected = if let Some(case) = state.query_cases.get(&case_id) {
         apply_reflection(&case.reflection, &q)
     } else {
         q.clone()
     };
-    
+
     let body = format!(
         "<html><head><title>mock</title></head><body><div id=out>{}</div></body></html>",
         reflected
@@ -100,24 +100,24 @@ async fn header_handler_v2(
     State(state): State<AppState>,
 ) -> impl IntoResponse {
     let case = state.header_cases.get(&case_id);
-    
+
     let header_name = case
         .and_then(|c| c.header_name.as_ref())
         .map(|s| s.to_lowercase())
         .unwrap_or_else(|| "x-test".to_string());
-    
+
     let q = headers
         .get(header_name.as_str())
         .and_then(|h| h.to_str().ok())
         .unwrap_or("")
         .to_string();
-    
+
     let reflected = if let Some(case) = case {
         apply_reflection(&case.reflection, &q)
     } else {
         q.clone()
     };
-    
+
     let body = format!(
         "<html><head><title>mock</title></head><body><div id=out>{}</div></body></html>",
         reflected
@@ -131,17 +131,17 @@ async fn cookie_handler_v2(
     State(state): State<AppState>,
 ) -> impl IntoResponse {
     let case = state.cookie_cases.get(&case_id);
-    
+
     let cookie_name = case
         .and_then(|c| c.cookie_name.as_ref())
         .map(|s| s.as_str())
         .unwrap_or("test");
-    
+
     let cookie_header = headers
         .get("cookie")
         .and_then(|h| h.to_str().ok())
         .unwrap_or("");
-    
+
     let q = cookie_header
         .split(';')
         .find_map(|c| {
@@ -154,13 +154,13 @@ async fn cookie_handler_v2(
             }
         })
         .unwrap_or_default();
-    
+
     let reflected = if let Some(case) = case {
         apply_reflection(&case.reflection, &q)
     } else {
         q.clone()
     };
-    
+
     let body = format!(
         "<html><head><title>mock</title></head><body><div id=out>{}</div></body></html>",
         reflected
@@ -177,7 +177,7 @@ async fn path_handler_v2(
     } else {
         param.clone()
     };
-    
+
     let body = format!(
         "<html><head><title>mock</title></head><body><div id=out>{}</div></body></html>",
         reflected
@@ -191,20 +191,20 @@ async fn body_handler_v2(
     Form(params): Form<HashMap<String, String>>,
 ) -> impl IntoResponse {
     let case = state.body_cases.get(&case_id);
-    
+
     let param_name = case
         .and_then(|c| c.param_name.as_ref())
         .map(|s| s.as_str())
         .unwrap_or("query");
-    
+
     let q = params.get(param_name).cloned().unwrap_or_default();
-    
+
     let reflected = if let Some(case) = case {
         apply_reflection(&case.reflection, &q)
     } else {
         q.clone()
     };
-    
+
     let body = format!(
         "<html><head><title>mock</title></head><body><div id=out>{}</div></body></html>",
         reflected
@@ -215,29 +215,39 @@ async fn body_handler_v2(
 async fn start_mock_server_v2() -> (SocketAddr, AppState) {
     // Load all mock cases
     let base_dir = mock_case_loader::get_mock_cases_base_dir();
-    let cases_by_type = mock_case_loader::load_all_mock_cases(&base_dir)
-        .expect("Failed to load mock cases");
-    
+    let cases_by_type =
+        mock_case_loader::load_all_mock_cases(&base_dir).expect("Failed to load mock cases");
+
     // Organize cases by ID for quick lookup
     let mut query_cases = HashMap::new();
     let mut header_cases = HashMap::new();
     let mut cookie_cases = HashMap::new();
     let mut path_cases = HashMap::new();
     let mut body_cases = HashMap::new();
-    
+
     for (handler_type, cases) in cases_by_type {
         for case in cases {
             match handler_type.as_str() {
-                "query" => { query_cases.insert(case.id, case); },
-                "header" => { header_cases.insert(case.id, case); },
-                "cookie" => { cookie_cases.insert(case.id, case); },
-                "path" => { path_cases.insert(case.id, case); },
-                "body" => { body_cases.insert(case.id, case); },
-                _ => {},
+                "query" => {
+                    query_cases.insert(case.id, case);
+                }
+                "header" => {
+                    header_cases.insert(case.id, case);
+                }
+                "cookie" => {
+                    cookie_cases.insert(case.id, case);
+                }
+                "path" => {
+                    path_cases.insert(case.id, case);
+                }
+                "body" => {
+                    body_cases.insert(case.id, case);
+                }
+                _ => {}
             }
         }
     }
-    
+
     let state = AppState {
         query_cases: Arc::new(query_cases),
         header_cases: Arc::new(header_cases),
@@ -245,7 +255,7 @@ async fn start_mock_server_v2() -> (SocketAddr, AppState) {
         path_cases: Arc::new(path_cases),
         body_cases: Arc::new(body_cases),
     };
-    
+
     let app = Router::new()
         .route("/query/:case_id", get(query_handler_v2))
         .route("/header/:case_id", get(header_handler_v2))
@@ -258,7 +268,7 @@ async fn start_mock_server_v2() -> (SocketAddr, AppState) {
         .await
         .expect("bind listener");
     let addr = listener.local_addr().unwrap();
-    
+
     tokio::spawn(async move {
         axum::serve(listener, app)
             .with_graceful_shutdown(async {
@@ -268,7 +278,7 @@ async fn start_mock_server_v2() -> (SocketAddr, AppState) {
             .await
             .ok();
     });
-    
+
     (addr, state)
 }
 
@@ -345,11 +355,10 @@ async fn run_scan_test(
 
     scan::run_scan(&args).await;
 
-    let content = std::fs::read_to_string(&out_path)
-        .expect("scan should write JSON output file");
-    let v: serde_json::Value = serde_json::from_str(&content)
-        .expect("output should be valid JSON array");
-    
+    let content = std::fs::read_to_string(&out_path).expect("scan should write JSON output file");
+    let v: serde_json::Value =
+        serde_json::from_str(&content).expect("output should be valid JSON array");
+
     v.as_array().expect("json should be an array").clone()
 }
 
@@ -443,7 +452,7 @@ struct ScanTestConfig {
 #[ignore]
 async fn test_query_reflection_v2() {
     let (addr, state) = start_mock_server_v2().await;
-    
+
     // Wait a moment for server to be ready
     tokio::time::sleep(Duration::from_millis(100)).await;
 
@@ -452,8 +461,11 @@ async fn test_query_reflection_v2() {
 
     let mut detected = 0usize;
     for (case_id, case) in state.query_cases.iter() {
-        println!("Testing case {}: {} - {}", case_id, case.name, case.description);
-        
+        println!(
+            "Testing case {}: {} - {}",
+            case_id, case.name, case.description
+        );
+
         let config = ScanTestConfig {
             url_suffix: format!("/{case_id}?query=seed"),
             param: vec![],
@@ -468,7 +480,9 @@ async fn test_query_reflection_v2() {
 
         let results = run_scan_test(addr, "query", *case_id, config).await;
 
-        if !results.is_empty() { detected += 1; }
+        if !results.is_empty() {
+            detected += 1;
+        }
     }
     assert!(detected > 0, "query tests: expected at least one detection");
 }
@@ -477,7 +491,7 @@ async fn test_query_reflection_v2() {
 #[ignore]
 async fn test_header_reflection_v2() {
     let (addr, state) = start_mock_server_v2().await;
-    
+
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let total_cases = state.header_cases.len();
@@ -485,11 +499,14 @@ async fn test_header_reflection_v2() {
 
     let mut detected = 0usize;
     for (case_id, case) in state.header_cases.iter() {
-        println!("Testing case {}: {} - {}", case_id, case.name, case.description);
-        
+        println!(
+            "Testing case {}: {} - {}",
+            case_id, case.name, case.description
+        );
+
         let header_name = case.header_name.as_deref().unwrap_or("X-Test");
         let header_name_lc = header_name.to_ascii_lowercase();
-        
+
         let config = ScanTestConfig {
             url_suffix: format!("/{case_id}"),
             param: vec![format!("{}:header", header_name)],
@@ -513,16 +530,21 @@ async fn test_header_reflection_v2() {
             .expect("header request");
         let text = resp.text().await.expect("header text");
         let expected = apply_reflection(&case.reflection, "seed");
-        if text.contains(&expected) { detected += 1; }
+        if text.contains(&expected) {
+            detected += 1;
+        }
     }
-    assert!(detected > 0, "header tests: expected at least one detection");
+    assert!(
+        detected > 0,
+        "header tests: expected at least one detection"
+    );
 }
 
 #[tokio::test]
 #[ignore]
 async fn test_cookie_reflection_v2() {
     let (addr, state) = start_mock_server_v2().await;
-    
+
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let total_cases = state.cookie_cases.len();
@@ -530,10 +552,13 @@ async fn test_cookie_reflection_v2() {
 
     let mut detected = 0usize;
     for (case_id, case) in state.cookie_cases.iter() {
-        println!("Testing case {}: {} - {}", case_id, case.name, case.description);
-        
+        println!(
+            "Testing case {}: {} - {}",
+            case_id, case.name, case.description
+        );
+
         let cookie_name = case.cookie_name.as_deref().unwrap_or("test");
-        
+
         let config = ScanTestConfig {
             url_suffix: format!("/{case_id}"),
             param: vec![format!("{}:cookie", cookie_name)],
@@ -558,16 +583,21 @@ async fn test_cookie_reflection_v2() {
             true,
         )
         .await;
-        if found { detected += 1; }
+        if found {
+            detected += 1;
+        }
     }
-    assert!(detected > 0, "cookie tests: expected at least one detection");
+    assert!(
+        detected > 0,
+        "cookie tests: expected at least one detection"
+    );
 }
 
 #[tokio::test]
 #[ignore]
 async fn test_path_reflection_v2() {
     let (addr, state) = start_mock_server_v2().await;
-    
+
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let total_cases = state.path_cases.len();
@@ -575,8 +605,11 @@ async fn test_path_reflection_v2() {
 
     let mut detected = 0usize;
     for (case_id, case) in state.path_cases.iter() {
-        println!("Testing case {}: {} - {}", case_id, case.name, case.description);
-        
+        println!(
+            "Testing case {}: {} - {}",
+            case_id, case.name, case.description
+        );
+
         let config = ScanTestConfig {
             url_suffix: format!("/{case_id}/seed"),
             // Leave empty so discovery can add path_segment_* entries
@@ -592,7 +625,9 @@ async fn test_path_reflection_v2() {
 
         let results = run_scan_test(addr, "path", *case_id, config).await;
 
-        if !results.is_empty() { detected += 1; }
+        if !results.is_empty() {
+            detected += 1;
+        }
     }
     assert!(detected > 0, "path tests: expected at least one detection");
 }
@@ -601,7 +636,7 @@ async fn test_path_reflection_v2() {
 #[ignore]
 async fn test_body_reflection_v2() {
     let (addr, state) = start_mock_server_v2().await;
-    
+
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let total_cases = state.body_cases.len();
@@ -609,10 +644,13 @@ async fn test_body_reflection_v2() {
 
     let mut detected = 0usize;
     for (case_id, case) in state.body_cases.iter() {
-        println!("Testing case {}: {} - {}", case_id, case.name, case.description);
-        
+        println!(
+            "Testing case {}: {} - {}",
+            case_id, case.name, case.description
+        );
+
         let param_name = case.param_name.as_deref().unwrap_or("query");
-        
+
         let config = ScanTestConfig {
             url_suffix: format!("/{case_id}"),
             param: vec![format!("{}:body", param_name)],
@@ -629,14 +667,17 @@ async fn test_body_reflection_v2() {
         let client = reqwest::Client::new();
         let url = format!("http://{}:{}/body/{}", addr.ip(), addr.port(), case_id);
         let form = [(param_name.to_string(), "seed".to_string())];
-        let resp = client.post(&url)
+        let resp = client
+            .post(&url)
             .form(&form)
             .send()
             .await
             .expect("body request");
         let text = resp.text().await.expect("body text");
         let expected = apply_reflection(&case.reflection, "seed");
-        if text.contains(&expected) { detected += 1; }
+        if text.contains(&expected) {
+            detected += 1;
+        }
     }
     assert!(detected > 0, "body tests: expected at least one detection");
 }
