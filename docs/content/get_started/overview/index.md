@@ -76,7 +76,7 @@ Built with Rust for maximum performance:
 - Custom payload support
 - Remote payload providers (PortSwigger, PayloadBox)
 - MCP (Model Context Protocol) for AI integration
-- Multiple output formats (Plain, JSON, JSONL)
+- Multiple output formats (Plain, JSON, JSONL, Markdown, SARIF)
 
 ## Use Cases
 

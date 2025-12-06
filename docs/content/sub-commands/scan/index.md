@@ -85,6 +85,8 @@ Control the output format.
 {% badge_primary() %}plain{% end %} (default)
 {% badge_primary() %}json{% end %}
 {% badge_primary() %}jsonl{% end %}
+{% badge_primary() %}markdown{% end %}
+{% badge_primary() %}sarif{% end %}
 
 **Plain Format**:
 ```bash
@@ -99,6 +101,16 @@ dalfox scan https://example.com -f json -o results.json
 **JSONL Format** (JSON Lines - one JSON object per line):
 ```bash
 dalfox scan https://example.com -f jsonl -o results.jsonl
+```
+
+**Markdown Format**:
+```bash
+dalfox scan https://example.com -f markdown -o report.md
+```
+
+**SARIF Format** (Static Analysis Results Interchange Format):
+```bash
+dalfox scan https://example.com -f sarif -o results.sarif
 ```
 
 ### Output to File (`-o, --output`)
@@ -507,6 +519,31 @@ dalfox scan https://example.com \
   --delay 500 \
   -F
 ```
+
+### Generate Markdown Report
+```bash
+dalfox scan https://example.com \
+  -p id -p search \
+  -W params.txt \
+  --remote-payloads portswigger \
+  -f markdown \
+  -o security-report.md
+```
+
+### SARIF Output for CI/CD
+```bash
+dalfox scan https://example.com \
+  -f sarif \
+  -o results.sarif \
+  --timeout 30 \
+  --workers 100
+```
+
+This SARIF format is compatible with:
+- GitHub Code Scanning
+- Azure DevOps
+- GitLab SAST
+- Various security analysis tools
 
 ## See Also
 
