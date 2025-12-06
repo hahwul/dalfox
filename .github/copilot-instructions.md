@@ -416,6 +416,10 @@ Test organization (tests/ directory):
   - dalfox -i file urls.txt
 - Include request/response in JSON
   - dalfox scan https://example.com -f json --include-request --include-response
+- Markdown output
+  - dalfox scan https://example.com -f markdown -o report.md
+- SARIF output
+  - dalfox scan https://example.com -f sarif -o results.sarif
 - Blind XSS
   - dalfox scan https://example.com -b https://collab.example/x/callback
 - Stored XSS flow
