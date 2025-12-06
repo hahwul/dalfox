@@ -262,6 +262,132 @@ impl Result {
 
         out
     }
+
+    /// Serialize a slice of Result into SARIF v2.1.0 format string.
+    /// SARIF (Static Analysis Results Interchange Format) is a standard format for static analysis tools.
+    pub fn results_to_sarif(
+        results: &[Result],
+        include_request: bool,
+        include_response: bool,
+    ) -> String {
+        use serde_json::json;
+
+        // Convert severity to SARIF level
+        let severity_to_level = |severity: &str| -> &str {
+            match severity.to_lowercase().as_str() {
+                "high" | "critical" => "error",
+                "medium" => "warning",
+                "low" | "info" => "note",
+                _ => "warning",
+            }
+        };
+
+        // Convert results to SARIF result objects
+        let sarif_results: Vec<serde_json::Value> = results
+            .iter()
+            .map(|r| {
+                // Extract CWE number from string like "CWE-79"
+                let cwe_id = r.cwe.trim_start_matches("CWE-");
+
+                // Build message with additional context
+                let mut message_parts = vec![r.message_str.clone()];
+                if !r.evidence.is_empty() {
+                    message_parts.push(format!("Evidence: {}", r.evidence));
+                }
+                if include_request && r.request.is_some() {
+                    message_parts.push("HTTP request included in properties".to_string());
+                }
+                if include_response && r.response.is_some() {
+                    message_parts.push("HTTP response included in properties".to_string());
+                }
+                let full_message = message_parts.join(". ");
+
+                // Build properties bag
+                let mut properties = json!({
+                    "type": r.result_type,
+                    "inject_type": r.inject_type,
+                    "method": r.method,
+                    "param": r.param,
+                    "payload": r.payload,
+                    "severity": r.severity,
+                });
+
+                if include_request {
+                    if let Some(req) = &r.request {
+                        properties["request"] = json!(req);
+                    }
+                }
+                if include_response {
+                    if let Some(resp) = &r.response {
+                        properties["response"] = json!(resp);
+                    }
+                }
+
+                json!({
+                    "ruleId": format!("dalfox/{}", r.cwe.to_lowercase()),
+                    "ruleIndex": 0,
+                    "level": severity_to_level(&r.severity),
+                    "message": {
+                        "text": full_message
+                    },
+                    "locations": [{
+                        "physicalLocation": {
+                            "artifactLocation": {
+                                "uri": r.data.clone()
+                            },
+                            "region": {
+                                "snippet": {
+                                    "text": r.payload.clone()
+                                }
+                            }
+                        }
+                    }],
+                    "partialFingerprints": {
+                        "messageId": r.message_id.to_string()
+                    },
+                    "properties": properties
+                })
+            })
+            .collect();
+
+        // Build SARIF document
+        let sarif = json!({
+            "version": "2.1.0",
+            "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
+            "runs": [{
+                "tool": {
+                    "driver": {
+                        "name": "Dalfox",
+                        "informationUri": "https://github.com/hahwul/dalfox",
+                        "version": env!("CARGO_PKG_VERSION"),
+                        "rules": [{
+                            "id": "dalfox/cwe-79",
+                            "name": "CrossSiteScripting",
+                            "shortDescription": {
+                                "text": "Cross-site Scripting (XSS)"
+                            },
+                            "fullDescription": {
+                                "text": "The application reflects user input in HTML responses without proper encoding, allowing attackers to inject malicious scripts."
+                            },
+                            "help": {
+                                "text": "Ensure all user input is properly encoded before being rendered in HTML context. Use context-aware output encoding based on where the data is placed (HTML body, attributes, JavaScript, CSS, or URL)."
+                            },
+                            "defaultConfiguration": {
+                                "level": "error"
+                            },
+                            "properties": {
+                                "tags": ["security", "xss", "injection"],
+                                "precision": "high"
+                            }
+                        }]
+                    }
+                },
+                "results": sarif_results
+            }]
+        });
+
+        serde_json::to_string_pretty(&sarif).unwrap_or_else(|_| "{}".to_string())
+    }
 }
 
 #[cfg(test)]
@@ -560,5 +686,179 @@ mod tests {
         assert!(markdown.contains("**Total Findings**: 0"));
         assert!(markdown.contains("**Vulnerabilities (V)**: 0"));
         assert!(markdown.contains("**Reflections (R)**: 0"));
+    }
+
+    #[test]
+    fn test_results_to_sarif_basic() {
+        let result = Result::new(
+            "V".to_string(),
+            "inHTML".to_string(),
+            "GET".to_string(),
+            "https://example.com?q=test".to_string(),
+            "q".to_string(),
+            "<script>alert(1)</script>".to_string(),
+            "Found script tag".to_string(),
+            "CWE-79".to_string(),
+            "High".to_string(),
+            606,
+            "XSS detected".to_string(),
+        );
+
+        let results = vec![result];
+        let sarif = Result::results_to_sarif(&results, false, false);
+
+        // Verify SARIF structure
+        assert!(sarif.contains("\"version\": \"2.1.0\""));
+        assert!(sarif.contains("\"$schema\""));
+        assert!(sarif.contains("sarif-schema-2.1.0.json"));
+        assert!(sarif.contains("\"runs\""));
+        assert!(sarif.contains("\"tool\""));
+        assert!(sarif.contains("\"driver\""));
+        assert!(sarif.contains("\"name\": \"Dalfox\""));
+        assert!(sarif.contains("\"results\""));
+
+        // Verify result content
+        assert!(sarif.contains("\"ruleId\": \"dalfox/cwe-79\""));
+        assert!(sarif.contains("\"level\": \"error\""));
+        assert!(sarif.contains("XSS detected"));
+        assert!(sarif.contains("https://example.com?q=test"));
+        assert!(sarif.contains("<script>alert(1)</script>"));
+
+        // Verify properties
+        assert!(sarif.contains("\"type\": \"V\""));
+        assert!(sarif.contains("\"inject_type\": \"inHTML\""));
+        assert!(sarif.contains("\"method\": \"GET\""));
+        assert!(sarif.contains("\"param\": \"q\""));
+        assert!(sarif.contains("\"severity\": \"High\""));
+    }
+
+    #[test]
+    fn test_results_to_sarif_with_request_response() {
+        let mut result = Result::new(
+            "V".to_string(),
+            "inHTML".to_string(),
+            "GET".to_string(),
+            "https://example.com".to_string(),
+            "test".to_string(),
+            "<x>".to_string(),
+            "test evidence".to_string(),
+            "CWE-79".to_string(),
+            "High".to_string(),
+            606,
+            "XSS".to_string(),
+        );
+
+        result.request = Some("GET /?test=%3Cx%3E HTTP/1.1\nHost: example.com".to_string());
+        result.response =
+            Some("HTTP/1.1 200 OK\nContent-Type: text/html\n\n<html><x></html>".to_string());
+
+        let results = vec![result];
+        let sarif = Result::results_to_sarif(&results, true, true);
+
+        // Verify request and response are included in properties
+        assert!(sarif.contains("\"request\""));
+        assert!(sarif.contains("GET /?test=%3Cx%3E HTTP/1.1"));
+        assert!(sarif.contains("\"response\""));
+        assert!(sarif.contains("<html><x></html>"));
+    }
+
+    #[test]
+    fn test_results_to_sarif_severity_levels() {
+        let high = Result::new(
+            "V".to_string(),
+            "inHTML".to_string(),
+            "GET".to_string(),
+            "https://example.com".to_string(),
+            "p1".to_string(),
+            "payload".to_string(),
+            "".to_string(),
+            "CWE-79".to_string(),
+            "High".to_string(),
+            1,
+            "High severity".to_string(),
+        );
+
+        let medium = Result::new(
+            "V".to_string(),
+            "inHTML".to_string(),
+            "GET".to_string(),
+            "https://example.com".to_string(),
+            "p2".to_string(),
+            "payload".to_string(),
+            "".to_string(),
+            "CWE-79".to_string(),
+            "Medium".to_string(),
+            2,
+            "Medium severity".to_string(),
+        );
+
+        let low = Result::new(
+            "R".to_string(),
+            "inHTML".to_string(),
+            "GET".to_string(),
+            "https://example.com".to_string(),
+            "p3".to_string(),
+            "payload".to_string(),
+            "".to_string(),
+            "CWE-79".to_string(),
+            "Low".to_string(),
+            3,
+            "Low severity".to_string(),
+        );
+
+        // Test each severity level mapping
+        let sarif_high = Result::results_to_sarif(&vec![high], false, false);
+        assert!(sarif_high.contains("\"level\": \"error\""));
+
+        let sarif_medium = Result::results_to_sarif(&vec![medium], false, false);
+        assert!(sarif_medium.contains("\"level\": \"warning\""));
+
+        let sarif_low = Result::results_to_sarif(&vec![low], false, false);
+        assert!(sarif_low.contains("\"level\": \"note\""));
+    }
+
+    #[test]
+    fn test_results_to_sarif_empty() {
+        let results: Vec<Result> = vec![];
+        let sarif = Result::results_to_sarif(&results, false, false);
+
+        // Should still be valid SARIF with empty results array
+        assert!(sarif.contains("\"version\": \"2.1.0\""));
+        assert!(sarif.contains("\"results\": []"));
+    }
+
+    #[test]
+    fn test_results_to_sarif_valid_json() {
+        let result = Result::new(
+            "V".to_string(),
+            "inHTML".to_string(),
+            "GET".to_string(),
+            "https://example.com".to_string(),
+            "q".to_string(),
+            "payload".to_string(),
+            "evidence".to_string(),
+            "CWE-79".to_string(),
+            "High".to_string(),
+            606,
+            "message".to_string(),
+        );
+
+        let results = vec![result];
+        let sarif = Result::results_to_sarif(&results, false, false);
+
+        // Should be valid JSON
+        let parsed: serde_json::Result<serde_json::Value> = serde_json::from_str(&sarif);
+        assert!(parsed.is_ok(), "SARIF output should be valid JSON");
+
+        if let Ok(json) = parsed {
+            // Verify required SARIF fields
+            assert_eq!(json["version"], "2.1.0");
+            assert!(json["runs"].is_array());
+            assert_eq!(json["runs"].as_array().unwrap().len(), 1);
+
+            let run = &json["runs"][0];
+            assert!(run["tool"].is_object());
+            assert!(run["results"].is_array());
+        }
     }
 }
