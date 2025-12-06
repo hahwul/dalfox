@@ -5,6 +5,7 @@
 
 use dalfox::target_parser::parse_target;
 use dalfox::parameter_analysis::{Param, Location, InjectionContext, DelimiterType};
+use serde_json;
 
 /// Test that the target parser correctly parses various URL formats
 #[test]
@@ -194,8 +195,6 @@ fn test_target_default_configuration() {
 /// Test parameter serialization and deserialization
 #[test]
 fn test_param_serialization() {
-    use serde_json;
-    
     let param = Param {
         name: "test".to_string(),
         value: "value".to_string(),
