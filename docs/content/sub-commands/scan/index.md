@@ -520,6 +520,31 @@ dalfox scan https://example.com \
   -F
 ```
 
+### Generate Markdown Report
+```bash
+dalfox scan https://example.com \
+  -p id -p search \
+  -W params.txt \
+  --remote-payloads portswigger \
+  -f markdown \
+  -o security-report.md
+```
+
+### SARIF Output for CI/CD
+```bash
+dalfox scan https://example.com \
+  -f sarif \
+  -o results.sarif \
+  --timeout 30 \
+  --workers 100
+```
+
+This SARIF format is compatible with:
+- GitHub Code Scanning
+- Azure DevOps
+- GitLab SAST
+- Various security analysis tools
+
 ## See Also
 
 - [Basic XSS Scanning Guide](/usage_guides/basic_xss_scanning)
