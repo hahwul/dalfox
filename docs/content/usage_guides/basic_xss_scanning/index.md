@@ -105,6 +105,29 @@ dalfox scan https://example.com -f json -o results.json
 ]
 ```
 
+### Markdown Output Format
+
+For readable reports and documentation:
+
+```bash
+dalfox scan https://example.com -f markdown -o report.md
+```
+
+The markdown output includes a summary section and detailed findings with tables.
+
+### SARIF Output Format
+
+For integration with security tools and IDEs (SARIF 2.1.0 format):
+
+```bash
+dalfox scan https://example.com -f sarif -o results.sarif
+```
+
+SARIF (Static Analysis Results Interchange Format) is useful for:
+- CI/CD pipeline integration
+- GitHub Code Scanning
+- IDE security analysis tools
+
 ## Scanning Different Input Types
 
 ### URL Mode (Default)
@@ -461,6 +484,12 @@ dalfox scan https://example.com --cookies "session=abc123"
 
 # JSON output
 dalfox scan https://example.com -f json -o results.json
+
+# Markdown output
+dalfox scan https://example.com -f markdown -o report.md
+
+# SARIF output
+dalfox scan https://example.com -f sarif -o results.sarif
 
 # Through proxy
 dalfox scan https://example.com --proxy http://localhost:8080
