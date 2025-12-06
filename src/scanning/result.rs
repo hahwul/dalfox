@@ -286,9 +286,6 @@ impl Result {
         let sarif_results: Vec<serde_json::Value> = results
             .iter()
             .map(|r| {
-                // Extract CWE number from string like "CWE-79"
-                let cwe_id = r.cwe.trim_start_matches("CWE-");
-
                 // Build message with additional context
                 let mut message_parts = vec![r.message_str.clone()];
                 if !r.evidence.is_empty() {
@@ -312,15 +309,15 @@ impl Result {
                     "severity": r.severity,
                 });
 
-                if include_request {
-                    if let Some(req) = &r.request {
-                        properties["request"] = json!(req);
-                    }
+                if include_request
+                    && let Some(req) = &r.request
+                {
+                    properties["request"] = json!(req);
                 }
-                if include_response {
-                    if let Some(resp) = &r.response {
-                        properties["response"] = json!(resp);
-                    }
+                if include_response
+                    && let Some(resp) = &r.response
+                {
+                    properties["response"] = json!(resp);
                 }
 
                 json!({
