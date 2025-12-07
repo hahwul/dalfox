@@ -127,11 +127,15 @@ pub async fn probe_dictionary_params(
     semaphore: Arc<Semaphore>,
     pb: Option<ProgressBar>,
 ) {
+    let arc_target = Arc::new(target.clone());
     let silence = args.silence;
     let client = target.build_client().unwrap_or_else(|_| Client::new());
 
     // Resolve candidate parameter names (remote, file, or built-ins)
-    let params: Vec<String> = if !args.remote_wordlists.is_empty() {
+    let mut params: Vec<String> = Vec::new();
+    let mut loaded = false;
+
+    if !args.remote_wordlists.is_empty() {
         if let Err(e) = crate::payload::init_remote_wordlists(&args.remote_wordlists).await {
             if !silence {
                 eprintln!("Error initializing remote wordlists: {}", e);
@@ -139,31 +143,23 @@ pub async fn probe_dictionary_params(
         }
         if let Some(words) = crate::payload::get_remote_words() {
             if !words.is_empty() {
-                words.as_ref().clone()
-            } else if let Some(wordlist_path) = &args.mining_dict_word {
-                match std::fs::read_to_string(wordlist_path) {
-                    Ok(content) => content
+                params = words.as_ref().clone();
+                loaded = true;
+            }
+        }
+    }
+
+    if !loaded {
+        if let Some(wordlist_path) = &args.mining_dict_word {
+            match std::fs::read_to_string(wordlist_path) {
+                Ok(content) => {
+                    params = content
                         .lines()
                         .map(|s| s.trim().to_string())
                         .filter(|s| !s.is_empty())
-                        .collect(),
-                    Err(e) => {
-                        if !silence {
-                            eprintln!("Error reading wordlist file {}: {}", wordlist_path, e);
-                        }
-                        return;
-                    }
+                        .collect();
+                    loaded = true;
                 }
-            } else {
-                GF_PATTERNS_PARAMS.iter().map(|s| s.to_string()).collect()
-            }
-        } else if let Some(wordlist_path) = &args.mining_dict_word {
-            match std::fs::read_to_string(wordlist_path) {
-                Ok(content) => content
-                    .lines()
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect(),
                 Err(e) => {
                     if !silence {
                         eprintln!("Error reading wordlist file {}: {}", wordlist_path, e);
@@ -171,26 +167,12 @@ pub async fn probe_dictionary_params(
                     return;
                 }
             }
-        } else {
-            GF_PATTERNS_PARAMS.iter().map(|s| s.to_string()).collect()
         }
-    } else if let Some(wordlist_path) = &args.mining_dict_word {
-        match std::fs::read_to_string(wordlist_path) {
-            Ok(content) => content
-                .lines()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect(),
-            Err(e) => {
-                if !silence {
-                    eprintln!("Error reading wordlist file {}: {}", wordlist_path, e);
-                }
-                return;
-            }
-        }
-    } else {
-        GF_PATTERNS_PARAMS.iter().map(|s| s.to_string()).collect()
-    };
+    }
+
+    if !loaded {
+        params = GF_PATTERNS_PARAMS.iter().map(|s| s.to_string()).collect();
+    }
 
     if let Some(ref pb) = pb {
         pb.set_length(params.len() as u64);
@@ -244,7 +226,7 @@ pub async fn probe_dictionary_params(
 
             let data = target.data.clone();
             let method = target.method.clone();
-            let target_clone = target.clone();
+            let target_clone = arc_target.clone();
             let delay = target.delay;
             let semaphore_clone = semaphore.clone();
             let param_name = param.clone();
@@ -365,6 +347,7 @@ pub async fn probe_body_params(
     semaphore: Arc<Semaphore>,
     pb: Option<ProgressBar>,
 ) {
+    let arc_target = Arc::new(target.clone());
     let silence = args.silence;
     let client = target.build_client().unwrap_or_else(|_| Client::new());
 
@@ -421,7 +404,7 @@ pub async fn probe_body_params(
             let url = target.url.clone();
 
             let method = target.method.clone();
-            let target_clone = target.clone();
+            let target_clone = arc_target.clone();
             let delay = target.delay;
             let semaphore_clone = semaphore.clone();
             let param_name_cloned = param_name.clone();
@@ -551,6 +534,7 @@ pub async fn probe_response_id_params(
     semaphore: Arc<Semaphore>,
     pb: Option<ProgressBar>,
 ) {
+    let arc_target = Arc::new(target.clone());
     let silence = args.silence;
     let client = target.build_client().unwrap_or_else(|_| Client::new());
 
@@ -612,7 +596,7 @@ pub async fn probe_response_id_params(
 
                 let data = target.data.clone();
                 let method = target.method.clone();
-                let target_clone = target.clone();
+                let target_clone = arc_target.clone();
                 let delay = target.delay;
                 // removed unused variable reflection_params_clone
                 let semaphore_clone = semaphore.clone();
@@ -739,6 +723,7 @@ pub async fn probe_json_body_params(
     semaphore: Arc<Semaphore>,
     pb: Option<ProgressBar>,
 ) {
+    let arc_target = Arc::new(target.clone());
     let silence = args.silence;
     let client = target.build_client().unwrap_or_else(|_| Client::new());
 
@@ -790,7 +775,7 @@ pub async fn probe_json_body_params(
         let url = target.url.clone();
 
         let method = target.method.clone();
-        let target_clone = target.clone();
+        let target_clone = arc_target.clone();
         let delay = target.delay;
         let semaphore_clone = semaphore.clone();
         let param_name_cloned = param_name.clone();

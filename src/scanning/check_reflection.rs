@@ -2,8 +2,11 @@ use crate::parameter_analysis::Param;
 use crate::target_parser::Target;
 use regex::Regex;
 use reqwest::Client;
+use std::sync::OnceLock;
 use std::sync::atomic::Ordering;
 use tokio::time::{Duration, sleep};
+
+static ENTITY_REGEX: OnceLock<Regex> = OnceLock::new();
 
 /// Decode a subset of HTML entities (numeric dec & hex) for reflection normalization.
 /// Examples:
@@ -12,7 +15,8 @@ use tokio::time::{Duration, sleep};
 fn decode_html_entities(input: &str) -> String {
     // Match patterns like &#xHH; or &#xHHHH; or &#DDDD; (hex 'x' is case-insensitive)
     // We purposely limit to reasonable length to avoid catastrophic replacements.
-    let re = Regex::new(r"&#([xX][0-9a-fA-F]{2,6}|[0-9]{2,6});").unwrap();
+    let re =
+        ENTITY_REGEX.get_or_init(|| Regex::new(r"&#([xX][0-9a-fA-F]{2,6}|[0-9]{2,6});").unwrap());
     let mut out = String::with_capacity(input.len());
     let mut last = 0;
     for m in re.find_iter(input) {
@@ -47,40 +51,86 @@ fn decode_html_entities(input: &str) -> String {
     named
 }
 
-/// Generate normalization variants of a response body to test for reflected payload.
-/// Order: raw, html-decoded, url-decoded(html-decoded(raw)) for broader coverage.
-fn normalization_variants(raw: &str) -> Vec<String> {
-    let html_dec = decode_html_entities(raw);
-    let url_dec_once = urlencoding::decode(raw)
-        .map(|s| s.to_string())
-        .unwrap_or_else(|_| raw.to_string());
-    let url_dec_html_dec = urlencoding::decode(&html_dec)
-        .map(|s| s.to_string())
-        .unwrap_or(html_dec.clone());
-    // Deduplicate while preserving order
-    let mut seen = std::collections::HashSet::new();
-    let mut out = Vec::new();
-    for v in [raw.to_string(), html_dec, url_dec_once, url_dec_html_dec] {
-        if seen.insert(v.clone()) {
-            out.push(v);
-        }
-    }
-    out
-}
-
 /// Determine if payload is reflected in any normalization variant.
 fn is_payload_reflected(resp_text: &str, payload: &str) -> bool {
     // Direct match first (fast path)
     if resp_text.contains(payload) {
         return true;
     }
-    // Try normalization variants
-    for variant in normalization_variants(resp_text) {
-        if variant.contains(payload) {
+
+    let html_dec = decode_html_entities(resp_text);
+    if html_dec.contains(payload) {
+        return true;
+    }
+
+    // Check URL decoded version of raw
+    if let Ok(url_dec) = urlencoding::decode(resp_text) {
+        if url_dec != resp_text && url_dec.contains(payload) {
             return true;
         }
     }
+
+    // Check URL decoded version of HTML decoded
+    if let Ok(url_dec_html) = urlencoding::decode(&html_dec) {
+        if url_dec_html != html_dec && url_dec_html.contains(payload) {
+            return true;
+        }
+    }
+
     false
+}
+
+async fn fetch_injection_response(
+    target: &Target,
+    param: &Param,
+    payload: &str,
+    args: &crate::cmd::scan::ScanArgs,
+) -> Option<String> {
+    if args.skip_xss_scanning {
+        return None;
+    }
+    let client = target.build_client().unwrap_or_else(|_| Client::new());
+
+    // Build URL or body based on param location for injection (refactored to shared helper)
+    let inject_url = crate::scanning::url_inject::build_injected_url(&target.url, param, payload);
+
+    // Send injection request (centralized builder)
+    let method = target.method.parse().unwrap_or(reqwest::Method::GET);
+    let parsed_url = url::Url::parse(&inject_url).unwrap_or_else(|_| target.url.clone());
+    let inject_request =
+        crate::utils::build_request(&client, target, method, parsed_url, target.data.clone());
+
+    // Send the injection request
+    let inject_resp = inject_request.send().await;
+    crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+
+    if target.delay > 0 {
+        sleep(Duration::from_millis(target.delay)).await;
+    }
+
+    // For Stored XSS, check reflection on sxss_url
+    if args.sxss {
+        if let Some(sxss_url_str) = &args.sxss_url {
+            if let Ok(sxss_url) = url::Url::parse(sxss_url_str) {
+                let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
+                let check_request =
+                    crate::utils::build_request(&client, target, method, sxss_url, None);
+
+                crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+                if let Ok(resp) = check_request.send().await {
+                    return resp.text().await.ok();
+                }
+            }
+        }
+        None
+    } else {
+        // Normal reflection check
+        if let Ok(resp) = inject_resp {
+            resp.text().await.ok()
+        } else {
+            None
+        }
+    }
 }
 
 pub async fn check_reflection(
@@ -89,58 +139,11 @@ pub async fn check_reflection(
     payload: &str,
     args: &crate::cmd::scan::ScanArgs,
 ) -> bool {
-    if args.skip_xss_scanning {
-        return false;
-    }
-    let client = target.build_client().unwrap_or_else(|_| Client::new());
-
-    // Build URL or body based on param location for injection (refactored to shared helper)
-    let inject_url = crate::scanning::url_inject::build_injected_url(&target.url, param, payload);
-
-    // Send injection request (centralized builder)
-    let method = target.method.parse().unwrap_or(reqwest::Method::GET);
-    let parsed_url = url::Url::parse(&inject_url).unwrap_or_else(|_| target.url.clone());
-    let inject_request =
-        crate::utils::build_request(&client, target, method, parsed_url, target.data.clone());
-
-    // Send the injection request
-    let inject_resp = inject_request.send().await;
-    crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
-
-    if target.delay > 0 {
-        sleep(Duration::from_millis(target.delay)).await;
-    }
-
-    // For Stored XSS, check reflection on sxss_url
-    if args.sxss {
-        if let Some(sxss_url_str) = &args.sxss_url {
-            if let Ok(sxss_url) = url::Url::parse(sxss_url_str) {
-                let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
-                let check_request =
-                    crate::utils::build_request(&client, target, method, sxss_url, None);
-
-                crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
-                if let Ok(resp) = check_request.send().await {
-                    if let Ok(text) = resp.text().await {
-                        if is_payload_reflected(&text, payload) {
-                            return true;
-                        }
-                    }
-                }
-            }
-        }
+    if let Some(text) = fetch_injection_response(target, param, payload, args).await {
+        is_payload_reflected(&text, payload)
     } else {
-        // Normal reflection check
-        if let Ok(resp) = inject_resp {
-            if let Ok(text) = resp.text().await {
-                if is_payload_reflected(&text, payload) {
-                    return true;
-                }
-            }
-        }
+        false
     }
-
-    false
 }
 
 pub async fn check_reflection_with_response(
@@ -149,62 +152,12 @@ pub async fn check_reflection_with_response(
     payload: &str,
     args: &crate::cmd::scan::ScanArgs,
 ) -> (bool, Option<String>) {
-    if args.skip_xss_scanning {
-        return (false, None);
-    }
-    let client = target.build_client().unwrap_or_else(|_| Client::new());
-
-    // Build URL or body based on param location for injection (refactored to shared helper)
-    let inject_url = crate::scanning::url_inject::build_injected_url(&target.url, param, payload);
-
-    // Send injection request (centralized builder)
-    let method = target.method.parse().unwrap_or(reqwest::Method::GET);
-    let parsed_url = url::Url::parse(&inject_url).unwrap_or_else(|_| target.url.clone());
-    let inject_request =
-        crate::utils::build_request(&client, target, method, parsed_url, target.data.clone());
-
-    // Send the injection request
-    let inject_resp = inject_request.send().await;
-    crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
-
-    if target.delay > 0 {
-        sleep(Duration::from_millis(target.delay)).await;
-    }
-
-    // For Stored XSS, check reflection on sxss_url
-    if args.sxss {
-        if let Some(sxss_url_str) = &args.sxss_url {
-            if let Ok(sxss_url) = url::Url::parse(sxss_url_str) {
-                let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
-                let check_request =
-                    crate::utils::build_request(&client, target, method, sxss_url, None);
-
-                crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
-                if let Ok(resp) = check_request.send().await {
-                    if let Ok(text) = resp.text().await {
-                        if is_payload_reflected(&text, payload) {
-                            return (true, Some(text));
-                        } else {
-                            return (false, Some(text));
-                        }
-                    }
-                }
-            }
-        }
+    if let Some(text) = fetch_injection_response(target, param, payload, args).await {
+        let reflected = is_payload_reflected(&text, payload);
+        (reflected, Some(text))
     } else {
-        // Normal reflection check
-        if let Ok(resp) = inject_resp {
-            if let Ok(text) = resp.text().await {
-                if is_payload_reflected(&text, payload) {
-                    return (true, Some(text));
-                } else {
-                    return (false, Some(text));
-                }
-            }
-        }
+        (false, None)
     }
-
-    (false, None)
 }
 
 #[cfg(test)]
@@ -365,14 +318,6 @@ mod tests {
         assert!(d.contains("&"));
         assert!(d.contains("\""));
         assert!(d.contains("'"));
-    }
-
-    #[test]
-    fn test_normalization_variants_dedup() {
-        let raw = "Hello";
-        let vars = normalization_variants(raw);
-        assert!(!vars.is_empty());
-        assert_eq!(vars.iter().filter(|v| *v == "Hello").count(), 1);
     }
 
     #[test]

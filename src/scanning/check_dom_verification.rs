@@ -2,9 +2,11 @@ use crate::parameter_analysis::Param;
 use crate::target_parser::Target;
 use reqwest::Client;
 use scraper;
+use std::sync::OnceLock;
 
 use tokio::time::{Duration, sleep};
-use url::form_urlencoded;
+
+static DALFOX_SELECTOR: OnceLock<scraper::Selector> = OnceLock::new();
 
 pub async fn check_dom_verification(
     target: &Target,
@@ -18,61 +20,9 @@ pub async fn check_dom_verification(
     let client = target.build_client().unwrap_or_else(|_| Client::new());
 
     // Build URL or body based on param location for injection
-    let inject_url = match param.location {
-        crate::parameter_analysis::Location::Query => {
-            let mut pairs: Vec<(String, String)> = target
-                .url
-                .query_pairs()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect();
-            let mut found = false;
-            for pair in &mut pairs {
-                if pair.0 == param.name {
-                    pair.1 = payload.to_string();
-                    found = true;
-                    break;
-                }
-            }
-            if !found {
-                pairs.push((param.name.clone(), payload.to_string()));
-            }
-            let query = form_urlencoded::Serializer::new(String::new())
-                .extend_pairs(&pairs)
-                .finish();
-            let mut url = target.url.clone();
-            url.set_query(Some(&query));
-            url
-        }
-        crate::parameter_analysis::Location::Path => {
-            // Inject into a specific path segment (param.name pattern: path_segment_{idx})
-            let mut url = target.url.clone();
-            if let Some(idx_str) = param.name.strip_prefix("path_segment_") {
-                if let Ok(idx) = idx_str.parse::<usize>() {
-                    let original_path = url.path();
-                    let mut segments: Vec<&str> = if original_path == "/" {
-                        Vec::new()
-                    } else {
-                        original_path
-                            .trim_matches('/')
-                            .split('/')
-                            .filter(|s| !s.is_empty())
-                            .collect()
-                    };
-                    if idx < segments.len() {
-                        segments[idx] = payload;
-                        let new_path = if segments.is_empty() {
-                            "/".to_string()
-                        } else {
-                            format!("/{}", segments.join("/"))
-                        };
-                        url.set_path(&new_path);
-                    }
-                }
-            }
-            url
-        }
-        _ => target.url.clone(),
-    };
+    let inject_url_str =
+        crate::scanning::url_inject::build_injected_url(&target.url, param, payload);
+    let inject_url = url::Url::parse(&inject_url_str).unwrap_or_else(|_| target.url.clone());
 
     // Send injection request (centralized builder)
     let method = target.method.parse().unwrap_or(reqwest::Method::GET);
@@ -98,10 +48,13 @@ pub async fn check_dom_verification(
                 crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if let Ok(resp) = check_request.send().await {
                     if let Ok(text) = resp.text().await {
-                        let document = scraper::Html::parse_document(&text);
-                        let selector = scraper::Selector::parse(".dalfox").unwrap();
-                        if document.select(&selector).next().is_some() {
-                            return (true, Some(text));
+                        if text.contains("dalfox") {
+                            let document = scraper::Html::parse_document(&text);
+                            let selector = DALFOX_SELECTOR
+                                .get_or_init(|| scraper::Selector::parse(".dalfox").unwrap());
+                            if document.select(selector).next().is_some() {
+                                return (true, Some(text));
+                            }
                         }
                     }
                 }
@@ -111,10 +64,13 @@ pub async fn check_dom_verification(
         // Normal DOM verification
         if let Ok(resp) = inject_resp {
             if let Ok(text) = resp.text().await {
-                let document = scraper::Html::parse_document(&text);
-                let selector = scraper::Selector::parse(".dalfox").unwrap();
-                if document.select(&selector).next().is_some() {
-                    return (true, Some(text));
+                if text.contains("dalfox") {
+                    let document = scraper::Html::parse_document(&text);
+                    let selector = DALFOX_SELECTOR
+                        .get_or_init(|| scraper::Selector::parse(".dalfox").unwrap());
+                    if document.select(selector).next().is_some() {
+                        return (true, Some(text));
+                    }
                 }
             }
         }

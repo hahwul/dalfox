@@ -33,6 +33,7 @@ pub async fn check_query_discovery(
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
 ) {
+    let arc_target = Arc::new(target.clone());
     let client = target.build_client().unwrap_or_else(|_| Client::new());
     let test_value = "dalfox";
 
@@ -59,7 +60,7 @@ pub async fn check_query_discovery(
         let semaphore_clone = semaphore.clone();
         let name = name.to_string();
         let value = value.to_string();
-        let target_clone = target.clone();
+        let target_clone = arc_target.clone();
 
         // Spawn a task that returns Option<Param> instead of locking per discovery.
         let handle = tokio::spawn(async move {
@@ -113,6 +114,7 @@ pub async fn check_header_discovery(
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
 ) {
+    let arc_target = Arc::new(target.clone());
     let client = target.build_client().unwrap_or_else(|_| Client::new());
     let test_value = "dalfox";
 
@@ -130,7 +132,7 @@ pub async fn check_header_discovery(
         let semaphore_clone = semaphore.clone();
         let header_name = header_name.clone();
         let header_value = header_value.clone();
-        let target_clone = target.clone();
+        let target_clone = arc_target.clone();
 
         // Spawn task returning Option<Param> to batch reduce mutex contention
         let handle = tokio::spawn(async move {
@@ -309,6 +311,7 @@ pub async fn check_path_discovery(
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
 ) {
+    let arc_target = Arc::new(target.clone());
     let test_value = "dalfox";
     let path = target.url.path();
     // Split non-empty segments
@@ -339,7 +342,7 @@ pub async fn check_path_discovery(
         let _cookies = target.cookies.clone();
         let data = target.data.clone();
         let method = target.method.clone();
-        let target_clone = target.clone();
+        let target_clone = arc_target.clone();
         let delay = target.delay;
         let semaphore_clone = semaphore.clone();
         let param_name = format!("path_segment_{}", idx);
@@ -408,6 +411,7 @@ pub async fn check_cookie_discovery(
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
 ) {
+    let arc_target = Arc::new(target.clone());
     let client = target.build_client().unwrap_or_else(|_| Client::new());
     let test_value = "dalfox";
 
@@ -425,7 +429,7 @@ pub async fn check_cookie_discovery(
         let semaphore_clone = semaphore.clone();
         let cookie_name = cookie_name.clone();
         let cookie_value = cookie_value.clone();
-        let target_clone = target.clone();
+        let target_clone = arc_target.clone();
 
         // Spawn task returning Option<Param> for batched collection
         let handle = tokio::spawn(async move {
@@ -434,14 +438,9 @@ pub async fn check_cookie_discovery(
             // Compose cookie header overriding the probed cookie while preserving others
             let others =
                 crate::utils::compose_cookie_header_excluding(&cookies, Some(&cookie_name));
-            let cookie_header = if let Some(s) = others {
-                if s.is_empty() {
-                    format!("{}={}", cookie_name, test_value)
-                } else {
-                    format!("{}; {}={}", s, cookie_name, test_value)
-                }
-            } else {
-                format!("{}={}", cookie_name, test_value)
+            let cookie_header = match others {
+                Some(s) => format!("{}; {}={}", s, cookie_name, test_value),
+                None => format!("{}={}", cookie_name, test_value),
             };
             let request = crate::utils::build_request_with_cookie(
                 &client_clone,

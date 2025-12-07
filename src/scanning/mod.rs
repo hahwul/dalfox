@@ -203,6 +203,7 @@ pub async fn run_scanning(
     if args.skip_xss_scanning {
         return;
     }
+    let arc_target = Arc::new(target.clone());
     let semaphore = Arc::new(Semaphore::new(if args.sxss { 1 } else { target.workers }));
     let limit = args.limit;
 
@@ -268,7 +269,7 @@ pub async fn run_scanning(
         let args_clone = args.clone();
         let semaphore_clone = semaphore.clone();
         let param_clone = param.clone();
-        let target_clone = (*target).clone();
+        let target_clone = arc_target.clone();
         let reflection_payloads_clone = reflection_payloads.clone();
         let dom_payloads_clone = dom_payloads.clone();
         let results_clone = results.clone();
