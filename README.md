@@ -60,7 +60,7 @@ Check the [Usage](https://dalfox.hahwul.com/page/usage/) and [Running](https://d
 ## Contributing
 if you want to contribute to this project, please see [CONTRIBUTING.md](https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md) and Pull-Request with cool your contents.
 
-[![](/CONTRIBUTORS.svg)](https://github.com/hahwul/dalfox/graphs/contributors)
+[![](docs/static/images/CONTRIBUTORS.svg)](https://github.com/hahwul/dalfox/graphs/contributors)
 
 ## About the Name
 As for the name, Dal([달](https://en.wiktionary.org/wiki/달)) is the Korean word for "moon," while "Fox" stands for "Finder Of XSS" or 🦊
