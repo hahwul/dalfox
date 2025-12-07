@@ -31,19 +31,7 @@ use crate::target_parser::Target;
 /// Compose a single Cookie header string from pairs.
 /// Returns None if no cookies are provided.
 pub fn compose_cookie_header(cookies: &[(String, String)]) -> Option<String> {
-    if cookies.is_empty() {
-        return None;
-    }
-    let mut s = String::new();
-    for (i, (k, v)) in cookies.iter().enumerate() {
-        if i > 0 {
-            s.push_str("; ");
-        }
-        s.push_str(k);
-        s.push('=');
-        s.push_str(v);
-    }
-    if s.is_empty() { None } else { Some(s) }
+    compose_cookie_header_excluding(cookies, None)
 }
 
 /// Compose a Cookie header excluding a specific cookie name (case-sensitive match on name).
@@ -52,14 +40,35 @@ pub fn compose_cookie_header_excluding(
     cookies: &[(String, String)],
     exclude_name: Option<&str>,
 ) -> Option<String> {
-    match exclude_name {
-        None => compose_cookie_header(cookies),
-        Some(name) => {
-            let filtered: Vec<(String, String)> =
-                cookies.iter().filter(|(k, _)| k != name).cloned().collect();
-            compose_cookie_header(&filtered)
-        }
+    if cookies.is_empty() {
+        return None;
     }
+
+    // Estimate capacity to avoid reallocations
+    let estimated_len = cookies
+        .iter()
+        .map(|(k, v)| k.len() + v.len() + 2)
+        .sum::<usize>();
+    let mut s = String::with_capacity(estimated_len);
+
+    let mut first = true;
+    for (k, v) in cookies {
+        if let Some(name) = exclude_name {
+            if k == name {
+                continue;
+            }
+        }
+
+        if !first {
+            s.push_str("; ");
+        }
+        s.push_str(k);
+        s.push('=');
+        s.push_str(v);
+        first = false;
+    }
+
+    if s.is_empty() { None } else { Some(s) }
 }
 
 /// Case-insensitive check if a header exists in a (name, value) vector.

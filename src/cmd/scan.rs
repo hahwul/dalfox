@@ -135,17 +135,15 @@ fn generate_poc(result: &crate::scanning::result::Result, poc_type: &str) -> Str
 
 fn extract_context(response: &str, payload: &str) -> Option<(usize, String)> {
     for (line_num, line) in response.lines().enumerate() {
-        if line.contains(payload) {
-            let mut context = line.to_string();
-            if context.len() > 40 {
-                if let Some(pos) = line.find(payload) {
-                    let start = pos.saturating_sub(20);
-                    let end = (pos + payload.len() + 20).min(line.len());
-                    context = line[start..end].to_string();
-                } else {
-                    context = context.chars().take(40).collect();
-                }
-            }
+        if let Some(pos) = line.find(payload) {
+            let context = if line.len() > 40 {
+                let start = pos.saturating_sub(20);
+                let end = (pos + payload.len() + 20).min(line.len());
+                // Use get to avoid panic on multibyte boundaries
+                line.get(start..end).unwrap_or(line).to_string()
+            } else {
+                line.to_string()
+            };
             return Some((line_num + 1, context));
         }
     }

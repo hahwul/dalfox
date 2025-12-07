@@ -9,16 +9,16 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 pub fn apply_encoders_to_payloads(base_payloads: &[String], encoders: &[String]) -> Vec<String> {
     // Dedup base first while preserving order
     let mut seen = std::collections::HashSet::new();
-    let mut bases: Vec<String> = Vec::new();
+    let mut bases: Vec<&String> = Vec::with_capacity(base_payloads.len());
     for p in base_payloads {
-        if seen.insert(p.clone()) {
-            bases.push(p.clone());
+        if seen.insert(p) {
+            bases.push(p);
         }
     }
 
     // If "none" is selected, only originals should be used
     if encoders.iter().any(|e| e == "none") {
-        return bases;
+        return bases.into_iter().cloned().collect();
     }
 
     let mut out: Vec<String> = Vec::new();
@@ -27,24 +27,29 @@ pub fn apply_encoders_to_payloads(base_payloads: &[String], encoders: &[String])
     // Expansion order
     let prio = ["url", "html", "2url", "base64"];
 
+    // Pre-calculate active encoders
+    let active_encoders: Vec<&str> = prio
+        .iter()
+        .filter(|&&e| encoders.iter().any(|x| x == e))
+        .cloned()
+        .collect();
+
     for p in bases {
         // Always include original first
         if out_seen.insert(p.clone()) {
             out.push(p.clone());
         }
         // Then encoder variants in fixed order gated by encoders set
-        for e in prio {
-            if encoders.iter().any(|x| x == e) {
-                let v = match e {
-                    "url" => url_encode(&p),
-                    "html" => html_entity_encode(&p),
-                    "2url" => double_url_encode(&p),
-                    "base64" => base64_encode(&p),
-                    _ => continue,
-                };
-                if out_seen.insert(v.clone()) {
-                    out.push(v);
-                }
+        for &e in &active_encoders {
+            let v = match e {
+                "url" => url_encode(p),
+                "html" => html_entity_encode(p),
+                "2url" => double_url_encode(p),
+                "base64" => base64_encode(p),
+                _ => continue,
+            };
+            if out_seen.insert(v.clone()) {
+                out.push(v);
             }
         }
     }
@@ -107,10 +112,12 @@ pub fn base64_encode(payload: &str) -> String {
 /// HTML entity-encodes the given payload string using hex entities.
 /// Example: "<" becomes "&#x003c;"
 pub fn html_entity_encode(payload: &str) -> String {
-    payload
-        .chars()
-        .map(|c| format!("&#x{:04x};", c as u32))
-        .collect()
+    use std::fmt::Write;
+    let mut out = String::with_capacity(payload.len() * 8);
+    for c in payload.chars() {
+        let _ = write!(out, "&#x{:04x};", c as u32);
+    }
+    out
 }
 
 /// Double URL-encodes the given payload string.
