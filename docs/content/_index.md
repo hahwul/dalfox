@@ -11,6 +11,10 @@ cta_buttons = [
     { text = "View on GitHub", url = "https://github.com/hahwul/dalfox", style = "secondary" },
 ]
 
+[extra.features_section]
+title = "Essential Features"
+description = "Discover Dalfox's essential features for comprehensive attack surface detection and analysis."
+
 [[extra.features]]
 title = "Multiple Scanning Modes"
 desc = "URL, File, Pipe, Raw HTTP, and Server modes for flexible testing workflows and integration with your tools."
