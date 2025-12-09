@@ -338,9 +338,9 @@ pub async fn run_scanning(
                                 vuln.sink
                             ),
                             "CWE-79".to_string(),
-                            "High".to_string(),
+                            "Medium".to_string(),
                             0,
-                            description,
+                            format!("{} (검증 필요)", description),
                         );
                         ast_result.request = Some(build_request_text(
                             &target_clone,
@@ -429,9 +429,9 @@ pub async fn run_scanning(
                                     vuln.sink
                                 ),
                                 "CWE-79".to_string(),
-                                "High".to_string(),
+                                "Medium".to_string(),
                                 0,
-                                description,
+                                format!("{} (검증 필요)", description),
                             );
                             ast_result.request = Some(build_request_text(
                                 &target_clone,

@@ -1156,9 +1156,9 @@ pub async fn run_scan(args: &ScanArgs) {
                                         target.url.as_str(), vuln.line, vuln.column,
                                         description, vuln.source, vuln.sink),
                                     "CWE-79".to_string(),
-                                    "High".to_string(),
+                                    "Medium".to_string(),
                                     0,
-                                    description,
+                                    format!("{} (검증 필요)", description),
                                 );
                                 // Add to shared results
                                 results_clone.lock().await.push(ast_result);
