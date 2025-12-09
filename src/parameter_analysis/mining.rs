@@ -75,12 +75,33 @@ pub fn detect_injection_context(text: &str) -> InjectionContext {
     // Parse HTML and locate marker via element text/attributes/script
     let document = scraper::Html::parse_document(text);
 
+    // Heuristic to infer surrounding quote delimiter around the first marker
+    fn infer_quote_delimiter(text: &str, marker: &str) -> Option<DelimiterType> {
+        let pos = text.find(marker)?;
+        let before = &text[..pos];
+        let after = &text[pos + marker.len()..];
+        let prev_dq = before.rfind('"');
+        let prev_sq = before.rfind('\'');
+        let (qch, _qpos) = match (prev_dq, prev_sq) {
+            (Some(dq), Some(sq)) => if dq > sq { ('"', dq) } else { ('\'', sq) },
+            (Some(dq), None) => ('"', dq),
+            (None, Some(sq)) => ('\'', sq),
+        (None, None) => return None,
+        };
+        let next = after.find(qch);
+        if next.is_some() {
+            return Some(match qch { '"' => DelimiterType::DoubleQuote, '\'' => DelimiterType::SingleQuote, _ => return None });
+        }
+        None
+    }
+
     // 1) JavaScript context: marker appears in any <script> text
     if let Ok(sel) = scraper::Selector::parse("script") {
         for el in document.select(&sel) {
             let s = el.text().collect::<Vec<_>>().join("");
             if s.contains(marker) {
-                return InjectionContext::Javascript(None);
+                let delim = infer_quote_delimiter(text, marker);
+                return InjectionContext::Javascript(delim);
             }
         }
     }
@@ -90,7 +111,8 @@ pub fn detect_injection_context(text: &str) -> InjectionContext {
         for el in document.select(&any) {
             for (_name, v) in el.value().attrs() {
                 if v.contains(marker) {
-                    return InjectionContext::Attribute(None);
+                    let delim = infer_quote_delimiter(text, marker);
+                    return InjectionContext::Attribute(delim);
                 }
             }
         }
