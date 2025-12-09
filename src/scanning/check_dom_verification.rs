@@ -48,10 +48,12 @@ pub async fn check_dom_verification(
                 crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if let Ok(resp) = check_request.send().await {
                     if let Ok(text) = resp.text().await {
-                        if text.contains("dalfox") {
+                        if text.contains(crate::scanning::markers::class_marker()) {
                             let document = scraper::Html::parse_document(&text);
-                            let selector = DALFOX_SELECTOR
-                                .get_or_init(|| scraper::Selector::parse(".dalfox").unwrap());
+                            let selector = DALFOX_SELECTOR.get_or_init(|| {
+                                let sel = format!(".{}", crate::scanning::markers::class_marker());
+                                scraper::Selector::parse(&sel).unwrap()
+                            });
                             if document.select(selector).next().is_some() {
                                 return (true, Some(text));
                             }
@@ -64,10 +66,12 @@ pub async fn check_dom_verification(
         // Normal DOM verification
         if let Ok(resp) = inject_resp {
             if let Ok(text) = resp.text().await {
-                if text.contains("dalfox") {
+                if text.contains(crate::scanning::markers::class_marker()) {
                     let document = scraper::Html::parse_document(&text);
-                    let selector = DALFOX_SELECTOR
-                        .get_or_init(|| scraper::Selector::parse(".dalfox").unwrap());
+                    let selector = DALFOX_SELECTOR.get_or_init(|| {
+                        let sel = format!(".{}", crate::scanning::markers::class_marker());
+                        scraper::Selector::parse(&sel).unwrap()
+                    });
                     if document.select(selector).next().is_some() {
                         return (true, Some(text));
                     }

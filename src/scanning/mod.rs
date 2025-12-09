@@ -6,6 +6,7 @@ pub mod result;
 pub mod url_inject;
 pub mod xss_blind;
 pub mod xss_common;
+pub mod markers;
 
 use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::Param;
@@ -285,7 +286,7 @@ pub async fn run_scanning(
 
             // Stage 0: fast probe to avoid large payload blasts on non-reflective params
             // Use a minimal alphanumeric token to check generic reflection across contexts.
-            let probe_payloads: [&str; 1] = ["dalfox"]; // small, context-agnostic
+            let probe_payloads: [&str; 1] = [crate::scanning::markers::open_marker()]; // small, context-agnostic
             let mut probe_reflected = false;
             let mut probe_response_text: Option<String> = None;
             for pp in probe_payloads {
@@ -482,7 +483,7 @@ pub async fn run_scanning(
                                 reflection_payload.clone(),
                                 format!("Reflected XSS detected for param {}", param_clone.name),
                                 "CWE-79".to_string(),
-                                "High".to_string(),
+                                "Info".to_string(),
                                 606,
                                 format!(
                                     "[R] Triggered XSS Payload (reflected): {}={}",

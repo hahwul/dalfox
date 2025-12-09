@@ -91,9 +91,10 @@ mod tests {
             generate_dynamic_payloads(&InjectionContext::Html(Some(DelimiterType::Comment)));
         assert!(!payloads.is_empty());
         assert!(payloads.iter().any(|p| p.starts_with("-->")));
+        let cls = crate::scanning::markers::class_marker().to_lowercase();
         assert!(payloads.iter().any(|p| {
             p.to_lowercase()
-                .contains("<svg onload=alert(1) class=dalfox>")
+                .contains(&format!("<svg onload=alert(1) class={}>", cls))
         }));
     }
 
@@ -116,9 +117,13 @@ mod tests {
         let payloads = generate_dynamic_payloads(&InjectionContext::Attribute(None));
         assert!(!payloads.is_empty());
         assert!(payloads.iter().any(|p| p.contains("onerror=alert(1)")));
+        let cls = crate::scanning::markers::class_marker().to_lowercase();
         assert!(payloads.iter().any(|p| {
             p.to_lowercase()
-                .contains("<img src=x onerror=alert(1) class=dalfox>")
+                .contains(&format!(
+                    "<img src=x onerror=alert(1) class={}>",
+                    cls
+                ))
         }));
     }
 
@@ -201,11 +206,10 @@ mod tests {
     fn test_generate_dynamic_payloads_html() {
         let payloads = generate_dynamic_payloads(&InjectionContext::Html(None));
         assert!(!payloads.is_empty());
-        assert!(
-            payloads
-                .iter()
-                .any(|p| p.to_lowercase() == "<img src=x onerror=alert(1) class=dalfox>")
-        );
+        let cls = crate::scanning::markers::class_marker().to_lowercase();
+        assert!(payloads.iter().any(|p| {
+            p.to_lowercase() == format!("<img src=x onerror=alert(1) class={}>", cls)
+        }));
     }
 
     #[test]
@@ -261,11 +265,10 @@ mod tests {
         let payloads = get_dynamic_payloads(&context, &args).unwrap();
         assert!(!payloads.is_empty());
         // Check that original payloads are included
-        assert!(
-            payloads
-                .iter()
-                .any(|p| p.to_lowercase() == "<img src=x onerror=alert(1) class=dalfox>")
-        );
+        let cls = crate::scanning::markers::class_marker().to_lowercase();
+        assert!(payloads.iter().any(|p| {
+            p.to_lowercase() == format!("<img src=x onerror=alert(1) class={}>", cls)
+        }));
         // Check encoded versions
         assert!(payloads.iter().any(|p| p.contains("%3C")));
         assert!(payloads.iter().any(|p| p.contains("&#x")));

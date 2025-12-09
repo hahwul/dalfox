@@ -58,7 +58,7 @@ impl MiningSampleStats {
 }
 
 pub fn detect_injection_context(text: &str) -> InjectionContext {
-    let dalfox_pos = match text.find("dalfox") {
+    let dalfox_pos = match text.find(crate::scanning::markers::open_marker()) {
         Some(pos) => pos,
         None => return InjectionContext::Html(None),
     };
@@ -68,11 +68,11 @@ pub fn detect_injection_context(text: &str) -> InjectionContext {
         if let Some(script_end) = text.find("</script>") {
             if script_start < dalfox_pos && dalfox_pos < script_end {
                 // Check for delimiter type in JavaScript
-                if text.contains("\"dalfox\"") {
+                if text.contains(&format!("\"{}\"", crate::scanning::markers::open_marker())) {
                     return InjectionContext::Javascript(Some(
                         crate::parameter_analysis::DelimiterType::DoubleQuote,
                     ));
-                } else if text.contains("'dalfox'") {
+                } else if text.contains(&format!("'{}'", crate::scanning::markers::open_marker())) {
                     return InjectionContext::Javascript(Some(
                         crate::parameter_analysis::DelimiterType::SingleQuote,
                     ));
@@ -94,23 +94,23 @@ pub fn detect_injection_context(text: &str) -> InjectionContext {
     }
 
     // Check for attribute context
-    if text.contains("=\"dalfox\"") {
+    if text.contains(&format!("=\"{}\"", crate::scanning::markers::open_marker())) {
         return InjectionContext::Attribute(Some(
             crate::parameter_analysis::DelimiterType::DoubleQuote,
         ));
-    } else if text.contains("='dalfox'") {
+    } else if text.contains(&format!("='{}'", crate::scanning::markers::open_marker())) {
         return InjectionContext::Attribute(Some(
             crate::parameter_analysis::DelimiterType::SingleQuote,
         ));
     }
 
     // Check for string contexts (fallback)
-    if text.contains("\"dalfox\"") {
+    if text.contains(&format!("\"{}\"", crate::scanning::markers::open_marker())) {
         return InjectionContext::Attribute(Some(
             crate::parameter_analysis::DelimiterType::DoubleQuote,
         ));
     }
-    if text.contains("'dalfox'") {
+    if text.contains(&format!("'{}'", crate::scanning::markers::open_marker())) {
         return InjectionContext::Attribute(Some(
             crate::parameter_analysis::DelimiterType::SingleQuote,
         ));
@@ -220,7 +220,8 @@ pub async fn probe_dictionary_params(
             }
 
             let mut url = target.url.clone();
-            url.query_pairs_mut().append_pair(&param, "dalfox");
+            url.query_pairs_mut()
+                .append_pair(&param, crate::scanning::markers::open_marker());
 
             let client_clone = client.clone();
 
@@ -247,7 +248,7 @@ pub async fn probe_dictionary_params(
                     if let Ok(text) = r.text().await {
                         let mut st = stats_clone.lock().await;
                         st.record_attempt();
-                        if text.contains("dalfox") {
+                        if text.contains(crate::scanning::markers::open_marker()) {
                             st.record_reflection();
                             if !st.collapsed {
                                 let context = detect_injection_context(&text);
@@ -255,7 +256,7 @@ pub async fn probe_dictionary_params(
                                     crate::parameter_analysis::classify_special_chars(&text);
                                 discovered = Some(Param {
                                     name: param_name.clone(),
-                                    value: "dalfox".to_string(),
+                                    value: crate::scanning::markers::open_marker().to_string(),
                                     location: crate::parameter_analysis::Location::Query,
                                     injection_context: Some(context),
                                     valid_specials: Some(valid),
@@ -330,7 +331,7 @@ pub async fn probe_dictionary_params(
         } else {
             guard.push(Param {
                 name: "any".to_string(),
-                value: "dalfox".to_string(),
+                value: crate::scanning::markers::open_marker().to_string(),
                 location: crate::parameter_analysis::Location::Query,
                 injection_context: Some(crate::parameter_analysis::InjectionContext::Html(None)),
                 valid_specials: None,
@@ -386,11 +387,11 @@ pub async fn probe_body_params(
                 continue;
             }
 
-            // Build mutated body with this param set to dalfox
+            // Build mutated body with this param set to marker
             let new_data = form_urlencoded::parse(data.as_bytes())
                 .map(|(k, v)| {
                     if k == param_name {
-                        (k, "dalfox".to_string())
+                        (k, crate::scanning::markers::open_marker().to_string())
                     } else {
                         (k, v.to_string())
                     }
@@ -430,7 +431,7 @@ pub async fn probe_body_params(
                     if let Ok(text) = r.text().await {
                         let mut st = stats_clone.lock().await;
                         st.record_attempt();
-                        if text.contains("dalfox") {
+                        if text.contains(crate::scanning::markers::open_marker()) {
                             st.record_reflection();
                             if !st.collapsed {
                                 let context = detect_injection_context(&text);
@@ -438,7 +439,7 @@ pub async fn probe_body_params(
                                     crate::parameter_analysis::classify_special_chars(&text);
                                 discovered = Some(Param {
                                     name: param_name_cloned.clone(),
-                                    value: "dalfox".to_string(),
+                                    value: crate::scanning::markers::open_marker().to_string(),
                                     location: Location::Body,
                                     injection_context: Some(context),
                                     valid_specials: Some(valid),
@@ -514,7 +515,7 @@ pub async fn probe_body_params(
             } else {
                 guard.push(Param {
                     name: "any".to_string(),
-                    value: "dalfox".to_string(),
+                    value: crate::scanning::markers::open_marker().to_string(),
                     location: Location::Body,
                     injection_context: Some(crate::parameter_analysis::InjectionContext::Html(
                         None,
@@ -622,7 +623,7 @@ pub async fn probe_response_id_params(
                         if let Ok(text) = resp.text().await {
                             let mut st = stats_clone.lock().await;
                             st.record_attempt();
-                            if text.contains("dalfox") {
+                            if text.contains(crate::scanning::markers::open_marker()) {
                                 st.record_reflection();
                                 if !st.collapsed {
                                     let context = detect_injection_context(&text);
@@ -631,7 +632,7 @@ pub async fn probe_response_id_params(
                                     // Store discovered Param for return (batched later)
                                     discovered = Some(Param {
                                         name: param.clone(),
-                                        value: "dalfox".to_string(),
+                                        value: crate::scanning::markers::open_marker().to_string(),
                                         location: crate::parameter_analysis::Location::Query,
                                         injection_context: Some(context),
                                         valid_specials: Some(valid),
@@ -702,7 +703,7 @@ pub async fn probe_response_id_params(
                 } else {
                     guard.push(Param {
                         name: "any".to_string(),
-                        value: "dalfox".to_string(),
+                        value: crate::scanning::markers::open_marker().to_string(),
                         location: crate::parameter_analysis::Location::Query,
                         injection_context: Some(crate::parameter_analysis::InjectionContext::Html(
                             None,
@@ -786,23 +787,33 @@ pub async fn probe_json_body_params(
         let handle = tokio::spawn(async move {
             let permit = semaphore_clone.acquire().await.unwrap();
 
-            // Build mutated JSON with this key set to "dalfox"
+            // Build mutated JSON with this key set to marker
             let mut root = base_json_clone;
             if let Some(map) = root.as_object_mut() {
                 map.insert(
                     param_name_cloned.clone(),
-                    serde_json::Value::String("dalfox".to_string()),
+                    serde_json::Value::String(
+                        crate::scanning::markers::open_marker().to_string(),
+                    ),
                 );
             } else {
                 let mut map = serde_json::Map::new();
                 map.insert(
                     param_name_cloned.clone(),
-                    serde_json::Value::String("dalfox".to_string()),
+                    serde_json::Value::String(
+                        crate::scanning::markers::open_marker().to_string(),
+                    ),
                 );
                 root = serde_json::Value::Object(map);
             }
             let body = serde_json::to_string(&root)
-                .unwrap_or_else(|_| format!("{{\"{}\":\"dalfox\"}}", param_name_cloned));
+                .unwrap_or_else(|_| {
+                    format!(
+                        "{{\"{}\":\"{}\"}}",
+                        param_name_cloned,
+                        crate::scanning::markers::open_marker()
+                    )
+                });
 
             let m = method.parse().unwrap_or(reqwest::Method::POST);
             let base =
@@ -818,7 +829,7 @@ pub async fn probe_json_body_params(
                 if let Ok(text) = r.text().await {
                     let mut st = stats_clone.lock().await;
                     st.record_attempt();
-                    if text.contains("dalfox") {
+                    if text.contains(crate::scanning::markers::open_marker()) {
                         st.record_reflection();
                         if !st.collapsed {
                             let context = detect_injection_context(&text);
@@ -826,7 +837,7 @@ pub async fn probe_json_body_params(
                                 crate::parameter_analysis::classify_special_chars(&text);
                             discovered = Some(Param {
                                 name: param_name_cloned.clone(),
-                                value: "dalfox".to_string(),
+                                value: crate::scanning::markers::open_marker().to_string(),
                                 location: Location::JsonBody,
                                 injection_context: Some(context),
                                 valid_specials: Some(valid),
@@ -899,7 +910,7 @@ pub async fn probe_json_body_params(
         } else {
             guard.push(Param {
                 name: "any".to_string(),
-                value: "dalfox".to_string(),
+                value: crate::scanning::markers::open_marker().to_string(),
                 location: Location::JsonBody,
                 injection_context: Some(crate::parameter_analysis::InjectionContext::Html(None)),
                 valid_specials: None,
