@@ -8,6 +8,14 @@ use tokio::time::{Duration, sleep};
 
 static ENTITY_REGEX: OnceLock<Regex> = OnceLock::new();
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReflectionKind {
+    Raw,
+    HtmlEntityDecoded,
+    UrlDecoded,
+    HtmlThenUrlDecoded,
+}
+
 /// Decode a subset of HTML entities (numeric dec & hex) for reflection normalization.
 /// Examples:
 ///   "&#x3c;script&#x3e;" -> "<script>"
@@ -52,32 +60,32 @@ fn decode_html_entities(input: &str) -> String {
 }
 
 /// Determine if payload is reflected in any normalization variant.
-fn is_payload_reflected(resp_text: &str, payload: &str) -> bool {
+fn classify_reflection(resp_text: &str, payload: &str) -> Option<ReflectionKind> {
     // Direct match first (fast path)
     if resp_text.contains(payload) {
-        return true;
+        return Some(ReflectionKind::Raw);
     }
 
     let html_dec = decode_html_entities(resp_text);
     if html_dec.contains(payload) {
-        return true;
+        return Some(ReflectionKind::HtmlEntityDecoded);
     }
 
     // Check URL decoded version of raw
     if let Ok(url_dec) = urlencoding::decode(resp_text) {
         if url_dec != resp_text && url_dec.contains(payload) {
-            return true;
+            return Some(ReflectionKind::UrlDecoded);
         }
     }
 
     // Check URL decoded version of HTML decoded
     if let Ok(url_dec_html) = urlencoding::decode(&html_dec) {
         if url_dec_html != html_dec && url_dec_html.contains(payload) {
-            return true;
+            return Some(ReflectionKind::HtmlThenUrlDecoded);
         }
     }
 
-    false
+    None
 }
 
 async fn fetch_injection_response(
@@ -140,7 +148,7 @@ pub async fn check_reflection(
     args: &crate::cmd::scan::ScanArgs,
 ) -> bool {
     if let Some(text) = fetch_injection_response(target, param, payload, args).await {
-        is_payload_reflected(&text, payload)
+        classify_reflection(&text, payload).is_some()
     } else {
         false
     }
@@ -151,12 +159,12 @@ pub async fn check_reflection_with_response(
     param: &Param,
     payload: &str,
     args: &crate::cmd::scan::ScanArgs,
-) -> (bool, Option<String>) {
+) -> (Option<ReflectionKind>, Option<String>) {
     if let Some(text) = fetch_injection_response(target, param, payload, args).await {
-        let reflected = is_payload_reflected(&text, payload);
-        (reflected, Some(text))
+        let kind = classify_reflection(&text, payload);
+        (kind, Some(text))
     } else {
-        (false, None)
+        (None, None)
     }
 }
 
@@ -290,8 +298,8 @@ mod tests {
         let res = check_reflection_with_response(&target, &param, "PAY", &args).await;
         assert_eq!(
             res,
-            (false, None),
-            "should early-return (false, None) when skip_xss_scanning=true"
+            (None, None),
+            "should early-return (None, None) when skip_xss_scanning=true"
         );
     }
 
@@ -324,7 +332,7 @@ mod tests {
     fn test_is_payload_reflected_html_encoded() {
         let payload = "<script>alert(1)</script>";
         let resp = "prefix &#x3c;script&#x3e;alert(1)&#x3c;/script&#x3e; suffix";
-        assert!(is_payload_reflected(resp, payload));
+        assert_eq!(classify_reflection(resp, payload), Some(ReflectionKind::HtmlEntityDecoded));
     }
 
     #[test]
@@ -332,7 +340,7 @@ mod tests {
         let payload = "<img src=x onerror=alert(1)>";
         let encoded = urlencoding::encode(payload).to_string();
         let resp = format!("ok {} end", encoded);
-        assert!(is_payload_reflected(&resp, payload));
+        assert_eq!(classify_reflection(&resp, payload), Some(ReflectionKind::UrlDecoded));
     }
 
     #[test]
@@ -342,9 +350,9 @@ mod tests {
         // Build a string like: &#37;3Cscript%3Ealert(1)%3C%2Fscript%3E
         let url_once = urlencoding::encode(payload).to_string();
         let resp = url_once.replace("%", "&#37;");
-        assert!(
-            is_payload_reflected(&resp, payload),
-            "Should detect after decoding &#37; to % then URL-decoding"
+        assert_eq!(
+            classify_reflection(&resp, payload),
+            Some(ReflectionKind::HtmlThenUrlDecoded)
         );
     }
 
@@ -352,6 +360,6 @@ mod tests {
     fn test_is_payload_reflected_negative() {
         let payload = "<svg/onload=alert(1)>";
         let resp = "benign content without the thing";
-        assert!(!is_payload_reflected(resp, payload));
+        assert_eq!(classify_reflection(resp, payload), None);
     }
 }

@@ -289,10 +289,10 @@ pub async fn run_scanning(
             let mut probe_reflected = false;
             let mut probe_response_text: Option<String> = None;
             for pp in probe_payloads {
-                let (reflected, response_text) =
+                let (kind, response_text) =
                     check_reflection_with_response(&target_clone, &param_clone, pp, &args_clone)
                         .await;
-                if reflected {
+                if kind.is_some() {
                     probe_reflected = true;
                     probe_response_text = response_text;
                     break;
@@ -377,7 +377,7 @@ pub async fn run_scanning(
                         .await
                         .contains(&param_clone.name);
                     if already_found {
-                        (false, None)
+                        (None, None)
                     } else {
                         check_reflection_with_response(
                             &target_clone,
@@ -388,7 +388,7 @@ pub async fn run_scanning(
                         .await
                     }
                 };
-                let reflected = reflection_tuple.0;
+                let reflected_kind = reflection_tuple.0;
                 let reflection_response_text = reflection_tuple.1;
 
                 // AST-based DOM XSS analysis (enabled by default unless skipped)
@@ -449,7 +449,7 @@ pub async fn run_scanning(
                 if let Some(ref opb) = overall_pb_clone {
                     opb.lock().await.inc(1);
                 }
-                if reflected {
+                if let Some(kind) = reflected_kind {
                     let should_add = if args_clone.deep_scan {
                         true
                     } else {
@@ -463,39 +463,42 @@ pub async fn run_scanning(
                     };
 
                     if should_add {
-                        // Build result URL with the reflected payload (via helper)
-                        let result_url = crate::scanning::url_inject::build_injected_url(
-                            &target_clone.url,
-                            &param_clone,
-                            &reflection_payload,
-                        );
+                        // Only emit a POC result when raw payload is present in response.
+                        if matches!(kind, crate::scanning::check_reflection::ReflectionKind::Raw) {
+                            // Build result URL with the reflected payload (via helper)
+                            let result_url = crate::scanning::url_inject::build_injected_url(
+                                &target_clone.url,
+                                &param_clone,
+                                &reflection_payload,
+                            );
 
-                        // Record reflected XSS finding (fallback path)
-                        let mut result = crate::scanning::result::Result::new(
-                            "R".to_string(),
-                            "inHTML".to_string(),
-                            target_clone.method.clone(),
-                            result_url,
-                            param_clone.name.clone(),
-                            reflection_payload.clone(),
-                            format!("Reflected XSS detected for param {}", param_clone.name),
-                            "CWE-79".to_string(),
-                            "High".to_string(),
-                            606,
-                            format!(
-                                "[R] Triggered XSS Payload (reflected): {}={}",
-                                param_clone.name, reflection_payload
-                            ),
-                        );
-                        result.request = Some(build_request_text(
-                            &target_clone,
-                            &param_clone,
-                            &reflection_payload,
-                        ));
-                        result.response = reflection_response_text;
+                            // Record reflected XSS finding (fallback path)
+                            let mut result = crate::scanning::result::Result::new(
+                                "R".to_string(),
+                                "inHTML".to_string(),
+                                target_clone.method.clone(),
+                                result_url,
+                                param_clone.name.clone(),
+                                reflection_payload.clone(),
+                                format!("Reflected XSS detected for param {}", param_clone.name),
+                                "CWE-79".to_string(),
+                                "High".to_string(),
+                                606,
+                                format!(
+                                    "[R] Triggered XSS Payload (reflected): {}={}",
+                                    param_clone.name, reflection_payload
+                                ),
+                            );
+                            result.request = Some(build_request_text(
+                                &target_clone,
+                                &param_clone,
+                                &reflection_payload,
+                            ));
+                            result.response = reflection_response_text;
 
-                        // Defer pushing to shared results (batched)
-                        local_results.push(result);
+                            // Defer pushing to shared results (batched)
+                            local_results.push(result);
+                        }
                     }
                 }
             }
