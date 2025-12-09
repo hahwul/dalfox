@@ -1145,7 +1145,7 @@ pub async fn run_scan(args: &ScanArgs) {
                             );
                             for (vuln, payload, description) in findings {
                                 // Create an AST-based DOM XSS result with actual executable payload
-                                let ast_result = crate::scanning::result::Result::new(
+                                let mut ast_result = crate::scanning::result::Result::new(
                                     "A".to_string(), // AST-detected
                                     "DOM-XSS".to_string(),
                                     target.method.clone(),
@@ -1158,7 +1158,7 @@ pub async fn run_scan(args: &ScanArgs) {
                                     "CWE-79".to_string(),
                                     "Medium".to_string(),
                                     0,
-                                    format!("{} (검증 필요)", description),
+                                    format!("{} (검증 필요) [경량 확인: 파라미터 없음]", description),
                                 );
                                 // Add to shared results
                                 results_clone.lock().await.push(ast_result);

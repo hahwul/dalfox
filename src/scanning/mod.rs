@@ -2,6 +2,7 @@ pub mod ast_dom_analysis;
 pub mod ast_integration;
 pub mod check_dom_verification;
 pub mod check_reflection;
+pub mod light_verify;
 pub mod result;
 pub mod url_inject;
 pub mod xss_blind;
@@ -349,6 +350,23 @@ pub async fn run_scanning(
                             probe_payloads[0],
                         ));
                         ast_result.response = Some(response_text.clone());
+                        // Lightweight runtime verification (non-headless)
+                        let (verified, _rt_resp, note) = crate::scanning::light_verify::verify_dom_xss_light(
+                            &target_clone,
+                            &param_clone,
+                            &payload,
+                        )
+                        .await;
+                        if let Some(n) = note {
+                            ast_result.message_str = format!("{} [{}]", ast_result.message_str, n);
+                        }
+                        if verified {
+                            ast_result.result_type = "V".to_string();
+                            ast_result.severity = "High".to_string();
+                            ast_result.message_str = format!("{} [경량 확인: 검증됨]", ast_result.message_str);
+                        } else {
+                            ast_result.message_str = format!("{} [경량 확인: 미검증]", ast_result.message_str);
+                        }
                         local_results.push(ast_result);
                     }
                 }
@@ -439,6 +457,23 @@ pub async fn run_scanning(
                                 &reflection_payload,
                             ));
                             ast_result.response = Some(response_text.clone());
+                            // Lightweight runtime verification (non-headless)
+                            let (verified, _rt_resp, note) = crate::scanning::light_verify::verify_dom_xss_light(
+                                &target_clone,
+                                &param_clone,
+                                &reflection_payload,
+                            )
+                            .await;
+                            if let Some(n) = note {
+                                ast_result.message_str = format!("{} [{}]", ast_result.message_str, n);
+                            }
+                            if verified {
+                                ast_result.result_type = "V".to_string();
+                                ast_result.severity = "High".to_string();
+                                ast_result.message_str = format!("{} [경량 확인: 검증됨]", ast_result.message_str);
+                            } else {
+                                ast_result.message_str = format!("{} [경량 확인: 미검증]", ast_result.message_str);
+                            }
                             local_results.push(ast_result);
                         }
                     }
