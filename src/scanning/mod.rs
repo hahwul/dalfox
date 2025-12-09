@@ -2,10 +2,12 @@ pub mod ast_dom_analysis;
 pub mod ast_integration;
 pub mod check_dom_verification;
 pub mod check_reflection;
+pub mod light_verify;
 pub mod result;
 pub mod url_inject;
 pub mod xss_blind;
 pub mod xss_common;
+pub mod markers;
 
 use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::Param;
@@ -285,7 +287,7 @@ pub async fn run_scanning(
 
             // Stage 0: fast probe to avoid large payload blasts on non-reflective params
             // Use a minimal alphanumeric token to check generic reflection across contexts.
-            let probe_payloads: [&str; 1] = ["dalfox"]; // small, context-agnostic
+            let probe_payloads: [&str; 1] = [crate::scanning::markers::open_marker()]; // small, context-agnostic
             let mut probe_reflected = false;
             let mut probe_response_text: Option<String> = None;
             for pp in probe_payloads {
@@ -337,9 +339,9 @@ pub async fn run_scanning(
                                 vuln.sink
                             ),
                             "CWE-79".to_string(),
-                            "High".to_string(),
+                            "Medium".to_string(),
                             0,
-                            description,
+                            format!("{} (검증 필요)", description),
                         );
                         ast_result.request = Some(build_request_text(
                             &target_clone,
@@ -348,6 +350,23 @@ pub async fn run_scanning(
                             probe_payloads[0],
                         ));
                         ast_result.response = Some(response_text.clone());
+                        // Lightweight runtime verification (non-headless)
+                        let (verified, _rt_resp, note) = crate::scanning::light_verify::verify_dom_xss_light(
+                            &target_clone,
+                            &param_clone,
+                            &payload,
+                        )
+                        .await;
+                        if let Some(n) = note {
+                            ast_result.message_str = format!("{} [{}]", ast_result.message_str, n);
+                        }
+                        if verified {
+                            ast_result.result_type = "V".to_string();
+                            ast_result.severity = "High".to_string();
+                            ast_result.message_str = format!("{} [경량 확인: 검증됨]", ast_result.message_str);
+                        } else {
+                            ast_result.message_str = format!("{} [경량 확인: 미검증]", ast_result.message_str);
+                        }
                         local_results.push(ast_result);
                     }
                 }
@@ -428,9 +447,9 @@ pub async fn run_scanning(
                                     vuln.sink
                                 ),
                                 "CWE-79".to_string(),
-                                "High".to_string(),
+                                "Medium".to_string(),
                                 0,
-                                description,
+                                format!("{} (검증 필요)", description),
                             );
                             ast_result.request = Some(build_request_text(
                                 &target_clone,
@@ -438,6 +457,23 @@ pub async fn run_scanning(
                                 &reflection_payload,
                             ));
                             ast_result.response = Some(response_text.clone());
+                            // Lightweight runtime verification (non-headless)
+                            let (verified, _rt_resp, note) = crate::scanning::light_verify::verify_dom_xss_light(
+                                &target_clone,
+                                &param_clone,
+                                &reflection_payload,
+                            )
+                            .await;
+                            if let Some(n) = note {
+                                ast_result.message_str = format!("{} [{}]", ast_result.message_str, n);
+                            }
+                            if verified {
+                                ast_result.result_type = "V".to_string();
+                                ast_result.severity = "High".to_string();
+                                ast_result.message_str = format!("{} [경량 확인: 검증됨]", ast_result.message_str);
+                            } else {
+                                ast_result.message_str = format!("{} [경량 확인: 미검증]", ast_result.message_str);
+                            }
                             local_results.push(ast_result);
                         }
                     }
@@ -482,7 +518,7 @@ pub async fn run_scanning(
                                 reflection_payload.clone(),
                                 format!("Reflected XSS detected for param {}", param_clone.name),
                                 "CWE-79".to_string(),
-                                "High".to_string(),
+                                "Info".to_string(),
                                 606,
                                 format!(
                                     "[R] Triggered XSS Payload (reflected): {}={}",

@@ -3,7 +3,9 @@ use scraper::{Html, Selector};
 /// Extract JavaScript code from HTML response
 /// Looks for <script> tags and inline event handlers
 pub fn extract_javascript_from_html(html: &str) -> Vec<String> {
+    use std::collections::HashSet;
     let mut js_code = Vec::new();
+    let mut seen = HashSet::new();
 
     let document = Html::parse_document(html);
 
@@ -12,7 +14,41 @@ pub fn extract_javascript_from_html(html: &str) -> Vec<String> {
         for element in document.select(&selector) {
             let text = element.text().collect::<Vec<_>>().join("");
             if !text.trim().is_empty() {
-                js_code.push(text);
+                if seen.insert(text.trim().to_string()) {
+                    js_code.push(text);
+                }
+            }
+        }
+    }
+
+    // Extract inline event handler attributes (on*) and javascript: URLs
+    if let Ok(all) = Selector::parse("*") {
+        for node in document.select(&all) {
+            let attrs = node.value().attrs();
+            for (name, value) in attrs {
+                let lname = name.to_ascii_lowercase();
+                let v = value;
+                if v.trim().is_empty() {
+                    continue;
+                }
+                if lname.starts_with("on") {
+                    // Inline handler body as JS snippet
+                    let snippet = v.trim().to_string();
+                    if seen.insert(snippet.clone()) {
+                        js_code.push(snippet);
+                    }
+                } else if lname == "href" {
+                    let vv = v.trim();
+                    if vv.len() >= 11 && vv[..11].eq_ignore_ascii_case("javascript:") {
+                        let js = vv[11..].trim();
+                        if !js.is_empty() {
+                            let snippet = js.to_string();
+                            if seen.insert(snippet.clone()) {
+                                js_code.push(snippet);
+                            }
+                        }
+                    }
+                }
             }
         }
     }

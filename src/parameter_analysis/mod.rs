@@ -63,7 +63,7 @@ pub const SPECIAL_PROBE_CHARS: &[char] = &[
 ];
 
 /// Skeleton classification helper.
-/// Given a response body that already contains the reflection marker (e.g. "dalfox"),
+/// Given a response body that already contains the reflection marker (dynamic nonce),
 /// return (valid, invalid) special chars based on naive presence detection.
 /// TODO:
 /// 1. Actively send mutated payloads per character (e.g. dalfox'<c>dlafox")
@@ -112,12 +112,14 @@ pub fn encoded_variants(c: char) -> Vec<&'static str> {
     }
 }
 
-/// Extract segment between first "dalfox" and subsequent "dlafox"
+/// Extract segment between first open marker and subsequent close marker
 fn extract_reflected_segment(body: &str) -> Option<&str> {
-    let start = body.find("dalfox")?;
-    let after = start + "dalfox".len();
+    let open = crate::scanning::markers::open_marker();
+    let close = crate::scanning::markers::close_marker();
+    let start = body.find(open)?;
+    let after = start + open.len();
     let rest = &body[after..];
-    let end_rel = rest.find("dlafox")?;
+    let end_rel = rest.find(close)?;
     Some(&rest[..end_rel])
 }
 
@@ -152,7 +154,12 @@ pub async fn active_probe_param(
         let encoders_clone = encoders.clone();
         let handle = tokio::spawn(async move {
             let _permit = sem_clone.acquire().await.unwrap();
-            let payload = format!("dalfox{}dlafox", c);
+            let payload = format!(
+                "{}{}{}",
+                crate::scanning::markers::open_marker(),
+                c,
+                crate::scanning::markers::close_marker()
+            );
             let req_method = method.parse().unwrap_or(reqwest::Method::GET);
             let mut url = url_original.clone();
             let mut request_builder;
@@ -371,7 +378,12 @@ pub async fn active_probe_param(
                         "base64" => base64_encode(&c.to_string()),
                         _ => continue,
                     };
-                    let payload_enc = format!("dalfox{}dlafox", encoded_piece);
+            let payload_enc = format!(
+                "{}{}{}",
+                crate::scanning::markers::open_marker(),
+                encoded_piece,
+                crate::scanning::markers::close_marker()
+            );
                     let req_method2 = method.parse().unwrap_or(reqwest::Method::GET);
                     let mut url2 = url_original.clone();
                     let mut request_builder2;

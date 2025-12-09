@@ -35,7 +35,7 @@ pub async fn check_query_discovery(
 ) {
     let arc_target = Arc::new(target.clone());
     let client = target.build_client().unwrap_or_else(|_| Client::new());
-    let test_value = "dalfox";
+    let test_value = crate::scanning::markers::open_marker();
 
     let mut handles = vec![];
 
@@ -116,7 +116,7 @@ pub async fn check_header_discovery(
 ) {
     let arc_target = Arc::new(target.clone());
     let client = target.build_client().unwrap_or_else(|_| Client::new());
-    let test_value = "dalfox";
+    let test_value = crate::scanning::markers::open_marker();
 
     let mut handles = vec![];
 
@@ -312,7 +312,7 @@ pub async fn check_path_discovery(
     semaphore: Arc<Semaphore>,
 ) {
     let arc_target = Arc::new(target.clone());
-    let test_value = "dalfox";
+    let test_value = crate::scanning::markers::open_marker();
     let path = target.url.path();
     // Split non-empty segments
     let segments: Vec<&str> = path
@@ -413,7 +413,7 @@ pub async fn check_cookie_discovery(
 ) {
     let arc_target = Arc::new(target.clone());
     let client = target.build_client().unwrap_or_else(|_| Client::new());
-    let test_value = "dalfox";
+    let test_value = crate::scanning::markers::open_marker();
 
     let mut handles = vec![];
 

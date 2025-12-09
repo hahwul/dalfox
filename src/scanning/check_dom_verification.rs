@@ -47,14 +47,14 @@ pub async fn check_dom_verification(
 
                 crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if let Ok(resp) = check_request.send().await {
+                    let headers = resp.headers().clone();
+                    let ct = headers
+                        .get(reqwest::header::CONTENT_TYPE)
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("");
                     if let Ok(text) = resp.text().await {
-                        if text.contains("dalfox") {
-                            let document = scraper::Html::parse_document(&text);
-                            let selector = DALFOX_SELECTOR
-                                .get_or_init(|| scraper::Selector::parse(".dalfox").unwrap());
-                            if document.select(selector).next().is_some() {
-                                return (true, Some(text));
-                            }
+                        if crate::utils::is_htmlish_content_type(ct) && text.contains(payload) {
+                            return (true, Some(text));
                         }
                     }
                 }
@@ -63,14 +63,14 @@ pub async fn check_dom_verification(
     } else {
         // Normal DOM verification
         if let Ok(resp) = inject_resp {
+            let headers = resp.headers().clone();
+            let ct = headers
+                .get(reqwest::header::CONTENT_TYPE)
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("");
             if let Ok(text) = resp.text().await {
-                if text.contains("dalfox") {
-                    let document = scraper::Html::parse_document(&text);
-                    let selector = DALFOX_SELECTOR
-                        .get_or_init(|| scraper::Selector::parse(".dalfox").unwrap());
-                    if document.select(selector).next().is_some() {
-                        return (true, Some(text));
-                    }
+                if crate::utils::is_htmlish_content_type(ct) && text.contains(payload) {
+                    return (true, Some(text));
                 }
             }
         }
