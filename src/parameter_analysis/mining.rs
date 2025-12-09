@@ -1,5 +1,5 @@
 use crate::cmd::scan::ScanArgs;
-use crate::parameter_analysis::{InjectionContext, Location, Param};
+use crate::parameter_analysis::{DelimiterType, InjectionContext, Location, Param};
 use crate::payload::mining::GF_PATTERNS_PARAMS;
 use crate::target_parser::Target;
 use indicatif::ProgressBar;
@@ -58,65 +58,58 @@ impl MiningSampleStats {
 }
 
 pub fn detect_injection_context(text: &str) -> InjectionContext {
-    let dalfox_pos = match text.find(crate::scanning::markers::open_marker()) {
-        Some(pos) => pos,
-        None => return InjectionContext::Html(None),
-    };
+    let marker = crate::scanning::markers::open_marker();
+    if !text.contains(marker) {
+        return InjectionContext::Html(None);
+    }
 
-    // Check for JavaScript context
-    if let Some(script_start) = text.find("<script") {
-        if let Some(script_end) = text.find("</script>") {
-            if script_start < dalfox_pos && dalfox_pos < script_end {
-                // Check for delimiter type in JavaScript
-                if text.contains(&format!("\"{}\"", crate::scanning::markers::open_marker())) {
-                    return InjectionContext::Javascript(Some(
-                        crate::parameter_analysis::DelimiterType::DoubleQuote,
-                    ));
-                } else if text.contains(&format!("'{}'", crate::scanning::markers::open_marker())) {
-                    return InjectionContext::Javascript(Some(
-                        crate::parameter_analysis::DelimiterType::SingleQuote,
-                    ));
-                } else {
-                    return InjectionContext::Javascript(None);
+    // Fast comment check using raw HTML when available
+    if let (Some(cs), Some(ce)) = (text.find("<!--"), text.find("-->")) {
+        if let Some(mp) = text.find(marker) {
+            if cs < mp && mp < ce {
+                return InjectionContext::Html(Some(DelimiterType::Comment));
+            }
+        }
+    }
+
+    // Parse HTML and locate marker via element text/attributes/script
+    let document = scraper::Html::parse_document(text);
+
+    // 1) JavaScript context: marker appears in any <script> text
+    if let Ok(sel) = scraper::Selector::parse("script") {
+        for el in document.select(&sel) {
+            let s = el.text().collect::<Vec<_>>().join("");
+            if s.contains(marker) {
+                return InjectionContext::Javascript(None);
+            }
+        }
+    }
+
+    // 2) Attribute context: marker in any attribute value
+    if let Ok(any) = scraper::Selector::parse("*") {
+        for el in document.select(&any) {
+            for (_name, v) in el.value().attrs() {
+                if v.contains(marker) {
+                    return InjectionContext::Attribute(None);
                 }
             }
         }
     }
 
-    // Check for comment context
-    if let Some(comment_start) = text.find("<!--")
-        && let Some(comment_end) = text.find("-->")
-        && comment_start < dalfox_pos
-        && dalfox_pos < comment_end
-    {
-        // In comment context, delimiter type is always Comment regardless of quotes
-        return InjectionContext::Html(Some(crate::parameter_analysis::DelimiterType::Comment));
+    // 3) HTML text context: marker in non-script text nodes
+    if let Ok(any) = scraper::Selector::parse("*") {
+        for el in document.select(&any) {
+            if el.value().name().eq_ignore_ascii_case("script") {
+                continue;
+            }
+            let s = el.text().collect::<Vec<_>>().join("");
+            if s.contains(marker) {
+                return InjectionContext::Html(None);
+            }
+        }
     }
 
-    // Check for attribute context
-    if text.contains(&format!("=\"{}\"", crate::scanning::markers::open_marker())) {
-        return InjectionContext::Attribute(Some(
-            crate::parameter_analysis::DelimiterType::DoubleQuote,
-        ));
-    } else if text.contains(&format!("='{}'", crate::scanning::markers::open_marker())) {
-        return InjectionContext::Attribute(Some(
-            crate::parameter_analysis::DelimiterType::SingleQuote,
-        ));
-    }
-
-    // Check for string contexts (fallback)
-    if text.contains(&format!("\"{}\"", crate::scanning::markers::open_marker())) {
-        return InjectionContext::Attribute(Some(
-            crate::parameter_analysis::DelimiterType::DoubleQuote,
-        ));
-    }
-    if text.contains(&format!("'{}'", crate::scanning::markers::open_marker())) {
-        return InjectionContext::Attribute(Some(
-            crate::parameter_analysis::DelimiterType::SingleQuote,
-        ));
-    }
-
-    // Default to HTML
+    // Fallback to HTML
     InjectionContext::Html(None)
 }
 
