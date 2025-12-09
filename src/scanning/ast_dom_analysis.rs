@@ -77,6 +77,7 @@ impl<'a> DomXssVisitor<'a> {
         sinks.insert("innerHTML".to_string());
         sinks.insert("outerHTML".to_string());
         sinks.insert("insertAdjacentHTML".to_string());
+        sinks.insert("createContextualFragment".to_string());
         sinks.insert("document.write".to_string());
         sinks.insert("document.writeln".to_string());
         sinks.insert("eval".to_string());
@@ -89,6 +90,9 @@ impl<'a> DomXssVisitor<'a> {
         sinks.insert("location.replace".to_string());
         // Element source attributes
         sinks.insert("src".to_string());
+        sinks.insert("srcdoc".to_string());
+        sinks.insert("href".to_string());
+        sinks.insert("xlink:href".to_string());
         sinks.insert("setAttribute".to_string());
         // jQuery sinks
         sinks.insert("html".to_string());
@@ -670,7 +674,7 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
 
-        // Check if calling a sink function
+        // Check if calling a sink function (full name like document.write)
         if let Some(func_name) = self.get_expr_string(&call.callee) {
             if self.sinks.contains(&func_name) {
                 // Check if any argument is tainted
@@ -782,6 +786,82 @@ impl<'a> DomXssVisitor<'a> {
                             source_hint,
                         );
                         break;
+                    }
+                }
+            }
+        }
+
+        // Also treat member method name itself as sink (e.g., el.insertAdjacentHTML, range.createContextualFragment)
+        if let Expression::StaticMemberExpression(member) = &call.callee {
+            let method_name = member.property.name.as_str();
+            if self.sinks.contains(method_name) {
+                // Special-case setAttribute to only dangerous attributes
+                if method_name == "setAttribute" && call.arguments.len() >= 2 {
+                    let mut attr_name_lc: Option<String> = None;
+                    if let Some(arg0) = call.arguments.get(0) {
+                        if let Some(expr) = arg0.as_expression() {
+                            if let Expression::StringLiteral(s) = expr {
+                                attr_name_lc = Some(s.value.to_string().to_ascii_lowercase());
+                            }
+                        }
+                    }
+                    if let Some(name) = attr_name_lc {
+                        let dangerous = name.starts_with("on")
+                            || name == "href"
+                            || name == "xlink:href"
+                            || name == "srcdoc";
+                        if dangerous {
+                            if let Some(arg1) = call.arguments.get(1) {
+                                let tainted = match arg1 {
+                                    Argument::SpreadElement(sp) => self.is_tainted(&sp.argument),
+                                    _ => arg1
+                                        .as_expression()
+                                        .map(|e| self.is_tainted(e))
+                                        .unwrap_or(false),
+                                };
+                                if tainted {
+                                    self.report_vulnerability(
+                                        call.span(),
+                                        &format!("setAttribute:{}", name),
+                                        "Tainted data assigned to dangerous attribute",
+                                    );
+                                    return;
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Generic method sink: if any argument is tainted
+                    let mut arg_tainted = false;
+                    for (idx, arg) in call.arguments.iter().enumerate() {
+                        // For insertAdjacentHTML, the second argument is HTML
+                        let consider = if method_name == "insertAdjacentHTML" {
+                            idx == 1
+                        } else {
+                            true
+                        };
+                        if !consider {
+                            continue;
+                        }
+                        let tainted = match arg {
+                            Argument::SpreadElement(sp) => self.is_tainted(&sp.argument),
+                            _ => arg
+                                .as_expression()
+                                .map(|e| self.is_tainted(e))
+                                .unwrap_or(false),
+                        };
+                        if tainted {
+                            arg_tainted = true;
+                            break;
+                        }
+                    }
+                    if arg_tainted {
+                        self.report_vulnerability(
+                            call.span(),
+                            method_name,
+                            "Tainted data passed to sink method",
+                        );
+                        return;
                     }
                 }
             }
