@@ -14,7 +14,7 @@ jobs:
           homebrew_owner: hahwul
           homebrew_tap: homebrew-dalfox
           formula_folder: Formula
-          github_token: ${{ secrets.dalfox_PUBLISH_TOKEN }}
+          github_token: ${{ secrets.DALFOX_PUBLISH_TOKEN }}
           commit_owner: hahwul
           commit_email: hahwul@gmail.com
           depends_on: |
