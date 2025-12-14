@@ -22,9 +22,9 @@ dalfox server --api-key mysecretkey             # With auth
 
 ## Options
 
-**Host** (`-H, --host`): Bind address (default: 127.0.0.1)  
-**Port** (`-p, --port`): Port number (default: 6664)  
-**API Key** (`--api-key`): Auth via X-API-KEY header (or DALFOX_API_KEY env)  
+**Host** (`-H, --host`): Bind address (default: 127.0.0.1)
+**Port** (`-p, --port`): Port number (default: 6664)
+**API Key** (`--api-key`): Auth via X-API-KEY header (or DALFOX_API_KEY env)
 **Log File** (`--log-file`): Write logs to file
 
 {% alert_warning() %}

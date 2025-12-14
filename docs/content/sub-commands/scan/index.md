@@ -95,7 +95,7 @@ dalfox scan https://example.com --remote-wordlists burp,assetnote
 
 ## XSS Options
 
-**Encoders** (`-e`): {% badge_primary() %}none{% end %} {% badge_primary() %}url{% end %} {% badge_primary() %}2url{% end %} {% badge_primary() %}html{% end %} {% badge_primary() %}base64{% end %} (default: url,html)
+**Encoders** (`-e`): none | url | 2url | html | base64 (default: url,html)
 ```bash
 dalfox scan https://example.com -e url,2url,html
 dalfox scan https://example.com -e none  # No encoding
