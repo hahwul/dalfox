@@ -31,8 +31,37 @@ sudo snap install dalfox
 
 ## Nix
 
+### Using Nixpkgs
+
 ```bash
 nix-shell -p dalfox
+```
+
+### Using Nix Flakes
+
+```bash
+# Install from the repository
+nix profile install github:hahwul/dalfox
+
+# Or run directly without installing
+nix run github:hahwul/dalfox -- scan https://example.com
+
+# Development environment
+nix develop github:hahwul/dalfox
+```
+
+For local development with flakes:
+```bash
+# Clone the repository
+git clone https://github.com/hahwul/dalfox.git
+cd dalfox
+
+# Enter development shell
+nix develop
+
+# Or use direnv for automatic environment loading
+echo "use flake" > .envrc
+direnv allow
 ```
 
 ## Docker
