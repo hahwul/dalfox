@@ -1,6 +1,8 @@
 {
   description = "Dalfox - A powerful open-source XSS scanner and utility focused on automation";
 
+  # For detailed Nix flake documentation, see NIX.md
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
