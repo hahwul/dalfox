@@ -23,6 +23,27 @@ badge = "v3.0.0"
 default_thumbnail = "images/preview.jpg"
 footer_html = "<div style='display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap;'><a href='https://www.hahwul.com' target='_blank' rel='noopener noreferrer' style='display: inline-flex; align-items: center;'><img src='https://www.hahwul.com/images/logo-gray.png' alt='HAHWUL' style='height: 30px' /></a><span style='opacity: 0.6;'>•</span><span>Powered by <a href='https://www.getzola.org' class='font-medium text-base-content/70 hover:text-base-content transition-colors duration-200'>Zola</a> and <a href='https://github.com/hahwul/goyo' class='font-medium text-base-content/70 hover:text-base-content transition-colors duration-200'>Goyo</a></span></div>"
 
+# lang_aliases = { en = "English", ko = "한국어" }
+
+nav = [
+    { name = "Documents", url = "/getting_started/installation", type = "url", icon = "fa-solid fa-book" },
+    { name = "GitHub", url = "https://github.com/hahwul/dalfox", type = "url", icon = "fa-brands fa-github" },
+    { name = "Links", type = "dropdown", icon = "fa-solid fa-link", members = [
+        { name = "Crates", url = "https://crates.io/crates/dalfox", type = "url", icon = "fa-solid fa-box" },
+        { name = "Creator Blog", url = "https://www.hahwul.com", type = "url", icon = "fa-solid fa-fire-flame-curved" },
+    ] },
+]
+
+# nav_ko = [
+#     { name = "문서", url = "/ko/get_started/installation", type = "url", icon = "fa-solid fa-book" },
+#     { name = "GitHub", url = "https://github.com/hahwul/goyo", type = "url", icon = "fa-brands fa-github" },
+#     { name = "링크", type = "dropdown", icon = "fa-solid fa-link", members = [
+#         { name = "제작자 블로그", url = "https://www.hahwul.com", type = "url", icon = "fa-solid fa-fire-flame-curved" },
+#         { name = "Zola 공식", url = "https://getzola.org", type = "url", icon = "fa-solid fa-z" },
+#     ] },
+# ]
+
+
 # Logo configuration
 [extra.logo]
 text = "dalfox"
@@ -43,23 +64,3 @@ brightness = "darker"
 [extra.sidebar]
 expand_depth = 0
 disable_root_hide = false
-
-# lang_aliases = { en = "English", ko = "한국어" }
-
-nav = [
-    { name = "Documents", url = "/getting_started/installation", type = "url", icon = "fa-solid fa-book" },
-    { name = "GitHub", url = "https://github.com/hahwul/dalfox", type = "url", icon = "fa-brands fa-github" },
-    { name = "Links", type = "dropdown", icon = "fa-solid fa-link", members = [
-        { name = "Crates", url = "https://crates.io/crates/dalfox", type = "url", icon = "fa-solid fa-box" },
-        { name = "Creator Blog", url = "https://www.hahwul.com", type = "url", icon = "fa-solid fa-fire-flame-curved" },
-    ] },
-]
-
-# nav_ko = [
-#     { name = "문서", url = "/ko/get_started/installation", type = "url", icon = "fa-solid fa-book" },
-#     { name = "GitHub", url = "https://github.com/hahwul/goyo", type = "url", icon = "fa-brands fa-github" },
-#     { name = "링크", type = "dropdown", icon = "fa-solid fa-link", members = [
-#         { name = "제작자 블로그", url = "https://www.hahwul.com", type = "url", icon = "fa-solid fa-fire-flame-curved" },
-#         { name = "Zola 공식", url = "https://getzola.org", type = "url", icon = "fa-solid fa-z" },
-#     ] },
-# ]
