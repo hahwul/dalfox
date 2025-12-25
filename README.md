@@ -44,6 +44,21 @@ be present in the `unstable` channel.
 nix-shell -p dalfox
 ```
 
+### Nix Flakes
+
+For Nix users with flakes enabled:
+
+```bash
+# Run directly
+nix run github:hahwul/dalfox -- scan https://example.com
+
+# Install
+nix profile install github:hahwul/dalfox
+
+# Development environment
+nix develop github:hahwul/dalfox
+```
+
 See [Installation guide](https://dalfox.hahwul.com/docs/installation/) for details.
 
 ## Usage

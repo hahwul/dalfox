@@ -9,3 +9,8 @@ target/
 
 ### Zola ###
 docs/public
+
+### Nix ###
+.direnv/
+result
+result-*
