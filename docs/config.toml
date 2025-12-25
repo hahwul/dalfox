@@ -47,7 +47,7 @@ disable_root_hide = false
 # lang_aliases = { en = "English", ko = "한국어" }
 
 nav = [
-    { name = "Documents", url = "/get_started/installation", type = "url", icon = "fa-solid fa-book" },
+    { name = "Documents", url = "/getting_started/installation", type = "url", icon = "fa-solid fa-book" },
     { name = "GitHub", url = "https://github.com/hahwul/dalfox", type = "url", icon = "fa-brands fa-github" },
     { name = "Links", type = "dropdown", icon = "fa-solid fa-link", members = [
         { name = "Crates", url = "https://crates.io/crates/dalfox", type = "url", icon = "fa-solid fa-box" },

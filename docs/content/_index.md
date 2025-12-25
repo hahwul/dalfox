@@ -7,7 +7,7 @@ badge = "v3.0.0"
 description = "Powerful open-source XSS scanner and utility focused on automation"
 image = "/images/preview.jpg" # Background image
 cta_buttons = [
-    { text = "Get Started", url = "/get_started/installation", style = "primary" },
+    { text = "Get Started", url = "/getting_started/installation", style = "primary" },
     { text = "View on GitHub", url = "https://github.com/hahwul/dalfox", style = "secondary" },
 ]
 
