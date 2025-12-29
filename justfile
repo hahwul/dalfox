@@ -18,6 +18,9 @@ build:
 dev:
     cargo build
 
+nix-update:
+    nix flake update
+
 xss_maze:
     # Install and Run xssmaze
     # git clone https://github.com/hahwul/xssmaze
