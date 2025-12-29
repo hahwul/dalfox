@@ -175,6 +175,25 @@ impl Result {
     }
 
     /// Serialize a slice of Result into Markdown string.
+    pub fn results_to_toml(
+        results: &[Result],
+        include_request: bool,
+        include_response: bool,
+    ) -> String {
+        #[derive(Serialize)]
+        struct TomlWrapper {
+            results: Vec<SanitizedResult>,
+        }
+
+        let sanitized: Vec<SanitizedResult> = results
+            .iter()
+            .map(|r| r.to_sanitized(include_request, include_response))
+            .collect();
+
+        let wrapper = TomlWrapper { results: sanitized };
+        toml::to_string(&wrapper).unwrap_or_else(|_| "".to_string())
+    }
+
     pub fn results_to_markdown(
         results: &[Result],
         include_request: bool,
@@ -237,9 +256,7 @@ impl Result {
                 out.push_str("\n");
 
                 // Include request if requested
-                if include_request
-                    && let Some(req) = &result.request
-                {
+                if include_request && let Some(req) = &result.request {
                     out.push_str("**Request:**\n\n");
                     out.push_str("```http\n");
                     out.push_str(req);
@@ -247,9 +264,7 @@ impl Result {
                 }
 
                 // Include response if requested
-                if include_response
-                    && let Some(resp) = &result.response
-                {
+                if include_response && let Some(resp) = &result.response {
                     out.push_str("**Response:**\n\n");
                     out.push_str("```http\n");
                     out.push_str(resp);
@@ -309,14 +324,10 @@ impl Result {
                     "severity": r.severity,
                 });
 
-                if include_request
-                    && let Some(req) = &r.request
-                {
+                if include_request && let Some(req) = &r.request {
                     properties["request"] = json!(req);
                 }
-                if include_response
-                    && let Some(resp) = &r.response
-                {
+                if include_response && let Some(resp) = &r.response {
                     properties["response"] = json!(resp);
                 }
 
@@ -822,6 +833,34 @@ mod tests {
         // Should still be valid SARIF with empty results array
         assert!(sarif.contains("\"version\": \"2.1.0\""));
         assert!(sarif.contains("\"results\": []"));
+    }
+
+    #[test]
+    fn test_results_to_toml() {
+        let result = Result::new(
+            "V".to_string(),
+            "inHTML".to_string(),
+            "GET".to_string(),
+            "https://example.com?q=test".to_string(),
+            "q".to_string(),
+            "<script>alert(1)</script>".to_string(),
+            "Found script tag".to_string(),
+            "CWE-79".to_string(),
+            "High".to_string(),
+            606,
+            "XSS detected".to_string(),
+        );
+
+        let results = vec![result];
+        let toml_output = Result::results_to_toml(&results, false, false);
+
+        assert!(toml_output.contains("type = \"V\""));
+        assert!(toml_output.contains("inject_type = \"inHTML\""));
+        assert!(toml_output.contains("method = \"GET\""));
+        assert!(toml_output.contains("param = \"q\""));
+        assert!(toml_output.contains("payload = \"<script>alert(1)</script>\""));
+        assert!(toml_output.contains("severity = \"High\""));
+        assert!(toml_output.contains("message_id = 606"));
     }
 
     #[test]
