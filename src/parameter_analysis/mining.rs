@@ -64,13 +64,11 @@ pub fn detect_injection_context(text: &str) -> InjectionContext {
     }
 
     // Fast comment check using raw HTML when available
-    if let (Some(cs), Some(ce)) = (text.find("<!--"), text.find("-->")) {
-        if let Some(mp) = text.find(marker) {
-            if cs < mp && mp < ce {
+    if let (Some(cs), Some(ce)) = (text.find("<!--"), text.find("-->"))
+        && let Some(mp) = text.find(marker)
+            && cs < mp && mp < ce {
                 return InjectionContext::Html(Some(DelimiterType::Comment));
             }
-        }
-    }
 
     // Parse HTML and locate marker via element text/attributes/script
     let document = scraper::Html::parse_document(text);
@@ -151,21 +149,19 @@ pub async fn probe_dictionary_params(
     let mut loaded = false;
 
     if !args.remote_wordlists.is_empty() {
-        if let Err(e) = crate::payload::init_remote_wordlists(&args.remote_wordlists).await {
-            if !silence {
+        if let Err(e) = crate::payload::init_remote_wordlists(&args.remote_wordlists).await
+            && !silence {
                 eprintln!("Error initializing remote wordlists: {}", e);
             }
-        }
-        if let Some(words) = crate::payload::get_remote_words() {
-            if !words.is_empty() {
+        if let Some(words) = crate::payload::get_remote_words()
+            && !words.is_empty() {
                 params = words.as_ref().clone();
                 loaded = true;
             }
-        }
     }
 
-    if !loaded {
-        if let Some(wordlist_path) = &args.mining_dict_word {
+    if !loaded
+        && let Some(wordlist_path) = &args.mining_dict_word {
             match std::fs::read_to_string(wordlist_path) {
                 Ok(content) => {
                     params = content
@@ -183,7 +179,6 @@ pub async fn probe_dictionary_params(
                 }
             }
         }
-    }
 
     if !loaded {
         params = GF_PATTERNS_PARAMS.iter().map(|s| s.to_string()).collect();
@@ -236,7 +231,7 @@ pub async fn probe_dictionary_params(
 
             let mut url = target.url.clone();
             url.query_pairs_mut()
-                .append_pair(&param, crate::scanning::markers::open_marker());
+                .append_pair(param, crate::scanning::markers::open_marker());
 
             let client_clone = client.clone();
 
@@ -259,8 +254,8 @@ pub async fn probe_dictionary_params(
                 crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
 
                 let mut discovered: Option<Param> = None;
-                if let Ok(r) = resp {
-                    if let Ok(text) = r.text().await {
+                if let Ok(r) = resp
+                    && let Ok(text) = r.text().await {
                         let mut st = stats_clone.lock().await;
                         st.record_attempt();
                         if text.contains(crate::scanning::markers::open_marker()) {
@@ -297,7 +292,6 @@ pub async fn probe_dictionary_params(
                             st.record_non_reflection();
                         }
                     }
-                }
 
                 if delay > 0 {
                     sleep(Duration::from_millis(delay)).await;
@@ -316,11 +310,10 @@ pub async fn probe_dictionary_params(
     // Batch collect discovered parameters
     let mut batch: Vec<Param> = Vec::new();
     for h in handles {
-        if let Ok(opt) = h.await {
-            if let Some(p) = opt {
+        if let Ok(opt) = h.await
+            && let Some(p) = opt {
                 batch.push(p);
             }
-        }
     }
 
     if !batch.is_empty() {
@@ -442,8 +435,8 @@ pub async fn probe_body_params(
                 crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
 
                 let mut discovered: Option<Param> = None;
-                if let Ok(r) = resp {
-                    if let Ok(text) = r.text().await {
+                if let Ok(r) = resp
+                    && let Ok(text) = r.text().await {
                         let mut st = stats_clone.lock().await;
                         st.record_attempt();
                         if text.contains(crate::scanning::markers::open_marker()) {
@@ -483,7 +476,6 @@ pub async fn probe_body_params(
                             st.record_non_reflection();
                         }
                     }
-                }
 
                 if delay > 0 {
                     sleep(Duration::from_millis(delay)).await;
@@ -501,11 +493,10 @@ pub async fn probe_body_params(
         // Batch collect discovered params
         let mut batch: Vec<Param> = Vec::new();
         for h in handles {
-            if let Ok(opt) = h.await {
-                if let Some(p) = opt {
+            if let Ok(opt) = h.await
+                && let Some(p) = opt {
                     batch.push(p);
                 }
-            }
         }
         if !batch.is_empty() {
             let mut guard = reflection_params.lock().await;
@@ -565,8 +556,8 @@ pub async fn probe_response_id_params(
 
     let __resp = base_request.send().await;
     crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
-    if let Ok(resp) = __resp {
-        if let Ok(text) = resp.text().await {
+    if let Ok(resp) = __resp
+        && let Ok(text) = resp.text().await {
             let document = scraper::Html::parse_document(&text);
 
             // Collect unique ids and names
@@ -634,8 +625,8 @@ pub async fn probe_response_id_params(
                     let mut discovered: Option<Param> = None;
                     let __resp = request.send().await;
                     crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
-                    if let Ok(resp) = __resp {
-                        if let Ok(text) = resp.text().await {
+                    if let Ok(resp) = __resp
+                        && let Ok(text) = resp.text().await {
                             let mut st = stats_clone.lock().await;
                             st.record_attempt();
                             if text.contains(crate::scanning::markers::open_marker()) {
@@ -673,7 +664,6 @@ pub async fn probe_response_id_params(
                                 st.record_non_reflection();
                             }
                         }
-                    }
                     if delay > 0 {
                         sleep(Duration::from_millis(delay)).await;
                     }
@@ -690,11 +680,10 @@ pub async fn probe_response_id_params(
             // Batch collect discovered DOM params
             let mut batch: Vec<Param> = Vec::new();
             for handle in handles {
-                if let Ok(opt) = handle.await {
-                    if let Some(p) = opt {
+                if let Ok(opt) = handle.await
+                    && let Some(p) = opt {
                         batch.push(p);
                     }
-                }
             }
             if !batch.is_empty() {
                 let mut guard = reflection_params.lock().await;
@@ -729,7 +718,6 @@ pub async fn probe_response_id_params(
                 }
             }
         }
-    }
 }
 
 pub async fn probe_json_body_params(
@@ -840,8 +828,8 @@ pub async fn probe_json_body_params(
             crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
 
             let mut discovered: Option<Param> = None;
-            if let Ok(r) = resp {
-                if let Ok(text) = r.text().await {
+            if let Ok(r) = resp
+                && let Ok(text) = r.text().await {
                     let mut st = stats_clone.lock().await;
                     st.record_attempt();
                     if text.contains(crate::scanning::markers::open_marker()) {
@@ -878,7 +866,6 @@ pub async fn probe_json_body_params(
                         st.record_non_reflection();
                     }
                 }
-            }
 
             if delay > 0 {
                 sleep(Duration::from_millis(delay)).await;
@@ -896,11 +883,10 @@ pub async fn probe_json_body_params(
     // Batch collect discovered params
     let mut batch: Vec<Param> = Vec::new();
     for h in handles {
-        if let Ok(opt) = h.await {
-            if let Some(p) = opt {
+        if let Ok(opt) = h.await
+            && let Some(p) = opt {
                 batch.push(p);
             }
-        }
     }
     if !batch.is_empty() {
         let mut guard = reflection_params.lock().await;

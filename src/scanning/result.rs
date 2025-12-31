@@ -207,7 +207,7 @@ impl Result {
         // Add summary
         let v_count = results.iter().filter(|r| r.result_type == "V").count();
         let r_count = results.iter().filter(|r| r.result_type == "R").count();
-        out.push_str(&format!("## Summary\n\n"));
+        out.push_str("## Summary\n\n");
         out.push_str(&format!("- **Total Findings**: {}\n", results.len()));
         out.push_str(&format!("- **Vulnerabilities (V)**: {}\n", v_count));
         out.push_str(&format!("- **Reflections (R)**: {}\n\n", r_count));
@@ -253,7 +253,7 @@ impl Result {
                     ));
                 }
 
-                out.push_str("\n");
+                out.push('\n');
 
                 // Include request if requested
                 if include_request && let Some(req) = &result.request {

@@ -108,11 +108,10 @@ pub async fn init_remote_payloads_with(
             opts.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS),
         ))
         .danger_accept_invalid_certs(true);
-    if let Some(pxy) = opts.proxy.as_ref() {
-        if let Ok(proxy) = reqwest::Proxy::all(pxy) {
+    if let Some(pxy) = opts.proxy.as_ref()
+        && let Ok(proxy) = reqwest::Proxy::all(pxy) {
             client_builder = client_builder.proxy(proxy);
         }
-    }
     let client = client_builder.build()?;
 
     let lines = fetch_multiple_text_lists(&client, &urls).await;
@@ -144,11 +143,10 @@ pub async fn init_remote_wordlists_with(
             opts.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS),
         ))
         .danger_accept_invalid_certs(true);
-    if let Some(pxy) = opts.proxy.as_ref() {
-        if let Ok(proxy) = reqwest::Proxy::all(pxy) {
+    if let Some(pxy) = opts.proxy.as_ref()
+        && let Ok(proxy) = reqwest::Proxy::all(pxy) {
             client_builder = client_builder.proxy(proxy);
         }
-    }
     let client = client_builder.build()?;
 
     let lines = fetch_multiple_text_lists(&client, &urls).await;
@@ -271,7 +269,8 @@ fn collect_wordlist_provider_urls(providers: &[String]) -> Vec<String> {
 /// Any individual fetch failure will be logged to stderr and skipped.
 async fn fetch_multiple_text_lists(client: &Client, urls: &[String]) -> String {
     let mut set = JoinSet::new();
-    for url in urls.iter().cloned() {
+    for url in urls.iter() {
+        let url = url.clone();
         let client = client.clone();
         set.spawn(async move {
             match client.get(&url).send().await {

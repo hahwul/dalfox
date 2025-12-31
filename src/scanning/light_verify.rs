@@ -8,6 +8,7 @@ use reqwest::Client;
 /// - If Content-Type is HTML-ish and response contains the raw payload, mark verified.
 /// - Else, if response contains the class marker and a matching element exists, mark verified.
 /// - Else, if CSP likely blocks inline handlers ('unsafe-inline' missing), add note.
+///
 /// Returns: (verified, response_text, note)
 pub async fn verify_dom_xss_light(
     target: &Target,

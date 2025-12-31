@@ -53,11 +53,10 @@ pub fn compose_cookie_header_excluding(
 
     let mut first = true;
     for (k, v) in cookies {
-        if let Some(name) = exclude_name {
-            if k == name {
+        if let Some(name) = exclude_name
+            && k == name {
                 continue;
             }
-        }
 
         if !first {
             s.push_str("; ");

@@ -99,7 +99,9 @@ struct AppState {
 struct Job {
     status: String, // queued | running | done | error
     results: Option<Vec<SanitizedResult>>,
+    #[allow(dead_code)]
     include_request: bool,
+    #[allow(dead_code)]
     include_response: bool,
 }
 
@@ -145,11 +147,10 @@ struct ResultPayload {
 fn check_api_key(state: &AppState, headers: &HeaderMap) -> bool {
     match &state.api_key {
         Some(required) if !required.is_empty() => {
-            if let Some(h) = headers.get("X-API-KEY") {
-                if let Ok(v) = h.to_str() {
+            if let Some(h) = headers.get("X-API-KEY")
+                && let Ok(v) = h.to_str() {
                     return v == required;
                 }
-            }
             false
         }
         _ => true, // no API key set -> allow all
@@ -161,6 +162,7 @@ fn make_scan_id(s: &str) -> String {
 }
 
 /// Return a compact, 7-character prefix of a scan id for log display.
+#[allow(dead_code)]
 fn short_scan_id(id: &str) -> String {
     crate::utils::short_scan_id(id)
 }
@@ -213,8 +215,8 @@ fn build_cors_headers(state: &AppState, req_headers: &HeaderMap) -> HeaderMap {
     }
 
     // Reflect allowed origins
-    if let Some(origin_val) = req_headers.get("Origin") {
-        if let Ok(origin_str) = origin_val.to_str() {
+    if let Some(origin_val) = req_headers.get("Origin")
+        && let Ok(origin_str) = origin_val.to_str() {
             let exact_allowed = state
                 .allowed_origins
                 .as_ref()
@@ -233,7 +235,6 @@ fn build_cors_headers(state: &AppState, req_headers: &HeaderMap) -> HeaderMap {
                 headers.insert("Vary", "Origin".parse().unwrap());
             }
         }
-    }
 
     headers.insert("Access-Control-Allow-Methods", allow_methods);
     headers.insert("Access-Control-Allow-Headers", allow_headers);
@@ -297,11 +298,10 @@ async fn run_scan_job(
         headers: opts.header.clone().unwrap_or_default(),
         cookies: {
             let mut v = vec![];
-            if let Some(c) = &opts.cookie {
-                if !c.trim().is_empty() {
+            if let Some(c) = &opts.cookie
+                && !c.trim().is_empty() {
                     v.push(c.clone());
                 }
-            }
             v
         },
         method: opts.method.clone().unwrap_or_else(|| "GET".to_string()),
@@ -448,8 +448,8 @@ async fn start_scan_handler(
             msg: "unauthorized".to_string(),
             data: None,
         };
-        if state.jsonp_enabled {
-            if let Some(cb) = params
+        if state.jsonp_enabled
+            && let Some(cb) = params
                 .get(&state.callback_param_name)
                 .and_then(|s| validate_jsonp_callback(s))
                 .and_then(|raw_cb| {
@@ -483,7 +483,6 @@ async fn start_scan_handler(
                 let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
                 return (StatusCode::UNAUTHORIZED, cors, body);
             }
-        }
         let body = serde_json::to_string(&resp).unwrap();
         return (StatusCode::UNAUTHORIZED, cors, body);
     }
@@ -495,8 +494,8 @@ async fn start_scan_handler(
             msg: "url is required".to_string(),
             data: None,
         };
-        if state.jsonp_enabled {
-            if let Some(cb) = params
+        if state.jsonp_enabled
+            && let Some(cb) = params
                 .get(&state.callback_param_name)
                 .and_then(|s| validate_jsonp_callback(s))
                 .and_then(|raw_cb| {
@@ -530,7 +529,6 @@ async fn start_scan_handler(
                 let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
                 return (StatusCode::BAD_REQUEST, cors, body);
             }
-        }
         let body = serde_json::to_string(&resp).unwrap();
         return (StatusCode::BAD_REQUEST, cors, body);
     }
@@ -579,8 +577,8 @@ async fn start_scan_handler(
         msg: id,
         data: None,
     };
-    if state.jsonp_enabled {
-        if let Some(cb) = params
+    if state.jsonp_enabled
+        && let Some(cb) = params
             .get(&state.callback_param_name)
             .and_then(|s| validate_jsonp_callback(s))
             .and_then(|raw_cb| {
@@ -611,7 +609,6 @@ async fn start_scan_handler(
             let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
             return (StatusCode::OK, cors, body);
         }
-    }
     let body = serde_json::to_string(&resp).unwrap();
     (StatusCode::OK, cors, body)
 }
@@ -630,8 +627,8 @@ async fn get_result_handler(
             msg: "unauthorized".to_string(),
             data: None,
         };
-        if state.jsonp_enabled {
-            if let Some(cb) = params
+        if state.jsonp_enabled
+            && let Some(cb) = params
                 .get(&state.callback_param_name)
                 .and_then(|s| validate_jsonp_callback(s))
                 .and_then(|raw_cb| {
@@ -665,7 +662,6 @@ async fn get_result_handler(
                 let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
                 return (StatusCode::UNAUTHORIZED, cors, body);
             }
-        }
         let body = serde_json::to_string(&resp).unwrap();
         return (StatusCode::UNAUTHORIZED, cors, body);
     }
@@ -693,8 +689,8 @@ async fn get_result_handler(
                 },
                 data: Some(payload),
             };
-            if state.jsonp_enabled {
-                if let Some(cb) = params
+            if state.jsonp_enabled
+                && let Some(cb) = params
                     .get(&state.callback_param_name)
                     .and_then(|s| validate_jsonp_callback(s))
                     .and_then(|raw_cb| {
@@ -728,7 +724,6 @@ async fn get_result_handler(
                     let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
                     return (StatusCode::OK, cors, body);
                 }
-            }
             let body = serde_json::to_string(&resp).unwrap();
             (StatusCode::OK, cors, body)
         }
@@ -738,8 +733,8 @@ async fn get_result_handler(
                 msg: "not found".to_string(),
                 data: None,
             };
-            if state.jsonp_enabled {
-                if let Some(cb) = params
+            if state.jsonp_enabled
+                && let Some(cb) = params
                     .get(&state.callback_param_name)
                     .and_then(|s| validate_jsonp_callback(s))
                     .and_then(|raw_cb| {
@@ -773,7 +768,6 @@ async fn get_result_handler(
                     let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
                     return (StatusCode::NOT_FOUND, cors, body);
                 }
-            }
             let body = serde_json::to_string(&resp).unwrap();
             (StatusCode::NOT_FOUND, cors, body)
         }
@@ -802,8 +796,8 @@ async fn get_scan_handler(
             msg: "unauthorized".to_string(),
             data: None,
         };
-        if state.jsonp_enabled {
-            if let Some(cb) = params
+        if state.jsonp_enabled
+            && let Some(cb) = params
                 .get(&state.callback_param_name)
                 .and_then(|s| validate_jsonp_callback(s))
                 .and_then(|raw_cb| {
@@ -837,7 +831,6 @@ async fn get_scan_handler(
                 let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
                 return (StatusCode::UNAUTHORIZED, cors, body);
             }
-        }
         let body = serde_json::to_string(&resp).unwrap();
         return (StatusCode::UNAUTHORIZED, cors, body);
     }
@@ -850,8 +843,8 @@ async fn get_scan_handler(
             msg: "url is required".to_string(),
             data: None,
         };
-        if state.jsonp_enabled {
-            if let Some(cb) = params
+        if state.jsonp_enabled
+            && let Some(cb) = params
                 .get(&state.callback_param_name)
                 .and_then(|s| validate_jsonp_callback(s))
                 .and_then(|raw_cb| {
@@ -885,7 +878,6 @@ async fn get_scan_handler(
                 let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
                 return (StatusCode::BAD_REQUEST, cors, body);
             }
-        }
         let body = serde_json::to_string(&resp).unwrap();
         return (StatusCode::BAD_REQUEST, cors, body);
     }
@@ -1004,8 +996,8 @@ async fn get_scan_handler(
         msg: id_for_resp,
         data: None,
     };
-    if state.jsonp_enabled {
-        if let Some(cb) = params
+    if state.jsonp_enabled
+        && let Some(cb) = params
             .get(&state.callback_param_name)
             .and_then(|s| validate_jsonp_callback(s))
         {
@@ -1016,7 +1008,6 @@ async fn get_scan_handler(
             let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
             return (StatusCode::OK, cors, body);
         }
-    }
     let body = serde_json::to_string(&resp).unwrap();
     (StatusCode::OK, cors, body)
 }
@@ -1041,13 +1032,11 @@ pub async fn run_server(args: ServerArgs) {
     };
 
     let mut api_key = args.api_key.clone();
-    if api_key.is_none() {
-        if let Ok(v) = std::env::var("DALFOX_API_KEY") {
-            if !v.is_empty() {
+    if api_key.is_none()
+        && let Ok(v) = std::env::var("DALFOX_API_KEY")
+            && !v.is_empty() {
                 api_key = Some(v);
             }
-        }
-    }
 
     // Parse allowed origins, build regex list and wildcard flag
     let allowed_origins_vec = args.allowed_origins.as_ref().map(|s| {

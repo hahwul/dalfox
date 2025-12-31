@@ -175,11 +175,10 @@ impl<'a> DomXssVisitor<'a> {
             }
             Expression::CallExpression(call) => {
                 // Check if it's a sanitizer
-                if let Some(func_name) = self.get_expr_string(&call.callee) {
-                    if self.sanitizers.contains(&func_name) {
+                if let Some(func_name) = self.get_expr_string(&call.callee)
+                    && self.sanitizers.contains(&func_name) {
                         return false; // Sanitized
                     }
-                }
 
                 // Check if the callee itself is tainted (e.g., location.hash.slice())
                 // The callee could be a method call on a tainted source
@@ -349,14 +348,9 @@ impl<'a> DomXssVisitor<'a> {
                 self.walk_statement(&while_stmt.body);
             }
             Statement::ForStatement(for_stmt) => {
-                if let Some(init) = &for_stmt.init {
-                    match init {
-                        ForStatementInit::VariableDeclaration(var_decl) => {
-                            for decl in &var_decl.declarations {
-                                self.walk_variable_declarator(decl);
-                            }
-                        }
-                        _ => {}
+                if let Some(ForStatementInit::VariableDeclaration(var_decl)) = &for_stmt.init {
+                    for decl in &var_decl.declarations {
+                        self.walk_variable_declarator(decl);
                     }
                 }
                 if let Some(test) = &for_stmt.test {
@@ -404,38 +398,33 @@ impl<'a> DomXssVisitor<'a> {
                 let var_name = id.name.as_str();
 
                 // Check if initializer is a source or tainted
-                if let Some(source_expr) = self.get_expr_string(init) {
-                    if self.sources.contains(&source_expr) {
+                if let Some(source_expr) = self.get_expr_string(init)
+                    && self.sources.contains(&source_expr) {
                         self.tainted_vars.insert(var_name.to_string());
                         self.var_aliases
                             .insert(var_name.to_string(), source_expr.clone());
                     }
-                }
 
                 // Check for localStorage.getItem() and sessionStorage.getItem() calls
-                if let Expression::CallExpression(call) = init {
-                    if let Expression::StaticMemberExpression(member) = &call.callee {
-                        if let Some(callee_str) = self.get_member_string(member) {
-                            if callee_str == "localStorage.getItem"
-                                || callee_str == "sessionStorage.getItem"
+                if let Expression::CallExpression(call) = init
+                    && let Expression::StaticMemberExpression(member) = &call.callee
+                        && let Some(callee_str) = self.get_member_string(member)
+                            && (callee_str == "localStorage.getItem"
+                                || callee_str == "sessionStorage.getItem")
                             {
                                 // Mark this variable as tainted
                                 self.tainted_vars.insert(var_name.to_string());
                                 self.var_aliases.insert(var_name.to_string(), callee_str);
                             }
-                        }
-                    }
-                }
 
                 // Also check if init expression is tainted (includes template literals, arrays, objects)
                 if self.is_tainted(init) {
                     self.tainted_vars.insert(var_name.to_string());
                     // Try to find a source from the init expression for better reporting
-                    if !self.var_aliases.contains_key(var_name) {
-                        if let Some(source) = self.find_source_in_expr(init) {
+                    if !self.var_aliases.contains_key(var_name)
+                        && let Some(source) = self.find_source_in_expr(init) {
                             self.var_aliases.insert(var_name.to_string(), source);
                         }
-                    }
                 }
             }
 
@@ -449,11 +438,10 @@ impl<'a> DomXssVisitor<'a> {
         match expr {
             Expression::Identifier(id) => self.var_aliases.get(id.name.as_str()).cloned(),
             Expression::StaticMemberExpression(member) => {
-                if let Some(full_path) = self.get_member_string(member) {
-                    if self.sources.contains(&full_path) {
+                if let Some(full_path) = self.get_member_string(member)
+                    && self.sources.contains(&full_path) {
                         return Some(full_path);
                     }
-                }
                 self.find_source_in_expr(&member.object)
             }
             Expression::ArrayExpression(array) => {
@@ -466,11 +454,10 @@ impl<'a> DomXssVisitor<'a> {
                             }
                         }
                         _ => {
-                            if let Some(expr) = elem.as_expression() {
-                                if let Some(source) = self.find_source_in_expr(expr) {
+                            if let Some(expr) = elem.as_expression()
+                                && let Some(source) = self.find_source_in_expr(expr) {
                                     return Some(source);
                                 }
-                            }
                         }
                     }
                 }
@@ -513,11 +500,10 @@ impl<'a> DomXssVisitor<'a> {
                 .or_else(|| self.find_source_in_expr(&cond.alternate)),
             Expression::CallExpression(call) => {
                 // Check callee first (e.g., location.hash.slice())
-                if let Expression::StaticMemberExpression(member) = &call.callee {
-                    if let Some(source) = self.find_source_in_expr(&member.object) {
+                if let Expression::StaticMemberExpression(member) = &call.callee
+                    && let Some(source) = self.find_source_in_expr(&member.object) {
                         return Some(source);
                     }
-                }
                 // Check arguments
                 for arg in &call.arguments {
                     match arg {
@@ -527,11 +513,10 @@ impl<'a> DomXssVisitor<'a> {
                             }
                         }
                         Argument::StaticMemberExpression(member) => {
-                            if let Some(member_str) = self.get_member_string(member) {
-                                if self.sources.contains(&member_str) {
+                            if let Some(member_str) = self.get_member_string(member)
+                                && self.sources.contains(&member_str) {
                                     return Some(member_str);
                                 }
-                            }
                         }
                         _ => {}
                     }
@@ -621,13 +606,13 @@ impl<'a> DomXssVisitor<'a> {
     /// Walk through a call expression
     fn walk_call_expression(&mut self, call: &CallExpression<'a>) {
         // Check if this is an addEventListener call with a function argument
-        if let Expression::StaticMemberExpression(member) = &call.callee {
-            if member.property.name.as_str() == "addEventListener" && call.arguments.len() >= 2 {
+        if let Expression::StaticMemberExpression(member) = &call.callee
+            && member.property.name.as_str() == "addEventListener" && call.arguments.len() >= 2 {
                 // The second argument might be a function with event parameter
                 if let Some(Argument::FunctionExpression(func)) = call.arguments.get(1) {
                     // Mark the first parameter as tainted (it's the event object)
-                    if let Some(param) = func.params.items.first() {
-                        if let BindingPatternKind::BindingIdentifier(id) = &param.pattern.kind {
+                    if let Some(param) = func.params.items.first()
+                        && let BindingPatternKind::BindingIdentifier(id) = &param.pattern.kind {
                             let param_name = id.name.as_str();
                             // Save state before analyzing event handler
                             let saved_tainted = self.tainted_vars.clone();
@@ -648,12 +633,11 @@ impl<'a> DomXssVisitor<'a> {
                             self.var_aliases = saved_aliases;
                             return;
                         }
-                    }
                 }
                 // Also handle arrow functions
-                if let Some(Argument::ArrowFunctionExpression(arrow)) = call.arguments.get(1) {
-                    if let Some(param) = arrow.params.items.first() {
-                        if let BindingPatternKind::BindingIdentifier(id) = &param.pattern.kind {
+                if let Some(Argument::ArrowFunctionExpression(arrow)) = call.arguments.get(1)
+                    && let Some(param) = arrow.params.items.first()
+                        && let BindingPatternKind::BindingIdentifier(id) = &param.pattern.kind {
                             let param_name = id.name.as_str();
                             let saved_tainted = self.tainted_vars.clone();
                             let saved_aliases = self.var_aliases.clone();
@@ -669,14 +653,11 @@ impl<'a> DomXssVisitor<'a> {
                             self.var_aliases = saved_aliases;
                             return;
                         }
-                    }
-                }
             }
-        }
 
         // Check if calling a sink function (full name like document.write)
-        if let Some(func_name) = self.get_expr_string(&call.callee) {
-            if self.sinks.contains(&func_name) {
+        if let Some(func_name) = self.get_expr_string(&call.callee)
+            && self.sinks.contains(&func_name) {
                 // Check if any argument is tainted
                 for arg in &call.arguments {
                     let (is_arg_tainted, source_hint) = match arg {
@@ -729,12 +710,10 @@ impl<'a> DomXssVisitor<'a> {
                                     match arg {
                                         Argument::StaticMemberExpression(member) => {
                                             if let Some(member_str) = self.get_member_string(member)
-                                            {
-                                                if self.sources.contains(&member_str) {
+                                                && self.sources.contains(&member_str) {
                                                     found_source = Some(member_str);
                                                     break;
                                                 }
-                                            }
                                         }
                                         Argument::Identifier(id) => {
                                             if self.tainted_vars.contains(id.name.as_str()) {
@@ -789,7 +768,6 @@ impl<'a> DomXssVisitor<'a> {
                     }
                 }
             }
-        }
 
         // Also treat member method name itself as sink (e.g., el.insertAdjacentHTML, range.createContextualFragment)
         if let Expression::StaticMemberExpression(member) = &call.callee {
@@ -798,20 +776,18 @@ impl<'a> DomXssVisitor<'a> {
                 // Special-case setAttribute to only dangerous attributes
                 if method_name == "setAttribute" && call.arguments.len() >= 2 {
                     let mut attr_name_lc: Option<String> = None;
-                    if let Some(arg0) = call.arguments.get(0) {
-                        if let Some(expr) = arg0.as_expression() {
-                            if let Expression::StringLiteral(s) = expr {
+                    if let Some(arg0) = call.arguments.first()
+                        && let Some(expr) = arg0.as_expression()
+                            && let Expression::StringLiteral(s) = expr {
                                 attr_name_lc = Some(s.value.to_string().to_ascii_lowercase());
                             }
-                        }
-                    }
                     if let Some(name) = attr_name_lc {
                         let dangerous = name.starts_with("on")
                             || name == "href"
                             || name == "xlink:href"
                             || name == "srcdoc";
-                        if dangerous {
-                            if let Some(arg1) = call.arguments.get(1) {
+                        if dangerous
+                            && let Some(arg1) = call.arguments.get(1) {
                                 let tainted = match arg1 {
                                     Argument::SpreadElement(sp) => self.is_tainted(&sp.argument),
                                     _ => arg1
@@ -828,7 +804,6 @@ impl<'a> DomXssVisitor<'a> {
                                     return;
                                 }
                             }
-                        }
                     }
                 } else {
                     // Generic method sink: if any argument is tainted
@@ -872,11 +847,10 @@ impl<'a> DomXssVisitor<'a> {
 
     /// Extract the source name from an expression (for direct source usage)
     fn extract_source_from_expr(&self, expr: &Expression) -> Option<String> {
-        if let Some(member_str) = self.get_expr_string(expr) {
-            if self.sources.contains(&member_str) {
+        if let Some(member_str) = self.get_expr_string(expr)
+            && self.sources.contains(&member_str) {
                 return Some(member_str);
             }
-        }
         // Try to get from StaticMemberExpression
         if let Expression::StaticMemberExpression(member) = expr {
             return self
