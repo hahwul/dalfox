@@ -6,6 +6,7 @@ use std::sync::OnceLock;
 
 use tokio::time::{Duration, sleep};
 
+#[allow(dead_code)]
 static DALFOX_SELECTOR: OnceLock<scraper::Selector> = OnceLock::new();
 
 pub async fn check_dom_verification(
@@ -39,8 +40,8 @@ pub async fn check_dom_verification(
 
     if args.sxss {
         // For Stored XSS, check DOM on sxss_url
-        if let Some(sxss_url_str) = &args.sxss_url {
-            if let Ok(sxss_url) = url::Url::parse(sxss_url_str) {
+        if let Some(sxss_url_str) = &args.sxss_url
+            && let Ok(sxss_url) = url::Url::parse(sxss_url_str) {
                 let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
                 let check_request =
                     crate::utils::build_request(&client, target, method, sxss_url, None);
@@ -52,14 +53,12 @@ pub async fn check_dom_verification(
                         .get(reqwest::header::CONTENT_TYPE)
                         .and_then(|v| v.to_str().ok())
                         .unwrap_or("");
-                    if let Ok(text) = resp.text().await {
-                        if crate::utils::is_htmlish_content_type(ct) && text.contains(payload) {
+                    if let Ok(text) = resp.text().await
+                        && crate::utils::is_htmlish_content_type(ct) && text.contains(payload) {
                             return (true, Some(text));
                         }
-                    }
                 }
             }
-        }
     } else {
         // Normal DOM verification
         if let Ok(resp) = inject_resp {
@@ -68,11 +67,10 @@ pub async fn check_dom_verification(
                 .get(reqwest::header::CONTENT_TYPE)
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
-            if let Ok(text) = resp.text().await {
-                if crate::utils::is_htmlish_content_type(ct) && text.contains(payload) {
+            if let Ok(text) = resp.text().await
+                && crate::utils::is_htmlish_content_type(ct) && text.contains(payload) {
                     return (true, Some(text));
                 }
-            }
         }
     }
 

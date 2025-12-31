@@ -97,17 +97,15 @@ fn generate_poc(result: &crate::scanning::result::Result, poc_type: &str) -> Str
             }
         } else if url.contains('?') {
             // Query mutation already embedded
-        } else {
-            if !url.contains(&result.payload) {
-                let sep = if url.contains('?') { '&' } else { '?' };
-                url = format!(
-                    "{}{}{}={}",
-                    url,
-                    sep,
-                    result.param,
-                    urlencoding::encode(&result.payload)
-                );
-            }
+        } else if !url.contains(&result.payload) {
+            let sep = if url.contains('?') { '&' } else { '?' };
+            url = format!(
+                "{}{}{}={}",
+                url,
+                sep,
+                result.param,
+                urlencoding::encode(&result.payload)
+            );
         }
         url
     };
@@ -297,11 +295,10 @@ async fn preflight_content_type(
     for (k, v) in &target.headers {
         request_builder = request_builder.header(k, v);
     }
-    if let Some(ua) = &target.user_agent {
-        if !ua.is_empty() {
+    if let Some(ua) = &target.user_agent
+        && !ua.is_empty() {
             request_builder = request_builder.header("User-Agent", ua);
         }
-    }
     if !target.cookies.is_empty() {
         let mut cookie_header = String::new();
         for (ck, cv) in &target.cookies {
@@ -344,8 +341,8 @@ async fn preflight_content_type(
     let mut response_body: Option<String> = None;
     let get_req = crate::utils::build_preflight_request(&client, target, false, Some(8192));
     crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    if let Ok(get_resp) = get_req.send().await {
-        if let Ok(body) = get_resp.text().await {
+    if let Ok(get_resp) = get_req.send().await
+        && let Ok(body) = get_resp.text().await {
             response_body = Some(body.clone());
             // Only parse CSP if not already found
             if csp_header.is_none() {
@@ -375,7 +372,6 @@ async fn preflight_content_type(
                 }
             }
         }
-    }
     ct_opt.map(|ct| (ct, csp_header, response_body))
 }
 
@@ -664,20 +660,17 @@ pub async fn run_scan(args: &ScanArgs) {
         let _ = GLOBAL_ENCODERS.set(args.encoders.clone());
     }
     // Initialize remote payloads/wordlists if requested (honor timeout/proxy)
-    if !args.remote_payloads.is_empty() || !args.remote_wordlists.is_empty() {
-        if let Err(e) = crate::utils::init_remote_resources_with_options(
+    if (!args.remote_payloads.is_empty() || !args.remote_wordlists.is_empty())
+        && let Err(e) = crate::utils::init_remote_resources_with_options(
             &args.remote_payloads,
             &args.remote_wordlists,
             Some(args.timeout),
             args.proxy.clone(),
         )
         .await
-        {
-            if !args.silence {
+            && !args.silence {
                 eprintln!("Error initializing remote resources: {}", e);
             }
-        }
-    }
     let input_type = if args.input_type == "auto" {
         if args.targets.is_empty() {
             // If no positional targets and STDIN is piped, treat as pipe mode
@@ -927,10 +920,8 @@ pub async fn run_scan(args: &ScanArgs) {
                         }
                     }
                 }
-            } else {
-                if !args.silence {
-                    eprintln!("Error reading cookie file: {}", path);
-                }
+            } else if !args.silence {
+                eprintln!("Error reading cookie file: {}", path);
             }
         }
     }
@@ -944,7 +935,7 @@ pub async fn run_scan(args: &ScanArgs) {
         std::collections::HashMap::new();
     for target in parsed_targets {
         let host = target.url.host_str().unwrap_or("unknown").to_string();
-        host_groups.entry(host).or_insert(Vec::new()).push(target);
+        host_groups.entry(host).or_default().push(target);
     }
 
     let total_targets = host_groups.values().map(|g| g.len()).sum::<usize>();
@@ -968,12 +959,11 @@ pub async fn run_scan(args: &ScanArgs) {
                 let percent = (done * 100) / std::cmp::max(1, total_targets_copy);
                 let findings = results_clone.lock().await.len();
                 print!(
-                    "\r\x1b[38;5;247m{} overall: targets={}  done={}  progress={}{}  findings={}\x1b[0m",
+                    "\r\x1b[38;5;247m{} overall: targets={}  done={}  progress={}%  findings={}\x1b[0m",
                     frames[i % frames.len()],
                     total_targets_copy,
                     done,
                     percent,
-                    "%",
                     findings
                 );
                 let _ = io::stdout().flush();
@@ -1090,7 +1080,7 @@ pub async fn run_scan(args: &ScanArgs) {
                 if args_clone.format == "plain" && !args_clone.silence && total_targets_copy == 1 {
                     if total_targets_copy > 1 {
                         let sid = crate::utils::short_scan_id(&crate::utils::make_scan_id(
-                            &target.url.to_string(),
+                            target.url.as_ref(),
                         ));
                         let ts = chrono::Local::now().format("%-I:%M%p").to_string();
                         println!(
@@ -1135,8 +1125,8 @@ pub async fn run_scan(args: &ScanArgs) {
                 }
 
                 // Run AST-based DOM XSS analysis on the initial response (enabled by default)
-                if !args_clone.skip_ast_analysis {
-                    if let Some(response_text) = preflight_response_body {
+                if !args_clone.skip_ast_analysis
+                    && let Some(response_text) = preflight_response_body {
                         let js_blocks = crate::scanning::ast_integration::extract_javascript_from_html(&response_text);
                         for js_code in js_blocks {
                             let findings = crate::scanning::ast_integration::analyze_javascript_for_dom_xss(
@@ -1145,7 +1135,7 @@ pub async fn run_scan(args: &ScanArgs) {
                             );
                             for (vuln, payload, description) in findings {
                                 // Create an AST-based DOM XSS result with actual executable payload
-                                let mut ast_result = crate::scanning::result::Result::new(
+                                let ast_result = crate::scanning::result::Result::new(
                                     "A".to_string(), // AST-detected
                                     "DOM-XSS".to_string(),
                                     target.method.clone(),
@@ -1165,7 +1155,6 @@ pub async fn run_scan(args: &ScanArgs) {
                             }
                         }
                     }
-                }
 
                 // Pretty reflection summary (plain only)
                 if args_clone.format == "plain" && !args_clone.silence && total_targets_copy == 1 {
@@ -1173,7 +1162,7 @@ pub async fn run_scan(args: &ScanArgs) {
                     let ts = chrono::Local::now().format("%-I:%M%p").to_string();
                     if total_targets_copy > 1 {
                         let sid = crate::utils::short_scan_id(&crate::utils::make_scan_id(
-                            &target.url.to_string(),
+                            target.url.as_ref(),
                         ));
                         println!(
                             "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m {} found reflected \x1b[33m{}\x1b[0m params",
@@ -1258,11 +1247,10 @@ pub async fn run_scan(args: &ScanArgs) {
         // Collect processed targets (skipping those filtered by preflight)
                 let mut processed: Vec<Target> = Vec::new();
                 for handle in handles {
-                    if let Ok(res) = handle.await {
-                        if let Some(t) = res {
+                    if let Ok(res) = handle.await
+                        && let Some(t) = res {
                             processed.push(t);
                         }
-                    }
                 }
                 processed
             }).await
@@ -1278,11 +1266,10 @@ pub async fn run_scan(args: &ScanArgs) {
     let mut group_handles = vec![];
 
     for (host, group) in host_groups {
-        if let Some(lim) = args.limit {
-            if results.lock().await.len() >= lim {
+        if let Some(lim) = args.limit
+            && results.lock().await.len() >= lim {
                 break;
             }
-        }
         let global_semaphore_clone = global_semaphore.clone();
         let multi_pb_clone = multi_pb.clone();
         let args_arc = Arc::new(args.clone());
@@ -1327,11 +1314,10 @@ pub async fn run_scan(args: &ScanArgs) {
             let mut target_handles = vec![];
 
             for target in group {
-                if let Some(lim) = args_arc.limit {
-                    if results_clone.lock().await.len() >= lim {
+                if let Some(lim) = args_arc.limit
+                    && results_clone.lock().await.len() >= lim {
                         break;
                     }
-                }
                 let permit = global_semaphore_clone
                     .clone()
                     .acquire_owned()
@@ -1397,11 +1383,10 @@ pub async fn run_scan(args: &ScanArgs) {
 
     for handle in group_handles {
         handle.await.unwrap();
-        if let Some(lim) = args.limit {
-            if results.lock().await.len() >= lim {
+        if let Some(lim) = args.limit
+            && results.lock().await.len() >= lim {
                 break;
             }
-        }
     }
 
     if args.format == "plain" && !args.silence && total_targets > 1 {

@@ -44,7 +44,9 @@ use crate::{
 struct Job {
     status: String,                        // queued | running | done | error
     results: Option<Vec<SanitizedResult>>, // Present when done (or partial in future)
+    #[allow(dead_code)]
     include_request: bool,
+    #[allow(dead_code)]
     include_response: bool,
 }
 
@@ -53,6 +55,12 @@ struct Job {
 pub struct DalfoxMcp {
     jobs: Arc<Mutex<HashMap<String, Job>>>,
     tool_router: ToolRouter<Self>,
+}
+
+impl Default for DalfoxMcp {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DalfoxMcp {
@@ -83,7 +91,7 @@ impl DalfoxMcp {
 
         let url = scan_args
             .targets
-            .get(0)
+            .first()
             .cloned()
             .unwrap_or_else(|| "<missing>".to_string());
         let include_request = scan_args.include_request;
@@ -326,8 +334,7 @@ impl DalfoxMcp {
             .get("cookie_from_raw")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
-        {
-            if let Ok(content) = std::fs::read_to_string(&raw_path) {
+            && let Ok(content) = std::fs::read_to_string(&raw_path) {
                 for line in content.lines() {
                     if line.to_ascii_lowercase().starts_with("cookie:") {
                         let rest = line.split_once(':').map(|x| x.1).unwrap_or("").trim();
@@ -340,7 +347,6 @@ impl DalfoxMcp {
                     }
                 }
             }
-        }
 
         // Prepare ScanArgs
         // Optional engine/network flags
@@ -355,15 +361,13 @@ impl DalfoxMcp {
                             .filter_map(|x| x.as_str().map(|s| s.to_string()))
                             .collect::<Vec<_>>(),
                     )
-                } else if let Some(s) = v.as_str() {
-                    Some(
+                } else {
+                    v.as_str().map(|s| {
                         s.split(',')
                             .map(|x| x.trim().to_string())
                             .filter(|x| !x.is_empty())
-                            .collect(),
-                    )
-                } else {
-                    None
+                            .collect()
+                    })
                 }
             })
             .map(|xs| {

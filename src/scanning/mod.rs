@@ -186,6 +186,7 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
     request_lines.join("\r\n")
 }
 
+#[allow(dead_code)]
 fn build_injected_url(
     base: &url::Url,
     param: &crate::parameter_analysis::Param,

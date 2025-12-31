@@ -70,9 +70,9 @@ pub async fn check_query_discovery(
                 crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
             crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let mut discovered: Option<Param> = None;
-            if let Ok(resp) = request.send().await {
-                if let Ok(text) = resp.text().await {
-                    if text.contains(test_value) {
+            if let Ok(resp) = request.send().await
+                && let Ok(text) = resp.text().await
+                    && text.contains(test_value) {
                         let (valid, invalid) = classify_special_chars(&text);
                         discovered = Some(Param {
                             name,
@@ -83,8 +83,6 @@ pub async fn check_query_discovery(
                             invalid_specials: Some(invalid),
                         });
                     }
-                }
-            }
             if delay > 0 {
                 sleep(Duration::from_millis(delay)).await;
             }
@@ -97,11 +95,10 @@ pub async fn check_query_discovery(
     // Batch collect results to reduce mutex contention
     let mut batch: Vec<Param> = Vec::new();
     for handle in handles {
-        if let Ok(opt_param) = handle.await {
-            if let Some(p) = opt_param {
+        if let Ok(opt_param) = handle.await
+            && let Some(p) = opt_param {
                 batch.push(p);
             }
-        }
     }
     if !batch.is_empty() {
         let mut guard = reflection_params.lock().await;
@@ -144,9 +141,9 @@ pub async fn check_header_discovery(
             let request = crate::utils::apply_header_overrides(base, &overrides);
             crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let mut discovered: Option<Param> = None;
-            if let Ok(resp) = request.send().await {
-                if let Ok(text) = resp.text().await {
-                    if text.contains(test_value) {
+            if let Ok(resp) = request.send().await
+                && let Ok(text) = resp.text().await
+                    && text.contains(test_value) {
                         let (valid, invalid) = classify_special_chars(&text);
                         discovered = Some(Param {
                             name: header_name,
@@ -157,8 +154,6 @@ pub async fn check_header_discovery(
                             invalid_specials: Some(invalid),
                         });
                     }
-                }
-            }
             if delay > 0 {
                 sleep(Duration::from_millis(delay)).await;
             }
@@ -171,11 +166,10 @@ pub async fn check_header_discovery(
     // Batch collect
     let mut batch: Vec<Param> = Vec::new();
     for handle in handles {
-        if let Ok(opt) = handle.await {
-            if let Some(p) = opt {
+        if let Ok(opt) = handle.await
+            && let Some(p) = opt {
                 batch.push(p);
             }
-        }
     }
     if !batch.is_empty() {
         let mut guard = reflection_params.lock().await;
@@ -367,9 +361,9 @@ pub async fn check_path_discovery(
 
             crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let mut discovered: Option<Param> = None;
-            if let Ok(resp) = request.send().await {
-                if let Ok(text) = resp.text().await {
-                    if text.contains(test_value) {
+            if let Ok(resp) = request.send().await
+                && let Ok(text) = resp.text().await
+                    && text.contains(test_value) {
                         let (valid, invalid) = classify_special_chars(&text);
                         discovered = Some(Param {
                             name: param_name,
@@ -380,8 +374,6 @@ pub async fn check_path_discovery(
                             invalid_specials: Some(invalid),
                         });
                     }
-                }
-            }
             if delay > 0 {
                 sleep(Duration::from_millis(delay)).await;
             }
@@ -394,11 +386,10 @@ pub async fn check_path_discovery(
     // Batch collect discovered path params
     let mut batch: Vec<Param> = Vec::new();
     for h in handles {
-        if let Ok(opt) = h.await {
-            if let Some(p) = opt {
+        if let Ok(opt) = h.await
+            && let Some(p) = opt {
                 batch.push(p);
             }
-        }
     }
     if !batch.is_empty() {
         let mut guard = reflection_params.lock().await;
@@ -420,8 +411,8 @@ pub async fn check_cookie_discovery(
     for (cookie_name, cookie_value) in &target.cookies {
         let client_clone = client.clone();
         let url = target.url.clone();
-        let headers = target.headers.clone();
-        let user_agent = target.user_agent.clone();
+        let _headers = target.headers.clone();
+        let _user_agent = target.user_agent.clone();
         let cookies = target.cookies.clone();
         let data = target.data.clone();
         let method = target.method.clone();
@@ -452,9 +443,9 @@ pub async fn check_cookie_discovery(
             );
             crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let mut discovered: Option<Param> = None;
-            if let Ok(resp) = request.send().await {
-                if let Ok(text) = resp.text().await {
-                    if text.contains(test_value) {
+            if let Ok(resp) = request.send().await
+                && let Ok(text) = resp.text().await
+                    && text.contains(test_value) {
                         let (valid, invalid) = classify_special_chars(&text);
                         discovered = Some(Param {
                             name: cookie_name,
@@ -465,8 +456,6 @@ pub async fn check_cookie_discovery(
                             invalid_specials: Some(invalid),
                         });
                     }
-                }
-            }
             if delay > 0 {
                 sleep(Duration::from_millis(delay)).await;
             }
@@ -479,11 +468,10 @@ pub async fn check_cookie_discovery(
     // Batch collect cookie params
     let mut batch: Vec<Param> = Vec::new();
     for handle in handles {
-        if let Ok(opt) = handle.await {
-            if let Some(p) = opt {
+        if let Ok(opt) = handle.await
+            && let Some(p) = opt {
                 batch.push(p);
             }
-        }
     }
     if !batch.is_empty() {
         let mut guard = reflection_params.lock().await;

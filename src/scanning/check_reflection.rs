@@ -72,18 +72,16 @@ fn classify_reflection(resp_text: &str, payload: &str) -> Option<ReflectionKind>
     }
 
     // Check URL decoded version of raw
-    if let Ok(url_dec) = urlencoding::decode(resp_text) {
-        if url_dec != resp_text && url_dec.contains(payload) {
+    if let Ok(url_dec) = urlencoding::decode(resp_text)
+        && url_dec != resp_text && url_dec.contains(payload) {
             return Some(ReflectionKind::UrlDecoded);
         }
-    }
 
     // Check URL decoded version of HTML decoded
-    if let Ok(url_dec_html) = urlencoding::decode(&html_dec) {
-        if url_dec_html != html_dec && url_dec_html.contains(payload) {
+    if let Ok(url_dec_html) = urlencoding::decode(&html_dec)
+        && url_dec_html != html_dec && url_dec_html.contains(payload) {
             return Some(ReflectionKind::HtmlThenUrlDecoded);
         }
-    }
 
     None
 }
@@ -118,8 +116,8 @@ async fn fetch_injection_response(
 
     // For Stored XSS, check reflection on sxss_url
     if args.sxss {
-        if let Some(sxss_url_str) = &args.sxss_url {
-            if let Ok(sxss_url) = url::Url::parse(sxss_url_str) {
+        if let Some(sxss_url_str) = &args.sxss_url
+            && let Ok(sxss_url) = url::Url::parse(sxss_url_str) {
                 let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
                 let check_request =
                     crate::utils::build_request(&client, target, method, sxss_url, None);
@@ -129,7 +127,6 @@ async fn fetch_injection_response(
                     return resp.text().await.ok();
                 }
             }
-        }
         None
     } else {
         // Normal reflection check
