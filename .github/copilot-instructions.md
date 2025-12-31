@@ -79,6 +79,8 @@ src/
   - ast_integration.rs             JavaScript extraction and DOM XSS POC generation
   - ast_dom_analysis.rs            AST-based taint analysis for DOM-based XSS detection
   - result.rs                      Result model (JSON-compatible shape)
+  - light_verify.rs                Lightweight (non-headless) DOM XSS verification heuristics
+  - markers.rs                     Unique markers for DOM element identification (class/id markers)
 - target_parser/
   - mod.rs                         URL parsing, default target settings
 - mcp/
@@ -110,7 +112,7 @@ Scan flags (as of src/cmd/scan.rs):
 - INPUT
   - -i, --input-type: auto | url | file | pipe | raw-http
 - OUTPUT
-  - -f, --format: plain | json | jsonl | markdown | sarif (default: plain)
+  - -f, --format: plain | json | jsonl | markdown | sarif | toml (default: plain)
   - -o, --output: file path to write results
   - --include-request: include HTTP request in JSON/plain details
   - --include-response: include HTTP response in JSON/plain details
@@ -275,6 +277,7 @@ Result model (scanning/result.rs):
   - results_to_jsonl: JSON Lines format (one result per line)
   - results_to_markdown: Markdown report with summary and detailed findings
   - results_to_sarif: SARIF 2.1.0 format for security tool integration
+  - results_to_toml: TOML format with results array
 - JSON and JSONL outputs omit null request/response; plain output prints colorized POC lines and detail sections (Issue, Payload, L#, Request, Response)
 
 ## Development Workflow
@@ -331,6 +334,7 @@ Output format
 - Plain: colorized POC lines and a detail tree per finding; includes optional request/response blocks
 - Markdown: formatted report with summary statistics and detailed findings in markdown tables
 - SARIF: Static Analysis Results Interchange Format (SARIF) 2.1.0 compatible output for integration with security tools
+- TOML: structured TOML format for configuration-friendly output
 
 ## Adding or Modifying Features
 
@@ -389,24 +393,32 @@ Unit tests live alongside modules using #[cfg(test)] with a tests module.
 - CI policy: cargo fmt, cargo clippy -- --deny warnings, cargo test pass before merging
 
 Test organization (tests/ directory):
+- tests/unit_tests.rs: Root test file that includes all test modules (unit, integration, functional, e2e, common)
 - tests/unit/: Unit tests for isolated module functionality
+  - mod.rs: Test module definitions
   - encoding.rs: encoder correctness and policy tests
   - target_parser.rs: URL parsing and target configuration tests
   - utils.rs: utility function tests
 - tests/integration/: Integration tests for multi-module workflows
+  - mod.rs: Integration test module definitions
   - scanner_pipeline.rs: end-to-end scanning pipeline tests
   - markdown_output_test.rs: markdown output format validation
   - sarif_output_test.rs: SARIF output format tests
   - sarif_validation_test.rs: SARIF schema compliance validation
 - tests/functional/: Functional tests with mock servers
+  - mod.rs: Functional test module definitions
   - xss_mock_server.rs: Mock HTTP server for XSS testing scenarios
   - mock_case_loader.rs: Loads test cases from mock_cases/ subdirectories
   - dom_xss_tests.rs: DOM-based XSS detection tests
   - mock_cases/: Organized by parameter location (query, body, header, cookie, path, dom_xss)
   - basic/: Basic CLI flag and behavior tests
+    - mod.rs: Basic test module definitions
+    - cli_flags.rs: CLI flag behavior tests
 - tests/e2e/: End-to-end tests
+  - mod.rs: E2E test module definitions
   - cli_smoke_test.rs: CLI smoke tests ensuring basic commands work
 - tests/common/: Shared test utilities and helpers
+  - mod.rs: Common test utilities module
 
 ## CLI Examples
 
@@ -420,6 +432,8 @@ Test organization (tests/ directory):
   - dalfox scan https://example.com -f markdown -o report.md
 - SARIF output
   - dalfox scan https://example.com -f sarif -o results.sarif
+- TOML output
+  - dalfox scan https://example.com -f toml -o results.toml
 - Blind XSS
   - dalfox scan https://example.com -b https://collab.example/x/callback
 - Stored XSS flow
