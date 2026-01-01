@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/briandowns/spinner"
+	"github.com/hahwul/dalfox/v2/internal/optimization"
 	"github.com/hahwul/dalfox/v2/internal/printing"
 	"github.com/hahwul/dalfox/v2/internal/utils"
 	model "github.com/hahwul/dalfox/v2/pkg/model"
@@ -58,6 +59,9 @@ func runPipeCmd(cmd *cobra.Command, args []string) {
 		targets = append(targets, target)
 	}
 	targets = voltUtils.UniqueStringSlice(targets)
+	if len(options.OutOfScope) > 0 {
+		targets = optimization.FilterOutOfScopeTargets(options, targets)
+	}
 	printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target urls", options)
 
 	multi, _ := cmd.Flags().GetBool("multicast")
@@ -131,6 +135,10 @@ func runRawDataPipeMode(cmd *cobra.Command) {
 		} else {
 			target = "https://" + host + path
 		}
+	}
+	if optimization.IsOutOfScope(options, target) {
+		printing.DalLog("INFO", "Target is out of scope, skipping", options)
+		return
 	}
 	_, _ = scanning.Scan(target, options, "single")
 }

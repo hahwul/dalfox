@@ -10,6 +10,7 @@ import (
 	"time"
 
 	spinner "github.com/briandowns/spinner"
+	"github.com/hahwul/dalfox/v2/internal/optimization"
 	"github.com/hahwul/dalfox/v2/internal/printing"
 	model "github.com/hahwul/dalfox/v2/pkg/model"
 	"github.com/hahwul/dalfox/v2/pkg/scanning"
@@ -111,6 +112,10 @@ func runRawDataMode(filePath string, cmd *cobra.Command) {
 			target = "https://" + host + path
 		}
 	}
+	if optimization.IsOutOfScope(options, target) {
+		printing.DalLog("INFO", "Target is out of scope, skipping", options)
+		return
+	}
 	_, _ = scanning.Scan(target, options, "single")
 }
 
@@ -144,6 +149,10 @@ func runHarMode(filePath string, _ *cobra.Command, sf bool) {
 				options.Data = entry.Request.PostData.Text
 			}
 			options.Method = entry.Request.Method
+			if optimization.IsOutOfScope(options, turl) {
+				updateSpinner(options, sf, i, len(harObject.Log.Entries))
+				continue
+			}
 			_, _ = scanning.Scan(turl, options, strconv.Itoa(i))
 			updateSpinner(options, sf, i, len(harObject.Log.Entries))
 		}
@@ -170,6 +179,9 @@ func runFileMode(filePath string, cmd *cobra.Command, sf bool) {
 		return
 	}
 	targets := voltUtils.UniqueStringSlice(ff)
+	if len(options.OutOfScope) > 0 {
+		targets = optimization.FilterOutOfScopeTargets(options, targets)
+	}
 	printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(targets))+" target URLs", options)
 	multi, _ := cmd.Flags().GetBool("multicast")
 	mass, _ := cmd.Flags().GetBool("mass")

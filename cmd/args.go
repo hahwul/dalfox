@@ -6,6 +6,7 @@ type Args struct {
 	Header       []string // Custom HTTP headers to add to requests
 	P            []string // Parameters to test for XSS vulnerabilities
 	IgnoreParams []string // Parameters to ignore during scanning
+	OutOfScope   []string // Domains to exclude from scanning
 
 	// String options
 	Config                    string // Path to configuration file
@@ -33,6 +34,7 @@ type Args struct {
 	ReportFormat              string // Report format (plain, json, markdown, md)
 	HarFilePath               string // Path to save HAR files
 	CustomBlindXSSPayloadFile string // Path to custom blind XSS payload file
+	OutOfScopeFile            string // File containing domains to exclude
 
 	// Integer options
 	Timeout     int // Request timeout in seconds
