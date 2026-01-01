@@ -16,6 +16,7 @@ type Options struct {
 	// Target Related
 	UniqParam    []string `json:"param,omitempty"`
 	IgnoreParams []string `json:"ignore-params,omitempty"`
+	OutOfScope   []string `json:"out-of-scope,omitempty"`
 	Method       string   `json:"method,omitempty"`
 	IgnoreReturn string   `json:"ignore-return,omitempty"`
 

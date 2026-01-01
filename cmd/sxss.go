@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"github.com/hahwul/dalfox/v2/internal/optimization"
 	"github.com/hahwul/dalfox/v2/internal/printing"
 	"github.com/hahwul/dalfox/v2/pkg/scanning"
 	"github.com/spf13/cobra"
@@ -36,6 +37,10 @@ func runSxssCmd(cmd *cobra.Command, args []string) {
 
 	if options.Trigger != "" {
 		printing.DalLog("SYSTEM", "Using Stored XSS mode", options)
+		if optimization.IsOutOfScope(options, args[0]) {
+			printing.DalLog("INFO", "Target is out of scope, skipping", options)
+			return
+		}
 		if options.Format == "json" {
 			printing.DalLog("PRINT", "[", options)
 		}

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"text/template"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"github.com/hahwul/dalfox/v2/internal/har"
 	"github.com/hahwul/dalfox/v2/internal/printing"
 	"github.com/hahwul/dalfox/v2/pkg/model"
+	voltFile "github.com/hahwul/volt/file"
 	"github.com/logrusorgru/aurora"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
@@ -89,6 +91,8 @@ func init() {
 	rootCmd.PersistentFlags().StringSliceVarP(&args.Header, "header", "H", []string{}, "Add custom headers to the request. Example: -H 'Authorization: Bearer <token>'")
 	rootCmd.PersistentFlags().StringSliceVarP(&args.P, "param", "p", []string{}, "Specify parameters to test. Example: -p 'username' -p 'password'")
 	rootCmd.PersistentFlags().StringSliceVar(&args.IgnoreParams, "ignore-param", []string{}, "Ignore specific parameters during scanning. Example: --ignore-param 'api_token' --ignore-param 'csrf_token'")
+	rootCmd.PersistentFlags().StringSliceVar(&args.OutOfScope, "out-of-scope", []string{}, "Exclude domains from scanning. Supports wildcards. Example: --out-of-scope 'stg.example.com' --out-of-scope '*.dev.example.com'")
+	rootCmd.PersistentFlags().StringVar(&args.OutOfScopeFile, "out-of-scope-file", "", "Load out-of-scope domains from a file (one per line). Example: --out-of-scope-file 'exclusions.txt'")
 
 	// String
 	rootCmd.PersistentFlags().StringVar(&args.Config, "config", "", "Load configuration from a file. Example: --config 'config.json'")
@@ -248,7 +252,7 @@ func initializeFlagGroups() {
 	flagMap := map[string][]string{
 		"Input":    {"config", "custom-payload", "custom-blind-xss-payload", "data", "grep", "remote-payloads", "remote-wordlists", "har-file-path"},
 		"Request":  {"header", "cookie", "user-agent", "method", "cookie-from-raw"},
-		"Scanning": {"param", "ignore-param", "blind", "timeout", "delay", "worker", "skip-headless", "deep-domxss", "waf-evasion", "skip-discovery", "force-headless-verification", "use-bav", "skip-bav", "skip-mining-dom", "skip-mining-dict", "skip-mining-all", "skip-xss-scanning", "only-custom-payload", "skip-grepping", "detailed-analysis", "fast-scan", "magic-char-test", "context-aware"},
+		"Scanning": {"param", "ignore-param", "out-of-scope", "out-of-scope-file", "blind", "timeout", "delay", "worker", "skip-headless", "deep-domxss", "waf-evasion", "skip-discovery", "force-headless-verification", "use-bav", "skip-bav", "skip-mining-dom", "skip-mining-dict", "skip-mining-all", "skip-xss-scanning", "only-custom-payload", "skip-grepping", "detailed-analysis", "fast-scan", "magic-char-test", "context-aware"},
 		"Mining":   {"mining-dict-word", "mining-dict", "mining-dom"},
 		"Output":   {"output", "format", "only-poc", "report", "output-all", "output-request", "output-response", "poc-type", "report-format", "silence", "no-color", "no-spinner"},
 		"Advanced": {"custom-alert-value", "custom-alert-type", "found-action", "found-action-shell", "proxy", "ignore-return", "max-cpu", "only-discovery", "follow-redirects", "debug"},
@@ -317,6 +321,7 @@ func initConfig() {
 		Grep:                      args.Grep,
 		IgnoreReturn:              args.IgnoreReturn,
 		IgnoreParams:              args.IgnoreParams,
+		OutOfScope:                args.OutOfScope,
 		Timeout:                   args.Timeout,
 		Concurrence:               args.Concurrence,
 		MaxCPU:                    args.MaxCPU,
@@ -416,6 +421,9 @@ func initConfig() {
 		if len(args.IgnoreParams) == 0 && len(cfgOptions.IgnoreParams) > 0 {
 			options.IgnoreParams = cfgOptions.IgnoreParams
 		}
+		if len(args.OutOfScope) == 0 && len(cfgOptions.OutOfScope) > 0 {
+			options.OutOfScope = cfgOptions.OutOfScope
+		}
 		if args.Timeout == DefaultTimeout && cfgOptions.Timeout != 0 {
 			options.Timeout = cfgOptions.Timeout
 		}
@@ -454,6 +462,17 @@ func initConfig() {
 			options.HarFilePath = cfgOptions.HarFilePath
 			harFilePath = cfgOptions.HarFilePath
 		}
+	}
+
+	// Load out-of-scope domains from file if specified
+	if args.OutOfScopeFile != "" {
+		domains, err := voltFile.ReadLinesOrLiteral(args.OutOfScopeFile)
+		if err != nil {
+			printing.DalLog("ERROR", "Failed to read out-of-scope file: "+err.Error(), options)
+			os.Exit(1)
+		}
+		options.OutOfScope = append(options.OutOfScope, domains...)
+		printing.DalLog("SYSTEM", "Loaded "+strconv.Itoa(len(domains))+" domains from out-of-scope file", options)
 	}
 
 	// If HarFilePath is specified via CLI or configuration file, initialize HAR writer
