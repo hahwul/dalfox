@@ -100,6 +100,8 @@ impl<'a> DomXssVisitor<'a> {
         sinks.insert("prepend".to_string());
         sinks.insert("after".to_string());
         sinks.insert("before".to_string());
+        // execCommand with insertHTML command
+        sinks.insert("execCommand".to_string());
         // Note: textContent and innerText are SAFE - they don't parse HTML
         // Previously textContent was incorrectly included as a sink, but it
         // only sets the text content without HTML parsing, making it safe from XSS
@@ -387,6 +389,15 @@ impl<'a> DomXssVisitor<'a> {
                     self.walk_statements(&case.consequent);
                 }
             }
+            Statement::TryStatement(try_stmt) => {
+                self.walk_statements(&try_stmt.block.body);
+                if let Some(handler) = &try_stmt.handler {
+                    self.walk_statements(&handler.body.body);
+                }
+                if let Some(finalizer) = &try_stmt.finalizer {
+                    self.walk_statements(&finalizer.body);
+                }
+            }
             _ => {}
         }
     }
@@ -415,6 +426,83 @@ impl<'a> DomXssVisitor<'a> {
                                 // Mark this variable as tainted
                                 self.tainted_vars.insert(var_name.to_string());
                                 self.var_aliases.insert(var_name.to_string(), callee_str);
+                            }
+
+                // Check for taintedVar.get() calls (URLSearchParams.get, Map.get, etc.)
+                // e.g., query = urlParams.get('query') where urlParams is tainted
+                if let Expression::CallExpression(call) = init
+                    && let Expression::StaticMemberExpression(member) = &call.callee
+                        && member.property.name.as_str() == "get"
+                        {
+                            // Check if the object is tainted (e.g., urlParams.get())
+                            if self.is_tainted(&member.object) {
+                                self.tainted_vars.insert(var_name.to_string());
+                                if let Some(source) = self.find_source_in_expr(&member.object) {
+                                    self.var_aliases.insert(var_name.to_string(), source);
+                                } else {
+                                    self.var_aliases.insert(var_name.to_string(), "URLSearchParams.get".to_string());
+                                }
+                            }
+                        }
+
+                // Check for new URL(tainted).searchParams
+                // e.g., urlParams = new URL(location.href).searchParams
+                if let Expression::StaticMemberExpression(member) = init
+                    && member.property.name.as_str() == "searchParams"
+                    {
+                        // Check if the object is new URL(tainted)
+                        if let Expression::NewExpression(new_expr) = &member.object {
+                            if let Expression::Identifier(id) = &new_expr.callee {
+                                if id.name.as_str() == "URL" && !new_expr.arguments.is_empty() {
+                                    // Check if the first argument is tainted
+                                    if let Some(arg) = new_expr.arguments.first() {
+                                        let is_arg_tainted = match arg {
+                                            Argument::SpreadElement(spread) => self.is_tainted(&spread.argument),
+                                            _ => arg.as_expression().map(|e| self.is_tainted(e)).unwrap_or(false),
+                                        };
+                                        if is_arg_tainted {
+                                            self.tainted_vars.insert(var_name.to_string());
+                                            let source_expr = match arg {
+                                                Argument::SpreadElement(spread) => Some(&spread.argument),
+                                                _ => arg.as_expression(),
+                                            };
+                                            let source = source_expr
+                                                .and_then(|e| self.find_source_in_expr(e))
+                                                .unwrap_or_else(|| "URL.searchParams".to_string());
+                                            self.var_aliases.insert(var_name.to_string(), source);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                // Check for JSON.parse(tainted) - taint propagates through JSON.parse
+                // e.g., data = JSON.parse(query) where query is tainted
+                if let Expression::CallExpression(call) = init
+                    && let Expression::StaticMemberExpression(member) = &call.callee
+                        && let Some(callee_str) = self.get_member_string(member)
+                            && callee_str == "JSON.parse"
+                            && !call.arguments.is_empty()
+                            {
+                                // Check if first argument is tainted
+                                if let Some(arg) = call.arguments.first() {
+                                    let is_arg_tainted = match arg {
+                                        Argument::SpreadElement(spread) => self.is_tainted(&spread.argument),
+                                        _ => arg.as_expression().map(|e| self.is_tainted(e)).unwrap_or(false),
+                                    };
+                                    if is_arg_tainted {
+                                        self.tainted_vars.insert(var_name.to_string());
+                                        let source_expr = match arg {
+                                            Argument::SpreadElement(spread) => Some(&spread.argument),
+                                            _ => arg.as_expression(),
+                                        };
+                                        let source = source_expr
+                                            .and_then(|e| self.find_source_in_expr(e))
+                                            .unwrap_or_else(|| "JSON.parse".to_string());
+                                        self.var_aliases.insert(var_name.to_string(), source);
+                                    }
+                                }
                             }
 
                 // Also check if init expression is tainted (includes template literals, arrays, objects)
@@ -556,6 +644,29 @@ impl<'a> DomXssVisitor<'a> {
                 self.walk_expression(&cond.test);
                 self.walk_expression(&cond.consequent);
                 self.walk_expression(&cond.alternate);
+            }
+            Expression::NewExpression(new_expr) => {
+                // Handle new Function(tainted) - constructor calls with tainted arguments
+                if let Expression::Identifier(id) = &new_expr.callee {
+                    let callee_name = id.name.as_str();
+                    // Check if this is a sink constructor (e.g., Function)
+                    if self.sinks.contains(callee_name) {
+                        for arg in &new_expr.arguments {
+                            let is_arg_tainted = match arg {
+                                Argument::SpreadElement(spread) => self.is_tainted(&spread.argument),
+                                _ => arg.as_expression().map(|e| self.is_tainted(e)).unwrap_or(false),
+                            };
+                            if is_arg_tainted {
+                                self.report_vulnerability(
+                                    new_expr.span(),
+                                    callee_name,
+                                    "Tainted data passed to constructor",
+                                );
+                                break;
+                            }
+                        }
+                    }
+                }
             }
             _ => {}
         }
@@ -804,6 +915,35 @@ impl<'a> DomXssVisitor<'a> {
                                     return;
                                 }
                             }
+                    }
+                // Special-case execCommand - only insertHTML is dangerous, and the third arg is the value
+                } else if method_name == "execCommand" && call.arguments.len() >= 3 {
+                    let mut cmd_name_lc: Option<String> = None;
+                    if let Some(arg0) = call.arguments.first()
+                        && let Some(expr) = arg0.as_expression()
+                            && let Expression::StringLiteral(s) = expr {
+                                cmd_name_lc = Some(s.value.to_string().to_ascii_lowercase());
+                            }
+                    if let Some(cmd) = cmd_name_lc {
+                        if cmd == "inserthtml" {
+                            if let Some(arg2) = call.arguments.get(2) {
+                                let tainted = match arg2 {
+                                    Argument::SpreadElement(sp) => self.is_tainted(&sp.argument),
+                                    _ => arg2
+                                        .as_expression()
+                                        .map(|e| self.is_tainted(e))
+                                        .unwrap_or(false),
+                                };
+                                if tainted {
+                                    self.report_vulnerability(
+                                        call.span(),
+                                        "execCommand:insertHTML",
+                                        "Tainted data passed to insertHTML command",
+                                    );
+                                    return;
+                                }
+                            }
+                        }
                     }
                 } else {
                     // Generic method sink: if any argument is tainted
@@ -2103,5 +2243,75 @@ document.write(result);
             !result.is_empty(),
             "Should detect taint through combined logical operators"
         );
+    }
+
+    #[test]
+    fn test_tainted_get_method_call() {
+        let code = r#"
+            let params = location.search;
+            let value = params.get('id');
+            document.write(value);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(!result.is_empty(), "Should track taint through .get() on tainted object");
+    }
+
+    #[test]
+    fn test_new_url_searchparams() {
+        let code = r#"
+            let urlParams = new URL(location.href).searchParams;
+            document.write(urlParams);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(!result.is_empty(), "Should track taint through new URL(tainted).searchParams");
+    }
+
+    #[test]
+    fn test_json_parse_taint_propagation() {
+        let code = r#"
+            let input = location.hash;
+            let data = JSON.parse(input);
+            document.body.innerHTML = data;
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(!result.is_empty(), "Should propagate taint through JSON.parse");
+    }
+
+    #[test]
+    fn test_taint_inside_try_catch() {
+        let code = r#"
+            try {
+                let x = location.search;
+                document.write(x);
+            } catch(e) {}
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(!result.is_empty(), "Should detect taint inside try block");
+    }
+
+    #[test]
+    fn test_new_function_with_tainted_arg() {
+        let code = r#"
+            let code = location.hash;
+            let fn = new Function(code);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(!result.is_empty(), "Should detect new Function() with tainted argument");
+    }
+
+    #[test]
+    fn test_execcommand_inserthtml_sink() {
+        let code = r#"
+            let html = location.hash;
+            document.execCommand('insertHTML', false, html);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(!result.is_empty(), "Should detect execCommand insertHTML with tainted data");
     }
 }
