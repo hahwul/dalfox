@@ -72,7 +72,7 @@ var builtinPatterns = map[string]string{
 	"dalfox-dropbox-access-Token":  "sl.[A-Za-z0-9_-]{20,100}",
 	"dalfox-sendGrid-api-key":      "SG\.[\w\d\-_]{22}\.[\w\d\-_]{43}",
 	"dalfox-firebase-secret":       "AAAA[A-Za-z0-9_-]{7}:[A-Za-z0-9_-]{140}",
-	"dalfox-netlify-token":         "netlifyAuthToken\s*=\s*['"][a-z0-9]{40}['"]",
+	"dalfox-netlify-token":         "netlifyAuthToken\s*=\s*['"][A-Za-z0-9_-]{40,64}['"]",
 	"dalfox-sentry-dsn":            "https:\/\/[a-zA-Z0-9]+@[a-z]+\.ingest\.sentry\.io\/\d+", 
 	"dalfox-error-mysql":           "(SQL syntax.*MySQL|Warning.*mysql_.*|MySqlException \\(0x|valid MySQL result|check the manual that corresponds to your (MySQL|MariaDB) server version|MySqlClient\\.|com\\.mysql\\.jdbc\\.exceptions)",
 	"dalfox-error-postgresql":      "(PostgreSQL.*ERROR|Warning.*\\Wpg_.*|valid PostgreSQL result|Npgsql\\.|PG::SyntaxError:|org\\.postgresql\\.util\\.PSQLException|ERROR:\\s\\ssyntax error at or near)",
