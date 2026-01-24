@@ -64,6 +64,7 @@ var builtinPatterns = map[string]string{
 	"dalfox-braintree-token":       "access_token\\$production\\$[0-9a-z]{16}\\$[0-9a-f]{32}",
 	"dalfox-stripe-api-key":        "sk_live_[0-9a-zA-Z]{24}",
 	"dalfox-stripe-restricted-key": "rk_live_[0-9a-zA-Z]{24}",
+	"dalfox-Shopify-Access-Token":  "shpat_[0-9a-fA-F]{32}",
 	"dalfox-error-mysql":           "(SQL syntax.*MySQL|Warning.*mysql_.*|MySqlException \\(0x|valid MySQL result|check the manual that corresponds to your (MySQL|MariaDB) server version|MySqlClient\\.|com\\.mysql\\.jdbc\\.exceptions)",
 	"dalfox-error-postgresql":      "(PostgreSQL.*ERROR|Warning.*\\Wpg_.*|valid PostgreSQL result|Npgsql\\.|PG::SyntaxError:|org\\.postgresql\\.util\\.PSQLException|ERROR:\\s\\ssyntax error at or near)",
 	"dalfox-error-mssql":           "(Driver.* SQL[\\-\\_\\ ]*Server|OLE DB.* SQL Server|\bSQL Server.*Driver|Warning.*mssql_.*|\bSQL Server.*[0-9a-fA-F]{8}|[\\s\\S]Exception.*\\WSystem\\.Data\\.SqlClient\\.|[\\s\\S]Exception.*\\WRoadhouse\\.Cms\\.|Microsoft SQL Native Client.*[0-9a-fA-F]{8})",
