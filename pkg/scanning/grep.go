@@ -4,7 +4,10 @@ import "regexp"
 
 // Grepping is function for checking pattern
 func Grepping(data, regex string) []string {
-	pattern := regexp.MustCompile(regex)
+	pattern, err := regexp.Compile(regex)
+	if err != nil {
+		return []string{}
+	}
 	return pattern.FindAllString(data, -1)
 }
 
@@ -36,10 +39,10 @@ var builtinPatterns = map[string]string{
 	"dalfox-esii":                  `<esii-dalfox>`,
 	"dalfox-rsa-key":               `-----BEGIN RSA PRIVATE KEY-----|-----END RSA PRIVATE KEY-----`,
 	"dalfox-priv-key":              `-----BEGIN PRIVATE KEY-----|-----END PRIVATE KEY-----`,
-	"dalfox-aws-s3":                `s3\.amazonaws.com[/]+|[a-zA-Z0-9_-]*\.s3\.amazonaws.com`,
+	"dalfox-aws-s3":                `s3\.amazonaws\.com[/]+|[a-zA-Z0-9_-]*\.s3\.amazonaws\.com`,
 	"dalfox-aws-appsync-graphql":   `da2-[a-z0-9]{26}`,
-	"dalfox-slack-webhook1":        `https://hooks.slack.com/services/T[a-zA-Z0-9_]{8}/B[a-zA-Z0-9_]{8}/[a-zA-Z0-9_]{24}`,
-	"dalfox-slack-webhook2":        `https://hooks.slack.com/services/T[a-zA-Z0-9_]{8,10}/B[a-zA-Z0-9_]{8,10}/[a-zA-Z0-9_]{24}`,
+	"dalfox-slack-webhook1":        `https://hooks\.slack\.com/services/T[a-zA-Z0-9_]{8}/B[a-zA-Z0-9_]{8}/[a-zA-Z0-9_]{24}`,
+	"dalfox-slack-webhook2":        `https://hooks\.slack\.com/services/T[a-zA-Z0-9_]{8,10}/B[a-zA-Z0-9_]{8,10}/[a-zA-Z0-9_]{24}`,
 	"dalfox-slack-token":           `(xox[p|b|o|a]-[0-9]{12}-[0-9]{12}-[0-9]{12}-[a-z0-9]{32})`,
 	"dalfox-facebook-oauth":        `[f|F][a|A][c|C][e|E][b|B][o|O][o|O][k|K].{0,30}['"\s][0-9a-f]{32}['"\s]`,
 	"dalfox-twitter-oauth":         `[t|T][w|W][i|I][t|T][t|T][e|E][r|R].{0,30}['"\s][0-9a-zA-Z]{35,44}['"\s]`,
@@ -47,16 +50,16 @@ var builtinPatterns = map[string]string{
 	"dalfox-mailgun-api":           `key-[0-9a-zA-Z]{32}`,
 	"dalfox-mailchamp-api":         `[0-9a-f]{32}-us[0-9]{1,2}`,
 	"dalfox-picatic-api":           `sk_live_[0-9a-z]{32}`,
-	"dalfox-google-oauth-id":       `[0-9(+-[0-9A-Za-z_]{32}.apps.qooqleusercontent.com`,
+	"dalfox-google-oauth-id":       `[0-9]+-[0-9A-Za-z_]{32}\.apps\.googleusercontent\.com`,
 	"dalfox-google-api":            `AIza[0-9A-Za-z-_]{35}`,
 	"dalfox-google-oauth":          `ya29\.[0-9A-Za-z\-_]+`,
 	"dalfox-aws-access-key":        `AKIA[0-9A-Z]{16}`,
 	"dalfox-amazon-mws-auth-token": `amzn\.mws\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`,
 	"dalfox-facebook-access-token": `EAACEdEose0cBA[0-9A-Za-z]+`,
-	"dalfox-github-access-token":   `[a-zA-Z0-9_-]*:[a-zA-Z0-9_\-]+@github\.com*`,
+	"dalfox-github-access-token":   `[a-zA-Z0-9_-]*:[a-zA-Z0-9_\-]+@github\.com`,
 	"dalfox-github":                `[gG][iI][tT][hH][uU][bB].*['|"][0-9a-zA-Z]{35,40}['|"]`,
 	"dalfox-gitlab-token":          `glpat-[0-9a-zA-Z-_]{20}`,
-	"dalfox-azure-storage":         `[a-zA-Z0-9_-]*\.file.core.windows.net`,
+	"dalfox-azure-storage":         `[a-zA-Z0-9_-]*\.file\.core\.windows\.net`,
 	"dalfox-telegram-bot-api-key":  `[0-9]+:AA[0-9A-Za-z\-_]{33}`,
 	"dalfox-square-access-token":   `sq0atp-[0-9A-Za-z\-_]{22}`,
 	"dalfox-square-oauth-secret":   `sq0csp-[0-9A-Za-z\-_]{43}`,
@@ -69,7 +72,7 @@ var builtinPatterns = map[string]string{
 	"dalfox-linear-api-key":        `lin_api_[a-zA-Z0-9]{40}`,
 	"dalfox-digitalocean-token":    `dop_v1_[a-z0-9]{64}`,
 	"dalfox-asana-access-Token":    `0/[0-9a-z]{32}`,
-	"dalfox-dropbox-access-Token":  `sl.[A-Za-z0-9_-]{20,100}`,
+	"dalfox-dropbox-access-Token":  `sl\.[A-Za-z0-9_-]{20,100}`,
 	"dalfox-sendGrid-api-key":      `SG\.[\w\d\-_]{22}\.[\w\d\-_]{43}`,
 	"dalfox-firebase-secret":       `AAAA[A-Za-z0-9_-]{7}:[A-Za-z0-9_-]{140}`,
 	"dalfox-netlify-token":         `netlifyAuthToken\s*=\s*['"][A-Za-z0-9_-]{40,64}['"]`,
@@ -82,7 +85,7 @@ var builtinPatterns = map[string]string{
 	"dalfox-error-ibmdb2":          `(CLI Driver.*DB2|DB2 SQL error|\bdb2_\w+\(|SQLSTATE.+SQLCODE)`,
 	"dalfox-error-informix":        `(Exception.*Informix)`,
 	"dalfox-error-firebird":        `(Dynamic SQL Error|Warning.*ibase_.*)`,
-	"dalfox-error-sqlite":          `(SQLite/JDBCDriver|SQLite.Exception|System.Data.SQLite.SQLiteException|Warning.*sqlite_.*|Warning.*SQLite3::|\[SQLITE_ERROR\])`,
+	"dalfox-error-sqlite":          `(SQLite/JDBCDriver|SQLite\.Exception|System\.Data\.SQLite\.SQLiteException|Warning.*sqlite_.*|Warning.*SQLite3::|\[SQLITE_ERROR\])`,
 	"dalfox-error-sapdb":           `(SQL error.*POS([0-9]+).*|Warning.*maxdb.*)`,
 	"dalfox-error-sybase":          `(Warning.*sybase.*|Sybase message|Sybase.*Server message.*|SybSQLException|com\.sybase\.jdbc)`,
 	"dalfox-error-ingress":         `(Warning.*ingres_|Ingres SQLSTATE|Ingres\W.*Driver)`,
