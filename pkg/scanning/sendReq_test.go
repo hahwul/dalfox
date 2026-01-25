@@ -3,6 +3,7 @@ package scanning
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -119,8 +120,12 @@ func TestSendReq(t *testing.T) {
 }
 
 func TestCreatePoC(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
 	// Create a request with necessary context value
-	req, _ := http.NewRequest(http.MethodGet, "https://example.com/?param=value", nil)
+	req, _ := http.NewRequest(http.MethodGet, server.URL+"/?param=value", nil)
 
 	// Add message ID to context with the correct type
 	// Use the correct key that matches the one used in MessageIDFromRequest function
@@ -154,7 +159,7 @@ func TestCreatePoC(t *testing.T) {
 				Type:       "G",
 				InjectType: "XSS",
 				Method:     "GET",
-				Data:       "https://example.com/?param=value",
+				Data:       server.URL + "/?param=value",
 				Param:      "",
 				Payload:    "<script>alert(1)</script>",
 				Evidence:   "",
@@ -175,7 +180,7 @@ func TestCreatePoC(t *testing.T) {
 				Type:       "G",
 				InjectType: "BAV/OR",
 				Method:     "GET",
-				Data:       "https://example.com/?param=value",
+				Data:       server.URL + "/?param=value",
 				Param:      "",
 				Payload:    "//evil.com",
 				Evidence:   "",
@@ -219,7 +224,11 @@ func TestCreatePoC(t *testing.T) {
 }
 
 func TestHandlePoC(t *testing.T) {
-	req, _ := http.NewRequest(http.MethodGet, "https://example.com/?param=value", nil)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	req, _ := http.NewRequest(http.MethodGet, server.URL+"/?param=value", nil)
 
 	tests := []struct {
 		name    string
@@ -234,7 +243,7 @@ func TestHandlePoC(t *testing.T) {
 				Type:       "G",
 				InjectType: "XSS",
 				Method:     "GET",
-				Data:       "https://example.com/?param=value",
+				Data:       server.URL + "/?param=value",
 				Payload:    "<script>alert(1)</script>",
 				CWE:        "CWE-79",
 				Severity:   "High",
@@ -250,7 +259,7 @@ func TestHandlePoC(t *testing.T) {
 				Type:       "G",
 				InjectType: "XSS",
 				Method:     "GET",
-				Data:       "https://example.com/?param=value",
+				Data:       server.URL + "/?param=value",
 				Payload:    "<script>alert(1)</script>",
 				CWE:        "CWE-79",
 				Severity:   "High",
@@ -260,7 +269,7 @@ func TestHandlePoC(t *testing.T) {
 			options: model.Options{
 				Format: "json",
 			},
-			showG: true,
+			showG:   true,
 		},
 		{
 			name: "PoC with OutputRequest",
@@ -268,7 +277,7 @@ func TestHandlePoC(t *testing.T) {
 				Type:       "G",
 				InjectType: "XSS",
 				Method:     "GET",
-				Data:       "https://example.com/?param=value",
+				Data:       server.URL + "/?param=value",
 				Payload:    "<script>alert(1)</script>",
 				CWE:        "CWE-79",
 				Severity:   "High",
@@ -278,7 +287,7 @@ func TestHandlePoC(t *testing.T) {
 			options: model.Options{
 				OutputRequest: true,
 			},
-			showG: true,
+			showG:   true,
 		},
 		{
 			name: "PoC with showG false",
@@ -286,7 +295,7 @@ func TestHandlePoC(t *testing.T) {
 				Type:       "G",
 				InjectType: "XSS",
 				Method:     "GET",
-				Data:       "https://example.com/?param=value",
+				Data:       server.URL + "/?param=value",
 				Payload:    "<script>alert(1)</script>",
 				CWE:        "CWE-79",
 				Severity:   "High",

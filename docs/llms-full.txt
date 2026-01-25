@@ -3475,7 +3475,7 @@ Dalfox includes a set of built-in patterns for grepping. Here are some examples:
     "dalfox-mailgun-api":           "key-[0-9a-zA-Z]{32}",
     "dalfox-mailchamp-api":         "[0-9a-f]{32}-us[0-9]{1,2}",
     "dalfox-picatic-api":           "sk_live_[0-9a-z]{32}",
-    "dalfox-google-oauth-id":       "[0-9(+-[0-9A-Za-z_]{32}.apps.qooqleusercontent.com",
+    "dalfox-google-oauth-id":       "[0-9(+-[0-9A-Za-z_]{32}.apps.googleusercontent.com",
     "dalfox-google-api":            "AIza[0-9A-Za-z-_]{35}",
     "dalfox-google-oauth":          "ya29\\.[0-9A-Za-z\\-_]+",
     "dalfox-aws-access-key":        "AKIA[0-9A-Z]{16}",
