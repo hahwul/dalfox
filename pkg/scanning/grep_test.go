@@ -105,7 +105,7 @@ func TestBuiltinGrep(t *testing.T) {
 		},
 		{
 			name:     "Invalid Google OAuth ID (qooqle)",
-			data:     "client_id: 1234567890-abcdefghijklmnopqrstuvwxyz123456.apps.googleusercontent.com",
+			data:     "client_id: 1234567890-abcdefghijklmnopqrstuvwxyz123456.apps.qooqleusercontent.com",
 			expected: map[string][]string{},
 		},
 		{
