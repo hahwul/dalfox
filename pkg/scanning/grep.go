@@ -56,7 +56,7 @@ var builtinPatterns = map[string]string{
 	"dalfox-aws-access-key":        `AKIA[0-9A-Z]{16}`,
 	"dalfox-amazon-mws-auth-token": `amzn\.mws\.[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}`,
 	"dalfox-facebook-access-token": `EAACEdEose0cBA[0-9A-Za-z]+`,
-	"dalfox-github-access-token":   `[a-zA-Z0-9_-]*:[a-zA-Z0-9_\-]+@github\.com`,
+	"dalfox-github-access-token":   `\b[a-zA-Z0-9_-]*:[a-zA-Z0-9_\-]+@github\.com\b`,
 	"dalfox-github":                `[gG][iI][tT][hH][uU][bB].*['|"][0-9a-zA-Z]{35,40}['|"]`,
 	"dalfox-gitlab-token":          `glpat-[0-9a-zA-Z-_]{20}`,
 	"dalfox-azure-storage":         `[a-zA-Z0-9_-]*\.file\.core\.windows\.net`,

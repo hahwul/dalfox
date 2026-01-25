@@ -36,16 +36,19 @@ func TestGrepping(t *testing.T) {
 			regex:    "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}",
 			expected: []string{"email@example.com", "another@email.com"},
 		},
+		{
+			name:     "Invalid regex",
+			data:     "Hello, World!",
+			regex:    "[",
+			expected: []string{},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := Grepping(tt.data, tt.regex)
-			if tt.name == "No match" {
-				// For empty slices, check length instead of using DeepEqual
-				if len(result) != 0 {
-					t.Errorf("Grepping() = %v, want empty slice", result)
-				}
+			if len(result) == 0 && len(tt.expected) == 0 {
+				// pass
 			} else if !reflect.DeepEqual(result, tt.expected) {
 				t.Errorf("Grepping() = %v, want %v", result, tt.expected)
 			}
@@ -79,7 +82,8 @@ func TestBuiltinGrep(t *testing.T) {
                    MySQL error: Warning: mysql_connect()`,
 			expected: map[string][]string{
 				"dalfox-aws-s3":       {"bucket-name.s3.amazonaws.com"},
-				"dalfox-error-mysql2": {"Warning: mysql_connect()"},
+				"dalfox-error-mysql":  {"Warning: mysql_connect()"},
+				"dalfox-error-mysql2": {"Warning: mysql"},
 			},
 		},
 		{
@@ -87,49 +91,47 @@ func TestBuiltinGrep(t *testing.T) {
 			data:     "This is a normal text with no sensitive information.",
 			expected: map[string][]string{},
 		},
+		{
+			name:     "Invalid slack webhook (negative test)",
+			data:     "This is not a real slack webhook: https://hooksXslackYcom/services/T123/B123/123",
+			expected: map[string][]string{},
+		},
+		{
+			name: "Valid Google OAuth ID",
+			data: "client_id: 1234567890-abcdefghijklmnopqrstuvwxyz123456.apps.googleusercontent.com",
+			expected: map[string][]string{
+				"dalfox-google-oauth-id": {"1234567890-abcdefghijklmnopqrstuvwxyz123456.apps.googleusercontent.com"},
+			},
+		},
+		{
+			name:     "Invalid Google OAuth ID (qooqle)",
+			data:     "client_id: 1234567890-abcdefghijklmnopqrstuvwxyz123456.apps.qooqleusercontent.com",
+			expected: map[string][]string{},
+		},
+		{
+			name:     "Invalid github token (trailing chars)",
+			data:     "user:token@github.commm",
+			expected: map[string][]string{},
+		},
+		{
+			name: "Valid sqlite error",
+			data: "System.Data.SQLite.SQLiteException: something happened",
+			expected: map[string][]string{
+				"dalfox-error-sqlite": {"System.Data.SQLite.SQLiteException"},
+			},
+		},
+		{
+			name:     "Invalid sqlite error (negative test)",
+			data:     "SystemXDataYSQLiteZSQLiteException: something happened",
+			expected: map[string][]string{},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := builtinGrep(tt.data)
-
-			if len(tt.expected) == 0 && len(result) == 0 {
-				return // Test passed for empty results
-			}
-
-			// Check if all expected keys are in the result
-			for key, expectedValues := range tt.expected {
-				resultValues, exists := result[key]
-				if !exists {
-					t.Errorf("builtinGrep() missing key %s in result", key)
-					continue
-				}
-
-				// Check that values match for this specific key
-				if tt.name == "Multiple patterns" && key == "dalfox-error-mysql2" {
-					// Special handling for this test case which seems to have a pattern mismatch
-					if len(resultValues) == 0 {
-						t.Errorf("builtinGrep() for key %s has no matches, expected some", key)
-					}
-					// Update the expected value to match what the regex actually catches
-					expected := []string{"Warning: mysql"}
-					if !reflect.DeepEqual(resultValues, expected) {
-						t.Errorf("builtinGrep() for key %s = %v, want %v", key, resultValues, expected)
-					}
-				} else if !reflect.DeepEqual(resultValues, expectedValues) {
-					t.Errorf("builtinGrep() for key %s = %v, want %v", key, resultValues, expectedValues)
-				}
-			}
-
-			// Check if there are any unexpected keys in the result
-			for key := range result {
-				if _, exists := tt.expected[key]; !exists {
-					// Allow 'dalfox-error-mysql' as it might be triggered by the MySQL error test case
-					if tt.name == "Multiple patterns" && key == "dalfox-error-mysql" {
-						continue
-					}
-					t.Errorf("builtinGrep() unexpected key %s in result", key)
-				}
+			if !reflect.DeepEqual(result, tt.expected) {
+				t.Errorf("builtinGrep() = %v, want %v", result, tt.expected)
 			}
 		})
 	}
