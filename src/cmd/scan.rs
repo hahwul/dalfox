@@ -3,6 +3,7 @@ use indicatif::MultiProgress;
 use reqwest::header::CONTENT_TYPE;
 
 use scraper::{Html, Selector};
+use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::sync::Arc;
@@ -148,13 +149,64 @@ fn extract_context(response: &str, payload: &str) -> Option<(usize, String)> {
     None
 }
 
+fn result_priority(result: &Result) -> u8 {
+    let type_score = match result.result_type.as_str() {
+        "V" => 3,
+        "A" => 2,
+        "R" => 1,
+        _ => 0,
+    };
+    let severity_score = match result.severity.as_str() {
+        "High" => 3,
+        "Medium" => 2,
+        "Low" => 1,
+        _ => 0,
+    };
+    type_score * 10 + severity_score
+}
+
+// AST findings can be produced in multiple scan stages (preflight/probe/reflection loop).
+// Keep one strongest result per equivalent AST fingerprint to reduce duplicate noise.
+fn dedupe_ast_results(results: Vec<Result>) -> Vec<Result> {
+    let mut out: Vec<Result> = Vec::with_capacity(results.len());
+    let mut ast_index_by_key: HashMap<String, usize> = HashMap::new();
+
+    for result in results {
+        if result.message_id != 0 {
+            out.push(result);
+            continue;
+        }
+
+        let key = format!(
+            "{}|{}|{}|{}|{}|{}",
+            result.inject_type,
+            result.method,
+            result.data,
+            result.param,
+            result.payload,
+            result.evidence
+        );
+
+        if let Some(existing_idx) = ast_index_by_key.get(&key).copied() {
+            if result_priority(&result) > result_priority(&out[existing_idx]) {
+                out[existing_idx] = result;
+            }
+        } else {
+            ast_index_by_key.insert(key, out.len());
+            out.push(result);
+        }
+    }
+
+    out
+}
+
 fn is_allowed_content_type(ct: &str) -> bool {
     crate::utils::is_htmlish_content_type(ct)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{extract_context, generate_poc, is_allowed_content_type};
+    use super::{dedupe_ast_results, extract_context, generate_poc, is_allowed_content_type};
     use crate::scanning::result::Result as ScanResult;
 
     #[test]
@@ -201,6 +253,54 @@ mod tests {
     #[test]
     fn test_extract_context_none() {
         assert!(extract_context("no match here", "PAY").is_none());
+    }
+
+    #[test]
+    fn test_dedupe_ast_results_prefers_verified_variant() {
+        let mut ast_a = ScanResult::new(
+            "A".to_string(),
+            "DOM-XSS".to_string(),
+            "GET".to_string(),
+            "https://example.com".to_string(),
+            "q".to_string(),
+            "<img src=x onerror=alert(1)>".to_string(),
+            "https://example.com:1:1 - desc (Source: location.search, Sink: innerHTML)".to_string(),
+            "CWE-79".to_string(),
+            "Medium".to_string(),
+            0,
+            "desc (검증 필요) [경량 확인: 미검증]".to_string(),
+        );
+        ast_a.request = Some("GET /?q=... HTTP/1.1".to_string());
+
+        let mut ast_v = ast_a.clone();
+        ast_v.result_type = "V".to_string();
+        ast_v.severity = "High".to_string();
+        ast_v.message_str = "desc (검증 필요) [경량 확인: 검증됨]".to_string();
+
+        let deduped = dedupe_ast_results(vec![ast_a, ast_v]);
+        assert_eq!(deduped.len(), 1);
+        assert_eq!(deduped[0].result_type, "V");
+        assert_eq!(deduped[0].severity, "High");
+    }
+
+    #[test]
+    fn test_dedupe_ast_results_keeps_non_ast_entries() {
+        let r1 = ScanResult::new(
+            "R".to_string(),
+            "inHTML".to_string(),
+            "GET".to_string(),
+            "https://example.com".to_string(),
+            "q".to_string(),
+            "PAY".to_string(),
+            "e1".to_string(),
+            "CWE-79".to_string(),
+            "Info".to_string(),
+            606,
+            "m1".to_string(),
+        );
+        let r2 = r1.clone();
+        let deduped = dedupe_ast_results(vec![r1, r2]);
+        assert_eq!(deduped.len(), 2);
     }
 
     #[test]
@@ -1403,7 +1503,7 @@ pub async fn run_scan(args: &ScanArgs) {
         println!();
     }
     // Output results
-    let final_results = results.lock().await;
+    let final_results = dedupe_ast_results(results.lock().await.clone());
     let limit = args.limit.unwrap_or(usize::MAX);
     let display_results_len = std::cmp::min(final_results.len(), limit);
     let display_results = &final_results[..display_results_len];

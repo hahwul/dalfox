@@ -9,6 +9,45 @@ use tokio::time::{Duration, sleep};
 #[allow(dead_code)]
 static DALFOX_SELECTOR: OnceLock<scraper::Selector> = OnceLock::new();
 
+pub(crate) fn has_marker_evidence(payload: &str, text: &str) -> bool {
+    let class_marker = crate::scanning::markers::class_marker();
+    let id_marker = crate::scanning::markers::id_marker();
+
+    let need_class = payload.contains(class_marker);
+    let need_id = payload.contains(id_marker);
+
+    // Avoid promoting raw reflection to DOM-verified unless payload carries Dalfox marker(s).
+    if !need_class && !need_id {
+        return false;
+    }
+
+    let document = scraper::Html::parse_document(text);
+
+    let class_ok = if need_class {
+        let sel = format!(".{}", class_marker);
+        if let Ok(selector) = scraper::Selector::parse(&sel) {
+            document.select(&selector).next().is_some()
+        } else {
+            false
+        }
+    } else {
+        true
+    };
+
+    let id_ok = if need_id {
+        let sel = format!("#{}", id_marker);
+        if let Ok(selector) = scraper::Selector::parse(&sel) {
+            document.select(&selector).next().is_some()
+        } else {
+            false
+        }
+    } else {
+        true
+    };
+
+    class_ok && id_ok
+}
+
 pub async fn check_dom_verification(
     target: &Target,
     param: &Param,
@@ -57,6 +96,7 @@ pub async fn check_dom_verification(
                 if let Ok(text) = resp.text().await
                     && crate::utils::is_htmlish_content_type(ct)
                     && text.contains(payload)
+                    && has_marker_evidence(payload, &text)
                 {
                     return (true, Some(text));
                 }
@@ -73,6 +113,7 @@ pub async fn check_dom_verification(
             if let Ok(text) = resp.text().await
                 && crate::utils::is_htmlish_content_type(ct)
                 && text.contains(payload)
+                && has_marker_evidence(payload, &text)
             {
                 return (true, Some(text));
             }
@@ -243,26 +284,32 @@ mod tests {
 
     #[tokio::test]
     async fn test_check_dom_verification_detects_html_reflection() {
-        let payload = "<svg onload=alert(1)>";
+        let payload = format!(
+            "<svg onload=alert(1) class={}>",
+            crate::scanning::markers::class_marker()
+        );
         let addr = start_mock_server("stored").await;
         let target = make_target(addr, "/dom/html");
         let param = make_param();
         let args = default_scan_args();
 
-        let (found, body) = check_dom_verification(&target, &param, payload, &args).await;
+        let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
         assert!(found, "text/html responses with payload should be detected");
-        assert!(body.unwrap_or_default().contains(payload));
+        assert!(body.unwrap_or_default().contains(&payload));
     }
 
     #[tokio::test]
     async fn test_check_dom_verification_accepts_xhtml_content_type() {
-        let payload = "<img src=x onerror=alert(1)>";
+        let payload = format!(
+            "<img src=x onerror=alert(1) id={}>",
+            crate::scanning::markers::id_marker()
+        );
         let addr = start_mock_server("stored").await;
         let target = make_target(addr, "/dom/xhtml");
         let param = make_param();
         let args = default_scan_args();
 
-        let (found, _) = check_dom_verification(&target, &param, payload, &args).await;
+        let (found, _) = check_dom_verification(&target, &param, &payload, &args).await;
         assert!(
             found,
             "application/xhtml+xml should be treated as HTML-like"
@@ -271,72 +318,104 @@ mod tests {
 
     #[tokio::test]
     async fn test_check_dom_verification_rejects_non_html_content_type() {
-        let payload = "<script>alert(1)</script>";
+        let payload = format!(
+            "<script class={}>alert(1)</script>",
+            crate::scanning::markers::class_marker()
+        );
         let addr = start_mock_server("stored").await;
         let target = make_target(addr, "/dom/json");
         let param = make_param();
         let args = default_scan_args();
 
-        let (found, body) = check_dom_verification(&target, &param, payload, &args).await;
+        let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
         assert!(!found, "application/json should not pass DOM verification");
         assert!(body.is_none(), "non-html responses should not be returned");
     }
 
     #[tokio::test]
     async fn test_check_dom_verification_returns_false_when_payload_missing() {
-        let payload = "<script>alert(1)</script>";
+        let payload = format!(
+            "<script class={}>alert(1)</script>",
+            crate::scanning::markers::class_marker()
+        );
         let addr = start_mock_server("stored").await;
         let target = make_target(addr, "/dom/no-payload");
         let param = make_param();
         let args = default_scan_args();
 
-        let (found, body) = check_dom_verification(&target, &param, payload, &args).await;
+        let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
         assert!(!found);
         assert!(body.is_none());
     }
 
     #[tokio::test]
     async fn test_check_dom_verification_sxss_uses_secondary_url() {
-        let payload = "STORED_DOM_XSS";
-        let addr = start_mock_server(payload).await;
+        let payload = format!(
+            "<img src=x onerror=alert(1) class={}>",
+            crate::scanning::markers::class_marker()
+        );
+        let addr = start_mock_server(&payload).await;
         let target = make_target(addr, "/dom/no-payload");
         let param = make_param();
         let mut args = default_scan_args();
         args.sxss = true;
         args.sxss_url = Some(format!("http://{}:{}/sxss/html", addr.ip(), addr.port()));
 
-        let (found, body) = check_dom_verification(&target, &param, payload, &args).await;
+        let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
         assert!(found, "sxss should verify stored payload at secondary URL");
-        assert!(body.unwrap_or_default().contains(payload));
+        assert!(body.unwrap_or_default().contains(&payload));
     }
 
     #[tokio::test]
     async fn test_check_dom_verification_sxss_rejects_non_html_secondary_content() {
-        let payload = "STORED_DOM_XSS";
-        let addr = start_mock_server(payload).await;
+        let payload = format!(
+            "<img src=x onerror=alert(1) class={}>",
+            crate::scanning::markers::class_marker()
+        );
+        let addr = start_mock_server(&payload).await;
         let target = make_target(addr, "/dom/no-payload");
         let param = make_param();
         let mut args = default_scan_args();
         args.sxss = true;
         args.sxss_url = Some(format!("http://{}:{}/sxss/json", addr.ip(), addr.port()));
 
-        let (found, body) = check_dom_verification(&target, &param, payload, &args).await;
+        let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
         assert!(!found);
         assert!(body.is_none());
     }
 
     #[tokio::test]
     async fn test_check_dom_verification_sxss_without_url_returns_false() {
-        let payload = "STORED_DOM_XSS";
-        let addr = start_mock_server(payload).await;
+        let payload = format!(
+            "<img src=x onerror=alert(1) class={}>",
+            crate::scanning::markers::class_marker()
+        );
+        let addr = start_mock_server(&payload).await;
         let target = make_target(addr, "/dom/html");
         let param = make_param();
         let mut args = default_scan_args();
         args.sxss = true;
         args.sxss_url = None;
 
-        let (found, body) = check_dom_verification(&target, &param, payload, &args).await;
+        let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
         assert!(!found);
         assert!(body.is_none());
+    }
+
+    #[test]
+    fn test_has_marker_evidence_requires_payload_marker() {
+        let body = format!(
+            "<html><body><div class=\"{}\">x</div></body></html>",
+            crate::scanning::markers::class_marker()
+        );
+        assert!(!has_marker_evidence("<img src=x onerror=alert(1)>", &body));
+    }
+
+    #[test]
+    fn test_has_marker_evidence_detects_class_marker_element() {
+        let marker = crate::scanning::markers::class_marker();
+        let payload = format!("<img src=x onerror=alert(1) class={}>", marker);
+        let body = format!("<html><body><img class=\"{}\"></body></html>", marker);
+        assert!(has_marker_evidence(&payload, &body));
     }
 }

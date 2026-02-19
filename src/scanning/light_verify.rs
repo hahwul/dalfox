@@ -37,11 +37,14 @@ pub async fn verify_dom_xss_light(
         if let Ok(text) = resp.text().await {
             // 1) Raw payload present
             if crate::utils::is_htmlish_content_type(&ct) && text.contains(payload) {
-                return (true, Some(text), Some("raw reflected".to_string()));
+                if crate::scanning::check_dom_verification::has_marker_evidence(payload, &text) {
+                    return (true, Some(text), Some("marker-reflected".to_string()));
+                }
+                note = Some("raw reflection without marker evidence".to_string());
             }
             // 2) Marker element present
             let marker = crate::scanning::markers::class_marker();
-            if text.contains(marker) {
+            if payload.contains(marker) && text.contains(marker) {
                 let sel = format!(".{}", marker);
                 if let Ok(selector) = scraper::Selector::parse(&sel) {
                     let doc = scraper::Html::parse_document(&text);

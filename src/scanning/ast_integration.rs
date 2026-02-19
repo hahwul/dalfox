@@ -57,19 +57,20 @@ pub fn extract_javascript_from_html(html: &str) -> Vec<String> {
 /// Generate an executable POC payload based on the source and sink
 /// Returns (payload, description)
 pub fn generate_dom_xss_poc(source: &str, sink: &str) -> (String, String) {
+    let marker = crate::scanning::markers::class_marker();
     // Generate payload based on the source type
     let payload = if source.contains("location.hash") {
         // Hash-based XSS - use fragment identifier
-        "#<img src=x onerror=alert(1)>".to_string()
+        format!("#<img src=x onerror=alert(1) class={}>", marker)
     } else if source.contains("location.search") {
         // Query-based XSS
-        "xss=<img src=x onerror=alert(1)>".to_string()
+        format!("xss=<img src=x onerror=alert(1) class={}>", marker)
     } else if source.contains("location.href") || source.contains("document.URL") {
         // URL-based - could be anywhere
-        "#<img src=x onerror=alert(1)>".to_string()
+        format!("#<img src=x onerror=alert(1) class={}>", marker)
     } else {
         // Generic payload for other sources
-        "<img src=x onerror=alert(1)>".to_string()
+        format!("<img src=x onerror=alert(1) class={}>", marker)
     };
 
     let description = format!("DOM-based XSS via {} to {}", source, sink);

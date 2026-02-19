@@ -285,6 +285,7 @@ pub async fn run_scanning(
             let _permit = semaphore_clone.acquire().await.unwrap();
             // Batch local results to reduce mutex contention
             let mut local_results: Vec<crate::scanning::result::Result> = Vec::new();
+            let mut local_ast_seen: HashSet<String> = HashSet::new();
 
             // Stage 0: fast probe to avoid large payload blasts on non-reflective params
             // Use a minimal alphanumeric token to check generic reflection across contexts.
@@ -317,6 +318,14 @@ pub async fn run_scanning(
                         target_clone.url.as_str(),
                     );
                     for (vuln, payload, description) in findings {
+                        let ast_key = format!(
+                            "{}|{}|{}|{}|{}",
+                            param_clone.name, vuln.line, vuln.column, vuln.source, vuln.sink
+                        );
+                        if local_ast_seen.contains(&ast_key) {
+                            continue;
+                        }
+                        local_ast_seen.insert(ast_key);
                         let result_url = crate::scanning::url_inject::build_injected_url(
                             &target_clone.url,
                             &param_clone,
@@ -344,21 +353,20 @@ pub async fn run_scanning(
                             0,
                             format!("{} (검증 필요)", description),
                         );
-                        ast_result.request = Some(build_request_text(
-                            &target_clone,
-                            &param_clone,
-                            // For request text, show probe payload to keep noise low
-                            probe_payloads[0],
-                        ));
+                        ast_result.request =
+                            Some(build_request_text(&target_clone, &param_clone, &payload));
                         ast_result.response = Some(response_text.clone());
                         // Lightweight runtime verification (non-headless)
-                        let (verified, _rt_resp, note) =
+                        let (verified, rt_resp, note) =
                             crate::scanning::light_verify::verify_dom_xss_light(
                                 &target_clone,
                                 &param_clone,
                                 &payload,
                             )
                             .await;
+                        if let Some(runtime_response) = rt_resp {
+                            ast_result.response = Some(runtime_response);
+                        }
                         if let Some(n) = note {
                             ast_result.message_str = format!("{} [{}]", ast_result.message_str, n);
                         }
@@ -428,11 +436,19 @@ pub async fn run_scanning(
                                 target_clone.url.as_str(),
                             );
                         for (vuln, payload, description) in findings {
+                            let ast_key = format!(
+                                "{}|{}|{}|{}|{}",
+                                param_clone.name, vuln.line, vuln.column, vuln.source, vuln.sink
+                            );
+                            if local_ast_seen.contains(&ast_key) {
+                                continue;
+                            }
+                            local_ast_seen.insert(ast_key);
                             // Create an AST-based DOM XSS result with actual executable payload
                             let result_url = crate::scanning::url_inject::build_injected_url(
                                 &target_clone.url,
                                 &param_clone,
-                                &reflection_payload,
+                                &payload,
                             );
                             let mut ast_result = crate::scanning::result::Result::new(
                                 "A".to_string(), // AST-detected
@@ -440,7 +456,7 @@ pub async fn run_scanning(
                                 target_clone.method.clone(),
                                 result_url.clone(),
                                 param_clone.name.clone(),
-                                payload, // Actual XSS payload
+                                payload.clone(), // Actual XSS payload
                                 format!(
                                     "{}:{}:{} - {} (Source: {}, Sink: {})",
                                     target_clone.url.as_str(),
@@ -455,20 +471,20 @@ pub async fn run_scanning(
                                 0,
                                 format!("{} (검증 필요)", description),
                             );
-                            ast_result.request = Some(build_request_text(
-                                &target_clone,
-                                &param_clone,
-                                &reflection_payload,
-                            ));
+                            ast_result.request =
+                                Some(build_request_text(&target_clone, &param_clone, &payload));
                             ast_result.response = Some(response_text.clone());
                             // Lightweight runtime verification (non-headless)
-                            let (verified, _rt_resp, note) =
+                            let (verified, rt_resp, note) =
                                 crate::scanning::light_verify::verify_dom_xss_light(
                                     &target_clone,
                                     &param_clone,
-                                    &reflection_payload,
+                                    &payload,
                                 )
                                 .await;
+                            if let Some(runtime_response) = rt_resp {
+                                ast_result.response = Some(runtime_response);
+                            }
                             if let Some(n) = note {
                                 ast_result.message_str =
                                     format!("{} [{}]", ast_result.message_str, n);
