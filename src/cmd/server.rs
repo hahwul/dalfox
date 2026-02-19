@@ -418,8 +418,15 @@ async fn run_scan_job(
     silent_args.silence = true;
     analyze_parameters(&mut target, &silent_args, None).await;
 
-    crate::scanning::run_scanning(&target, Arc::new(args.clone()), results.clone(), None, None)
-        .await;
+    crate::scanning::run_scanning(
+        &target,
+        Arc::new(args.clone()),
+        results.clone(),
+        None,
+        None,
+        Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+    )
+    .await;
 
     let final_results = {
         let locked = results.lock().await;

@@ -143,6 +143,7 @@ impl DalfoxMcp {
             results_arc.clone(),
             None,
             None,
+            Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         )
         .await;
 

@@ -18,6 +18,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use reqwest::Client;
 use std::collections::HashSet;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::{Mutex, Semaphore};
 
 fn get_fallback_reflection_payloads(
@@ -202,6 +203,7 @@ pub async fn run_scanning(
     results: Arc<Mutex<Vec<crate::scanning::result::Result>>>,
     multi_pb: Option<Arc<MultiProgress>>,
     overall_pb: Option<Arc<Mutex<indicatif::ProgressBar>>>,
+    findings_count: Arc<AtomicUsize>,
 ) {
     // Short-circuit scanning when skip_xss_scanning is enabled (e.g., in unit tests)
     if args.skip_xss_scanning {
@@ -212,8 +214,10 @@ pub async fn run_scanning(
     let semaphore = Arc::new(Semaphore::new(if args.sxss { 1 } else { target.workers }));
     let limit = args.limit;
 
-    // Calculate total tasks by summing payloads for each param
+    // Precompute payload sets once per parameter to avoid repeated expansion work.
     let mut total_tasks = 0u64;
+    let mut param_jobs: Vec<(Param, Vec<String>, Vec<String>)> =
+        Vec::with_capacity(target.reflection_params.len());
     for param in &target.reflection_params {
         let reflection_payloads = if let Some(context) = &param.injection_context {
             crate::scanning::xss_common::get_dynamic_payloads(context, args.as_ref())
@@ -223,6 +227,7 @@ pub async fn run_scanning(
         };
         let dom_payloads = get_dom_payloads(param, args.as_ref()).unwrap_or_else(|_| vec![]);
         total_tasks += reflection_payloads.len() as u64 * (1 + dom_payloads.len() as u64);
+        param_jobs.push((param.clone(), reflection_payloads, dom_payloads));
     }
 
     let pb = if let Some(ref mp) = multi_pb {
@@ -246,16 +251,19 @@ pub async fn run_scanning(
 
     let mut handles = vec![];
 
-    for param in &target.reflection_params {
-        let already_ref = found_reflection_params.lock().await.contains(&param.name);
-        let already_dom = found_dom_params.lock().await.contains(&param.name);
+    for (param_clone, reflection_payloads, dom_payloads) in param_jobs {
+        let already_ref = found_reflection_params
+            .lock()
+            .await
+            .contains(&param_clone.name);
+        let already_dom = found_dom_params.lock().await.contains(&param_clone.name);
         if (already_ref || already_dom) && !args.deep_scan {
             // Skip further testing for this param if reflection or DOM XSS already found and not deep scanning
             continue;
         }
         // Early stop if global limit reached
         if let Some(lim) = limit
-            && results.lock().await.len() >= lim
+            && findings_count.load(Ordering::Relaxed) >= lim
         {
             if let Some(ref pb) = pb {
                 pb.finish_with_message(format!("Completed scanning {}", target.url));
@@ -263,26 +271,16 @@ pub async fn run_scanning(
             return;
         }
 
-        let reflection_payloads = if let Some(context) = &param.injection_context {
-            crate::scanning::xss_common::get_dynamic_payloads(context, args.as_ref())
-                .unwrap_or_else(|_| vec![])
-        } else {
-            get_fallback_reflection_payloads(args.as_ref()).unwrap_or_else(|_| vec![])
-        };
-        let dom_payloads = get_dom_payloads(param, args.as_ref()).unwrap_or_else(|_| vec![]);
-
         let args_clone = args.clone();
         let semaphore_clone = semaphore.clone();
-        let param_clone = param.clone();
         let target_clone = arc_target.clone();
-        let reflection_payloads_clone = reflection_payloads.clone();
-        let dom_payloads_clone = dom_payloads.clone();
         let results_clone = results.clone();
         let pb_clone = pb.clone();
         let found_reflection_params_clone = found_reflection_params.clone();
         let found_dom_params_clone = found_dom_params.clone();
         let overall_pb_clone = overall_pb.clone();
         let shared_client_clone = shared_client.clone();
+        let findings_count_clone = findings_count.clone();
 
         let handle = tokio::spawn(async move {
             let _permit = semaphore_clone.acquire().await.unwrap();
@@ -399,17 +397,19 @@ pub async fn run_scanning(
             // If probe found no reflection and not in deep_scan, skip heavy payload loops for this param
             if !probe_reflected && !args_clone.deep_scan {
                 if !local_results.is_empty() {
+                    let added = local_results.len();
                     let mut guard = results_clone.lock().await;
                     guard.extend(local_results);
+                    findings_count_clone.fetch_add(added, Ordering::Relaxed);
                 }
                 return;
             }
 
             // Sequential testing for this param
-            for reflection_payload in reflection_payloads_clone {
+            for reflection_payload in reflection_payloads {
                 // Early stop if global limit reached
                 if let Some(lim) = args_clone.limit
-                    && results_clone.lock().await.len() >= lim
+                    && findings_count_clone.load(Ordering::Relaxed) >= lim
                 {
                     return;
                 }
@@ -580,10 +580,10 @@ pub async fn run_scanning(
             }
 
             // DOM verification
-            for dom_payload in dom_payloads_clone {
+            for dom_payload in dom_payloads {
                 // Early stop if global limit reached
                 if let Some(lim) = args_clone.limit
-                    && results_clone.lock().await.len() >= lim
+                    && findings_count_clone.load(Ordering::Relaxed) >= lim
                 {
                     return;
                 }
@@ -666,8 +666,10 @@ pub async fn run_scanning(
                 }
             }
             if !local_results.is_empty() {
+                let added = local_results.len();
                 let mut guard = results_clone.lock().await;
                 guard.extend(local_results);
+                findings_count_clone.fetch_add(added, Ordering::Relaxed);
             }
         });
         handles.push(handle);
@@ -937,7 +939,15 @@ mod tests {
         let results = Arc::new(Mutex::new(Vec::new()));
 
         // Mock scanning - in real scenario this would attempt HTTP requests
-        run_scanning(&target, Arc::new(args), results, None, None).await;
+        run_scanning(
+            &target,
+            Arc::new(args),
+            results,
+            None,
+            None,
+            Arc::new(AtomicUsize::new(0)),
+        )
+        .await;
 
         // Verify that reflection params are present
         assert!(!target.reflection_params.is_empty());
@@ -999,7 +1009,15 @@ mod tests {
         let results = Arc::new(Mutex::new(Vec::new()));
 
         // Mock scanning - in real scenario this would attempt HTTP requests
-        run_scanning(&target, Arc::new(args), results, None, None).await;
+        run_scanning(
+            &target,
+            Arc::new(args),
+            results,
+            None,
+            None,
+            Arc::new(AtomicUsize::new(0)),
+        )
+        .await;
 
         // Verify that reflection params are present
         assert!(!target.reflection_params.is_empty());
@@ -1069,7 +1087,15 @@ mod tests {
 
         // This will attempt real HTTP requests, but in test environment it may fail
         // For unit testing, we can just ensure no panic occurs
-        run_scanning(&target, Arc::new(args), results, None, None).await;
+        run_scanning(
+            &target,
+            Arc::new(args),
+            results,
+            None,
+            None,
+            Arc::new(AtomicUsize::new(0)),
+        )
+        .await;
     }
 
     #[tokio::test]
@@ -1125,6 +1151,14 @@ mod tests {
 
         let results = Arc::new(Mutex::new(Vec::new()));
 
-        run_scanning(&target, Arc::new(args), results, None, None).await;
+        run_scanning(
+            &target,
+            Arc::new(args),
+            results,
+            None,
+            None,
+            Arc::new(AtomicUsize::new(0)),
+        )
+        .await;
     }
 }

@@ -128,7 +128,7 @@ pub async fn active_probe_param(
     target: &Target,
     mut param: Param,
     semaphore: Arc<Semaphore>,
-    encoders: Vec<String>,
+    encoders: Arc<Vec<String>>,
 ) -> Param {
     let client = target.build_client().unwrap_or_else(|_| Client::new());
 
@@ -619,11 +619,12 @@ pub async fn analyze_parameters(
     // Concurrent active probing per parameter
     let probe_semaphore = Arc::new(Semaphore::new(target.workers));
     let probe_target = Arc::new(target.clone());
+    let probe_encoders = Arc::new(args.encoders.clone());
     let mut param_handles = Vec::new();
     for p in target.reflection_params.clone() {
         let target_ref = probe_target.clone();
         let sem = probe_semaphore.clone();
-        let encoders_clone = args.encoders.clone();
+        let encoders_clone = probe_encoders.clone();
         param_handles.push(tokio::spawn(async move {
             active_probe_param(target_ref.as_ref(), p, sem, encoders_clone).await
         }));

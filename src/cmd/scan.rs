@@ -1072,6 +1072,7 @@ pub async fn run_scan(args: &ScanArgs) {
     }
 
     let results = Arc::new(Mutex::new(Vec::<Result>::new()));
+    let findings_count = Arc::new(AtomicUsize::new(0));
 
     let multi_pb: Option<Arc<MultiProgress>> = None;
 
@@ -1091,7 +1092,7 @@ pub async fn run_scan(args: &ScanArgs) {
 
     // Start global overall progress ticker when multiple targets; runs across preflight, analysis, and scanning
     let overall_ticker = if args.format == "plain" && !args.silence && total_targets > 1 {
-        let results_clone = results.clone();
+        let findings_count_clone = findings_count.clone();
         let overall_done_clone = overall_done.clone();
         let total_targets_copy = total_targets;
         let (tx, mut rx) = oneshot::channel::<()>();
@@ -1102,7 +1103,7 @@ pub async fn run_scan(args: &ScanArgs) {
             loop {
                 let done = overall_done_clone.load(Ordering::Relaxed);
                 let percent = (done * 100) / std::cmp::max(1, total_targets_copy);
-                let findings = results_clone.lock().await.len();
+                let findings = findings_count_clone.load(Ordering::Relaxed);
                 print!(
                     "\r\x1b[38;5;247m{} overall: targets={}  done={}  progress={}%  findings={}\x1b[0m",
                     frames[i % frames.len()],
@@ -1169,6 +1170,7 @@ pub async fn run_scan(args: &ScanArgs) {
             let total_targets_outer = total_targets;
             let multi_pb_outer = multi_pb.clone();
             let results_outer = results.clone();
+            let findings_count_outer = findings_count.clone();
             local.run_until(async move {
                 let mut handles = vec![];
 
@@ -1180,6 +1182,7 @@ pub async fn run_scan(args: &ScanArgs) {
             let total_targets_copy = total_targets_outer;
             let multi_pb_clone = multi_pb_outer.clone();
             let results_clone = results_outer.clone();
+            let findings_count_clone = findings_count_outer.clone();
 
             handles.push(tokio::task::spawn_local(async move {
                 // Bound concurrency across targets for preflight + analysis
@@ -1272,6 +1275,7 @@ pub async fn run_scan(args: &ScanArgs) {
                 // Run AST-based DOM XSS analysis on the initial response (enabled by default)
                 if !args_clone.skip_ast_analysis
                     && let Some(response_text) = preflight_response_body {
+                        let mut ast_batch: Vec<crate::scanning::result::Result> = Vec::new();
                         let js_blocks = crate::scanning::ast_integration::extract_javascript_from_html(&response_text);
                         for js_code in js_blocks {
                             let findings = crate::scanning::ast_integration::analyze_javascript_for_dom_xss(
@@ -1295,9 +1299,14 @@ pub async fn run_scan(args: &ScanArgs) {
                                     0,
                                     format!("{} (검증 필요) [경량 확인: 파라미터 없음]", description),
                                 );
-                                // Add to shared results
-                                results_clone.lock().await.push(ast_result);
+                                ast_batch.push(ast_result);
                             }
+                        }
+                        if !ast_batch.is_empty() {
+                            let added = ast_batch.len();
+                            let mut guard = results_clone.lock().await;
+                            guard.extend(ast_batch);
+                            findings_count_clone.fetch_add(added, Ordering::Relaxed);
                         }
                     }
 
@@ -1412,7 +1421,7 @@ pub async fn run_scan(args: &ScanArgs) {
 
     for (host, group) in host_groups {
         if let Some(lim) = args.limit
-            && results.lock().await.len() >= lim
+            && findings_count.load(Ordering::Relaxed) >= lim
         {
             break;
         }
@@ -1420,6 +1429,7 @@ pub async fn run_scan(args: &ScanArgs) {
         let multi_pb_clone = multi_pb.clone();
         let args_arc = Arc::new(args.clone());
         let results_clone = results.clone();
+        let findings_count_group = findings_count.clone();
 
         let scan_idx = scan_idx.clone();
         let overall_done_clone = overall_done.clone();
@@ -1461,7 +1471,7 @@ pub async fn run_scan(args: &ScanArgs) {
 
             for target in group {
                 if let Some(lim) = args_arc.limit
-                    && results_clone.lock().await.len() >= lim
+                    && findings_count_group.load(Ordering::Relaxed) >= lim
                 {
                     break;
                 }
@@ -1476,6 +1486,7 @@ pub async fn run_scan(args: &ScanArgs) {
                 let overall_pb_clone = overall_pb.clone();
                 let scan_idx_clone = scan_idx.clone();
                 let total_targets_copy = total_targets;
+                let findings_count_target = findings_count_group.clone();
 
                 let target_handle = tokio::spawn(async move {
                     if !args_clone.skip_xss_scanning {
@@ -1500,6 +1511,7 @@ pub async fn run_scan(args: &ScanArgs) {
                             results_clone_inner,
                             multi_pb_clone_inner,
                             overall_pb_clone,
+                            findings_count_target,
                         )
                         .await;
                         if let Some((tx, done_rx)) = __scan_spinner {
@@ -1531,7 +1543,7 @@ pub async fn run_scan(args: &ScanArgs) {
     for handle in group_handles {
         handle.await.unwrap();
         if let Some(lim) = args.limit
-            && results.lock().await.len() >= lim
+            && findings_count.load(Ordering::Relaxed) >= lim
         {
             break;
         }
