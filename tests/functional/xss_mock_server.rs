@@ -507,18 +507,6 @@ async fn test_header_reflection_v2() {
         let header_name = case.header_name.as_deref().unwrap_or("X-Test");
         let header_name_lc = header_name.to_ascii_lowercase();
 
-        let config = ScanTestConfig {
-            url_suffix: format!("/{case_id}"),
-            param: vec![format!("{}:header", header_name)],
-            data: None,
-            headers: vec![format!("{}: seed", header_name_lc)],
-            cookies: vec![],
-            method: "GET".to_string(),
-            skip_reflection_header: false,
-            skip_reflection_cookie: true,
-            skip_reflection_path: true,
-        };
-
         // Simple functional check: server reflects the header value (transformed)
         let client = reqwest::Client::new();
         let url = format!("http://{}:{}/header/{}", addr.ip(), addr.port(), case_id);
@@ -558,18 +546,6 @@ async fn test_cookie_reflection_v2() {
         );
 
         let cookie_name = case.cookie_name.as_deref().unwrap_or("test");
-
-        let config = ScanTestConfig {
-            url_suffix: format!("/{case_id}"),
-            param: vec![format!("{}:cookie", cookie_name)],
-            data: None,
-            headers: vec![],
-            cookies: vec![format!("{}=seed", cookie_name)],
-            method: "GET".to_string(),
-            skip_reflection_header: true,
-            skip_reflection_cookie: false,
-            skip_reflection_path: true,
-        };
 
         let found = run_discovery_once(
             addr,
@@ -650,18 +626,6 @@ async fn test_body_reflection_v2() {
         );
 
         let param_name = case.param_name.as_deref().unwrap_or("query");
-
-        let config = ScanTestConfig {
-            url_suffix: format!("/{case_id}"),
-            param: vec![format!("{}:body", param_name)],
-            data: Some(format!("{}=seed", param_name)),
-            headers: vec![],
-            cookies: vec![],
-            method: "POST".to_string(),
-            skip_reflection_header: true,
-            skip_reflection_cookie: true,
-            skip_reflection_path: true,
-        };
 
         // Simple functional check: server reflects the body param (transformed)
         let client = reqwest::Client::new();

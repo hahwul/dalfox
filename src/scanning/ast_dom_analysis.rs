@@ -289,7 +289,9 @@ impl<'a> DomXssVisitor<'a> {
     fn get_callee_property_name(&self, callee: &Expression<'a>) -> Option<String> {
         match callee {
             Expression::StaticMemberExpression(member) => Some(member.property.name.to_string()),
-            Expression::ComputedMemberExpression(member) => self.get_computed_property_string(member),
+            Expression::ComputedMemberExpression(member) => {
+                self.get_computed_property_string(member)
+            }
             _ => None,
         }
     }
@@ -530,7 +532,8 @@ impl<'a> DomXssVisitor<'a> {
         &self,
         arg: &Argument<'a>,
     ) -> Option<&BoundCallableAlias> {
-        arg.as_expression().and_then(|expr| self.get_alias_for_expr(expr))
+        arg.as_expression()
+            .and_then(|expr| self.get_alias_for_expr(expr))
     }
 
     fn get_callable_target_key_from_argument(&self, arg: &Argument<'a>) -> Option<String> {
@@ -1087,7 +1090,11 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
-    fn register_class_method_summaries_for_name(&mut self, class_name: &str, class_decl: &Class<'a>) {
+    fn register_class_method_summaries_for_name(
+        &mut self,
+        class_name: &str,
+        class_decl: &Class<'a>,
+    ) {
         for elem in &class_decl.body.body {
             let ClassElement::MethodDefinition(method_def) = elem else {
                 continue;
@@ -1169,7 +1176,10 @@ impl<'a> DomXssVisitor<'a> {
             }
             Statement::ClassDeclaration(class_decl) => {
                 if let Some(class_id) = &class_decl.id {
-                    self.register_class_method_summaries_for_name(class_id.name.as_str(), class_decl);
+                    self.register_class_method_summaries_for_name(
+                        class_id.name.as_str(),
+                        class_decl,
+                    );
                 }
             }
             Statement::ReturnStatement(return_stmt) => {
@@ -1604,9 +1614,7 @@ impl<'a> DomXssVisitor<'a> {
 
                 // Track object-level taint for property assignment flows like:
                 // obj.payload = location.hash; sink(obj.payload)
-                if right_tainted
-                    && let Expression::Identifier(obj_id) = &member.object
-                {
+                if right_tainted && let Expression::Identifier(obj_id) = &member.object {
                     self.tainted_vars.insert(obj_id.name.to_string());
                     if let Some(source) = right_source.clone() {
                         self.var_aliases.insert(obj_id.name.to_string(), source);
@@ -1643,9 +1651,7 @@ impl<'a> DomXssVisitor<'a> {
 
                 // Propagate taint to base object for computed assignments:
                 // arr[0] = location.hash; sink(arr[0])
-                if right_tainted
-                    && let Expression::Identifier(obj_id) = &member.object
-                {
+                if right_tainted && let Expression::Identifier(obj_id) = &member.object {
                     self.tainted_vars.insert(obj_id.name.to_string());
                     if let Some(source) = right_source.clone() {
                         self.var_aliases.insert(obj_id.name.to_string(), source);
@@ -1712,7 +1718,9 @@ impl<'a> DomXssVisitor<'a> {
                 .first()
                 .and_then(|arg| arg.as_expression())
                 .and_then(|expr| match expr {
-                    Expression::StringLiteral(s) => Some(s.value.as_str().eq_ignore_ascii_case("message")),
+                    Expression::StringLiteral(s) => {
+                        Some(s.value.as_str().eq_ignore_ascii_case("message"))
+                    }
                     _ => None,
                 })
                 .unwrap_or(false);
@@ -1730,12 +1738,14 @@ impl<'a> DomXssVisitor<'a> {
 
                     // Mark event parameter as tainted
                     self.tainted_vars.insert(param_name.to_string());
-                    self.var_aliases
-                        .insert(param_name.to_string(), if is_message_event {
+                    self.var_aliases.insert(
+                        param_name.to_string(),
+                        if is_message_event {
                             "event.data".to_string()
                         } else {
                             "event".to_string()
-                        });
+                        },
+                    );
 
                     // Walk the function body
                     if let Some(body) = &func.body {
@@ -1758,12 +1768,14 @@ impl<'a> DomXssVisitor<'a> {
                 let saved_aliases = self.var_aliases.clone();
 
                 self.tainted_vars.insert(param_name.to_string());
-                self.var_aliases
-                    .insert(param_name.to_string(), if is_message_event {
+                self.var_aliases.insert(
+                    param_name.to_string(),
+                    if is_message_event {
                         "event.data".to_string()
                     } else {
                         "event".to_string()
-                    });
+                    },
+                );
 
                 // Arrow functions have a FunctionBody
                 self.walk_statements(&arrow.body.statements);
@@ -1803,8 +1815,8 @@ impl<'a> DomXssVisitor<'a> {
             let target_alias_owned = target_arg
                 .and_then(|arg0| self.get_callable_target_alias_from_argument(arg0))
                 .cloned();
-            let mut target_summary_key = target_arg
-                .and_then(|arg0| self.get_callable_target_key_from_argument(arg0));
+            let mut target_summary_key =
+                target_arg.and_then(|arg0| self.get_callable_target_key_from_argument(arg0));
 
             if target_summary_key
                 .as_ref()
@@ -1816,13 +1828,14 @@ impl<'a> DomXssVisitor<'a> {
             }
 
             if let Some(summary_key) = target_summary_key
-                && let Some(param_sinks) = self.function_summaries.get(&summary_key).map(|summary| {
-                    summary
-                        .tainted_param_sinks
-                        .iter()
-                        .map(|(idx, sink)| (*idx, sink.clone()))
-                        .collect::<Vec<_>>()
-                })
+                && let Some(param_sinks) =
+                    self.function_summaries.get(&summary_key).map(|summary| {
+                        summary
+                            .tainted_param_sinks
+                            .iter()
+                            .map(|(idx, sink)| (*idx, sink.clone()))
+                            .collect::<Vec<_>>()
+                    })
             {
                 for (idx, sink_name) in param_sinks {
                     let (tainted, source_hint) = self.resolve_reflect_apply_param_argument_taint(
@@ -1993,13 +2006,14 @@ impl<'a> DomXssVisitor<'a> {
                 target_summary_key = Some(alias.target.clone());
             }
             if let Some(summary_key) = target_summary_key
-                && let Some(param_sinks) = self.function_summaries.get(&summary_key).map(|summary| {
-                    summary
-                        .tainted_param_sinks
-                        .iter()
-                        .map(|(idx, sink)| (*idx, sink.clone()))
-                        .collect::<Vec<_>>()
-                })
+                && let Some(param_sinks) =
+                    self.function_summaries.get(&summary_key).map(|summary| {
+                        summary
+                            .tainted_param_sinks
+                            .iter()
+                            .map(|(idx, sink)| (*idx, sink.clone()))
+                            .collect::<Vec<_>>()
+                    })
             {
                 for (idx, sink_name) in param_sinks {
                     let (tainted, source_hint) = self.resolve_wrapper_param_argument_taint(
@@ -2036,7 +2050,9 @@ impl<'a> DomXssVisitor<'a> {
                 target_func_name = Some(alias.target.clone());
             }
 
-            if let Some(target_func_name) = target_func_name.filter(|name| self.sinks.contains(name)) {
+            if let Some(target_func_name) =
+                target_func_name.filter(|name| self.sinks.contains(name))
+            {
                 if let Some(target_alias) = target_alias_owned.as_ref()
                     && self.sinks.contains(&target_alias.target)
                 {
@@ -2182,8 +2198,7 @@ impl<'a> DomXssVisitor<'a> {
         } else {
             None
         };
-        if let Some(func_name) = direct_sink_name.or(bound_sink_name)
-        {
+        if let Some(func_name) = direct_sink_name.or(bound_sink_name) {
             if let Some(bound_alias) = alias_owned.as_ref()
                 && self.sinks.contains(&bound_alias.target)
             {
@@ -2318,7 +2333,6 @@ impl<'a> DomXssVisitor<'a> {
         // Walk the callee
         self.walk_expression(&call.callee);
     }
-
 }
 
 /// AST-based DOM XSS analyzer
@@ -2928,9 +2942,9 @@ location.href = url;
 let input = location.search;
 let safe = DOMPurify.sanitize(input);
 document.body.innerHTML = safe;
-"#;
+        "#;
         let analyzer = AstDomAnalyzer::new();
-        let result = analyzer.analyze(code).unwrap();
+        let _result = analyzer.analyze(code).unwrap();
         // This should NOT detect a vulnerability because DOMPurify.sanitize is used
         // However, current implementation tracks taint through variable assignment
         // This is a known limitation - sanitization detection could be improved
@@ -2944,9 +2958,9 @@ document.body.innerHTML = safe;
 let input = location.search;
 let encoded = encodeURIComponent(input);
 document.body.innerHTML = encoded;
-"#;
+        "#;
         let analyzer = AstDomAnalyzer::new();
-        let result = analyzer.analyze(code).unwrap();
+        let _result = analyzer.analyze(code).unwrap();
         // encodeURIComponent is considered a sanitizer, but taint still propagates
         // through variable assignment. This is a limitation of the current impl.
         // We expect it to still find a vulnerability due to the limitation
@@ -3269,9 +3283,9 @@ let key = location.hash;
 let obj = {};
 obj[key] = "value";
 document.write(obj[key]);
-"#;
+        "#;
         let analyzer = AstDomAnalyzer::new();
-        let result = analyzer.analyze(code).unwrap();
+        let _result = analyzer.analyze(code).unwrap();
         // This is a limitation - we track that obj is tainted but not specific keys
         // The test documents current behavior
     }
@@ -3545,9 +3559,9 @@ document.write(value);
         let code = r#"
 let result = (1, 2, location.hash);
 document.write(result);
-"#;
+        "#;
         let analyzer = AstDomAnalyzer::new();
-        let result = analyzer.analyze(code).unwrap();
+        let _result = analyzer.analyze(code).unwrap();
         // Comma operator returns the last value
         // Test documents current behavior
     }

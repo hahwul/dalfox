@@ -795,7 +795,7 @@ mod tests {
 
     #[test]
     fn test_analyze_parameters_skip_mining() {
-        let mut target = parse_target("https://example.com").unwrap();
+        let target = parse_target("https://example.com").unwrap();
         let _args = ScanArgs {
             input_type: "auto".to_string(),
             format: "json".to_string(),

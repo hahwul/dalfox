@@ -140,7 +140,7 @@ document.getElementById('x').innerHTML = param;
 "#;
         let findings = analyze_javascript_for_dom_xss(js, "https://example.com");
         assert!(!findings.is_empty());
-        let (vuln, payload, description) = &findings[0];
+        let (_vuln, payload, description) = &findings[0];
         assert!(description.contains("DOM-based XSS"));
         assert!(description.contains("innerHTML"));
         assert!(payload.contains("alert"));

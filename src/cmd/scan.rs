@@ -177,14 +177,11 @@ fn dedupe_ast_results(results: Vec<Result>) -> Vec<Result> {
             continue;
         }
 
+        // Use evidence-centric fingerprint so duplicates across stages
+        // (preflight/probe/reflection loop) collapse into one.
         let key = format!(
-            "{}|{}|{}|{}|{}|{}",
-            result.inject_type,
-            result.method,
-            result.data,
-            result.param,
-            result.payload,
-            result.evidence
+            "{}|{}|{}",
+            result.inject_type, result.method, result.evidence
         );
 
         if let Some(existing_idx) = ast_index_by_key.get(&key).copied() {
@@ -281,6 +278,44 @@ mod tests {
         assert_eq!(deduped.len(), 1);
         assert_eq!(deduped[0].result_type, "V");
         assert_eq!(deduped[0].severity, "High");
+    }
+
+    #[test]
+    fn test_dedupe_ast_results_collapses_cross_stage_duplicates() {
+        let evidence =
+            "https://example.com:3:9 - DOM-based XSS via location.search to innerHTML (Source: location.search, Sink: innerHTML)".to_string();
+        let ast_preflight = ScanResult::new(
+            "A".to_string(),
+            "DOM-XSS".to_string(),
+            "GET".to_string(),
+            "https://example.com".to_string(),
+            "-".to_string(),
+            "<img src=x onerror=alert(1) class=dlxaaa111>".to_string(),
+            evidence.clone(),
+            "CWE-79".to_string(),
+            "Medium".to_string(),
+            0,
+            "preflight".to_string(),
+        );
+        let mut ast_param_verified = ScanResult::new(
+            "V".to_string(),
+            "DOM-XSS".to_string(),
+            "GET".to_string(),
+            "https://example.com/?q=%3Cimg...%3E".to_string(),
+            "q".to_string(),
+            "<img src=x onerror=alert(1) class=dlxaaa111>".to_string(),
+            evidence,
+            "CWE-79".to_string(),
+            "High".to_string(),
+            0,
+            "verified".to_string(),
+        );
+        ast_param_verified.request = Some("GET /?q=... HTTP/1.1".to_string());
+
+        let deduped = dedupe_ast_results(vec![ast_preflight, ast_param_verified.clone()]);
+        assert_eq!(deduped.len(), 1);
+        assert_eq!(deduped[0].result_type, "V");
+        assert_eq!(deduped[0].message_str, ast_param_verified.message_str);
     }
 
     #[test]
