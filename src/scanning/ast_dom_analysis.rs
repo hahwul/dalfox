@@ -417,6 +417,42 @@ impl<'a> DomXssVisitor<'a> {
         self.argument_taint_and_source(arg_array)
     }
 
+    fn resolve_apply_static_string_at(
+        &self,
+        arg_array: &Argument<'a>,
+        param_idx: usize,
+    ) -> Option<String> {
+        let expr = arg_array.as_expression()?;
+        let Expression::ArrayExpression(array) = expr else {
+            return None;
+        };
+
+        let mut current_idx = 0usize;
+        for elem in &array.elements {
+            match elem {
+                ArrayExpressionElement::Elision(_) => {
+                    if current_idx == param_idx {
+                        return None;
+                    }
+                    current_idx += 1;
+                }
+                ArrayExpressionElement::SpreadElement(_) => {
+                    return None;
+                }
+                _ => {
+                    if let Some(elem_expr) = elem.as_expression() {
+                        if current_idx == param_idx {
+                            return self.eval_static_string_expr(elem_expr);
+                        }
+                    }
+                    current_idx += 1;
+                }
+            }
+        }
+
+        None
+    }
+
     fn resolve_wrapper_param_argument_taint(
         &self,
         call: &CallExpression<'a>,
@@ -456,12 +492,77 @@ impl<'a> DomXssVisitor<'a> {
         (false, None)
     }
 
+    fn resolve_reflect_apply_param_argument_taint(
+        &self,
+        call: &CallExpression<'a>,
+        alias: Option<&BoundCallableAlias>,
+        param_idx: usize,
+    ) -> (bool, Option<String>) {
+        if let Some(bound_alias) = alias {
+            if let Some(bound_arg) = bound_alias.bound_args.get(param_idx) {
+                return (bound_arg.tainted, bound_arg.source.clone());
+            }
+            if param_idx >= bound_alias.bound_args.len()
+                && let Some(arg_array) = call.arguments.get(2)
+            {
+                let shifted_idx = param_idx - bound_alias.bound_args.len();
+                return self.resolve_apply_argument_taint_at(arg_array, shifted_idx);
+            }
+            return (false, None);
+        }
+
+        if let Some(arg_array) = call.arguments.get(2) {
+            self.resolve_apply_argument_taint_at(arg_array, param_idx)
+        } else {
+            (false, None)
+        }
+    }
+
     fn get_alias_for_expr(&self, expr: &Expression<'a>) -> Option<&BoundCallableAlias> {
         if let Expression::Identifier(id) = expr {
             self.bound_function_aliases.get(id.name.as_str())
         } else {
             None
         }
+    }
+
+    fn get_callable_target_alias_from_argument(
+        &self,
+        arg: &Argument<'a>,
+    ) -> Option<&BoundCallableAlias> {
+        arg.as_expression().and_then(|expr| self.get_alias_for_expr(expr))
+    }
+
+    fn get_callable_target_key_from_argument(&self, arg: &Argument<'a>) -> Option<String> {
+        let expr = arg.as_expression()?;
+        let mut key = self
+            .get_summary_key_for_callee_expr(expr)
+            .or_else(|| self.get_expr_string(expr));
+
+        if key
+            .as_ref()
+            .and_then(|k| self.function_summaries.get(k))
+            .is_none()
+            && let Some(alias) = self.get_alias_for_expr(expr)
+        {
+            key = Some(alias.target.clone());
+        }
+
+        key
+    }
+
+    fn get_sink_name_for_callable_expr(&self, expr: &Expression<'a>) -> Option<String> {
+        if let Some(full_name) = self.get_expr_string(expr)
+            && self.sinks.contains(&full_name)
+        {
+            return Some(full_name);
+        }
+        if let Some(method_name) = self.get_callee_property_name(expr)
+            && self.sinks.contains(method_name.as_str())
+        {
+            return Some(method_name);
+        }
+        None
     }
 
     fn get_alias_for_callee_identifier(
@@ -514,6 +615,48 @@ impl<'a> DomXssVisitor<'a> {
             && self.sanitizers.contains(&func_name)
         {
             return (false, None);
+        }
+
+        // Reflect.apply(targetFn, thisArg, argsArray) return propagation
+        if let Some(callee_name) = self.get_expr_string(&call.callee)
+            && callee_name == "Reflect.apply"
+            && call.arguments.len() >= 3
+        {
+            let target_alias = call
+                .arguments
+                .first()
+                .and_then(|arg0| self.get_callable_target_alias_from_argument(arg0));
+            let target_key = call
+                .arguments
+                .first()
+                .and_then(|arg0| self.get_callable_target_key_from_argument(arg0));
+
+            if let Some(target_name) = target_key.as_ref()
+                && self.sanitizers.contains(target_name)
+            {
+                return (false, None);
+            }
+
+            if let Some(summary_key) = target_key.clone()
+                && let Some(summary) = self.function_summaries.get(&summary_key)
+            {
+                if let Some(source) = &summary.return_without_tainted_params {
+                    return (true, Some(source.clone()));
+                }
+                for (idx, fallback_source) in &summary.tainted_param_returns {
+                    let (tainted, source_hint) =
+                        self.resolve_reflect_apply_param_argument_taint(call, target_alias, *idx);
+                    if tainted {
+                        return (true, source_hint.or_else(|| Some(fallback_source.clone())));
+                    }
+                }
+            }
+
+            if let Some(target_name) = target_key
+                && self.sources.contains(&target_name)
+            {
+                return (true, Some(target_name));
+            }
         }
 
         // Wrapper return propagation (fn.call / fn.apply)
@@ -1647,6 +1790,187 @@ impl<'a> DomXssVisitor<'a> {
                     Some("event.data".to_string()),
                 );
                 return;
+            }
+        }
+
+        // Handle Reflect.apply(targetFn, thisArg, argsArray)
+        if let Some(callee_name) = self.get_expr_string(&call.callee)
+            && callee_name == "Reflect.apply"
+            && call.arguments.len() >= 3
+        {
+            let target_arg = call.arguments.first();
+            let target_expr = target_arg.and_then(|arg| arg.as_expression());
+            let target_alias_owned = target_arg
+                .and_then(|arg0| self.get_callable_target_alias_from_argument(arg0))
+                .cloned();
+            let mut target_summary_key = target_arg
+                .and_then(|arg0| self.get_callable_target_key_from_argument(arg0));
+
+            if target_summary_key
+                .as_ref()
+                .and_then(|k| self.function_summaries.get(k))
+                .is_none()
+                && let Some(alias) = target_alias_owned.as_ref()
+            {
+                target_summary_key = Some(alias.target.clone());
+            }
+
+            if let Some(summary_key) = target_summary_key
+                && let Some(param_sinks) = self.function_summaries.get(&summary_key).map(|summary| {
+                    summary
+                        .tainted_param_sinks
+                        .iter()
+                        .map(|(idx, sink)| (*idx, sink.clone()))
+                        .collect::<Vec<_>>()
+                })
+            {
+                for (idx, sink_name) in param_sinks {
+                    let (tainted, source_hint) = self.resolve_reflect_apply_param_argument_taint(
+                        call,
+                        target_alias_owned.as_ref(),
+                        idx,
+                    );
+                    if tainted {
+                        self.report_vulnerability_with_source(
+                            call.span(),
+                            &sink_name,
+                            "Tainted argument reaches sink through Reflect.apply",
+                            source_hint,
+                        );
+                        return;
+                    }
+                }
+            }
+
+            let mut target_sink_name =
+                target_expr.and_then(|expr| self.get_sink_name_for_callable_expr(expr));
+            if target_sink_name.is_none()
+                && let Some(alias) = target_alias_owned.as_ref()
+                && self.sinks.contains(&alias.target)
+            {
+                target_sink_name = Some(alias.target.clone());
+            }
+
+            if let Some(sink_name) = target_sink_name {
+                if let Some(target_alias) = target_alias_owned.as_ref()
+                    && self.sinks.contains(&target_alias.target)
+                {
+                    for bound_arg in &target_alias.bound_args {
+                        if bound_arg.tainted {
+                            self.report_vulnerability_with_source(
+                                call.span(),
+                                &sink_name,
+                                "Tainted pre-bound argument reaches sink function via Reflect.apply",
+                                bound_arg.source.clone(),
+                            );
+                            return;
+                        }
+                    }
+                }
+
+                if let Some(arg_array) = call.arguments.get(2) {
+                    let target_method_name = target_expr
+                        .and_then(|expr| self.get_callee_property_name(expr))
+                        .or_else(|| {
+                            if self.sinks.contains(&sink_name) {
+                                Some(sink_name.clone())
+                            } else {
+                                None
+                            }
+                        });
+
+                    if target_method_name.as_deref() == Some("setAttribute") {
+                        let attr_name_lc = self
+                            .resolve_apply_static_string_at(arg_array, 0)
+                            .map(|name| name.to_ascii_lowercase());
+                        if let Some(name) = attr_name_lc {
+                            let dangerous = name.starts_with("on")
+                                || name == "href"
+                                || name == "xlink:href"
+                                || name == "srcdoc";
+                            if dangerous {
+                                let (tainted, source_hint) =
+                                    self.resolve_apply_argument_taint_at(arg_array, 1);
+                                if tainted {
+                                    self.report_vulnerability_with_source(
+                                        call.span(),
+                                        &format!("setAttribute:{name}"),
+                                        "Tainted data assigned to dangerous attribute via Reflect.apply",
+                                        source_hint,
+                                    );
+                                    return;
+                                }
+                            }
+                        }
+                    } else if target_method_name.as_deref() == Some("execCommand") {
+                        let cmd_name_lc = self
+                            .resolve_apply_static_string_at(arg_array, 0)
+                            .map(|name| name.to_ascii_lowercase());
+                        if let Some(cmd) = cmd_name_lc
+                            && cmd == "inserthtml"
+                        {
+                            let (tainted, source_hint) =
+                                self.resolve_apply_argument_taint_at(arg_array, 2);
+                            if tainted {
+                                self.report_vulnerability_with_source(
+                                    call.span(),
+                                    "execCommand:insertHTML",
+                                    "Tainted data passed to insertHTML command via Reflect.apply",
+                                    source_hint,
+                                );
+                                return;
+                            }
+                        }
+                    } else if target_method_name.as_deref() == Some("insertAdjacentHTML") {
+                        let (tainted, source_hint) =
+                            self.resolve_apply_argument_taint_at(arg_array, 1);
+                        if tainted {
+                            self.report_vulnerability_with_source(
+                                call.span(),
+                                "insertAdjacentHTML",
+                                "Tainted HTML argument passed to sink method via Reflect.apply",
+                                source_hint,
+                            );
+                            return;
+                        }
+                    } else {
+                        let (tainted, source_hint) = self.argument_taint_and_source(arg_array);
+                        if tainted {
+                            self.report_vulnerability_with_source(
+                                call.span(),
+                                &sink_name,
+                                "Tainted data passed to sink function via Reflect.apply",
+                                source_hint,
+                            );
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Handle Reflect.construct(Function, [taintedCode])
+        if let Some(callee_name) = self.get_expr_string(&call.callee)
+            && callee_name == "Reflect.construct"
+            && call.arguments.len() >= 2
+        {
+            let target_key = call
+                .arguments
+                .first()
+                .and_then(|arg0| self.get_callable_target_key_from_argument(arg0));
+            if target_key.as_deref() == Some("Function")
+                && let Some(arg_array) = call.arguments.get(1)
+            {
+                let (tainted, source_hint) = self.resolve_apply_argument_taint_at(arg_array, 0);
+                if tainted {
+                    self.report_vulnerability_with_source(
+                        call.span(),
+                        "Function",
+                        "Tainted data passed to Function constructor via Reflect.construct",
+                        source_hint,
+                    );
+                    return;
+                }
             }
         }
 
@@ -4049,6 +4373,146 @@ document.write(result);
         assert!(
             !result.is_empty(),
             "Should respect pre-bound args when mapping apply wrapper parameter index"
+        );
+    }
+
+    #[test]
+    fn test_reflect_apply_sink_detected() {
+        let code = r#"
+            Reflect.apply(document.write, document, [location.hash]);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect sink invocation via Reflect.apply"
+        );
+    }
+
+    #[test]
+    fn test_reflect_apply_bound_sink_alias_detected() {
+        let code = r#"
+            const writer = document.write.bind(document);
+            Reflect.apply(writer, null, [location.search]);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect bound sink alias invocation via Reflect.apply"
+        );
+    }
+
+    #[test]
+    fn test_reflect_apply_summary_flow_detected() {
+        let code = r#"
+            function render(v) {
+                eval(v);
+            }
+            Reflect.apply(render, null, [location.hash]);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect summary flow through Reflect.apply"
+        );
+    }
+
+    #[test]
+    fn test_reflect_apply_summary_non_sink_param_tainted_not_detected() {
+        let code = r#"
+            function render(a, b) {
+                document.write(a);
+            }
+            Reflect.apply(render, null, ['safe', location.search]);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result.is_empty(),
+            "Tainted non-sink parameter should not trigger Reflect.apply summary finding"
+        );
+    }
+
+    #[test]
+    fn test_reflect_apply_source_return_taints_sink() {
+        let code = r#"
+            const value = Reflect.apply(localStorage.getItem, localStorage, ['payload']);
+            document.write(value);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should propagate source taint through Reflect.apply return value"
+        );
+    }
+
+    #[test]
+    fn test_reflect_apply_setattribute_dangerous_detected() {
+        let code = r#"
+            const el = document.getElementById('x');
+            Reflect.apply(el.setAttribute, el, ['onclick', location.hash]);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect dangerous setAttribute via Reflect.apply"
+        );
+    }
+
+    #[test]
+    fn test_reflect_apply_setattribute_safe_attr_not_detected() {
+        let code = r#"
+            const el = document.getElementById('x');
+            Reflect.apply(el.setAttribute, el, ['class', location.hash]);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result.is_empty(),
+            "Safe setAttribute attribute should not be detected via Reflect.apply"
+        );
+    }
+
+    #[test]
+    fn test_reflect_apply_execcommand_insert_html_detected() {
+        let code = r#"
+            Reflect.apply(document.execCommand, document, ['insertHTML', false, location.search]);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect execCommand insertHTML via Reflect.apply"
+        );
+    }
+
+    #[test]
+    fn test_reflect_construct_function_tainted_detected() {
+        let code = r#"
+            Reflect.construct(Function, [location.hash]);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect tainted Function constructor invocation via Reflect.construct"
+        );
+    }
+
+    #[test]
+    fn test_reflect_construct_function_safe_literal_not_detected() {
+        let code = r#"
+            Reflect.construct(Function, ['return 1']);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result.is_empty(),
+            "Safe literal code should not be detected via Reflect.construct"
         );
     }
 }

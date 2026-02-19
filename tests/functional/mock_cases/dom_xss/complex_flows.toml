@@ -1163,3 +1163,140 @@ bound.apply(null, [location.hash]);
 </html>
 """
 expected_detection = true
+
+[[case]]
+id = 1361
+name = "reflect_apply_document_write"
+description = "Reflect.apply invocation of document.write with tainted argument"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+Reflect.apply(document.write, document, [location.hash]);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1362
+name = "reflect_apply_bound_sink_alias"
+description = "Reflect.apply invocation of bound sink alias with tainted argument"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var writer = document.write.bind(document);
+Reflect.apply(writer, null, [location.search]);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1363
+name = "reflect_apply_summary_flow"
+description = "Reflect.apply should respect function summary sink flow"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+function render(v) {
+  eval(v);
+}
+Reflect.apply(render, null, [location.hash]);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1364
+name = "reflect_apply_source_return_to_sink"
+description = "Reflect.apply source return value should propagate taint to sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var value = Reflect.apply(localStorage.getItem, localStorage, ['payload']);
+document.write(value);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1365
+name = "reflect_apply_setattribute_dangerous"
+description = "Reflect.apply setAttribute with dangerous attribute should be detected"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="x"></div>
+<script>
+var el = document.getElementById('x');
+Reflect.apply(el.setAttribute, el, ['onclick', location.hash]);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1366
+name = "reflect_apply_execcommand_inserthtml"
+description = "Reflect.apply execCommand insertHTML should be detected"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+Reflect.apply(document.execCommand, document, ['insertHTML', false, location.search]);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1367
+name = "reflect_construct_function_tainted"
+description = "Reflect.construct Function with tainted code should be detected"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+Reflect.construct(Function, [location.hash]);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1368
+name = "reflect_apply_insertadjacenthtml_tainted"
+description = "Reflect.apply insertAdjacentHTML with tainted html argument should be detected"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="x"></div>
+<script>
+var el = document.getElementById('x');
+Reflect.apply(el.insertAdjacentHTML, el, ['beforeend', location.search]);
+</script>
+</body>
+</html>
+"""
+expected_detection = true

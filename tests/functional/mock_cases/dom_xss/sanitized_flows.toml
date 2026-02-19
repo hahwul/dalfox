@@ -647,3 +647,126 @@ chained();
 </html>
 """
 expected_detection = false
+
+[[case]]
+id = 1434
+name = "reflect_apply_document_write_sanitized"
+description = "Reflect.apply document.write with sanitized argument should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@2.4.0/dist/purify.min.js"></script>
+<script>
+Reflect.apply(document.write, document, [DOMPurify.sanitize(location.hash)]);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1435
+name = "reflect_apply_summary_non_sink_param_tainted_safe"
+description = "Reflect.apply with taint only in non-sink parameter should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+function render(a, b) {
+  document.write(a);
+}
+Reflect.apply(render, null, ['safe', location.search]);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1436
+name = "reflect_apply_setattribute_safe_attr"
+description = "Reflect.apply setAttribute with safe attribute should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="x"></div>
+<script>
+var el = document.getElementById('x');
+Reflect.apply(el.setAttribute, el, ['class', location.hash]);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1437
+name = "reflect_apply_execcommand_non_html_safe"
+description = "Reflect.apply execCommand with non-HTML command should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+Reflect.apply(document.execCommand, document, ['copy', false, location.search]);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1438
+name = "reflect_construct_function_safe_literal"
+description = "Reflect.construct Function with safe literal should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+Reflect.construct(Function, ['return 1']);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1439
+name = "reflect_apply_bound_sink_alias_sanitized"
+description = "Reflect.apply bound sink alias with sanitized argument should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@2.4.0/dist/purify.min.js"></script>
+<script>
+var writer = document.write.bind(document);
+Reflect.apply(writer, null, [DOMPurify.sanitize(location.search)]);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1440
+name = "reflect_apply_insertadjacenthtml_sanitized"
+description = "Reflect.apply insertAdjacentHTML with sanitized html should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="x"></div>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@2.4.0/dist/purify.min.js"></script>
+<script>
+var el = document.getElementById('x');
+Reflect.apply(el.insertAdjacentHTML, el, ['beforeend', DOMPurify.sanitize(location.hash)]);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
