@@ -334,19 +334,20 @@ impl DalfoxMcp {
             .get("cookie_from_raw")
             .and_then(|v| v.as_str())
             .map(|s| s.to_string())
-            && let Ok(content) = std::fs::read_to_string(&raw_path) {
-                for line in content.lines() {
-                    if line.to_ascii_lowercase().starts_with("cookie:") {
-                        let rest = line.split_once(':').map(|x| x.1).unwrap_or("").trim();
-                        for part in rest.split(';') {
-                            let trimmed = part.trim();
-                            if trimmed.contains('=') {
-                                all_cookies.push(trimmed.to_string());
-                            }
+            && let Ok(content) = std::fs::read_to_string(&raw_path)
+        {
+            for line in content.lines() {
+                if line.to_ascii_lowercase().starts_with("cookie:") {
+                    let rest = line.split_once(':').map(|x| x.1).unwrap_or("").trim();
+                    for part in rest.split(';') {
+                        let trimmed = part.trim();
+                        if trimmed.contains('=') {
+                            all_cookies.push(trimmed.to_string());
                         }
                     }
                 }
             }
+        }
 
         // Prepare ScanArgs
         // Optional engine/network flags

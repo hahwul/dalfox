@@ -249,66 +249,80 @@ impl Config {
         if let Some(scan) = &self.scan {
             // OUTPUT
             if let Some(v) = &scan.output
-                && args.output.is_none() {
-                    args.output = Some(v.clone());
-                }
+                && args.output.is_none()
+            {
+                args.output = Some(v.clone());
+            }
             if let Some(v) = scan.limit
-                && args.limit.is_none() {
-                    args.limit = Some(v);
-                }
+                && args.limit.is_none()
+            {
+                args.limit = Some(v);
+            }
             // TARGETS
             if let Some(v) = &scan.data
-                && args.data.is_none() {
-                    args.data = Some(v.clone());
-                }
+                && args.data.is_none()
+            {
+                args.data = Some(v.clone());
+            }
             if let Some(v) = &scan.user_agent
-                && args.user_agent.is_none() {
-                    args.user_agent = Some(v.clone());
-                }
+                && args.user_agent.is_none()
+            {
+                args.user_agent = Some(v.clone());
+            }
             if let Some(v) = &scan.cookie_from_raw
-                && args.cookie_from_raw.is_none() {
-                    args.cookie_from_raw = Some(v.clone());
-                }
+                && args.cookie_from_raw.is_none()
+            {
+                args.cookie_from_raw = Some(v.clone());
+            }
             // PARAMETER MINING
             if let Some(v) = &scan.mining_dict_word
-                && args.mining_dict_word.is_none() {
-                    args.mining_dict_word = Some(v.clone());
-                }
+                && args.mining_dict_word.is_none()
+            {
+                args.mining_dict_word = Some(v.clone());
+            }
             if let Some(v) = &scan.remote_wordlists
-                && args.remote_wordlists.is_empty() {
-                    args.remote_wordlists = v.clone();
-                }
+                && args.remote_wordlists.is_empty()
+            {
+                args.remote_wordlists = v.clone();
+            }
             // NETWORK
             if let Some(v) = &scan.proxy
-                && args.proxy.is_none() {
-                    args.proxy = Some(v.clone());
-                }
+                && args.proxy.is_none()
+            {
+                args.proxy = Some(v.clone());
+            }
             // XSS SCANNING
             if let Some(v) = &scan.custom_blind_xss_payload
-                && args.custom_blind_xss_payload.is_none() {
-                    args.custom_blind_xss_payload = Some(v.clone());
-                }
+                && args.custom_blind_xss_payload.is_none()
+            {
+                args.custom_blind_xss_payload = Some(v.clone());
+            }
             if let Some(v) = &scan.blind_callback_url
-                && args.blind_callback_url.is_none() {
-                    args.blind_callback_url = Some(v.clone());
-                }
+                && args.blind_callback_url.is_none()
+            {
+                args.blind_callback_url = Some(v.clone());
+            }
             if let Some(v) = &scan.custom_payload
-                && args.custom_payload.is_none() {
-                    args.custom_payload = Some(v.clone());
-                }
+                && args.custom_payload.is_none()
+            {
+                args.custom_payload = Some(v.clone());
+            }
             if let Some(v) = &scan.remote_payloads
-                && args.remote_payloads.is_empty() {
-                    args.remote_payloads = v.clone();
-                }
+                && args.remote_payloads.is_empty()
+            {
+                args.remote_payloads = v.clone();
+            }
             if let Some(v) = &scan.sxss_url
-                && args.sxss_url.is_none() {
-                    args.sxss_url = Some(v.clone());
-                }
+                && args.sxss_url.is_none()
+            {
+                args.sxss_url = Some(v.clone());
+            }
             // PARAMETER DISCOVERY (conservative mapping)
             if let Some(v) = scan.skip_reflection_path
-                && !args.skip_reflection_path {
-                    args.skip_reflection_path = v;
-                }
+                && !args.skip_reflection_path
+            {
+                args.skip_reflection_path = v;
+            }
         }
     }
 
@@ -318,147 +332,179 @@ impl Config {
         if let Some(scan) = &self.scan {
             // INPUT
             if let Some(v) = &scan.input_type
-                && args.input_type == "auto" {
-                    args.input_type = v.clone();
-                }
+                && args.input_type == "auto"
+            {
+                args.input_type = v.clone();
+            }
 
             // OUTPUT
             if let Some(v) = &scan.format
-                && args.format == "plain" {
-                    args.format = v.clone();
-                }
+                && args.format == "plain"
+            {
+                args.format = v.clone();
+            }
             if let Some(v) = &scan.output
-                && args.output.is_none() {
-                    args.output = Some(v.clone());
-                }
+                && args.output.is_none()
+            {
+                args.output = Some(v.clone());
+            }
             if let Some(v) = scan.include_request
-                && !args.include_request {
-                    args.include_request = v;
-                }
+                && !args.include_request
+            {
+                args.include_request = v;
+            }
             if let Some(v) = scan.include_response
-                && !args.include_response {
-                    args.include_response = v;
-                }
+                && !args.include_response
+            {
+                args.include_response = v;
+            }
             if let Some(v) = scan.silence
-                && !args.silence {
-                    args.silence = v;
-                }
+                && !args.silence
+            {
+                args.silence = v;
+            }
             if let Some(v) = &scan.poc_type
-                && args.poc_type == "plain" {
-                    args.poc_type = v.clone();
-                }
+                && args.poc_type == "plain"
+            {
+                args.poc_type = v.clone();
+            }
             if let Some(v) = scan.limit
-                && args.limit.is_none() {
-                    args.limit = Some(v);
-                }
+                && args.limit.is_none()
+            {
+                args.limit = Some(v);
+            }
             // Map debug conservatively: only set when CLI didn't enable it (global false)
             if let Some(v) = scan.debug
-                && !crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                    crate::DEBUG.store(v, std::sync::atomic::Ordering::Relaxed);
-                }
+                && !crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed)
+            {
+                crate::DEBUG.store(v, std::sync::atomic::Ordering::Relaxed);
+            }
 
             // TARGETS
             if let Some(v) = &scan.param
-                && args.param.is_empty() {
-                    args.param = v.clone();
-                }
+                && args.param.is_empty()
+            {
+                args.param = v.clone();
+            }
             if let Some(v) = &scan.data
-                && args.data.is_none() {
-                    args.data = Some(v.clone());
-                }
+                && args.data.is_none()
+            {
+                args.data = Some(v.clone());
+            }
             if let Some(v) = &scan.headers
-                && args.headers.is_empty() {
-                    args.headers = v.clone();
-                }
+                && args.headers.is_empty()
+            {
+                args.headers = v.clone();
+            }
             if let Some(v) = &scan.cookies
-                && args.cookies.is_empty() {
-                    args.cookies = v.clone();
-                }
+                && args.cookies.is_empty()
+            {
+                args.cookies = v.clone();
+            }
             if let Some(v) = &scan.method
-                && args.method == "GET" {
-                    args.method = v.clone();
-                }
+                && args.method == "GET"
+            {
+                args.method = v.clone();
+            }
             if let Some(v) = &scan.user_agent
-                && args.user_agent.is_none() {
-                    args.user_agent = Some(v.clone());
-                }
+                && args.user_agent.is_none()
+            {
+                args.user_agent = Some(v.clone());
+            }
             // PARAMETER DISCOVERY (default mapping)
             if let Some(v) = scan.skip_reflection_path
-                && !args.skip_reflection_path {
-                    args.skip_reflection_path = v;
-                }
+                && !args.skip_reflection_path
+            {
+                args.skip_reflection_path = v;
+            }
             if let Some(v) = &scan.cookie_from_raw
-                && args.cookie_from_raw.is_none() {
-                    args.cookie_from_raw = Some(v.clone());
-                }
+                && args.cookie_from_raw.is_none()
+            {
+                args.cookie_from_raw = Some(v.clone());
+            }
 
             // PARAMETER DISCOVERY
             if let Some(v) = scan.skip_discovery
-                && !args.skip_discovery {
-                    args.skip_discovery = v;
-                }
+                && !args.skip_discovery
+            {
+                args.skip_discovery = v;
+            }
             if let Some(v) = scan.skip_reflection_header
-                && !args.skip_reflection_header {
-                    args.skip_reflection_header = v;
-                }
+                && !args.skip_reflection_header
+            {
+                args.skip_reflection_header = v;
+            }
             if let Some(v) = scan.skip_reflection_cookie
-                && !args.skip_reflection_cookie {
-                    args.skip_reflection_cookie = v;
-                }
+                && !args.skip_reflection_cookie
+            {
+                args.skip_reflection_cookie = v;
+            }
 
             // PARAMETER MINING
             if let Some(v) = &scan.mining_dict_word
-                && args.mining_dict_word.is_none() {
-                    args.mining_dict_word = Some(v.clone());
-                }
+                && args.mining_dict_word.is_none()
+            {
+                args.mining_dict_word = Some(v.clone());
+            }
             if let Some(v) = &scan.remote_wordlists
-                && args.remote_wordlists.is_empty() {
-                    args.remote_wordlists = v.clone();
-                }
+                && args.remote_wordlists.is_empty()
+            {
+                args.remote_wordlists = v.clone();
+            }
             if let Some(v) = scan.skip_mining
-                && !args.skip_mining {
-                    args.skip_mining = v;
-                }
+                && !args.skip_mining
+            {
+                args.skip_mining = v;
+            }
             if let Some(v) = scan.skip_mining_dict
-                && !args.skip_mining_dict {
-                    args.skip_mining_dict = v;
-                }
+                && !args.skip_mining_dict
+            {
+                args.skip_mining_dict = v;
+            }
             if let Some(v) = scan.skip_mining_dom
-                && !args.skip_mining_dom {
-                    args.skip_mining_dom = v;
-                }
+                && !args.skip_mining_dom
+            {
+                args.skip_mining_dom = v;
+            }
 
             // NETWORK
             if let Some(v) = scan.timeout
-                && args.timeout == crate::cmd::scan::DEFAULT_TIMEOUT_SECS {
-                    args.timeout = v;
-                }
+                && args.timeout == crate::cmd::scan::DEFAULT_TIMEOUT_SECS
+            {
+                args.timeout = v;
+            }
             if let Some(v) = scan.delay
-                && args.delay == crate::cmd::scan::DEFAULT_DELAY_MS {
-                    args.delay = v;
-                }
+                && args.delay == crate::cmd::scan::DEFAULT_DELAY_MS
+            {
+                args.delay = v;
+            }
             if let Some(v) = &scan.proxy
-                && args.proxy.is_none() {
-                    args.proxy = Some(v.clone());
-                }
+                && args.proxy.is_none()
+            {
+                args.proxy = Some(v.clone());
+            }
             if let Some(v) = scan.follow_redirects
-                && !args.follow_redirects {
-                    args.follow_redirects = v;
-                }
+                && !args.follow_redirects
+            {
+                args.follow_redirects = v;
+            }
 
             // ENGINE
             if let Some(v) = scan.workers
-                && args.workers == crate::cmd::scan::DEFAULT_WORKERS {
-                    args.workers = v;
-                }
+                && args.workers == crate::cmd::scan::DEFAULT_WORKERS
+            {
+                args.workers = v;
+            }
             if let Some(v) = scan.max_concurrent_targets
-                && args.max_concurrent_targets == crate::cmd::scan::DEFAULT_MAX_CONCURRENT_TARGETS {
-                    args.max_concurrent_targets = v;
-                }
+                && args.max_concurrent_targets == crate::cmd::scan::DEFAULT_MAX_CONCURRENT_TARGETS
+            {
+                args.max_concurrent_targets = v;
+            }
             if let Some(v) = scan.max_targets_per_host
-                && args.max_targets_per_host == crate::cmd::scan::DEFAULT_MAX_TARGETS_PER_HOST {
-                    args.max_targets_per_host = v;
-                }
+                && args.max_targets_per_host == crate::cmd::scan::DEFAULT_MAX_TARGETS_PER_HOST
+            {
+                args.max_targets_per_host = v;
+            }
 
             // XSS SCANNING
             if let Some(v) = &scan.encoders {
@@ -471,49 +517,60 @@ impl Config {
                 }
             }
             if let Some(v) = &scan.remote_payloads
-                && args.remote_payloads.is_empty() {
-                    args.remote_payloads = v.clone();
-                }
+                && args.remote_payloads.is_empty()
+            {
+                args.remote_payloads = v.clone();
+            }
             if let Some(v) = &scan.custom_blind_xss_payload
-                && args.custom_blind_xss_payload.is_none() {
-                    args.custom_blind_xss_payload = Some(v.clone());
-                }
+                && args.custom_blind_xss_payload.is_none()
+            {
+                args.custom_blind_xss_payload = Some(v.clone());
+            }
             if let Some(v) = &scan.blind_callback_url
-                && args.blind_callback_url.is_none() {
-                    args.blind_callback_url = Some(v.clone());
-                }
+                && args.blind_callback_url.is_none()
+            {
+                args.blind_callback_url = Some(v.clone());
+            }
             if let Some(v) = &scan.custom_payload
-                && args.custom_payload.is_none() {
-                    args.custom_payload = Some(v.clone());
-                }
+                && args.custom_payload.is_none()
+            {
+                args.custom_payload = Some(v.clone());
+            }
             if let Some(v) = scan.only_custom_payload
-                && !args.only_custom_payload {
-                    args.only_custom_payload = v;
-                }
+                && !args.only_custom_payload
+            {
+                args.only_custom_payload = v;
+            }
             if let Some(v) = scan.skip_xss_scanning
-                && !args.skip_xss_scanning {
-                    args.skip_xss_scanning = v;
-                }
+                && !args.skip_xss_scanning
+            {
+                args.skip_xss_scanning = v;
+            }
             if let Some(v) = scan.deep_scan
-                && !args.deep_scan {
-                    args.deep_scan = v;
-                }
+                && !args.deep_scan
+            {
+                args.deep_scan = v;
+            }
             if let Some(v) = scan.sxss
-                && !args.sxss {
-                    args.sxss = v;
-                }
+                && !args.sxss
+            {
+                args.sxss = v;
+            }
             if let Some(v) = &scan.sxss_url
-                && args.sxss_url.is_none() {
-                    args.sxss_url = Some(v.clone());
-                }
+                && args.sxss_url.is_none()
+            {
+                args.sxss_url = Some(v.clone());
+            }
             if let Some(v) = &scan.sxss_method
-                && args.sxss_method == "GET" {
-                    args.sxss_method = v.clone();
-                }
+                && args.sxss_method == "GET"
+            {
+                args.sxss_method = v.clone();
+            }
             if let Some(v) = scan.skip_ast_analysis
-                && !args.skip_ast_analysis {
-                    args.skip_ast_analysis = v;
-                }
+                && !args.skip_ast_analysis
+            {
+                args.skip_ast_analysis = v;
+            }
         }
     }
 }
@@ -574,9 +631,10 @@ pub fn load_or_init() -> Result<LoadResult, Box<dyn std::error::Error>> {
 // - else $HOME/.config/dalfox
 pub fn resolve_config_dir() -> Result<PathBuf, io::Error> {
     if let Ok(xdg) = env::var("XDG_CONFIG_HOME")
-        && !xdg.trim().is_empty() {
-            return Ok(Path::new(&xdg).join("dalfox"));
-        }
+        && !xdg.trim().is_empty()
+    {
+        return Ok(Path::new(&xdg).join("dalfox"));
+    }
     let home = env::var("HOME")
         .or_else(|_| env::var("USERPROFILE"))
         .map_err(|e| {

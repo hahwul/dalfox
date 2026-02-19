@@ -120,10 +120,7 @@ mod tests {
         let cls = crate::scanning::markers::class_marker().to_lowercase();
         assert!(payloads.iter().any(|p| {
             p.to_lowercase()
-                .contains(&format!(
-                    "<img src=x onerror=alert(1) class={}>",
-                    cls
-                ))
+                .contains(&format!("<img src=x onerror=alert(1) class={}>", cls))
         }));
     }
 

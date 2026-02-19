@@ -72,17 +72,18 @@ pub async fn check_query_discovery(
             let mut discovered: Option<Param> = None;
             if let Ok(resp) = request.send().await
                 && let Ok(text) = resp.text().await
-                    && text.contains(test_value) {
-                        let (valid, invalid) = classify_special_chars(&text);
-                        discovered = Some(Param {
-                            name,
-                            value,
-                            location: crate::parameter_analysis::Location::Query,
-                            injection_context: Some(detect_injection_context(&text)),
-                            valid_specials: Some(valid),
-                            invalid_specials: Some(invalid),
-                        });
-                    }
+                && text.contains(test_value)
+            {
+                let (valid, invalid) = classify_special_chars(&text);
+                discovered = Some(Param {
+                    name,
+                    value,
+                    location: crate::parameter_analysis::Location::Query,
+                    injection_context: Some(detect_injection_context(&text)),
+                    valid_specials: Some(valid),
+                    invalid_specials: Some(invalid),
+                });
+            }
             if delay > 0 {
                 sleep(Duration::from_millis(delay)).await;
             }
@@ -96,9 +97,10 @@ pub async fn check_query_discovery(
     let mut batch: Vec<Param> = Vec::new();
     for handle in handles {
         if let Ok(opt_param) = handle.await
-            && let Some(p) = opt_param {
-                batch.push(p);
-            }
+            && let Some(p) = opt_param
+        {
+            batch.push(p);
+        }
     }
     if !batch.is_empty() {
         let mut guard = reflection_params.lock().await;
@@ -143,17 +145,18 @@ pub async fn check_header_discovery(
             let mut discovered: Option<Param> = None;
             if let Ok(resp) = request.send().await
                 && let Ok(text) = resp.text().await
-                    && text.contains(test_value) {
-                        let (valid, invalid) = classify_special_chars(&text);
-                        discovered = Some(Param {
-                            name: header_name,
-                            value: header_value,
-                            location: crate::parameter_analysis::Location::Header,
-                            injection_context: Some(detect_injection_context(&text)),
-                            valid_specials: Some(valid),
-                            invalid_specials: Some(invalid),
-                        });
-                    }
+                && text.contains(test_value)
+            {
+                let (valid, invalid) = classify_special_chars(&text);
+                discovered = Some(Param {
+                    name: header_name,
+                    value: header_value,
+                    location: crate::parameter_analysis::Location::Header,
+                    injection_context: Some(detect_injection_context(&text)),
+                    valid_specials: Some(valid),
+                    invalid_specials: Some(invalid),
+                });
+            }
             if delay > 0 {
                 sleep(Duration::from_millis(delay)).await;
             }
@@ -167,9 +170,10 @@ pub async fn check_header_discovery(
     let mut batch: Vec<Param> = Vec::new();
     for handle in handles {
         if let Ok(opt) = handle.await
-            && let Some(p) = opt {
-                batch.push(p);
-            }
+            && let Some(p) = opt
+        {
+            batch.push(p);
+        }
     }
     if !batch.is_empty() {
         let mut guard = reflection_params.lock().await;
@@ -363,17 +367,18 @@ pub async fn check_path_discovery(
             let mut discovered: Option<Param> = None;
             if let Ok(resp) = request.send().await
                 && let Ok(text) = resp.text().await
-                    && text.contains(test_value) {
-                        let (valid, invalid) = classify_special_chars(&text);
-                        discovered = Some(Param {
-                            name: param_name,
-                            value: original_value,
-                            location: crate::parameter_analysis::Location::Path,
-                            injection_context: Some(detect_injection_context(&text)),
-                            valid_specials: Some(valid),
-                            invalid_specials: Some(invalid),
-                        });
-                    }
+                && text.contains(test_value)
+            {
+                let (valid, invalid) = classify_special_chars(&text);
+                discovered = Some(Param {
+                    name: param_name,
+                    value: original_value,
+                    location: crate::parameter_analysis::Location::Path,
+                    injection_context: Some(detect_injection_context(&text)),
+                    valid_specials: Some(valid),
+                    invalid_specials: Some(invalid),
+                });
+            }
             if delay > 0 {
                 sleep(Duration::from_millis(delay)).await;
             }
@@ -387,9 +392,10 @@ pub async fn check_path_discovery(
     let mut batch: Vec<Param> = Vec::new();
     for h in handles {
         if let Ok(opt) = h.await
-            && let Some(p) = opt {
-                batch.push(p);
-            }
+            && let Some(p) = opt
+        {
+            batch.push(p);
+        }
     }
     if !batch.is_empty() {
         let mut guard = reflection_params.lock().await;
@@ -445,17 +451,18 @@ pub async fn check_cookie_discovery(
             let mut discovered: Option<Param> = None;
             if let Ok(resp) = request.send().await
                 && let Ok(text) = resp.text().await
-                    && text.contains(test_value) {
-                        let (valid, invalid) = classify_special_chars(&text);
-                        discovered = Some(Param {
-                            name: cookie_name,
-                            value: cookie_value,
-                            location: crate::parameter_analysis::Location::Header,
-                            injection_context: Some(detect_injection_context(&text)),
-                            valid_specials: Some(valid),
-                            invalid_specials: Some(invalid),
-                        });
-                    }
+                && text.contains(test_value)
+            {
+                let (valid, invalid) = classify_special_chars(&text);
+                discovered = Some(Param {
+                    name: cookie_name,
+                    value: cookie_value,
+                    location: crate::parameter_analysis::Location::Header,
+                    injection_context: Some(detect_injection_context(&text)),
+                    valid_specials: Some(valid),
+                    invalid_specials: Some(invalid),
+                });
+            }
             if delay > 0 {
                 sleep(Duration::from_millis(delay)).await;
             }
@@ -469,9 +476,10 @@ pub async fn check_cookie_discovery(
     let mut batch: Vec<Param> = Vec::new();
     for handle in handles {
         if let Ok(opt) = handle.await
-            && let Some(p) = opt {
-                batch.push(p);
-            }
+            && let Some(p) = opt
+        {
+            batch.push(p);
+        }
     }
     if !batch.is_empty() {
         let mut guard = reflection_params.lock().await;

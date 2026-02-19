@@ -109,9 +109,10 @@ pub async fn init_remote_payloads_with(
         ))
         .danger_accept_invalid_certs(true);
     if let Some(pxy) = opts.proxy.as_ref()
-        && let Ok(proxy) = reqwest::Proxy::all(pxy) {
-            client_builder = client_builder.proxy(proxy);
-        }
+        && let Ok(proxy) = reqwest::Proxy::all(pxy)
+    {
+        client_builder = client_builder.proxy(proxy);
+    }
     let client = client_builder.build()?;
 
     let lines = fetch_multiple_text_lists(&client, &urls).await;
@@ -144,9 +145,10 @@ pub async fn init_remote_wordlists_with(
         ))
         .danger_accept_invalid_certs(true);
     if let Some(pxy) = opts.proxy.as_ref()
-        && let Ok(proxy) = reqwest::Proxy::all(pxy) {
-            client_builder = client_builder.proxy(proxy);
-        }
+        && let Ok(proxy) = reqwest::Proxy::all(pxy)
+    {
+        client_builder = client_builder.proxy(proxy);
+    }
     let client = client_builder.build()?;
 
     let lines = fetch_multiple_text_lists(&client, &urls).await;

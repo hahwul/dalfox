@@ -41,24 +41,27 @@ pub async fn check_dom_verification(
     if args.sxss {
         // For Stored XSS, check DOM on sxss_url
         if let Some(sxss_url_str) = &args.sxss_url
-            && let Ok(sxss_url) = url::Url::parse(sxss_url_str) {
-                let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
-                let check_request =
-                    crate::utils::build_request(&client, target, method, sxss_url, None);
+            && let Ok(sxss_url) = url::Url::parse(sxss_url_str)
+        {
+            let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
+            let check_request =
+                crate::utils::build_request(&client, target, method, sxss_url, None);
 
-                crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                if let Ok(resp) = check_request.send().await {
-                    let headers = resp.headers().clone();
-                    let ct = headers
-                        .get(reqwest::header::CONTENT_TYPE)
-                        .and_then(|v| v.to_str().ok())
-                        .unwrap_or("");
-                    if let Ok(text) = resp.text().await
-                        && crate::utils::is_htmlish_content_type(ct) && text.contains(payload) {
-                            return (true, Some(text));
-                        }
+            crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if let Ok(resp) = check_request.send().await {
+                let headers = resp.headers().clone();
+                let ct = headers
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("");
+                if let Ok(text) = resp.text().await
+                    && crate::utils::is_htmlish_content_type(ct)
+                    && text.contains(payload)
+                {
+                    return (true, Some(text));
                 }
             }
+        }
     } else {
         // Normal DOM verification
         if let Ok(resp) = inject_resp {
@@ -68,9 +71,11 @@ pub async fn check_dom_verification(
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
             if let Ok(text) = resp.text().await
-                && crate::utils::is_htmlish_content_type(ct) && text.contains(payload) {
-                    return (true, Some(text));
-                }
+                && crate::utils::is_htmlish_content_type(ct)
+                && text.contains(payload)
+            {
+                return (true, Some(text));
+            }
         }
     }
 
@@ -81,20 +86,37 @@ pub async fn check_dom_verification(
 mod tests {
     use super::*;
     use crate::parameter_analysis::{Location, Param};
+    use crate::target_parser::Target;
     use crate::target_parser::parse_target;
+    use axum::{
+        Router,
+        extract::{Query, State},
+        http::StatusCode,
+        response::{Html, IntoResponse},
+        routing::get,
+    };
+    use std::collections::HashMap;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use tokio::time::{Duration, sleep};
 
-    #[tokio::test]
-    async fn test_check_dom_verification_early_return_when_skip() {
-        let target = parse_target("https://example.com/?q=1").unwrap();
-        let param = Param {
+    #[derive(Clone)]
+    struct TestState {
+        stored_payload: String,
+    }
+
+    fn make_param() -> Param {
+        Param {
             name: "q".to_string(),
-            value: "1".to_string(),
+            value: "seed".to_string(),
             location: Location::Query,
             injection_context: None,
             valid_specials: None,
             invalid_specials: None,
-        };
-        let args = crate::cmd::scan::ScanArgs {
+        }
+    }
+
+    fn default_scan_args() -> crate::cmd::scan::ScanArgs {
+        crate::cmd::scan::ScanArgs {
             input_type: "auto".to_string(),
             format: "json".to_string(),
             targets: vec![],
@@ -120,18 +142,18 @@ mod tests {
             output: None,
             include_request: false,
             include_response: false,
-            silence: false,
+            silence: true,
             poc_type: "plain".to_string(),
             limit: None,
             workers: 10,
             max_concurrent_targets: 10,
             max_targets_per_host: 100,
-            encoders: vec!["url".to_string(), "html".to_string()],
+            encoders: vec!["url".to_string(), "html".to_string(), "base64".to_string()],
             custom_blind_xss_payload: None,
             blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
-            skip_xss_scanning: true,
+            skip_xss_scanning: false,
             deep_scan: false,
             sxss: false,
             sxss_url: None,
@@ -139,8 +161,182 @@ mod tests {
             skip_ast_analysis: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
-        };
+        }
+    }
+
+    fn make_target(addr: SocketAddr, path: &str) -> Target {
+        let target = format!("http://{}:{}{}?q=seed", addr.ip(), addr.port(), path);
+        parse_target(&target).expect("valid target")
+    }
+
+    async fn html_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
+        let q = params.get("q").cloned().unwrap_or_default();
+        Html(format!("<div>{}</div>", q))
+    }
+
+    async fn xhtml_handler(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+        let q = params.get("q").cloned().unwrap_or_default();
+        (
+            StatusCode::OK,
+            [("content-type", "application/xhtml+xml")],
+            format!("<html><body>{}</body></html>", q),
+        )
+    }
+
+    async fn json_handler(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+        let q = params.get("q").cloned().unwrap_or_default();
+        (
+            StatusCode::OK,
+            [("content-type", "application/json")],
+            format!("{{\"echo\":\"{}\"}}", q),
+        )
+    }
+
+    async fn html_without_payload_handler() -> Html<&'static str> {
+        Html("<div>no payload</div>")
+    }
+
+    async fn sxss_html_handler(State(state): State<TestState>) -> Html<String> {
+        Html(format!("<div>{}</div>", state.stored_payload))
+    }
+
+    async fn sxss_json_handler(State(state): State<TestState>) -> impl IntoResponse {
+        (
+            StatusCode::OK,
+            [("content-type", "application/json")],
+            format!("{{\"stored\":\"{}\"}}", state.stored_payload),
+        )
+    }
+
+    async fn start_mock_server(stored_payload: &str) -> SocketAddr {
+        let app = Router::new()
+            .route("/dom/html", get(html_handler))
+            .route("/dom/xhtml", get(xhtml_handler))
+            .route("/dom/json", get(json_handler))
+            .route("/dom/no-payload", get(html_without_payload_handler))
+            .route("/sxss/html", get(sxss_html_handler))
+            .route("/sxss/json", get(sxss_json_handler))
+            .with_state(TestState {
+                stored_payload: stored_payload.to_string(),
+            });
+
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("bind test listener");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve test app");
+        });
+        sleep(Duration::from_millis(20)).await;
+        addr
+    }
+
+    #[tokio::test]
+    async fn test_check_dom_verification_early_return_when_skip() {
+        let target = parse_target("https://example.com/?q=1").unwrap();
+        let param = make_param();
+        let mut args = default_scan_args();
+        args.skip_xss_scanning = true;
         let res = check_dom_verification(&target, &param, "PAY", &args).await;
         assert_eq!(res, (false, None));
+    }
+
+    #[tokio::test]
+    async fn test_check_dom_verification_detects_html_reflection() {
+        let payload = "<svg onload=alert(1)>";
+        let addr = start_mock_server("stored").await;
+        let target = make_target(addr, "/dom/html");
+        let param = make_param();
+        let args = default_scan_args();
+
+        let (found, body) = check_dom_verification(&target, &param, payload, &args).await;
+        assert!(found, "text/html responses with payload should be detected");
+        assert!(body.unwrap_or_default().contains(payload));
+    }
+
+    #[tokio::test]
+    async fn test_check_dom_verification_accepts_xhtml_content_type() {
+        let payload = "<img src=x onerror=alert(1)>";
+        let addr = start_mock_server("stored").await;
+        let target = make_target(addr, "/dom/xhtml");
+        let param = make_param();
+        let args = default_scan_args();
+
+        let (found, _) = check_dom_verification(&target, &param, payload, &args).await;
+        assert!(
+            found,
+            "application/xhtml+xml should be treated as HTML-like"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_check_dom_verification_rejects_non_html_content_type() {
+        let payload = "<script>alert(1)</script>";
+        let addr = start_mock_server("stored").await;
+        let target = make_target(addr, "/dom/json");
+        let param = make_param();
+        let args = default_scan_args();
+
+        let (found, body) = check_dom_verification(&target, &param, payload, &args).await;
+        assert!(!found, "application/json should not pass DOM verification");
+        assert!(body.is_none(), "non-html responses should not be returned");
+    }
+
+    #[tokio::test]
+    async fn test_check_dom_verification_returns_false_when_payload_missing() {
+        let payload = "<script>alert(1)</script>";
+        let addr = start_mock_server("stored").await;
+        let target = make_target(addr, "/dom/no-payload");
+        let param = make_param();
+        let args = default_scan_args();
+
+        let (found, body) = check_dom_verification(&target, &param, payload, &args).await;
+        assert!(!found);
+        assert!(body.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_check_dom_verification_sxss_uses_secondary_url() {
+        let payload = "STORED_DOM_XSS";
+        let addr = start_mock_server(payload).await;
+        let target = make_target(addr, "/dom/no-payload");
+        let param = make_param();
+        let mut args = default_scan_args();
+        args.sxss = true;
+        args.sxss_url = Some(format!("http://{}:{}/sxss/html", addr.ip(), addr.port()));
+
+        let (found, body) = check_dom_verification(&target, &param, payload, &args).await;
+        assert!(found, "sxss should verify stored payload at secondary URL");
+        assert!(body.unwrap_or_default().contains(payload));
+    }
+
+    #[tokio::test]
+    async fn test_check_dom_verification_sxss_rejects_non_html_secondary_content() {
+        let payload = "STORED_DOM_XSS";
+        let addr = start_mock_server(payload).await;
+        let target = make_target(addr, "/dom/no-payload");
+        let param = make_param();
+        let mut args = default_scan_args();
+        args.sxss = true;
+        args.sxss_url = Some(format!("http://{}:{}/sxss/json", addr.ip(), addr.port()));
+
+        let (found, body) = check_dom_verification(&target, &param, payload, &args).await;
+        assert!(!found);
+        assert!(body.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_check_dom_verification_sxss_without_url_returns_false() {
+        let payload = "STORED_DOM_XSS";
+        let addr = start_mock_server(payload).await;
+        let target = make_target(addr, "/dom/html");
+        let param = make_param();
+        let mut args = default_scan_args();
+        args.sxss = true;
+        args.sxss_url = None;
+
+        let (found, body) = check_dom_verification(&target, &param, payload, &args).await;
+        assert!(!found);
+        assert!(body.is_none());
     }
 }

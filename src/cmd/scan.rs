@@ -296,9 +296,10 @@ async fn preflight_content_type(
         request_builder = request_builder.header(k, v);
     }
     if let Some(ua) = &target.user_agent
-        && !ua.is_empty() {
-            request_builder = request_builder.header("User-Agent", ua);
-        }
+        && !ua.is_empty()
+    {
+        request_builder = request_builder.header("User-Agent", ua);
+    }
     if !target.cookies.is_empty() {
         let mut cookie_header = String::new();
         for (ck, cv) in &target.cookies {
@@ -342,36 +343,37 @@ async fn preflight_content_type(
     let get_req = crate::utils::build_preflight_request(&client, target, false, Some(8192));
     crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     if let Ok(get_resp) = get_req.send().await
-        && let Ok(body) = get_resp.text().await {
-            response_body = Some(body.clone());
-            // Only parse CSP if not already found
-            if csp_header.is_none() {
-                let doc = Html::parse_document(&body);
-                if let Ok(sel) = Selector::parse("meta[http-equiv][content]") {
-                    for el in doc.select(&sel) {
-                        let http_equiv = el
-                            .value()
-                            .attr("http-equiv")
-                            .unwrap_or("")
-                            .to_ascii_lowercase();
-                        if http_equiv == "content-security-policy"
-                            || http_equiv == "content-security-policy-report-only"
-                        {
-                            let content = el.value().attr("content").unwrap_or("").to_string();
-                            if !content.is_empty() {
-                                let name = if http_equiv == "content-security-policy" {
-                                    "Content-Security-Policy".to_string()
-                                } else {
-                                    "Content-Security-Policy-Report-Only".to_string()
-                                };
-                                csp_header = Some((name, content));
-                                break;
-                            }
+        && let Ok(body) = get_resp.text().await
+    {
+        response_body = Some(body.clone());
+        // Only parse CSP if not already found
+        if csp_header.is_none() {
+            let doc = Html::parse_document(&body);
+            if let Ok(sel) = Selector::parse("meta[http-equiv][content]") {
+                for el in doc.select(&sel) {
+                    let http_equiv = el
+                        .value()
+                        .attr("http-equiv")
+                        .unwrap_or("")
+                        .to_ascii_lowercase();
+                    if http_equiv == "content-security-policy"
+                        || http_equiv == "content-security-policy-report-only"
+                    {
+                        let content = el.value().attr("content").unwrap_or("").to_string();
+                        if !content.is_empty() {
+                            let name = if http_equiv == "content-security-policy" {
+                                "Content-Security-Policy".to_string()
+                            } else {
+                                "Content-Security-Policy-Report-Only".to_string()
+                            };
+                            csp_header = Some((name, content));
+                            break;
                         }
                     }
                 }
             }
         }
+    }
     ct_opt.map(|ct| (ct, csp_header, response_body))
 }
 
@@ -668,9 +670,10 @@ pub async fn run_scan(args: &ScanArgs) {
             args.proxy.clone(),
         )
         .await
-            && !args.silence {
-                eprintln!("Error initializing remote resources: {}", e);
-            }
+        && !args.silence
+    {
+        eprintln!("Error initializing remote resources: {}", e);
+    }
     let input_type = if args.input_type == "auto" {
         if args.targets.is_empty() {
             // If no positional targets and STDIN is piped, treat as pipe mode
@@ -1267,9 +1270,10 @@ pub async fn run_scan(args: &ScanArgs) {
 
     for (host, group) in host_groups {
         if let Some(lim) = args.limit
-            && results.lock().await.len() >= lim {
-                break;
-            }
+            && results.lock().await.len() >= lim
+        {
+            break;
+        }
         let global_semaphore_clone = global_semaphore.clone();
         let multi_pb_clone = multi_pb.clone();
         let args_arc = Arc::new(args.clone());
@@ -1315,9 +1319,10 @@ pub async fn run_scan(args: &ScanArgs) {
 
             for target in group {
                 if let Some(lim) = args_arc.limit
-                    && results_clone.lock().await.len() >= lim {
-                        break;
-                    }
+                    && results_clone.lock().await.len() >= lim
+                {
+                    break;
+                }
                 let permit = global_semaphore_clone
                     .clone()
                     .acquire_owned()
@@ -1384,9 +1389,10 @@ pub async fn run_scan(args: &ScanArgs) {
     for handle in group_handles {
         handle.await.unwrap();
         if let Some(lim) = args.limit
-            && results.lock().await.len() >= lim {
-                break;
-            }
+            && results.lock().await.len() >= lim
+        {
+            break;
+        }
     }
 
     if args.format == "plain" && !args.silence && total_targets > 1 {

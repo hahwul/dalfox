@@ -25,10 +25,12 @@ fn test_sarif_output_basic_structure() {
 
     // Verify SARIF version and schema
     assert_eq!(json["version"], "2.1.0");
-    assert!(json["$schema"]
-        .as_str()
-        .unwrap()
-        .contains("sarif-schema-2.1.0.json"));
+    assert!(
+        json["$schema"]
+            .as_str()
+            .unwrap()
+            .contains("sarif-schema-2.1.0.json")
+    );
 
     // Verify runs array
     assert!(json["runs"].is_array());
@@ -38,10 +40,12 @@ fn test_sarif_output_basic_structure() {
     // Verify tool information
     let run = &runs[0];
     assert_eq!(run["tool"]["driver"]["name"], "Dalfox");
-    assert!(run["tool"]["driver"]["informationUri"]
-        .as_str()
-        .unwrap()
-        .contains("github.com/hahwul/dalfox"));
+    assert!(
+        run["tool"]["driver"]["informationUri"]
+            .as_str()
+            .unwrap()
+            .contains("github.com/hahwul/dalfox")
+    );
 
     // Verify rules
     assert!(run["tool"]["driver"]["rules"].is_array());
@@ -58,10 +62,12 @@ fn test_sarif_output_basic_structure() {
     let result = &results[0];
     assert_eq!(result["ruleId"], "dalfox/cwe-79");
     assert_eq!(result["level"], "error"); // High severity maps to error
-    assert!(result["message"]["text"]
-        .as_str()
-        .unwrap()
-        .contains("XSS vulnerability detected"));
+    assert!(
+        result["message"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("XSS vulnerability detected")
+    );
 }
 
 #[test]
@@ -105,17 +111,21 @@ fn test_sarif_output_multiple_results() {
 
     // Verify first result
     assert_eq!(run_results[0]["level"], "error"); // High
-    assert!(run_results[0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
-        .as_str()
-        .unwrap()
-        .contains("q=test1"));
+    assert!(
+        run_results[0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+            .as_str()
+            .unwrap()
+            .contains("q=test1")
+    );
 
     // Verify second result
     assert_eq!(run_results[1]["level"], "warning"); // Medium
-    assert!(run_results[1]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
-        .as_str()
-        .unwrap()
-        .contains("/api"));
+    assert!(
+        run_results[1]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"]
+            .as_str()
+            .unwrap()
+            .contains("/api")
+    );
 }
 
 #[test]
@@ -134,8 +144,11 @@ fn test_sarif_output_with_request_response() {
         "XSS".to_string(),
     );
 
-    result.request = Some("GET /?test=%3Cx%3E HTTP/1.1\nHost: example.com\nUser-Agent: Dalfox".to_string());
-    result.response = Some("HTTP/1.1 200 OK\nContent-Type: text/html\n\n<html><body><x></body></html>".to_string());
+    result.request =
+        Some("GET /?test=%3Cx%3E HTTP/1.1\nHost: example.com\nUser-Agent: Dalfox".to_string());
+    result.response = Some(
+        "HTTP/1.1 200 OK\nContent-Type: text/html\n\n<html><body><x></body></html>".to_string(),
+    );
 
     let results = vec![result];
     let sarif = ScanResult::results_to_sarif(&results, true, true);
@@ -144,24 +157,32 @@ fn test_sarif_output_with_request_response() {
 
     // Verify request and response are in properties
     let result = &json["runs"][0]["results"][0];
-    assert!(result["properties"]["request"]
-        .as_str()
-        .unwrap()
-        .contains("GET /?test=%3Cx%3E HTTP/1.1"));
-    assert!(result["properties"]["response"]
-        .as_str()
-        .unwrap()
-        .contains("<html><body><x></body></html>"));
+    assert!(
+        result["properties"]["request"]
+            .as_str()
+            .unwrap()
+            .contains("GET /?test=%3Cx%3E HTTP/1.1")
+    );
+    assert!(
+        result["properties"]["response"]
+            .as_str()
+            .unwrap()
+            .contains("<html><body><x></body></html>")
+    );
 
     // Message should indicate that request/response are included
-    assert!(result["message"]["text"]
-        .as_str()
-        .unwrap()
-        .contains("HTTP request included"));
-    assert!(result["message"]["text"]
-        .as_str()
-        .unwrap()
-        .contains("HTTP response included"));
+    assert!(
+        result["message"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("HTTP request included")
+    );
+    assert!(
+        result["message"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("HTTP response included")
+    );
 }
 
 #[test]

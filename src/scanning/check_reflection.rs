@@ -7,6 +7,7 @@ use std::sync::atomic::Ordering;
 use tokio::time::{Duration, sleep};
 
 static ENTITY_REGEX: OnceLock<Regex> = OnceLock::new();
+static NAMED_ENTITY_REGEX: OnceLock<Regex> = OnceLock::new();
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReflectionKind {
@@ -49,14 +50,21 @@ fn decode_html_entities(input: &str) -> String {
     out.push_str(&input[last..]);
 
     // Handle a minimal set of named entities commonly encountered in XSS contexts.
-    // This is intentionally small to avoid unexpected transformations.
-    let mut named = out;
-    named = named.replace("&lt;", "<");
-    named = named.replace("&gt;", ">");
-    named = named.replace("&amp;", "&");
-    named = named.replace("&quot;", "\"");
-    named = named.replace("&apos;", "'");
-    named
+    // Keep decoding narrow but case-insensitive (e.g., &LT; / &Lt;).
+    let named_re =
+        NAMED_ENTITY_REGEX.get_or_init(|| Regex::new(r"(?i)&(?:lt|gt|amp|quot|apos);").unwrap());
+    named_re
+        .replace_all(&out, |caps: &regex::Captures| {
+            match caps[0].to_ascii_lowercase().as_str() {
+                "&lt;" => "<",
+                "&gt;" => ">",
+                "&amp;" => "&",
+                "&quot;" => "\"",
+                "&apos;" => "'",
+                _ => "",
+            }
+        })
+        .to_string()
 }
 
 /// Determine if payload is reflected in any normalization variant.
@@ -73,15 +81,19 @@ fn classify_reflection(resp_text: &str, payload: &str) -> Option<ReflectionKind>
 
     // Check URL decoded version of raw
     if let Ok(url_dec) = urlencoding::decode(resp_text)
-        && url_dec != resp_text && url_dec.contains(payload) {
-            return Some(ReflectionKind::UrlDecoded);
-        }
+        && url_dec != resp_text
+        && url_dec.contains(payload)
+    {
+        return Some(ReflectionKind::UrlDecoded);
+    }
 
     // Check URL decoded version of HTML decoded
     if let Ok(url_dec_html) = urlencoding::decode(&html_dec)
-        && url_dec_html != html_dec && url_dec_html.contains(payload) {
-            return Some(ReflectionKind::HtmlThenUrlDecoded);
-        }
+        && url_dec_html != html_dec
+        && url_dec_html.contains(payload)
+    {
+        return Some(ReflectionKind::HtmlThenUrlDecoded);
+    }
 
     None
 }
@@ -117,16 +129,17 @@ async fn fetch_injection_response(
     // For Stored XSS, check reflection on sxss_url
     if args.sxss {
         if let Some(sxss_url_str) = &args.sxss_url
-            && let Ok(sxss_url) = url::Url::parse(sxss_url_str) {
-                let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
-                let check_request =
-                    crate::utils::build_request(&client, target, method, sxss_url, None);
+            && let Ok(sxss_url) = url::Url::parse(sxss_url_str)
+        {
+            let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
+            let check_request =
+                crate::utils::build_request(&client, target, method, sxss_url, None);
 
-                crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
-                if let Ok(resp) = check_request.send().await {
-                    return resp.text().await.ok();
-                }
+            crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+            if let Ok(resp) = check_request.send().await {
+                return resp.text().await.ok();
             }
+        }
         None
     } else {
         // Normal reflection check
@@ -169,20 +182,37 @@ pub async fn check_reflection_with_response(
 mod tests {
     use super::*;
     use crate::parameter_analysis::{Location, Param};
+    use crate::target_parser::Target;
     use crate::target_parser::parse_target;
+    use axum::{
+        Router,
+        extract::{Query, State},
+        http::StatusCode,
+        response::{Html, IntoResponse},
+        routing::get,
+    };
+    use std::collections::HashMap;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use tokio::time::{Duration, sleep};
 
-    #[tokio::test]
-    async fn test_check_reflection_early_return_when_skip() {
-        let target = parse_target("https://example.com/?q=1").unwrap();
-        let param = Param {
+    #[derive(Clone)]
+    struct TestState {
+        stored_payload: String,
+    }
+
+    fn make_param() -> Param {
+        Param {
             name: "q".to_string(),
-            value: "1".to_string(),
+            value: "seed".to_string(),
             location: Location::Query,
             injection_context: None,
             valid_specials: None,
             invalid_specials: None,
-        };
-        let args = crate::cmd::scan::ScanArgs {
+        }
+    }
+
+    fn default_scan_args() -> crate::cmd::scan::ScanArgs {
+        crate::cmd::scan::ScanArgs {
             input_type: "auto".to_string(),
             format: "json".to_string(),
             targets: vec![],
@@ -208,18 +238,18 @@ mod tests {
             output: None,
             include_request: false,
             include_response: false,
-            silence: false,
+            silence: true,
             poc_type: "plain".to_string(),
             limit: None,
             workers: 10,
             max_concurrent_targets: 10,
             max_targets_per_host: 100,
-            encoders: vec!["url".to_string(), "html".to_string()],
+            encoders: vec!["url".to_string(), "html".to_string(), "base64".to_string()],
             custom_blind_xss_payload: None,
             blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
-            skip_xss_scanning: true,
+            skip_xss_scanning: false,
             deep_scan: false,
             sxss: false,
             sxss_url: None,
@@ -227,7 +257,89 @@ mod tests {
             skip_ast_analysis: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
-        };
+        }
+    }
+
+    fn make_target(addr: SocketAddr, path: &str) -> Target {
+        let target = format!("http://{}:{}{}?q=seed", addr.ip(), addr.port(), path);
+        parse_target(&target).expect("valid target")
+    }
+
+    fn html_named_encode_all(input: &str) -> String {
+        input
+            .chars()
+            .map(|c| match c {
+                '<' => "&lt;".to_string(),
+                '>' => "&gt;".to_string(),
+                '&' => "&amp;".to_string(),
+                '"' => "&quot;".to_string(),
+                '\'' => "&apos;".to_string(),
+                _ => c.to_string(),
+            })
+            .collect::<String>()
+    }
+
+    async fn raw_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
+        let q = params.get("q").cloned().unwrap_or_default();
+        Html(format!("<div>{}</div>", q))
+    }
+
+    async fn html_entity_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
+        let q = params.get("q").cloned().unwrap_or_default();
+        Html(format!("<div>{}</div>", html_named_encode_all(&q)))
+    }
+
+    async fn url_encoded_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
+        let q = params.get("q").cloned().unwrap_or_default();
+        Html(format!("<div>{}</div>", urlencoding::encode(&q)))
+    }
+
+    async fn none_handler() -> Html<&'static str> {
+        Html("<div>not reflected</div>")
+    }
+
+    async fn json_handler(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+        let q = params.get("q").cloned().unwrap_or_default();
+        (
+            StatusCode::OK,
+            [("content-type", "application/json")],
+            format!("{{\"echo\":\"{}\"}}", q),
+        )
+    }
+
+    async fn sxss_handler(State(state): State<TestState>) -> Html<String> {
+        Html(format!("<div>{}</div>", state.stored_payload))
+    }
+
+    async fn start_mock_server(stored_payload: &str) -> SocketAddr {
+        let app = Router::new()
+            .route("/reflect/raw", get(raw_handler))
+            .route("/reflect/html-entity", get(html_entity_handler))
+            .route("/reflect/url-encoded", get(url_encoded_handler))
+            .route("/reflect/none", get(none_handler))
+            .route("/reflect/json", get(json_handler))
+            .route("/sxss/stored", get(sxss_handler))
+            .with_state(TestState {
+                stored_payload: stored_payload.to_string(),
+            });
+
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("bind test listener");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve test app");
+        });
+        sleep(Duration::from_millis(20)).await;
+        addr
+    }
+
+    #[tokio::test]
+    async fn test_check_reflection_early_return_when_skip() {
+        let target = parse_target("https://example.com/?q=1").unwrap();
+        let param = make_param();
+        let mut args = default_scan_args();
+        args.skip_xss_scanning = true;
         let res = check_reflection(&target, &param, "PAY", &args).await;
         assert!(
             !res,
@@ -238,60 +350,9 @@ mod tests {
     #[tokio::test]
     async fn test_check_reflection_with_response_early_return_when_skip() {
         let target = parse_target("https://example.com/?q=1").unwrap();
-        let param = Param {
-            name: "q".to_string(),
-            value: "1".to_string(),
-            location: Location::Query,
-            injection_context: None,
-            valid_specials: None,
-            invalid_specials: None,
-        };
-        let args = crate::cmd::scan::ScanArgs {
-            input_type: "auto".to_string(),
-            format: "json".to_string(),
-            targets: vec![],
-            param: vec![],
-            data: None,
-            headers: vec![],
-            cookies: vec![],
-            method: "GET".to_string(),
-            user_agent: None,
-            cookie_from_raw: None,
-            mining_dict_word: None,
-            skip_mining: false,
-            skip_mining_dict: false,
-            skip_mining_dom: false,
-            skip_discovery: false,
-            skip_reflection_header: false,
-            skip_reflection_cookie: false,
-            skip_reflection_path: false,
-            timeout: 10,
-            delay: 0,
-            proxy: None,
-            follow_redirects: false,
-            output: None,
-            include_request: false,
-            include_response: false,
-            silence: false,
-            poc_type: "plain".to_string(),
-            limit: None,
-            workers: 10,
-            max_concurrent_targets: 10,
-            max_targets_per_host: 100,
-            encoders: vec!["url".to_string(), "html".to_string()],
-            custom_blind_xss_payload: None,
-            blind_callback_url: None,
-            custom_payload: None,
-            only_custom_payload: false,
-            skip_xss_scanning: true,
-            deep_scan: false,
-            sxss: false,
-            sxss_url: None,
-            sxss_method: "GET".to_string(),
-            skip_ast_analysis: false,
-            remote_payloads: vec![],
-            remote_wordlists: vec![],
-        };
+        let param = make_param();
+        let mut args = default_scan_args();
+        args.skip_xss_scanning = true;
         let res = check_reflection_with_response(&target, &param, "PAY", &args).await;
         assert_eq!(
             res,
@@ -326,10 +387,45 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_html_entities_decimal_and_hex_mix() {
+        let s = "&#60;img src=x&#62; and &#x3C;svg&#x3E;";
+        let d = decode_html_entities(s);
+        assert_eq!(d, "<img src=x> and <svg>");
+    }
+
+    #[test]
+    fn test_decode_html_entities_named_case_insensitive() {
+        let s = "&LT;script&GT;1&LT;/script&GT; &QuOt;ok&QuOt;";
+        let d = decode_html_entities(s);
+        assert!(d.contains("<script>1</script>"));
+        assert!(d.contains("\"ok\""));
+    }
+
+    #[test]
+    fn test_decode_html_entities_ignores_invalid_numeric_sequences() {
+        let s = "&#xZZ; &#;";
+        let d = decode_html_entities(s);
+        assert_eq!(d, s);
+    }
+
+    #[test]
+    fn test_classify_reflection_prefers_raw_match() {
+        let payload = "<script>alert(1)</script>";
+        let resp = format!("raw:{} encoded:{}", payload, urlencoding::encode(payload));
+        assert_eq!(
+            classify_reflection(&resp, payload),
+            Some(ReflectionKind::Raw)
+        );
+    }
+
+    #[test]
     fn test_is_payload_reflected_html_encoded() {
         let payload = "<script>alert(1)</script>";
         let resp = "prefix &#x3c;script&#x3e;alert(1)&#x3c;/script&#x3e; suffix";
-        assert_eq!(classify_reflection(resp, payload), Some(ReflectionKind::HtmlEntityDecoded));
+        assert_eq!(
+            classify_reflection(resp, payload),
+            Some(ReflectionKind::HtmlEntityDecoded)
+        );
     }
 
     #[test]
@@ -337,7 +433,10 @@ mod tests {
         let payload = "<img src=x onerror=alert(1)>";
         let encoded = urlencoding::encode(payload).to_string();
         let resp = format!("ok {} end", encoded);
-        assert_eq!(classify_reflection(&resp, payload), Some(ReflectionKind::UrlDecoded));
+        assert_eq!(
+            classify_reflection(&resp, payload),
+            Some(ReflectionKind::UrlDecoded)
+        );
     }
 
     #[test]
@@ -358,5 +457,133 @@ mod tests {
         let payload = "<svg/onload=alert(1)>";
         let resp = "benign content without the thing";
         assert_eq!(classify_reflection(resp, payload), None);
+    }
+
+    #[test]
+    fn test_is_payload_reflected_html_named_uppercase() {
+        let payload = "<svg onload=alert(1)>";
+        let resp = "prefix &LT;svg onload=alert(1)&GT; suffix";
+        assert_eq!(
+            classify_reflection(resp, payload),
+            Some(ReflectionKind::HtmlEntityDecoded)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_check_reflection_detects_raw_response() {
+        let payload = "<script>alert(1)</script>";
+        let addr = start_mock_server("stored").await;
+        let target = make_target(addr, "/reflect/raw");
+        let param = make_param();
+        let args = default_scan_args();
+
+        let found = check_reflection(&target, &param, payload, &args).await;
+        assert!(found, "raw reflection should be detected");
+    }
+
+    #[tokio::test]
+    async fn test_check_reflection_detects_html_entity_response() {
+        let payload = "<img src=x onerror=alert(1)>";
+        let addr = start_mock_server("stored").await;
+        let target = make_target(addr, "/reflect/html-entity");
+        let param = make_param();
+        let args = default_scan_args();
+
+        let found = check_reflection(&target, &param, payload, &args).await;
+        assert!(found, "entity-encoded reflection should be detected");
+    }
+
+    #[tokio::test]
+    async fn test_check_reflection_detects_url_encoded_response() {
+        let payload = "<svg onload=alert(1)>";
+        let addr = start_mock_server("stored").await;
+        let target = make_target(addr, "/reflect/url-encoded");
+        let param = make_param();
+        let args = default_scan_args();
+
+        let found = check_reflection(&target, &param, payload, &args).await;
+        assert!(found, "URL-encoded reflection should be detected");
+    }
+
+    #[tokio::test]
+    async fn test_check_reflection_returns_false_when_not_reflected() {
+        let payload = "<svg/onload=alert(1)>";
+        let addr = start_mock_server("stored").await;
+        let target = make_target(addr, "/reflect/none");
+        let param = make_param();
+        let args = default_scan_args();
+
+        let found = check_reflection(&target, &param, payload, &args).await;
+        assert!(!found, "non-reflective response should not be detected");
+    }
+
+    #[tokio::test]
+    async fn test_check_reflection_with_response_reports_kind_and_body() {
+        let payload = "<script>alert(1)</script>";
+        let addr = start_mock_server("stored").await;
+        let target = make_target(addr, "/reflect/html-entity");
+        let param = make_param();
+        let args = default_scan_args();
+
+        let (kind, body) = check_reflection_with_response(&target, &param, payload, &args).await;
+        assert_eq!(kind, Some(ReflectionKind::HtmlEntityDecoded));
+        assert!(body.unwrap_or_default().contains("&lt;script&gt;"));
+    }
+
+    #[tokio::test]
+    async fn test_check_reflection_with_response_not_reflected() {
+        let payload = "<script>alert(1)</script>";
+        let addr = start_mock_server("stored").await;
+        let target = make_target(addr, "/reflect/none");
+        let param = make_param();
+        let args = default_scan_args();
+
+        let (kind, body) = check_reflection_with_response(&target, &param, payload, &args).await;
+        assert_eq!(kind, None);
+        assert!(
+            body.is_some(),
+            "request succeeded so response body should be returned"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_check_reflection_sxss_uses_secondary_url() {
+        let payload = "STORED_XSS_PAYLOAD";
+        let addr = start_mock_server(payload).await;
+        let target = make_target(addr, "/reflect/none");
+        let param = make_param();
+        let mut args = default_scan_args();
+        args.sxss = true;
+        args.sxss_url = Some(format!("http://{}:{}/sxss/stored", addr.ip(), addr.port()));
+
+        let found = check_reflection(&target, &param, payload, &args).await;
+        assert!(found, "sxss mode should verify reflection via sxss_url");
+    }
+
+    #[tokio::test]
+    async fn test_check_reflection_sxss_without_url_returns_false() {
+        let payload = "STORED_XSS_PAYLOAD";
+        let addr = start_mock_server(payload).await;
+        let target = make_target(addr, "/reflect/raw");
+        let param = make_param();
+        let mut args = default_scan_args();
+        args.sxss = true;
+        args.sxss_url = None;
+
+        let found = check_reflection(&target, &param, payload, &args).await;
+        assert!(!found, "sxss mode without sxss_url should return false");
+    }
+
+    #[tokio::test]
+    async fn test_check_reflection_with_response_handles_json_raw_reflection() {
+        let payload = "<svg/onload=alert(1)>";
+        let addr = start_mock_server("stored").await;
+        let target = make_target(addr, "/reflect/json");
+        let param = make_param();
+        let args = default_scan_args();
+
+        let (kind, body) = check_reflection_with_response(&target, &param, payload, &args).await;
+        assert_eq!(kind, Some(ReflectionKind::Raw));
+        assert!(body.unwrap_or_default().contains("echo"));
     }
 }

@@ -15,7 +15,9 @@ fn short_id(seed: &str) -> String {
 }
 
 pub fn open_marker() -> &'static str {
-    OPEN_MARKER.get_or_init(|| format!("dlx{}", short_id("open"))).as_str()
+    OPEN_MARKER
+        .get_or_init(|| format!("dlx{}", short_id("open")))
+        .as_str()
 }
 
 pub fn close_marker() -> &'static str {
@@ -35,4 +37,3 @@ pub fn id_marker() -> &'static str {
         .get_or_init(|| format!("dlx{}", short_id("id")))
         .as_str()
 }
-

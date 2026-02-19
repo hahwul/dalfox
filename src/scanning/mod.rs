@@ -3,11 +3,11 @@ pub mod ast_integration;
 pub mod check_dom_verification;
 pub mod check_reflection;
 pub mod light_verify;
+pub mod markers;
 pub mod result;
 pub mod url_inject;
 pub mod xss_blind;
 pub mod xss_common;
-pub mod markers;
 
 use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::Param;
@@ -352,21 +352,24 @@ pub async fn run_scanning(
                         ));
                         ast_result.response = Some(response_text.clone());
                         // Lightweight runtime verification (non-headless)
-                        let (verified, _rt_resp, note) = crate::scanning::light_verify::verify_dom_xss_light(
-                            &target_clone,
-                            &param_clone,
-                            &payload,
-                        )
-                        .await;
+                        let (verified, _rt_resp, note) =
+                            crate::scanning::light_verify::verify_dom_xss_light(
+                                &target_clone,
+                                &param_clone,
+                                &payload,
+                            )
+                            .await;
                         if let Some(n) = note {
                             ast_result.message_str = format!("{} [{}]", ast_result.message_str, n);
                         }
                         if verified {
                             ast_result.result_type = "V".to_string();
                             ast_result.severity = "High".to_string();
-                            ast_result.message_str = format!("{} [경량 확인: 검증됨]", ast_result.message_str);
+                            ast_result.message_str =
+                                format!("{} [경량 확인: 검증됨]", ast_result.message_str);
                         } else {
-                            ast_result.message_str = format!("{} [경량 확인: 미검증]", ast_result.message_str);
+                            ast_result.message_str =
+                                format!("{} [경량 확인: 미검증]", ast_result.message_str);
                         }
                         local_results.push(ast_result);
                     }
@@ -459,21 +462,25 @@ pub async fn run_scanning(
                             ));
                             ast_result.response = Some(response_text.clone());
                             // Lightweight runtime verification (non-headless)
-                            let (verified, _rt_resp, note) = crate::scanning::light_verify::verify_dom_xss_light(
-                                &target_clone,
-                                &param_clone,
-                                &reflection_payload,
-                            )
-                            .await;
+                            let (verified, _rt_resp, note) =
+                                crate::scanning::light_verify::verify_dom_xss_light(
+                                    &target_clone,
+                                    &param_clone,
+                                    &reflection_payload,
+                                )
+                                .await;
                             if let Some(n) = note {
-                                ast_result.message_str = format!("{} [{}]", ast_result.message_str, n);
+                                ast_result.message_str =
+                                    format!("{} [{}]", ast_result.message_str, n);
                             }
                             if verified {
                                 ast_result.result_type = "V".to_string();
                                 ast_result.severity = "High".to_string();
-                                ast_result.message_str = format!("{} [경량 확인: 검증됨]", ast_result.message_str);
+                                ast_result.message_str =
+                                    format!("{} [경량 확인: 검증됨]", ast_result.message_str);
                             } else {
-                                ast_result.message_str = format!("{} [경량 확인: 미검증]", ast_result.message_str);
+                                ast_result.message_str =
+                                    format!("{} [경량 확인: 미검증]", ast_result.message_str);
                             }
                             local_results.push(ast_result);
                         }
@@ -643,6 +650,7 @@ pub use xss_blind::blind_scanning;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::encoding::{base64_encode, html_entity_encode, url_encode};
     use crate::parameter_analysis::{InjectionContext, Location, Param};
     use crate::target_parser::parse_target;
 
@@ -656,6 +664,185 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
         });
+    }
+
+    fn default_scan_args() -> crate::cmd::scan::ScanArgs {
+        crate::cmd::scan::ScanArgs {
+            input_type: "auto".to_string(),
+            format: "json".to_string(),
+            targets: vec!["https://example.com".to_string()],
+            param: vec![],
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            method: "GET".to_string(),
+            user_agent: None,
+            cookie_from_raw: None,
+            mining_dict_word: None,
+            skip_mining: false,
+            skip_mining_dict: false,
+            skip_mining_dom: false,
+            skip_discovery: false,
+            skip_reflection_header: false,
+            skip_reflection_cookie: false,
+            skip_reflection_path: false,
+            timeout: 10,
+            delay: 0,
+            proxy: None,
+            follow_redirects: false,
+            output: None,
+            include_request: false,
+            include_response: false,
+            silence: true,
+            poc_type: "plain".to_string(),
+            limit: None,
+            workers: 10,
+            max_concurrent_targets: 10,
+            max_targets_per_host: 100,
+            encoders: vec!["url".to_string(), "html".to_string(), "base64".to_string()],
+            custom_blind_xss_payload: None,
+            blind_callback_url: None,
+            custom_payload: None,
+            only_custom_payload: false,
+            skip_xss_scanning: true,
+            deep_scan: false,
+            sxss: false,
+            sxss_url: None,
+            sxss_method: "GET".to_string(),
+            skip_ast_analysis: false,
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
+        }
+    }
+
+    #[test]
+    fn test_get_dom_payloads_javascript_context_returns_empty() {
+        let param = Param {
+            name: "q".to_string(),
+            value: "seed".to_string(),
+            location: Location::Query,
+            injection_context: Some(InjectionContext::Javascript(None)),
+            valid_specials: None,
+            invalid_specials: None,
+        };
+        let args = default_scan_args();
+        let payloads = get_dom_payloads(&param, &args).expect("dom payload generation");
+        assert!(payloads.is_empty());
+    }
+
+    #[test]
+    fn test_get_dom_payloads_html_context_includes_encoded_variants() {
+        let param = Param {
+            name: "q".to_string(),
+            value: "seed".to_string(),
+            location: Location::Query,
+            injection_context: Some(InjectionContext::Html(None)),
+            valid_specials: None,
+            invalid_specials: None,
+        };
+        let args = default_scan_args();
+        let payloads = get_dom_payloads(&param, &args).expect("dom payload generation");
+        assert!(!payloads.is_empty());
+        assert!(payloads.iter().any(|p| p.contains("alert(1)")));
+        assert!(payloads.iter().any(|p| p.contains("%3C")));
+        assert!(payloads.iter().any(|p| p.contains("&#x")));
+    }
+
+    #[test]
+    fn test_get_dom_payloads_unknown_context_falls_back_even_with_only_custom() {
+        let param = Param {
+            name: "q".to_string(),
+            value: "seed".to_string(),
+            location: Location::Query,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+        };
+        let mut args = default_scan_args();
+        args.only_custom_payload = true;
+        args.custom_payload = None;
+        args.encoders = vec!["none".to_string()];
+
+        let payloads = get_dom_payloads(&param, &args).expect("dom fallback payload generation");
+        assert!(
+            !payloads.is_empty(),
+            "fallback should include default HTML/attribute payloads"
+        );
+        assert!(payloads.iter().any(|p| p.contains("onerror=alert(1)")));
+    }
+
+    #[test]
+    fn test_get_fallback_reflection_payloads_include_encoder_outputs() {
+        let args = default_scan_args();
+        let payloads =
+            get_fallback_reflection_payloads(&args).expect("reflection fallback payloads");
+
+        assert!(payloads.iter().any(|p| p == "alert(1)"));
+        assert!(payloads.iter().any(|p| p == &url_encode("alert(1)")));
+        assert!(
+            payloads
+                .iter()
+                .any(|p| p == &html_entity_encode("alert(1)"))
+        );
+        assert!(payloads.iter().any(|p| p == &base64_encode("alert(1)")));
+    }
+
+    #[test]
+    fn test_get_fallback_reflection_payloads_none_encoder_keeps_raw_only() {
+        let mut args = default_scan_args();
+        args.encoders = vec!["none".to_string()];
+        let payloads =
+            get_fallback_reflection_payloads(&args).expect("reflection fallback payloads");
+
+        assert!(payloads.iter().any(|p| p == "alert(1)"));
+        assert!(!payloads.iter().any(|p| p == &url_encode("alert(1)")));
+        assert!(
+            !payloads
+                .iter()
+                .any(|p| p == &html_entity_encode("alert(1)"))
+        );
+        assert!(!payloads.iter().any(|p| p == &base64_encode("alert(1)")));
+    }
+
+    #[test]
+    fn test_build_request_text_query_contains_headers_and_cookies() {
+        let mut target = parse_target("https://example.com/search?a=1").unwrap();
+        target.method = "GET".to_string();
+        target.headers = vec![("X-Test".to_string(), "1".to_string())];
+        target.cookies = vec![("sid".to_string(), "abc".to_string())];
+
+        let param = Param {
+            name: "q".to_string(),
+            value: "".to_string(),
+            location: Location::Query,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+        };
+
+        let request = build_request_text(&target, &param, "PAYLOAD");
+        assert!(request.contains("GET /search?a=1&q=PAYLOAD HTTP/1.1"));
+        assert!(request.contains("Host: example.com"));
+        assert!(request.contains("X-Test: 1"));
+        assert!(request.contains("Cookie: sid=abc"));
+    }
+
+    #[test]
+    fn test_build_request_text_path_segment_injection() {
+        let mut target = parse_target("https://example.com/a/b/c").unwrap();
+        target.method = "GET".to_string();
+
+        let param = Param {
+            name: "path_segment_1".to_string(),
+            value: "b".to_string(),
+            location: Location::Path,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+        };
+
+        let request = build_request_text(&target, &param, "hello world");
+        assert!(request.contains("GET /a/hello%20world/c HTTP/1.1"));
     }
 
     #[tokio::test]

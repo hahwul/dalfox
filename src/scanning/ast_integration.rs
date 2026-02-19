@@ -13,10 +13,9 @@ pub fn extract_javascript_from_html(html: &str) -> Vec<String> {
     if let Ok(selector) = Selector::parse("script") {
         for element in document.select(&selector) {
             let text = element.text().collect::<Vec<_>>().join("");
-            if !text.trim().is_empty()
-                && seen.insert(text.trim().to_string()) {
-                    js_code.push(text);
-                }
+            if !text.trim().is_empty() && seen.insert(text.trim().to_string()) {
+                js_code.push(text);
+            }
         }
     }
 

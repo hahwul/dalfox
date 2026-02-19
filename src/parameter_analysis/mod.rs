@@ -243,37 +243,39 @@ pub async fn active_probe_param(
                 Location::Path => {
                     let mut path_url = url_original.clone();
                     if let Some(idx_str) = param_name.strip_prefix("path_segment_")
-                        && let Ok(idx) = idx_str.parse::<usize>() {
-                            let original_path = path_url.path();
-                            let mut segments: Vec<String> = if original_path == "/" {
-                                Vec::new()
+                        && let Ok(idx) = idx_str.parse::<usize>()
+                    {
+                        let original_path = path_url.path();
+                        let mut segments: Vec<String> = if original_path == "/" {
+                            Vec::new()
+                        } else {
+                            original_path
+                                .trim_matches('/')
+                                .split('/')
+                                .filter(|s| !s.is_empty())
+                                .map(|s| s.to_string())
+                                .collect()
+                        };
+                        if idx < segments.len() {
+                            segments[idx] = payload.clone();
+                            let new_path = if segments.is_empty() {
+                                "/".to_string()
                             } else {
-                                original_path
-                                    .trim_matches('/')
-                                    .split('/')
-                                    .filter(|s| !s.is_empty())
-                                    .map(|s| s.to_string())
-                                    .collect()
+                                format!("/{}", segments.join("/"))
                             };
-                            if idx < segments.len() {
-                                segments[idx] = payload.clone();
-                                let new_path = if segments.is_empty() {
-                                    "/".to_string()
-                                } else {
-                                    format!("/{}", segments.join("/"))
-                                };
-                                path_url.set_path(&new_path);
-                            }
+                            path_url.set_path(&new_path);
                         }
+                    }
                     request_builder = client_clone.request(req_method, path_url);
                 }
                 Location::JsonBody => {
                     // Attempt JSON body mutation
                     let mut json_value_opt: Option<Value> = None;
                     if let Some(d) = &data
-                        && let Ok(parsed) = serde_json::from_str::<Value>(d) {
-                            json_value_opt = Some(parsed);
-                        }
+                        && let Ok(parsed) = serde_json::from_str::<Value>(d)
+                    {
+                        json_value_opt = Some(parsed);
+                    }
                     let mut root =
                         json_value_opt.unwrap_or_else(|| Value::Object(serde_json::Map::new()));
                     if let Value::Object(ref mut map) = root {
@@ -315,9 +317,10 @@ pub async fn active_probe_param(
                 }
             }
             if let Some(d) = &data
-                && matches!(location, Location::Query | Location::Header) {
-                    request_builder = request_builder.body(d.clone());
-                }
+                && matches!(location, Location::Query | Location::Header)
+            {
+                request_builder = request_builder.body(d.clone());
+            }
 
             let reflected_ok = if let Ok(resp) = {
                 crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -375,12 +378,12 @@ pub async fn active_probe_param(
                         "base64" => base64_encode(&c.to_string()),
                         _ => continue,
                     };
-            let payload_enc = format!(
-                "{}{}{}",
-                crate::scanning::markers::open_marker(),
-                encoded_piece,
-                crate::scanning::markers::close_marker()
-            );
+                    let payload_enc = format!(
+                        "{}{}{}",
+                        crate::scanning::markers::open_marker(),
+                        encoded_piece,
+                        crate::scanning::markers::close_marker()
+                    );
                     let req_method2 = method.parse().unwrap_or(reqwest::Method::GET);
                     let mut url2 = url_original.clone();
                     let mut request_builder2;
@@ -465,37 +468,39 @@ pub async fn active_probe_param(
                         Location::Path => {
                             let mut url_path = url2.clone();
                             if let Some(idx_str) = param_name.strip_prefix("path_segment_")
-                                && let Ok(idx) = idx_str.parse::<usize>() {
-                                    let original_path = url_path.path();
-                                    let mut segments: Vec<String> = if original_path == "/" {
-                                        Vec::new()
+                                && let Ok(idx) = idx_str.parse::<usize>()
+                            {
+                                let original_path = url_path.path();
+                                let mut segments: Vec<String> = if original_path == "/" {
+                                    Vec::new()
+                                } else {
+                                    original_path
+                                        .trim_matches('/')
+                                        .split('/')
+                                        .filter(|s| !s.is_empty())
+                                        .map(|s| s.to_string())
+                                        .collect()
+                                };
+                                if idx < segments.len() {
+                                    segments[idx] = payload_enc.clone();
+                                    let new_path = if segments.is_empty() {
+                                        "/".to_string()
                                     } else {
-                                        original_path
-                                            .trim_matches('/')
-                                            .split('/')
-                                            .filter(|s| !s.is_empty())
-                                            .map(|s| s.to_string())
-                                            .collect()
+                                        format!("/{}", segments.join("/"))
                                     };
-                                    if idx < segments.len() {
-                                        segments[idx] = payload_enc.clone();
-                                        let new_path = if segments.is_empty() {
-                                            "/".to_string()
-                                        } else {
-                                            format!("/{}", segments.join("/"))
-                                        };
-                                        url_path.set_path(&new_path);
-                                    }
+                                    url_path.set_path(&new_path);
                                 }
+                            }
                             request_builder2 = client_clone.request(req_method2, url_path);
                         }
                         Location::JsonBody => {
                             // JSON fallback probing
                             let mut json_value_opt: Option<Value> = None;
                             if let Some(d) = &data
-                                && let Ok(parsed) = serde_json::from_str::<Value>(d) {
-                                    json_value_opt = Some(parsed);
-                                }
+                                && let Ok(parsed) = serde_json::from_str::<Value>(d)
+                            {
+                                json_value_opt = Some(parsed);
+                            }
                             let mut root = json_value_opt
                                 .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
                             if let Value::Object(ref mut map) = root {
@@ -535,24 +540,24 @@ pub async fn active_probe_param(
                         }
                     }
                     if let Some(d) = &data
-                        && matches!(location, Location::Query | Location::Header) {
-                            request_builder2 = request_builder2.body(d.clone());
-                        }
+                        && matches!(location, Location::Query | Location::Header)
+                    {
+                        request_builder2 = request_builder2.body(d.clone());
+                    }
                     if let Ok(resp2) = {
                         crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         request_builder2.send().await
+                    } && let Ok(text2) = resp2.text().await
+                        && let Some(segment2) = extract_reflected_segment(&text2)
+                        && (segment2.contains(c)
+                            || segment2.contains(&encoded_piece)
+                            || segment2
+                                .to_ascii_uppercase()
+                                .contains(&format!("%{:02X}", c as u32)))
+                    {
+                        alt_reflected = true;
+                        break;
                     }
-                        && let Ok(text2) = resp2.text().await
-                            && let Some(segment2) = extract_reflected_segment(&text2)
-                                && (segment2.contains(c)
-                                    || segment2.contains(&encoded_piece)
-                                    || segment2
-                                        .to_ascii_uppercase()
-                                        .contains(&format!("%{:02X}", c as u32)))
-                                {
-                                    alt_reflected = true;
-                                    break;
-                                }
                 }
                 if alt_reflected {
                     valid_ref.lock().await.push(c);

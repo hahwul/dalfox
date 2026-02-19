@@ -66,9 +66,11 @@ pub fn detect_injection_context(text: &str) -> InjectionContext {
     // Fast comment check using raw HTML when available
     if let (Some(cs), Some(ce)) = (text.find("<!--"), text.find("-->"))
         && let Some(mp) = text.find(marker)
-            && cs < mp && mp < ce {
-                return InjectionContext::Html(Some(DelimiterType::Comment));
-            }
+        && cs < mp
+        && mp < ce
+    {
+        return InjectionContext::Html(Some(DelimiterType::Comment));
+    }
 
     // Parse HTML and locate marker via element text/attributes/script
     let document = scraper::Html::parse_document(text);
@@ -81,14 +83,24 @@ pub fn detect_injection_context(text: &str) -> InjectionContext {
         let prev_dq = before.rfind('"');
         let prev_sq = before.rfind('\'');
         let (qch, _qpos) = match (prev_dq, prev_sq) {
-            (Some(dq), Some(sq)) => if dq > sq { ('"', dq) } else { ('\'', sq) },
+            (Some(dq), Some(sq)) => {
+                if dq > sq {
+                    ('"', dq)
+                } else {
+                    ('\'', sq)
+                }
+            }
             (Some(dq), None) => ('"', dq),
             (None, Some(sq)) => ('\'', sq),
-        (None, None) => return None,
+            (None, None) => return None,
         };
         let next = after.find(qch);
         if next.is_some() {
-            return Some(match qch { '"' => DelimiterType::DoubleQuote, '\'' => DelimiterType::SingleQuote, _ => return None });
+            return Some(match qch {
+                '"' => DelimiterType::DoubleQuote,
+                '\'' => DelimiterType::SingleQuote,
+                _ => return None,
+            });
         }
         None
     }
@@ -150,35 +162,36 @@ pub async fn probe_dictionary_params(
 
     if !args.remote_wordlists.is_empty() {
         if let Err(e) = crate::payload::init_remote_wordlists(&args.remote_wordlists).await
-            && !silence {
-                eprintln!("Error initializing remote wordlists: {}", e);
-            }
+            && !silence
+        {
+            eprintln!("Error initializing remote wordlists: {}", e);
+        }
         if let Some(words) = crate::payload::get_remote_words()
-            && !words.is_empty() {
-                params = words.as_ref().clone();
-                loaded = true;
-            }
+            && !words.is_empty()
+        {
+            params = words.as_ref().clone();
+            loaded = true;
+        }
     }
 
-    if !loaded
-        && let Some(wordlist_path) = &args.mining_dict_word {
-            match std::fs::read_to_string(wordlist_path) {
-                Ok(content) => {
-                    params = content
-                        .lines()
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect();
-                    loaded = true;
+    if !loaded && let Some(wordlist_path) = &args.mining_dict_word {
+        match std::fs::read_to_string(wordlist_path) {
+            Ok(content) => {
+                params = content
+                    .lines()
+                    .map(|s| s.trim().to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                loaded = true;
+            }
+            Err(e) => {
+                if !silence {
+                    eprintln!("Error reading wordlist file {}: {}", wordlist_path, e);
                 }
-                Err(e) => {
-                    if !silence {
-                        eprintln!("Error reading wordlist file {}: {}", wordlist_path, e);
-                    }
-                    return;
-                }
+                return;
             }
         }
+    }
 
     if !loaded {
         params = GF_PATTERNS_PARAMS.iter().map(|s| s.to_string()).collect();
@@ -255,43 +268,44 @@ pub async fn probe_dictionary_params(
 
                 let mut discovered: Option<Param> = None;
                 if let Ok(r) = resp
-                    && let Ok(text) = r.text().await {
-                        let mut st = stats_clone.lock().await;
-                        st.record_attempt();
-                        if text.contains(crate::scanning::markers::open_marker()) {
-                            st.record_reflection();
-                            if !st.collapsed {
-                                let context = detect_injection_context(&text);
-                                let (valid, invalid) =
-                                    crate::parameter_analysis::classify_special_chars(&text);
-                                discovered = Some(Param {
-                                    name: param_name.clone(),
-                                    value: crate::scanning::markers::open_marker().to_string(),
-                                    location: crate::parameter_analysis::Location::Query,
-                                    injection_context: Some(context),
-                                    valid_specials: Some(valid),
-                                    invalid_specials: Some(invalid),
-                                });
+                    && let Ok(text) = r.text().await
+                {
+                    let mut st = stats_clone.lock().await;
+                    st.record_attempt();
+                    if text.contains(crate::scanning::markers::open_marker()) {
+                        st.record_reflection();
+                        if !st.collapsed {
+                            let context = detect_injection_context(&text);
+                            let (valid, invalid) =
+                                crate::parameter_analysis::classify_special_chars(&text);
+                            discovered = Some(Param {
+                                name: param_name.clone(),
+                                value: crate::scanning::markers::open_marker().to_string(),
+                                location: crate::parameter_analysis::Location::Query,
+                                injection_context: Some(context),
+                                valid_specials: Some(valid),
+                                invalid_specials: Some(invalid),
+                            });
+                            if !silence {
+                                eprintln!(
+                                    "Discovered parameter: {} (EWMA {:.2}, {}/{})",
+                                    param_name, st.ewma_ratio, st.reflections, st.attempts
+                                );
+                            }
+                            if st.should_collapse() {
+                                st.collapsed = true;
                                 if !silence {
                                     eprintln!(
-                                        "Discovered parameter: {} (EWMA {:.2}, {}/{})",
-                                        param_name, st.ewma_ratio, st.reflections, st.attempts
+                                        "[mining-collapse] High reflection EWMA {:.2} after {} attempts ({} reflections)",
+                                        st.ewma_ratio, st.attempts, st.reflections
                                     );
                                 }
-                                if st.should_collapse() {
-                                    st.collapsed = true;
-                                    if !silence {
-                                        eprintln!(
-                                            "[mining-collapse] High reflection EWMA {:.2} after {} attempts ({} reflections)",
-                                            st.ewma_ratio, st.attempts, st.reflections
-                                        );
-                                    }
-                                }
                             }
-                        } else {
-                            st.record_non_reflection();
                         }
+                    } else {
+                        st.record_non_reflection();
                     }
+                }
 
                 if delay > 0 {
                     sleep(Duration::from_millis(delay)).await;
@@ -311,9 +325,10 @@ pub async fn probe_dictionary_params(
     let mut batch: Vec<Param> = Vec::new();
     for h in handles {
         if let Ok(opt) = h.await
-            && let Some(p) = opt {
-                batch.push(p);
-            }
+            && let Some(p) = opt
+        {
+            batch.push(p);
+        }
     }
 
     if !batch.is_empty() {
@@ -436,46 +451,44 @@ pub async fn probe_body_params(
 
                 let mut discovered: Option<Param> = None;
                 if let Ok(r) = resp
-                    && let Ok(text) = r.text().await {
-                        let mut st = stats_clone.lock().await;
-                        st.record_attempt();
-                        if text.contains(crate::scanning::markers::open_marker()) {
-                            st.record_reflection();
-                            if !st.collapsed {
-                                let context = detect_injection_context(&text);
-                                let (valid, invalid) =
-                                    crate::parameter_analysis::classify_special_chars(&text);
-                                discovered = Some(Param {
-                                    name: param_name_cloned.clone(),
-                                    value: crate::scanning::markers::open_marker().to_string(),
-                                    location: Location::Body,
-                                    injection_context: Some(context),
-                                    valid_specials: Some(valid),
-                                    invalid_specials: Some(invalid),
-                                });
+                    && let Ok(text) = r.text().await
+                {
+                    let mut st = stats_clone.lock().await;
+                    st.record_attempt();
+                    if text.contains(crate::scanning::markers::open_marker()) {
+                        st.record_reflection();
+                        if !st.collapsed {
+                            let context = detect_injection_context(&text);
+                            let (valid, invalid) =
+                                crate::parameter_analysis::classify_special_chars(&text);
+                            discovered = Some(Param {
+                                name: param_name_cloned.clone(),
+                                value: crate::scanning::markers::open_marker().to_string(),
+                                location: Location::Body,
+                                injection_context: Some(context),
+                                valid_specials: Some(valid),
+                                invalid_specials: Some(invalid),
+                            });
+                            if !silence {
+                                eprintln!(
+                                    "Discovered body param: {} (EWMA {:.2}, {}/{})",
+                                    param_name_cloned, st.ewma_ratio, st.reflections, st.attempts
+                                );
+                            }
+                            if st.should_collapse() {
+                                st.collapsed = true;
                                 if !silence {
                                     eprintln!(
-                                        "Discovered body param: {} (EWMA {:.2}, {}/{})",
-                                        param_name_cloned,
-                                        st.ewma_ratio,
-                                        st.reflections,
-                                        st.attempts
+                                        "[mining-collapse] Body mining collapsed at EWMA {:.2} after {} attempts ({} reflections)",
+                                        st.ewma_ratio, st.attempts, st.reflections
                                     );
                                 }
-                                if st.should_collapse() {
-                                    st.collapsed = true;
-                                    if !silence {
-                                        eprintln!(
-                                            "[mining-collapse] Body mining collapsed at EWMA {:.2} after {} attempts ({} reflections)",
-                                            st.ewma_ratio, st.attempts, st.reflections
-                                        );
-                                    }
-                                }
                             }
-                        } else {
-                            st.record_non_reflection();
                         }
+                    } else {
+                        st.record_non_reflection();
                     }
+                }
 
                 if delay > 0 {
                     sleep(Duration::from_millis(delay)).await;
@@ -494,9 +507,10 @@ pub async fn probe_body_params(
         let mut batch: Vec<Param> = Vec::new();
         for h in handles {
             if let Ok(opt) = h.await
-                && let Some(p) = opt {
-                    batch.push(p);
-                }
+                && let Some(p) = opt
+            {
+                batch.push(p);
+            }
         }
         if !batch.is_empty() {
             let mut guard = reflection_params.lock().await;
@@ -557,167 +571,165 @@ pub async fn probe_response_id_params(
     let __resp = base_request.send().await;
     crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
     if let Ok(resp) = __resp
-        && let Ok(text) = resp.text().await {
-            let document = scraper::Html::parse_document(&text);
+        && let Ok(text) = resp.text().await
+    {
+        let document = scraper::Html::parse_document(&text);
 
-            // Collect unique ids and names
-            let mut params_to_check = std::collections::HashSet::new();
-            let selector = scraper::Selector::parse("input[id], input[name]").unwrap();
-            for element in document.select(&selector) {
-                if let Some(id) = element.value().attr("id") {
-                    params_to_check.insert(id.to_string());
-                }
-                if let Some(name) = element.value().attr("name") {
-                    params_to_check.insert(name.to_string());
-                }
+        // Collect unique ids and names
+        let mut params_to_check = std::collections::HashSet::new();
+        let selector = scraper::Selector::parse("input[id], input[name]").unwrap();
+        for element in document.select(&selector) {
+            if let Some(id) = element.value().attr("id") {
+                params_to_check.insert(id.to_string());
             }
-
-            if let Some(ref pb) = pb {
-                pb.set_length(params_to_check.len() as u64);
-                pb.set_message("Mining DOM parameters");
-            }
-
-            // Spawn tasks returning Option<Param> for batched collection
-            let mut handles: Vec<tokio::task::JoinHandle<Option<Param>>> = Vec::new();
-            let stats = Arc::new(Mutex::new(MiningSampleStats::new()));
-
-            // Check each param for reflection
-            for param in params_to_check {
-                {
-                    let st = stats.lock().await;
-                    if st.collapsed {
-                        break;
-                    }
-                }
-                let existing = reflection_params
-                    .lock()
-                    .await
-                    .iter()
-                    .any(|p| p.name == param);
-                if existing {
-                    continue;
-                }
-                let mut url = target.url.clone();
-                url.query_pairs_mut().append_pair(&param, "dalfox");
-                let client_clone = client.clone();
-
-                let data = target.data.clone();
-                let method = target.method.clone();
-                let target_clone = arc_target.clone();
-                let delay = target.delay;
-                // removed unused variable reflection_params_clone
-                let semaphore_clone = semaphore.clone();
-                let param = param.clone();
-                let pb_clone = pb.clone();
-                let stats_clone = stats.clone();
-
-                let handle = tokio::spawn(async move {
-                    let permit = semaphore_clone.acquire().await.unwrap();
-                    let m = method.parse().unwrap_or(reqwest::Method::GET);
-                    let request = crate::utils::build_request(
-                        &client_clone,
-                        &target_clone,
-                        m,
-                        url,
-                        data.clone(),
-                    );
-                    // Prepare optional discovered Param container for batched return
-                    let mut discovered: Option<Param> = None;
-                    let __resp = request.send().await;
-                    crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
-                    if let Ok(resp) = __resp
-                        && let Ok(text) = resp.text().await {
-                            let mut st = stats_clone.lock().await;
-                            st.record_attempt();
-                            if text.contains(crate::scanning::markers::open_marker()) {
-                                st.record_reflection();
-                                if !st.collapsed {
-                                    let context = detect_injection_context(&text);
-                                    let (valid, invalid) =
-                                        crate::parameter_analysis::classify_special_chars(&text);
-                                    // Store discovered Param for return (batched later)
-                                    discovered = Some(Param {
-                                        name: param.clone(),
-                                        value: crate::scanning::markers::open_marker().to_string(),
-                                        location: crate::parameter_analysis::Location::Query,
-                                        injection_context: Some(context),
-                                        valid_specials: Some(valid),
-                                        invalid_specials: Some(invalid),
-                                    });
-                                    if !silence {
-                                        eprintln!(
-                                            "Discovered DOM param: {} (EWMA {:.2}, {}/{})",
-                                            param, st.ewma_ratio, st.reflections, st.attempts
-                                        );
-                                    }
-                                    if st.should_collapse() {
-                                        st.collapsed = true;
-                                        if !silence {
-                                            eprintln!(
-                                                "[mining-collapse] DOM mining collapsed at EWMA {:.2} after {} attempts ({} reflections)",
-                                                st.ewma_ratio, st.attempts, st.reflections
-                                            );
-                                        }
-                                    }
-                                }
-                            } else {
-                                st.record_non_reflection();
-                            }
-                        }
-                    if delay > 0 {
-                        sleep(Duration::from_millis(delay)).await;
-                    }
-                    drop(permit);
-                    if let Some(ref pb) = pb_clone {
-                        pb.inc(1);
-                    }
-                    // Return discovered Param (if any) for batch processing
-                    discovered
-                });
-                handles.push(handle);
-            }
-
-            // Batch collect discovered DOM params
-            let mut batch: Vec<Param> = Vec::new();
-            for handle in handles {
-                if let Ok(opt) = handle.await
-                    && let Some(p) = opt {
-                        batch.push(p);
-                    }
-            }
-            if !batch.is_empty() {
-                let mut guard = reflection_params.lock().await;
-                guard.extend(batch);
-            }
-            // Collapse post-processing (single 'any' param) if adaptive stats triggered it
-            let st_final = stats.lock().await;
-            if st_final.collapsed {
-                let mut guard = reflection_params.lock().await;
-                let preserved = guard.first().cloned();
-                guard.clear();
-                if let Some(orig) = preserved {
-                    guard.push(Param {
-                        name: "any".to_string(),
-                        value: orig.value.clone(),
-                        location: crate::parameter_analysis::Location::Query,
-                        injection_context: orig.injection_context.clone(),
-                        valid_specials: orig.valid_specials.clone(),
-                        invalid_specials: orig.invalid_specials.clone(),
-                    });
-                } else {
-                    guard.push(Param {
-                        name: "any".to_string(),
-                        value: crate::scanning::markers::open_marker().to_string(),
-                        location: crate::parameter_analysis::Location::Query,
-                        injection_context: Some(crate::parameter_analysis::InjectionContext::Html(
-                            None,
-                        )),
-                        valid_specials: None,
-                        invalid_specials: None,
-                    });
-                }
+            if let Some(name) = element.value().attr("name") {
+                params_to_check.insert(name.to_string());
             }
         }
+
+        if let Some(ref pb) = pb {
+            pb.set_length(params_to_check.len() as u64);
+            pb.set_message("Mining DOM parameters");
+        }
+
+        // Spawn tasks returning Option<Param> for batched collection
+        let mut handles: Vec<tokio::task::JoinHandle<Option<Param>>> = Vec::new();
+        let stats = Arc::new(Mutex::new(MiningSampleStats::new()));
+
+        // Check each param for reflection
+        for param in params_to_check {
+            {
+                let st = stats.lock().await;
+                if st.collapsed {
+                    break;
+                }
+            }
+            let existing = reflection_params
+                .lock()
+                .await
+                .iter()
+                .any(|p| p.name == param);
+            if existing {
+                continue;
+            }
+            let mut url = target.url.clone();
+            url.query_pairs_mut().append_pair(&param, "dalfox");
+            let client_clone = client.clone();
+
+            let data = target.data.clone();
+            let method = target.method.clone();
+            let target_clone = arc_target.clone();
+            let delay = target.delay;
+            // removed unused variable reflection_params_clone
+            let semaphore_clone = semaphore.clone();
+            let param = param.clone();
+            let pb_clone = pb.clone();
+            let stats_clone = stats.clone();
+
+            let handle = tokio::spawn(async move {
+                let permit = semaphore_clone.acquire().await.unwrap();
+                let m = method.parse().unwrap_or(reqwest::Method::GET);
+                let request =
+                    crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
+                // Prepare optional discovered Param container for batched return
+                let mut discovered: Option<Param> = None;
+                let __resp = request.send().await;
+                crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+                if let Ok(resp) = __resp
+                    && let Ok(text) = resp.text().await
+                {
+                    let mut st = stats_clone.lock().await;
+                    st.record_attempt();
+                    if text.contains(crate::scanning::markers::open_marker()) {
+                        st.record_reflection();
+                        if !st.collapsed {
+                            let context = detect_injection_context(&text);
+                            let (valid, invalid) =
+                                crate::parameter_analysis::classify_special_chars(&text);
+                            // Store discovered Param for return (batched later)
+                            discovered = Some(Param {
+                                name: param.clone(),
+                                value: crate::scanning::markers::open_marker().to_string(),
+                                location: crate::parameter_analysis::Location::Query,
+                                injection_context: Some(context),
+                                valid_specials: Some(valid),
+                                invalid_specials: Some(invalid),
+                            });
+                            if !silence {
+                                eprintln!(
+                                    "Discovered DOM param: {} (EWMA {:.2}, {}/{})",
+                                    param, st.ewma_ratio, st.reflections, st.attempts
+                                );
+                            }
+                            if st.should_collapse() {
+                                st.collapsed = true;
+                                if !silence {
+                                    eprintln!(
+                                        "[mining-collapse] DOM mining collapsed at EWMA {:.2} after {} attempts ({} reflections)",
+                                        st.ewma_ratio, st.attempts, st.reflections
+                                    );
+                                }
+                            }
+                        }
+                    } else {
+                        st.record_non_reflection();
+                    }
+                }
+                if delay > 0 {
+                    sleep(Duration::from_millis(delay)).await;
+                }
+                drop(permit);
+                if let Some(ref pb) = pb_clone {
+                    pb.inc(1);
+                }
+                // Return discovered Param (if any) for batch processing
+                discovered
+            });
+            handles.push(handle);
+        }
+
+        // Batch collect discovered DOM params
+        let mut batch: Vec<Param> = Vec::new();
+        for handle in handles {
+            if let Ok(opt) = handle.await
+                && let Some(p) = opt
+            {
+                batch.push(p);
+            }
+        }
+        if !batch.is_empty() {
+            let mut guard = reflection_params.lock().await;
+            guard.extend(batch);
+        }
+        // Collapse post-processing (single 'any' param) if adaptive stats triggered it
+        let st_final = stats.lock().await;
+        if st_final.collapsed {
+            let mut guard = reflection_params.lock().await;
+            let preserved = guard.first().cloned();
+            guard.clear();
+            if let Some(orig) = preserved {
+                guard.push(Param {
+                    name: "any".to_string(),
+                    value: orig.value.clone(),
+                    location: crate::parameter_analysis::Location::Query,
+                    injection_context: orig.injection_context.clone(),
+                    valid_specials: orig.valid_specials.clone(),
+                    invalid_specials: orig.invalid_specials.clone(),
+                });
+            } else {
+                guard.push(Param {
+                    name: "any".to_string(),
+                    value: crate::scanning::markers::open_marker().to_string(),
+                    location: crate::parameter_analysis::Location::Query,
+                    injection_context: Some(crate::parameter_analysis::InjectionContext::Html(
+                        None,
+                    )),
+                    valid_specials: None,
+                    invalid_specials: None,
+                });
+            }
+        }
+    }
 }
 
 pub async fn probe_json_body_params(
@@ -795,28 +807,23 @@ pub async fn probe_json_body_params(
             if let Some(map) = root.as_object_mut() {
                 map.insert(
                     param_name_cloned.clone(),
-                    serde_json::Value::String(
-                        crate::scanning::markers::open_marker().to_string(),
-                    ),
+                    serde_json::Value::String(crate::scanning::markers::open_marker().to_string()),
                 );
             } else {
                 let mut map = serde_json::Map::new();
                 map.insert(
                     param_name_cloned.clone(),
-                    serde_json::Value::String(
-                        crate::scanning::markers::open_marker().to_string(),
-                    ),
+                    serde_json::Value::String(crate::scanning::markers::open_marker().to_string()),
                 );
                 root = serde_json::Value::Object(map);
             }
-            let body = serde_json::to_string(&root)
-                .unwrap_or_else(|_| {
-                    format!(
-                        "{{\"{}\":\"{}\"}}",
-                        param_name_cloned,
-                        crate::scanning::markers::open_marker()
-                    )
-                });
+            let body = serde_json::to_string(&root).unwrap_or_else(|_| {
+                format!(
+                    "{{\"{}\":\"{}\"}}",
+                    param_name_cloned,
+                    crate::scanning::markers::open_marker()
+                )
+            });
 
             let m = method.parse().unwrap_or(reqwest::Method::POST);
             let base =
@@ -829,43 +836,44 @@ pub async fn probe_json_body_params(
 
             let mut discovered: Option<Param> = None;
             if let Ok(r) = resp
-                && let Ok(text) = r.text().await {
-                    let mut st = stats_clone.lock().await;
-                    st.record_attempt();
-                    if text.contains(crate::scanning::markers::open_marker()) {
-                        st.record_reflection();
-                        if !st.collapsed {
-                            let context = detect_injection_context(&text);
-                            let (valid, invalid) =
-                                crate::parameter_analysis::classify_special_chars(&text);
-                            discovered = Some(Param {
-                                name: param_name_cloned.clone(),
-                                value: crate::scanning::markers::open_marker().to_string(),
-                                location: Location::JsonBody,
-                                injection_context: Some(context),
-                                valid_specials: Some(valid),
-                                invalid_specials: Some(invalid),
-                            });
+                && let Ok(text) = r.text().await
+            {
+                let mut st = stats_clone.lock().await;
+                st.record_attempt();
+                if text.contains(crate::scanning::markers::open_marker()) {
+                    st.record_reflection();
+                    if !st.collapsed {
+                        let context = detect_injection_context(&text);
+                        let (valid, invalid) =
+                            crate::parameter_analysis::classify_special_chars(&text);
+                        discovered = Some(Param {
+                            name: param_name_cloned.clone(),
+                            value: crate::scanning::markers::open_marker().to_string(),
+                            location: Location::JsonBody,
+                            injection_context: Some(context),
+                            valid_specials: Some(valid),
+                            invalid_specials: Some(invalid),
+                        });
+                        if !silence {
+                            eprintln!(
+                                "Discovered JSON body param: {} (EWMA {:.2}, {}/{})",
+                                param_name_cloned, st.ewma_ratio, st.reflections, st.attempts
+                            );
+                        }
+                        if st.should_collapse() {
+                            st.collapsed = true;
                             if !silence {
                                 eprintln!(
-                                    "Discovered JSON body param: {} (EWMA {:.2}, {}/{})",
-                                    param_name_cloned, st.ewma_ratio, st.reflections, st.attempts
+                                    "[mining-collapse] JSON mining collapsed at EWMA {:.2} after {} attempts ({} reflections)",
+                                    st.ewma_ratio, st.attempts, st.reflections
                                 );
                             }
-                            if st.should_collapse() {
-                                st.collapsed = true;
-                                if !silence {
-                                    eprintln!(
-                                        "[mining-collapse] JSON mining collapsed at EWMA {:.2} after {} attempts ({} reflections)",
-                                        st.ewma_ratio, st.attempts, st.reflections
-                                    );
-                                }
-                            }
                         }
-                    } else {
-                        st.record_non_reflection();
                     }
+                } else {
+                    st.record_non_reflection();
                 }
+            }
 
             if delay > 0 {
                 sleep(Duration::from_millis(delay)).await;
@@ -884,9 +892,10 @@ pub async fn probe_json_body_params(
     let mut batch: Vec<Param> = Vec::new();
     for h in handles {
         if let Ok(opt) = h.await
-            && let Some(p) = opt {
-                batch.push(p);
-            }
+            && let Some(p) = opt
+        {
+            batch.push(p);
+        }
     }
     if !batch.is_empty() {
         let mut guard = reflection_params.lock().await;

@@ -102,8 +102,11 @@ fn test_markdown_output_with_request_response() {
         "XSS".to_string(),
     );
 
-    result.request = Some("GET /?test=%3Cx%3E HTTP/1.1\nHost: example.com\nUser-Agent: Dalfox".to_string());
-    result.response = Some("HTTP/1.1 200 OK\nContent-Type: text/html\n\n<html><body><x></body></html>".to_string());
+    result.request =
+        Some("GET /?test=%3Cx%3E HTTP/1.1\nHost: example.com\nUser-Agent: Dalfox".to_string());
+    result.response = Some(
+        "HTTP/1.1 200 OK\nContent-Type: text/html\n\n<html><body><x></body></html>".to_string(),
+    );
 
     let results = vec![result];
     let markdown = ScanResult::results_to_markdown(&results, true, true);

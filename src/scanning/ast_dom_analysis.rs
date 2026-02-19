@@ -178,9 +178,10 @@ impl<'a> DomXssVisitor<'a> {
             Expression::CallExpression(call) => {
                 // Check if it's a sanitizer
                 if let Some(func_name) = self.get_expr_string(&call.callee)
-                    && self.sanitizers.contains(&func_name) {
-                        return false; // Sanitized
-                    }
+                    && self.sanitizers.contains(&func_name)
+                {
+                    return false; // Sanitized
+                }
 
                 // Check if the callee itself is tainted (e.g., location.hash.slice())
                 // The callee could be a method call on a tainted source
@@ -410,109 +411,122 @@ impl<'a> DomXssVisitor<'a> {
 
                 // Check if initializer is a source or tainted
                 if let Some(source_expr) = self.get_expr_string(init)
-                    && self.sources.contains(&source_expr) {
-                        self.tainted_vars.insert(var_name.to_string());
-                        self.var_aliases
-                            .insert(var_name.to_string(), source_expr.clone());
-                    }
+                    && self.sources.contains(&source_expr)
+                {
+                    self.tainted_vars.insert(var_name.to_string());
+                    self.var_aliases
+                        .insert(var_name.to_string(), source_expr.clone());
+                }
 
                 // Check for localStorage.getItem() and sessionStorage.getItem() calls
                 if let Expression::CallExpression(call) = init
                     && let Expression::StaticMemberExpression(member) = &call.callee
-                        && let Some(callee_str) = self.get_member_string(member)
-                            && (callee_str == "localStorage.getItem"
-                                || callee_str == "sessionStorage.getItem")
-                            {
-                                // Mark this variable as tainted
-                                self.tainted_vars.insert(var_name.to_string());
-                                self.var_aliases.insert(var_name.to_string(), callee_str);
-                            }
+                    && let Some(callee_str) = self.get_member_string(member)
+                    && (callee_str == "localStorage.getItem"
+                        || callee_str == "sessionStorage.getItem")
+                {
+                    // Mark this variable as tainted
+                    self.tainted_vars.insert(var_name.to_string());
+                    self.var_aliases.insert(var_name.to_string(), callee_str);
+                }
 
                 // Check for taintedVar.get() calls (URLSearchParams.get, Map.get, etc.)
                 // e.g., query = urlParams.get('query') where urlParams is tainted
                 if let Expression::CallExpression(call) = init
                     && let Expression::StaticMemberExpression(member) = &call.callee
-                        && member.property.name.as_str() == "get"
-                        {
-                            // Check if the object is tainted (e.g., urlParams.get())
-                            if self.is_tainted(&member.object) {
-                                self.tainted_vars.insert(var_name.to_string());
-                                if let Some(source) = self.find_source_in_expr(&member.object) {
-                                    self.var_aliases.insert(var_name.to_string(), source);
-                                } else {
-                                    self.var_aliases.insert(var_name.to_string(), "URLSearchParams.get".to_string());
-                                }
-                            }
+                    && member.property.name.as_str() == "get"
+                {
+                    // Check if the object is tainted (e.g., urlParams.get())
+                    if self.is_tainted(&member.object) {
+                        self.tainted_vars.insert(var_name.to_string());
+                        if let Some(source) = self.find_source_in_expr(&member.object) {
+                            self.var_aliases.insert(var_name.to_string(), source);
+                        } else {
+                            self.var_aliases
+                                .insert(var_name.to_string(), "URLSearchParams.get".to_string());
                         }
+                    }
+                }
 
                 // Check for new URL(tainted).searchParams
                 // e.g., urlParams = new URL(location.href).searchParams
                 if let Expression::StaticMemberExpression(member) = init
                     && member.property.name.as_str() == "searchParams"
-                    {
-                        // Check if the object is new URL(tainted)
-                        if let Expression::NewExpression(new_expr) = &member.object {
-                            if let Expression::Identifier(id) = &new_expr.callee {
-                                if id.name.as_str() == "URL" && !new_expr.arguments.is_empty() {
-                                    // Check if the first argument is tainted
-                                    if let Some(arg) = new_expr.arguments.first() {
-                                        let is_arg_tainted = match arg {
-                                            Argument::SpreadElement(spread) => self.is_tainted(&spread.argument),
-                                            _ => arg.as_expression().map(|e| self.is_tainted(e)).unwrap_or(false),
-                                        };
-                                        if is_arg_tainted {
-                                            self.tainted_vars.insert(var_name.to_string());
-                                            let source_expr = match arg {
-                                                Argument::SpreadElement(spread) => Some(&spread.argument),
-                                                _ => arg.as_expression(),
-                                            };
-                                            let source = source_expr
-                                                .and_then(|e| self.find_source_in_expr(e))
-                                                .unwrap_or_else(|| "URL.searchParams".to_string());
-                                            self.var_aliases.insert(var_name.to_string(), source);
+                {
+                    // Check if the object is new URL(tainted)
+                    if let Expression::NewExpression(new_expr) = &member.object {
+                        if let Expression::Identifier(id) = &new_expr.callee {
+                            if id.name.as_str() == "URL" && !new_expr.arguments.is_empty() {
+                                // Check if the first argument is tainted
+                                if let Some(arg) = new_expr.arguments.first() {
+                                    let is_arg_tainted = match arg {
+                                        Argument::SpreadElement(spread) => {
+                                            self.is_tainted(&spread.argument)
                                         }
+                                        _ => arg
+                                            .as_expression()
+                                            .map(|e| self.is_tainted(e))
+                                            .unwrap_or(false),
+                                    };
+                                    if is_arg_tainted {
+                                        self.tainted_vars.insert(var_name.to_string());
+                                        let source_expr = match arg {
+                                            Argument::SpreadElement(spread) => {
+                                                Some(&spread.argument)
+                                            }
+                                            _ => arg.as_expression(),
+                                        };
+                                        let source = source_expr
+                                            .and_then(|e| self.find_source_in_expr(e))
+                                            .unwrap_or_else(|| "URL.searchParams".to_string());
+                                        self.var_aliases.insert(var_name.to_string(), source);
                                     }
                                 }
                             }
                         }
                     }
+                }
 
                 // Check for JSON.parse(tainted) - taint propagates through JSON.parse
                 // e.g., data = JSON.parse(query) where query is tainted
                 if let Expression::CallExpression(call) = init
                     && let Expression::StaticMemberExpression(member) = &call.callee
-                        && let Some(callee_str) = self.get_member_string(member)
-                            && callee_str == "JSON.parse"
-                            && !call.arguments.is_empty()
-                            {
-                                // Check if first argument is tainted
-                                if let Some(arg) = call.arguments.first() {
-                                    let is_arg_tainted = match arg {
-                                        Argument::SpreadElement(spread) => self.is_tainted(&spread.argument),
-                                        _ => arg.as_expression().map(|e| self.is_tainted(e)).unwrap_or(false),
-                                    };
-                                    if is_arg_tainted {
-                                        self.tainted_vars.insert(var_name.to_string());
-                                        let source_expr = match arg {
-                                            Argument::SpreadElement(spread) => Some(&spread.argument),
-                                            _ => arg.as_expression(),
-                                        };
-                                        let source = source_expr
-                                            .and_then(|e| self.find_source_in_expr(e))
-                                            .unwrap_or_else(|| "JSON.parse".to_string());
-                                        self.var_aliases.insert(var_name.to_string(), source);
-                                    }
-                                }
-                            }
+                    && let Some(callee_str) = self.get_member_string(member)
+                    && callee_str == "JSON.parse"
+                    && !call.arguments.is_empty()
+                {
+                    // Check if first argument is tainted
+                    if let Some(arg) = call.arguments.first() {
+                        let is_arg_tainted = match arg {
+                            Argument::SpreadElement(spread) => self.is_tainted(&spread.argument),
+                            _ => arg
+                                .as_expression()
+                                .map(|e| self.is_tainted(e))
+                                .unwrap_or(false),
+                        };
+                        if is_arg_tainted {
+                            self.tainted_vars.insert(var_name.to_string());
+                            let source_expr = match arg {
+                                Argument::SpreadElement(spread) => Some(&spread.argument),
+                                _ => arg.as_expression(),
+                            };
+                            let source = source_expr
+                                .and_then(|e| self.find_source_in_expr(e))
+                                .unwrap_or_else(|| "JSON.parse".to_string());
+                            self.var_aliases.insert(var_name.to_string(), source);
+                        }
+                    }
+                }
 
                 // Also check if init expression is tainted (includes template literals, arrays, objects)
                 if self.is_tainted(init) {
                     self.tainted_vars.insert(var_name.to_string());
                     // Try to find a source from the init expression for better reporting
                     if !self.var_aliases.contains_key(var_name)
-                        && let Some(source) = self.find_source_in_expr(init) {
-                            self.var_aliases.insert(var_name.to_string(), source);
-                        }
+                        && let Some(source) = self.find_source_in_expr(init)
+                    {
+                        self.var_aliases.insert(var_name.to_string(), source);
+                    }
                 }
             }
 
@@ -527,9 +541,10 @@ impl<'a> DomXssVisitor<'a> {
             Expression::Identifier(id) => self.var_aliases.get(id.name.as_str()).cloned(),
             Expression::StaticMemberExpression(member) => {
                 if let Some(full_path) = self.get_member_string(member)
-                    && self.sources.contains(&full_path) {
-                        return Some(full_path);
-                    }
+                    && self.sources.contains(&full_path)
+                {
+                    return Some(full_path);
+                }
                 self.find_source_in_expr(&member.object)
             }
             Expression::ArrayExpression(array) => {
@@ -543,9 +558,10 @@ impl<'a> DomXssVisitor<'a> {
                         }
                         _ => {
                             if let Some(expr) = elem.as_expression()
-                                && let Some(source) = self.find_source_in_expr(expr) {
-                                    return Some(source);
-                                }
+                                && let Some(source) = self.find_source_in_expr(expr)
+                            {
+                                return Some(source);
+                            }
                         }
                     }
                 }
@@ -589,9 +605,10 @@ impl<'a> DomXssVisitor<'a> {
             Expression::CallExpression(call) => {
                 // Check callee first (e.g., location.hash.slice())
                 if let Expression::StaticMemberExpression(member) = &call.callee
-                    && let Some(source) = self.find_source_in_expr(&member.object) {
-                        return Some(source);
-                    }
+                    && let Some(source) = self.find_source_in_expr(&member.object)
+                {
+                    return Some(source);
+                }
                 // Check arguments
                 for arg in &call.arguments {
                     match arg {
@@ -602,9 +619,10 @@ impl<'a> DomXssVisitor<'a> {
                         }
                         Argument::StaticMemberExpression(member) => {
                             if let Some(member_str) = self.get_member_string(member)
-                                && self.sources.contains(&member_str) {
-                                    return Some(member_str);
-                                }
+                                && self.sources.contains(&member_str)
+                            {
+                                return Some(member_str);
+                            }
                         }
                         _ => {}
                     }
@@ -653,8 +671,13 @@ impl<'a> DomXssVisitor<'a> {
                     if self.sinks.contains(callee_name) {
                         for arg in &new_expr.arguments {
                             let is_arg_tainted = match arg {
-                                Argument::SpreadElement(spread) => self.is_tainted(&spread.argument),
-                                _ => arg.as_expression().map(|e| self.is_tainted(e)).unwrap_or(false),
+                                Argument::SpreadElement(spread) => {
+                                    self.is_tainted(&spread.argument)
+                                }
+                                _ => arg
+                                    .as_expression()
+                                    .map(|e| self.is_tainted(e))
+                                    .unwrap_or(false),
                             };
                             if is_arg_tainted {
                                 self.report_vulnerability(
@@ -718,167 +741,173 @@ impl<'a> DomXssVisitor<'a> {
     fn walk_call_expression(&mut self, call: &CallExpression<'a>) {
         // Check if this is an addEventListener call with a function argument
         if let Expression::StaticMemberExpression(member) = &call.callee
-            && member.property.name.as_str() == "addEventListener" && call.arguments.len() >= 2 {
-                // The second argument might be a function with event parameter
-                if let Some(Argument::FunctionExpression(func)) = call.arguments.get(1) {
-                    // Mark the first parameter as tainted (it's the event object)
-                    if let Some(param) = func.params.items.first()
-                        && let BindingPatternKind::BindingIdentifier(id) = &param.pattern.kind {
-                            let param_name = id.name.as_str();
-                            // Save state before analyzing event handler
-                            let saved_tainted = self.tainted_vars.clone();
-                            let saved_aliases = self.var_aliases.clone();
+            && member.property.name.as_str() == "addEventListener"
+            && call.arguments.len() >= 2
+        {
+            // The second argument might be a function with event parameter
+            if let Some(Argument::FunctionExpression(func)) = call.arguments.get(1) {
+                // Mark the first parameter as tainted (it's the event object)
+                if let Some(param) = func.params.items.first()
+                    && let BindingPatternKind::BindingIdentifier(id) = &param.pattern.kind
+                {
+                    let param_name = id.name.as_str();
+                    // Save state before analyzing event handler
+                    let saved_tainted = self.tainted_vars.clone();
+                    let saved_aliases = self.var_aliases.clone();
 
-                            // Mark event parameter as tainted
-                            self.tainted_vars.insert(param_name.to_string());
-                            self.var_aliases
-                                .insert(param_name.to_string(), "event.data".to_string());
+                    // Mark event parameter as tainted
+                    self.tainted_vars.insert(param_name.to_string());
+                    self.var_aliases
+                        .insert(param_name.to_string(), "event.data".to_string());
 
-                            // Walk the function body
-                            if let Some(body) = &func.body {
-                                self.walk_statements(&body.statements);
-                            }
+                    // Walk the function body
+                    if let Some(body) = &func.body {
+                        self.walk_statements(&body.statements);
+                    }
 
-                            // Restore state
-                            self.tainted_vars = saved_tainted;
-                            self.var_aliases = saved_aliases;
-                            return;
-                        }
+                    // Restore state
+                    self.tainted_vars = saved_tainted;
+                    self.var_aliases = saved_aliases;
+                    return;
                 }
-                // Also handle arrow functions
-                if let Some(Argument::ArrowFunctionExpression(arrow)) = call.arguments.get(1)
-                    && let Some(param) = arrow.params.items.first()
-                        && let BindingPatternKind::BindingIdentifier(id) = &param.pattern.kind {
-                            let param_name = id.name.as_str();
-                            let saved_tainted = self.tainted_vars.clone();
-                            let saved_aliases = self.var_aliases.clone();
-
-                            self.tainted_vars.insert(param_name.to_string());
-                            self.var_aliases
-                                .insert(param_name.to_string(), "event.data".to_string());
-
-                            // Arrow functions have a FunctionBody
-                            self.walk_statements(&arrow.body.statements);
-
-                            self.tainted_vars = saved_tainted;
-                            self.var_aliases = saved_aliases;
-                            return;
-                        }
             }
+            // Also handle arrow functions
+            if let Some(Argument::ArrowFunctionExpression(arrow)) = call.arguments.get(1)
+                && let Some(param) = arrow.params.items.first()
+                && let BindingPatternKind::BindingIdentifier(id) = &param.pattern.kind
+            {
+                let param_name = id.name.as_str();
+                let saved_tainted = self.tainted_vars.clone();
+                let saved_aliases = self.var_aliases.clone();
+
+                self.tainted_vars.insert(param_name.to_string());
+                self.var_aliases
+                    .insert(param_name.to_string(), "event.data".to_string());
+
+                // Arrow functions have a FunctionBody
+                self.walk_statements(&arrow.body.statements);
+
+                self.tainted_vars = saved_tainted;
+                self.var_aliases = saved_aliases;
+                return;
+            }
+        }
 
         // Check if calling a sink function (full name like document.write)
         if let Some(func_name) = self.get_expr_string(&call.callee)
-            && self.sinks.contains(&func_name) {
-                // Check if any argument is tainted
-                for arg in &call.arguments {
-                    let (is_arg_tainted, source_hint) = match arg {
-                        Argument::Identifier(id) => {
-                            let tainted = self.tainted_vars.contains(id.name.as_str());
-                            let source = if tainted {
-                                self.var_aliases.get(id.name.as_str()).cloned()
+            && self.sinks.contains(&func_name)
+        {
+            // Check if any argument is tainted
+            for arg in &call.arguments {
+                let (is_arg_tainted, source_hint) = match arg {
+                    Argument::Identifier(id) => {
+                        let tainted = self.tainted_vars.contains(id.name.as_str());
+                        let source = if tainted {
+                            self.var_aliases.get(id.name.as_str()).cloned()
+                        } else {
+                            None
+                        };
+                        (tainted, source)
+                    }
+                    Argument::StaticMemberExpression(member) => {
+                        // Check if this is a known source first
+                        let is_known_source =
+                            if let Some(member_str) = self.get_member_string(member) {
+                                self.sources.contains(&member_str)
                             } else {
-                                None
+                                false
                             };
-                            (tainted, source)
-                        }
-                        Argument::StaticMemberExpression(member) => {
-                            // Check if this is a known source first
-                            let is_known_source =
-                                if let Some(member_str) = self.get_member_string(member) {
-                                    self.sources.contains(&member_str)
-                                } else {
-                                    false
-                                };
 
-                            if is_known_source {
-                                // It's a known source like location.search
-                                (true, self.get_member_string(member))
-                            } else {
-                                // Not a known source, check if the base object or any part is tainted
-                                let tainted = self.is_tainted(&member.object);
-                                (
-                                    tainted,
-                                    if tainted {
-                                        self.find_source_in_expr(&member.object)
-                                    } else {
-                                        None
-                                    },
-                                )
-                            }
-                        }
-                        Argument::CallExpression(call_arg) => {
-                            // Check if the call expression is tainted (e.g., location.hash.slice(1))
-                            // The callee might be a member expression on a source
-                            if let Expression::StaticMemberExpression(member) = &call_arg.callee {
-                                // Try to extract the source from the object
-                                let source = self.extract_source_from_expr(&member.object);
-                                (source.is_some(), source)
-                            } else {
-                                // Check if any argument to the call is tainted
-                                // e.g., decodeURI(location.hash)
-                                let mut found_source = None;
-                                for arg in &call_arg.arguments {
-                                    match arg {
-                                        Argument::StaticMemberExpression(member) => {
-                                            if let Some(member_str) = self.get_member_string(member)
-                                                && self.sources.contains(&member_str) {
-                                                    found_source = Some(member_str);
-                                                    break;
-                                                }
-                                        }
-                                        Argument::Identifier(id) => {
-                                            if self.tainted_vars.contains(id.name.as_str()) {
-                                                found_source =
-                                                    self.var_aliases.get(id.name.as_str()).cloned();
-                                                break;
-                                            }
-                                        }
-                                        _ => {}
-                                    }
-                                }
-                                (found_source.is_some(), found_source)
-                            }
-                        }
-                        Argument::SpreadElement(spread) => {
-                            let tainted = self.is_tainted(&spread.argument);
+                        if is_known_source {
+                            // It's a known source like location.search
+                            (true, self.get_member_string(member))
+                        } else {
+                            // Not a known source, check if the base object or any part is tainted
+                            let tainted = self.is_tainted(&member.object);
                             (
                                 tainted,
                                 if tainted {
-                                    self.find_source_in_expr(&spread.argument)
+                                    self.find_source_in_expr(&member.object)
                                 } else {
                                     None
                                 },
                             )
                         }
-                        // Handle all other expression types via as_expression()
-                        _ => {
-                            if let Some(expr) = arg.as_expression() {
-                                let tainted = self.is_tainted(expr);
-                                (
-                                    tainted,
-                                    if tainted {
-                                        self.find_source_in_expr(expr)
-                                    } else {
-                                        None
-                                    },
-                                )
-                            } else {
-                                (false, None)
-                            }
-                        }
-                    };
-
-                    if is_arg_tainted {
-                        self.report_vulnerability_with_source(
-                            call.span(),
-                            &func_name,
-                            "Tainted data passed to sink function",
-                            source_hint,
-                        );
-                        break;
                     }
+                    Argument::CallExpression(call_arg) => {
+                        // Check if the call expression is tainted (e.g., location.hash.slice(1))
+                        // The callee might be a member expression on a source
+                        if let Expression::StaticMemberExpression(member) = &call_arg.callee {
+                            // Try to extract the source from the object
+                            let source = self.extract_source_from_expr(&member.object);
+                            (source.is_some(), source)
+                        } else {
+                            // Check if any argument to the call is tainted
+                            // e.g., decodeURI(location.hash)
+                            let mut found_source = None;
+                            for arg in &call_arg.arguments {
+                                match arg {
+                                    Argument::StaticMemberExpression(member) => {
+                                        if let Some(member_str) = self.get_member_string(member)
+                                            && self.sources.contains(&member_str)
+                                        {
+                                            found_source = Some(member_str);
+                                            break;
+                                        }
+                                    }
+                                    Argument::Identifier(id) => {
+                                        if self.tainted_vars.contains(id.name.as_str()) {
+                                            found_source =
+                                                self.var_aliases.get(id.name.as_str()).cloned();
+                                            break;
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            (found_source.is_some(), found_source)
+                        }
+                    }
+                    Argument::SpreadElement(spread) => {
+                        let tainted = self.is_tainted(&spread.argument);
+                        (
+                            tainted,
+                            if tainted {
+                                self.find_source_in_expr(&spread.argument)
+                            } else {
+                                None
+                            },
+                        )
+                    }
+                    // Handle all other expression types via as_expression()
+                    _ => {
+                        if let Some(expr) = arg.as_expression() {
+                            let tainted = self.is_tainted(expr);
+                            (
+                                tainted,
+                                if tainted {
+                                    self.find_source_in_expr(expr)
+                                } else {
+                                    None
+                                },
+                            )
+                        } else {
+                            (false, None)
+                        }
+                    }
+                };
+
+                if is_arg_tainted {
+                    self.report_vulnerability_with_source(
+                        call.span(),
+                        &func_name,
+                        "Tainted data passed to sink function",
+                        source_hint,
+                    );
+                    break;
                 }
             }
+        }
 
         // Also treat member method name itself as sink (e.g., el.insertAdjacentHTML, range.createContextualFragment)
         if let Expression::StaticMemberExpression(member) = &call.callee {
@@ -889,41 +918,42 @@ impl<'a> DomXssVisitor<'a> {
                     let mut attr_name_lc: Option<String> = None;
                     if let Some(arg0) = call.arguments.first()
                         && let Some(expr) = arg0.as_expression()
-                            && let Expression::StringLiteral(s) = expr {
-                                attr_name_lc = Some(s.value.to_string().to_ascii_lowercase());
-                            }
+                        && let Expression::StringLiteral(s) = expr
+                    {
+                        attr_name_lc = Some(s.value.to_string().to_ascii_lowercase());
+                    }
                     if let Some(name) = attr_name_lc {
                         let dangerous = name.starts_with("on")
                             || name == "href"
                             || name == "xlink:href"
                             || name == "srcdoc";
-                        if dangerous
-                            && let Some(arg1) = call.arguments.get(1) {
-                                let tainted = match arg1 {
-                                    Argument::SpreadElement(sp) => self.is_tainted(&sp.argument),
-                                    _ => arg1
-                                        .as_expression()
-                                        .map(|e| self.is_tainted(e))
-                                        .unwrap_or(false),
-                                };
-                                if tainted {
-                                    self.report_vulnerability(
-                                        call.span(),
-                                        &format!("setAttribute:{}", name),
-                                        "Tainted data assigned to dangerous attribute",
-                                    );
-                                    return;
-                                }
+                        if dangerous && let Some(arg1) = call.arguments.get(1) {
+                            let tainted = match arg1 {
+                                Argument::SpreadElement(sp) => self.is_tainted(&sp.argument),
+                                _ => arg1
+                                    .as_expression()
+                                    .map(|e| self.is_tainted(e))
+                                    .unwrap_or(false),
+                            };
+                            if tainted {
+                                self.report_vulnerability(
+                                    call.span(),
+                                    &format!("setAttribute:{}", name),
+                                    "Tainted data assigned to dangerous attribute",
+                                );
+                                return;
                             }
+                        }
                     }
                 // Special-case execCommand - only insertHTML is dangerous, and the third arg is the value
                 } else if method_name == "execCommand" && call.arguments.len() >= 3 {
                     let mut cmd_name_lc: Option<String> = None;
                     if let Some(arg0) = call.arguments.first()
                         && let Some(expr) = arg0.as_expression()
-                            && let Expression::StringLiteral(s) = expr {
-                                cmd_name_lc = Some(s.value.to_string().to_ascii_lowercase());
-                            }
+                        && let Expression::StringLiteral(s) = expr
+                    {
+                        cmd_name_lc = Some(s.value.to_string().to_ascii_lowercase());
+                    }
                     if let Some(cmd) = cmd_name_lc {
                         if cmd == "inserthtml" {
                             if let Some(arg2) = call.arguments.get(2) {
@@ -988,9 +1018,10 @@ impl<'a> DomXssVisitor<'a> {
     /// Extract the source name from an expression (for direct source usage)
     fn extract_source_from_expr(&self, expr: &Expression) -> Option<String> {
         if let Some(member_str) = self.get_expr_string(expr)
-            && self.sources.contains(&member_str) {
-                return Some(member_str);
-            }
+            && self.sources.contains(&member_str)
+        {
+            return Some(member_str);
+        }
         // Try to get from StaticMemberExpression
         if let Expression::StaticMemberExpression(member) = expr {
             return self
@@ -2254,7 +2285,10 @@ document.write(result);
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should track taint through .get() on tainted object");
+        assert!(
+            !result.is_empty(),
+            "Should track taint through .get() on tainted object"
+        );
     }
 
     #[test]
@@ -2265,7 +2299,10 @@ document.write(result);
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should track taint through new URL(tainted).searchParams");
+        assert!(
+            !result.is_empty(),
+            "Should track taint through new URL(tainted).searchParams"
+        );
     }
 
     #[test]
@@ -2277,7 +2314,10 @@ document.write(result);
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should propagate taint through JSON.parse");
+        assert!(
+            !result.is_empty(),
+            "Should propagate taint through JSON.parse"
+        );
     }
 
     #[test]
@@ -2301,7 +2341,10 @@ document.write(result);
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should detect new Function() with tainted argument");
+        assert!(
+            !result.is_empty(),
+            "Should detect new Function() with tainted argument"
+        );
     }
 
     #[test]
@@ -2312,6 +2355,9 @@ document.write(result);
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        assert!(!result.is_empty(), "Should detect execCommand insertHTML with tainted data");
+        assert!(
+            !result.is_empty(),
+            "Should detect execCommand insertHTML with tainted data"
+        );
     }
 }

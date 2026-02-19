@@ -148,9 +148,10 @@ fn check_api_key(state: &AppState, headers: &HeaderMap) -> bool {
     match &state.api_key {
         Some(required) if !required.is_empty() => {
             if let Some(h) = headers.get("X-API-KEY")
-                && let Ok(v) = h.to_str() {
-                    return v == required;
-                }
+                && let Ok(v) = h.to_str()
+            {
+                return v == required;
+            }
             false
         }
         _ => true, // no API key set -> allow all
@@ -216,25 +217,26 @@ fn build_cors_headers(state: &AppState, req_headers: &HeaderMap) -> HeaderMap {
 
     // Reflect allowed origins
     if let Some(origin_val) = req_headers.get("Origin")
-        && let Ok(origin_str) = origin_val.to_str() {
-            let exact_allowed = state
-                .allowed_origins
-                .as_ref()
-                .map(|v| {
-                    v.iter()
-                        .any(|o| !o.starts_with("regex:") && o != "*" && o == origin_str)
-                })
-                .unwrap_or(false);
-            let regex_allowed = state
-                .allowed_origin_regexes
-                .iter()
-                .any(|re| re.is_match(origin_str));
+        && let Ok(origin_str) = origin_val.to_str()
+    {
+        let exact_allowed = state
+            .allowed_origins
+            .as_ref()
+            .map(|v| {
+                v.iter()
+                    .any(|o| !o.starts_with("regex:") && o != "*" && o == origin_str)
+            })
+            .unwrap_or(false);
+        let regex_allowed = state
+            .allowed_origin_regexes
+            .iter()
+            .any(|re| re.is_match(origin_str));
 
-            if exact_allowed || regex_allowed {
-                headers.insert("Access-Control-Allow-Origin", origin_val.clone());
-                headers.insert("Vary", "Origin".parse().unwrap());
-            }
+        if exact_allowed || regex_allowed {
+            headers.insert("Access-Control-Allow-Origin", origin_val.clone());
+            headers.insert("Vary", "Origin".parse().unwrap());
         }
+    }
 
     headers.insert("Access-Control-Allow-Methods", allow_methods);
     headers.insert("Access-Control-Allow-Headers", allow_headers);
@@ -299,9 +301,10 @@ async fn run_scan_job(
         cookies: {
             let mut v = vec![];
             if let Some(c) = &opts.cookie
-                && !c.trim().is_empty() {
-                    v.push(c.clone());
-                }
+                && !c.trim().is_empty()
+            {
+                v.push(c.clone());
+            }
             v
         },
         method: opts.method.clone().unwrap_or_else(|| "GET".to_string()),
@@ -475,14 +478,14 @@ async fn start_scan_handler(
                         }
                     }
                 })
-            {
-                cors.insert(
-                    "Content-Type",
-                    "application/javascript; charset=utf-8".parse().unwrap(),
-                );
-                let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
-                return (StatusCode::UNAUTHORIZED, cors, body);
-            }
+        {
+            cors.insert(
+                "Content-Type",
+                "application/javascript; charset=utf-8".parse().unwrap(),
+            );
+            let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
+            return (StatusCode::UNAUTHORIZED, cors, body);
+        }
         let body = serde_json::to_string(&resp).unwrap();
         return (StatusCode::UNAUTHORIZED, cors, body);
     }
@@ -521,14 +524,14 @@ async fn start_scan_handler(
                         }
                     }
                 })
-            {
-                cors.insert(
-                    "Content-Type",
-                    "application/javascript; charset=utf-8".parse().unwrap(),
-                );
-                let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
-                return (StatusCode::BAD_REQUEST, cors, body);
-            }
+        {
+            cors.insert(
+                "Content-Type",
+                "application/javascript; charset=utf-8".parse().unwrap(),
+            );
+            let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
+            return (StatusCode::BAD_REQUEST, cors, body);
+        }
         let body = serde_json::to_string(&resp).unwrap();
         return (StatusCode::BAD_REQUEST, cors, body);
     }
@@ -601,14 +604,14 @@ async fn start_scan_handler(
                     }
                 }
             })
-        {
-            cors.insert(
-                "Content-Type",
-                "application/javascript; charset=utf-8".parse().unwrap(),
-            );
-            let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
-            return (StatusCode::OK, cors, body);
-        }
+    {
+        cors.insert(
+            "Content-Type",
+            "application/javascript; charset=utf-8".parse().unwrap(),
+        );
+        let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
+        return (StatusCode::OK, cors, body);
+    }
     let body = serde_json::to_string(&resp).unwrap();
     (StatusCode::OK, cors, body)
 }
@@ -654,14 +657,14 @@ async fn get_result_handler(
                         }
                     }
                 })
-            {
-                cors.insert(
-                    "Content-Type",
-                    "application/javascript; charset=utf-8".parse().unwrap(),
-                );
-                let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
-                return (StatusCode::UNAUTHORIZED, cors, body);
-            }
+        {
+            cors.insert(
+                "Content-Type",
+                "application/javascript; charset=utf-8".parse().unwrap(),
+            );
+            let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
+            return (StatusCode::UNAUTHORIZED, cors, body);
+        }
         let body = serde_json::to_string(&resp).unwrap();
         return (StatusCode::UNAUTHORIZED, cors, body);
     }
@@ -716,14 +719,14 @@ async fn get_result_handler(
                             }
                         }
                     })
-                {
-                    cors.insert(
-                        "Content-Type",
-                        "application/javascript; charset=utf-8".parse().unwrap(),
-                    );
-                    let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
-                    return (StatusCode::OK, cors, body);
-                }
+            {
+                cors.insert(
+                    "Content-Type",
+                    "application/javascript; charset=utf-8".parse().unwrap(),
+                );
+                let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
+                return (StatusCode::OK, cors, body);
+            }
             let body = serde_json::to_string(&resp).unwrap();
             (StatusCode::OK, cors, body)
         }
@@ -760,14 +763,14 @@ async fn get_result_handler(
                             }
                         }
                     })
-                {
-                    cors.insert(
-                        "Content-Type",
-                        "application/javascript; charset=utf-8".parse().unwrap(),
-                    );
-                    let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
-                    return (StatusCode::NOT_FOUND, cors, body);
-                }
+            {
+                cors.insert(
+                    "Content-Type",
+                    "application/javascript; charset=utf-8".parse().unwrap(),
+                );
+                let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
+                return (StatusCode::NOT_FOUND, cors, body);
+            }
             let body = serde_json::to_string(&resp).unwrap();
             (StatusCode::NOT_FOUND, cors, body)
         }
@@ -823,14 +826,14 @@ async fn get_scan_handler(
                         }
                     }
                 })
-            {
-                cors.insert(
-                    "Content-Type",
-                    "application/javascript; charset=utf-8".parse().unwrap(),
-                );
-                let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
-                return (StatusCode::UNAUTHORIZED, cors, body);
-            }
+        {
+            cors.insert(
+                "Content-Type",
+                "application/javascript; charset=utf-8".parse().unwrap(),
+            );
+            let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
+            return (StatusCode::UNAUTHORIZED, cors, body);
+        }
         let body = serde_json::to_string(&resp).unwrap();
         return (StatusCode::UNAUTHORIZED, cors, body);
     }
@@ -870,14 +873,14 @@ async fn get_scan_handler(
                         }
                     }
                 })
-            {
-                cors.insert(
-                    "Content-Type",
-                    "application/javascript; charset=utf-8".parse().unwrap(),
-                );
-                let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
-                return (StatusCode::BAD_REQUEST, cors, body);
-            }
+        {
+            cors.insert(
+                "Content-Type",
+                "application/javascript; charset=utf-8".parse().unwrap(),
+            );
+            let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
+            return (StatusCode::BAD_REQUEST, cors, body);
+        }
         let body = serde_json::to_string(&resp).unwrap();
         return (StatusCode::BAD_REQUEST, cors, body);
     }
@@ -1000,14 +1003,14 @@ async fn get_scan_handler(
         && let Some(cb) = params
             .get(&state.callback_param_name)
             .and_then(|s| validate_jsonp_callback(s))
-        {
-            cors.insert(
-                "Content-Type",
-                "application/javascript; charset=utf-8".parse().unwrap(),
-            );
-            let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
-            return (StatusCode::OK, cors, body);
-        }
+    {
+        cors.insert(
+            "Content-Type",
+            "application/javascript; charset=utf-8".parse().unwrap(),
+        );
+        let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
+        return (StatusCode::OK, cors, body);
+    }
     let body = serde_json::to_string(&resp).unwrap();
     (StatusCode::OK, cors, body)
 }
@@ -1034,9 +1037,10 @@ pub async fn run_server(args: ServerArgs) {
     let mut api_key = args.api_key.clone();
     if api_key.is_none()
         && let Ok(v) = std::env::var("DALFOX_API_KEY")
-            && !v.is_empty() {
-                api_key = Some(v);
-            }
+        && !v.is_empty()
+    {
+        api_key = Some(v);
+    }
 
     // Parse allowed origins, build regex list and wildcard flag
     let allowed_origins_vec = args.allowed_origins.as_ref().map(|s| {
