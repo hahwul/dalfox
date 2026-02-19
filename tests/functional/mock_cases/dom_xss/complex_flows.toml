@@ -148,3 +148,565 @@ document.getElementById('list').innerHTML = result;
 </html>
 """
 expected_detection = true
+
+[[case]]
+id = 1308
+name = "assignment_in_if_branch"
+description = "Taint propagated via assignment inside if branch"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="out"></div>
+<script>
+var source = location.hash;
+var out = "safe";
+if (source) {
+  out = source;
+}
+document.getElementById('out').innerHTML = out;
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1309
+name = "array_push_then_index_sink"
+description = "Taint flow through array push then indexed access"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var arr = [];
+arr.push(location.search);
+document.write(arr[0]);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1310
+name = "array_splice_then_sink"
+description = "Taint flow through array splice inserted value"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var arr = ["safe"];
+arr.splice(0, 1, location.hash);
+document.write(arr[0]);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1311
+name = "array_unshift_then_sink"
+description = "Taint flow through array unshift"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var list = ["x"];
+list.unshift(location.search);
+document.write(list[0]);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1312
+name = "switch_branch_assignment"
+description = "Taint assigned in switch branch then used in sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="box"></div>
+<script>
+var data = location.hash;
+var output = "safe";
+switch (data) {
+  default:
+    output = data;
+}
+document.getElementById('box').innerHTML = output;
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1313
+name = "try_catch_assignment_flow"
+description = "Taint assignment inside try block then sink usage"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var out = "safe";
+try {
+  out = location.search;
+} catch (e) {}
+document.write(out);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1314
+name = "logical_chain_assignment_flow"
+description = "Taint through logical expression and assignment chain"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="target"></div>
+<script>
+var base = location.search || "";
+var out = "prefix:" + base;
+document.getElementById('target').innerHTML = out;
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1315
+name = "tainted_get_call_from_urlsearchparams"
+description = "Tainted URLSearchParams.get result to sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var params = new URL(location.href).searchParams;
+var value = params.get('id');
+document.write(value);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1316
+name = "json_parse_then_reassign"
+description = "JSON.parse of tainted value then reassigned to sink variable"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="render"></div>
+<script>
+var raw = location.hash;
+var obj = JSON.parse(raw);
+var out = "safe";
+out = obj;
+document.getElementById('render').innerHTML = out;
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1317
+name = "sequence_expression_then_sink"
+description = "Taint through sequence expression into sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var value = (1, 2, location.search);
+document.write(value);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1318
+name = "object_spread_then_innerhtml"
+description = "Taint through object spread followed by innerHTML sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="o"></div>
+<script>
+var src = { payload: location.hash };
+var dst = { ...src };
+document.getElementById('o').innerHTML = dst.payload;
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1319
+name = "template_literal_reassignment_chain"
+description = "Template literal taint stored in variable chain then sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var p = location.search;
+var x = `<b>${p}</b>`;
+var y = x;
+document.write(y);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1320
+name = "computed_member_from_tainted_array"
+description = "Computed member access from tainted array to sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var arr = [location.hash, "safe"];
+var idx = 0;
+document.write(arr[idx]);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1321
+name = "function_param_to_innerhtml"
+description = "Tainted argument passed into helper function sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="display"></div>
+<script>
+function render(content) {
+  document.getElementById('display').innerHTML = content;
+}
+var p = location.hash.substring(1);
+render(p);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1322
+name = "function_hoisted_call_to_document_write"
+description = "Function called before declaration with tainted argument"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var p = location.search;
+sinkWrap(p);
+function sinkWrap(v) {
+  document.write(v);
+}
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1323
+name = "function_two_params_second_tainted"
+description = "Second function argument tainted and used in sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="out"></div>
+<script>
+function show(prefix, value) {
+  document.getElementById('out').innerHTML = prefix + value;
+}
+var tainted = location.hash;
+show('x:', tainted);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1324
+name = "function_with_branch_assignment_and_sink"
+description = "Tainted parameter assigned in branch and then used in sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+function wrap(v) {
+  var out = "safe";
+  if (v) {
+    out = v;
+  }
+  eval(out);
+}
+wrap(location.search);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1325
+name = "function_return_source_to_sink"
+description = "Function returns source directly and result is sent to sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+function getPayload() {
+  return location.hash;
+}
+document.write(getPayload());
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1326
+name = "function_expression_param_to_sink"
+description = "Function expression parameter flows to sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="display"></div>
+<script>
+var render = function (content) {
+  document.getElementById('display').innerHTML = content;
+};
+var input = location.search;
+render(input);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1327
+name = "arrow_function_param_to_sink"
+description = "Arrow function parameter flows to sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="display"></div>
+<script>
+var render = (content) => {
+  document.getElementById('display').innerHTML = content;
+};
+var input = location.hash;
+render(input);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1328
+name = "computed_assignment_then_sink"
+description = "Computed member assignment propagates taint to sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var arr = [];
+arr[0] = location.search;
+document.write(arr[0]);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1329
+name = "named_message_handler_to_sink"
+description = "Named message event callback routes event.data to sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="out"></div>
+<script>
+function onMessage(event) {
+  document.getElementById('out').innerHTML = event.data;
+}
+window.addEventListener('message', onMessage);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1330
+name = "source_return_chain_assignment"
+description = "Tainted return value assigned through chain before sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+function readInput() {
+  return location.search;
+}
+var a = readInput();
+var b = a;
+eval(b);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1331
+name = "object_property_assignment_then_sink"
+description = "Object property assignment from source flows to sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var model = {};
+model.html = location.hash;
+document.write(model.html);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1332
+name = "computed_innerhtml_assignment"
+description = "Computed member innerHTML assignment from source"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="out"></div>
+<script>
+var payload = location.hash;
+var el = document.getElementById('out');
+el['innerHTML'] = payload;
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1333
+name = "computed_location_href_assignment"
+description = "Computed location.href assignment sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var target = location.search;
+location['href'] = target;
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1334
+name = "computed_document_write_call"
+description = "Computed member document.write sink call"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var data = location.hash;
+document['write'](data);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1335
+name = "computed_insertadjacenthtml_call"
+description = "Computed member insertAdjacentHTML sink call"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="out"></div>
+<script>
+var data = location.search;
+var el = document.getElementById('out');
+el['insertAdjacentHTML']('beforeend', data);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1336
+name = "computed_storage_getitem_to_sink"
+description = "Computed storage getItem source call to sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var data = localStorage['getItem']('payload');
+document.write(data);
+</script>
+</body>
+</html>
+"""
+expected_detection = true

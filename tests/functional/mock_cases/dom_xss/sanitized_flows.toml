@@ -88,3 +88,250 @@ document.getElementById('encoded').innerHTML = safe;
 </html>
 """
 expected_detection = false
+
+[[case]]
+id = 1405
+name = "innertext_safe"
+description = "Using innerText instead of innerHTML"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="safe"></div>
+<script>
+var input = location.hash.substring(1);
+document.getElementById('safe').innerText = input;
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1406
+name = "setattribute_class_safe"
+description = "setAttribute on non-dangerous class attribute"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="item"></div>
+<script>
+var input = location.search.substring(1);
+document.getElementById('item').setAttribute('class', input);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1407
+name = "setattribute_data_attribute_safe"
+description = "setAttribute on data-* attribute is safe for script execution"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="item"></div>
+<script>
+var input = location.search.substring(1);
+document.getElementById('item').setAttribute('data-value', input);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1408
+name = "append_textnode_safe"
+description = "createTextNode + appendChild safe flow"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="safe"></div>
+<script>
+var input = location.search.substring(1);
+var node = document.createTextNode(input);
+document.getElementById('safe').appendChild(node);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1409
+name = "encodeuricomponent_before_location_assign"
+description = "encodeURIComponent before location.assign should be treated as sanitized"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var input = location.hash.substring(1);
+var safe = encodeURIComponent(input);
+location.assign(safe);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1410
+name = "document_createtextnode_inline_safe"
+description = "Inline createTextNode call without intermediate variable"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="safe"></div>
+<script>
+var input = location.search.substring(1);
+document.getElementById('safe').appendChild(document.createTextNode(input));
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1411
+name = "function_wrapper_textcontent_safe"
+description = "Tainted argument passed to function that uses textContent safely"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="out"></div>
+<script>
+function safeRender(value) {
+  document.getElementById('out').textContent = value;
+}
+var input = location.search.substring(1);
+safeRender(input);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1412
+name = "function_expression_textcontent_safe"
+description = "Function expression uses textContent safely"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="safe"></div>
+<script>
+var safeRender = function(value) {
+  document.getElementById('safe').textContent = value;
+};
+var input = location.hash;
+safeRender(input);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1413
+name = "arrow_function_textcontent_safe"
+description = "Arrow function uses textContent safely"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="safe"></div>
+<script>
+var safeRender = (value) => {
+  document.getElementById('safe').textContent = value;
+};
+var input = location.search;
+safeRender(input);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1414
+name = "named_message_handler_textcontent_safe"
+description = "Named message callback with textContent should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="safe"></div>
+<script>
+function onMessage(event) {
+  document.getElementById('safe').textContent = event.data;
+}
+window.addEventListener('message', onMessage);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1415
+name = "object_html_property_assignment_only_safe"
+description = "Assigning to plain object html property without sink should not trigger"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var model = {};
+model.html = location.hash;
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1416
+name = "computed_textcontent_assignment_safe"
+description = "Computed textContent assignment is safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="safe"></div>
+<script>
+var input = location.search;
+var el = document.getElementById('safe');
+el['textContent'] = input;
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1417
+name = "computed_setattribute_class_safe"
+description = "Computed setAttribute with class should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="safe"></div>
+<script>
+var input = location.hash;
+var el = document.getElementById('safe');
+el['setAttribute']('class', input);
+</script>
+</body>
+</html>
+"""
+expected_detection = false

@@ -145,3 +145,143 @@ document.getElementById('msg').innerHTML = msg;
 </html>
 """
 expected_detection = true
+
+[[case]]
+id = 1009
+name = "location_hash_slice_to_document_write"
+description = "location.hash slice result to document.write"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var value = location.hash.slice(1);
+document.write(value);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1010
+name = "document_documenturi_to_writeln"
+description = "document.documentURI to document.writeln sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var uri = document.documentURI;
+document.writeln(uri);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1011
+name = "document_baseuri_to_eval"
+description = "document.baseURI to eval sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var x = document.baseURI;
+eval(x);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1012
+name = "window_location_to_innerhtml"
+description = "window.location source to innerHTML sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="out"></div>
+<script>
+var loc = window.location;
+document.getElementById('out').innerHTML = loc;
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1013
+name = "location_search_to_setinterval"
+description = "location.search to setInterval sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var code = location.search.substring(1);
+setInterval(code, 1000);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1014
+name = "decodeuri_location_hash_to_innerhtml"
+description = "decodeURI(location.hash) to innerHTML sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="msg"></div>
+<script>
+var decoded = decodeURI(location.hash);
+document.getElementById('msg').innerHTML = decoded;
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1015
+name = "location_search_to_insertadjacenthtml"
+description = "location.search to insertAdjacentHTML sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="host"></div>
+<script>
+var html = location.search.substring(1);
+document.getElementById('host').insertAdjacentHTML('beforeend', html);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1016
+name = "location_hash_to_setattribute_srcdoc"
+description = "location.hash to setAttribute('srcdoc', ...) sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<iframe id="frame"></iframe>
+<script>
+var html = location.hash.substring(1);
+document.getElementById('frame').setAttribute('srcdoc', html);
+</script>
+</body>
+</html>
+"""
+expected_detection = true

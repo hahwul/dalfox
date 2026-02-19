@@ -77,3 +77,175 @@ window.addEventListener('message', function(event) {
 </html>
 """
 expected_detection = true
+
+[[case]]
+id = 1205
+name = "postmessage_arrow_to_document_write"
+description = "Arrow function event.data to document.write sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+window.addEventListener('message', (event) => {
+  document.write(event.data);
+});
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1206
+name = "postmessage_to_settimeout"
+description = "postMessage event.data to setTimeout sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+window.addEventListener('message', function(event) {
+  setTimeout(event.data, 100);
+});
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1207
+name = "postmessage_to_setattribute_srcdoc"
+description = "postMessage event.data to setAttribute srcdoc sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<iframe id="f"></iframe>
+<script>
+window.addEventListener('message', function(event) {
+  document.getElementById('f').setAttribute('srcdoc', event.data);
+});
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1208
+name = "postmessage_nested_redirect_to_replace"
+description = "event.data nested property to location.replace sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+window.addEventListener('message', function(event) {
+  location.replace(event.data.redirect);
+});
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1209
+name = "postmessage_to_new_function"
+description = "postMessage event.data to new Function sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+window.addEventListener('message', function(event) {
+  var fn = new Function(event.data);
+  fn();
+});
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1210
+name = "postmessage_to_insertadjacenthtml"
+description = "postMessage event.data to insertAdjacentHTML sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="box"></div>
+<script>
+window.addEventListener('message', function(event) {
+  document.getElementById('box').insertAdjacentHTML('beforeend', event.data);
+});
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1211
+name = "postmessage_array_push_then_write"
+description = "event.data taint through array push to document.write"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+window.addEventListener('message', function(event) {
+  var values = [];
+  values.push(event.data);
+  document.write(values[0]);
+});
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1212
+name = "postmessage_reassignment_branch_to_innerhtml"
+description = "event.data taint propagated through branch assignment"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="view"></div>
+<script>
+window.addEventListener('message', function(event) {
+  var out = "safe";
+  if (event.data) {
+    out = event.data;
+  }
+  document.getElementById('view').innerHTML = out;
+});
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1213
+name = "postmessage_execcommand_inserthtml"
+description = "event.data to execCommand('insertHTML') sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+window.addEventListener('message', function(event) {
+  document.execCommand('insertHTML', false, event.data);
+});
+</script>
+</body>
+</html>
+"""
+expected_detection = true

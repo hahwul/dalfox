@@ -27,6 +27,14 @@ pub struct DomXssVulnerability {
     pub description: String,
 }
 
+/// Lightweight summary for a function declaration.
+/// Maps parameter index to a sink reached when that parameter is tainted.
+struct FunctionSummary {
+    tainted_param_sinks: HashMap<usize, String>,
+    tainted_param_returns: HashMap<usize, String>,
+    return_without_tainted_params: Option<String>,
+}
+
 /// AST visitor for DOM XSS analysis
 struct DomXssVisitor<'a> {
     /// Set of tainted variable names
@@ -41,6 +49,12 @@ struct DomXssVisitor<'a> {
     sinks: HashSet<String>,
     /// Known sanitizers
     sanitizers: HashSet<String>,
+    /// Function summaries used for lightweight inter-procedural taint tracking
+    function_summaries: HashMap<String, FunctionSummary>,
+    /// Internal flag for summary collection of tainted return values
+    collecting_tainted_returns: bool,
+    /// Internal buffer for tainted return sources while collecting summaries
+    tainted_return_sources: Vec<String>,
     /// Source code for line/column calculation
     source_code: &'a str,
 }
@@ -123,6 +137,9 @@ impl<'a> DomXssVisitor<'a> {
             sources,
             sinks,
             sanitizers,
+            function_summaries: HashMap::new(),
+            collecting_tainted_returns: false,
+            tainted_return_sources: Vec::new(),
             source_code,
         }
     }
@@ -132,6 +149,7 @@ impl<'a> DomXssVisitor<'a> {
         match expr {
             Expression::Identifier(id) => Some(id.name.to_string()),
             Expression::StaticMemberExpression(member) => self.get_member_string(member),
+            Expression::ComputedMemberExpression(member) => self.get_computed_member_string(member),
             _ => None,
         }
     }
@@ -146,6 +164,136 @@ impl<'a> DomXssVisitor<'a> {
                 .map(|obj| format!("{}.{}", obj, property)),
             _ => None,
         }
+    }
+
+    /// Get string representation of computed member property if static string literal.
+    fn get_computed_property_string(
+        &self,
+        member: &ComputedMemberExpression<'a>,
+    ) -> Option<String> {
+        match &member.expression {
+            Expression::StringLiteral(s) => Some(s.value.to_string()),
+            _ => None,
+        }
+    }
+
+    /// Get string representation of computed member expression when property is literal.
+    fn get_computed_member_string(&self, member: &ComputedMemberExpression<'a>) -> Option<String> {
+        let property = self.get_computed_property_string(member)?;
+        match &member.object {
+            Expression::Identifier(id) => Some(format!("{}.{}", id.name.as_str(), property)),
+            Expression::StaticMemberExpression(inner) => self
+                .get_member_string(inner)
+                .map(|obj| format!("{}.{}", obj, property)),
+            Expression::ComputedMemberExpression(inner) => self
+                .get_computed_member_string(inner)
+                .map(|obj| format!("{}.{}", obj, property)),
+            _ => None,
+        }
+    }
+
+    /// Property names that are dangerous when assigned as member properties.
+    fn is_assignment_sink_property(&self, prop_name: &str) -> bool {
+        matches!(
+            prop_name,
+            "innerHTML" | "outerHTML" | "src" | "srcdoc" | "href" | "xlink:href"
+        )
+    }
+
+    /// Check taint/source hint for a call argument
+    fn argument_taint_and_source(&self, arg: &Argument<'a>) -> (bool, Option<String>) {
+        match arg {
+            Argument::SpreadElement(spread) => {
+                let tainted = self.is_tainted(&spread.argument);
+                (
+                    tainted,
+                    if tainted {
+                        self.find_source_in_expr(&spread.argument)
+                    } else {
+                        None
+                    },
+                )
+            }
+            _ => {
+                if let Some(expr) = arg.as_expression() {
+                    let tainted = self.is_tainted(expr);
+                    (
+                        tainted,
+                        if tainted {
+                            self.find_source_in_expr(expr)
+                        } else {
+                            None
+                        },
+                    )
+                } else {
+                    (false, None)
+                }
+            }
+        }
+    }
+
+    /// Determine whether a call expression yields tainted data and provide source hint.
+    fn call_taint_and_source(&self, call: &CallExpression<'a>) -> (bool, Option<String>) {
+        // Sanitizers produce de-tainted values
+        if let Some(func_name) = self.get_expr_string(&call.callee)
+            && self.sanitizers.contains(&func_name)
+        {
+            return (false, None);
+        }
+
+        // Function summary-based return taint
+        if let Expression::Identifier(callee_id) = &call.callee {
+            let fn_name = callee_id.name.as_str();
+            if let Some(summary) = self.function_summaries.get(fn_name) {
+                if let Some(source) = &summary.return_without_tainted_params {
+                    return (true, Some(source.clone()));
+                }
+
+                for (idx, fallback_source) in &summary.tainted_param_returns {
+                    if let Some(arg) = call.arguments.get(*idx) {
+                        let (tainted, source_hint) = self.argument_taint_and_source(arg);
+                        if tainted {
+                            return (true, source_hint.or_else(|| Some(fallback_source.clone())));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Direct source calls (e.g., localStorage.getItem(...))
+        if let Expression::StaticMemberExpression(member) = &call.callee {
+            if let Some(callee_str) = self.get_member_string(member)
+                && self.sources.contains(&callee_str)
+            {
+                return (true, Some(callee_str));
+            }
+
+            // Method call on tainted object (e.g., tainted.slice())
+            if self.is_tainted(&member.object) {
+                return (true, self.find_source_in_expr(&member.object));
+            }
+        }
+        if let Expression::ComputedMemberExpression(member) = &call.callee {
+            if let Some(callee_str) = self.get_computed_member_string(member)
+                && self.sources.contains(&callee_str)
+            {
+                return (true, Some(callee_str));
+            }
+
+            if self.is_tainted(&member.object) {
+                return (true, self.find_source_in_expr(&member.object));
+            }
+        }
+
+        // Conservative fallback: tainted argument taints call result.
+        for arg in &call.arguments {
+            let (tainted, source_hint) = self.argument_taint_and_source(arg);
+            if tainted {
+                return (true, source_hint);
+            }
+        }
+
+        (false, None)
     }
 
     /// Check if expression is tainted
@@ -175,43 +323,7 @@ impl<'a> DomXssVisitor<'a> {
             Expression::ConditionalExpression(cond) => {
                 self.is_tainted(&cond.consequent) || self.is_tainted(&cond.alternate)
             }
-            Expression::CallExpression(call) => {
-                // Check if it's a sanitizer
-                if let Some(func_name) = self.get_expr_string(&call.callee)
-                    && self.sanitizers.contains(&func_name)
-                {
-                    return false; // Sanitized
-                }
-
-                // Check if the callee itself is tainted (e.g., location.hash.slice())
-                // The callee could be a method call on a tainted source
-                if let Expression::StaticMemberExpression(member) = &call.callee {
-                    // Check if the object of the member expression is tainted
-                    if self.is_tainted(&member.object) {
-                        return true;
-                    }
-                }
-
-                // Also check if any argument is tainted
-                for arg in &call.arguments {
-                    let arg_tainted = match arg {
-                        Argument::Identifier(id) => self.tainted_vars.contains(id.name.as_str()),
-                        Argument::StaticMemberExpression(member) => {
-                            if let Some(member_str) = self.get_member_string(member) {
-                                self.sources.contains(&member_str)
-                            } else {
-                                false
-                            }
-                        }
-                        Argument::SpreadElement(spread) => self.is_tainted(&spread.argument),
-                        _ => false,
-                    };
-                    if arg_tainted {
-                        return true;
-                    }
-                }
-                false
-            }
+            Expression::CallExpression(call) => self.call_taint_and_source(call).0,
             Expression::ArrayExpression(array) => {
                 // Array is tainted if any element is tainted
                 array.elements.iter().any(|elem| {
@@ -244,6 +356,11 @@ impl<'a> DomXssVisitor<'a> {
                 })
             }
             Expression::ComputedMemberExpression(member) => {
+                if let Some(full_path) = self.get_computed_member_string(member)
+                    && self.sources.contains(&full_path)
+                {
+                    return true;
+                }
                 // Check if base object is tainted (e.g., arr[0] where arr is tainted)
                 self.is_tainted(&member.object)
             }
@@ -320,9 +437,124 @@ impl<'a> DomXssVisitor<'a> {
 
     /// Walk through statements
     fn walk_statements(&mut self, stmts: &[Statement<'a>]) {
+        self.collect_function_declarations(stmts);
         for stmt in stmts {
             self.walk_statement(stmt);
         }
+    }
+
+    /// Collect function declarations before statement traversal so hoisted calls are recognized.
+    fn collect_function_declarations(&mut self, stmts: &[Statement<'a>]) {
+        for stmt in stmts {
+            if let Statement::FunctionDeclaration(func_decl) = stmt {
+                self.register_function_declaration(func_decl.as_ref());
+            }
+        }
+    }
+
+    fn extract_param_names(&self, params: &FormalParameters<'a>) -> Vec<String> {
+        params
+            .items
+            .iter()
+            .filter_map(|param| match &param.pattern.kind {
+                BindingPatternKind::BindingIdentifier(id) => Some(id.name.to_string()),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    }
+
+    fn register_function_summary(
+        &mut self,
+        function_name: String,
+        params: Vec<String>,
+        body_stmts: &[Statement<'a>],
+    ) {
+        if self.function_summaries.contains_key(&function_name) {
+            return;
+        }
+
+        // Insert placeholder summary first to avoid recursive self-analysis loops.
+        self.function_summaries.insert(
+            function_name.clone(),
+            FunctionSummary {
+                tainted_param_sinks: HashMap::new(),
+                tainted_param_returns: HashMap::new(),
+                return_without_tainted_params: None,
+            },
+        );
+
+        let saved_tainted = self.tainted_vars.clone();
+        let saved_aliases = self.var_aliases.clone();
+        let saved_vuln_len = self.vulnerabilities.len();
+        let saved_collecting_tainted_returns = self.collecting_tainted_returns;
+        let saved_tainted_return_sources = std::mem::take(&mut self.tainted_return_sources);
+
+        let mut summary = FunctionSummary {
+            tainted_param_sinks: HashMap::new(),
+            tainted_param_returns: HashMap::new(),
+            return_without_tainted_params: None,
+        };
+
+        for (idx, param_name) in params.iter().enumerate() {
+            self.tainted_vars.clear();
+            self.var_aliases.clear();
+            self.tainted_vars.insert(param_name.clone());
+            self.var_aliases
+                .insert(param_name.clone(), format!("fn_param_{}", idx));
+            self.collecting_tainted_returns = true;
+            self.tainted_return_sources.clear();
+
+            let before = self.vulnerabilities.len();
+            self.walk_statements(body_stmts);
+            for vuln in &self.vulnerabilities[before..] {
+                if vuln.sink != "__return__" {
+                    summary
+                        .tainted_param_sinks
+                        .entry(idx)
+                        .or_insert_with(|| vuln.sink.clone());
+                }
+            }
+            if let Some(source) = self.tainted_return_sources.first() {
+                summary.tainted_param_returns.insert(idx, source.clone());
+            }
+            self.vulnerabilities.truncate(before);
+            self.tainted_return_sources.clear();
+        }
+
+        // Also capture return taint that does not depend on tainted parameters
+        // (e.g., function directly returning location.hash)
+        self.tainted_vars.clear();
+        self.var_aliases.clear();
+        self.collecting_tainted_returns = true;
+        self.tainted_return_sources.clear();
+        let before = self.vulnerabilities.len();
+        self.walk_statements(body_stmts);
+        if let Some(source) = self.tainted_return_sources.first() {
+            summary.return_without_tainted_params = Some(source.clone());
+        }
+        self.vulnerabilities.truncate(before);
+
+        self.tainted_vars = saved_tainted;
+        self.var_aliases = saved_aliases;
+        self.vulnerabilities.truncate(saved_vuln_len);
+        self.collecting_tainted_returns = saved_collecting_tainted_returns;
+        self.tainted_return_sources = saved_tainted_return_sources;
+
+        self.function_summaries.insert(function_name, summary);
+    }
+
+    fn register_function_declaration(&mut self, func_decl: &Function<'a>) {
+        let Some(id) = &func_decl.id else {
+            return;
+        };
+        let Some(body) = &func_decl.body else {
+            return;
+        };
+        self.register_function_summary(
+            id.name.to_string(),
+            self.extract_param_names(&func_decl.params),
+            &body.statements,
+        );
     }
 
     /// Walk through a single statement
@@ -365,11 +597,13 @@ impl<'a> DomXssVisitor<'a> {
                 self.walk_statement(&for_stmt.body);
             }
             Statement::FunctionDeclaration(func_decl) => {
-                // Function declarations are analyzed in their local scope
-                // Parameter tainting would require interprocedural analysis
-                // which is not yet implemented. For now, we analyze the body
-                // with the current taint state.
-                if let Some(body) = &func_decl.body {
+                // Parameterized functions are primarily handled through summaries/call sites.
+                // Walking bodies here can duplicate findings when summaries are also applied.
+                // Keep direct walk only for zero-parameter functions where call-site summaries
+                // cannot currently represent source->sink usage.
+                if func_decl.params.items.is_empty()
+                    && let Some(body) = &func_decl.body
+                {
                     // Save current tainted vars state
                     let saved_tainted = self.tainted_vars.clone();
                     let saved_aliases = self.var_aliases.clone();
@@ -379,6 +613,17 @@ impl<'a> DomXssVisitor<'a> {
                     // Restore state after function (parameters are local scope)
                     self.tainted_vars = saved_tainted;
                     self.var_aliases = saved_aliases;
+                }
+            }
+            Statement::ReturnStatement(return_stmt) => {
+                if let Some(argument) = &return_stmt.argument {
+                    if self.collecting_tainted_returns && self.is_tainted(argument) {
+                        let source = self
+                            .find_source_in_expr(argument)
+                            .unwrap_or_else(|| "unknown source".to_string());
+                        self.tainted_return_sources.push(source);
+                    }
+                    self.walk_expression(argument);
                 }
             }
             Statement::SwitchStatement(switch_stmt) => {
@@ -408,6 +653,25 @@ impl<'a> DomXssVisitor<'a> {
         if let Some(init) = &decl.init {
             if let BindingPatternKind::BindingIdentifier(id) = &decl.id.kind {
                 let var_name = id.name.as_str();
+
+                // Register summaries for function expressions assigned to variables.
+                if let Expression::FunctionExpression(func_expr) = init
+                    && let Some(body) = &func_expr.body
+                {
+                    self.register_function_summary(
+                        var_name.to_string(),
+                        self.extract_param_names(&func_expr.params),
+                        &body.statements,
+                    );
+                }
+                // Register summaries for arrow functions assigned to variables.
+                if let Expression::ArrowFunctionExpression(arrow_expr) = init {
+                    self.register_function_summary(
+                        var_name.to_string(),
+                        self.extract_param_names(&arrow_expr.params),
+                        &arrow_expr.body.statements,
+                    );
+                }
 
                 // Check if initializer is a source or tainted
                 if let Some(source_expr) = self.get_expr_string(init)
@@ -603,11 +867,21 @@ impl<'a> DomXssVisitor<'a> {
                 .find_source_in_expr(&cond.consequent)
                 .or_else(|| self.find_source_in_expr(&cond.alternate)),
             Expression::CallExpression(call) => {
-                // Check callee first (e.g., location.hash.slice())
-                if let Expression::StaticMemberExpression(member) = &call.callee
-                    && let Some(source) = self.find_source_in_expr(&member.object)
-                {
+                if let (_, Some(source)) = self.call_taint_and_source(call) {
                     return Some(source);
+                }
+
+                // Check callee first (e.g., location.hash.slice())
+                if let Expression::StaticMemberExpression(member) = &call.callee {
+                    // Direct source call (e.g., localStorage.getItem(...))
+                    if let Some(callee_str) = self.get_member_string(member)
+                        && self.sources.contains(&callee_str)
+                    {
+                        return Some(callee_str);
+                    }
+                    if let Some(source) = self.find_source_in_expr(&member.object) {
+                        return Some(source);
+                    }
                 }
                 // Check arguments
                 for arg in &call.arguments {
@@ -630,6 +904,11 @@ impl<'a> DomXssVisitor<'a> {
                 None
             }
             Expression::ComputedMemberExpression(member) => {
+                if let Some(full_path) = self.get_computed_member_string(member)
+                    && self.sources.contains(&full_path)
+                {
+                    return Some(full_path);
+                }
                 self.find_source_in_expr(&member.object)
             }
             _ => None,
@@ -697,11 +976,18 @@ impl<'a> DomXssVisitor<'a> {
 
     /// Walk through an assignment expression
     fn walk_assignment_expression(&mut self, assign: &AssignmentExpression<'a>) {
+        let right_tainted = self.is_tainted(&assign.right);
+        let right_source = if right_tainted {
+            self.find_source_in_expr(&assign.right)
+        } else {
+            None
+        };
+
         // Check if we're assigning to a sink property
         match &assign.left {
             AssignmentTarget::StaticMemberExpression(member) => {
                 let prop_name = member.property.name.as_str();
-                let is_sink = self.sinks.contains(prop_name);
+                let is_sink = self.is_assignment_sink_property(prop_name);
 
                 // Also check if the full member path is a sink (e.g., location.href)
                 let full_path_is_sink = if let Some(full_path) = self.get_member_string(member) {
@@ -718,17 +1004,81 @@ impl<'a> DomXssVisitor<'a> {
                         prop_name.to_string()
                     };
 
-                    self.report_vulnerability(
+                    self.report_vulnerability_with_source(
                         assign.span(),
                         &sink_name,
                         "Assignment to sink property",
+                        right_source.clone(),
                     );
+                }
+
+                // Track object-level taint for property assignment flows like:
+                // obj.payload = location.hash; sink(obj.payload)
+                if right_tainted
+                    && let Expression::Identifier(obj_id) = &member.object
+                {
+                    self.tainted_vars.insert(obj_id.name.to_string());
+                    if let Some(source) = right_source.clone() {
+                        self.var_aliases.insert(obj_id.name.to_string(), source);
+                    }
+                }
+            }
+            AssignmentTarget::ComputedMemberExpression(member) => {
+                let prop_name = self.get_computed_property_string(member);
+                let is_sink = prop_name
+                    .as_deref()
+                    .map(|name| self.is_assignment_sink_property(name))
+                    .unwrap_or(false);
+                let full_path_is_sink = self
+                    .get_computed_member_string(member)
+                    .map(|full_path| self.sinks.contains(&full_path))
+                    .unwrap_or(false);
+
+                if (is_sink || full_path_is_sink) && right_tainted {
+                    let sink_name = if full_path_is_sink {
+                        self.get_computed_member_string(member)
+                            .or(prop_name.clone())
+                            .unwrap_or_else(|| "computed_member".to_string())
+                    } else {
+                        prop_name.unwrap_or_else(|| "computed_member".to_string())
+                    };
+
+                    self.report_vulnerability_with_source(
+                        assign.span(),
+                        &sink_name,
+                        "Assignment to sink property",
+                        right_source.clone(),
+                    );
+                }
+
+                // Propagate taint to base object for computed assignments:
+                // arr[0] = location.hash; sink(arr[0])
+                if right_tainted
+                    && let Expression::Identifier(obj_id) = &member.object
+                {
+                    self.tainted_vars.insert(obj_id.name.to_string());
+                    if let Some(source) = right_source.clone() {
+                        self.var_aliases.insert(obj_id.name.to_string(), source);
+                    }
                 }
             }
             AssignmentTarget::AssignmentTargetIdentifier(id) => {
                 let target_name = id.name.as_str();
-                if self.sinks.contains(target_name) && self.is_tainted(&assign.right) {
-                    self.report_vulnerability(assign.span(), target_name, "Assignment to sink");
+                // Propagate taint through direct assignments like `a = taintedValue;`
+                if right_tainted {
+                    self.tainted_vars.insert(target_name.to_string());
+                    if let Some(source) = right_source.clone() {
+                        self.var_aliases.insert(target_name.to_string(), source);
+                    }
+                }
+
+                if self.is_assignment_sink_property(target_name) && right_tainted {
+                    self.report_vulnerability_with_source(
+                        assign.span(),
+                        target_name,
+                        "Assignment to sink",
+                        right_source.clone(),
+                    );
                 }
             }
             _ => {}
@@ -744,6 +1094,16 @@ impl<'a> DomXssVisitor<'a> {
             && member.property.name.as_str() == "addEventListener"
             && call.arguments.len() >= 2
         {
+            let is_message_event = call
+                .arguments
+                .first()
+                .and_then(|arg| arg.as_expression())
+                .and_then(|expr| match expr {
+                    Expression::StringLiteral(s) => Some(s.value.as_str().eq_ignore_ascii_case("message")),
+                    _ => None,
+                })
+                .unwrap_or(false);
+
             // The second argument might be a function with event parameter
             if let Some(Argument::FunctionExpression(func)) = call.arguments.get(1) {
                 // Mark the first parameter as tainted (it's the event object)
@@ -758,7 +1118,11 @@ impl<'a> DomXssVisitor<'a> {
                     // Mark event parameter as tainted
                     self.tainted_vars.insert(param_name.to_string());
                     self.var_aliases
-                        .insert(param_name.to_string(), "event.data".to_string());
+                        .insert(param_name.to_string(), if is_message_event {
+                            "event.data".to_string()
+                        } else {
+                            "event".to_string()
+                        });
 
                     // Walk the function body
                     if let Some(body) = &func.body {
@@ -782,7 +1146,11 @@ impl<'a> DomXssVisitor<'a> {
 
                 self.tainted_vars.insert(param_name.to_string());
                 self.var_aliases
-                    .insert(param_name.to_string(), "event.data".to_string());
+                    .insert(param_name.to_string(), if is_message_event {
+                        "event.data".to_string()
+                    } else {
+                        "event".to_string()
+                    });
 
                 // Arrow functions have a FunctionBody
                 self.walk_statements(&arrow.body.statements);
@@ -790,6 +1158,149 @@ impl<'a> DomXssVisitor<'a> {
                 self.tainted_vars = saved_tainted;
                 self.var_aliases = saved_aliases;
                 return;
+            }
+
+            // Handle named callback references:
+            // window.addEventListener('message', handleMessage)
+            if is_message_event
+                && let Some(Argument::Identifier(handler_id)) = call.arguments.get(1)
+                && let Some(sink_name) = self
+                    .function_summaries
+                    .get(handler_id.name.as_str())
+                    .and_then(|summary| summary.tainted_param_sinks.get(&0))
+                    .cloned()
+            {
+                self.report_vulnerability_with_source(
+                    call.span(),
+                    &sink_name,
+                    "Tainted message event data may reach sink through callback",
+                    Some("event.data".to_string()),
+                );
+                return;
+            }
+        }
+
+        // Propagate taint through common array mutation methods
+        // e.g. arr.push(location.hash); document.write(arr[0]);
+        if let Expression::StaticMemberExpression(member) = &call.callee {
+            let method = member.property.name.as_str();
+            if let Expression::Identifier(id) = &member.object {
+                let target = id.name.as_str();
+                let mut tainted_source: Option<String> = None;
+
+                match method {
+                    "push" | "unshift" => {
+                        for arg in &call.arguments {
+                            let is_arg_tainted = match arg {
+                                Argument::SpreadElement(spread) => {
+                                    self.is_tainted(&spread.argument)
+                                }
+                                _ => arg
+                                    .as_expression()
+                                    .map(|e| self.is_tainted(e))
+                                    .unwrap_or(false),
+                            };
+                            if is_arg_tainted {
+                                tainted_source = match arg {
+                                    Argument::SpreadElement(spread) => {
+                                        self.find_source_in_expr(&spread.argument)
+                                    }
+                                    _ => arg
+                                        .as_expression()
+                                        .and_then(|e| self.find_source_in_expr(e)),
+                                };
+                                break;
+                            }
+                        }
+                    }
+                    "splice" => {
+                        // splice(start, deleteCount, ...items): only items can introduce taint
+                        for arg in call.arguments.iter().skip(2) {
+                            let is_arg_tainted = match arg {
+                                Argument::SpreadElement(spread) => {
+                                    self.is_tainted(&spread.argument)
+                                }
+                                _ => arg
+                                    .as_expression()
+                                    .map(|e| self.is_tainted(e))
+                                    .unwrap_or(false),
+                            };
+                            if is_arg_tainted {
+                                tainted_source = match arg {
+                                    Argument::SpreadElement(spread) => {
+                                        self.find_source_in_expr(&spread.argument)
+                                    }
+                                    _ => arg
+                                        .as_expression()
+                                        .and_then(|e| self.find_source_in_expr(e)),
+                                };
+                                break;
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+
+                if let Some(source) = tainted_source {
+                    self.tainted_vars.insert(target.to_string());
+                    self.var_aliases.insert(target.to_string(), source);
+                }
+            }
+        }
+
+        // Lightweight inter-procedural flow via function summary:
+        // If summary says parameter[i] reaches sink S and argument[i] is tainted,
+        // report vulnerability at call site.
+        if let Expression::Identifier(callee_id) = &call.callee {
+            let fn_name = callee_id.name.as_str();
+            if let Some(param_sinks) = self.function_summaries.get(fn_name).map(|summary| {
+                summary
+                    .tainted_param_sinks
+                    .iter()
+                    .map(|(idx, sink)| (*idx, sink.clone()))
+                    .collect::<Vec<_>>()
+            }) {
+                for (idx, sink_name) in param_sinks {
+                    if let Some(arg) = call.arguments.get(idx) {
+                        let (tainted, source_hint) = match arg {
+                            Argument::SpreadElement(spread) => {
+                                let t = self.is_tainted(&spread.argument);
+                                (
+                                    t,
+                                    if t {
+                                        self.find_source_in_expr(&spread.argument)
+                                    } else {
+                                        None
+                                    },
+                                )
+                            }
+                            _ => {
+                                if let Some(expr) = arg.as_expression() {
+                                    let t = self.is_tainted(expr);
+                                    (
+                                        t,
+                                        if t {
+                                            self.find_source_in_expr(expr)
+                                        } else {
+                                            None
+                                        },
+                                    )
+                                } else {
+                                    (false, None)
+                                }
+                            }
+                        };
+                        if tainted {
+                            self.report_vulnerability_with_source(
+                                call.span(),
+                                &sink_name,
+                                "Tainted argument reaches sink through function call",
+                                source_hint,
+                            );
+                            break;
+                        }
+                    }
+                }
             }
         }
 
@@ -835,38 +1346,7 @@ impl<'a> DomXssVisitor<'a> {
                         }
                     }
                     Argument::CallExpression(call_arg) => {
-                        // Check if the call expression is tainted (e.g., location.hash.slice(1))
-                        // The callee might be a member expression on a source
-                        if let Expression::StaticMemberExpression(member) = &call_arg.callee {
-                            // Try to extract the source from the object
-                            let source = self.extract_source_from_expr(&member.object);
-                            (source.is_some(), source)
-                        } else {
-                            // Check if any argument to the call is tainted
-                            // e.g., decodeURI(location.hash)
-                            let mut found_source = None;
-                            for arg in &call_arg.arguments {
-                                match arg {
-                                    Argument::StaticMemberExpression(member) => {
-                                        if let Some(member_str) = self.get_member_string(member)
-                                            && self.sources.contains(&member_str)
-                                        {
-                                            found_source = Some(member_str);
-                                            break;
-                                        }
-                                    }
-                                    Argument::Identifier(id) => {
-                                        if self.tainted_vars.contains(id.name.as_str()) {
-                                            found_source =
-                                                self.var_aliases.get(id.name.as_str()).cloned();
-                                            break;
-                                        }
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            (found_source.is_some(), found_source)
-                        }
+                        self.call_taint_and_source(call_arg)
                     }
                     Argument::SpreadElement(spread) => {
                         let tainted = self.is_tainted(&spread.argument);
@@ -909,10 +1389,15 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
 
-        // Also treat member method name itself as sink (e.g., el.insertAdjacentHTML, range.createContextualFragment)
-        if let Expression::StaticMemberExpression(member) = &call.callee {
-            let method_name = member.property.name.as_str();
-            if self.sinks.contains(method_name) {
+        // Also treat member method name itself as sink
+        // (e.g., el.insertAdjacentHTML, document['write'](...))
+        let member_method_name = match &call.callee {
+            Expression::StaticMemberExpression(member) => Some(member.property.name.to_string()),
+            Expression::ComputedMemberExpression(member) => self.get_computed_property_string(member),
+            _ => None,
+        };
+        if let Some(method_name) = member_method_name {
+            if self.sinks.contains(method_name.as_str()) {
                 // Special-case setAttribute to only dangerous attributes
                 if method_name == "setAttribute" && call.arguments.len() >= 2 {
                     let mut attr_name_lc: Option<String> = None;
@@ -1003,7 +1488,7 @@ impl<'a> DomXssVisitor<'a> {
                     if arg_tainted {
                         self.report_vulnerability(
                             call.span(),
-                            method_name,
+                            &method_name,
                             "Tainted data passed to sink method",
                         );
                         return;
@@ -1015,21 +1500,6 @@ impl<'a> DomXssVisitor<'a> {
         self.walk_expression(&call.callee);
     }
 
-    /// Extract the source name from an expression (for direct source usage)
-    fn extract_source_from_expr(&self, expr: &Expression) -> Option<String> {
-        if let Some(member_str) = self.get_expr_string(expr)
-            && self.sources.contains(&member_str)
-        {
-            return Some(member_str);
-        }
-        // Try to get from StaticMemberExpression
-        if let Expression::StaticMemberExpression(member) = expr {
-            return self
-                .get_member_string(member)
-                .filter(|s| self.sources.contains(s));
-        }
-        None
-    }
 }
 
 /// AST-based DOM XSS analyzer
@@ -1704,9 +2174,10 @@ document.body.innerHTML = data;
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        // Current implementation doesn't track inter-procedural taint flow
-        // This is a known limitation - detecting this would require more advanced analysis
-        // We just verify it doesn't crash and returns valid results
+        assert!(
+            !result.is_empty(),
+            "Should detect tainted return value flowing to sink"
+        );
     }
 
     #[test]
@@ -2158,8 +2629,10 @@ document.write(arr[0]);
 "#;
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
-        // Note: This may not be detected due to computed member assignment limitations
-        // Test documents current behavior
+        assert!(
+            !result.is_empty(),
+            "Should detect computed member assignment taint propagation"
+        );
     }
 
     #[test]
@@ -2359,5 +2832,291 @@ document.write(result);
             !result.is_empty(),
             "Should detect execCommand insertHTML with tainted data"
         );
+    }
+
+    #[test]
+    fn test_assignment_expression_propagates_taint() {
+        let code = r#"
+            let src = location.search;
+            let out;
+            out = src;
+            document.write(out);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should propagate taint through identifier assignment"
+        );
+    }
+
+    #[test]
+    fn test_assignment_in_conditional_branch_propagates_taint() {
+        let code = r#"
+            let input = location.hash;
+            let out = "safe";
+            if (input) {
+                out = input;
+            }
+            document.body.innerHTML = out;
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should propagate taint through assignment in conditional branches"
+        );
+    }
+
+    #[test]
+    fn test_array_push_taint_propagation() {
+        let code = r#"
+            let items = [];
+            items.push(location.hash);
+            document.write(items[0]);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should propagate taint through Array.push()"
+        );
+    }
+
+    #[test]
+    fn test_array_splice_taint_propagation() {
+        let code = r#"
+            let items = ["safe"];
+            items.splice(0, 1, location.search);
+            document.write(items[0]);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should propagate taint through Array.splice() inserted values"
+        );
+    }
+
+    #[test]
+    fn test_function_parameter_taint_interprocedural() {
+        let code = r#"
+            function render(content) {
+                document.getElementById('display').innerHTML = content;
+            }
+            let param = location.hash.substring(1);
+            render(param);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect tainted argument flowing into sink inside called function"
+        );
+    }
+
+    #[test]
+    fn test_function_call_before_declaration_hoisting_flow() {
+        let code = r#"
+            let param = location.search;
+            sinkWrap(param);
+            function sinkWrap(v) {
+                document.write(v);
+            }
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect tainted flow even when function is declared after call"
+        );
+    }
+
+    #[test]
+    fn test_function_parameter_safe_sink_not_detected() {
+        let code = r#"
+            function safeRender(content) {
+                document.getElementById('display').textContent = content;
+            }
+            let param = location.hash.substring(1);
+            safeRender(param);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result.is_empty(),
+            "textContent inside called function should remain safe"
+        );
+    }
+
+    #[test]
+    fn test_function_expression_parameter_taint_interprocedural() {
+        let code = r#"
+            const render = function (content) {
+                document.getElementById('display').innerHTML = content;
+            };
+            const input = location.search;
+            render(input);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect tainted argument flowing into function expression sink"
+        );
+    }
+
+    #[test]
+    fn test_arrow_function_parameter_taint_interprocedural() {
+        let code = r#"
+            const render = (content) => {
+                document.getElementById('display').innerHTML = content;
+            };
+            const input = location.hash;
+            render(input);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect tainted argument flowing into arrow function sink"
+        );
+    }
+
+    #[test]
+    fn test_function_return_direct_source_to_sink_argument() {
+        let code = r#"
+            function getPayload() {
+                return location.search;
+            }
+            document.write(getPayload());
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect direct function return source passed to sink"
+        );
+    }
+
+    #[test]
+    fn test_named_message_event_handler_callback_flow() {
+        let code = r#"
+            function onMessage(event) {
+                document.getElementById('out').innerHTML = event.data;
+            }
+            window.addEventListener('message', onMessage);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect message event data reaching sink through named callback"
+        );
+    }
+
+    #[test]
+    fn test_named_message_event_handler_safe_not_detected() {
+        let code = r#"
+            function onMessage(event) {
+                document.getElementById('out').textContent = event.data;
+            }
+            window.addEventListener('message', onMessage);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result.is_empty(),
+            "Named message callback should not be flagged when using safe sink"
+        );
+    }
+
+    #[test]
+    fn test_computed_member_innerhtml_assignment_detected() {
+        let code = r#"
+            let payload = location.hash;
+            let el = document.getElementById('target');
+            el['innerHTML'] = payload;
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect computed innerHTML assignment sink"
+        );
+    }
+
+    #[test]
+    fn test_computed_member_location_href_assignment_detected() {
+        let code = r#"
+            let redirect = location.search;
+            location['href'] = redirect;
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect computed location.href assignment sink"
+        );
+    }
+
+    #[test]
+    fn test_computed_member_document_write_call_detected() {
+        let code = r#"
+            let data = location.hash;
+            document['write'](data);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect computed member sink call document['write']"
+        );
+    }
+
+    #[test]
+    fn test_computed_member_insertadjacenthtml_call_detected() {
+        let code = r#"
+            let data = location.search;
+            const el = document.getElementById('target');
+            el['insertAdjacentHTML']('beforeend', data);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect computed insertAdjacentHTML sink call"
+        );
+    }
+
+    #[test]
+    fn test_object_html_property_assignment_not_sink_by_itself() {
+        let code = r#"
+            let model = {};
+            model.html = location.hash;
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result.is_empty(),
+            "Object html property assignment should not be treated as direct sink"
+        );
+    }
+
+    #[test]
+    fn test_object_html_property_then_real_sink_reports_only_real_sink() {
+        let code = r#"
+            let model = {};
+            model.html = location.hash;
+            document.write(model.html);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert_eq!(
+            result.len(),
+            1,
+            "Should report only actual sink usage, not property assignment pseudo-sink"
+        );
+        assert_eq!(result[0].sink, "document.write");
     }
 }

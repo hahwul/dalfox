@@ -80,3 +80,164 @@ if (html) {
 </html>
 """
 expected_detection = true
+
+[[case]]
+id = 1105
+name = "localstorage_to_document_write"
+description = "localStorage.getItem value to document.write"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var message = localStorage.getItem('msg');
+document.write(message);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1106
+name = "sessionstorage_to_location_replace"
+description = "sessionStorage.getItem value to location.replace sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var next = sessionStorage.getItem('next_url');
+location.replace(next);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1107
+name = "localstorage_to_setattribute_href"
+description = "localStorage value to dangerous href attribute via setAttribute"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<a id="jump">go</a>
+<script>
+var href = localStorage.getItem('href');
+document.getElementById('jump').setAttribute('href', href);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1108
+name = "sessionstorage_to_execcommand_inserthtml"
+description = "sessionStorage value to execCommand('insertHTML') sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var html = sessionStorage.getItem('html');
+document.execCommand('insertHTML', false, html);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1109
+name = "localstorage_object_to_innerhtml"
+description = "localStorage object source directly to innerHTML"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="data"></div>
+<script>
+var store = localStorage;
+document.getElementById('data').innerHTML = store;
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1110
+name = "sessionstorage_object_to_eval"
+description = "sessionStorage object source to eval sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var data = sessionStorage;
+eval(data);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1111
+name = "localstorage_template_literal_to_innerhtml"
+description = "localStorage taint through template literal to innerHTML"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="card"></div>
+<script>
+var value = localStorage.getItem('card');
+var html = `<section>${value}</section>`;
+document.getElementById('card').innerHTML = html;
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1112
+name = "storage_reassignment_to_eval"
+description = "sessionStorage taint propagated via reassignment to eval"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var src = sessionStorage.getItem('code');
+var sink = "safe";
+sink = src;
+eval(sink);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1113
+name = "storage_array_push_to_innerhtml"
+description = "localStorage taint through array push then indexed sink usage"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="result"></div>
+<script>
+var list = [];
+list.push(localStorage.getItem('payload'));
+document.getElementById('result').innerHTML = list[0];
+</script>
+</body>
+</html>
+"""
+expected_detection = true

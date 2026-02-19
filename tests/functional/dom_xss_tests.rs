@@ -5,7 +5,6 @@
 
 use crate::functional::mock_case_loader::{self, MockCase};
 use dalfox::scanning::ast_dom_analysis::AstDomAnalyzer;
-use std::path::PathBuf;
 
 /// Load DOM XSS test cases from the mock_cases directory
 fn load_dom_xss_cases() -> Result<Vec<MockCase>, String> {
@@ -134,7 +133,11 @@ fn test_dom_xss_location_sources() {
         }
     }
 
-    // Assert that we detect at least some cases
+    assert!(
+        failed_cases.is_empty(),
+        "Location source DOM XSS cases should all be detected"
+    );
+
     assert!(
         detected > 0,
         "Should detect at least one DOM XSS vulnerability in location sources"
@@ -209,9 +212,9 @@ fn test_dom_xss_storage_sources() {
         }
     }
 
-    // Storage sources are now detected via localStorage.getItem/sessionStorage.getItem
-    println!(
-        "\nNote: Most storage sources detected. Remaining failures may be due to complex call chains."
+    assert!(
+        failed_cases.is_empty(),
+        "Storage source DOM XSS cases should all be detected"
     );
 }
 
@@ -282,6 +285,11 @@ fn test_dom_xss_postmessage_sources() {
             println!("  - Case {}: {}", id, name);
         }
     }
+
+    assert!(
+        failed_cases.is_empty(),
+        "postMessage DOM XSS cases should all be detected"
+    );
 }
 
 #[test]
@@ -352,7 +360,16 @@ fn test_dom_xss_complex_flows() {
         }
     }
 
-    // Complex flows test the analyzer's ability to track taint through transformations
+    let detection_rate = detected as f64 / complex_cases.len() as f64;
+
+    // Complex flows include known hard patterns (e.g. inter-procedural calls),
+    // but baseline coverage should remain high.
+    assert!(
+        detection_rate >= 0.90,
+        "Complex flow detection rate dropped below baseline: {:.1}%",
+        detection_rate * 100.0
+    );
+
     assert!(
         detected > 0,
         "Should detect at least one vulnerability in complex flows"
@@ -482,7 +499,7 @@ fn test_dom_xss_comprehensive_coverage() {
     }
 
     println!("\nCategory Breakdown:");
-    for (category, (total, expected, detected)) in category_stats {
+    for (category, (total, _expected, detected)) in category_stats {
         println!(
             "  {}: {}/{} detected ({:.1}%)",
             category,
