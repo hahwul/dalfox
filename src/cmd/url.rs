@@ -12,9 +12,34 @@ pub struct UrlArgs {
     pub scan_args: ScanArgs,
 }
 
-pub async fn run_url(args: UrlArgs) {
+fn into_scan_args(args: UrlArgs) -> ScanArgs {
     let mut scan_args = args.scan_args;
     scan_args.input_type = "url".to_string();
     scan_args.targets = vec![args.url];
+    scan_args
+}
+
+pub async fn run_url(args: UrlArgs) {
+    let scan_args = into_scan_args(args);
     crate::cmd::scan::run_scan(&scan_args).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::Parser;
+
+    #[derive(Parser)]
+    struct TestCli {
+        #[command(flatten)]
+        args: UrlArgs,
+    }
+
+    #[test]
+    fn test_into_scan_args_sets_url_mode_and_target() {
+        let cli = TestCli::parse_from(["dalfox-test", "--url", "https://example.com"]);
+        let scan_args = into_scan_args(cli.args);
+        assert_eq!(scan_args.input_type, "url");
+        assert_eq!(scan_args.targets, vec!["https://example.com".to_string()]);
+    }
 }
