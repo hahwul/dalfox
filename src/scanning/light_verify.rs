@@ -16,6 +16,15 @@ pub async fn verify_dom_xss_light(
     payload: &str,
 ) -> (bool, Option<String>, Option<String>) {
     let client = target.build_client().unwrap_or_else(|_| Client::new());
+    verify_dom_xss_light_with_client(&client, target, param, payload).await
+}
+
+pub async fn verify_dom_xss_light_with_client(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    payload: &str,
+) -> (bool, Option<String>, Option<String>) {
     let inject_url = crate::scanning::url_inject::build_injected_url(&target.url, param, payload);
     let parsed_url = url::Url::parse(&inject_url).unwrap_or_else(|_| target.url.clone());
     let method = target.method.parse().unwrap_or(reqwest::Method::GET);

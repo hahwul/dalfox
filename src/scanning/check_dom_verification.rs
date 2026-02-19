@@ -58,6 +58,19 @@ pub async fn check_dom_verification(
         return (false, None);
     }
     let client = target.build_client().unwrap_or_else(|_| Client::new());
+    check_dom_verification_with_client(&client, target, param, payload, args).await
+}
+
+pub async fn check_dom_verification_with_client(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    payload: &str,
+    args: &crate::cmd::scan::ScanArgs,
+) -> (bool, Option<String>) {
+    if args.skip_xss_scanning {
+        return (false, None);
+    }
 
     // Build URL or body based on param location for injection
     let inject_url_str =

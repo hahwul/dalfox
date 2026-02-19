@@ -11,10 +11,11 @@ pub mod xss_common;
 
 use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::Param;
-use crate::scanning::check_dom_verification::check_dom_verification;
-use crate::scanning::check_reflection::check_reflection_with_response;
+use crate::scanning::check_dom_verification::check_dom_verification_with_client;
+use crate::scanning::check_reflection::check_reflection_with_response_client;
 use crate::target_parser::Target;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use reqwest::Client;
 use std::collections::HashSet;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
@@ -207,6 +208,7 @@ pub async fn run_scanning(
         return;
     }
     let arc_target = Arc::new(target.clone());
+    let shared_client = Arc::new(arc_target.build_client().unwrap_or_else(|_| Client::new()));
     let semaphore = Arc::new(Semaphore::new(if args.sxss { 1 } else { target.workers }));
     let limit = args.limit;
 
@@ -280,12 +282,15 @@ pub async fn run_scanning(
         let found_reflection_params_clone = found_reflection_params.clone();
         let found_dom_params_clone = found_dom_params.clone();
         let overall_pb_clone = overall_pb.clone();
+        let shared_client_clone = shared_client.clone();
 
         let handle = tokio::spawn(async move {
             let _permit = semaphore_clone.acquire().await.unwrap();
             // Batch local results to reduce mutex contention
             let mut local_results: Vec<crate::scanning::result::Result> = Vec::new();
             let mut local_ast_seen: HashSet<String> = HashSet::new();
+            let mut ast_analysis_done = false;
+            let client = shared_client_clone.as_ref();
 
             // Stage 0: fast probe to avoid large payload blasts on non-reflective params
             // Use a minimal alphanumeric token to check generic reflection across contexts.
@@ -293,9 +298,14 @@ pub async fn run_scanning(
             let mut probe_reflected = false;
             let mut probe_response_text: Option<String> = None;
             for pp in probe_payloads {
-                let (kind, response_text) =
-                    check_reflection_with_response(&target_clone, &param_clone, pp, &args_clone)
-                        .await;
+                let (kind, response_text) = check_reflection_with_response_client(
+                    client,
+                    &target_clone,
+                    &param_clone,
+                    pp,
+                    &args_clone,
+                )
+                .await;
                 if kind.is_some() {
                     probe_reflected = true;
                     probe_response_text = response_text;
@@ -310,6 +320,7 @@ pub async fn run_scanning(
             if !args_clone.skip_ast_analysis
                 && let Some(ref response_text) = probe_response_text
             {
+                ast_analysis_done = true;
                 let js_blocks =
                     crate::scanning::ast_integration::extract_javascript_from_html(response_text);
                 for js_code in js_blocks {
@@ -358,7 +369,8 @@ pub async fn run_scanning(
                         ast_result.response = Some(response_text.clone());
                         // Lightweight runtime verification (non-headless)
                         let (verified, rt_resp, note) =
-                            crate::scanning::light_verify::verify_dom_xss_light(
+                            crate::scanning::light_verify::verify_dom_xss_light_with_client(
+                                client,
                                 &target_clone,
                                 &param_clone,
                                 &payload,
@@ -410,7 +422,8 @@ pub async fn run_scanning(
                     if already_found {
                         (None, None)
                     } else {
-                        check_reflection_with_response(
+                        check_reflection_with_response_client(
+                            client,
                             &target_clone,
                             &param_clone,
                             &reflection_payload,
@@ -424,8 +437,10 @@ pub async fn run_scanning(
 
                 // AST-based DOM XSS analysis (enabled by default unless skipped)
                 if !args_clone.skip_ast_analysis
+                    && !ast_analysis_done
                     && let Some(ref response_text) = reflection_response_text
                 {
+                    ast_analysis_done = true;
                     let js_blocks = crate::scanning::ast_integration::extract_javascript_from_html(
                         response_text,
                     );
@@ -476,7 +491,8 @@ pub async fn run_scanning(
                             ast_result.response = Some(response_text.clone());
                             // Lightweight runtime verification (non-headless)
                             let (verified, rt_resp, note) =
-                                crate::scanning::light_verify::verify_dom_xss_light(
+                                crate::scanning::light_verify::verify_dom_xss_light_with_client(
+                                    client,
                                     &target_clone,
                                     &param_clone,
                                     &payload,
@@ -585,9 +601,14 @@ pub async fn run_scanning(
                     }
                     continue;
                 }
-                let (dom_verified, response_text) =
-                    check_dom_verification(&target_clone, &param_clone, &dom_payload, &args_clone)
-                        .await;
+                let (dom_verified, response_text) = check_dom_verification_with_client(
+                    client,
+                    &target_clone,
+                    &param_clone,
+                    &dom_payload,
+                    &args_clone,
+                )
+                .await;
                 if dom_verified {
                     let should_add = if args_clone.deep_scan {
                         true

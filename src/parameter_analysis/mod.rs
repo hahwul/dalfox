@@ -618,13 +618,14 @@ pub async fn analyze_parameters(
     // Active special character probing (overwrite naive classification)
     // Concurrent active probing per parameter
     let probe_semaphore = Arc::new(Semaphore::new(target.workers));
+    let probe_target = Arc::new(target.clone());
     let mut param_handles = Vec::new();
     for p in target.reflection_params.clone() {
-        let target_ref = target.clone();
+        let target_ref = probe_target.clone();
         let sem = probe_semaphore.clone();
         let encoders_clone = args.encoders.clone();
         param_handles.push(tokio::spawn(async move {
-            active_probe_param(&target_ref, p, sem, encoders_clone).await
+            active_probe_param(target_ref.as_ref(), p, sem, encoders_clone).await
         }));
     }
     let mut probed = Vec::with_capacity(param_handles.len());

@@ -51,9 +51,6 @@ pub async fn check_query_discovery(
             }
         }
         let client_clone = client.clone();
-        let _headers = target.headers.clone();
-        let _user_agent = target.user_agent.clone();
-        let _cookies = target.cookies.clone();
         let data = target.data.clone();
         let method = target.method.clone();
         let delay = target.delay;
@@ -122,9 +119,6 @@ pub async fn check_header_discovery(
     for (header_name, header_value) in &target.headers {
         let client_clone = client.clone();
         let url = target.url.clone();
-        let _headers = target.headers.clone();
-        let _user_agent = target.user_agent.clone();
-        let _cookies = target.cookies.clone();
         let data = target.data.clone();
         let method = target.method.clone();
         let delay = target.delay;
@@ -335,9 +329,6 @@ pub async fn check_path_discovery(
         new_url.set_path(&new_path);
 
         let client_clone = client.clone();
-        let _headers = target.headers.clone();
-        let _user_agent = target.user_agent.clone();
-        let _cookies = target.cookies.clone();
         let data = target.data.clone();
         let method = target.method.clone();
         let target_clone = arc_target.clone();
@@ -417,8 +408,6 @@ pub async fn check_cookie_discovery(
     for (cookie_name, cookie_value) in &target.cookies {
         let client_clone = client.clone();
         let url = target.url.clone();
-        let _headers = target.headers.clone();
-        let _user_agent = target.user_agent.clone();
         let cookies = target.cookies.clone();
         let data = target.data.clone();
         let method = target.method.clone();

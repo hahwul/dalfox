@@ -108,6 +108,19 @@ async fn fetch_injection_response(
         return None;
     }
     let client = target.build_client().unwrap_or_else(|_| Client::new());
+    fetch_injection_response_with_client(&client, target, param, payload, args).await
+}
+
+async fn fetch_injection_response_with_client(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    payload: &str,
+    args: &crate::cmd::scan::ScanArgs,
+) -> Option<String> {
+    if args.skip_xss_scanning {
+        return None;
+    }
 
     // Build URL or body based on param location for injection (refactored to shared helper)
     let inject_url = crate::scanning::url_inject::build_injected_url(&target.url, param, payload);
@@ -171,6 +184,23 @@ pub async fn check_reflection_with_response(
     args: &crate::cmd::scan::ScanArgs,
 ) -> (Option<ReflectionKind>, Option<String>) {
     if let Some(text) = fetch_injection_response(target, param, payload, args).await {
+        let kind = classify_reflection(&text, payload);
+        (kind, Some(text))
+    } else {
+        (None, None)
+    }
+}
+
+pub async fn check_reflection_with_response_client(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    payload: &str,
+    args: &crate::cmd::scan::ScanArgs,
+) -> (Option<ReflectionKind>, Option<String>) {
+    if let Some(text) =
+        fetch_injection_response_with_client(client, target, param, payload, args).await
+    {
         let kind = classify_reflection(&text, payload);
         (kind, Some(text))
     } else {

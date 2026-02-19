@@ -1045,22 +1045,29 @@ pub async fn run_scan(args: &ScanArgs) {
 
     // Load cookies from raw HTTP request file if specified
     if let Some(path) = &args.cookie_from_raw {
-        for target in &mut parsed_targets {
-            if let Ok(content) = std::fs::read_to_string(path) {
+        match std::fs::read_to_string(path) {
+            Ok(content) => {
+                let mut cookies_from_raw: Vec<(String, String)> = Vec::new();
                 for line in content.lines() {
                     if let Some(cookie_line) = line.strip_prefix("Cookie: ") {
                         for cookie in cookie_line.split("; ") {
                             if let Some((name, value)) = cookie.split_once('=') {
-                                target
-                                    .cookies
+                                cookies_from_raw
                                     .push((name.trim().to_string(), value.trim().to_string()));
                             }
                         }
                     }
                 }
-            } else if !args.silence {
+                if !cookies_from_raw.is_empty() {
+                    for target in &mut parsed_targets {
+                        target.cookies.extend(cookies_from_raw.iter().cloned());
+                    }
+                }
+            }
+            Err(_) if !args.silence => {
                 eprintln!("Error reading cookie file: {}", path);
             }
+            Err(_) => {}
         }
     }
 

@@ -1,8 +1,12 @@
 use crate::cmd::scan::ScanArgs;
 
 use crate::parameter_analysis::{DelimiterType, InjectionContext};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 // Context-specific payload lists
+
+static CUSTOM_PAYLOAD_CACHE: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
 
 /// Generate dynamic payloads based on the injection context
 pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
@@ -389,8 +393,21 @@ mod tests {
 }
 
 pub fn load_custom_payloads(path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let cache = CUSTOM_PAYLOAD_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(guard) = cache.lock()
+        && let Some(cached) = guard.get(path)
+    {
+        return Ok(cached.clone());
+    }
+
     let content = std::fs::read_to_string(path)?;
-    Ok(content.lines().map(|s| s.to_string()).collect())
+    let payloads: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(path.to_string(), payloads.clone());
+    }
+
+    Ok(payloads)
 }
 
 pub fn get_dynamic_payloads(
