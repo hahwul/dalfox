@@ -612,6 +612,13 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_default_constructor_initializes_empty_jobs() {
+        let mcp = DalfoxMcp::default();
+        let jobs = mcp.jobs.lock().await;
+        assert!(jobs.is_empty());
+    }
+
+    #[tokio::test]
     async fn test_scan_with_dalfox_rejects_missing_target() {
         let mcp = DalfoxMcp::new();
         let err = mcp
@@ -743,5 +750,36 @@ mod tests {
         let queried_payload = parse_result_json(&queried);
         let status = queried_payload["status"].as_str().expect("status");
         assert!(matches!(status, "queued" | "running" | "done" | "error"));
+    }
+
+    #[tokio::test]
+    async fn test_scan_with_dalfox_handles_cookie_from_raw_and_non_string_collections() {
+        let mcp = DalfoxMcp::new();
+        let cookie_file = std::env::temp_dir().join(format!(
+            "dalfox-mcp-cookie-{}.txt",
+            crate::utils::make_scan_id("cookie-raw")
+        ));
+        std::fs::write(
+            &cookie_file,
+            "GET / HTTP/1.1\nHost: example.com\nCookie: sid=abc; uid=def\n",
+        )
+        .expect("write cookie raw");
+
+        let resp = mcp
+            .scan_with_dalfox(object(json!({
+                "target":"http://127.0.0.1:1/?q=a",
+                "param": 123,
+                "headers": 456,
+                "cookies": true,
+                "cookie_from_raw": cookie_file.to_string_lossy().to_string(),
+                "encoders": ["url", "html"]
+            })))
+            .await
+            .expect("scan_with_dalfox should queue");
+
+        let payload = parse_result_json(&resp);
+        assert_eq!(payload["status"], "queued");
+        assert!(payload["scan_id"].as_str().is_some());
+        let _ = std::fs::remove_file(cookie_file);
     }
 }

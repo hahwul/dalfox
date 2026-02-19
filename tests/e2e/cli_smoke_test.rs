@@ -2,7 +2,8 @@
 //!
 //! These tests spawn the actual dalfox binary and verify basic functionality.
 
-use std::process::Command;
+use std::io::Write;
+use std::process::{Command, Stdio};
 
 #[test]
 fn test_cli_starts_without_error() {
@@ -93,5 +94,28 @@ fn test_invalid_subcommand_exits_with_error() {
     // Invalid subcommand should either fail or fall through to scan mode
     // (which might fail without a valid target)
     // We just verify the process completes
+    let _ = output.status;
+}
+
+#[test]
+fn test_hidden_pipe_subcommand_reads_stdin_and_exits() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args(["pipe", "--format", "json", "-S"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to execute dalfox pipe");
+
+    {
+        let stdin = child.stdin.as_mut().expect("child stdin should be piped");
+        stdin
+            .write_all(b"http://[::1\n")
+            .expect("failed to write pipe input");
+    }
+
+    let output = child
+        .wait_with_output()
+        .expect("failed waiting for dalfox pipe");
     let _ = output.status;
 }

@@ -1141,6 +1141,7 @@ mod tests {
         response::IntoResponse,
     };
     use std::collections::HashMap as Map;
+    use std::path::PathBuf;
 
     fn make_state(
         api_key: Option<&str>,
@@ -1161,6 +1162,254 @@ mod tests {
             jsonp_enabled: jsonp,
             callback_param_name: cb_name.to_string(),
         }
+    }
+
+    fn temp_log_path(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "dalfox-server-{}-{}.log",
+            name,
+            crate::utils::make_scan_id(name)
+        ))
+    }
+
+    #[test]
+    fn test_check_api_key_variants() {
+        let state_no_key = make_state(None, None, false, false, "callback");
+        let headers = HeaderMap::new();
+        assert!(check_api_key(&state_no_key, &headers));
+
+        let state_with_key = make_state(Some("secret"), None, false, false, "callback");
+        assert!(!check_api_key(&state_with_key, &headers));
+
+        let mut ok_headers = HeaderMap::new();
+        ok_headers.insert("X-API-KEY", HeaderValue::from_static("secret"));
+        assert!(check_api_key(&state_with_key, &ok_headers));
+
+        let mut bad_headers = HeaderMap::new();
+        bad_headers.insert("X-API-KEY", HeaderValue::from_static("wrong"));
+        assert!(!check_api_key(&state_with_key, &bad_headers));
+    }
+
+    #[test]
+    fn test_make_and_short_scan_id_shape() {
+        let id = make_scan_id("https://example.com");
+        assert_eq!(id.len(), 64);
+        assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
+        assert_eq!(short_scan_id(&id).len(), 7);
+        assert_eq!(short_scan_id("abc"), "abc");
+    }
+
+    #[test]
+    fn test_validate_jsonp_callback_accepts_and_rejects() {
+        assert_eq!(
+            validate_jsonp_callback(" cb.func_1 "),
+            Some("cb.func_1".to_string())
+        );
+        assert_eq!(validate_jsonp_callback("$name"), Some("$name".to_string()));
+        assert!(validate_jsonp_callback("").is_none());
+        assert!(validate_jsonp_callback("1abc").is_none());
+        assert!(validate_jsonp_callback("a-b").is_none());
+        assert!(validate_jsonp_callback(&"a".repeat(65)).is_none());
+    }
+
+    #[test]
+    fn test_build_cors_headers_none_all_exact_regex_and_fallbacks() {
+        let req_headers = HeaderMap::new();
+        let state_none = make_state(None, None, false, false, "callback");
+        let none_headers = build_cors_headers(&state_none, &req_headers);
+        assert!(none_headers.is_empty());
+
+        let state_all = make_state(None, Some(vec!["*"]), true, false, "callback");
+        let all_headers = build_cors_headers(&state_all, &req_headers);
+        assert_eq!(
+            all_headers
+                .get("Access-Control-Allow-Origin")
+                .and_then(|v| v.to_str().ok()),
+            Some("*")
+        );
+
+        let state_exact = make_state(
+            None,
+            Some(vec!["http://localhost:3000"]),
+            false,
+            false,
+            "callback",
+        );
+        let mut exact_req_headers = HeaderMap::new();
+        exact_req_headers.insert("Origin", HeaderValue::from_static("http://localhost:3000"));
+        let exact_headers = build_cors_headers(&state_exact, &exact_req_headers);
+        assert_eq!(
+            exact_headers
+                .get("Access-Control-Allow-Origin")
+                .and_then(|v| v.to_str().ok()),
+            Some("http://localhost:3000")
+        );
+        assert_eq!(
+            exact_headers.get("Vary").and_then(|v| v.to_str().ok()),
+            Some("Origin")
+        );
+
+        let mut state_regex =
+            make_state(None, Some(vec!["http://dummy"]), false, false, "callback");
+        state_regex.allowed_origin_regexes =
+            vec![regex::Regex::new(r"^https://.*\.example\.com$").expect("valid regex")];
+        let mut regex_req_headers = HeaderMap::new();
+        regex_req_headers.insert(
+            "Origin",
+            HeaderValue::from_static("https://api.example.com"),
+        );
+        let regex_headers = build_cors_headers(&state_regex, &regex_req_headers);
+        assert_eq!(
+            regex_headers
+                .get("Access-Control-Allow-Origin")
+                .and_then(|v| v.to_str().ok()),
+            Some("https://api.example.com")
+        );
+
+        let mut state_fallback = make_state(None, Some(vec!["http://x"]), false, false, "callback");
+        state_fallback.allow_methods = "\n".to_string();
+        state_fallback.allow_headers = "\n".to_string();
+        let fallback_headers = build_cors_headers(&state_fallback, &HeaderMap::new());
+        assert!(
+            fallback_headers
+                .get("Access-Control-Allow-Methods")
+                .and_then(|v| v.to_str().ok())
+                .map(|v| v.contains("GET"))
+                .unwrap_or(false)
+        );
+        assert!(
+            fallback_headers
+                .get("Access-Control-Allow-Headers")
+                .and_then(|v| v.to_str().ok())
+                .map(|v| v.contains("Content-Type"))
+                .unwrap_or(false)
+        );
+    }
+
+    #[test]
+    fn test_log_writes_to_file_and_supports_unknown_level() {
+        let mut state = make_state(None, None, false, false, "callback");
+        let path = temp_log_path("log-test");
+        let _ = std::fs::remove_file(&path);
+        state.log_file = Some(path.to_string_lossy().to_string());
+
+        log(&state, "CUSTOM", "hello-log");
+        let content = std::fs::read_to_string(&path).expect("log file should be readable");
+        assert!(content.contains("[CUSTOM] hello-log"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[tokio::test]
+    async fn test_run_scan_job_invalid_target_sets_error() {
+        let state = make_state(None, None, false, false, "callback");
+        let id = "scan-job-error".to_string();
+        {
+            let mut jobs = state.jobs.lock().await;
+            jobs.insert(
+                id.clone(),
+                Job {
+                    status: "queued".to_string(),
+                    results: None,
+                    include_request: false,
+                    include_response: false,
+                },
+            );
+        }
+
+        run_scan_job(
+            state.clone(),
+            id.clone(),
+            "not a valid target".to_string(),
+            ScanOptions::default(),
+            false,
+            false,
+        )
+        .await;
+
+        let jobs = state.jobs.lock().await;
+        let job = jobs.get(&id).expect("job should exist");
+        assert_eq!(job.status, "error");
+    }
+
+    #[tokio::test]
+    async fn test_get_scan_handler_unauthorized_and_bad_request_jsonp() {
+        let state_auth = make_state(Some("secret"), None, false, true, "cb");
+        let mut params_auth = Map::new();
+        params_auth.insert("cb".to_string(), "myFn".to_string());
+        params_auth.insert("url".to_string(), "http://example.com".to_string());
+        let headers_missing_key = HeaderMap::new();
+
+        let unauthorized_resp =
+            get_scan_handler(State(state_auth), headers_missing_key, Query(params_auth))
+                .await
+                .into_response();
+        assert_eq!(unauthorized_resp.status(), StatusCode::UNAUTHORIZED);
+        assert!(
+            unauthorized_resp
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .starts_with("application/javascript")
+        );
+
+        let state_no_key = make_state(None, None, false, true, "cb");
+        let mut params_bad_req = Map::new();
+        params_bad_req.insert("cb".to_string(), "myFn".to_string());
+        let bad_req_resp =
+            get_scan_handler(State(state_no_key), HeaderMap::new(), Query(params_bad_req))
+                .await
+                .into_response();
+        assert_eq!(bad_req_resp.status(), StatusCode::BAD_REQUEST);
+        assert!(
+            bad_req_resp
+                .headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .starts_with("application/javascript")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_get_result_handler_not_found_jsonp() {
+        let state = make_state(None, None, false, true, "cb");
+        let mut q = Map::new();
+        q.insert("cb".to_string(), "resultCb".to_string());
+        let resp = get_result_handler(
+            State(state),
+            HeaderMap::new(),
+            Path("missing-id".to_string()),
+            Query(q),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        assert!(
+            resp.headers()
+                .get("content-type")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("")
+                .starts_with("application/javascript")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_options_scan_handler_returns_no_content() {
+        let state = make_state(None, Some(vec!["*"]), true, false, "callback");
+        let mut headers = HeaderMap::new();
+        headers.insert("Origin", HeaderValue::from_static("http://any.origin"));
+
+        let resp = options_scan_handler(State(state), headers)
+            .await
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::NO_CONTENT);
+        assert_eq!(
+            resp.headers()
+                .get("access-control-allow-origin")
+                .and_then(|v| v.to_str().ok()),
+            Some("*")
+        );
     }
 
     #[tokio::test]
