@@ -537,3 +537,211 @@ pub async fn run_mcp_server() -> Result<(), Box<dyn std::error::Error>> {
     running.waiting().await?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rmcp::model::object;
+    use serde_json::json;
+    use tokio::time::{Duration, sleep};
+
+    fn default_scan_args(target: &str) -> ScanArgs {
+        ScanArgs {
+            input_type: "url".to_string(),
+            format: "json".to_string(),
+            targets: vec![target.to_string()],
+            param: vec![],
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            method: "GET".to_string(),
+            user_agent: None,
+            cookie_from_raw: None,
+            mining_dict_word: None,
+            skip_mining: false,
+            skip_mining_dict: false,
+            skip_mining_dom: false,
+            skip_discovery: false,
+            skip_reflection_header: false,
+            skip_reflection_cookie: false,
+            skip_reflection_path: false,
+            timeout: 1,
+            delay: 0,
+            proxy: None,
+            follow_redirects: false,
+            output: None,
+            include_request: false,
+            include_response: false,
+            silence: true,
+            poc_type: "plain".to_string(),
+            limit: None,
+            workers: 1,
+            max_concurrent_targets: 1,
+            max_targets_per_host: 1,
+            encoders: vec!["none".to_string()],
+            custom_blind_xss_payload: None,
+            blind_callback_url: None,
+            custom_payload: None,
+            only_custom_payload: false,
+            skip_xss_scanning: false,
+            deep_scan: false,
+            sxss: false,
+            sxss_url: None,
+            sxss_method: "GET".to_string(),
+            skip_ast_analysis: false,
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
+        }
+    }
+
+    fn parse_result_json(result: &CallToolResult) -> serde_json::Value {
+        let text = result
+            .content
+            .first()
+            .and_then(|c| c.as_text())
+            .map(|t| t.text.clone())
+            .expect("text content");
+        serde_json::from_str(&text).expect("json tool result")
+    }
+
+    #[test]
+    fn test_make_scan_id_shape() {
+        let a = DalfoxMcp::make_scan_id("https://example.com");
+        assert_eq!(a.len(), 64);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[tokio::test]
+    async fn test_scan_with_dalfox_rejects_missing_target() {
+        let mcp = DalfoxMcp::new();
+        let err = mcp
+            .scan_with_dalfox(object(json!({})))
+            .await
+            .expect_err("missing target must fail");
+        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert!(err.message.contains("missing required field 'target'"));
+    }
+
+    #[tokio::test]
+    async fn test_scan_with_dalfox_rejects_non_http_target() {
+        let mcp = DalfoxMcp::new();
+        let err = mcp
+            .scan_with_dalfox(object(json!({"target":"ftp://example.com"})))
+            .await
+            .expect_err("non-http scheme must fail");
+        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert!(err.message.contains("http:// or https://"));
+    }
+
+    #[tokio::test]
+    async fn test_get_results_rejects_empty_scan_id() {
+        let mcp = DalfoxMcp::new();
+        let err = mcp
+            .get_results_dalfox(object(json!({"scan_id":""})))
+            .await
+            .expect_err("empty scan_id must fail");
+        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert!(err.message.contains("must not be empty"));
+    }
+
+    #[tokio::test]
+    async fn test_get_results_rejects_unknown_scan_id() {
+        let mcp = DalfoxMcp::new();
+        let err = mcp
+            .get_results_dalfox(object(json!({"scan_id":"missing-id"})))
+            .await
+            .expect_err("unknown scan_id must fail");
+        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert!(err.message.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_run_job_sets_error_on_parse_failure() {
+        let mcp = DalfoxMcp::new();
+        let scan_id = "job-parse-fail".to_string();
+        {
+            let mut jobs = mcp.jobs.lock().await;
+            jobs.insert(
+                scan_id.clone(),
+                Job {
+                    status: "queued".to_string(),
+                    results: None,
+                    include_request: false,
+                    include_response: false,
+                },
+            );
+        }
+
+        let mut args = default_scan_args("http://example.com");
+        args.targets = vec!["not a valid target".to_string()];
+        mcp.run_job(scan_id.clone(), args).await;
+
+        let jobs = mcp.jobs.lock().await;
+        let job = jobs.get(&scan_id).expect("job exists");
+        assert_eq!(job.status, "error");
+    }
+
+    #[tokio::test]
+    async fn test_scan_with_dalfox_queues_and_can_be_queried_array_args() {
+        let mcp = DalfoxMcp::new();
+        let resp = mcp
+            .scan_with_dalfox(object(json!({
+                "target":"http://127.0.0.1:1/?q=a",
+                "include_request": true,
+                "include_response": true,
+                "param": ["q:query", "id"],
+                "data": "a=1&b=2",
+                "headers": ["X-Test: 1", "X-Trace: 2"],
+                "cookies": ["sid=abc", "uid=def"],
+                "method": "POST",
+                "user_agent": "dalfox-mcp-test",
+                "encoders": "none,url,html",
+                "timeout": 1,
+                "delay": 0,
+                "follow_redirects": false
+            })))
+            .await
+            .expect("scan_with_dalfox should queue");
+
+        let payload = parse_result_json(&resp);
+        assert_eq!(payload["status"], "queued");
+        let scan_id = payload["scan_id"].as_str().expect("scan_id").to_string();
+
+        sleep(Duration::from_millis(25)).await;
+        let queried = mcp
+            .get_results_dalfox(object(json!({"scan_id": scan_id})))
+            .await
+            .expect("get_results should return a job");
+        let queried_payload = parse_result_json(&queried);
+        let status = queried_payload["status"].as_str().expect("status");
+        assert!(matches!(status, "queued" | "running" | "done" | "error"));
+    }
+
+    #[tokio::test]
+    async fn test_scan_with_dalfox_queues_and_can_be_queried_string_args() {
+        let mcp = DalfoxMcp::new();
+        let resp = mcp
+            .scan_with_dalfox(object(json!({
+                "target":"http://127.0.0.1:1/?q=a",
+                "param": "q:query",
+                "headers": "X-One: 1",
+                "cookies": "sid=1",
+                "encoders": ["none", "base64"],
+                "timeout": 9999,
+                "delay": -1
+            })))
+            .await
+            .expect("scan_with_dalfox should queue");
+
+        let payload = parse_result_json(&resp);
+        let scan_id = payload["scan_id"].as_str().expect("scan_id").to_string();
+
+        let queried = mcp
+            .get_results_dalfox(object(json!({"scan_id": scan_id})))
+            .await
+            .expect("get_results should return a job");
+        let queried_payload = parse_result_json(&queried);
+        let status = queried_payload["status"].as_str().expect("status");
+        assert!(matches!(status, "queued" | "running" | "done" | "error"));
+    }
+}
