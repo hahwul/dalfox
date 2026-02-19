@@ -35,6 +35,18 @@ struct FunctionSummary {
     return_without_tainted_params: Option<String>,
 }
 
+#[derive(Clone)]
+struct BoundArgInfo {
+    tainted: bool,
+    source: Option<String>,
+}
+
+#[derive(Clone)]
+struct BoundCallableAlias {
+    target: String,
+    bound_args: Vec<BoundArgInfo>,
+}
+
 /// AST visitor for DOM XSS analysis
 struct DomXssVisitor<'a> {
     /// Set of tainted variable names
@@ -51,6 +63,10 @@ struct DomXssVisitor<'a> {
     sanitizers: HashSet<String>,
     /// Function summaries used for lightweight inter-procedural taint tracking
     function_summaries: HashMap<String, FunctionSummary>,
+    /// Track `instanceVar -> ClassName` for class instance method summary resolution.
+    instance_classes: HashMap<String, String>,
+    /// Track aliases produced by `.bind()` calls.
+    bound_function_aliases: HashMap<String, BoundCallableAlias>,
     /// Internal flag for summary collection of tainted return values
     collecting_tainted_returns: bool,
     /// Internal buffer for tainted return sources while collecting summaries
@@ -138,6 +154,8 @@ impl<'a> DomXssVisitor<'a> {
             sinks,
             sanitizers,
             function_summaries: HashMap::new(),
+            instance_classes: HashMap::new(),
+            bound_function_aliases: HashMap::new(),
             collecting_tainted_returns: false,
             tainted_return_sources: Vec::new(),
             source_code,
@@ -166,15 +184,12 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
-    /// Get string representation of computed member property if static string literal.
+    /// Get string representation of computed member property if statically resolvable.
     fn get_computed_property_string(
         &self,
         member: &ComputedMemberExpression<'a>,
     ) -> Option<String> {
-        match &member.expression {
-            Expression::StringLiteral(s) => Some(s.value.to_string()),
-            _ => None,
-        }
+        self.eval_static_string_expr(&member.expression)
     }
 
     /// Get string representation of computed member expression when property is literal.
@@ -198,6 +213,266 @@ impl<'a> DomXssVisitor<'a> {
             prop_name,
             "innerHTML" | "outerHTML" | "src" | "srcdoc" | "href" | "xlink:href"
         )
+    }
+
+    /// Evaluate an expression to a static string when possible.
+    fn eval_static_string_expr(&self, expr: &Expression<'a>) -> Option<String> {
+        match expr {
+            Expression::StringLiteral(s) => Some(s.value.to_string()),
+            Expression::TemplateLiteral(t) if t.expressions.is_empty() => Some(
+                t.quasis
+                    .iter()
+                    .filter_map(|q| q.value.cooked)
+                    .map(|a| a.as_str())
+                    .collect::<Vec<_>>()
+                    .join(""),
+            ),
+            Expression::BinaryExpression(binary) if binary.operator == BinaryOperator::Addition => {
+                let left = self.eval_static_string_expr(&binary.left)?;
+                let right = self.eval_static_string_expr(&binary.right)?;
+                Some(format!("{left}{right}"))
+            }
+            Expression::ParenthesizedExpression(paren) => {
+                self.eval_static_string_expr(&paren.expression)
+            }
+            _ => None,
+        }
+    }
+
+    fn eval_static_string_arg(&self, arg: &Argument<'a>) -> Option<String> {
+        match arg {
+            Argument::SpreadElement(_) => None,
+            _ => arg
+                .as_expression()
+                .and_then(|expr| self.eval_static_string_expr(expr)),
+        }
+    }
+
+    fn get_property_key_name(&self, key: &PropertyKey<'a>) -> Option<String> {
+        key.name().map(|n| n.into_owned())
+    }
+
+    fn get_summary_object_prefix(&self, expr: &Expression<'a>) -> Option<String> {
+        match expr {
+            Expression::Identifier(id) => self
+                .instance_classes
+                .get(id.name.as_str())
+                .cloned()
+                .or_else(|| Some(id.name.to_string())),
+            Expression::StaticMemberExpression(member) => self.get_member_string(member),
+            Expression::ComputedMemberExpression(member) => self.get_computed_member_string(member),
+            _ => None,
+        }
+    }
+
+    /// Resolve a callable summary key from an expression.
+    /// Examples:
+    /// - `render` -> `render`
+    /// - `helper.render` -> `helper.render`
+    /// - `inst.render` where `inst` is `new Renderer()` -> `Renderer.render`
+    fn get_summary_key_for_callee_expr(&self, expr: &Expression<'a>) -> Option<String> {
+        match expr {
+            Expression::Identifier(id) => Some(id.name.to_string()),
+            Expression::StaticMemberExpression(member) => {
+                let base = self.get_summary_object_prefix(&member.object)?;
+                Some(format!("{}.{}", base, member.property.name.as_str()))
+            }
+            Expression::ComputedMemberExpression(member) => {
+                let base = self.get_summary_object_prefix(&member.object)?;
+                let property = self.get_computed_property_string(member)?;
+                Some(format!("{}.{}", base, property))
+            }
+            _ => None,
+        }
+    }
+
+    fn get_callee_property_name(&self, callee: &Expression<'a>) -> Option<String> {
+        match callee {
+            Expression::StaticMemberExpression(member) => Some(member.property.name.to_string()),
+            Expression::ComputedMemberExpression(member) => self.get_computed_property_string(member),
+            _ => None,
+        }
+    }
+
+    fn get_callee_object_expr<'b>(&self, callee: &'b Expression<'a>) -> Option<&'b Expression<'a>> {
+        match callee {
+            Expression::StaticMemberExpression(member) => Some(&member.object),
+            Expression::ComputedMemberExpression(member) => Some(&member.object),
+            _ => None,
+        }
+    }
+
+    fn build_bound_alias_from_bind_call(
+        &self,
+        bind_call: &CallExpression<'a>,
+    ) -> Option<BoundCallableAlias> {
+        let wrapper_name = self.get_callee_property_name(&bind_call.callee)?;
+        if wrapper_name != "bind" {
+            return None;
+        }
+        let target_expr = self.get_callee_object_expr(&bind_call.callee)?;
+        let mut target = self
+            .get_summary_key_for_callee_expr(target_expr)
+            .or_else(|| self.get_expr_string(target_expr))?;
+
+        let mut bound_args = bind_call
+            .arguments
+            .iter()
+            .skip(1)
+            .map(|arg| {
+                let (tainted, source) = self.argument_taint_and_source(arg);
+                BoundArgInfo { tainted, source }
+            })
+            .collect::<Vec<_>>();
+
+        // Preserve previously bound arguments across chained binds:
+        // f1 = fn.bind(this, a); f2 = f1.bind(this2, b) -> args [a, b]
+        if let Expression::Identifier(id) = target_expr
+            && let Some(existing_alias) = self.bound_function_aliases.get(id.name.as_str())
+        {
+            target = existing_alias.target.clone();
+            let mut chained_args = existing_alias.bound_args.clone();
+            chained_args.extend(bound_args);
+            bound_args = chained_args;
+        }
+
+        Some(BoundCallableAlias { target, bound_args })
+    }
+
+    fn resolve_param_argument_taint(
+        &self,
+        call: &CallExpression<'a>,
+        alias: Option<&BoundCallableAlias>,
+        param_idx: usize,
+    ) -> (bool, Option<String>) {
+        if let Some(bound_alias) = alias {
+            if let Some(bound_arg) = bound_alias.bound_args.get(param_idx) {
+                return (bound_arg.tainted, bound_arg.source.clone());
+            }
+            let call_idx = param_idx.saturating_sub(bound_alias.bound_args.len());
+            if param_idx >= bound_alias.bound_args.len()
+                && let Some(arg) = call.arguments.get(call_idx)
+            {
+                return self.argument_taint_and_source(arg);
+            }
+            return (false, None);
+        }
+
+        if let Some(arg) = call.arguments.get(param_idx) {
+            self.argument_taint_and_source(arg)
+        } else {
+            (false, None)
+        }
+    }
+
+    fn resolve_apply_argument_taint_at(
+        &self,
+        arg_array: &Argument<'a>,
+        param_idx: usize,
+    ) -> (bool, Option<String>) {
+        if let Some(expr) = arg_array.as_expression()
+            && let Expression::ArrayExpression(array) = expr
+        {
+            let mut current_idx = 0usize;
+            for elem in &array.elements {
+                match elem {
+                    ArrayExpressionElement::Elision(_) => {
+                        if current_idx == param_idx {
+                            return (false, None);
+                        }
+                        current_idx += 1;
+                    }
+                    ArrayExpressionElement::SpreadElement(spread) => {
+                        let tainted = self.is_tainted(&spread.argument);
+                        return (
+                            tainted,
+                            if tainted {
+                                self.find_source_in_expr(&spread.argument)
+                            } else {
+                                None
+                            },
+                        );
+                    }
+                    _ => {
+                        if let Some(elem_expr) = elem.as_expression() {
+                            if current_idx == param_idx {
+                                let tainted = self.is_tainted(elem_expr);
+                                return (
+                                    tainted,
+                                    if tainted {
+                                        self.find_source_in_expr(elem_expr)
+                                    } else {
+                                        None
+                                    },
+                                );
+                            }
+                        }
+                        current_idx += 1;
+                    }
+                }
+            }
+            return (false, None);
+        }
+
+        self.argument_taint_and_source(arg_array)
+    }
+
+    fn resolve_wrapper_param_argument_taint(
+        &self,
+        call: &CallExpression<'a>,
+        wrapper_name: &str,
+        alias: Option<&BoundCallableAlias>,
+        param_idx: usize,
+    ) -> (bool, Option<String>) {
+        if let Some(bound_alias) = alias {
+            if let Some(bound_arg) = bound_alias.bound_args.get(param_idx) {
+                return (bound_arg.tainted, bound_arg.source.clone());
+            }
+            if param_idx >= bound_alias.bound_args.len() {
+                let shifted_idx = param_idx - bound_alias.bound_args.len();
+                if wrapper_name == "call" {
+                    if let Some(arg) = call.arguments.get(shifted_idx + 1) {
+                        return self.argument_taint_and_source(arg);
+                    }
+                } else if wrapper_name == "apply"
+                    && let Some(arg_array) = call.arguments.get(1)
+                {
+                    return self.resolve_apply_argument_taint_at(arg_array, shifted_idx);
+                }
+            }
+            return (false, None);
+        }
+
+        if wrapper_name == "call" {
+            if let Some(arg) = call.arguments.get(param_idx + 1) {
+                return self.argument_taint_and_source(arg);
+            }
+        } else if wrapper_name == "apply"
+            && let Some(arg_array) = call.arguments.get(1)
+        {
+            return self.resolve_apply_argument_taint_at(arg_array, param_idx);
+        }
+
+        (false, None)
+    }
+
+    fn get_alias_for_expr(&self, expr: &Expression<'a>) -> Option<&BoundCallableAlias> {
+        if let Expression::Identifier(id) = expr {
+            self.bound_function_aliases.get(id.name.as_str())
+        } else {
+            None
+        }
+    }
+
+    fn get_alias_for_callee_identifier(
+        &self,
+        call: &CallExpression<'a>,
+    ) -> Option<&BoundCallableAlias> {
+        if let Expression::Identifier(id) = &call.callee {
+            self.bound_function_aliases.get(id.name.as_str())
+        } else {
+            None
+        }
     }
 
     /// Check taint/source hint for a call argument
@@ -241,23 +516,95 @@ impl<'a> DomXssVisitor<'a> {
             return (false, None);
         }
 
-        // Function summary-based return taint
-        if let Expression::Identifier(callee_id) = &call.callee {
-            let fn_name = callee_id.name.as_str();
-            if let Some(summary) = self.function_summaries.get(fn_name) {
+        // Wrapper return propagation (fn.call / fn.apply)
+        if let Some(wrapper_name) = self.get_callee_property_name(&call.callee)
+            && (wrapper_name == "call" || wrapper_name == "apply")
+            && let Some(target_expr) = self.get_callee_object_expr(&call.callee)
+        {
+            let target_alias = self.get_alias_for_expr(target_expr);
+            let mut target_summary_key = self.get_summary_key_for_callee_expr(target_expr);
+            if target_summary_key
+                .as_ref()
+                .and_then(|k| self.function_summaries.get(k))
+                .is_none()
+                && let Some(alias) = target_alias
+            {
+                target_summary_key = Some(alias.target.clone());
+            }
+
+            if let Some(summary_key) = target_summary_key
+                && let Some(summary) = self.function_summaries.get(&summary_key)
+            {
                 if let Some(source) = &summary.return_without_tainted_params {
                     return (true, Some(source.clone()));
                 }
-
                 for (idx, fallback_source) in &summary.tainted_param_returns {
-                    if let Some(arg) = call.arguments.get(*idx) {
-                        let (tainted, source_hint) = self.argument_taint_and_source(arg);
-                        if tainted {
-                            return (true, source_hint.or_else(|| Some(fallback_source.clone())));
-                        }
+                    let (tainted, source_hint) = self.resolve_wrapper_param_argument_taint(
+                        call,
+                        &wrapper_name,
+                        target_alias,
+                        *idx,
+                    );
+                    if tainted {
+                        return (true, source_hint.or_else(|| Some(fallback_source.clone())));
                     }
                 }
             }
+
+            let mut target_name = self.get_expr_string(target_expr);
+            if target_name
+                .as_ref()
+                .map(|name| !self.sources.contains(name))
+                .unwrap_or(true)
+                && let Some(alias) = target_alias
+            {
+                target_name = Some(alias.target.clone());
+            }
+            if let Some(target_name) = target_name
+                && self.sources.contains(&target_name)
+            {
+                return (true, Some(target_name));
+            }
+        }
+
+        // Function summary-based return taint
+        let mut summary_key = self.get_summary_key_for_callee_expr(&call.callee);
+        if let Expression::Identifier(id) = &call.callee
+            && (summary_key.is_none()
+                || summary_key
+                    .as_ref()
+                    .and_then(|k| self.function_summaries.get(k))
+                    .is_none())
+        {
+            summary_key = self
+                .bound_function_aliases
+                .get(id.name.as_str())
+                .map(|alias| alias.target.clone())
+                .or(summary_key);
+        }
+        let alias = self.get_alias_for_callee_identifier(call);
+        if let Some(fn_key) = summary_key
+            && let Some(summary) = self.function_summaries.get(&fn_key)
+        {
+            if let Some(source) = &summary.return_without_tainted_params {
+                return (true, Some(source.clone()));
+            }
+
+            for (idx, fallback_source) in &summary.tainted_param_returns {
+                let (tainted, source_hint) = self.resolve_param_argument_taint(call, alias, *idx);
+                if tainted {
+                    return (true, source_hint.or_else(|| Some(fallback_source.clone())));
+                }
+            }
+        }
+        if let Expression::Identifier(id) = &call.callee
+            && let Some(bound_target) = self
+                .bound_function_aliases
+                .get(id.name.as_str())
+                .map(|alias| alias.target.clone())
+            && self.sources.contains(&bound_target)
+        {
+            return (true, Some(bound_target));
         }
 
         // Direct source calls (e.g., localStorage.getItem(...))
@@ -485,6 +832,8 @@ impl<'a> DomXssVisitor<'a> {
 
         let saved_tainted = self.tainted_vars.clone();
         let saved_aliases = self.var_aliases.clone();
+        let saved_instance_classes = self.instance_classes.clone();
+        let saved_bound_aliases = self.bound_function_aliases.clone();
         let saved_vuln_len = self.vulnerabilities.len();
         let saved_collecting_tainted_returns = self.collecting_tainted_returns;
         let saved_tainted_return_sources = std::mem::take(&mut self.tainted_return_sources);
@@ -536,6 +885,8 @@ impl<'a> DomXssVisitor<'a> {
 
         self.tainted_vars = saved_tainted;
         self.var_aliases = saved_aliases;
+        self.instance_classes = saved_instance_classes;
+        self.bound_function_aliases = saved_bound_aliases;
         self.vulnerabilities.truncate(saved_vuln_len);
         self.collecting_tainted_returns = saved_collecting_tainted_returns;
         self.tainted_return_sources = saved_tainted_return_sources;
@@ -555,6 +906,64 @@ impl<'a> DomXssVisitor<'a> {
             self.extract_param_names(&func_decl.params),
             &body.statements,
         );
+    }
+
+    fn register_object_literal_method_summaries(
+        &mut self,
+        object_name: &str,
+        obj: &ObjectExpression<'a>,
+    ) {
+        for prop in &obj.properties {
+            let ObjectPropertyKind::ObjectProperty(p) = prop else {
+                continue;
+            };
+            let Some(method_name) = self.get_property_key_name(&p.key) else {
+                continue;
+            };
+            let summary_name = format!("{}.{}", object_name, method_name);
+
+            match &p.value {
+                Expression::FunctionExpression(func_expr) => {
+                    if let Some(body) = &func_expr.body {
+                        self.register_function_summary(
+                            summary_name,
+                            self.extract_param_names(&func_expr.params),
+                            &body.statements,
+                        );
+                    }
+                }
+                Expression::ArrowFunctionExpression(arrow_expr) => {
+                    self.register_function_summary(
+                        summary_name,
+                        self.extract_param_names(&arrow_expr.params),
+                        &arrow_expr.body.statements,
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn register_class_method_summaries_for_name(&mut self, class_name: &str, class_decl: &Class<'a>) {
+        for elem in &class_decl.body.body {
+            let ClassElement::MethodDefinition(method_def) = elem else {
+                continue;
+            };
+            if !matches!(method_def.kind, MethodDefinitionKind::Method) {
+                continue;
+            }
+            let Some(method_name) = self.get_property_key_name(&method_def.key) else {
+                continue;
+            };
+            let Some(body) = &method_def.value.body else {
+                continue;
+            };
+            self.register_function_summary(
+                format!("{}.{}", class_name, method_name),
+                self.extract_param_names(&method_def.value.params),
+                &body.statements,
+            );
+        }
     }
 
     /// Walk through a single statement
@@ -615,6 +1024,11 @@ impl<'a> DomXssVisitor<'a> {
                     self.var_aliases = saved_aliases;
                 }
             }
+            Statement::ClassDeclaration(class_decl) => {
+                if let Some(class_id) = &class_decl.id {
+                    self.register_class_method_summaries_for_name(class_id.name.as_str(), class_decl);
+                }
+            }
             Statement::ReturnStatement(return_stmt) => {
                 if let Some(argument) = &return_stmt.argument {
                     if self.collecting_tainted_returns && self.is_tainted(argument) {
@@ -671,6 +1085,39 @@ impl<'a> DomXssVisitor<'a> {
                         self.extract_param_names(&arrow_expr.params),
                         &arrow_expr.body.statements,
                     );
+                }
+                // Register summaries for object literal methods assigned to variables.
+                if let Expression::ObjectExpression(obj_expr) = init {
+                    self.register_object_literal_method_summaries(var_name, obj_expr);
+                }
+                // Register summaries for class expressions assigned to variables.
+                if let Expression::ClassExpression(class_expr) = init {
+                    self.register_class_method_summaries_for_name(var_name, class_expr);
+                }
+                // Track class instance variables (`inst = new Renderer()`).
+                let mut assigned_instance_class = false;
+                if let Expression::NewExpression(new_expr) = init
+                    && let Expression::Identifier(class_id) = &new_expr.callee
+                {
+                    self.instance_classes
+                        .insert(var_name.to_string(), class_id.name.to_string());
+                    assigned_instance_class = true;
+                }
+                if !assigned_instance_class {
+                    self.instance_classes.remove(var_name);
+                }
+                // Track aliases created by `.bind()` so subsequent calls can resolve
+                // to sink functions or function summaries.
+                let mut assigned_bind_alias = false;
+                if let Expression::CallExpression(bind_call) = init
+                    && let Some(alias) = self.build_bound_alias_from_bind_call(bind_call)
+                {
+                    self.bound_function_aliases
+                        .insert(var_name.to_string(), alias);
+                    assigned_bind_alias = true;
+                }
+                if !assigned_bind_alias {
+                    self.bound_function_aliases.remove(var_name);
                 }
 
                 // Check if initializer is a source or tainted
@@ -1064,6 +1511,29 @@ impl<'a> DomXssVisitor<'a> {
             }
             AssignmentTarget::AssignmentTargetIdentifier(id) => {
                 let target_name = id.name.as_str();
+                let mut assigned_instance_class = false;
+                if let Expression::NewExpression(new_expr) = &assign.right
+                    && let Expression::Identifier(class_id) = &new_expr.callee
+                {
+                    self.instance_classes
+                        .insert(target_name.to_string(), class_id.name.to_string());
+                    assigned_instance_class = true;
+                }
+                if !assigned_instance_class {
+                    self.instance_classes.remove(target_name);
+                }
+
+                let mut assigned_bind_alias = false;
+                if let Expression::CallExpression(bind_call) = &assign.right
+                    && let Some(alias) = self.build_bound_alias_from_bind_call(bind_call)
+                {
+                    self.bound_function_aliases
+                        .insert(target_name.to_string(), alias);
+                    assigned_bind_alias = true;
+                }
+                if !assigned_bind_alias {
+                    self.bound_function_aliases.remove(target_name);
+                }
                 // Propagate taint through direct assignments like `a = taintedValue;`
                 if right_tainted {
                     self.tainted_vars.insert(target_name.to_string());
@@ -1180,202 +1650,235 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
 
+        // Handle wrapper invocations:
+        // - sink.call(thisArg, tainted)
+        // - sink.apply(thisArg, [tainted])
+        // - helper.call(thisArg, tainted) where helper has function summary
+        if let Some(wrapper_name) = self.get_callee_property_name(&call.callee)
+            && (wrapper_name == "call" || wrapper_name == "apply")
+            && let Some(target_expr) = self.get_callee_object_expr(&call.callee)
+        {
+            let target_alias_owned = self.get_alias_for_expr(target_expr).cloned();
+            let mut target_summary_key = self.get_summary_key_for_callee_expr(target_expr);
+            if target_summary_key
+                .as_ref()
+                .and_then(|k| self.function_summaries.get(k))
+                .is_none()
+                && let Some(alias) = target_alias_owned.as_ref()
+            {
+                target_summary_key = Some(alias.target.clone());
+            }
+            if let Some(summary_key) = target_summary_key
+                && let Some(param_sinks) = self.function_summaries.get(&summary_key).map(|summary| {
+                    summary
+                        .tainted_param_sinks
+                        .iter()
+                        .map(|(idx, sink)| (*idx, sink.clone()))
+                        .collect::<Vec<_>>()
+                })
+            {
+                for (idx, sink_name) in param_sinks {
+                    let (tainted, source_hint) = self.resolve_wrapper_param_argument_taint(
+                        call,
+                        &wrapper_name,
+                        target_alias_owned.as_ref(),
+                        idx,
+                    );
+                    if tainted {
+                        let description = if wrapper_name == "call" {
+                            "Tainted argument reaches sink through function.call wrapper"
+                        } else {
+                            "Tainted argument reaches sink through function.apply wrapper"
+                        };
+                        self.report_vulnerability_with_source(
+                            call.span(),
+                            &sink_name,
+                            description,
+                            source_hint,
+                        );
+                        return;
+                    }
+                }
+            }
+
+            let mut target_func_name = self.get_expr_string(target_expr);
+            if target_func_name
+                .as_ref()
+                .map(|name| !self.sinks.contains(name))
+                .unwrap_or(true)
+                && let Some(alias) = target_alias_owned.as_ref()
+                && self.sinks.contains(&alias.target)
+            {
+                target_func_name = Some(alias.target.clone());
+            }
+
+            if let Some(target_func_name) = target_func_name.filter(|name| self.sinks.contains(name)) {
+                if let Some(target_alias) = target_alias_owned.as_ref()
+                    && self.sinks.contains(&target_alias.target)
+                {
+                    for bound_arg in &target_alias.bound_args {
+                        if bound_arg.tainted {
+                            self.report_vulnerability_with_source(
+                                call.span(),
+                                &target_func_name,
+                                "Tainted pre-bound argument reaches sink function via wrapper",
+                                bound_arg.source.clone(),
+                            );
+                            return;
+                        }
+                    }
+                }
+
+                if wrapper_name == "call" {
+                    for arg in call.arguments.iter().skip(1) {
+                        let (tainted, source_hint) = self.argument_taint_and_source(arg);
+                        if tainted {
+                            self.report_vulnerability_with_source(
+                                call.span(),
+                                &target_func_name,
+                                "Tainted data passed to sink function via .call wrapper",
+                                source_hint,
+                            );
+                            return;
+                        }
+                    }
+                } else if let Some(arg_array) = call.arguments.get(1) {
+                    let (tainted, source_hint) = self.argument_taint_and_source(arg_array);
+                    if tainted {
+                        self.report_vulnerability_with_source(
+                            call.span(),
+                            &target_func_name,
+                            "Tainted data passed to sink function via .apply wrapper",
+                            source_hint,
+                        );
+                        return;
+                    }
+                }
+            }
+        }
+
         // Propagate taint through common array mutation methods
         // e.g. arr.push(location.hash); document.write(arr[0]);
-        if let Expression::StaticMemberExpression(member) = &call.callee {
-            let method = member.property.name.as_str();
-            if let Expression::Identifier(id) = &member.object {
-                let target = id.name.as_str();
-                let mut tainted_source: Option<String> = None;
+        if let Some(method) = self.get_callee_property_name(&call.callee)
+            && let Some(target_obj) = self.get_callee_object_expr(&call.callee)
+            && let Expression::Identifier(id) = target_obj
+        {
+            let target = id.name.as_str();
+            let mut tainted_source: Option<String> = None;
 
-                match method {
-                    "push" | "unshift" => {
-                        for arg in &call.arguments {
-                            let is_arg_tainted = match arg {
-                                Argument::SpreadElement(spread) => {
-                                    self.is_tainted(&spread.argument)
-                                }
-                                _ => arg
-                                    .as_expression()
-                                    .map(|e| self.is_tainted(e))
-                                    .unwrap_or(false),
-                            };
-                            if is_arg_tainted {
-                                tainted_source = match arg {
-                                    Argument::SpreadElement(spread) => {
-                                        self.find_source_in_expr(&spread.argument)
-                                    }
-                                    _ => arg
-                                        .as_expression()
-                                        .and_then(|e| self.find_source_in_expr(e)),
-                                };
-                                break;
-                            }
+            match method.as_str() {
+                "push" | "unshift" => {
+                    for arg in &call.arguments {
+                        let (is_arg_tainted, source_hint) = self.argument_taint_and_source(arg);
+                        if is_arg_tainted {
+                            tainted_source = source_hint;
+                            break;
                         }
                     }
-                    "splice" => {
-                        // splice(start, deleteCount, ...items): only items can introduce taint
-                        for arg in call.arguments.iter().skip(2) {
-                            let is_arg_tainted = match arg {
-                                Argument::SpreadElement(spread) => {
-                                    self.is_tainted(&spread.argument)
-                                }
-                                _ => arg
-                                    .as_expression()
-                                    .map(|e| self.is_tainted(e))
-                                    .unwrap_or(false),
-                            };
-                            if is_arg_tainted {
-                                tainted_source = match arg {
-                                    Argument::SpreadElement(spread) => {
-                                        self.find_source_in_expr(&spread.argument)
-                                    }
-                                    _ => arg
-                                        .as_expression()
-                                        .and_then(|e| self.find_source_in_expr(e)),
-                                };
-                                break;
-                            }
+                }
+                "splice" => {
+                    // splice(start, deleteCount, ...items): only items can introduce taint
+                    for arg in call.arguments.iter().skip(2) {
+                        let (is_arg_tainted, source_hint) = self.argument_taint_and_source(arg);
+                        if is_arg_tainted {
+                            tainted_source = source_hint;
+                            break;
                         }
                     }
-                    _ => {}
                 }
+                _ => {}
+            }
 
-                if let Some(source) = tainted_source {
-                    self.tainted_vars.insert(target.to_string());
-                    self.var_aliases.insert(target.to_string(), source);
-                }
+            if let Some(source) = tainted_source {
+                self.tainted_vars.insert(target.to_string());
+                self.var_aliases.insert(target.to_string(), source);
             }
         }
 
         // Lightweight inter-procedural flow via function summary:
         // If summary says parameter[i] reaches sink S and argument[i] is tainted,
         // report vulnerability at call site.
-        if let Expression::Identifier(callee_id) = &call.callee {
-            let fn_name = callee_id.name.as_str();
-            if let Some(param_sinks) = self.function_summaries.get(fn_name).map(|summary| {
+        let mut summary_key = self.get_summary_key_for_callee_expr(&call.callee);
+        if let Expression::Identifier(id) = &call.callee
+            && (summary_key.is_none()
+                || summary_key
+                    .as_ref()
+                    .and_then(|k| self.function_summaries.get(k))
+                    .is_none())
+        {
+            summary_key = self
+                .bound_function_aliases
+                .get(id.name.as_str())
+                .map(|alias| alias.target.clone())
+                .or(summary_key);
+        }
+        let alias_owned = self.get_alias_for_callee_identifier(call).cloned();
+        if let Some(callee_key) = summary_key
+            && let Some(param_sinks) = self.function_summaries.get(&callee_key).map(|summary| {
                 summary
                     .tainted_param_sinks
                     .iter()
                     .map(|(idx, sink)| (*idx, sink.clone()))
                     .collect::<Vec<_>>()
-            }) {
-                for (idx, sink_name) in param_sinks {
-                    if let Some(arg) = call.arguments.get(idx) {
-                        let (tainted, source_hint) = match arg {
-                            Argument::SpreadElement(spread) => {
-                                let t = self.is_tainted(&spread.argument);
-                                (
-                                    t,
-                                    if t {
-                                        self.find_source_in_expr(&spread.argument)
-                                    } else {
-                                        None
-                                    },
-                                )
-                            }
-                            _ => {
-                                if let Some(expr) = arg.as_expression() {
-                                    let t = self.is_tainted(expr);
-                                    (
-                                        t,
-                                        if t {
-                                            self.find_source_in_expr(expr)
-                                        } else {
-                                            None
-                                        },
-                                    )
-                                } else {
-                                    (false, None)
-                                }
-                            }
-                        };
-                        if tainted {
-                            self.report_vulnerability_with_source(
-                                call.span(),
-                                &sink_name,
-                                "Tainted argument reaches sink through function call",
-                                source_hint,
-                            );
-                            break;
-                        }
-                    }
+            })
+        {
+            for (idx, sink_name) in param_sinks {
+                let (tainted, source_hint) =
+                    self.resolve_param_argument_taint(call, alias_owned.as_ref(), idx);
+                if tainted {
+                    self.report_vulnerability_with_source(
+                        call.span(),
+                        &sink_name,
+                        "Tainted argument reaches sink through function call",
+                        source_hint,
+                    );
+                    break;
                 }
             }
         }
 
         // Check if calling a sink function (full name like document.write)
-        if let Some(func_name) = self.get_expr_string(&call.callee)
-            && self.sinks.contains(&func_name)
-        {
-            // Check if any argument is tainted
-            for arg in &call.arguments {
-                let (is_arg_tainted, source_hint) = match arg {
-                    Argument::Identifier(id) => {
-                        let tainted = self.tainted_vars.contains(id.name.as_str());
-                        let source = if tainted {
-                            self.var_aliases.get(id.name.as_str()).cloned()
+        let direct_sink_name = self
+            .get_expr_string(&call.callee)
+            .filter(|name| self.sinks.contains(name));
+        let bound_sink_name = if direct_sink_name.is_none() {
+            if let Expression::Identifier(id) = &call.callee {
+                self.bound_function_aliases
+                    .get(id.name.as_str())
+                    .and_then(|alias| {
+                        if self.sinks.contains(&alias.target) {
+                            Some(alias.target.clone())
                         } else {
                             None
-                        };
-                        (tainted, source)
+                        }
+                    })
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some(func_name) = direct_sink_name.or(bound_sink_name)
+        {
+            if let Some(bound_alias) = alias_owned.as_ref()
+                && self.sinks.contains(&bound_alias.target)
+            {
+                for bound_arg in &bound_alias.bound_args {
+                    if bound_arg.tainted {
+                        self.report_vulnerability_with_source(
+                            call.span(),
+                            &func_name,
+                            "Tainted pre-bound argument reaches sink function",
+                            bound_arg.source.clone(),
+                        );
+                        return;
                     }
-                    Argument::StaticMemberExpression(member) => {
-                        // Check if this is a known source first
-                        let is_known_source =
-                            if let Some(member_str) = self.get_member_string(member) {
-                                self.sources.contains(&member_str)
-                            } else {
-                                false
-                            };
+                }
+            }
 
-                        if is_known_source {
-                            // It's a known source like location.search
-                            (true, self.get_member_string(member))
-                        } else {
-                            // Not a known source, check if the base object or any part is tainted
-                            let tainted = self.is_tainted(&member.object);
-                            (
-                                tainted,
-                                if tainted {
-                                    self.find_source_in_expr(&member.object)
-                                } else {
-                                    None
-                                },
-                            )
-                        }
-                    }
-                    Argument::CallExpression(call_arg) => {
-                        self.call_taint_and_source(call_arg)
-                    }
-                    Argument::SpreadElement(spread) => {
-                        let tainted = self.is_tainted(&spread.argument);
-                        (
-                            tainted,
-                            if tainted {
-                                self.find_source_in_expr(&spread.argument)
-                            } else {
-                                None
-                            },
-                        )
-                    }
-                    // Handle all other expression types via as_expression()
-                    _ => {
-                        if let Some(expr) = arg.as_expression() {
-                            let tainted = self.is_tainted(expr);
-                            (
-                                tainted,
-                                if tainted {
-                                    self.find_source_in_expr(expr)
-                                } else {
-                                    None
-                                },
-                            )
-                        } else {
-                            (false, None)
-                        }
-                    }
-                };
+            // Check if any argument is tainted
+            for arg in &call.arguments {
+                let (is_arg_tainted, source_hint) = self.argument_taint_and_source(arg);
 
                 if is_arg_tainted {
                     self.report_vulnerability_with_source(
@@ -1391,22 +1894,16 @@ impl<'a> DomXssVisitor<'a> {
 
         // Also treat member method name itself as sink
         // (e.g., el.insertAdjacentHTML, document['write'](...))
-        let member_method_name = match &call.callee {
-            Expression::StaticMemberExpression(member) => Some(member.property.name.to_string()),
-            Expression::ComputedMemberExpression(member) => self.get_computed_property_string(member),
-            _ => None,
-        };
+        let member_method_name = self.get_callee_property_name(&call.callee);
         if let Some(method_name) = member_method_name {
             if self.sinks.contains(method_name.as_str()) {
                 // Special-case setAttribute to only dangerous attributes
                 if method_name == "setAttribute" && call.arguments.len() >= 2 {
-                    let mut attr_name_lc: Option<String> = None;
-                    if let Some(arg0) = call.arguments.first()
-                        && let Some(expr) = arg0.as_expression()
-                        && let Expression::StringLiteral(s) = expr
-                    {
-                        attr_name_lc = Some(s.value.to_string().to_ascii_lowercase());
-                    }
+                    let attr_name_lc = call
+                        .arguments
+                        .first()
+                        .and_then(|arg0| self.eval_static_string_arg(arg0))
+                        .map(|name| name.to_ascii_lowercase());
                     if let Some(name) = attr_name_lc {
                         let dangerous = name.starts_with("on")
                             || name == "href"
@@ -1432,13 +1929,11 @@ impl<'a> DomXssVisitor<'a> {
                     }
                 // Special-case execCommand - only insertHTML is dangerous, and the third arg is the value
                 } else if method_name == "execCommand" && call.arguments.len() >= 3 {
-                    let mut cmd_name_lc: Option<String> = None;
-                    if let Some(arg0) = call.arguments.first()
-                        && let Some(expr) = arg0.as_expression()
-                        && let Expression::StringLiteral(s) = expr
-                    {
-                        cmd_name_lc = Some(s.value.to_string().to_ascii_lowercase());
-                    }
+                    let cmd_name_lc = call
+                        .arguments
+                        .first()
+                        .and_then(|arg0| self.eval_static_string_arg(arg0))
+                        .map(|name| name.to_ascii_lowercase());
                     if let Some(cmd) = cmd_name_lc {
                         if cmd == "inserthtml" {
                             if let Some(arg2) = call.arguments.get(2) {
@@ -3118,5 +3613,442 @@ document.write(result);
             "Should report only actual sink usage, not property assignment pseudo-sink"
         );
         assert_eq!(result[0].sink, "document.write");
+    }
+
+    #[test]
+    fn test_sink_call_wrapper_detected() {
+        let code = r#"
+            let input = location.hash;
+            document.write.call(document, input);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect sink invocation via .call wrapper"
+        );
+    }
+
+    #[test]
+    fn test_sink_apply_wrapper_detected() {
+        let code = r#"
+            document.write.apply(document, [location.search]);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect sink invocation via .apply wrapper"
+        );
+    }
+
+    #[test]
+    fn test_bound_sink_alias_detected() {
+        let code = r#"
+            let writer = document.write.bind(document);
+            let payload = location.hash;
+            writer(payload);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(!result.is_empty(), "Should detect sink through bound alias");
+    }
+
+    #[test]
+    fn test_object_method_summary_flow_detected() {
+        let code = r#"
+            const helper = {
+                render(value) {
+                    document.getElementById('out').innerHTML = value;
+                }
+            };
+            helper.render(location.hash);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect object literal method inter-procedural flow"
+        );
+    }
+
+    #[test]
+    fn test_class_instance_method_summary_flow_detected() {
+        let code = r#"
+            class Renderer {
+                render(value) {
+                    document.write(value);
+                }
+            }
+            const r = new Renderer();
+            r.render(location.search);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect class instance method inter-procedural flow"
+        );
+    }
+
+    #[test]
+    fn test_class_static_method_summary_flow_detected() {
+        let code = r#"
+            class Redirector {
+                static go(url) {
+                    location.assign(url);
+                }
+            }
+            Redirector.go(location.hash);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect class static method inter-procedural flow"
+        );
+    }
+
+    #[test]
+    fn test_summary_call_wrapper_detected() {
+        let code = r#"
+            function render(value) {
+                document.write(value);
+            }
+            render.call(null, location.hash);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect summary flow through .call wrapper"
+        );
+    }
+
+    #[test]
+    fn test_summary_apply_wrapper_detected() {
+        let code = r#"
+            function render(value) {
+                document.write(value);
+            }
+            render.apply(null, [location.hash]);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect summary flow through .apply wrapper"
+        );
+    }
+
+    #[test]
+    fn test_bound_object_method_summary_detected() {
+        let code = r#"
+            const helper = {
+                render(v) {
+                    eval(v);
+                }
+            };
+            const bound = helper.render.bind(helper);
+            bound(location.search);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect bound object method summary flow"
+        );
+    }
+
+    #[test]
+    fn test_dynamic_setattribute_name_concat_detected() {
+        let code = r#"
+            const input = location.hash;
+            document.getElementById('x').setAttribute('on' + 'click', input);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect dangerous dynamic setAttribute name"
+        );
+    }
+
+    #[test]
+    fn test_dynamic_setattribute_safe_name_concat_not_detected() {
+        let code = r#"
+            const input = location.hash;
+            document.getElementById('x').setAttribute('data-' + 'id', input);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result.is_empty(),
+            "Should not detect safe dynamic setAttribute name"
+        );
+    }
+
+    #[test]
+    fn test_dynamic_execcommand_name_concat_detected() {
+        let code = r#"
+            const html = location.search;
+            document.execCommand('insert' + 'HTML', false, html);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect dynamic execCommand insertHTML name"
+        );
+    }
+
+    #[test]
+    fn test_bound_source_alias_taint_detected() {
+        let code = r#"
+            const readStorage = localStorage.getItem.bind(localStorage);
+            const data = readStorage('payload');
+            document.write(data);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should propagate source taint through bound source alias"
+        );
+    }
+
+    #[test]
+    fn test_bound_summary_prebound_tainted_arg_detected() {
+        let code = r#"
+            function render(value) {
+                document.write(value);
+            }
+            const bound = render.bind(null, location.hash);
+            bound();
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect tainted pre-bound argument through function summary"
+        );
+    }
+
+    #[test]
+    fn test_bound_sink_prebound_tainted_arg_detected() {
+        let code = r#"
+            const writer = document.write.bind(document, location.search);
+            writer();
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect tainted pre-bound argument to sink alias"
+        );
+    }
+
+    #[test]
+    fn test_bound_object_method_prebound_tainted_arg_detected() {
+        let code = r#"
+            const helper = {
+                render(v) {
+                    eval(v);
+                }
+            };
+            const bound = helper.render.bind(helper, location.hash);
+            bound();
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect tainted pre-bound argument to bound object method"
+        );
+    }
+
+    #[test]
+    fn test_bound_return_prebound_arg_taints_sink() {
+        let code = r#"
+            function echo(v) {
+                return v;
+            }
+            const f = echo.bind(null, location.search);
+            document.write(f());
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect tainted return from pre-bound argument"
+        );
+    }
+
+    #[test]
+    fn test_bound_summary_prebound_safe_literal_not_detected() {
+        let code = r#"
+            function render(value) {
+                document.getElementById('out').innerHTML = value;
+            }
+            const bound = render.bind(null, 'safe');
+            bound();
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result.is_empty(),
+            "Safe literal pre-bound argument should not be detected"
+        );
+    }
+
+    #[test]
+    fn test_computed_member_dynamic_property_sink_call_detected() {
+        let code = r#"
+            const payload = location.hash;
+            document['wri' + 'te'](payload);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect sink call when computed property name is statically resolvable"
+        );
+    }
+
+    #[test]
+    fn test_computed_member_dynamic_wrapper_property_call_detected() {
+        let code = r#"
+            const payload = location.search;
+            document.write['ca' + 'll'](document, payload);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect wrapper sink call when wrapper property is computed"
+        );
+    }
+
+    #[test]
+    fn test_computed_member_dynamic_non_sink_property_not_detected() {
+        let code = r#"
+            const payload = location.hash;
+            document['wri' + 'ten'](payload);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result.is_empty(),
+            "Non-sink computed member should not be flagged"
+        );
+    }
+
+    #[test]
+    fn test_bind_chain_sink_alias_detected() {
+        let code = r#"
+            const base = document.write.bind(document, location.hash);
+            const chained = base.bind(null);
+            chained();
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should preserve taint through chained bind aliases"
+        );
+    }
+
+    #[test]
+    fn test_bound_sink_alias_call_wrapper_detected() {
+        let code = r#"
+            const writer = document.write.bind(document);
+            writer.call(null, location.hash);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect sink alias invoked via .call wrapper"
+        );
+    }
+
+    #[test]
+    fn test_bound_sink_alias_apply_wrapper_detected() {
+        let code = r#"
+            const writer = document.write.bind(document);
+            writer.apply(null, [location.search]);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect sink alias invoked via .apply wrapper"
+        );
+    }
+
+    #[test]
+    fn test_summary_apply_wrapper_param_index_precision_detected() {
+        let code = r#"
+            function render(a, b) {
+                document.write(b);
+            }
+            render.apply(null, ['safe', location.hash]);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should map apply array index to correct sink parameter"
+        );
+    }
+
+    #[test]
+    fn test_summary_apply_wrapper_non_sink_param_tainted_not_detected() {
+        let code = r#"
+            function render(a, b) {
+                document.write(a);
+            }
+            render.apply(null, ['safe', location.hash]);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result.is_empty(),
+            "Tainted non-sink parameter should not trigger apply wrapper finding"
+        );
+    }
+
+    #[test]
+    fn test_bound_summary_call_wrapper_detected() {
+        let code = r#"
+            function render(v) {
+                eval(v);
+            }
+            const bound = render.bind(null);
+            bound.call(null, location.search);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect summary alias invoked through call wrapper"
+        );
+    }
+
+    #[test]
+    fn test_bound_summary_apply_wrapper_with_prebound_index_detected() {
+        let code = r#"
+            function render(a, b) {
+                document.write(b);
+            }
+            const bound = render.bind(null, 'safe');
+            bound.apply(null, [location.hash]);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should respect pre-bound args when mapping apply wrapper parameter index"
+        );
     }
 }

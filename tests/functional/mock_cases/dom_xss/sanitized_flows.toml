@@ -335,3 +335,315 @@ el['setAttribute']('class', input);
 </html>
 """
 expected_detection = false
+
+[[case]]
+id = 1418
+name = "summary_call_wrapper_textcontent_safe"
+description = "Function.call wrapper to safe textContent sink should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="out"></div>
+<script>
+function safeRender(value) {
+  document.getElementById('out').textContent = value;
+}
+safeRender.call(null, location.hash);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1419
+name = "summary_apply_wrapper_textcontent_safe"
+description = "Function.apply wrapper to safe textContent sink should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="out"></div>
+<script>
+function safeRender(value) {
+  document.getElementById('out').textContent = value;
+}
+safeRender.apply(null, [location.search]);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1420
+name = "object_method_textcontent_safe"
+description = "Object literal method using textContent should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="safe"></div>
+<script>
+var helper = {
+  render(value) {
+    document.getElementById('safe').textContent = value;
+  }
+};
+helper.render(location.hash);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1421
+name = "class_method_textcontent_safe"
+description = "Class method using textContent should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="safe"></div>
+<script>
+class Renderer {
+  render(value) {
+    document.getElementById('safe').textContent = value;
+  }
+}
+var r = new Renderer();
+r.render(location.search);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1422
+name = "dynamic_setattribute_safe_concat"
+description = "Dynamic setAttribute safe data-* name should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="safe"></div>
+<script>
+var value = location.hash;
+document.getElementById('safe').setAttribute('data-' + 'id', value);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1423
+name = "dynamic_execcommand_non_html_safe"
+description = "execCommand non-HTML command should remain safe in this model"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var value = location.search;
+document.execCommand('copy' + '', false, value);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1424
+name = "bound_object_method_textcontent_safe"
+description = "Bound object method that uses textContent should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="safe"></div>
+<script>
+var helper = {
+  render(value) {
+    document.getElementById('safe').textContent = value;
+  }
+};
+var bound = helper.render.bind(helper);
+bound(location.search);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1425
+name = "bound_sink_alias_with_sanitized_input"
+description = "Bound sink alias invoked with sanitized input should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@2.4.0/dist/purify.min.js"></script>
+<script>
+var writer = document.write.bind(document);
+var clean = DOMPurify.sanitize(location.hash);
+writer(clean);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1426
+name = "bound_summary_prebound_safe_literal"
+description = "Function summary with safe literal pre-bound argument should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="out"></div>
+<script>
+function render(value) {
+  document.getElementById('out').innerHTML = value;
+}
+var bound = render.bind(null, 'safe');
+bound();
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1427
+name = "bound_sink_prebound_sanitized_input"
+description = "Sink alias with sanitized pre-bound argument should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@2.4.0/dist/purify.min.js"></script>
+<script>
+var writer = document.write.bind(document, DOMPurify.sanitize(location.hash));
+writer();
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1428
+name = "computed_non_sink_property_concat_safe"
+description = "Computed non-sink property name should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var payload = location.hash;
+document['wri' + 'ten'](payload);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1429
+name = "summary_apply_non_sink_param_tainted_safe"
+description = "Function.apply taint in non-sink parameter should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+function render(a, b) {
+  document.write(a);
+}
+render.apply(null, ['safe', location.search]);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1430
+name = "bound_sink_alias_call_wrapper_sanitized"
+description = "Bound sink alias through call wrapper with sanitized argument should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@2.4.0/dist/purify.min.js"></script>
+<script>
+var writer = document.write.bind(document);
+writer.call(null, DOMPurify.sanitize(location.hash));
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1431
+name = "bound_sink_alias_apply_wrapper_sanitized"
+description = "Bound sink alias through apply wrapper with sanitized argument should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@2.4.0/dist/purify.min.js"></script>
+<script>
+var writer = document.write.bind(document);
+writer.apply(null, [DOMPurify.sanitize(location.search)]);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1432
+name = "bound_summary_apply_non_sink_param_tainted_safe"
+description = "Bound summary apply with taint only in non-sink parameter should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+function render(a, b) {
+  document.write(a);
+}
+var bound = render.bind(null);
+bound.apply(null, ['safe', location.hash]);
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1433
+name = "bind_chain_prebound_sanitized_safe"
+description = "Chained bind with sanitized pre-bound argument should remain safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@2.4.0/dist/purify.min.js"></script>
+<script>
+var base = document.write.bind(document, DOMPurify.sanitize(location.hash));
+var chained = base.bind(null);
+chained();
+</script>
+</body>
+</html>
+"""
+expected_detection = false

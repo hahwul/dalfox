@@ -710,3 +710,456 @@ document.write(data);
 </html>
 """
 expected_detection = true
+
+[[case]]
+id = 1337
+name = "sink_call_wrapper"
+description = "Sink invoked via Function.call wrapper"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var input = location.hash;
+document.write.call(document, input);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1338
+name = "sink_apply_wrapper"
+description = "Sink invoked via Function.apply wrapper"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+document.write.apply(document, [location.search]);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1339
+name = "bound_sink_alias_call"
+description = "Bound sink alias later invoked with tainted data"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var writer = document.write.bind(document);
+var payload = location.hash;
+writer(payload);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1340
+name = "object_literal_method_summary_flow"
+description = "Object literal method receives tainted argument and uses sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="out"></div>
+<script>
+var helper = {
+  render(value) {
+    document.getElementById('out').innerHTML = value;
+  }
+};
+helper.render(location.hash);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1341
+name = "class_instance_method_summary_flow"
+description = "Class instance method receives tainted value and uses sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+class Renderer {
+  render(value) {
+    document.write(value);
+  }
+}
+var r = new Renderer();
+r.render(location.search);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1342
+name = "class_static_method_summary_flow"
+description = "Class static method receives tainted value and uses sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+class Redirector {
+  static go(url) {
+    location.assign(url);
+  }
+}
+Redirector.go(location.hash);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1343
+name = "summary_call_wrapper_flow"
+description = "Function summary flow through call wrapper"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+function render(value) {
+  document.write(value);
+}
+render.call(null, location.hash);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1344
+name = "summary_apply_wrapper_flow"
+description = "Function summary flow through apply wrapper"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+function render(value) {
+  document.write(value);
+}
+render.apply(null, [location.search]);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1345
+name = "bound_object_method_summary_flow"
+description = "Bound object method summary invoked with tainted value"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var helper = {
+  render(v) {
+    eval(v);
+  }
+};
+var bound = helper.render.bind(helper);
+bound(location.search);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1346
+name = "dynamic_setattribute_name_concat"
+description = "setAttribute dangerous name built via string concatenation"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="x"></div>
+<script>
+var input = location.hash;
+document.getElementById('x').setAttribute('on' + 'click', input);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1347
+name = "dynamic_execcommand_name_concat"
+description = "execCommand insertHTML name built via concatenation"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var html = location.search;
+document.execCommand('insert' + 'HTML', false, html);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1348
+name = "bound_source_alias_to_sink"
+description = "Bound source helper result flows into sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var readStorage = localStorage.getItem.bind(localStorage);
+var data = readStorage('payload');
+document.write(data);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1349
+name = "bound_summary_prebound_tainted_arg"
+description = "Function summary with tainted pre-bound argument reaches sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+function render(value) {
+  document.write(value);
+}
+var bound = render.bind(null, location.hash);
+bound();
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1350
+name = "bound_sink_prebound_tainted_arg"
+description = "Sink alias with tainted pre-bound argument should be detected"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var writer = document.write.bind(document, location.search);
+writer();
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1351
+name = "bound_object_method_prebound_tainted_arg"
+description = "Bound object method with tainted pre-bound argument reaches sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var helper = {
+  render(v) {
+    eval(v);
+  }
+};
+var bound = helper.render.bind(helper, location.hash);
+bound();
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1352
+name = "bound_return_prebound_arg_to_sink"
+description = "Return value taint through pre-bound argument flows into sink"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+function echo(v) {
+  return v;
+}
+var f = echo.bind(null, location.search);
+document.write(f());
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1353
+name = "computed_sink_property_concat"
+description = "Computed sink name via string concat should resolve to document.write"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var payload = location.hash;
+document['wri' + 'te'](payload);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1354
+name = "computed_wrapper_property_concat"
+description = "Computed wrapper property concat should detect document.write.call pattern"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var payload = location.search;
+document.write['ca' + 'll'](document, payload);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1355
+name = "bind_chain_sink_alias"
+description = "Chained bind aliases should preserve tainted pre-bound arguments"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var base = document.write.bind(document, location.hash);
+var chained = base.bind(null);
+chained();
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1356
+name = "bound_sink_alias_call_wrapper"
+description = "Bound sink alias invoked through call wrapper should be detected"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var writer = document.write.bind(document);
+writer.call(null, location.hash);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1357
+name = "bound_sink_alias_apply_wrapper"
+description = "Bound sink alias invoked through apply wrapper should be detected"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+var writer = document.write.bind(document);
+writer.apply(null, [location.search]);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1358
+name = "summary_apply_wrapper_param_index"
+description = "Function.apply should map tainted argument to the correct sink parameter index"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+function render(a, b) {
+  document.write(b);
+}
+render.apply(null, ['safe', location.hash]);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1359
+name = "bound_summary_call_wrapper"
+description = "Bound summary alias invoked through call wrapper should be detected"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+function render(v) {
+  eval(v);
+}
+var bound = render.bind(null);
+bound.call(null, location.search);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
+
+[[case]]
+id = 1360
+name = "bound_summary_apply_prebound_index"
+description = "Bound summary apply should account for pre-bound argument offsets"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<script>
+function render(a, b) {
+  document.write(b);
+}
+var bound = render.bind(null, 'safe');
+bound.apply(null, [location.hash]);
+</script>
+</body>
+</html>
+"""
+expected_detection = true
