@@ -203,8 +203,101 @@ fn is_allowed_content_type(ct: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{dedupe_ast_results, extract_context, generate_poc, is_allowed_content_type};
+    use super::{
+        DEFAULT_DELAY_MS, DEFAULT_ENCODERS, DEFAULT_MAX_CONCURRENT_TARGETS,
+        DEFAULT_MAX_TARGETS_PER_HOST, DEFAULT_METHOD, DEFAULT_TIMEOUT_SECS, DEFAULT_WORKERS,
+        ScanArgs, dedupe_ast_results, extract_context, generate_poc, is_allowed_content_type,
+        preflight_content_type,
+    };
     use crate::scanning::result::Result as ScanResult;
+    use crate::target_parser::parse_target;
+    use axum::Router;
+    use axum::http::{HeaderMap, HeaderName, HeaderValue};
+    use axum::routing::get;
+    use tokio::net::TcpListener;
+
+    fn default_scan_args() -> ScanArgs {
+        ScanArgs {
+            input_type: "url".to_string(),
+            format: "json".to_string(),
+            output: None,
+            include_request: false,
+            include_response: false,
+            silence: true,
+            poc_type: "plain".to_string(),
+            limit: None,
+            param: vec![],
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            method: DEFAULT_METHOD.to_string(),
+            user_agent: None,
+            cookie_from_raw: None,
+            skip_discovery: false,
+            skip_reflection_header: false,
+            skip_reflection_cookie: false,
+            skip_reflection_path: false,
+            mining_dict_word: None,
+            remote_wordlists: vec![],
+            skip_mining: false,
+            skip_mining_dict: false,
+            skip_mining_dom: false,
+            timeout: DEFAULT_TIMEOUT_SECS,
+            delay: DEFAULT_DELAY_MS,
+            proxy: None,
+            follow_redirects: false,
+            workers: DEFAULT_WORKERS,
+            max_concurrent_targets: DEFAULT_MAX_CONCURRENT_TARGETS,
+            max_targets_per_host: DEFAULT_MAX_TARGETS_PER_HOST,
+            encoders: DEFAULT_ENCODERS.iter().map(|s| s.to_string()).collect(),
+            remote_payloads: vec![],
+            custom_blind_xss_payload: None,
+            blind_callback_url: None,
+            custom_payload: None,
+            only_custom_payload: false,
+            skip_xss_scanning: false,
+            deep_scan: false,
+            sxss: false,
+            sxss_url: None,
+            sxss_method: "GET".to_string(),
+            skip_ast_analysis: false,
+            targets: vec![],
+        }
+    }
+
+    async fn spawn_preflight_server(
+        csp_header: Option<(&'static str, &'static str)>,
+        body: &'static str,
+    ) -> (String, tokio::task::JoinHandle<()>) {
+        let app = Router::new().route(
+            "/",
+            get(move || async move {
+                let mut headers = HeaderMap::new();
+                headers.insert(
+                    "content-type",
+                    HeaderValue::from_static("text/html; charset=utf-8"),
+                );
+                if let Some((name, value)) = csp_header {
+                    headers.insert(
+                        HeaderName::from_lowercase(name.as_bytes())
+                            .expect("valid static header name"),
+                        HeaderValue::from_static(value),
+                    );
+                }
+                (headers, body)
+            }),
+        );
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind test server");
+        let addr = listener.local_addr().expect("local addr");
+        let handle = tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        (format!("http://{}/", addr), handle)
+    }
 
     #[test]
     fn test_allowed_content_types() {
@@ -415,6 +508,110 @@ mod tests {
         );
         let out = generate_poc(&r, "plain");
         assert!(out.contains("https://ex.com/foo/bar/PAY"));
+    }
+
+    #[test]
+    fn test_generate_poc_http_request_without_request_falls_back_to_url() {
+        let r = ScanResult::new(
+            "R".to_string(),
+            "inHTML".to_string(),
+            "GET".to_string(),
+            "https://example.com".to_string(),
+            "q".to_string(),
+            "<x>".to_string(),
+            "evidence".to_string(),
+            "CWE-79".to_string(),
+            "Info".to_string(),
+            0,
+            "msg".to_string(),
+        );
+        let out = generate_poc(&r, "http-request");
+        assert!(out.contains("https://example.com?q=%3Cx%3E"));
+    }
+
+    #[test]
+    fn test_generate_poc_unknown_type_defaults_to_plain_format() {
+        let r = ScanResult::new(
+            "R".to_string(),
+            "inHTML".to_string(),
+            "GET".to_string(),
+            "https://example.com".to_string(),
+            "q".to_string(),
+            "PAY".to_string(),
+            "evidence".to_string(),
+            "CWE-79".to_string(),
+            "Info".to_string(),
+            0,
+            "msg".to_string(),
+        );
+        let out = generate_poc(&r, "custom");
+        assert!(out.starts_with("[POC][R][GET][inHTML]"));
+    }
+
+    #[test]
+    fn test_generate_poc_path_segment_selective_encoding_for_special_chars() {
+        let payload = "A B#?%".to_string();
+        let r = ScanResult::new(
+            "R".to_string(),
+            "inHTML".to_string(),
+            "GET".to_string(),
+            format!("https://ex.com/base/{}", payload),
+            "path_segment_2".to_string(),
+            payload,
+            "evidence".to_string(),
+            "CWE-79".to_string(),
+            "Info".to_string(),
+            0,
+            "msg".to_string(),
+        );
+        let out = generate_poc(&r, "plain");
+        assert!(out.contains("A%20B%23%3F%25"));
+    }
+
+    #[tokio::test]
+    async fn test_preflight_content_type_reads_http_csp_header() {
+        let (url, handle) = spawn_preflight_server(
+            Some(("content-security-policy", "default-src 'self'")),
+            "ok",
+        )
+        .await;
+
+        let mut target = parse_target(&url).expect("valid target");
+        target.headers.push(("X-Test".to_string(), "1".to_string()));
+        target.user_agent = Some("dalfox-test-agent".to_string());
+        target.cookies.push(("sid".to_string(), "abc".to_string()));
+        target.delay = 1;
+
+        let args = default_scan_args();
+        let (ct, csp, body) = preflight_content_type(&target, &args)
+            .await
+            .expect("preflight response");
+        handle.abort();
+
+        assert!(ct.contains("text/html"));
+        let (name, value) = csp.expect("csp header should be present");
+        assert_eq!(name, "Content-Security-Policy");
+        assert_eq!(value, "default-src 'self'");
+        assert_eq!(body.as_deref(), Some("ok"));
+    }
+
+    #[tokio::test]
+    async fn test_preflight_content_type_extracts_meta_csp_when_header_missing() {
+        let html = "<html><head><meta http-equiv=\"Content-Security-Policy-Report-Only\" content=\"script-src 'none'\"></head><body>ok</body></html>";
+        let (url, handle) = spawn_preflight_server(None, html).await;
+
+        let target = parse_target(&url).expect("valid target");
+        let args = default_scan_args();
+        let (ct, csp, body) = preflight_content_type(&target, &args)
+            .await
+            .expect("preflight response");
+        handle.abort();
+
+        assert!(ct.contains("text/html"));
+        let (name, value) = csp.expect("meta csp should be parsed");
+        assert_eq!(name, "Content-Security-Policy-Report-Only");
+        assert_eq!(value, "script-src 'none'");
+        assert!(body.expect("body expected").contains("http-equiv"));
     }
 }
 

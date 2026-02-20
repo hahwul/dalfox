@@ -180,6 +180,239 @@ mod tests {
     use super::*;
     use crate::parameter_analysis::{Location, Param};
     use crate::target_parser::parse_target;
+    use axum::Router;
+    use axum::extract::Query;
+    use axum::http::{HeaderMap, Uri};
+    use axum::routing::any;
+    use std::collections::HashMap;
+    use std::net::{Ipv4Addr, SocketAddr};
+
+    fn default_scan_args() -> crate::cmd::scan::ScanArgs {
+        crate::cmd::scan::ScanArgs {
+            input_type: "url".to_string(),
+            format: "json".to_string(),
+            targets: vec![],
+            param: vec![],
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            method: "GET".to_string(),
+            user_agent: None,
+            cookie_from_raw: None,
+            skip_discovery: false,
+            skip_reflection_header: false,
+            skip_reflection_cookie: false,
+            skip_reflection_path: false,
+            mining_dict_word: None,
+            remote_wordlists: vec![],
+            skip_mining: false,
+            skip_mining_dict: false,
+            skip_mining_dom: false,
+            timeout: 10,
+            delay: 0,
+            proxy: None,
+            follow_redirects: false,
+            output: None,
+            include_request: false,
+            include_response: false,
+            silence: true,
+            poc_type: "plain".to_string(),
+            limit: None,
+            workers: 4,
+            max_concurrent_targets: 4,
+            max_targets_per_host: 100,
+            encoders: vec!["none".to_string()],
+            remote_payloads: vec![],
+            custom_blind_xss_payload: None,
+            blind_callback_url: None,
+            custom_payload: None,
+            only_custom_payload: false,
+            skip_xss_scanning: true,
+            deep_scan: false,
+            sxss: false,
+            sxss_url: None,
+            sxss_method: "GET".to_string(),
+            skip_ast_analysis: false,
+        }
+    }
+
+    async fn discovery_reflect_handler(
+        Query(params): Query<HashMap<String, String>>,
+        headers: HeaderMap,
+        uri: Uri,
+    ) -> String {
+        let mut values: Vec<String> = params.values().cloned().collect();
+        values.sort();
+        let query_values = values.join(",");
+        let header_values: Vec<String> = headers
+            .get_all("x-reflect-me")
+            .iter()
+            .filter_map(|v| v.to_str().ok().map(|s| s.to_string()))
+            .collect();
+        let header_value = header_values.join(",");
+        let cookie_value = headers
+            .get("cookie")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+        format!(
+            "path={} query={} header={} cookie={}",
+            uri.path(),
+            query_values,
+            header_value,
+            cookie_value
+        )
+    }
+
+    async fn start_discovery_mock_server() -> SocketAddr {
+        let app = Router::new()
+            .route("/", any(discovery_reflect_handler))
+            .route("/*rest", any(discovery_reflect_handler));
+
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("bind test listener");
+        let addr = listener.local_addr().expect("local addr");
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+        sleep(Duration::from_millis(20)).await;
+        addr
+    }
+
+    #[tokio::test]
+    async fn test_check_query_discovery_discovers_reflection_and_extends_batch() {
+        let addr = start_discovery_mock_server().await;
+        let mut target = parse_target(&format!("http://{}/reflect?a=1&b=2", addr)).unwrap();
+        target.delay = 1;
+
+        let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+        let semaphore = Arc::new(Semaphore::new(1));
+        check_query_discovery(&target, reflection_params.clone(), semaphore).await;
+
+        let params = reflection_params.lock().await.clone();
+        assert_eq!(params.len(), 2);
+        assert!(
+            params
+                .iter()
+                .any(|p| p.name == "a" && p.location == Location::Query)
+        );
+        assert!(
+            params
+                .iter()
+                .any(|p| p.name == "b" && p.location == Location::Query)
+        );
+        assert!(params.iter().all(|p| p.valid_specials.is_some()));
+        assert!(params.iter().all(|p| p.invalid_specials.is_some()));
+    }
+
+    #[tokio::test]
+    async fn test_check_header_discovery_discovers_reflected_header() {
+        let addr = start_discovery_mock_server().await;
+        let mut target = parse_target(&format!("http://{}/reflect?q=1", addr)).unwrap();
+        target
+            .headers
+            .push(("X-Reflect-Me".to_string(), "orig".to_string()));
+        target.delay = 1;
+
+        let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+        let semaphore = Arc::new(Semaphore::new(1));
+        check_header_discovery(&target, reflection_params.clone(), semaphore).await;
+
+        let params = reflection_params.lock().await.clone();
+        assert_eq!(params.len(), 1);
+        let p = &params[0];
+        assert_eq!(p.name, "X-Reflect-Me");
+        assert_eq!(p.value, "orig");
+        assert_eq!(p.location, Location::Header);
+        assert!(p.injection_context.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_check_cookie_discovery_single_cookie_branch() {
+        let addr = start_discovery_mock_server().await;
+        let mut target = parse_target(&format!("http://{}/reflect", addr)).unwrap();
+        target
+            .cookies
+            .push(("session".to_string(), "abc".to_string()));
+        target.delay = 1;
+
+        let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+        let semaphore = Arc::new(Semaphore::new(1));
+        check_cookie_discovery(&target, reflection_params.clone(), semaphore).await;
+
+        let params = reflection_params.lock().await.clone();
+        assert_eq!(params.len(), 1);
+        assert_eq!(params[0].name, "session");
+        assert_eq!(params[0].location, Location::Header);
+    }
+
+    #[tokio::test]
+    async fn test_check_cookie_discovery_multiple_cookies_branch() {
+        let addr = start_discovery_mock_server().await;
+        let mut target = parse_target(&format!("http://{}/reflect", addr)).unwrap();
+        target
+            .cookies
+            .push(("session".to_string(), "abc".to_string()));
+        target
+            .cookies
+            .push(("theme".to_string(), "dark".to_string()));
+        target.delay = 1;
+
+        let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+        let semaphore = Arc::new(Semaphore::new(1));
+        check_cookie_discovery(&target, reflection_params.clone(), semaphore).await;
+
+        let params = reflection_params.lock().await.clone();
+        assert_eq!(params.len(), 2);
+        assert!(params.iter().any(|p| p.name == "session"));
+        assert!(params.iter().any(|p| p.name == "theme"));
+    }
+
+    #[tokio::test]
+    async fn test_check_path_discovery_discovers_reflected_segments() {
+        let addr = start_discovery_mock_server().await;
+        let mut target = parse_target(&format!("http://{}/one/two", addr)).unwrap();
+        target.delay = 1;
+
+        let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+        let semaphore = Arc::new(Semaphore::new(1));
+        check_path_discovery(&target, reflection_params.clone(), semaphore).await;
+
+        let params = reflection_params.lock().await.clone();
+        assert_eq!(params.len(), 2);
+        assert!(
+            params
+                .iter()
+                .any(|p| p.name == "path_segment_0" && p.value == "one")
+        );
+        assert!(
+            params
+                .iter()
+                .any(|p| p.name == "path_segment_1" && p.value == "two")
+        );
+        assert!(params.iter().all(|p| p.location == Location::Path));
+    }
+
+    #[tokio::test]
+    async fn test_check_discovery_skip_discovery_true_keeps_empty() {
+        let addr = start_discovery_mock_server().await;
+        let mut target = parse_target(&format!("http://{}/a/b?q=1", addr)).unwrap();
+        target
+            .headers
+            .push(("X-Reflect-Me".to_string(), "orig".to_string()));
+        target
+            .cookies
+            .push(("session".to_string(), "abc".to_string()));
+
+        let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+        let semaphore = Arc::new(Semaphore::new(1));
+        let mut args = default_scan_args();
+        args.skip_discovery = true;
+
+        check_discovery(&mut target, &args, reflection_params, semaphore).await;
+        assert!(target.reflection_params.is_empty());
+    }
 
     #[tokio::test]
     async fn test_check_path_discovery_skips_existing_segment() {
@@ -239,52 +472,10 @@ mod tests {
         let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
         let semaphore = Arc::new(Semaphore::new(1));
 
-        let args = crate::cmd::scan::ScanArgs {
-            input_type: "auto".to_string(),
-            format: "json".to_string(),
-            targets: vec![],
-            param: vec![],
-            data: None,
-            headers: vec![],
-            cookies: vec![],
-            method: "GET".to_string(),
-            user_agent: None,
-            cookie_from_raw: None,
-            skip_discovery: false,
-            skip_reflection_header: false,
-            skip_reflection_cookie: false,
-            skip_reflection_path: true,
-            mining_dict_word: None,
-            remote_wordlists: vec![],
-            skip_mining: false,
-            skip_mining_dict: false,
-            skip_mining_dom: false,
-            timeout: 10,
-            delay: 0,
-            proxy: None,
-            follow_redirects: false,
-            output: None,
-            include_request: false,
-            include_response: false,
-            silence: true,
-            poc_type: "plain".to_string(),
-            limit: None,
-            workers: 1,
-            max_concurrent_targets: 1,
-            max_targets_per_host: 100,
-            encoders: vec!["none".to_string()],
-            remote_payloads: vec![],
-            custom_blind_xss_payload: None,
-            blind_callback_url: None,
-            custom_payload: None,
-            only_custom_payload: false,
-            skip_xss_scanning: true,
-            deep_scan: false,
-            sxss: false,
-            sxss_url: None,
-            sxss_method: "GET".to_string(),
-            skip_ast_analysis: false,
-        };
+        let mut args = default_scan_args();
+        args.workers = 1;
+        args.max_concurrent_targets = 1;
+        args.skip_reflection_path = true;
 
         check_discovery(
             &mut target,

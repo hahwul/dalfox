@@ -717,6 +717,8 @@ mod tests {
     use super::*;
     use crate::cmd::scan::ScanArgs;
     use crate::target_parser::parse_target;
+    use std::sync::Arc;
+    use tokio::sync::Semaphore;
 
     // Mock mining function for testing
     fn mock_mine_parameters(_target: &mut Target, _args: &ScanArgs) {
@@ -1275,5 +1277,247 @@ mod tests {
         let filtered = filter_params(params.clone(), &["sort:query:extra".to_string()], &target);
         assert_eq!(filtered.len(), 1);
         assert_eq!(filtered[0].name, "sort");
+    }
+
+    fn default_scan_args() -> ScanArgs {
+        ScanArgs {
+            input_type: "url".to_string(),
+            format: "json".to_string(),
+            targets: vec!["http://127.0.0.1:0".to_string()],
+            param: vec![],
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            method: "GET".to_string(),
+            user_agent: None,
+            cookie_from_raw: None,
+            mining_dict_word: None,
+            skip_mining: true,
+            skip_mining_dict: true,
+            skip_mining_dom: true,
+            skip_discovery: true,
+            skip_reflection_header: true,
+            skip_reflection_cookie: true,
+            skip_reflection_path: true,
+            timeout: 1,
+            delay: 0,
+            proxy: None,
+            follow_redirects: false,
+            output: None,
+            include_request: false,
+            include_response: false,
+            silence: true,
+            poc_type: "plain".to_string(),
+            limit: None,
+            workers: 1,
+            max_concurrent_targets: 1,
+            max_targets_per_host: 1,
+            encoders: vec![
+                "url".to_string(),
+                "html".to_string(),
+                "2url".to_string(),
+                "base64".to_string(),
+            ],
+            custom_blind_xss_payload: None,
+            blind_callback_url: None,
+            custom_payload: None,
+            only_custom_payload: false,
+            skip_xss_scanning: false,
+            deep_scan: false,
+            sxss: false,
+            sxss_url: None,
+            sxss_method: "GET".to_string(),
+            skip_ast_analysis: false,
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
+        }
+    }
+
+    fn probe_target() -> crate::target_parser::Target {
+        let mut target = parse_target("http://127.0.0.1:0/a/b?x=1").unwrap();
+        target.method = "POST".to_string();
+        target.data = Some("foo=bar&session=orig".to_string());
+        target
+            .headers
+            .push(("X-Test".to_string(), "header-value".to_string()));
+        target
+            .cookies
+            .push(("session".to_string(), "cookie-value".to_string()));
+        target.user_agent = Some("DalfoxTest/1.0".to_string());
+        target
+    }
+
+    fn probe_param(name: &str, location: Location) -> Param {
+        Param {
+            name: name.to_string(),
+            value: "v".to_string(),
+            location,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+        }
+    }
+
+    #[test]
+    fn test_classify_special_chars_and_encoded_variants() {
+        let body = "/\\\\'{}<>\"()";
+        let (valid, invalid) = classify_special_chars(body);
+        assert!(valid.contains(&'/'));
+        assert!(valid.contains(&'\\'));
+        assert!(valid.contains(&'\''));
+        assert!(valid.contains(&'<'));
+        assert!(!invalid.is_empty());
+
+        assert!(encoded_variants('<').contains(&"&lt;"));
+        assert!(encoded_variants('"').contains(&"&quot;"));
+        assert!(encoded_variants('x').is_empty());
+    }
+
+    #[test]
+    fn test_extract_reflected_segment_finds_marker_bounds() {
+        let body = format!(
+            "aaa{}middle{}bbb",
+            crate::scanning::markers::open_marker(),
+            crate::scanning::markers::close_marker()
+        );
+        let seg = extract_reflected_segment(&body).expect("segment should exist");
+        assert_eq!(seg, "middle");
+    }
+
+    #[tokio::test]
+    async fn test_active_probe_param_query_path_failure_paths() {
+        let target = probe_target();
+        let semaphore = Arc::new(Semaphore::new(8));
+        let encoders = Arc::new(vec![
+            "url".to_string(),
+            "html".to_string(),
+            "2url".to_string(),
+            "base64".to_string(),
+        ]);
+
+        let query_res = active_probe_param(
+            &target,
+            probe_param("x", Location::Query),
+            semaphore.clone(),
+            encoders.clone(),
+        )
+        .await;
+        assert!(query_res.valid_specials.as_ref().is_some());
+        assert!(
+            query_res
+                .invalid_specials
+                .as_ref()
+                .expect("invalid set")
+                .len()
+                >= SPECIAL_PROBE_CHARS.len()
+        );
+
+        let path_res = active_probe_param(
+            &target,
+            probe_param("path_segment_1", Location::Path),
+            semaphore,
+            encoders,
+        )
+        .await;
+        assert!(path_res.valid_specials.as_ref().is_some());
+        assert!(
+            path_res
+                .invalid_specials
+                .as_ref()
+                .expect("invalid set")
+                .len()
+                >= SPECIAL_PROBE_CHARS.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_active_probe_param_body_header_json_failure_paths() {
+        let mut target = probe_target();
+        target.data = Some("{\"json_key\":\"v\"}".to_string());
+        let semaphore = Arc::new(Semaphore::new(8));
+        let encoders = Arc::new(vec![
+            "url".to_string(),
+            "html".to_string(),
+            "2url".to_string(),
+            "base64".to_string(),
+        ]);
+
+        let body_res = active_probe_param(
+            &target,
+            probe_param("foo", Location::Body),
+            semaphore.clone(),
+            encoders.clone(),
+        )
+        .await;
+        assert!(body_res.valid_specials.as_ref().is_some());
+        assert!(
+            body_res
+                .invalid_specials
+                .as_ref()
+                .expect("invalid set")
+                .len()
+                >= SPECIAL_PROBE_CHARS.len()
+        );
+
+        let header_cookie_res = active_probe_param(
+            &target,
+            probe_param("session", Location::Header),
+            semaphore.clone(),
+            encoders.clone(),
+        )
+        .await;
+        assert!(header_cookie_res.valid_specials.as_ref().is_some());
+        assert!(
+            header_cookie_res
+                .invalid_specials
+                .as_ref()
+                .expect("invalid set")
+                .len()
+                >= SPECIAL_PROBE_CHARS.len()
+        );
+
+        let header_plain_res = active_probe_param(
+            &target,
+            probe_param("X-Test", Location::Header),
+            semaphore.clone(),
+            encoders.clone(),
+        )
+        .await;
+        assert!(header_plain_res.valid_specials.as_ref().is_some());
+        assert!(
+            header_plain_res
+                .invalid_specials
+                .as_ref()
+                .expect("invalid set")
+                .len()
+                >= SPECIAL_PROBE_CHARS.len()
+        );
+
+        let json_res = active_probe_param(
+            &target,
+            probe_param("json_key", Location::JsonBody),
+            semaphore,
+            encoders,
+        )
+        .await;
+        assert!(json_res.valid_specials.as_ref().is_some());
+        assert!(
+            json_res
+                .invalid_specials
+                .as_ref()
+                .expect("invalid set")
+                .len()
+                >= SPECIAL_PROBE_CHARS.len()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_analyze_parameters_with_skip_flags_finishes_cleanly() {
+        let mut target = parse_target("http://127.0.0.1:0").unwrap();
+        target.workers = 1;
+        let args = default_scan_args();
+
+        analyze_parameters(&mut target, &args, None).await;
+        assert!(target.reflection_params.is_empty());
     }
 }

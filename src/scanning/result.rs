@@ -897,4 +897,58 @@ mod tests {
             assert!(run["results"].is_array());
         }
     }
+
+    #[test]
+    fn test_to_json_value_respects_include_flags() {
+        let mut result = Result::new(
+            "V".to_string(),
+            "inHTML".to_string(),
+            "GET".to_string(),
+            "https://example.com".to_string(),
+            "q".to_string(),
+            "payload".to_string(),
+            "evidence".to_string(),
+            "CWE-79".to_string(),
+            "High".to_string(),
+            1,
+            "message".to_string(),
+        );
+        result.request = Some("GET / HTTP/1.1".to_string());
+        result.response = Some("HTTP/1.1 200 OK".to_string());
+
+        let with_all = result.to_json_value(true, true);
+        assert_eq!(with_all["request"], "GET / HTTP/1.1");
+        assert_eq!(with_all["response"], "HTTP/1.1 200 OK");
+
+        let without_optional = result.to_json_value(false, false);
+        assert!(without_optional.get("request").is_none());
+        assert!(without_optional.get("response").is_none());
+    }
+
+    #[test]
+    fn test_results_to_json_compact_and_jsonl() {
+        let mut result = Result::new(
+            "R".to_string(),
+            "inJS".to_string(),
+            "POST".to_string(),
+            "https://example.com/api".to_string(),
+            "data".to_string(),
+            "alert(1)".to_string(),
+            "reflected".to_string(),
+            "CWE-79".to_string(),
+            "Medium".to_string(),
+            2,
+            "reflection".to_string(),
+        );
+        result.request = Some("POST /api HTTP/1.1".to_string());
+
+        let results = vec![result];
+        let compact = Result::results_to_json(&results, true, false, false);
+        assert!(compact.starts_with("["));
+        assert!(compact.contains("\"request\":\"POST /api HTTP/1.1\""));
+
+        let jsonl = Result::results_to_jsonl(&results, true, false);
+        assert!(jsonl.contains("\"type\":\"R\""));
+        assert!(jsonl.ends_with('\n'));
+    }
 }
