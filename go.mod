@@ -9,7 +9,7 @@ require (
 	github.com/chromedp/cdproto v0.0.0-20250724212937-08a3db8b4327
 	github.com/chromedp/chromedp v0.14.2
 	github.com/hahwul/volt v1.0.7
-	github.com/labstack/echo/v4 v4.15.0
+	github.com/labstack/echo/v4 v4.15.1
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/mark3labs/mcp-go v0.41.1
 	github.com/olekukonko/tablewriter v1.1.3
