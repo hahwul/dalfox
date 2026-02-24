@@ -101,6 +101,7 @@ pub fn get_mock_cases_base_dir() -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
     fn test_load_mock_cases_structure() {
@@ -147,5 +148,53 @@ expected_detection = true
         assert_eq!(case_file.cases[0].id, 1);
         assert_eq!(case_file.cases[0].name, "test_case");
         assert_eq!(case_file.cases[0].handler_type, "query");
+    }
+
+    #[test]
+    fn test_mock_case_ids_unique_per_handler_type() {
+        let base_dir = get_mock_cases_base_dir();
+        if !base_dir.exists() {
+            return;
+        }
+
+        let all = load_all_mock_cases(&base_dir).expect("mock cases should load");
+        for (handler_type, cases) in all {
+            let mut ids = HashSet::new();
+            for case in &cases {
+                assert!(
+                    ids.insert(case.id),
+                    "Duplicate case id {} in handler type {}",
+                    case.id,
+                    handler_type
+                );
+            }
+            assert!(
+                !cases.is_empty(),
+                "Handler type {} should include at least one case",
+                handler_type
+            );
+        }
+    }
+
+    #[test]
+    fn test_dom_xss_has_positive_and_negative_expectations() {
+        let base_dir = get_mock_cases_base_dir();
+        if !base_dir.exists() {
+            return;
+        }
+
+        let all = load_all_mock_cases(&base_dir).expect("mock cases should load");
+        let dom_cases = all.get("dom_xss").expect("dom_xss cases should exist");
+        let positives = dom_cases.iter().filter(|c| c.expected_detection).count();
+        let negatives = dom_cases.iter().filter(|c| !c.expected_detection).count();
+
+        assert!(
+            positives > 0,
+            "dom_xss should include positive detection cases"
+        );
+        assert!(
+            negatives > 0,
+            "dom_xss should include negative/sanitized cases"
+        );
     }
 }

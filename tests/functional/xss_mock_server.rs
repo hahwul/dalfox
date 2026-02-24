@@ -3,7 +3,7 @@
 //!
 //! This version uses structured mock cases loaded from TOML files.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -282,6 +282,40 @@ async fn start_mock_server_v2() -> (SocketAddr, AppState) {
     (addr, state)
 }
 
+/// Load query mock cases grouped by source TOML file name (category).
+fn load_query_cases_by_file() -> Result<HashMap<String, Vec<MockCase>>, String> {
+    let query_dir = mock_case_loader::get_mock_cases_base_dir().join("query");
+    if !query_dir.exists() {
+        return Err(format!(
+            "Query mock cases directory does not exist: {}",
+            query_dir.display()
+        ));
+    }
+
+    let entries = std::fs::read_dir(&query_dir)
+        .map_err(|e| format!("Failed to read query cases directory: {}", e))?;
+
+    let mut by_file = HashMap::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+        let path = entry.path();
+        if path.extension().and_then(|s| s.to_str()) != Some("toml") {
+            continue;
+        }
+
+        let file_stem = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| format!("Invalid query case file name: {}", path.display()))?;
+
+        let mut cases = mock_case_loader::load_mock_cases_from_file(&path)?;
+        cases.sort_by_key(|c| c.id);
+        by_file.insert(file_stem.to_string(), cases);
+    }
+
+    Ok(by_file)
+}
+
 /// Helper to run a scan test for a specific case
 async fn run_scan_test(
     addr: SocketAddr,
@@ -456,14 +490,28 @@ async fn test_query_reflection_v2() {
     // Wait a moment for server to be ready
     tokio::time::sleep(Duration::from_millis(100)).await;
 
-    let total_cases = state.query_cases.len();
+    let mut case_ids: Vec<u32> = state.query_cases.keys().copied().collect();
+    case_ids.sort_unstable();
+    let total_cases = case_ids.len();
     println!("Testing {} query reflection cases", total_cases);
 
     let mut detected = 0usize;
-    for (case_id, case) in state.query_cases.iter() {
+    let mut expected_total = 0usize;
+    let mut expected_detected = 0usize;
+    let mut missed_expected_ids = Vec::new();
+    let mut false_positive_ids = Vec::new();
+    let mut mismatches = Vec::new();
+    // Known coverage gaps in query full corpus (as of current scanner behavior).
+    let known_gap_ids: HashSet<u32> = [3, 4, 193, 194].into_iter().collect();
+
+    for case_id in case_ids {
+        let case = state
+            .query_cases
+            .get(&case_id)
+            .unwrap_or_else(|| panic!("missing query case {}", case_id));
         println!(
             "Testing case {}: {} - {}",
-            case_id, case.name, case.description
+            case.id, case.name, case.description
         );
 
         let config = ScanTestConfig {
@@ -478,13 +526,348 @@ async fn test_query_reflection_v2() {
             skip_reflection_path: true,
         };
 
-        let results = run_scan_test(addr, "query", *case_id, config).await;
+        let results = run_scan_test(addr, "query", case_id, config).await;
+        let case_detected = !results.is_empty();
 
-        if !results.is_empty() {
+        if case_detected {
             detected += 1;
         }
+
+        if case.expected_detection {
+            expected_total += 1;
+            if case_detected {
+                expected_detected += 1;
+            } else {
+                missed_expected_ids.push(case.id);
+                mismatches.push(format!(
+                    "case {} ({}) expected_detection=true actual_detection=false",
+                    case.id, case.name
+                ));
+            }
+        } else if case_detected {
+            false_positive_ids.push(case.id);
+            mismatches.push(format!(
+                "case {} ({}) expected_detection=false actual_detection=true",
+                case.id, case.name
+            ));
+        }
     }
-    assert!(detected > 0, "query tests: expected at least one detection");
+
+    let positive_detection_rate = if expected_total > 0 {
+        expected_detected as f64 / expected_total as f64
+    } else {
+        0.0
+    };
+
+    println!(
+        "query full corpus detected: {}/{} ({:.1}%)",
+        detected,
+        total_cases,
+        (detected as f64 / total_cases as f64) * 100.0
+    );
+    println!(
+        "query expected-positive coverage: {}/{} ({:.1}%)",
+        expected_detected,
+        expected_total,
+        positive_detection_rate * 100.0
+    );
+
+    let unexpected_missed: Vec<u32> = missed_expected_ids
+        .iter()
+        .copied()
+        .filter(|id| !known_gap_ids.contains(id))
+        .collect();
+
+    if !mismatches.is_empty() {
+        println!("query full corpus mismatches:");
+        for m in &mismatches {
+            println!("  - {}", m);
+        }
+    }
+
+    assert!(
+        mismatches.len() <= 8,
+        "query full corpus mismatches exceeded baseline (>{}):\n{}",
+        8,
+        mismatches.join("\n")
+    );
+    assert!(
+        unexpected_missed.is_empty(),
+        "query full corpus introduced unexpected missed cases: {:?} (known gaps: {:?})",
+        unexpected_missed,
+        known_gap_ids
+    );
+    assert!(
+        missed_expected_ids.len() <= known_gap_ids.len(),
+        "query full corpus missed case count exceeded known gaps: {} > {}",
+        missed_expected_ids.len(),
+        known_gap_ids.len()
+    );
+    assert!(
+        false_positive_ids.is_empty(),
+        "query full corpus produced unexpected false positives: {:?}",
+        false_positive_ids
+    );
+    assert!(
+        positive_detection_rate >= 0.95,
+        "query full corpus positive detection rate dropped below baseline: {:.1}%",
+        positive_detection_rate * 100.0
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_query_reflection_diverse_xss_contexts_v2() {
+    let (addr, state) = start_mock_server_v2().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Representative cases across major reflected-XSS contexts.
+    let case_ids = vec![
+        1,   // raw html reflection
+        7,   // javascript string
+        12,  // href attribute
+        29,  // javascript: protocol
+        31,  // event handler
+        41,  // svg script context
+        46,  // style context
+        91,  // template literal
+        168, // plain element body
+        191, // encoded reflection variant
+    ];
+
+    let mut failed = Vec::new();
+
+    for case_id in case_ids {
+        let case = state
+            .query_cases
+            .get(&case_id)
+            .unwrap_or_else(|| panic!("Missing query case id {}", case_id));
+
+        let config = ScanTestConfig {
+            url_suffix: format!("/{case_id}?query=seed"),
+            param: vec![],
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            method: "GET".to_string(),
+            skip_reflection_header: true,
+            skip_reflection_cookie: true,
+            skip_reflection_path: true,
+        };
+
+        let results = run_scan_test(addr, "query", case_id, config).await;
+        let detected = !results.is_empty();
+
+        if detected != case.expected_detection {
+            failed.push(format!(
+                "case {} ({}) expected_detection={} actual_detection={}",
+                case.id, case.name, case.expected_detection, detected
+            ));
+        }
+    }
+
+    assert!(
+        failed.is_empty(),
+        "diverse query context mismatches:\n{}",
+        failed.join("\n")
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_query_reflection_advanced_xss_coverage_v2() {
+    let (addr, state) = start_mock_server_v2().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Advanced/evasive contexts: encoding bypass, multilayer contexts, and unicode edge cases.
+    let case_ids = vec![191, 193, 194, 199, 205, 226, 230, 234, 239, 247, 250, 254];
+
+    let mut detected = 0usize;
+    let mut mismatches = Vec::new();
+
+    for case_id in case_ids {
+        let case = state
+            .query_cases
+            .get(&case_id)
+            .unwrap_or_else(|| panic!("Missing query case id {}", case_id));
+
+        let config = ScanTestConfig {
+            url_suffix: format!("/{case_id}?query=seed"),
+            param: vec![],
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            method: "GET".to_string(),
+            skip_reflection_header: true,
+            skip_reflection_cookie: true,
+            skip_reflection_path: true,
+        };
+
+        let results = run_scan_test(addr, "query", case_id, config).await;
+        let case_detected = !results.is_empty();
+        if case_detected {
+            detected += 1;
+        }
+        if case_detected != case.expected_detection {
+            mismatches.push(format!(
+                "case {} ({}) expected_detection={} actual_detection={}",
+                case.id, case.name, case.expected_detection, case_detected
+            ));
+        }
+    }
+
+    let total = 12usize;
+    let detection_rate = detected as f64 / total as f64;
+
+    assert!(
+        mismatches.len() <= 2,
+        "advanced query context mismatches (>{}):\n{}",
+        2,
+        mismatches.join("\n")
+    );
+    assert!(
+        detection_rate >= 0.80,
+        "advanced query context detection rate below baseline: {}/{} ({:.1}%)",
+        detected,
+        total,
+        detection_rate * 100.0
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_query_reflection_category_baselines_v2() {
+    let (addr, _state) = start_mock_server_v2().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let by_file = load_query_cases_by_file().expect("query category files should load");
+    assert!(
+        by_file.len() >= 10,
+        "expected multiple query categories, got {}",
+        by_file.len()
+    );
+
+    let mut categories: Vec<String> = by_file.keys().cloned().collect();
+    categories.sort();
+
+    let mut zero_hit_categories = Vec::new();
+    let mut total_expected = 0usize;
+    let mut total_expected_detected = 0usize;
+
+    for category in categories {
+        let cases = by_file
+            .get(&category)
+            .unwrap_or_else(|| panic!("missing category {}", category));
+
+        let mut detected = 0usize;
+        let mut expected_total = 0usize;
+        let mut expected_detected = 0usize;
+        let mut mismatches = 0usize;
+
+        for case in cases {
+            let config = ScanTestConfig {
+                url_suffix: format!("/{}?query=seed", case.id),
+                param: vec![],
+                data: None,
+                headers: vec![],
+                cookies: vec![],
+                method: "GET".to_string(),
+                skip_reflection_header: true,
+                skip_reflection_cookie: true,
+                skip_reflection_path: true,
+            };
+
+            let results = run_scan_test(addr, "query", case.id, config).await;
+            let case_detected = !results.is_empty();
+
+            if case_detected {
+                detected += 1;
+            }
+            if case.expected_detection {
+                expected_total += 1;
+                if case_detected {
+                    expected_detected += 1;
+                } else {
+                    mismatches += 1;
+                }
+            } else if case_detected {
+                mismatches += 1;
+            }
+        }
+
+        total_expected += expected_total;
+        total_expected_detected += expected_detected;
+
+        let positive_detection_rate = if expected_total > 0 {
+            expected_detected as f64 / expected_total as f64
+        } else {
+            0.0
+        };
+
+        println!(
+            "query category {}: detected={}/{} positive_coverage={}/{} ({:.1}%) mismatches={}",
+            category,
+            detected,
+            cases.len(),
+            expected_detected,
+            expected_total,
+            positive_detection_rate * 100.0,
+            mismatches
+        );
+
+        if expected_detected == 0 {
+            zero_hit_categories.push(category.clone());
+        }
+
+        let category_min_rate = match category.as_str() {
+            "encoding_bypass" => 0.85,
+            "html_contexts" => 0.90,
+            _ => 0.95,
+        };
+        let category_max_mismatch = match category.as_str() {
+            "encoding_bypass" => 3usize,
+            "html_contexts" => 3usize,
+            _ => 1usize,
+        };
+
+        assert!(
+            positive_detection_rate >= category_min_rate,
+            "query category baseline dropped for {}: {:.1}% < {:.1}%",
+            category,
+            positive_detection_rate * 100.0,
+            category_min_rate * 100.0
+        );
+        assert!(
+            mismatches <= category_max_mismatch,
+            "query category mismatches exceeded baseline for {}: {} > {}",
+            category,
+            mismatches,
+            category_max_mismatch
+        );
+    }
+
+    let overall_positive_rate = if total_expected > 0 {
+        total_expected_detected as f64 / total_expected as f64
+    } else {
+        0.0
+    };
+    println!(
+        "query category baseline overall positive coverage: {}/{} ({:.1}%)",
+        total_expected_detected,
+        total_expected,
+        overall_positive_rate * 100.0
+    );
+
+    assert!(
+        zero_hit_categories.is_empty(),
+        "query categories with zero detections: {}",
+        zero_hit_categories.join(", ")
+    );
+    assert!(
+        overall_positive_rate >= 0.97,
+        "query category baseline overall coverage dropped: {:.1}% < 97.0%",
+        overall_positive_rate * 100.0
+    );
 }
 
 #[tokio::test]
@@ -644,4 +1027,412 @@ async fn test_body_reflection_v2() {
         }
     }
     assert!(detected > 0, "body tests: expected at least one detection");
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_header_reflection_diverse_xss_contexts_v2() {
+    let (addr, state) = start_mock_server_v2().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Representative header contexts: raw/script/attribute/js-string/style/encoded.
+    let case_ids = vec![1, 9, 23, 32, 35, 41, 46, 49];
+    let mut failed = Vec::new();
+    let client = reqwest::Client::new();
+
+    for case_id in case_ids {
+        let case = state
+            .header_cases
+            .get(&case_id)
+            .unwrap_or_else(|| panic!("Missing header case id {}", case_id));
+        let header_name = case.header_name.as_deref().unwrap_or("X-Test");
+        let header_name_lc = header_name.to_ascii_lowercase();
+
+        let url = format!("http://{}:{}/header/{}", addr.ip(), addr.port(), case_id);
+        let resp = client
+            .get(&url)
+            .header(&header_name_lc, "seed")
+            .send()
+            .await
+            .expect("header request");
+        let text = resp.text().await.expect("header text");
+        let reflected = text.contains(&apply_reflection(&case.reflection, "seed"));
+
+        if reflected != case.expected_detection {
+            failed.push(format!(
+                "case {} ({}) expected_detection={} actual_reflection={}",
+                case.id, case.name, case.expected_detection, reflected
+            ));
+        }
+    }
+
+    assert!(
+        failed.is_empty(),
+        "diverse header context mismatches:\n{}",
+        failed.join("\n")
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_header_reflection_advanced_xss_coverage_v2() {
+    let (addr, state) = start_mock_server_v2().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    // Advanced/evasive header contexts.
+    let case_ids = vec![42, 43, 45, 47, 48, 50, 34, 40];
+    let mut reflected_count = 0usize;
+    let mut mismatches = Vec::new();
+    let client = reqwest::Client::new();
+
+    for case_id in case_ids {
+        let case = state
+            .header_cases
+            .get(&case_id)
+            .unwrap_or_else(|| panic!("Missing header case id {}", case_id));
+        let header_name = case.header_name.as_deref().unwrap_or("X-Test");
+        let header_name_lc = header_name.to_ascii_lowercase();
+
+        let url = format!("http://{}:{}/header/{}", addr.ip(), addr.port(), case_id);
+        let resp = client
+            .get(&url)
+            .header(&header_name_lc, "seed")
+            .send()
+            .await
+            .expect("header request");
+        let text = resp.text().await.expect("header text");
+        let reflected = text.contains(&apply_reflection(&case.reflection, "seed"));
+
+        if reflected {
+            reflected_count += 1;
+        }
+        if reflected != case.expected_detection {
+            mismatches.push(format!(
+                "case {} ({}) expected_detection={} actual_reflection={}",
+                case.id, case.name, case.expected_detection, reflected
+            ));
+        }
+    }
+
+    let total = 8usize;
+    let reflection_rate = reflected_count as f64 / total as f64;
+
+    assert!(
+        mismatches.len() <= 2,
+        "advanced header context mismatches (>{}):\n{}",
+        2,
+        mismatches.join("\n")
+    );
+    assert!(
+        reflection_rate >= 0.90,
+        "advanced header context reflection rate below baseline: {}/{} ({:.1}%)",
+        reflected_count,
+        total,
+        reflection_rate * 100.0
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_cookie_reflection_diverse_xss_contexts_v2() {
+    let (addr, state) = start_mock_server_v2().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let case_ids = vec![1, 9, 11, 16, 20, 29, 31, 35, 37];
+    let mut failed = Vec::new();
+
+    for case_id in case_ids {
+        let case = state
+            .cookie_cases
+            .get(&case_id)
+            .unwrap_or_else(|| panic!("Missing cookie case id {}", case_id));
+        let cookie_name = case.cookie_name.as_deref().unwrap_or("test");
+
+        let found = run_discovery_once(
+            addr,
+            format!("/cookie/{}", case_id),
+            "GET".to_string(),
+            vec![],
+            vec![(cookie_name.to_string(), "seed".to_string())],
+            None,
+            true,
+            false,
+            true,
+        )
+        .await;
+        if found != case.expected_detection {
+            failed.push(format!(
+                "case {} ({}) expected_detection={} actual_discovery={}",
+                case.id, case.name, case.expected_detection, found
+            ));
+        }
+    }
+
+    assert!(
+        failed.is_empty(),
+        "diverse cookie context mismatches:\n{}",
+        failed.join("\n")
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_cookie_reflection_advanced_xss_coverage_v2() {
+    let (addr, state) = start_mock_server_v2().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let case_ids = vec![32, 33, 34, 36, 38, 39, 40, 27];
+    let mut found_count = 0usize;
+    let mut mismatches = Vec::new();
+
+    for case_id in case_ids {
+        let case = state
+            .cookie_cases
+            .get(&case_id)
+            .unwrap_or_else(|| panic!("Missing cookie case id {}", case_id));
+        let cookie_name = case.cookie_name.as_deref().unwrap_or("test");
+
+        let found = run_discovery_once(
+            addr,
+            format!("/cookie/{}", case_id),
+            "GET".to_string(),
+            vec![],
+            vec![(cookie_name.to_string(), "seed".to_string())],
+            None,
+            true,
+            false,
+            true,
+        )
+        .await;
+        if found {
+            found_count += 1;
+        }
+        if found != case.expected_detection {
+            mismatches.push(format!(
+                "case {} ({}) expected_detection={} actual_discovery={}",
+                case.id, case.name, case.expected_detection, found
+            ));
+        }
+    }
+
+    let total = 8usize;
+    let discovery_rate = found_count as f64 / total as f64;
+
+    assert!(
+        mismatches.len() <= 2,
+        "advanced cookie context mismatches (>{}):\n{}",
+        2,
+        mismatches.join("\n")
+    );
+    assert!(
+        discovery_rate >= 0.85,
+        "advanced cookie context discovery rate below baseline: {}/{} ({:.1}%)",
+        found_count,
+        total,
+        discovery_rate * 100.0
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_path_reflection_diverse_xss_contexts_v2() {
+    let (addr, state) = start_mock_server_v2().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let case_ids = vec![1, 9, 11, 12, 15, 17, 18, 22, 24, 28];
+    let mut failed = Vec::new();
+
+    for case_id in case_ids {
+        let case = state
+            .path_cases
+            .get(&case_id)
+            .unwrap_or_else(|| panic!("Missing path case id {}", case_id));
+        let config = ScanTestConfig {
+            url_suffix: format!("/{case_id}/seed"),
+            param: vec![],
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            method: "GET".to_string(),
+            skip_reflection_header: true,
+            skip_reflection_cookie: true,
+            skip_reflection_path: false,
+        };
+
+        let results = run_scan_test(addr, "path", case_id, config).await;
+        let detected = !results.is_empty();
+        if detected != case.expected_detection {
+            failed.push(format!(
+                "case {} ({}) expected_detection={} actual_detection={}",
+                case.id, case.name, case.expected_detection, detected
+            ));
+        }
+    }
+
+    assert!(
+        failed.len() <= 1,
+        "diverse path context mismatches (>{}):\n{}",
+        1,
+        failed.join("\n")
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_path_reflection_advanced_xss_coverage_v2() {
+    let (addr, state) = start_mock_server_v2().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let case_ids = vec![25, 26, 27, 29, 30, 31, 32, 33];
+    let mut detected = 0usize;
+    let mut mismatches = Vec::new();
+
+    for case_id in case_ids {
+        let case = state
+            .path_cases
+            .get(&case_id)
+            .unwrap_or_else(|| panic!("Missing path case id {}", case_id));
+        let config = ScanTestConfig {
+            url_suffix: format!("/{case_id}/seed"),
+            param: vec![],
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            method: "GET".to_string(),
+            skip_reflection_header: true,
+            skip_reflection_cookie: true,
+            skip_reflection_path: false,
+        };
+
+        let results = run_scan_test(addr, "path", case_id, config).await;
+        let case_detected = !results.is_empty();
+        if case_detected {
+            detected += 1;
+        }
+        if case_detected != case.expected_detection {
+            mismatches.push(format!(
+                "case {} ({}) expected_detection={} actual_detection={}",
+                case.id, case.name, case.expected_detection, case_detected
+            ));
+        }
+    }
+
+    let total = 8usize;
+    let detection_rate = detected as f64 / total as f64;
+
+    assert!(
+        mismatches.len() <= 2,
+        "advanced path context mismatches (>{}):\n{}",
+        2,
+        mismatches.join("\n")
+    );
+    assert!(
+        detection_rate >= 0.75,
+        "advanced path context detection rate below baseline: {}/{} ({:.1}%)",
+        detected,
+        total,
+        detection_rate * 100.0
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_body_reflection_diverse_xss_contexts_v2() {
+    let (addr, state) = start_mock_server_v2().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let case_ids = vec![1, 9, 11, 14, 18, 21, 26, 31, 33];
+    let mut failed = Vec::new();
+    let client = reqwest::Client::new();
+
+    for case_id in case_ids {
+        let case = state
+            .body_cases
+            .get(&case_id)
+            .unwrap_or_else(|| panic!("Missing body case id {}", case_id));
+        let param_name = case.param_name.as_deref().unwrap_or("query");
+
+        let url = format!("http://{}:{}/body/{}", addr.ip(), addr.port(), case_id);
+        let form = [(param_name.to_string(), "seed".to_string())];
+        let resp = client
+            .post(&url)
+            .form(&form)
+            .send()
+            .await
+            .expect("body request");
+        let text = resp.text().await.expect("body text");
+        let reflected = text.contains(&apply_reflection(&case.reflection, "seed"));
+
+        if reflected != case.expected_detection {
+            failed.push(format!(
+                "case {} ({}) expected_detection={} actual_reflection={}",
+                case.id, case.name, case.expected_detection, reflected
+            ));
+        }
+    }
+
+    assert!(
+        failed.len() <= 1,
+        "diverse body context mismatches (>{}):\n{}",
+        1,
+        failed.join("\n")
+    );
+}
+
+#[tokio::test]
+#[ignore]
+async fn test_body_reflection_advanced_xss_coverage_v2() {
+    let (addr, state) = start_mock_server_v2().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let case_ids = vec![27, 28, 29, 30, 32, 34, 35, 36];
+    let mut reflected_count = 0usize;
+    let mut mismatches = Vec::new();
+    let client = reqwest::Client::new();
+
+    for case_id in case_ids {
+        let case = state
+            .body_cases
+            .get(&case_id)
+            .unwrap_or_else(|| panic!("Missing body case id {}", case_id));
+        let param_name = case.param_name.as_deref().unwrap_or("query");
+
+        let url = format!("http://{}:{}/body/{}", addr.ip(), addr.port(), case_id);
+        let form = [(param_name.to_string(), "seed".to_string())];
+        let resp = client
+            .post(&url)
+            .form(&form)
+            .send()
+            .await
+            .expect("body request");
+        let text = resp.text().await.expect("body text");
+        let reflected = text.contains(&apply_reflection(&case.reflection, "seed"));
+
+        if reflected {
+            reflected_count += 1;
+        }
+        if reflected != case.expected_detection {
+            mismatches.push(format!(
+                "case {} ({}) expected_detection={} actual_reflection={}",
+                case.id, case.name, case.expected_detection, reflected
+            ));
+        }
+    }
+
+    let total = 8usize;
+    let reflection_rate = reflected_count as f64 / total as f64;
+
+    assert!(
+        mismatches.len() <= 2,
+        "advanced body context mismatches (>{}):\n{}",
+        2,
+        mismatches.join("\n")
+    );
+    assert!(
+        reflection_rate >= 0.90,
+        "advanced body context reflection rate below baseline: {}/{} ({:.1}%)",
+        reflected_count,
+        total,
+        reflection_rate * 100.0
+    );
 }

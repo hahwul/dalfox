@@ -448,6 +448,20 @@ fn test_dom_xss_sanitized_flows() {
             "\nNote: Some false positives are expected as the analyzer may not recognize all sanitization patterns"
         );
     }
+
+    let false_positive_rate = false_positives.len() as f64 / sanitized_cases.len() as f64;
+    assert!(
+        false_positives.is_empty(),
+        "Sanitized flows should not generate false positives, got {:.1}% ({}/{})",
+        false_positive_rate * 100.0,
+        false_positives.len(),
+        sanitized_cases.len()
+    );
+    assert_eq!(
+        correctly_not_detected,
+        sanitized_cases.len(),
+        "All sanitized flows should be correctly classified as non-vulnerable"
+    );
 }
 
 #[test]
@@ -460,6 +474,8 @@ fn test_dom_xss_comprehensive_coverage() {
     let analyzer = AstDomAnalyzer::new();
     let mut total_detected = 0;
     let mut total_expected = 0;
+    let mut sanitized_total = 0;
+    let mut sanitized_detected = 0;
     let mut category_stats = std::collections::HashMap::new();
 
     for case in &cases {
@@ -489,11 +505,15 @@ fn test_dom_xss_comprehensive_coverage() {
         if case.expected_detection {
             stats.1 += 1; // expected
             total_expected += 1;
+        } else if matches!(case.id, 1400..=1499) {
+            sanitized_total += 1;
         }
         if detected {
             stats.2 += 1; // detected
             if case.expected_detection {
                 total_detected += 1;
+            } else if matches!(case.id, 1400..=1499) {
+                sanitized_detected += 1;
             }
         }
     }
@@ -520,15 +540,40 @@ fn test_dom_xss_comprehensive_coverage() {
         }
     );
 
+    let positive_detection_rate = if total_expected > 0 {
+        total_detected as f64 / total_expected as f64
+    } else {
+        0.0
+    };
+    let sanitized_false_positive_rate = if sanitized_total > 0 {
+        sanitized_detected as f64 / sanitized_total as f64
+    } else {
+        0.0
+    };
+
     // We should detect a reasonable percentage of cases
     assert!(
         total_detected > 0,
         "Should detect at least some DOM XSS vulnerabilities"
     );
+    assert!(
+        positive_detection_rate >= 0.95,
+        "DOM XSS positive detection rate dropped below baseline: {:.1}%",
+        positive_detection_rate * 100.0
+    );
+    assert!(
+        sanitized_false_positive_rate <= 0.05,
+        "DOM XSS sanitized false-positive rate exceeded baseline: {:.1}%",
+        sanitized_false_positive_rate * 100.0
+    );
 
-    println!("\n=== Recommendations for Improvement ===");
-    println!("1. Ensure storage sources (localStorage/sessionStorage) are recognized");
-    println!("2. Track event.data and e.data from postMessage handlers");
-    println!("3. Improve taint tracking through function calls and object properties");
-    println!("4. Add sanitizer recognition (DOMPurify, textContent, createTextNode)");
+    if positive_detection_rate < 0.95 || sanitized_false_positive_rate > 0.05 {
+        println!("\n=== Recommendations for Improvement ===");
+        println!("1. Ensure storage sources (localStorage/sessionStorage) are recognized");
+        println!("2. Track event.data and e.data from postMessage handlers");
+        println!("3. Improve taint tracking through function calls and object properties");
+        println!("4. Add sanitizer recognition (DOMPurify, textContent, createTextNode)");
+    } else {
+        println!("\nCoverage baselines are healthy; keep this as a regression guard.");
+    }
 }
