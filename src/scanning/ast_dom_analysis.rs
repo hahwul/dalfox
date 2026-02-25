@@ -73,6 +73,10 @@ struct DomXssVisitor<'a> {
     tainted_return_sources: Vec<String>,
     /// Source code for line/column calculation
     source_code: &'a str,
+    /// Field-level taint tracking: "obj.field" -> source
+    field_taints: HashMap<String, String>,
+    /// Top-level global variable taint tracking
+    global_taints: HashSet<String>,
 }
 
 impl<'a> DomXssVisitor<'a> {
@@ -101,6 +105,18 @@ impl<'a> DomXssVisitor<'a> {
         sources.insert("e.data".to_string());
         // Window opener
         sources.insert("window.opener".to_string());
+        // Modern DOM sources
+        sources.insert("URLSearchParams".to_string());
+        sources.insert("import.meta.url".to_string());
+        sources.insert("location.origin".to_string());
+        sources.insert("location.host".to_string());
+        sources.insert("history.state".to_string());
+        sources.insert("document.domain".to_string());
+        // XHR/Fetch response sources
+        sources.insert("Response.text".to_string());
+        sources.insert("Response.json".to_string());
+        sources.insert("XMLHttpRequest.responseText".to_string());
+        sources.insert("XMLHttpRequest.response".to_string());
 
         let mut sinks = HashSet::new();
         // Common DOM XSS sinks
@@ -138,13 +154,24 @@ impl<'a> DomXssVisitor<'a> {
 
         let mut sanitizers = HashSet::new();
         sanitizers.insert("DOMPurify.sanitize".to_string());
-        sanitizers.insert("sanitize".to_string());
         sanitizers.insert("encodeURIComponent".to_string());
         sanitizers.insert("encodeURI".to_string());
         sanitizers.insert("encodeHTML".to_string());
         sanitizers.insert("escapeHTML".to_string());
         sanitizers.insert("document.createTextNode".to_string());
         sanitizers.insert("createTextNode".to_string());
+        // Specific sanitizer library functions
+        sanitizers.insert("sanitizeHtml".to_string());
+        sanitizers.insert("xss".to_string());
+        sanitizers.insert("filterXSS".to_string());
+        sanitizers.insert("he.encode".to_string());
+        sanitizers.insert("he.escape".to_string());
+        sanitizers.insert("_.escape".to_string());
+        sanitizers.insert("escapeHtml".to_string());
+        sanitizers.insert("htmlEscape".to_string());
+        sanitizers.insert("htmlEncode".to_string());
+        sanitizers.insert("sanitizeHTML".to_string());
+        sanitizers.insert("validator.escape".to_string());
 
         Self {
             tainted_vars: HashSet::new(),
@@ -159,6 +186,8 @@ impl<'a> DomXssVisitor<'a> {
             collecting_tainted_returns: false,
             tainted_return_sources: Vec::new(),
             source_code,
+            field_taints: HashMap::new(),
+            global_taints: HashSet::new(),
         }
     }
 
@@ -168,6 +197,9 @@ impl<'a> DomXssVisitor<'a> {
             Expression::Identifier(id) => Some(id.name.to_string()),
             Expression::StaticMemberExpression(member) => self.get_member_string(member),
             Expression::ComputedMemberExpression(member) => self.get_computed_member_string(member),
+            Expression::MetaProperty(meta) => {
+                Some(format!("{}.{}", meta.meta.name, meta.property.name))
+            }
             _ => None,
         }
     }
@@ -180,6 +212,9 @@ impl<'a> DomXssVisitor<'a> {
             Expression::StaticMemberExpression(inner) => self
                 .get_member_string(inner)
                 .map(|obj| format!("{}.{}", obj, property)),
+            Expression::MetaProperty(meta) => {
+                Some(format!("{}.{}.{}", meta.meta.name, meta.property.name, property))
+            }
             _ => None,
         }
     }
@@ -213,6 +248,32 @@ impl<'a> DomXssVisitor<'a> {
             prop_name,
             "innerHTML" | "outerHTML" | "src" | "srcdoc" | "href" | "xlink:href"
         )
+    }
+
+    /// Pattern-based sanitizer name detection for names not in the explicit allowlist.
+    /// Matches specific combinations: "sanitize"+"html"/"xss", "escape"+"html"/"xss",
+    /// "encode"+"html".
+    fn is_likely_sanitizer_name(name: &str) -> bool {
+        let lower = name.to_lowercase();
+        let func = lower.split('.').next_back().unwrap_or(&lower);
+
+        // "sanitize" combined with "html" or "xss"
+        if func.contains("sanitize") && (func.contains("html") || func.contains("xss")) {
+            return true;
+        }
+        // "escape" combined with "html" or "xss"
+        if func.contains("escape") && (func.contains("html") || func.contains("xss")) {
+            return true;
+        }
+        // "encode" combined with "html"
+        if func.contains("encode") && func.contains("html") {
+            return true;
+        }
+        // "purify" or "dompurify"
+        if func.contains("purify") {
+            return true;
+        }
+        false
     }
 
     /// Evaluate an expression to a static string when possible.
@@ -615,7 +676,7 @@ impl<'a> DomXssVisitor<'a> {
     fn call_taint_and_source(&self, call: &CallExpression<'a>) -> (bool, Option<String>) {
         // Sanitizers produce de-tainted values
         if let Some(func_name) = self.get_expr_string(&call.callee)
-            && self.sanitizers.contains(&func_name)
+            && (self.sanitizers.contains(&func_name) || Self::is_likely_sanitizer_name(&func_name))
         {
             return (false, None);
         }
@@ -635,7 +696,7 @@ impl<'a> DomXssVisitor<'a> {
                 .and_then(|arg0| self.get_callable_target_key_from_argument(arg0));
 
             if let Some(target_name) = target_key.as_ref()
-                && self.sanitizers.contains(target_name)
+                && (self.sanitizers.contains(target_name) || Self::is_likely_sanitizer_name(target_name))
             {
                 return (false, None);
             }
@@ -792,9 +853,16 @@ impl<'a> DomXssVisitor<'a> {
     /// Check if expression is tainted
     fn is_tainted(&self, expr: &Expression) -> bool {
         match expr {
-            Expression::Identifier(id) => self.tainted_vars.contains(id.name.as_str()),
+            Expression::Identifier(id) => {
+                self.tainted_vars.contains(id.name.as_str())
+                    || self.global_taints.contains(id.name.as_str())
+            }
             Expression::StaticMemberExpression(member) => {
                 if let Some(full_path) = self.get_member_string(member) {
+                    // Check field-level taint first for precise tracking
+                    if self.field_taints.contains_key(&full_path) {
+                        return true;
+                    }
                     // Check if the full path is a known source
                     if self.sources.contains(&full_path) {
                         return true;
@@ -1394,6 +1462,50 @@ impl<'a> DomXssVisitor<'a> {
                 }
             }
 
+            // Handle object destructuring: const { a, b } = tainted → a, b all tainted
+            if let BindingPatternKind::ObjectPattern(obj_pat) = &decl.id.kind
+                && self.is_tainted(init)
+            {
+                let source = self.find_source_in_expr(init);
+                for prop in &obj_pat.properties {
+                    if let BindingPatternKind::BindingIdentifier(id) = &prop.value.kind {
+                        let name = id.name.to_string();
+                        self.tainted_vars.insert(name.clone());
+                        self.global_taints.insert(name.clone());
+                        if let Some(ref src) = source {
+                            self.var_aliases.insert(name, src.clone());
+                        }
+                    }
+                }
+                if let Some(rest) = &obj_pat.rest
+                    && let BindingPatternKind::BindingIdentifier(id) = &rest.argument.kind
+                {
+                    let name = id.name.to_string();
+                    self.tainted_vars.insert(name.clone());
+                    self.global_taints.insert(name.clone());
+                    if let Some(ref src) = source {
+                        self.var_aliases.insert(name, src.clone());
+                    }
+                }
+            }
+
+            // Handle array destructuring: const [a, b] = tainted → a, b all tainted
+            if let BindingPatternKind::ArrayPattern(arr_pat) = &decl.id.kind
+                && self.is_tainted(init)
+            {
+                let source = self.find_source_in_expr(init);
+                for elem in arr_pat.elements.iter().flatten() {
+                    if let BindingPatternKind::BindingIdentifier(id) = &elem.kind {
+                        let name = id.name.to_string();
+                        self.tainted_vars.insert(name.clone());
+                        self.global_taints.insert(name.clone());
+                        if let Some(ref src) = source {
+                            self.var_aliases.insert(name, src.clone());
+                        }
+                    }
+                }
+            }
+
             // Walk the init expression to detect any sinks used in the initializer
             self.walk_expression(init);
         }
@@ -1404,10 +1516,13 @@ impl<'a> DomXssVisitor<'a> {
         match expr {
             Expression::Identifier(id) => self.var_aliases.get(id.name.as_str()).cloned(),
             Expression::StaticMemberExpression(member) => {
-                if let Some(full_path) = self.get_member_string(member)
-                    && self.sources.contains(&full_path)
-                {
-                    return Some(full_path);
+                if let Some(full_path) = self.get_member_string(member) {
+                    if let Some(source) = self.field_taints.get(&full_path) {
+                        return Some(source.clone());
+                    }
+                    if self.sources.contains(&full_path) {
+                        return Some(full_path);
+                    }
                 }
                 self.find_source_in_expr(&member.object)
             }
@@ -1612,12 +1727,23 @@ impl<'a> DomXssVisitor<'a> {
                     );
                 }
 
-                // Track object-level taint for property assignment flows like:
+                // Track field-level taint for property assignments like:
                 // obj.payload = location.hash; sink(obj.payload)
-                if right_tainted && let Expression::Identifier(obj_id) = &member.object {
-                    self.tainted_vars.insert(obj_id.name.to_string());
-                    if let Some(source) = right_source.clone() {
-                        self.var_aliases.insert(obj_id.name.to_string(), source);
+                if right_tainted {
+                    if let Some(full_path) = self.get_member_string(member) {
+                        if let Some(source) = right_source.clone() {
+                            self.field_taints.insert(full_path.clone(), source.clone());
+                        } else {
+                            self.field_taints
+                                .insert(full_path.clone(), "unknown".to_string());
+                        }
+                    }
+                    // Also propagate to object level
+                    if let Expression::Identifier(obj_id) = &member.object {
+                        self.tainted_vars.insert(obj_id.name.to_string());
+                        if let Some(source) = right_source.clone() {
+                            self.var_aliases.insert(obj_id.name.to_string(), source);
+                        }
                     }
                 }
             }

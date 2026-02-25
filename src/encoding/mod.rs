@@ -25,7 +25,7 @@ pub fn apply_encoders_to_payloads(base_payloads: &[String], encoders: &[String])
     let mut out_seen = std::collections::HashSet::new();
 
     // Expansion order
-    let prio = ["url", "html", "2url", "base64"];
+    let prio = ["url", "html", "2url", "base64", "unicode", "zwsp"];
 
     // Pre-calculate active encoders
     let active_encoders: Vec<&str> = prio
@@ -46,6 +46,8 @@ pub fn apply_encoders_to_payloads(base_payloads: &[String], encoders: &[String])
                 "html" => html_entity_encode(p),
                 "2url" => double_url_encode(p),
                 "base64" => base64_encode(p),
+                "unicode" => unicode_fullwidth_encode(p),
+                "zwsp" => zero_width_encode(p),
                 _ => continue,
             };
             if out_seen.insert(v.clone()) {
@@ -125,6 +127,130 @@ pub fn html_entity_encode(payload: &str) -> String {
 /// Example: "<" becomes "%253C"
 pub fn double_url_encode(payload: &str) -> String {
     url_encode(&url_encode(payload))
+}
+
+/// Unicode fullwidth encoding: maps ASCII 0x21-0x7E to fullwidth equivalents
+/// (U+FF01-U+FF5E). Useful for bypassing WAFs that only check ASCII characters.
+/// Example: "<" (0x3C) becomes "＜" (U+FF1C)
+pub fn unicode_fullwidth_encode(payload: &str) -> String {
+    payload
+        .chars()
+        .map(|c| {
+            let code = c as u32;
+            if (0x21..=0x7E).contains(&code) {
+                // Map ASCII printable range to fullwidth: 0x21 -> 0xFF01
+                char::from_u32(code - 0x21 + 0xFF01).unwrap_or(c)
+            } else {
+                c
+            }
+        })
+        .collect()
+}
+
+/// Zero-width space encoding: inserts U+200B after key characters commonly
+/// filtered by WAFs (<, >, ", ', (, ), /, ;). The zero-width space is invisible
+/// but may bypass simple string matching.
+pub fn zero_width_encode(payload: &str) -> String {
+    let mut out = String::with_capacity(payload.len() * 2);
+    for c in payload.chars() {
+        out.push(c);
+        if matches!(c, '<' | '>' | '"' | '\'' | '(' | ')' | '/' | ';') {
+            out.push('\u{200B}');
+        }
+    }
+    out
+}
+
+/// Selectively HTML-entity-encode only the specified characters in a payload.
+fn selective_html_encode(payload: &str, chars_to_encode: &[char]) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(payload.len() * 4);
+    for c in payload.chars() {
+        if chars_to_encode.contains(&c) {
+            let _ = write!(out, "&#x{:04x};", c as u32);
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// Generate adaptive encoding variants based on which special characters are
+/// filtered vs. allowed by the target.  Returns a list of encoding function names
+/// that should be applied to payloads.
+///
+/// * `invalid_specials` – characters that the server filters/blocks (e.g. `<`, `>`)
+/// * `valid_specials`   – characters that pass through unmodified
+pub fn generate_adaptive_encodings(
+    invalid_specials: &[char],
+    _valid_specials: &[char],
+) -> Vec<String> {
+    let mut encoders: Vec<String> = Vec::new();
+
+    let angle_blocked = invalid_specials.contains(&'<') || invalid_specials.contains(&'>');
+    let quote_blocked = invalid_specials.contains(&'"') || invalid_specials.contains(&'\'');
+    let paren_blocked = invalid_specials.contains(&'(') || invalid_specials.contains(&')');
+
+    if angle_blocked {
+        encoders.push("html".to_string());
+        encoders.push("url".to_string());
+        encoders.push("2url".to_string());
+        encoders.push("unicode".to_string());
+    }
+
+    if quote_blocked && !angle_blocked {
+        encoders.push("html".to_string());
+    }
+
+    if paren_blocked && !angle_blocked {
+        encoders.push("html".to_string());
+    }
+
+    // Always include url as a baseline
+    if !encoders.contains(&"url".to_string()) {
+        encoders.push("url".to_string());
+    }
+
+    encoders
+}
+
+/// Apply adaptive encoding to a single payload based on which chars are blocked.
+pub fn apply_adaptive_encoding(
+    payload: &str,
+    invalid_specials: &[char],
+) -> Vec<String> {
+    let mut variants = vec![payload.to_string()];
+
+    let angle_blocked = invalid_specials.contains(&'<') || invalid_specials.contains(&'>');
+    let quote_blocked = invalid_specials.contains(&'"') || invalid_specials.contains(&'\'');
+    let paren_blocked = invalid_specials.contains(&'(') || invalid_specials.contains(&')');
+
+    if angle_blocked {
+        // Encode only angle brackets
+        variants.push(selective_html_encode(payload, &['<', '>']));
+        variants.push(url_encode(payload));
+        variants.push(double_url_encode(payload));
+        variants.push(unicode_fullwidth_encode(payload));
+        // Combo: url(html)
+        variants.push(url_encode(&selective_html_encode(payload, &['<', '>'])));
+        // Combo: html(url)
+        variants.push(html_entity_encode(&url_encode(payload)));
+    }
+
+    if quote_blocked {
+        // Encode only quotes
+        variants.push(selective_html_encode(payload, &['"', '\'']));
+    }
+
+    if paren_blocked {
+        // Encode only parens
+        variants.push(selective_html_encode(payload, &['(', ')']));
+    }
+
+    // Dedup
+    let mut seen = std::collections::HashSet::new();
+    variants.retain(|v| seen.insert(v.clone()));
+    variants
 }
 
 #[cfg(test)]
@@ -226,5 +352,80 @@ mod tests {
         assert!(url_encoded.contains("%"));
         assert!(html_encoded.contains("&#x"));
         assert!(double_encoded.contains("%25"));
+    }
+
+    #[test]
+    fn test_unicode_fullwidth_encode() {
+        assert_eq!(unicode_fullwidth_encode("<"), "\u{FF1C}");
+        assert_eq!(unicode_fullwidth_encode(">"), "\u{FF1E}");
+        assert_eq!(unicode_fullwidth_encode("a"), "\u{FF41}");
+        // Space (0x20) is outside printable range for fullwidth mapping, stays as-is
+        assert_eq!(unicode_fullwidth_encode(" "), " ");
+        // Full payload
+        let encoded = unicode_fullwidth_encode("<script>");
+        assert!(!encoded.contains('<'));
+        assert!(!encoded.contains('>'));
+    }
+
+    #[test]
+    fn test_zero_width_encode() {
+        let encoded = zero_width_encode("<img>");
+        assert!(encoded.contains('\u{200B}'));
+        // < should be followed by ZWS, > should be followed by ZWS
+        assert_eq!(encoded, "<\u{200B}img>\u{200B}");
+    }
+
+    #[test]
+    fn test_zero_width_encode_preserves_non_special() {
+        let encoded = zero_width_encode("abc");
+        assert_eq!(encoded, "abc");
+    }
+
+    #[test]
+    fn test_generate_adaptive_encodings_angle_blocked() {
+        let encoders = generate_adaptive_encodings(&['<', '>'], &['"', '\'']);
+        assert!(encoders.contains(&"html".to_string()));
+        assert!(encoders.contains(&"url".to_string()));
+        assert!(encoders.contains(&"2url".to_string()));
+        assert!(encoders.contains(&"unicode".to_string()));
+    }
+
+    #[test]
+    fn test_generate_adaptive_encodings_quote_blocked() {
+        let encoders = generate_adaptive_encodings(&['"'], &['<', '>']);
+        assert!(encoders.contains(&"html".to_string()));
+        assert!(encoders.contains(&"url".to_string()));
+    }
+
+    #[test]
+    fn test_generate_adaptive_encodings_nothing_blocked() {
+        let encoders = generate_adaptive_encodings(&[], &['<', '>', '"']);
+        // Should at least have url as baseline
+        assert!(encoders.contains(&"url".to_string()));
+    }
+
+    #[test]
+    fn test_apply_adaptive_encoding_angle_blocked() {
+        let variants = apply_adaptive_encoding("<img src=x>", &['<', '>']);
+        assert!(variants.len() > 1, "should produce multiple variants");
+        // Original should be first
+        assert_eq!(variants[0], "<img src=x>");
+        // Should contain a variant with encoded angles
+        assert!(variants.iter().any(|v| !v.contains('<')));
+    }
+
+    #[test]
+    fn test_apply_adaptive_encoding_no_block() {
+        let variants = apply_adaptive_encoding("<img>", &[]);
+        assert_eq!(variants.len(), 1, "no blocked chars = no extra variants");
+        assert_eq!(variants[0], "<img>");
+    }
+
+    #[test]
+    fn test_selective_html_encode() {
+        let result = selective_html_encode("<img src='x'>", &['<', '>']);
+        assert!(!result.contains('<'));
+        assert!(!result.contains('>'));
+        assert!(result.contains("src='x'"));
     }
 }

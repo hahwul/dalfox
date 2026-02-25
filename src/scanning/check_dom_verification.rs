@@ -91,27 +91,32 @@ pub async fn check_dom_verification_with_client(
     }
 
     if args.sxss {
-        // For Stored XSS, check DOM on sxss_url
+        // For Stored XSS, check DOM on sxss_url with retry logic
         if let Some(sxss_url_str) = &args.sxss_url
             && let Ok(sxss_url) = url::Url::parse(sxss_url_str)
         {
-            let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
-            let check_request =
-                crate::utils::build_request(&client, target, method, sxss_url, None);
+            for attempt in 0u64..3 {
+                if attempt > 0 {
+                    sleep(Duration::from_millis(500 * attempt)).await;
+                }
+                let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
+                let check_request =
+                    crate::utils::build_request(&client, target, method, sxss_url.clone(), None);
 
-            crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if let Ok(resp) = check_request.send().await {
-                let headers = resp.headers().clone();
-                let ct = headers
-                    .get(reqwest::header::CONTENT_TYPE)
-                    .and_then(|v| v.to_str().ok())
-                    .unwrap_or("");
-                if let Ok(text) = resp.text().await
-                    && crate::utils::is_htmlish_content_type(ct)
-                    && text.contains(payload)
-                    && has_marker_evidence(payload, &text)
-                {
-                    return (true, Some(text));
+                crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if let Ok(resp) = check_request.send().await {
+                    let headers = resp.headers().clone();
+                    let ct = headers
+                        .get(reqwest::header::CONTENT_TYPE)
+                        .and_then(|v| v.to_str().ok())
+                        .unwrap_or("");
+                    if let Ok(text) = resp.text().await
+                        && crate::utils::is_htmlish_content_type(ct)
+                        && text.contains(payload)
+                        && has_marker_evidence(payload, &text)
+                    {
+                        return (true, Some(text));
+                    }
                 }
             }
         }

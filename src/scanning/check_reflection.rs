@@ -6,6 +6,67 @@ use std::sync::OnceLock;
 use std::sync::atomic::Ordering;
 use tokio::time::{Duration, sleep};
 
+/// Safe HTML tags where reflected content cannot execute scripts.
+const SAFE_TAGS: &[&str] = &["textarea", "noscript", "style", "xmp", "plaintext", "title"];
+
+/// Check whether *all* occurrences of `payload` in `html` fall inside safe tags
+/// (textarea, noscript, style, xmp, plaintext, title).  If the payload appears
+/// at least once outside a safe tag, returns `false`.
+///
+/// Uses a simple tag-stack approach on the raw HTML for reliability, because DOM
+/// parsers like `scraper` may normalize text content inside raw-text elements.
+fn is_in_safe_context(html: &str, payload: &str) -> bool {
+    // Quick check: payload must be present
+    if !html.contains(payload) {
+        return true; // nothing reflected, vacuously safe
+    }
+
+    let lower_html = html.to_lowercase();
+
+    // Build safe-context ranges by scanning for opening/closing safe tags
+    let mut safe_ranges: Vec<(usize, usize)> = Vec::new();
+    for &tag in SAFE_TAGS {
+        let open_pattern = format!("<{}", tag);
+        let close_pattern = format!("</{}>", tag);
+        let mut search_pos = 0;
+        while let Some(open_start) = lower_html[search_pos..].find(&open_pattern) {
+            let abs_open = search_pos + open_start;
+            // Find the end of the opening tag '>'
+            if let Some(tag_end_offset) = html[abs_open..].find('>') {
+                let content_start = abs_open + tag_end_offset + 1;
+                // Find closing tag
+                if let Some(close_offset) = lower_html[content_start..].find(&close_pattern) {
+                    let content_end = content_start + close_offset;
+                    safe_ranges.push((content_start, content_end));
+                    search_pos = content_end + close_pattern.len();
+                } else {
+                    // No closing tag found, rest of document is in safe context
+                    safe_ranges.push((content_start, html.len()));
+                    break;
+                }
+            } else {
+                break;
+            }
+        }
+    }
+
+    // Check every occurrence of the payload
+    let payload_len = payload.len();
+    let mut search_start = 0;
+    while let Some(pos) = html[search_start..].find(payload) {
+        let abs_pos = search_start + pos;
+        let in_safe = safe_ranges
+            .iter()
+            .any(|&(start, end)| abs_pos >= start && abs_pos + payload_len <= end);
+        if !in_safe {
+            return false; // at least one occurrence is outside safe context
+        }
+        search_start = abs_pos + 1;
+    }
+
+    true
+}
+
 static ENTITY_REGEX: OnceLock<Regex> = OnceLock::new();
 static NAMED_ENTITY_REGEX: OnceLock<Regex> = OnceLock::new();
 
@@ -139,18 +200,27 @@ async fn fetch_injection_response_with_client(
         sleep(Duration::from_millis(target.delay)).await;
     }
 
-    // For Stored XSS, check reflection on sxss_url
+    // For Stored XSS, check reflection on sxss_url with retry logic
     if args.sxss {
         if let Some(sxss_url_str) = &args.sxss_url
             && let Ok(sxss_url) = url::Url::parse(sxss_url_str)
         {
-            let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
-            let check_request =
-                crate::utils::build_request(&client, target, method, sxss_url, None);
+            // Retry up to 3 times with delay to handle session propagation
+            for attempt in 0..3 {
+                if attempt > 0 {
+                    sleep(Duration::from_millis(500 * attempt as u64)).await;
+                }
+                let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
+                let check_request =
+                    crate::utils::build_request(&client, target, method, sxss_url.clone(), None);
 
-            crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
-            if let Ok(resp) = check_request.send().await {
-                return resp.text().await.ok();
+                crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+                if let Ok(resp) = check_request.send().await
+                    && let Ok(text) = resp.text().await
+                    && !text.is_empty()
+                {
+                    return Some(text);
+                }
             }
         }
         None
@@ -171,7 +241,11 @@ pub async fn check_reflection(
     args: &crate::cmd::scan::ScanArgs,
 ) -> bool {
     if let Some(text) = fetch_injection_response(target, param, payload, args).await {
-        classify_reflection(&text, payload).is_some()
+        match classify_reflection(&text, payload) {
+            Some(ReflectionKind::Raw) if is_in_safe_context(&text, payload) => false,
+            Some(_) => true,
+            None => false,
+        }
     } else {
         false
     }
@@ -185,6 +259,10 @@ pub async fn check_reflection_with_response(
 ) -> (Option<ReflectionKind>, Option<String>) {
     if let Some(text) = fetch_injection_response(target, param, payload, args).await {
         let kind = classify_reflection(&text, payload);
+        let kind = match kind {
+            Some(ReflectionKind::Raw) if is_in_safe_context(&text, payload) => None,
+            other => other,
+        };
         (kind, Some(text))
     } else {
         (None, None)
@@ -202,6 +280,10 @@ pub async fn check_reflection_with_response_client(
         fetch_injection_response_with_client(client, target, param, payload, args).await
     {
         let kind = classify_reflection(&text, payload);
+        let kind = match kind {
+            Some(ReflectionKind::Raw) if is_in_safe_context(&text, payload) => None,
+            other => other,
+        };
         (kind, Some(text))
     } else {
         (None, None)
@@ -615,5 +697,60 @@ mod tests {
         let (kind, body) = check_reflection_with_response(&target, &param, payload, &args).await;
         assert_eq!(kind, Some(ReflectionKind::Raw));
         assert!(body.unwrap_or_default().contains("echo"));
+    }
+
+    // --- Safe context filtering tests ---
+
+    #[test]
+    fn test_safe_context_textarea() {
+        let payload = "<script>alert(1)</script>";
+        let html = format!("<html><textarea>{}</textarea></html>", payload);
+        assert!(is_in_safe_context(&html, payload));
+    }
+
+    #[test]
+    fn test_safe_context_noscript() {
+        let payload = "<img src=x onerror=alert(1)>";
+        let html = format!("<html><noscript>{}</noscript></html>", payload);
+        assert!(is_in_safe_context(&html, payload));
+    }
+
+    #[test]
+    fn test_safe_context_title() {
+        let payload = "<script>alert(1)</script>";
+        let html = format!("<html><head><title>{}</title></head></html>", payload);
+        assert!(is_in_safe_context(&html, payload));
+    }
+
+    #[test]
+    fn test_safe_context_style() {
+        let payload = "expression(alert(1))";
+        let html = format!("<html><style>{}</style></html>", payload);
+        assert!(is_in_safe_context(&html, payload));
+    }
+
+    #[test]
+    fn test_safe_context_mixed_safe_and_unsafe() {
+        let payload = "<script>alert(1)</script>";
+        let html = format!(
+            "<html><textarea>{}</textarea><div>{}</div></html>",
+            payload, payload
+        );
+        assert!(
+            !is_in_safe_context(&html, payload),
+            "mixed context should NOT be considered safe"
+        );
+    }
+
+    #[test]
+    fn test_safe_context_outside_safe_tag() {
+        let payload = "<script>alert(1)</script>";
+        let html = format!("<html><div>{}</div></html>", payload);
+        assert!(!is_in_safe_context(&html, payload));
+    }
+
+    #[test]
+    fn test_safe_context_no_payload() {
+        assert!(is_in_safe_context("<html><body>nothing</body></html>", "PAYLOAD"));
     }
 }

