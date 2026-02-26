@@ -457,8 +457,8 @@ impl<'a> DomXssVisitor<'a> {
                         );
                     }
                     _ => {
-                        if let Some(elem_expr) = elem.as_expression() {
-                            if current_idx == param_idx {
+                        if let Some(elem_expr) = elem.as_expression()
+                            && current_idx == param_idx {
                                 let tainted = self.is_tainted(elem_expr);
                                 return (
                                     tainted,
@@ -469,7 +469,6 @@ impl<'a> DomXssVisitor<'a> {
                                     },
                                 );
                             }
-                        }
                         current_idx += 1;
                     }
                 }
@@ -503,11 +502,10 @@ impl<'a> DomXssVisitor<'a> {
                     return None;
                 }
                 _ => {
-                    if let Some(elem_expr) = elem.as_expression() {
-                        if current_idx == param_idx {
+                    if let Some(elem_expr) = elem.as_expression()
+                        && current_idx == param_idx {
                             return self.eval_static_string_expr(elem_expr);
                         }
-                    }
                     current_idx += 1;
                 }
             }
@@ -1386,9 +1384,9 @@ impl<'a> DomXssVisitor<'a> {
                     && member.property.name.as_str() == "searchParams"
                 {
                     // Check if the object is new URL(tainted)
-                    if let Expression::NewExpression(new_expr) = &member.object {
-                        if let Expression::Identifier(id) = &new_expr.callee {
-                            if id.name.as_str() == "URL" && !new_expr.arguments.is_empty() {
+                    if let Expression::NewExpression(new_expr) = &member.object
+                        && let Expression::Identifier(id) = &new_expr.callee
+                            && id.name.as_str() == "URL" && !new_expr.arguments.is_empty() {
                                 // Check if the first argument is tainted
                                 if let Some(arg) = new_expr.arguments.first() {
                                     let is_arg_tainted = match arg {
@@ -1415,8 +1413,6 @@ impl<'a> DomXssVisitor<'a> {
                                     }
                                 }
                             }
-                        }
-                    }
                 }
 
                 // Check for JSON.parse(tainted) - taint propagates through JSON.parse
@@ -2360,8 +2356,8 @@ impl<'a> DomXssVisitor<'a> {
         // Also treat member method name itself as sink
         // (e.g., el.insertAdjacentHTML, document['write'](...))
         let member_method_name = self.get_callee_property_name(&call.callee);
-        if let Some(method_name) = member_method_name {
-            if self.sinks.contains(method_name.as_str()) {
+        if let Some(method_name) = member_method_name
+            && self.sinks.contains(method_name.as_str()) {
                 // Special-case setAttribute to only dangerous attributes
                 if method_name == "setAttribute" && call.arguments.len() >= 2 {
                     let attr_name_lc = call
@@ -2399,9 +2395,9 @@ impl<'a> DomXssVisitor<'a> {
                         .first()
                         .and_then(|arg0| self.eval_static_string_arg(arg0))
                         .map(|name| name.to_ascii_lowercase());
-                    if let Some(cmd) = cmd_name_lc {
-                        if cmd == "inserthtml" {
-                            if let Some(arg2) = call.arguments.get(2) {
+                    if let Some(cmd) = cmd_name_lc
+                        && cmd == "inserthtml"
+                            && let Some(arg2) = call.arguments.get(2) {
                                 let tainted = match arg2 {
                                     Argument::SpreadElement(sp) => self.is_tainted(&sp.argument),
                                     _ => arg2
@@ -2418,8 +2414,6 @@ impl<'a> DomXssVisitor<'a> {
                                     return;
                                 }
                             }
-                        }
-                    }
                 } else {
                     // Generic method sink: if any argument is tainted
                     let mut arg_tainted = false;
@@ -2455,7 +2449,6 @@ impl<'a> DomXssVisitor<'a> {
                     }
                 }
             }
-        }
         // Walk the callee
         self.walk_expression(&call.callee);
     }

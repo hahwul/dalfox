@@ -55,11 +55,9 @@ fn generate_poc(result: &crate::scanning::result::Result, poc_type: &str) -> Str
     // Apply user-specified encoders (highest precedence first) to path payload if requested.
     // We only transform the payload portion inside the path (if any); query/body already handled upstream.
     fn apply_path_encoders_if_requested(raw_payload: &str) -> String {
-        let encoders = GLOBAL_ENCODERS.get();
-        if encoders.is_none() {
+        let Some(encs) = GLOBAL_ENCODERS.get() else {
             return selective_path_encode(raw_payload);
-        }
-        let encs = encoders.unwrap();
+        };
         // Priority order: explicit user order (stop at first transforming encoder that is not 'none')
         for enc in encs {
             match enc.as_str() {
@@ -1383,7 +1381,9 @@ pub async fn run_scan(args: &ScanArgs) {
 
             handles.push(tokio::task::spawn_local(async move {
                 // Bound concurrency across targets for preflight + analysis
-                let _permit = sem.acquire_owned().await.unwrap();
+                let Ok(_permit) = sem.acquire_owned().await else {
+                    return None;
+                };
                 let mut __preflight_csp_present = false;
                 let mut __preflight_csp_header: Option<(String, String)> = None;
                 let mut preflight_response_body: Option<String> = None;
@@ -1656,7 +1656,7 @@ pub async fn run_scan(args: &ScanArgs) {
                 pb.set_style(
                     indicatif::ProgressStyle::default_bar()
                         .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} Overall scanning")
-                        .unwrap()
+                        .expect("valid progress bar template")
                         .progress_chars("#>-"),
                 );
                 Some(Arc::new(Mutex::new(pb)))
@@ -1672,11 +1672,9 @@ pub async fn run_scan(args: &ScanArgs) {
                 {
                     break;
                 }
-                let permit = global_semaphore_clone
-                    .clone()
-                    .acquire_owned()
-                    .await
-                    .unwrap();
+                let Ok(permit) = global_semaphore_clone.clone().acquire_owned().await else {
+                    break;
+                };
                 let args_clone = args_arc.clone();
                 let results_clone_inner = results_clone.clone();
                 let multi_pb_clone_inner = multi_pb_clone.clone();
@@ -1722,7 +1720,7 @@ pub async fn run_scan(args: &ScanArgs) {
             }
 
             for handle in target_handles {
-                handle.await.unwrap();
+                let _ = handle.await;
                 // Update global overall progress line when multiple targets
                 overall_done_clone.fetch_add(1, Ordering::Relaxed);
                 // overall ticker handles rendering globally
@@ -1738,7 +1736,7 @@ pub async fn run_scan(args: &ScanArgs) {
     }
 
     for handle in group_handles {
-        handle.await.unwrap();
+        let _ = handle.await;
         if let Some(lim) = args.limit
             && findings_count.load(Ordering::Relaxed) >= lim
         {

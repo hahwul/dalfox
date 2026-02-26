@@ -201,15 +201,26 @@ fn build_cors_headers(state: &AppState, req_headers: &HeaderMap) -> HeaderMap {
     let allow_methods = state
         .allow_methods
         .parse()
-        .unwrap_or_else(|_| "GET,POST,OPTIONS,PUT,PATCH,DELETE".parse().unwrap());
+        .unwrap_or_else(|_| {
+            "GET,POST,OPTIONS,PUT,PATCH,DELETE"
+                .parse()
+                .expect("static CORS methods header")
+        });
     let allow_headers = state
         .allow_headers
         .parse()
-        .unwrap_or_else(|_| "Content-Type,X-API-KEY,Authorization".parse().unwrap());
+        .unwrap_or_else(|_| {
+            "Content-Type,X-API-KEY,Authorization"
+                .parse()
+                .expect("static CORS headers header")
+        });
 
     // Wildcard
     if state.allow_all_origins {
-        headers.insert("Access-Control-Allow-Origin", "*".parse().unwrap());
+        headers.insert(
+            "Access-Control-Allow-Origin",
+            "*".parse().expect("static wildcard origin"),
+        );
         headers.insert("Access-Control-Allow-Methods", allow_methods);
         headers.insert("Access-Control-Allow-Headers", allow_headers);
         return headers;
@@ -234,7 +245,7 @@ fn build_cors_headers(state: &AppState, req_headers: &HeaderMap) -> HeaderMap {
 
         if exact_allowed || regex_allowed {
             headers.insert("Access-Control-Allow-Origin", origin_val.clone());
-            headers.insert("Vary", "Origin".parse().unwrap());
+            headers.insert("Vary", "Origin".parse().expect("static Vary header"));
         }
     }
 
@@ -488,12 +499,14 @@ async fn start_scan_handler(
         {
             cors.insert(
                 "Content-Type",
-                "application/javascript; charset=utf-8".parse().unwrap(),
+                "application/javascript; charset=utf-8"
+                    .parse()
+                    .expect("static content-type"),
             );
-            let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
+            let body = format!("{}({});", cb, serde_json::to_string(&resp).expect("serializable response"));
             return (StatusCode::UNAUTHORIZED, cors, body);
         }
-        let body = serde_json::to_string(&resp).unwrap();
+        let body = serde_json::to_string(&resp).expect("serializable response");
         return (StatusCode::UNAUTHORIZED, cors, body);
     }
 
@@ -534,12 +547,14 @@ async fn start_scan_handler(
         {
             cors.insert(
                 "Content-Type",
-                "application/javascript; charset=utf-8".parse().unwrap(),
+                "application/javascript; charset=utf-8"
+                    .parse()
+                    .expect("static content-type"),
             );
-            let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
+            let body = format!("{}({});", cb, serde_json::to_string(&resp).expect("serializable response"));
             return (StatusCode::BAD_REQUEST, cors, body);
         }
-        let body = serde_json::to_string(&resp).unwrap();
+        let body = serde_json::to_string(&resp).expect("serializable response");
         return (StatusCode::BAD_REQUEST, cors, body);
     }
 
@@ -614,12 +629,14 @@ async fn start_scan_handler(
     {
         cors.insert(
             "Content-Type",
-            "application/javascript; charset=utf-8".parse().unwrap(),
+            "application/javascript; charset=utf-8"
+                    .parse()
+                    .expect("static content-type"),
         );
-        let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
+        let body = format!("{}({});", cb, serde_json::to_string(&resp).expect("serializable response"));
         return (StatusCode::OK, cors, body);
     }
-    let body = serde_json::to_string(&resp).unwrap();
+    let body = serde_json::to_string(&resp).expect("serializable response");
     (StatusCode::OK, cors, body)
 }
 
@@ -667,12 +684,14 @@ async fn get_result_handler(
         {
             cors.insert(
                 "Content-Type",
-                "application/javascript; charset=utf-8".parse().unwrap(),
+                "application/javascript; charset=utf-8"
+                    .parse()
+                    .expect("static content-type"),
             );
-            let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
+            let body = format!("{}({});", cb, serde_json::to_string(&resp).expect("serializable response"));
             return (StatusCode::UNAUTHORIZED, cors, body);
         }
-        let body = serde_json::to_string(&resp).unwrap();
+        let body = serde_json::to_string(&resp).expect("serializable response");
         return (StatusCode::UNAUTHORIZED, cors, body);
     }
 
@@ -729,12 +748,14 @@ async fn get_result_handler(
             {
                 cors.insert(
                     "Content-Type",
-                    "application/javascript; charset=utf-8".parse().unwrap(),
+                    "application/javascript; charset=utf-8"
+                    .parse()
+                    .expect("static content-type"),
                 );
-                let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
+                let body = format!("{}({});", cb, serde_json::to_string(&resp).expect("serializable response"));
                 return (StatusCode::OK, cors, body);
             }
-            let body = serde_json::to_string(&resp).unwrap();
+            let body = serde_json::to_string(&resp).expect("serializable response");
             (StatusCode::OK, cors, body)
         }
         None => {
@@ -773,12 +794,14 @@ async fn get_result_handler(
             {
                 cors.insert(
                     "Content-Type",
-                    "application/javascript; charset=utf-8".parse().unwrap(),
+                    "application/javascript; charset=utf-8"
+                    .parse()
+                    .expect("static content-type"),
                 );
-                let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
+                let body = format!("{}({});", cb, serde_json::to_string(&resp).expect("serializable response"));
                 return (StatusCode::NOT_FOUND, cors, body);
             }
-            let body = serde_json::to_string(&resp).unwrap();
+            let body = serde_json::to_string(&resp).expect("serializable response");
             (StatusCode::NOT_FOUND, cors, body)
         }
     }
@@ -836,12 +859,14 @@ async fn get_scan_handler(
         {
             cors.insert(
                 "Content-Type",
-                "application/javascript; charset=utf-8".parse().unwrap(),
+                "application/javascript; charset=utf-8"
+                    .parse()
+                    .expect("static content-type"),
             );
-            let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
+            let body = format!("{}({});", cb, serde_json::to_string(&resp).expect("serializable response"));
             return (StatusCode::UNAUTHORIZED, cors, body);
         }
-        let body = serde_json::to_string(&resp).unwrap();
+        let body = serde_json::to_string(&resp).expect("serializable response");
         return (StatusCode::UNAUTHORIZED, cors, body);
     }
 
@@ -883,12 +908,14 @@ async fn get_scan_handler(
         {
             cors.insert(
                 "Content-Type",
-                "application/javascript; charset=utf-8".parse().unwrap(),
+                "application/javascript; charset=utf-8"
+                    .parse()
+                    .expect("static content-type"),
             );
-            let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
+            let body = format!("{}({});", cb, serde_json::to_string(&resp).expect("serializable response"));
             return (StatusCode::BAD_REQUEST, cors, body);
         }
-        let body = serde_json::to_string(&resp).unwrap();
+        let body = serde_json::to_string(&resp).expect("serializable response");
         return (StatusCode::BAD_REQUEST, cors, body);
     }
 
@@ -1013,12 +1040,14 @@ async fn get_scan_handler(
     {
         cors.insert(
             "Content-Type",
-            "application/javascript; charset=utf-8".parse().unwrap(),
+            "application/javascript; charset=utf-8"
+                    .parse()
+                    .expect("static content-type"),
         );
-        let body = format!("{}({});", cb, serde_json::to_string(&resp).unwrap());
+        let body = format!("{}({});", cb, serde_json::to_string(&resp).expect("serializable response"));
         return (StatusCode::OK, cors, body);
     }
-    let body = serde_json::to_string(&resp).unwrap();
+    let body = serde_json::to_string(&resp).expect("serializable response");
     (StatusCode::OK, cors, body)
 }
 

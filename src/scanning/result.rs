@@ -21,6 +21,7 @@ pub struct Result {
 }
 
 impl Result {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         result_type: String,
         inject_type: String,

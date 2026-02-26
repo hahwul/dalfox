@@ -80,7 +80,7 @@ pub async fn check_dom_verification_with_client(
     // Send injection request (centralized builder)
     let method = target.method.parse().unwrap_or(reqwest::Method::GET);
     let inject_request =
-        crate::utils::build_request(&client, target, method, inject_url, target.data.clone());
+        crate::utils::build_request(client, target, method, inject_url, target.data.clone());
 
     // Send the injection request
     crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -101,7 +101,7 @@ pub async fn check_dom_verification_with_client(
                 }
                 let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
                 let check_request =
-                    crate::utils::build_request(&client, target, method, sxss_url.clone(), None);
+                    crate::utils::build_request(client, target, method, sxss_url.clone(), None);
 
                 crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 if let Ok(resp) = check_request.send().await {

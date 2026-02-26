@@ -29,7 +29,7 @@ pub async fn verify_dom_xss_light_with_client(
     let parsed_url = url::Url::parse(&inject_url).unwrap_or_else(|_| target.url.clone());
     let method = target.method.parse().unwrap_or(reqwest::Method::GET);
     let request =
-        crate::utils::build_request(&client, target, method, parsed_url, target.data.clone());
+        crate::utils::build_request(client, target, method, parsed_url, target.data.clone());
 
     let mut note: Option<String> = None;
     if let Ok(resp) = request.send().await {
