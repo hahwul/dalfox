@@ -1,0 +1,56 @@
+# Mobile deep link, app banner, and mobile-specific XSS patterns
+
+[[case]]
+id = 5381
+name = "mobile_deep_link_page"
+description = "Deep link redirect page with app URI and fallback URL"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "deep_link"
+category = "real_world"
+
+[[case]]
+id = 5382
+name = "mobile_app_banner"
+description = "Smart app banner page reflects app-argument in meta and link"
+handler_type = "realworld"
+reflection = "<html><head><meta name=\"apple-itunes-app\" content=\"app-id=123, app-argument={input}\"><link rel=\"android-app\" href=\"android-app://com.example/{input}\"></head><body><div class=\"app-banner\"><a href=\"myapp://{input}\">Open in App</a><p>{input}</p></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5383
+name = "mobile_qr_code"
+description = "QR code generator page reflects encoded URL content"
+handler_type = "realworld"
+reflection = "<html><body><h2>QR Code</h2><div class=\"qr-container\"><img src=\"/qr?data={input}\" alt=\"QR for {input}\"></div><p>Content: <a href=\"{input}\">{input}</a></p><script>var qrData = '{input}'; generateQR(qrData);</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5384
+name = "mobile_push_register"
+description = "Push notification registration page reflects topic/channel"
+handler_type = "realworld"
+reflection = "<html><body><h2>Push Notifications</h2><form><label>Subscribe to</label><input name=\"topic\" value=\"{input}\"><p>You will receive notifications for: <strong>{input}</strong></p><button>Subscribe</button></form><script>var topic = '{input}'; messaging.subscribeToTopic(topic);</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5385
+name = "mobile_intent_uri"
+description = "Android intent URI handler page reflects intent parameters"
+handler_type = "realworld"
+reflection = "<html><body><p>Opening app...</p><a href=\"intent://{input}#Intent;scheme=myapp;package=com.example;end\" id=\"intent-link\">Launch</a><script>var intentData = '{input}'; document.getElementById('intent-link').click();</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5386
+name = "mobile_responsive_redirect"
+description = "Mobile redirect page reflects target URL with device detection"
+handler_type = "realworld"
+reflection = "<html><body><script>var target = '{input}'; if(/Mobile/.test(navigator.userAgent)) {{ window.location = 'm.' + target; }} else {{ document.write('<p>Desktop: <a href=\"' + target + '\">{input}</a></p>'); }}</script><noscript><a href=\"{input}\">Continue</a></noscript></body></html>"
+expected_detection = true
+category = "real_world"

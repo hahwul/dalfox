@@ -1,0 +1,77 @@
+# CMS-specific XSS patterns - WordPress, Joomla, Magento, and generic CMS patterns
+
+[[case]]
+id = 5211
+name = "cms_wp_shortcode_attr"
+description = "WordPress shortcode attribute reflected in rendered HTML"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"wp-block\"><div class=\"shortcode-output\" data-attr=\"{input}\">{input}</div></div></body></html>"
+expected_detection = true
+category = "cve"
+reference = "wordpress-shortcode-xss"
+
+[[case]]
+id = 5212
+name = "cms_wp_customizer_preview"
+description = "WordPress customizer preview reflects theme option in style and body"
+handler_type = "realworld"
+reflection = "<html><head><style>body {{ background-color: {input}; }}</style></head><body><div class=\"site-title\">{input}</div><script>wp.customize('blogname', function(v){{ document.title = '{input}'; }});</script></body></html>"
+expected_detection = true
+category = "cve"
+reference = "wordpress-customizer-xss"
+
+[[case]]
+id = 5213
+name = "cms_joomla_module_output"
+description = "Joomla module renders user parameter in custom HTML module"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"moduletable\"><h3>{input}</h3><div class=\"custom\">{input}</div></div><script>Joomla.getOptions('module', {{title: '{input}'}});</script></body></html>"
+expected_detection = true
+category = "cve"
+reference = "joomla-module-xss"
+
+[[case]]
+id = 5214
+name = "cms_magento_layered_nav"
+description = "Magento layered navigation reflects filter value in breadcrumb and URL"
+handler_type = "realworld"
+reflection = "<html><body><ol class=\"breadcrumb\"><li><a href=\"/\">Home</a></li><li class=\"active\">{input}</li></ol><div class=\"category-title\"><h1>{input}</h1></div><script>var category = '{input}';</script></body></html>"
+expected_detection = true
+category = "cve"
+reference = "magento-layered-nav-xss"
+
+[[case]]
+id = 5215
+name = "cms_blog_post_title"
+description = "Blog post page reflects title in heading, og:title, and document.title"
+handler_type = "realworld"
+reflection = "<html><head><meta property=\"og:title\" content=\"{input}\"><title>{input}</title></head><body><article><h1>{input}</h1><p>Posted by admin</p></article><script>document.title = '{input}' + ' | Blog';</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5216
+name = "cms_tag_archive"
+description = "CMS tag/category archive page reflects tag name"
+handler_type = "realworld"
+reflection = "<html><body><h1>Posts tagged: {input}</h1><div class=\"tag-cloud\"><a href=\"/tag/{input}\" class=\"tag\">{input}</a></div><link rel=\"alternate\" type=\"application/rss+xml\" href=\"/tag/{input}/feed\"></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5217
+name = "cms_media_library"
+description = "CMS media library reflects image caption and alt text"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"media-item\"><img src=\"/media/photo.jpg\" alt=\"{input}\" title=\"{input}\"><figcaption>{input}</figcaption></div><input type=\"hidden\" name=\"caption\" value=\"{input}\"></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5218
+name = "cms_plugin_settings"
+description = "CMS plugin settings page reflects config values in form"
+handler_type = "realworld"
+reflection = "<html><body><h1>Plugin: {input}</h1><form><div class=\"form-group\"><label>API Key</label><input type=\"text\" value=\"{input}\"></div><div class=\"form-group\"><label>Webhook URL</label><input type=\"url\" value=\"{input}\"></div></form></body></html>"
+expected_detection = true
+category = "real_world"

@@ -1,0 +1,241 @@
+# WAF bypass XSS test cases - simulated WAF/filter bypass patterns
+
+[[case]]
+id = 5081
+name = "waf_basic_bypass"
+description = "Basic WAF blocks script tags; img/svg tags should bypass"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "waf_basic"
+category = "waf_bypass"
+
+[[case]]
+id = 5082
+name = "waf_moderate_bypass"
+description = "Moderate WAF blocks script/iframe/events; data: or alternative vectors needed"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "waf_moderate"
+category = "waf_bypass"
+
+[[case]]
+id = 5083
+name = "waf_strict_block"
+description = "Strict WAF blocks all known vectors including angles"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = false
+filter = "waf_strict"
+category = "waf_bypass"
+
+[[case]]
+id = 5084
+name = "waf_keyword_removal"
+description = "WAF removes 'script' keyword; ScRiPt or scr+ipt bypass"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "remove_keyword:script"
+category = "waf_bypass"
+
+[[case]]
+id = 5085
+name = "waf_double_encoding"
+description = "WAF encodes angles once; already-encoded input may decode at browser"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "encode_angles"
+category = "waf_bypass"
+
+[[case]]
+id = 5086
+name = "waf_backtick_bypass"
+description = "WAF removes parentheses; backtick template literal bypass in JS context"
+handler_type = "realworld"
+reflection = "<script>var x = '{input}';</script>"
+expected_detection = true
+filter = "remove_parens"
+category = "waf_bypass"
+
+[[case]]
+id = 5087
+name = "waf_custom_element"
+description = "WAF blocks known tags; custom HTML element with onfocus/autofocus"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "strip_script|strip_on_events"
+category = "waf_bypass"
+
+[[case]]
+id = 5088
+name = "waf_remove_alert_keyword"
+description = "WAF removes 'alert' keyword; confirm/prompt or String.fromCharCode bypass"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "remove_keyword:alert"
+category = "waf_bypass"
+
+[[case]]
+id = 5089
+name = "waf_semicolon_removal"
+description = "WAF removes semicolons; newline or no-semicolon JS syntax bypass"
+handler_type = "realworld"
+reflection = "<script>var x = '{input}';</script>"
+expected_detection = true
+filter = "remove_semicolons"
+category = "waf_bypass"
+
+[[case]]
+id = 5090
+name = "waf_lowercase_filter"
+description = "WAF lowercases input; case-insensitive event handlers still work"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "lowercase"
+category = "waf_bypass"
+
+[[case]]
+id = 5181
+name = "waf_basic_js_context"
+description = "Basic WAF on JS string context; string break without script tags"
+handler_type = "realworld"
+reflection = "<script>var msg = '{input}';</script>"
+expected_detection = true
+filter = "waf_basic"
+category = "waf_bypass"
+
+[[case]]
+id = 5182
+name = "waf_truncate_short"
+description = "WAF truncates input to 30 chars; ultra-short payload needed"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "truncate:30"
+category = "waf_bypass"
+
+[[case]]
+id = 5183
+name = "waf_strip_on_events_only"
+description = "WAF strips only on* events; tag injection with href/src still possible"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "strip_on_events"
+category = "waf_bypass"
+
+[[case]]
+id = 5184
+name = "waf_encode_angles_js_ctx"
+description = "WAF encodes angles in JS string context; quote break still possible"
+handler_type = "realworld"
+reflection = "<script>var search = '{input}';</script>"
+expected_detection = true
+filter = "encode_angles"
+category = "waf_bypass"
+
+[[case]]
+id = 5185
+name = "waf_encode_double_quotes_attr"
+description = "WAF encodes double quotes in attribute context; event handler injection via space"
+handler_type = "realworld"
+reflection = "<input type=\"text\" value=\"{input}\">"
+expected_detection = true
+filter = "encode_double_quotes"
+category = "waf_bypass"
+
+[[case]]
+id = 5186
+name = "waf_multi_layer_filter"
+description = "Multi-layer WAF: strip script, remove alert keyword, encode quotes"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = false
+filter = "strip_script|strip_on_events|remove_keyword:alert|encode_quotes"
+category = "waf_bypass"
+
+[[case]]
+id = 5187
+name = "waf_svg_aware_bypass"
+description = "SVG-aware WAF blocks script/svg/math; details/marquee tags may bypass"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "waf_svg_aware"
+category = "waf_bypass"
+
+[[case]]
+id = 5188
+name = "waf_url_protocol_strip"
+description = "WAF strips javascript: and data: protocols; other protocol vectors needed"
+handler_type = "realworld"
+reflection = "<a href=\"{input}\">Click here</a>"
+expected_detection = true
+filter = "waf_url_protocol"
+category = "waf_bypass"
+
+[[case]]
+id = 5189
+name = "waf_replace_script_tag"
+description = "WAF replaces < in script tags with entity but other tags pass through"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "replace_script_text"
+category = "waf_bypass"
+
+[[case]]
+id = 5190
+name = "waf_colon_removal_js"
+description = "WAF removes colons; javascript pseudo-protocol blocked but JS context break possible"
+handler_type = "realworld"
+reflection = "<script>var url = '{input}';</script>"
+expected_detection = true
+filter = "remove_colon"
+category = "waf_bypass"
+
+[[case]]
+id = 5191
+name = "waf_equals_removal"
+description = "WAF removes = signs; event handlers blocked but tag injection still possible"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "remove_equals"
+category = "waf_bypass"
+
+[[case]]
+id = 5192
+name = "waf_moderate_js_context"
+description = "Moderate WAF applied to JS string context; no tags needed for JS break"
+handler_type = "realworld"
+reflection = "<script>var config = {{name: '{input}', debug: false}};</script>"
+expected_detection = true
+filter = "waf_moderate"
+category = "waf_bypass"
+
+[[case]]
+id = 5193
+name = "waf_strip_img_but_allow_svg"
+description = "WAF strips img tags but SVG elements pass through"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "strip_img|strip_script"
+category = "waf_bypass"
+
+[[case]]
+id = 5194
+name = "waf_iframe_stripped_object_ok"
+description = "WAF strips iframe but object/embed elements pass"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "strip_iframe|strip_script"
+category = "waf_bypass"

@@ -1,0 +1,64 @@
+# DOM clobbering and DOM-based XSS patterns
+
+[[case]]
+id = 5231
+name = "dom_id_clobber"
+description = "Page with id-based DOM access where injected element can override"
+handler_type = "realworld"
+reflection = "<html><body><div id=\"config\">{input}</div><script>var c = document.getElementById('config'); document.title = c.innerHTML;</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5232
+name = "dom_innerhtml_assignment"
+description = "Page assigns user input to innerHTML via JS variable"
+handler_type = "realworld"
+reflection = "<html><body><div id=\"output\"></div><script>var data = '{input}'; document.getElementById('output').innerHTML = data;</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5233
+name = "dom_document_write"
+description = "Page uses document.write with user-controlled data"
+handler_type = "realworld"
+reflection = "<html><body><script>var q = '{input}'; document.write('<div>Search: ' + q + '</div>');</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5234
+name = "dom_eval_context"
+description = "Page passes user input into eval-like context"
+handler_type = "realworld"
+reflection = "<html><body><script>var handler = '{input}'; setTimeout(handler, 0);</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5235
+name = "dom_location_href"
+description = "Page sets location.href from user input"
+handler_type = "realworld"
+reflection = "<html><body><script>var next = '{input}'; if(next) location.href = next;</script><p>Redirecting...</p></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5236
+name = "dom_jquery_html"
+description = "Page uses jQuery .html() with user input"
+handler_type = "realworld"
+reflection = "<html><head><script src=\"https://code.jquery.com/jquery-3.6.0.min.js\"></script></head><body><div id=\"target\"></div><script>var msg = '{input}'; $('#target').html(msg);</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5237
+name = "dom_postmessage_handler"
+description = "Page with postMessage handler that writes data to DOM"
+handler_type = "realworld"
+reflection = "<html><body><div id=\"msg-area\"></div><script>window.addEventListener('message', function(e){{ document.getElementById('msg-area').innerHTML = e.data; }}); var init = '{input}'; document.getElementById('msg-area').innerHTML = init;</script></body></html>"
+expected_detection = true
+category = "real_world"

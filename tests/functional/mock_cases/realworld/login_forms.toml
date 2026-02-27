@@ -1,0 +1,87 @@
+# Login form XSS test cases - real-world login and auth patterns
+
+[[case]]
+id = 5031
+name = "login_redirect_hidden"
+description = "Login form with redirect URL in hidden input value"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "login_form"
+category = "real_world"
+
+[[case]]
+id = 5032
+name = "login_error_message"
+description = "Login page reflects username in error message div"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "login_form"
+category = "real_world"
+
+[[case]]
+id = 5033
+name = "login_meta_refresh"
+description = "Login redirect page using meta refresh with user-controlled URL"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "redirect_page"
+category = "real_world"
+
+[[case]]
+id = 5034
+name = "login_oauth_callback"
+description = "OAuth callback page reflects state parameter without encoding"
+handler_type = "realworld"
+reflection = "<html><body><script>var state = \"{input}\"; window.opener.postMessage(state, '*');</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5035
+name = "login_2fa_token_page"
+description = "2FA verification page reflects token reference in hidden field"
+handler_type = "realworld"
+reflection = "<html><body><form method=\"POST\"><p>Enter code sent to {input}</p><input type=\"hidden\" name=\"ref\" value=\"{input}\"><input name=\"code\" type=\"text\"><button>Verify</button></form></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5036
+name = "login_password_reset"
+description = "Password reset page reflects email in confirmation message"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"alert\">Password reset link sent to <strong>{input}</strong></div><p>Check your inbox.</p></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5037
+name = "login_saml_response"
+description = "SAML callback page reflects RelayState in form action"
+handler_type = "realworld"
+reflection = "<html><body><form method=\"POST\" action=\"{input}\"><input type=\"hidden\" name=\"SAMLResponse\" value=\"dummytoken\"><noscript><button>Continue</button></noscript></form><script>document.forms[0].submit();</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5038
+name = "login_sso_error"
+description = "SSO error page reflects error description parameter"
+handler_type = "realworld"
+reflection = "<html><body><h1>SSO Error</h1><div class=\"error\">{input}</div><a href=\"/login\">Try again</a><script>analytics.track('sso_error', {{desc: '{input}'}});</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5039
+name = "login_encoded_redirect_safe"
+description = "Login form with fully encoded redirect URL - should be safe"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = false
+filter = "encode_angles|encode_quotes"
+page_template = "login_form"
+category = "real_world"

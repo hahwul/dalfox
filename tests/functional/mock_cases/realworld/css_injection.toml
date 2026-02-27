@@ -1,0 +1,56 @@
+# CSS injection XSS test cases - style context and CSS-based attack patterns
+
+[[case]]
+id = 5161
+name = "css_style_attribute"
+description = "User input reflected in inline style attribute"
+handler_type = "realworld"
+reflection = "<html><body><div style=\"color: {input}; font-size: 14px;\">Styled content</div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5162
+name = "css_style_block"
+description = "User input in style block selector or property value"
+handler_type = "realworld"
+reflection = "<html><head><style>.theme-{input} {{ background: #fff; }} .user-content {{ color: {input}; }}</style></head><body><div class=\"user-content\">Content</div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5163
+name = "css_background_url"
+description = "CSS background-image URL with user-controlled input"
+handler_type = "realworld"
+reflection = "<html><body><div style=\"background-image: url('{input}'); width: 200px; height: 200px;\"></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5164
+name = "css_import_injection"
+description = "Style block where user input could inject @import rule"
+handler_type = "realworld"
+reflection = "<html><head><style>body {{ font-family: {input}; }} .container {{ margin: 0 auto; }}</style></head><body><div class=\"container\">Content</div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5165
+name = "css_class_name_injection"
+description = "User input used as CSS class name on element"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"card {input}\"><h3>Card Title</h3><p>Card content</p></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5166
+name = "css_style_stripped_safe"
+description = "Style context with angles and quotes fully encoded - safe"
+handler_type = "realworld"
+reflection = "<html><head><style>.x {{ content: '{input}'; }}</style></head><body>Content</body></html>"
+expected_detection = false
+filter = "encode_angles|encode_quotes"
+category = "real_world"

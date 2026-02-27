@@ -1,0 +1,74 @@
+# Data export, import preview, and data table XSS patterns
+
+[[case]]
+id = 5341
+name = "data_csv_preview"
+description = "CSV import preview page reflecting cell values in HTML table"
+handler_type = "realworld"
+reflection = "<html><body><h2>CSV Preview</h2><table class=\"csv-data\"><thead><tr><th>Name</th><th>Email</th><th>Note</th></tr></thead><tbody><tr><td>{input}</td><td>{input}@example.com</td><td>{input}</td></tr></tbody></table><button onclick=\"importCSV('{input}')\">Import</button></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5342
+name = "data_table_column"
+description = "Data table page with dynamic column headers from user input"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "data_table"
+category = "real_world"
+
+[[case]]
+id = 5343
+name = "data_export_download"
+description = "Export download page reflects filename and format in UI"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"export\"><h2>Export Ready</h2><p>File: <strong>{input}</strong></p><a href=\"/download?file={input}\" class=\"btn\">Download {input}</a></div><script>var filename = '{input}';</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5344
+name = "data_import_mapping"
+description = "Data import field mapping page reflects source column names"
+handler_type = "realworld"
+reflection = "<html><body><h2>Map Fields</h2><table><tr><td class=\"source\">{input}</td><td>→</td><td><select><option>{input}</option><option>name</option></select></td></tr><tr><td class=\"source\">{input}</td><td>→</td><td><select><option>email</option></select></td></tr></table></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5345
+name = "data_pivot_table"
+description = "Pivot table/report page reflects dimension and metric names"
+handler_type = "realworld"
+reflection = "<html><body><h2>Report: {input}</h2><div class=\"pivot-config\"><label>Rows</label><span class=\"tag\">{input}</span><label>Values</label><span class=\"tag\">{input}</span></div><table><thead><tr><th>{input}</th><th>Count</th></tr></thead><tbody><tr><td>{input}</td><td>42</td></tr></tbody></table></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5346
+name = "data_chart_label"
+description = "Chart/graph page reflecting data labels and title"
+handler_type = "realworld"
+reflection = "<html><body><h2>{input}</h2><canvas id=\"chart\"></canvas><script>new Chart(document.getElementById('chart'), {{type: 'bar', data: {{labels: ['{input}'], datasets: [{{label: '{input}', data: [42]}}]}}}});</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5347
+name = "data_sql_query_builder"
+description = "SQL query builder UI reflects table and column names"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"query-builder\"><h2>Query Builder</h2><pre class=\"sql\">SELECT * FROM {input} WHERE {input} = 'value'</pre><div class=\"results\"><table><tr><th>{input}</th></tr><tr><td>sample data</td></tr></table></div></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5348
+name = "data_json_viewer"
+description = "JSON data viewer reflects key names and values in tree view"
+handler_type = "realworld"
+reflection = "<html><body><h2>JSON Viewer</h2><div class=\"json-tree\"><ul><li><span class=\"key\">{input}</span>: <span class=\"value\">\"{input}\"</span></li><li><span class=\"key\">nested</span>: <ul><li><span class=\"key\">{input}</span>: <span class=\"value\">42</span></li></ul></li></ul></div></body></html>"
+expected_detection = true
+category = "real_world"

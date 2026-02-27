@@ -1,0 +1,73 @@
+# Event handler XSS test cases - various event handler injection contexts
+
+[[case]]
+id = 5151
+name = "event_onclick_button"
+description = "Button onclick handler reflects user input in JS expression"
+handler_type = "realworld"
+reflection = "<html><body><button onclick=\"doAction('{input}')\">Click</button></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5152
+name = "event_onchange_select"
+description = "Select onchange handler with user input in option values"
+handler_type = "realworld"
+reflection = "<html><body><select onchange=\"navigate(this.value)\"><option value=\"{input}\">{input}</option><option value=\"page2\">Page 2</option></select></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5153
+name = "event_onsubmit_form"
+description = "Form onsubmit handler with validation using user input"
+handler_type = "realworld"
+reflection = "<html><body><form onsubmit=\"return validate('{input}')\"><input name=\"q\" value=\"{input}\"><button>Go</button></form></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5154
+name = "event_onfocus_autofocus"
+description = "Input with onfocus combined with autofocus for automatic trigger"
+handler_type = "realworld"
+reflection = "<html><body><input type=\"text\" value=\"{input}\" autofocus></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5155
+name = "event_onmouseover_tooltip"
+description = "Element with onmouseover tooltip showing user content"
+handler_type = "realworld"
+reflection = "<html><body><span onmouseover=\"showTooltip('{input}')\" class=\"tooltip-trigger\">{input}</span></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5156
+name = "event_onerror_img"
+description = "Image tag with onerror fallback containing user input in src"
+handler_type = "realworld"
+reflection = "<html><body><img src=\"{input}\" onerror=\"this.src='/placeholder.png'\" alt=\"user image\"><p>Loading image: {input}</p></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5157
+name = "event_onload_body"
+description = "Body tag with onload handler using user-controlled config value"
+handler_type = "realworld"
+reflection = "<html><body onload=\"init('{input}')\"><div>{input}</div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5158
+name = "event_onhashchange"
+description = "Page with onhashchange handler reflecting hash in page"
+handler_type = "realworld"
+reflection = "<html><body onhashchange=\"updateView(location.hash)\"><div id=\"content\">{input}</div><script>var view = '{input}';</script></body></html>"
+expected_detection = true
+category = "real_world"

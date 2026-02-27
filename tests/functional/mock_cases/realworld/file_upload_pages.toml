@@ -1,0 +1,57 @@
+# File upload page XSS test cases - filename reflection patterns
+
+[[case]]
+id = 5111
+name = "upload_filename_reflection"
+description = "File upload page reflects uploaded filename in confirmation"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "file_upload"
+category = "real_world"
+
+[[case]]
+id = 5112
+name = "upload_accept_attribute"
+description = "File upload page reflects file type filter in accept attribute"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "file_upload"
+category = "real_world"
+
+[[case]]
+id = 5113
+name = "upload_error_path"
+description = "Upload error page reflects file path in error message"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"alert alert-danger\"><h4>Upload Failed</h4><p>Could not save file: {input}</p><p>Error: Permission denied at path /{input}</p></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5114
+name = "upload_preview_image"
+description = "Upload preview page reflects filename in img alt and title"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"preview\"><img src=\"/uploads/temp.png\" alt=\"{input}\" title=\"{input}\"><p class=\"filename\">{input}</p></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5115
+name = "upload_mime_type_display"
+description = "Upload confirmation shows detected MIME type in page"
+handler_type = "realworld"
+reflection = "<html><body><table class=\"file-info\"><tr><td>Filename</td><td>{input}</td></tr><tr><td>Type</td><td>{input}</td></tr><tr><td>Size</td><td>1024 bytes</td></tr></table></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5116
+name = "upload_svg_content"
+description = "SVG file upload preview renders SVG content directly"
+handler_type = "realworld"
+reflection = "<html><body><h2>SVG Preview</h2><div class=\"svg-preview\">{input}</div></body></html>"
+expected_detection = true
+category = "real_world"

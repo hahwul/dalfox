@@ -23,6 +23,27 @@ pub struct MockCase {
     pub cookie_name: Option<String>,
     #[serde(default)]
     pub param_name: Option<String>,
+    /// Server-side filter chain (pipe-separated: "strip_script|encode_angles")
+    #[serde(default)]
+    pub filter: Option<String>,
+    /// Page template key (search_page, error_page, login_form, etc.)
+    #[serde(default)]
+    pub page_template: Option<String>,
+    /// Content-Type header override
+    #[serde(default)]
+    pub content_type: Option<String>,
+    /// HTTP status code override
+    #[serde(default)]
+    pub status_code: Option<u16>,
+    /// Additional response headers
+    #[serde(default)]
+    pub response_headers: Vec<String>,
+    /// CVE or reference identifier
+    #[serde(default)]
+    pub reference: Option<String>,
+    /// Classification tag (cve, hackerone, waf_bypass, real_world, etc.)
+    #[serde(default)]
+    pub category: Option<String>,
 }
 
 /// Container for multiple test cases from a TOML file
@@ -77,7 +98,7 @@ pub fn load_all_mock_cases(base_dir: &Path) -> Result<HashMap<String, Vec<MockCa
     let mut cases_by_type: HashMap<String, Vec<MockCase>> = HashMap::new();
 
     // Define the handler types we support
-    let handler_types = vec!["query", "header", "cookie", "path", "body", "dom_xss"];
+    let handler_types = vec!["query", "header", "cookie", "path", "body", "dom_xss", "realworld"];
 
     for handler_type in handler_types {
         let type_dir = base_dir.join(handler_type);

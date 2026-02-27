@@ -1,0 +1,82 @@
+# URL-based injection XSS test cases - various URL context reflection patterns
+
+[[case]]
+id = 5171
+name = "url_link_href_raw"
+description = "Anchor tag href with completely unvalidated user URL"
+handler_type = "realworld"
+reflection = "<html><body><a href=\"{input}\" class=\"external-link\">Visit Link</a></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5172
+name = "url_img_src_injection"
+description = "Image src attribute with user-controlled URL"
+handler_type = "realworld"
+reflection = "<html><body><img src=\"{input}\" alt=\"User provided image\" width=\"300\"></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5173
+name = "url_script_src"
+description = "Script src attribute loading from user-controlled URL"
+handler_type = "realworld"
+reflection = "<html><head><script src=\"{input}\"></script></head><body><p>Loading external script...</p></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5174
+name = "url_link_stylesheet"
+description = "Link stylesheet href with user-controlled URL"
+handler_type = "realworld"
+reflection = "<html><head><link rel=\"stylesheet\" href=\"{input}\"></head><body><p>Custom themed page</p></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5175
+name = "url_object_data"
+description = "Object element data attribute with user URL"
+handler_type = "realworld"
+reflection = "<html><body><object data=\"{input}\" type=\"text/html\" width=\"400\" height=\"300\"></object></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5176
+name = "url_video_source"
+description = "Video source element with user-controlled URL"
+handler_type = "realworld"
+reflection = "<html><body><video width=\"320\" height=\"240\" controls><source src=\"{input}\" type=\"video/mp4\">Your browser does not support video.</video></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5177
+name = "url_embed_src"
+description = "Embed element with user-controlled src attribute"
+handler_type = "realworld"
+reflection = "<html><body><embed src=\"{input}\" type=\"text/html\" width=\"500\" height=\"400\"></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5178
+name = "url_form_action_js"
+description = "Form action with javascript: protocol potential"
+handler_type = "realworld"
+reflection = "<html><body><form action=\"{input}\" method=\"GET\"><input name=\"q\" placeholder=\"Search\"><button>Go</button></form></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5179
+name = "url_canonical_link"
+description = "Canonical link tag with user-controlled href"
+handler_type = "realworld"
+reflection = "<html><head><link rel=\"canonical\" href=\"{input}\"><title>Page</title></head><body><p>Content</p></body></html>"
+expected_detection = true
+category = "real_world"

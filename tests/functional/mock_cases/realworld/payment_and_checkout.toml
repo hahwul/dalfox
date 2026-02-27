@@ -1,0 +1,65 @@
+# Payment form, checkout, and invoice XSS patterns
+
+[[case]]
+id = 5361
+name = "payment_checkout_page"
+description = "Checkout page reflects order description and return URL"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "payment_form"
+category = "real_world"
+
+[[case]]
+id = 5362
+name = "payment_invoice_page"
+description = "Invoice page reflects customer name and line items"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"invoice\"><h1>Invoice #12345</h1><div class=\"billing\"><p>Bill to: {input}</p><p>Email: {input}</p></div><table><tr><td>{input}</td><td>1</td><td>$99.00</td></tr></table><div class=\"notes\">{input}</div></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5363
+name = "payment_receipt"
+description = "Payment receipt reflects transaction details and merchant name"
+handler_type = "realworld"
+reflection = "<html><body><h1>Payment Receipt</h1><dl><dt>Merchant</dt><dd>{input}</dd><dt>Description</dt><dd>{input}</dd><dt>Amount</dt><dd>$99.00</dd><dt>Status</dt><dd>Completed</dd></dl><a href=\"{input}\">Return to {input}</a></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5364
+name = "payment_error"
+description = "Payment error page reflects error message and merchant callback"
+handler_type = "realworld"
+reflection = "<html><body><h1>Payment Failed</h1><div class=\"error\"><p>Error: {input}</p><p>Transaction declined for: {input}</p></div><a href=\"{input}\">Try Again</a><script>paymentSDK.reportError('{input}');</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5365
+name = "payment_subscription"
+description = "Subscription management page reflects plan name and features"
+handler_type = "realworld"
+reflection = "<html><body><h1>Subscription: {input}</h1><div class=\"plan\"><h2>{input}</h2><ul><li>{input}</li></ul><input type=\"hidden\" name=\"plan\" value=\"{input}\"><button>Subscribe</button></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5366
+name = "payment_3ds_redirect"
+description = "3D Secure redirect page with bank URL parameter"
+handler_type = "realworld"
+reflection = "<html><body><h2>Redirecting to your bank...</h2><form method=\"POST\" action=\"{input}\" id=\"3ds-form\"><input type=\"hidden\" name=\"PaReq\" value=\"token123\"><input type=\"hidden\" name=\"TermUrl\" value=\"{input}\"></form><script>document.getElementById('3ds-form').submit();</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5367
+name = "payment_coupon_applied"
+description = "Coupon applied confirmation reflects coupon details"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"cart\"><div class=\"coupon-applied\"><span class=\"badge\">{input}</span><p>Discount: {input}</p></div><table><tr><td>Subtotal</td><td>$99.00</td></tr><tr class=\"discount\"><td>{input}</td><td>-$10.00</td></tr></table></div></body></html>"
+expected_detection = true
+category = "real_world"

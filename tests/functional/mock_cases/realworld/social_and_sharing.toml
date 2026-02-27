@@ -1,0 +1,75 @@
+# Social sharing, embed, and Open Graph XSS patterns
+
+[[case]]
+id = 5331
+name = "social_og_meta_tags"
+description = "Social share page with Open Graph meta tags reflecting user content"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "social_share"
+category = "real_world"
+
+[[case]]
+id = 5332
+name = "social_embed_card"
+description = "oEmbed-style card preview reflecting title and description"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"embed-card\"><div class=\"card-header\"><img src=\"/favicon.ico\" alt=\"{input}\"><span class=\"site-name\">{input}</span></div><h3 class=\"card-title\"><a href=\"{input}\">{input}</a></h3><p class=\"card-desc\">{input}</p></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5333
+name = "social_share_intent"
+description = "Share intent page reflects title and URL in share links and JS"
+handler_type = "realworld"
+reflection = "<html><body><h2>Share this page</h2><div class=\"share-box\"><input type=\"text\" value=\"{input}\" readonly><button onclick=\"copyToClipboard('{input}')\">Copy</button></div><ul><li><a href=\"mailto:?subject={input}&body={input}\">Email</a></li></ul></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5334
+name = "social_profile_card"
+description = "Social profile card with user bio and link in multiple contexts"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"profile-card\"><img src=\"/avatar.png\" alt=\"{input}\"><h3>{input}</h3><p class=\"bio\">{input}</p><a href=\"{input}\" rel=\"nofollow\">{input}</a><button onclick=\"follow('{input}')\">Follow</button></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5335
+name = "social_oembed_json_html"
+description = "oEmbed JSON response served as text/html"
+handler_type = "realworld"
+reflection = "<html><body><pre>{{\"type\":\"rich\",\"title\":\"{input}\",\"author_name\":\"{input}\",\"html\":\"<iframe src='{input}'></iframe>\"}}</pre></body></html>"
+expected_detection = true
+content_type = "text/html"
+category = "real_world"
+
+[[case]]
+id = 5336
+name = "social_comment_mention"
+description = "Social comment with @mention linking to user profile"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"comment\"><p>Great post! cc <a href=\"/user/{input}\" class=\"mention\">@{input}</a></p><div class=\"reactions\" data-user=\"{input}\"></div></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5337
+name = "social_link_preview"
+description = "Link preview fetcher result page reflecting URL metadata"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"link-preview\"><a href=\"{input}\" class=\"preview-link\"><div class=\"preview-image\"><img src=\"{input}\" onerror=\"this.style.display='none'\"></div><div class=\"preview-title\">{input}</div><div class=\"preview-domain\">{input}</div></a></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5338
+name = "social_hashtag_page"
+description = "Hashtag/topic page reflecting tag name in heading and feed"
+handler_type = "realworld"
+reflection = "<html><body><h1>#{input}</h1><div class=\"feed\"><div class=\"post\"><p>Trending in #{input}</p></div></div><script>var tag = '{input}'; loadFeed('/api/tag/' + tag);</script></body></html>"
+expected_detection = true
+category = "real_world"

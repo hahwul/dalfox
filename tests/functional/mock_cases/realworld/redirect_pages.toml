@@ -1,0 +1,78 @@
+# Redirect page XSS test cases - real-world redirect/open redirect patterns
+
+[[case]]
+id = 5071
+name = "redirect_javascript_protocol"
+description = "Redirect page with javascript: protocol in meta refresh and href"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "redirect_page"
+category = "real_world"
+
+[[case]]
+id = 5072
+name = "redirect_partial_validation"
+description = "Redirect page strips script tags but allows javascript: in href"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+filter = "strip_script"
+page_template = "redirect_page"
+category = "real_world"
+
+[[case]]
+id = 5073
+name = "redirect_location_body"
+description = "Redirect with Location header and body reflection"
+handler_type = "realworld"
+reflection = "<html><body>Redirecting to <a href=\"{input}\">{input}</a>...</body></html>"
+expected_detection = true
+response_headers = ["Location: /default"]
+status_code = 302
+category = "real_world"
+
+[[case]]
+id = 5074
+name = "redirect_data_uri"
+description = "Redirect page reflects input in href; data: URI possible"
+handler_type = "realworld"
+reflection = "<html><body><p>Click to continue:</p><a href=\"{input}\" id=\"redirect-link\">Continue</a><script>setTimeout(function(){{document.getElementById('redirect-link').click();}}, 3000);</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5075
+name = "redirect_base_tag"
+description = "Page reflects input in base href tag"
+handler_type = "realworld"
+reflection = "<html><head><base href=\"{input}\"></head><body><a href=\"/dashboard\">Go to dashboard</a><img src=\"/logo.png\"></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5076
+name = "redirect_form_action"
+description = "Form action attribute reflects user-controlled URL"
+handler_type = "realworld"
+reflection = "<html><body><form action=\"{input}\" method=\"POST\"><input name=\"token\" value=\"abc123\"><button>Submit</button></form></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5077
+name = "redirect_window_open"
+description = "Page opens user-controlled URL via window.open in JS"
+handler_type = "realworld"
+reflection = "<html><body><script>var url = '{input}'; window.open(url, '_blank');</script><p>Opening external link...</p></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5078
+name = "redirect_srcset_attribute"
+description = "Image srcset attribute reflects user input"
+handler_type = "realworld"
+reflection = "<html><body><picture><source srcset=\"{input}\" media=\"(min-width: 800px)\"><img src=\"/default.png\" alt=\"image\"></picture></body></html>"
+expected_detection = true
+category = "real_world"

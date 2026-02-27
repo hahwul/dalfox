@@ -1,0 +1,109 @@
+# Framework-specific error page XSS patterns
+
+[[case]]
+id = 5321
+name = "django_debug_page"
+description = "Django debug page reflects request path and GET parameters"
+handler_type = "realworld"
+reflection = "<html><body><h1>ValueError at /{input}</h1><table><tr><th>Request URL</th><td>http://example.com/{input}</td></tr><tr><th>GET</th><td>{{\"q\": \"{input}\"}}</td></tr></table><div class=\"traceback\"><pre>raise ValueError('{input}')</pre></div></body></html>"
+expected_detection = true
+status_code = 500
+category = "cve"
+reference = "django-debug-page-xss"
+
+[[case]]
+id = 5322
+name = "express_error_handler"
+description = "Express.js default error handler reflects error message"
+handler_type = "realworld"
+reflection = "<html><body><h1>{input}</h1><h2>404</h2><pre>Error: {input}\n    at Layer.handle [as handle_request] (/app/node_modules/express/lib/router/layer.js:95:5)</pre></body></html>"
+expected_detection = true
+status_code = 404
+category = "cve"
+reference = "express-error-handler-xss"
+
+[[case]]
+id = 5323
+name = "flask_debug_page"
+description = "Flask/Werkzeug debug page reflects exception and request data"
+handler_type = "realworld"
+reflection = "<html><body><h1>KeyError: '{input}'</h1><div class=\"traceback\"><pre>File \"/app/views.py\", line 42, in search\n    result = data['{input}']</pre></div><div class=\"request\"><h3>Request Args</h3><pre>q = {input}</pre></div></body></html>"
+expected_detection = true
+status_code = 500
+category = "cve"
+reference = "flask-werkzeug-debug-xss"
+
+[[case]]
+id = 5324
+name = "dotnet_error_page"
+description = ".NET custom error page reflects exception details"
+handler_type = "realworld"
+reflection = "<html><body><h1>Server Error in '/' Application</h1><h2>The resource cannot be found.</h2><p>Requested URL: /{input}</p><div class=\"details\"><b>Description:</b> HTTP 404. The resource '{input}' does not exist.</div></body></html>"
+expected_detection = true
+status_code = 404
+category = "cve"
+reference = "dotnet-error-page-xss"
+
+[[case]]
+id = 5325
+name = "laravel_exception_page"
+description = "Laravel Ignition-style exception page reflects request details"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"exception\"><h1>Symfony\\Component\\HttpKernel\\Exception\\NotFoundHttpException</h1><p>The route [{input}] could not be found.</p></div><div class=\"request-details\"><dt>URL</dt><dd>/{input}</dd><dt>Query String</dt><dd>q={input}</dd></div></body></html>"
+expected_detection = true
+status_code = 404
+category = "cve"
+reference = "laravel-exception-xss"
+
+[[case]]
+id = 5326
+name = "tomcat_error_page"
+description = "Apache Tomcat default error page reflects URI path"
+handler_type = "realworld"
+reflection = "<html><head><title>HTTP Status 404</title></head><body><h1>HTTP Status 404 - /{input}</h1><p><b>Type:</b> Status Report</p><p><b>Message:</b> /{input}</p><p><b>Description:</b> The requested resource is not available.</p></body></html>"
+expected_detection = true
+status_code = 404
+category = "cve"
+reference = "tomcat-default-error-xss"
+
+[[case]]
+id = 5327
+name = "nginx_error_page"
+description = "Nginx custom error page reflects Host header or URI"
+handler_type = "realworld"
+reflection = "<html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1><p>The page {input} was not found on this server.</p></center><hr><center>nginx/1.18.0</center></body></html>"
+expected_detection = true
+status_code = 404
+category = "real_world"
+
+[[case]]
+id = 5328
+name = "graphql_validation_error"
+description = "GraphQL validation error reflects field name in error detail"
+handler_type = "realworld"
+reflection = "<html><body><h1>GraphQL Error</h1><pre>{{\"errors\": [{{\"message\": \"Cannot query field \\\"{input}\\\" on type \\\"Query\\\"\", \"locations\": [{{\"line\": 1, \"column\": 3}}], \"path\": [\"{input}\"]}}]}}</pre></body></html>"
+expected_detection = true
+status_code = 400
+content_type = "text/html"
+category = "real_world"
+
+[[case]]
+id = 5329
+name = "ruby_sinatra_error"
+description = "Sinatra error page reflects route and params"
+handler_type = "realworld"
+reflection = "<html><body><h1>Sinatra doesn't know this ditty.</h1><p>Try <pre>get '/{input}' do\n  \"Hello World\"\nend</pre></p><h2>params</h2><pre>{{\"q\"=>\"{input}\"}}</pre></body></html>"
+expected_detection = true
+status_code = 404
+category = "cve"
+reference = "sinatra-error-page-xss"
+
+[[case]]
+id = 5330
+name = "next_js_error_overlay"
+description = "Next.js development error overlay reflects component error"
+handler_type = "realworld"
+reflection = "<html><body><div id=\"__next-error\"><h1>Unhandled Runtime Error</h1><p>Error: Invalid input: {input}</p><div class=\"stack\"><pre>at getServerSideProps (/pages/{input}.js:15:11)</pre></div></div></body></html>"
+expected_detection = true
+status_code = 500
+category = "real_world"

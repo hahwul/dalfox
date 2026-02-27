@@ -1,0 +1,105 @@
+# API response XSS test cases - JSON/JSONP/API error patterns
+
+[[case]]
+id = 5041
+name = "api_json_html_content_type"
+description = "JSON API response served with text/html content-type"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+content_type = "text/html"
+page_template = "api_json"
+category = "real_world"
+
+[[case]]
+id = 5042
+name = "api_jsonp_callback"
+description = "JSONP endpoint reflects callback function name"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "jsonp_callback"
+content_type = "application/javascript"
+category = "real_world"
+
+[[case]]
+id = 5043
+name = "api_jsonp_bypass"
+description = "JSONP callback with basic strip but no parenthesis removal"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+filter = "strip_script"
+page_template = "jsonp_callback"
+content_type = "text/html"
+category = "real_world"
+
+[[case]]
+id = 5044
+name = "api_error_reflection"
+description = "API error response reflects parameter in error message as HTML"
+handler_type = "realworld"
+reflection = "<html><body><h1>API Error</h1><p>Invalid parameter: {input}</p></body></html>"
+expected_detection = true
+content_type = "text/html"
+category = "real_world"
+
+[[case]]
+id = 5045
+name = "api_graphql_error"
+description = "GraphQL-style error response reflecting query in message field served as HTML"
+handler_type = "realworld"
+reflection = "<html><body><pre>{{\"errors\":[{{\"message\":\"Unknown field: {input}\"}}]}}</pre></body></html>"
+expected_detection = true
+content_type = "text/html"
+category = "real_world"
+
+[[case]]
+id = 5046
+name = "api_xml_response_html_ct"
+description = "XML API response served as text/html with reflected parameter"
+handler_type = "realworld"
+reflection = "<response><status>error</status><message>Invalid query: {input}</message></response>"
+expected_detection = true
+content_type = "text/html"
+category = "real_world"
+
+[[case]]
+id = 5047
+name = "api_rss_feed"
+description = "RSS feed endpoint reflects search term in title element"
+handler_type = "realworld"
+reflection = "<html><body><rss version=\"2.0\"><channel><title>Search: {input}</title><item><title>{input}</title><description>Result for {input}</description></item></channel></rss></body></html>"
+expected_detection = true
+content_type = "text/html"
+category = "real_world"
+
+[[case]]
+id = 5048
+name = "api_cors_error_page"
+description = "CORS error page reflects origin header value in error message"
+handler_type = "realworld"
+reflection = "<html><body><h1>CORS Error</h1><p>Origin <code>{input}</code> is not allowed.</p><p>Allowed origins: *.example.com</p></body></html>"
+expected_detection = true
+content_type = "text/html"
+category = "real_world"
+
+[[case]]
+id = 5049
+name = "api_webhook_debug"
+description = "Webhook debug page reflects payload data in pre block"
+handler_type = "realworld"
+reflection = "<html><body><h1>Webhook Received</h1><pre class=\"payload\">{input}</pre><p>Status: processed</p></body></html>"
+expected_detection = true
+content_type = "text/html"
+category = "real_world"
+
+[[case]]
+id = 5050
+name = "api_content_type_json_safe"
+description = "API with proper application/json content-type should not render as HTML"
+handler_type = "realworld"
+reflection = "{{\"message\": \"{input}\", \"status\": \"ok\"}}"
+expected_detection = false
+content_type = "application/json"
+category = "real_world"

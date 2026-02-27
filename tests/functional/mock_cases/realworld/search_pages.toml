@@ -1,0 +1,106 @@
+# Search page XSS test cases - real-world search result reflection patterns
+
+[[case]]
+id = 5001
+name = "search_basic_reflection"
+description = "Basic search result page with direct query reflection in results and form"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "search_page"
+category = "real_world"
+
+[[case]]
+id = 5002
+name = "search_partial_encode"
+description = "Search page with angle brackets encoded but quotes unfiltered"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+filter = "encode_angles"
+page_template = "search_page"
+category = "real_world"
+
+[[case]]
+id = 5003
+name = "search_strip_script_bypass"
+description = "Search page strips script tags but allows other tags"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+filter = "strip_script"
+page_template = "search_page"
+category = "real_world"
+
+[[case]]
+id = 5004
+name = "search_double_reflection"
+description = "Search page reflects input in both HTML and JS context without encoding"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "search_page"
+category = "real_world"
+
+[[case]]
+id = 5005
+name = "search_json_autocomplete"
+description = "Search autocomplete JSON endpoint served as text/html"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+content_type = "text/html"
+page_template = "api_json"
+category = "real_world"
+
+[[case]]
+id = 5006
+name = "search_truncated_input"
+description = "Search page truncates long input to 50 chars; short payloads still work"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+filter = "truncate:50"
+page_template = "search_page"
+category = "real_world"
+
+[[case]]
+id = 5007
+name = "search_uppercase_filter"
+description = "Search page converts input to uppercase; event handlers still fire"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "uppercase"
+category = "real_world"
+
+[[case]]
+id = 5008
+name = "search_remove_quotes_only"
+description = "Search removes quotes but leaves angles; tag injection possible"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+filter = "remove_quotes"
+page_template = "search_page"
+category = "real_world"
+
+[[case]]
+id = 5009
+name = "search_suggestion_widget"
+description = "Search suggestion dropdown reflects query in li elements"
+handler_type = "realworld"
+reflection = "<html><body><ul class=\"suggestions\"><li class=\"active\">{input}</li><li>Popular: {input} tips</li></ul></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5010
+name = "search_encoded_quotes_raw_angles"
+description = "Search encodes quotes but leaves angle brackets raw"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+filter = "encode_quotes"
+page_template = "search_page"
+category = "real_world"

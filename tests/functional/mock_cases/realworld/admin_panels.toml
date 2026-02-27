@@ -1,0 +1,76 @@
+# Admin panel XSS test cases - real-world admin/config patterns
+
+[[case]]
+id = 5051
+name = "admin_js_config"
+description = "Admin panel reflects setting value in JS config object"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "admin_panel"
+category = "real_world"
+
+[[case]]
+id = 5052
+name = "admin_input_value"
+description = "Admin panel reflects setting in input value attribute"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "admin_panel"
+category = "real_world"
+
+[[case]]
+id = 5053
+name = "admin_document_title"
+description = "Admin panel reflects input in document.title via JS"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "admin_panel"
+category = "real_world"
+
+[[case]]
+id = 5054
+name = "admin_log_viewer"
+description = "Admin log viewer displays log entries with user-controlled data"
+handler_type = "realworld"
+reflection = "<html><body><h1>Access Log</h1><table><tr><td>2024-01-01</td><td>GET</td><td>{input}</td><td>200</td></tr><tr><td>2024-01-01</td><td>POST</td><td>/api/data</td><td>500</td></tr></table></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5055
+name = "admin_user_management"
+description = "Admin user list reflects search filter in table and JS"
+handler_type = "realworld"
+reflection = "<html><body><h1>Users</h1><input type=\"text\" id=\"filter\" value=\"{input}\"><script>document.getElementById('filter').value = \"{input}\";</script><table><tr><td colspan=\"3\">Showing results for: {input}</td></tr></table></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5056
+name = "admin_config_textarea"
+description = "Admin config editor reflects current config in textarea"
+handler_type = "realworld"
+reflection = "<html><body><h1>Config Editor</h1><form><textarea name=\"config\" rows=\"20\">{input}</textarea><button type=\"submit\">Save</button></form></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5057
+name = "admin_breadcrumb"
+description = "Admin breadcrumb navigation reflects section name"
+handler_type = "realworld"
+reflection = "<html><body><nav class=\"breadcrumb\"><a href=\"/admin\">Admin</a> &gt; <a href=\"/admin/settings\">{input}</a> &gt; <span>{input}</span></nav><div class=\"content\"><h2>{input}</h2></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5058
+name = "admin_inline_js_var"
+description = "Admin page embeds multiple config values in inline script"
+handler_type = "realworld"
+reflection = "<html><head><script>var APP_CONFIG = {{name: '{input}', env: 'production', baseUrl: '{input}', features: ['search']}};</script></head><body><p>Welcome</p></body></html>"
+expected_detection = true
+category = "real_world"

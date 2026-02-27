@@ -1,0 +1,56 @@
+# Form builder and dynamic form generation XSS patterns
+
+[[case]]
+id = 5311
+name = "form_field_label"
+description = "Form builder reflects custom field labels and placeholders"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "form_builder"
+category = "real_world"
+
+[[case]]
+id = 5312
+name = "form_hidden_field_value"
+description = "Dynamic form with hidden field value from query parameter"
+handler_type = "realworld"
+reflection = "<html><body><form method=\"POST\"><input type=\"hidden\" name=\"token\" value=\"abc\"><input type=\"hidden\" name=\"ref\" value=\"{input}\"><input type=\"hidden\" name=\"source\" value=\"{input}\"><input name=\"email\" placeholder=\"Email\"><button>Submit</button></form></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5313
+name = "form_select_options"
+description = "Dynamic form with select options populated from user input"
+handler_type = "realworld"
+reflection = "<html><body><form><label>Category</label><select name=\"cat\"><option value=\"{input}\">{input}</option><option value=\"other\">Other</option></select><label>Subcategory</label><select name=\"sub\"><option value=\"{input}\">{input}</option></select></form></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5314
+name = "form_validation_error"
+description = "Form validation error reflects invalid field value"
+handler_type = "realworld"
+reflection = "<html><body><form><div class=\"field error\"><label>Username</label><input name=\"username\" value=\"{input}\"><span class=\"error-msg\">Username '{input}' is not available</span></div><div class=\"field\"><label>Email</label><input name=\"email\" value=\"{input}\"><span class=\"error-msg\">Invalid email: {input}</span></div></form></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5315
+name = "form_action_dynamic"
+description = "Form with dynamically set action URL from user input"
+handler_type = "realworld"
+reflection = "<html><body><form action=\"{input}\" method=\"POST\" id=\"dynamic-form\"><input name=\"data\" value=\"test\"><button>Submit</button></form><script>document.getElementById('dynamic-form').action = '{input}';</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5316
+name = "form_multipart_filename"
+description = "Multipart form upload result page reflects metadata"
+handler_type = "realworld"
+reflection = "<html><body><h2>Form Submission Result</h2><dl><dt>Field</dt><dd>{input}</dd><dt>Filename</dt><dd>{input}</dd><dt>Content-Type</dt><dd>{input}</dd></dl></body></html>"
+expected_detection = true
+category = "real_world"

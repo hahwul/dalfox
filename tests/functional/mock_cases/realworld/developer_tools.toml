@@ -1,0 +1,74 @@
+# Developer tools and utility page XSS patterns
+
+[[case]]
+id = 5351
+name = "devtool_regex_tester"
+description = "Regex tester reflects pattern and test string in page"
+handler_type = "realworld"
+reflection = "<html><body><h2>Regex Tester</h2><div class=\"input\"><label>Pattern</label><input value=\"{input}\"><label>Test String</label><textarea>{input}</textarea></div><div class=\"result\"><p>Pattern: <code>{input}</code></p><p>Matches in: {input}</p></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5352
+name = "devtool_url_encoder"
+description = "URL encoder/decoder tool reflects input and output"
+handler_type = "realworld"
+reflection = "<html><body><h2>URL Encoder</h2><div class=\"tool\"><textarea id=\"input\">{input}</textarea><div class=\"result\"><label>Encoded:</label><textarea id=\"output\">{input}</textarea></div></div><script>var input = '{input}'; document.getElementById('output').value = encodeURIComponent(input);</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5353
+name = "devtool_json_formatter"
+description = "JSON formatter/validator reflects input in editor and error message"
+handler_type = "realworld"
+reflection = "<html><body><h2>JSON Formatter</h2><div class=\"editor\"><pre id=\"json-input\">{input}</pre></div><div class=\"error\"><p>Parse error at: {input}</p></div><script>var raw = `{input}`; try {{ JSON.parse(raw); }} catch(e) {{ console.log('{input}'); }}</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5354
+name = "devtool_diff_viewer"
+description = "Diff viewer reflects file path and content in comparison"
+handler_type = "realworld"
+reflection = "<html><body><h2>Diff Viewer</h2><div class=\"diff\"><div class=\"file-header\"><span class=\"filename\">{input}</span></div><table class=\"diff-table\"><tr class=\"add\"><td>+</td><td>{input}</td></tr><tr class=\"remove\"><td>-</td><td>old content</td></tr></table></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5355
+name = "devtool_base64_decoder"
+description = "Base64 encoder/decoder reflects both encoded and decoded values"
+handler_type = "realworld"
+reflection = "<html><body><h2>Base64 Tool</h2><form><label>Input</label><textarea name=\"input\">{input}</textarea><label>Output</label><textarea name=\"output\" readonly>{input}</textarea></form><p>Decoded value: <code>{input}</code></p></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5356
+name = "devtool_color_picker"
+description = "Color picker reflects color value in style and input"
+handler_type = "realworld"
+reflection = "<html><body><h2>Color Picker</h2><div class=\"preview\" style=\"background-color: {input}; width:100px; height:100px;\"></div><input type=\"text\" value=\"{input}\"><p>Selected: {input}</p><script>var color = '{input}'; document.body.style.borderColor = color;</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5357
+name = "devtool_markdown_editor"
+description = "Markdown editor with live preview rendering user input"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "markdown_preview"
+category = "real_world"
+
+[[case]]
+id = 5358
+name = "devtool_code_snippet"
+description = "Code snippet sharing page reflects code content and language"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"snippet\"><div class=\"header\"><span class=\"lang\">{input}</span><span class=\"title\">{input}</span></div><pre><code class=\"language-{input}\">{input}</code></pre></div><script>hljs.highlightElement(document.querySelector('code'));</script></body></html>"
+expected_detection = true
+category = "real_world"

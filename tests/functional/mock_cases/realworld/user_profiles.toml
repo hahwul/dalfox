@@ -1,0 +1,89 @@
+# User profile XSS test cases - real-world profile page patterns
+
+[[case]]
+id = 5021
+name = "profile_name_reflection"
+description = "User profile page reflects username in heading and alt attribute"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "user_profile"
+category = "real_world"
+
+[[case]]
+id = 5022
+name = "profile_partial_html"
+description = "Profile allows partial HTML (strip_script) for bio field"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+filter = "strip_script"
+page_template = "user_profile"
+category = "real_world"
+
+[[case]]
+id = 5023
+name = "profile_javascript_href"
+description = "Profile website link reflects input directly in href attribute"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "user_profile"
+category = "real_world"
+
+[[case]]
+id = 5024
+name = "profile_onerror_image"
+description = "Profile avatar alt attribute with unfiltered reflection"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "user_profile"
+category = "real_world"
+
+[[case]]
+id = 5025
+name = "profile_social_link"
+description = "Profile social media link with unvalidated URL in href"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"social\"><a href=\"{input}\" target=\"_blank\" rel=\"noopener\">Social Profile</a></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5026
+name = "profile_custom_field_label"
+description = "Custom profile field with label reflected in form"
+handler_type = "realworld"
+reflection = "<html><body><form><label for=\"custom\">{input}</label><input id=\"custom\" name=\"custom\" value=\"\"><br><label for=\"bio\">{input}</label><textarea id=\"bio\"></textarea></form></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5027
+name = "profile_json_ld_structured"
+description = "Profile page with JSON-LD structured data containing user input"
+handler_type = "realworld"
+reflection = "<html><head><script type=\"application/ld+json\">{{\"@context\":\"https://schema.org\",\"@type\":\"Person\",\"name\":\"{input}\",\"url\":\"{input}\"}}</script></head><body><h1>{input}</h1></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5028
+name = "profile_encoded_safe"
+description = "Profile page with all angles and quotes encoded - safe"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = false
+filter = "encode_angles|encode_quotes"
+page_template = "user_profile"
+category = "real_world"
+
+[[case]]
+id = 5029
+name = "profile_data_attribute"
+description = "Profile page embeds username in data-* attribute without encoding"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"card\" data-user=\"{input}\" data-bio=\"{input}\"><span>{input}</span></div></body></html>"
+expected_detection = true
+category = "real_world"

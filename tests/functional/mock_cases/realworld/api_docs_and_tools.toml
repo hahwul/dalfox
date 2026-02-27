@@ -1,0 +1,65 @@
+# API documentation, developer tools, and debug interface XSS patterns
+
+[[case]]
+id = 5261
+name = "swagger_ui_reflection"
+description = "Swagger UI-style API docs page reflects endpoint path and parameters"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "api_docs"
+category = "real_world"
+
+[[case]]
+id = 5262
+name = "api_playground"
+description = "API playground/sandbox reflects query and response in page"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"playground\"><h2>Request</h2><pre>GET /api/{input}?q={input}</pre><h2>Response</h2><pre class=\"response\">{{\"result\": \"{input}\"}}</pre></div><script>var lastQuery = '{input}';</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5263
+name = "webhook_config_page"
+description = "Webhook configuration page reflects URL and secret in form"
+handler_type = "realworld"
+reflection = "<html><body><h1>Webhook Settings</h1><form><label>URL</label><input type=\"url\" name=\"url\" value=\"{input}\"><label>Secret</label><input type=\"text\" name=\"secret\" value=\"{input}\"><label>Events</label><select><option value=\"{input}\">{input}</option></select></form><div class=\"test-result\"><pre>POST {input}\nX-Hook-Secret: {input}</pre></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5264
+name = "debug_console"
+description = "Application debug console reflects executed expression"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"console\"><div class=\"input\"><span>&gt;</span> {input}</div><div class=\"output\"><pre>{input}</pre></div></div><script>var history = ['{input}']; document.title = 'Debug: ' + history[0];</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5265
+name = "graphql_explorer"
+description = "GraphQL explorer/GraphiQL reflects query in editor and response"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"graphiql\"><div class=\"editor\"><textarea>{input}</textarea></div><div class=\"result\"><pre>{{\"data\": {{\"search\": \"{input}\"}}}}</pre></div></div><script>var savedQuery = `{input}`;</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5266
+name = "cron_job_manager"
+description = "Cron job management page reflects job command and schedule"
+handler_type = "realworld"
+reflection = "<html><body><h1>Scheduled Tasks</h1><table><tr><td>{input}</td><td>Every hour</td><td>Active</td></tr></table><form><input name=\"command\" value=\"{input}\"><input name=\"schedule\" value=\"{input}\"><button>Save</button></form></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5267
+name = "health_check_page"
+description = "Health check/status page reflects service name and endpoint"
+handler_type = "realworld"
+reflection = "<html><body><h1>Service Health</h1><table><tr><td>{input}</td><td class=\"status\">UP</td><td><a href=\"{input}\">{input}</a></td></tr></table><script>var services = [{{name: '{input}', url: '{input}'}}];</script></body></html>"
+expected_detection = true
+category = "real_world"

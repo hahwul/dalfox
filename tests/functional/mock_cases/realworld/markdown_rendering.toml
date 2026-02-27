@@ -1,0 +1,77 @@
+# Markdown, BBCode, and wiki markup rendering XSS patterns
+
+[[case]]
+id = 5401
+name = "markdown_raw_html"
+description = "Markdown renderer allows raw HTML passthrough"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "markdown_preview"
+category = "real_world"
+
+[[case]]
+id = 5402
+name = "markdown_link_injection"
+description = "Markdown link rendered with javascript: protocol possible"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"md\"><p><a href=\"{input}\" title=\"{input}\">Click here</a></p><p>Image: <img src=\"{input}\" alt=\"{input}\"></p></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5403
+name = "markdown_code_block"
+description = "Markdown code block with syntax highlighting reflecting language"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"md\"><pre><code class=\"language-{input}\">{input}</code></pre><p>Language: {input}</p></div><script>hljs.highlightAll();</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5404
+name = "markdown_heading_id"
+description = "Markdown headings auto-generate id attributes from content"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"md\"><h1 id=\"{input}\">{input}</h1><h2 id=\"sub-{input}\">{input}</h2><nav class=\"toc\"><a href=\"#{input}\">{input}</a></nav></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5405
+name = "bbcode_rendering"
+description = "BBCode forum post renders user content with limited tag set"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"bbcode-post\"><p>{input}</p><a href=\"{input}\">{input}</a><img src=\"{input}\" alt=\"user image\"></div></body></html>"
+expected_detection = true
+filter = "strip_script"
+category = "real_world"
+
+[[case]]
+id = 5406
+name = "wiki_markup"
+description = "Wiki-style markup rendering with links and templates"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"wiki\"><h1>{input}</h1><p>{input}</p><div class=\"infobox\" data-title=\"{input}\"><dl><dt>{input}</dt><dd>{input}</dd></dl></div><a href=\"/wiki/{input}\">{input}</a></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5407
+name = "markdown_sanitized_safe"
+description = "Markdown rendered with full sanitization - no raw HTML allowed"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = false
+filter = "strip_tags|encode_full_html"
+page_template = "markdown_preview"
+category = "real_world"
+
+[[case]]
+id = 5408
+name = "markdown_table_injection"
+description = "Markdown table cells with user content reflected"
+handler_type = "realworld"
+reflection = "<html><body><table class=\"md-table\"><thead><tr><th>{input}</th><th>Value</th></tr></thead><tbody><tr><td>{input}</td><td>{input}</td></tr></tbody></table></body></html>"
+expected_detection = true
+category = "real_world"

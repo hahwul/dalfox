@@ -1,0 +1,66 @@
+# Internationalization, localization, and language-related XSS patterns
+
+[[case]]
+id = 5391
+name = "i18n_lang_switcher"
+description = "Language switcher page reflects locale parameter in multiple contexts"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "i18n_page"
+category = "real_world"
+
+[[case]]
+id = 5392
+name = "i18n_translation_key"
+description = "Translation management page reflects translation keys and values"
+handler_type = "realworld"
+reflection = "<html><body><h2>Translations</h2><table><tr><td>Key</td><td>Value</td></tr><tr><td>{input}</td><td>{input}</td></tr></table><form><label>Key</label><input name=\"key\" value=\"{input}\"><label>Translation</label><textarea name=\"value\">{input}</textarea></form></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5393
+name = "i18n_locale_error"
+description = "Locale not found error page reflects requested locale"
+handler_type = "realworld"
+reflection = "<html><body><h1>Locale Not Found</h1><p>The locale <code>{input}</code> is not supported.</p><p>Available: <a href=\"?lang=en\">English</a>, <a href=\"?lang=ko\">한국어</a></p><script>var requested = '{input}'; console.warn('Unknown locale: ' + requested);</script></body></html>"
+expected_detection = true
+status_code = 404
+category = "real_world"
+
+[[case]]
+id = 5394
+name = "i18n_rtl_page"
+description = "RTL language page reflects direction attribute and content"
+handler_type = "realworld"
+reflection = "<html dir=\"{input}\"><head><title>{input}</title></head><body><div class=\"content\" dir=\"{input}\"><h1>{input}</h1><p>{input}</p></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5395
+name = "i18n_currency_format"
+description = "Currency formatting page reflects locale and amount display"
+handler_type = "realworld"
+reflection = "<html><body><h2>Price Display</h2><div class=\"price\" data-locale=\"{input}\" data-currency=\"{input}\"><span>{input}</span></div><script>var fmt = new Intl.NumberFormat('{input}', {{style: 'currency', currency: '{input}'}}); document.title = fmt.format(99);</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5396
+name = "i18n_date_format"
+description = "Date format configuration reflects locale and pattern"
+handler_type = "realworld"
+reflection = "<html><body><h2>Date Settings</h2><form><label>Format</label><input value=\"{input}\"><label>Locale</label><input value=\"{input}\"></form><p>Preview: <span id=\"preview\">{input}</span></p><script>var pattern = '{input}'; document.getElementById('preview').textContent = pattern;</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5397
+name = "i18n_font_loading"
+description = "Font loading page reflects font family name in style and link"
+handler_type = "realworld"
+reflection = "<html><head><link href=\"https://fonts.googleapis.com/css?family={input}\" rel=\"stylesheet\"><style>body {{ font-family: '{input}', sans-serif; }}</style></head><body><p style=\"font-family: {input}\">Sample text in {input}</p></body></html>"
+expected_detection = true
+category = "real_world"

@@ -1,0 +1,65 @@
+# Analytics, tracking, and marketing page XSS patterns
+
+[[case]]
+id = 5371
+name = "analytics_utm_dashboard"
+description = "Analytics dashboard reflecting UTM campaign parameters"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "analytics_dashboard"
+category = "real_world"
+
+[[case]]
+id = 5372
+name = "analytics_custom_event"
+description = "Event tracking page reflects event name and properties"
+handler_type = "realworld"
+reflection = "<html><body><h2>Event Log</h2><table><tr><td>{input}</td><td>{{\"label\": \"{input}\"}}</td><td>2024-01-01</td></tr></table><script>analytics.track('{input}', {{property: '{input}'}});</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5373
+name = "analytics_ab_test"
+description = "A/B test configuration page reflects variant names"
+handler_type = "realworld"
+reflection = "<html><body><h2>A/B Test: {input}</h2><div class=\"variants\"><div class=\"variant\" data-name=\"{input}\"><h3>{input}</h3><p>Traffic: 50%</p></div></div><script>var experiment = '{input}'; abTest.activate(experiment);</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5374
+name = "analytics_tracking_pixel"
+description = "Tracking pixel page reflects campaign ID in img src and noscript"
+handler_type = "realworld"
+reflection = "<html><body><img src=\"/pixel?campaign={input}&source={input}\" width=\"1\" height=\"1\"><noscript><img src=\"/pixel?campaign={input}\" width=\"1\" height=\"1\"></noscript><script>var campaign = '{input}'; fbq('track', 'PageView', {{campaign: campaign}});</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5375
+name = "analytics_funnel_report"
+description = "Funnel analysis report reflects step names and filter values"
+handler_type = "realworld"
+reflection = "<html><body><h2>Funnel: {input}</h2><div class=\"steps\"><div class=\"step\" data-name=\"{input}\"><span>{input}</span><span class=\"count\">1,234</span></div></div><div class=\"filter\"><label>Segment</label><input value=\"{input}\"></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5376
+name = "analytics_heatmap_page"
+description = "Heatmap viewer reflects page URL being analyzed"
+handler_type = "realworld"
+reflection = "<html><body><h2>Heatmap Analysis</h2><div class=\"heatmap-container\"><iframe src=\"{input}\" width=\"100%\" height=\"600\"></iframe></div><p>Analyzing: <a href=\"{input}\">{input}</a></p><script>heatmap.load('{input}');</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5377
+name = "analytics_goal_config"
+description = "Goal/conversion configuration page reflects goal details"
+handler_type = "realworld"
+reflection = "<html><body><h2>Goal Configuration</h2><form><label>Goal Name</label><input name=\"name\" value=\"{input}\"><label>Match URL</label><input name=\"url\" value=\"{input}\"><label>Category</label><select><option value=\"{input}\">{input}</option></select></form></body></html>"
+expected_detection = true
+category = "real_world"

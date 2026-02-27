@@ -1,0 +1,74 @@
+# SVG and MathML XSS test cases - vector graphics and math markup patterns
+
+[[case]]
+id = 5131
+name = "svg_inline_script"
+description = "Inline SVG with user input reflected inside SVG element"
+handler_type = "realworld"
+reflection = "<html><body><svg width=\"100\" height=\"100\"><text x=\"10\" y=\"50\">{input}</text></svg></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5132
+name = "svg_onload_event"
+description = "SVG element with onload event handler context"
+handler_type = "realworld"
+reflection = "<html><body><svg><rect width=\"100\" height=\"100\" style=\"fill:{input}\"></rect></svg></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5133
+name = "svg_foreignobject"
+description = "SVG foreignObject allowing HTML content injection"
+handler_type = "realworld"
+reflection = "<html><body><svg><foreignObject width=\"200\" height=\"200\">{input}</foreignObject></svg></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5134
+name = "svg_animate_values"
+description = "SVG animate element with user-controlled values"
+handler_type = "realworld"
+reflection = "<html><body><svg><circle cx=\"50\" cy=\"50\" r=\"40\"><animate attributeName=\"fill\" values=\"{input}\" dur=\"3s\" repeatCount=\"indefinite\"/></circle></svg></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5135
+name = "svg_use_xlink"
+description = "SVG use element with xlink:href reflecting user input"
+handler_type = "realworld"
+reflection = "<html><body><svg><use xlink:href=\"{input}\"></use></svg></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5136
+name = "mathml_annotation"
+description = "MathML with annotation-xml containing user input"
+handler_type = "realworld"
+reflection = "<html><body><math><mtext>{input}</mtext><annotation-xml encoding=\"text/html\"><body>{input}</body></annotation-xml></math></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5137
+name = "svg_strip_script_bypass"
+description = "SVG context with script tags stripped but SVG events allowed"
+handler_type = "realworld"
+reflection = "<html><body><svg width=\"200\" height=\"200\">{input}</svg></body></html>"
+expected_detection = true
+filter = "strip_script"
+category = "real_world"
+
+[[case]]
+id = 5138
+name = "svg_image_xlink"
+description = "SVG image element with xlink:href reflecting user input"
+handler_type = "realworld"
+reflection = "<html><body><svg width=\"200\" height=\"200\"><image xlink:href=\"{input}\" width=\"200\" height=\"200\"></image></svg></body></html>"
+expected_detection = true
+category = "real_world"

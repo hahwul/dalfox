@@ -1,0 +1,66 @@
+# OAuth, SSO, and authentication flow XSS patterns
+
+[[case]]
+id = 5241
+name = "oauth_authorize_page"
+description = "OAuth authorization page reflects client_id and redirect_uri"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "oauth_callback"
+category = "real_world"
+
+[[case]]
+id = 5242
+name = "oauth_error_description"
+description = "OAuth error page reflects error_description parameter"
+handler_type = "realworld"
+reflection = "<html><body><h1>Authorization Error</h1><div class=\"error\"><p>Error: access_denied</p><p>Description: {input}</p></div><a href=\"{input}\">Return to application</a></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5243
+name = "oauth_consent_screen"
+description = "OAuth consent screen reflects app name and requested scopes"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"consent\"><h2>{input} wants to access your account</h2><ul class=\"scopes\"><li>{input}</li></ul><form><input type=\"hidden\" name=\"client\" value=\"{input}\"><button>Allow</button></form></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5244
+name = "sso_login_relay"
+description = "SSO login page reflects RelayState and entity ID"
+handler_type = "realworld"
+reflection = "<html><body><form method=\"POST\" action=\"/sso/acs\"><input type=\"hidden\" name=\"RelayState\" value=\"{input}\"><input type=\"hidden\" name=\"entityID\" value=\"{input}\"><p>Authenticating with {input}...</p><noscript><button>Continue</button></noscript></form></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5245
+name = "oidc_discovery_html"
+description = "OpenID Connect discovery endpoint served as HTML"
+handler_type = "realworld"
+reflection = "<html><body><pre>{{\"issuer\": \"{input}\", \"authorization_endpoint\": \"{input}/authorize\", \"token_endpoint\": \"{input}/token\"}}</pre></body></html>"
+expected_detection = true
+content_type = "text/html"
+category = "real_world"
+
+[[case]]
+id = 5246
+name = "oauth_token_debug"
+description = "OAuth token debug/introspection page reflects token data"
+handler_type = "realworld"
+reflection = "<html><body><h1>Token Info</h1><dl><dt>Client</dt><dd>{input}</dd><dt>Scope</dt><dd>{input}</dd><dt>Redirect</dt><dd><a href=\"{input}\">{input}</a></dd></dl></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5247
+name = "oauth_device_code"
+description = "OAuth device code verification page reflects user code"
+handler_type = "realworld"
+reflection = "<html><body><h1>Device Authorization</h1><p>Enter the code shown on your device:</p><form><input type=\"text\" name=\"code\" value=\"{input}\" class=\"code-input\"><button>Verify</button></form><p>Code: <strong>{input}</strong></p></body></html>"
+expected_detection = true
+category = "real_world"

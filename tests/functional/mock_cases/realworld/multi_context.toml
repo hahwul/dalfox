@@ -1,0 +1,146 @@
+# Multi-context XSS test cases - input reflected in multiple contexts
+
+[[case]]
+id = 5121
+name = "multi_selective_filter"
+description = "Input reflected in HTML (filtered) and JS (unfiltered) contexts"
+handler_type = "realworld"
+reflection = "<html><body><div>{input}</div><script>var data = '{input}';</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5122
+name = "multi_dual_context"
+description = "Input in attribute value and HTML body simultaneously"
+handler_type = "realworld"
+reflection = "<html><body><input value=\"{input}\"><div>{input}</div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5123
+name = "multi_dashboard_widget"
+description = "Dashboard page with input in data-config attribute and innerHTML"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "dashboard"
+category = "real_world"
+
+[[case]]
+id = 5124
+name = "multi_csv_export"
+description = "CSV export preview page with formula injection potential"
+handler_type = "realworld"
+reflection = "<html><body><h1>CSV Preview</h1><table><tr><td>{input}</td><td>{input}</td></tr></table><a href=\"/export?data={input}\">Download</a></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5125
+name = "multi_iframe_src"
+description = "Page with iframe src reflecting user input"
+handler_type = "realworld"
+reflection = "<html><body><h2>Preview</h2><iframe src=\"{input}\" width=\"100%\" height=\"400\"></iframe></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5126
+name = "multi_triple_context"
+description = "Input in HTML body, attribute value, and JS string simultaneously"
+handler_type = "realworld"
+reflection = "<html><body><div title=\"{input}\">{input}</div><script>var q = '{input}';</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5127
+name = "multi_css_html"
+description = "Input in both CSS style block and HTML body"
+handler_type = "realworld"
+reflection = "<html><head><style>.user-theme {{ background: url('{input}'); color: #{input}; }}</style></head><body><div class=\"user-theme\">{input}</div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5128
+name = "multi_meta_tags"
+description = "Input in multiple meta tag content attributes"
+handler_type = "realworld"
+reflection = "<html><head><meta property=\"og:title\" content=\"{input}\"><meta property=\"og:description\" content=\"{input}\"><meta name=\"description\" content=\"{input}\"></head><body><h1>{input}</h1></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5129
+name = "multi_link_text_and_href"
+description = "Input used as both link text and href attribute"
+handler_type = "realworld"
+reflection = "<html><body><nav><a href=\"{input}\">{input}</a> | <a href=\"/page?ref={input}\">Related</a></nav><div>{input}</div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5130
+name = "multi_script_and_noscript"
+description = "Input in both script and noscript tags"
+handler_type = "realworld"
+reflection = "<html><body><script>document.write('{input}');</script><noscript><div>{input}</div></noscript></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5511
+name = "multi_five_contexts"
+description = "Input reflected in 5 different contexts: HTML, attribute, JS, CSS, URL"
+handler_type = "realworld"
+reflection = "<html><head><style>.x {{ content: '{input}'; }}</style></head><body><div title=\"{input}\">{input}</div><a href=\"{input}\">Link</a><script>var d = '{input}';</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5512
+name = "multi_encode_html_raw_js"
+description = "HTML context encoded but JS context left completely raw"
+handler_type = "realworld"
+reflection = "<html><body><div>&lt;safe&gt;</div><script>var raw = '{input}'; eval('console.log(\"' + raw + '\")');</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5513
+name = "multi_svg_and_html"
+description = "Input in both SVG and HTML contexts on same page"
+handler_type = "realworld"
+reflection = "<html><body><svg><text>{input}</text></svg><div>{input}</div><script>var label = '{input}';</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5514
+name = "multi_comment_and_attribute"
+description = "Input in HTML comment, attribute, and body"
+handler_type = "realworld"
+reflection = "<html><body><!-- user query: {input} --><input value=\"{input}\"><p>{input}</p></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5515
+name = "multi_textarea_and_js"
+description = "Input inside textarea (special parsing) and JS string"
+handler_type = "realworld"
+reflection = "<html><body><textarea>{input}</textarea><script>var note = '{input}';</script><div title=\"{input}\">{input}</div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5516
+name = "multi_form_all_contexts"
+description = "Form with input in action, hidden value, label, and onsubmit"
+handler_type = "realworld"
+reflection = "<html><body><form action=\"{input}\" onsubmit=\"validate('{input}')\"><label>{input}</label><input type=\"hidden\" name=\"ref\" value=\"{input}\"><input name=\"q\" value=\"{input}\"><button>{input}</button></form></body></html>"
+expected_detection = true
+category = "real_world"

@@ -1,0 +1,128 @@
+# Encoding variation XSS test cases - encoding bypass and mixed encoding patterns
+
+[[case]]
+id = 5141
+name = "encoding_single_quote_js"
+description = "JS string context with only double quotes encoded; single quote break possible"
+handler_type = "realworld"
+reflection = "<script>var msg = '{input}';</script>"
+expected_detection = true
+filter = "encode_double_quotes"
+category = "real_world"
+
+[[case]]
+id = 5142
+name = "encoding_angle_only_attr"
+description = "Attribute context with angles encoded but quotes raw; attribute break possible"
+handler_type = "realworld"
+reflection = "<input type=\"text\" value=\"{input}\" placeholder=\"search\">"
+expected_detection = true
+filter = "encode_angles"
+category = "real_world"
+
+[[case]]
+id = 5143
+name = "encoding_html_entity_double"
+description = "Double HTML entity encoding; browser decodes once leaving encoded chars"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = false
+filter = "encode_angles|encode_angles"
+category = "real_world"
+
+[[case]]
+id = 5144
+name = "encoding_url_encoded_reflection"
+description = "Server URL-encodes input then reflects; browser may decode in certain contexts"
+handler_type = "realworld"
+reflection = "encoded_url"
+expected_detection = false
+category = "real_world"
+
+[[case]]
+id = 5145
+name = "encoding_strip_angle_js_context"
+description = "Angles removed but input in JS context; no angle needed for JS payload"
+handler_type = "realworld"
+reflection = "<script>var data = '{input}';</script>"
+expected_detection = true
+filter = "remove_angles"
+category = "real_world"
+
+[[case]]
+id = 5146
+name = "encoding_mixed_quote_handling"
+description = "Single quotes encoded but double quotes raw in attribute context"
+handler_type = "realworld"
+reflection = "<div title=\"{input}\" data-info=\"{input}\">{input}</div>"
+expected_detection = true
+filter = "encode_single_quotes"
+category = "real_world"
+
+[[case]]
+id = 5147
+name = "encoding_null_byte_prefix"
+description = "Input with potential null bytes; server strips null but reflects rest"
+handler_type = "realworld"
+reflection = "<div class=\"result\">{input}</div>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5148
+name = "encoding_backslash_js_escape"
+description = "JS context where backslash is not escaped; unicode escape bypass"
+handler_type = "realworld"
+reflection = "<script>var s = \"{input}\";</script>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5149
+name = "encoding_ampersand_only"
+description = "Only ampersand encoded; angles and quotes raw in HTML context"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "encode_ampersand"
+category = "real_world"
+
+[[case]]
+id = 5301
+name = "encoding_js_single_quote_backslash"
+description = "JS single-quote context with backslash removed; quote break easy"
+handler_type = "realworld"
+reflection = "<script>var msg = '{input}';</script>"
+expected_detection = true
+filter = "remove_backslash"
+category = "real_world"
+
+[[case]]
+id = 5302
+name = "encoding_newline_removed_js"
+description = "JS context with newlines removed; single-line payload needed"
+handler_type = "realworld"
+reflection = "<script>var data = '{input}';</script>"
+expected_detection = true
+filter = "remove_newlines"
+category = "real_world"
+
+[[case]]
+id = 5303
+name = "encoding_lowercase_html"
+description = "Input lowercased in HTML context; case-insensitive HTML still works"
+handler_type = "realworld"
+reflection = "<div title=\"{input}\">{input}</div>"
+expected_detection = true
+filter = "lowercase"
+category = "real_world"
+
+[[case]]
+id = 5304
+name = "encoding_uppercase_js"
+description = "Input uppercased in JS string context; JS keywords case-sensitive"
+handler_type = "realworld"
+reflection = "<script>var x = '{input}';</script>"
+expected_detection = true
+filter = "uppercase"
+category = "real_world"

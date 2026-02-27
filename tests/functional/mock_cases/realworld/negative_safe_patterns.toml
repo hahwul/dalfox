@@ -1,0 +1,183 @@
+# Negative/safe test cases - properly secured pages that should NOT trigger XSS detection
+
+[[case]]
+id = 5281
+name = "safe_full_html_encoding"
+description = "Page with complete HTML entity encoding of all special characters"
+handler_type = "realworld"
+reflection = "<html><body><div>{input}</div></body></html>"
+expected_detection = false
+filter = "encode_full_html"
+category = "real_world"
+
+[[case]]
+id = 5282
+name = "safe_strip_tags_encode"
+description = "Page strips all tags then encodes remaining special characters"
+handler_type = "realworld"
+reflection = "<html><body><p>{input}</p></body></html>"
+expected_detection = false
+filter = "strip_tags|encode_full_html"
+category = "real_world"
+
+[[case]]
+id = 5283
+name = "safe_alphanumeric_only"
+description = "Page accepts only alphanumeric input - all special chars stripped"
+handler_type = "realworld"
+reflection = "<html><body><div>{input}</div><script>var x = '{input}';</script></body></html>"
+expected_detection = false
+filter = "alphanumeric_only"
+category = "real_world"
+
+[[case]]
+id = 5284
+name = "safe_json_proper_ct"
+description = "JSON response with proper application/json content-type"
+handler_type = "realworld"
+reflection = "{{\"query\": \"{input}\", \"results\": []}}"
+expected_detection = false
+content_type = "application/json"
+category = "real_world"
+
+[[case]]
+id = 5285
+name = "safe_truncate_very_short"
+description = "Page truncates input to 5 chars - too short for any payload"
+handler_type = "realworld"
+reflection = "<html><body><div>{input}</div></body></html>"
+expected_detection = false
+filter = "truncate:5"
+category = "real_world"
+
+[[case]]
+id = 5286
+name = "safe_full_encode_attr"
+description = "Attribute context with all quotes and angles encoded"
+handler_type = "realworld"
+reflection = "<html><body><input value=\"{input}\"><div title=\"{input}\">{input}</div></body></html>"
+expected_detection = false
+filter = "encode_full_html"
+category = "real_world"
+
+[[case]]
+id = 5287
+name = "safe_js_context_encoded"
+description = "JS context with angles, quotes, and backslash all removed"
+handler_type = "realworld"
+reflection = "<script>var data = '{input}';</script>"
+expected_detection = false
+filter = "remove_angles|remove_quotes|remove_backslash"
+category = "real_world"
+
+[[case]]
+id = 5288
+name = "safe_waf_strict_full"
+description = "Strict WAF plus tag stripping plus encoding - fully secured"
+handler_type = "realworld"
+reflection = "<html><body><div>{input}</div></body></html>"
+expected_detection = false
+filter = "waf_strict|strip_tags|encode_full_html"
+category = "real_world"
+
+[[case]]
+id = 5289
+name = "safe_search_fully_encoded"
+description = "Search page with full HTML encoding on all reflection points"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = false
+filter = "encode_full_html"
+page_template = "search_page"
+category = "real_world"
+
+[[case]]
+id = 5290
+name = "safe_url_context_protocol_stripped"
+description = "URL context with javascript: and data: protocols stripped plus encoding"
+handler_type = "realworld"
+reflection = "<html><body><a href=\"{input}\">Link</a></body></html>"
+expected_detection = false
+filter = "waf_url_protocol|encode_angles|encode_quotes"
+category = "real_world"
+
+[[case]]
+id = 5531
+name = "safe_cloudflare_waf"
+description = "Cloudflare-like WAF blocks all common XSS vectors"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = false
+filter = "waf_cloudflare_sim"
+category = "real_world"
+
+[[case]]
+id = 5532
+name = "safe_akamai_waf"
+description = "Akamai-like WAF blocks common XSS patterns"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = false
+filter = "waf_akamai_sim"
+category = "real_world"
+
+[[case]]
+id = 5533
+name = "safe_allowlist_html"
+description = "HTML allow-list sanitizer only permits safe tags (p, b, i, br, a)"
+handler_type = "realworld"
+reflection = "<div class=\"content\">{input}</div>"
+expected_detection = false
+filter = "allow_basic_html|strip_dangerous_attrs"
+category = "real_world"
+
+[[case]]
+id = 5534
+name = "safe_double_encoded_angles"
+description = "Double-encoded angle brackets prevent any tag injection"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = false
+filter = "double_encode_angles"
+category = "real_world"
+
+[[case]]
+id = 5535
+name = "safe_curly_braces_removed"
+description = "Template context with curly braces and backticks removed"
+handler_type = "realworld"
+reflection = "<script>var t = `{input}`;</script>"
+expected_detection = false
+filter = "remove_curly_braces|remove_backtick|remove_angles|remove_quotes"
+category = "real_world"
+
+[[case]]
+id = 5536
+name = "safe_normalize_strip_encode"
+description = "Whitespace normalized, tags stripped, and entities encoded"
+handler_type = "realworld"
+reflection = "<html><body><p>{input}</p></body></html>"
+expected_detection = false
+filter = "normalize_whitespace|strip_tags|encode_full_html"
+category = "real_world"
+
+[[case]]
+id = 5537
+name = "safe_search_all_defenses"
+description = "Search page with all defense layers applied"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = false
+filter = "strip_tags|encode_full_html|waf_strict"
+page_template = "search_page"
+category = "real_world"
+
+[[case]]
+id = 5538
+name = "safe_js_all_special_removed"
+description = "JS context with angles, quotes, backticks, parens, and semicolons all removed"
+handler_type = "realworld"
+reflection = "<script>var x = '{input}';</script>"
+expected_detection = false
+filter = "remove_angles|remove_quotes|remove_backtick|remove_parens|remove_semicolons"
+category = "real_world"

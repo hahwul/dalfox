@@ -1,0 +1,73 @@
+# Template injection XSS patterns - server-side and client-side template engine contexts
+
+[[case]]
+id = 5221
+name = "template_handlebars_raw"
+description = "Handlebars triple-stash (raw) rendering user input without escaping"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"template-output\">{input}</div><script>var tpl = Handlebars.compile('<p>{input}</p>');</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5222
+name = "template_jinja2_autoescape_off"
+description = "Jinja2-style template with autoescape disabled reflecting user input"
+handler_type = "realworld"
+reflection = "<html><body><h1>Welcome, {input}</h1><p>Your profile: {input}</p></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5223
+name = "template_thymeleaf_unescaped"
+description = "Thymeleaf th:utext equivalent reflecting raw HTML"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"content\">{input}</div><span class=\"info\" data-value=\"{input}\">Info</span></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5224
+name = "template_ejs_raw_output"
+description = "EJS <%- (unescaped) output reflecting user input"
+handler_type = "realworld"
+reflection = "<html><head><title>{input}</title></head><body><div id=\"app\">{input}</div><script>window.__DATA__ = {{user: '{input}'}};</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5225
+name = "template_vue_v_html"
+description = "Vue.js v-html directive rendering user input as raw HTML"
+handler_type = "realworld"
+reflection = "<html><body><div id=\"app\"><div v-html=\"content\">{input}</div><input v-model=\"search\" value=\"{input}\"></div><script>new Vue({{el:'#app',data:{{content:'{input}',search:'{input}'}}}});</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5226
+name = "template_react_dangerously"
+description = "React dangerouslySetInnerHTML equivalent with server-rendered initial state"
+handler_type = "realworld"
+reflection = "<html><body><div id=\"root\"><div>{input}</div></div><script>window.__INITIAL_STATE__ = {{html: \"{input}\", query: \"{input}\"}};</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5227
+name = "template_twig_raw_filter"
+description = "Twig template with raw filter applied to user input"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"page\"><h2>{input}</h2><div class=\"body\">{input}</div><a href=\"/page/{input}\">Permalink</a></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5228
+name = "template_mustache_triple"
+description = "Mustache/Handlebars triple-mustache unescaped rendering in multiple contexts"
+handler_type = "realworld"
+reflection = "<html><body><article><header>{input}</header><section>{input}</section><footer data-author=\"{input}\">By {input}</footer></article></body></html>"
+expected_detection = true
+category = "real_world"

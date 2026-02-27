@@ -1,0 +1,57 @@
+# WYSIWYG editor XSS test cases - rich text editor sanitization patterns
+
+[[case]]
+id = 5101
+name = "wysiwyg_contenteditable"
+description = "Rich text editor reflects content in contenteditable div"
+handler_type = "realworld"
+reflection = "<html><body><div contenteditable=\"true\">{input}</div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5102
+name = "wysiwyg_strip_script_allow_style"
+description = "Editor strips script but allows style tags (CSS injection possible)"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"editor\">{input}</div></body></html>"
+expected_detection = true
+filter = "strip_script"
+category = "real_world"
+
+[[case]]
+id = 5103
+name = "wysiwyg_paste_handler"
+description = "Editor paste handler reflects clipboard content in data attribute"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"editor\" contenteditable=\"true\" data-paste=\"{input}\"><p>Pasted content: {input}</p></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5104
+name = "wysiwyg_link_dialog"
+description = "Editor link insertion dialog reflects URL in preview and href"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"link-preview\"><a href=\"{input}\" target=\"_blank\">{input}</a></div><input type=\"text\" value=\"{input}\"></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5105
+name = "wysiwyg_embed_code"
+description = "Editor embed code feature reflects raw HTML in iframe sandbox"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"embed-container\"><iframe srcdoc=\"{input}\" sandbox=\"allow-scripts\"></iframe></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5106
+name = "wysiwyg_strip_all_safe"
+description = "Editor strips all tags and encodes entities - fully safe"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"editor\">{input}</div></body></html>"
+expected_detection = false
+filter = "strip_tags|encode_angles"
+category = "real_world"

@@ -1,0 +1,96 @@
+# Error page XSS test cases - real-world error message reflection patterns
+
+[[case]]
+id = 5011
+name = "error_404_path_reflection"
+description = "404 page reflects the requested path in error message"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "404_page"
+status_code = 404
+category = "real_world"
+
+[[case]]
+id = 5012
+name = "error_stack_trace"
+description = "Error page reflects input in stack trace pre block"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "error_page"
+status_code = 500
+category = "real_world"
+
+[[case]]
+id = 5013
+name = "error_console_log"
+description = "Error page reflects input in console.log JavaScript context"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "error_page"
+category = "real_world"
+
+[[case]]
+id = 5014
+name = "error_html_safe_js_unsafe"
+description = "Error page encodes angles but reflects raw in JS console.log"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+filter = "encode_angles"
+page_template = "error_page"
+category = "real_world"
+
+[[case]]
+id = 5015
+name = "error_json_as_html"
+description = "API error returns JSON body with text/html content-type"
+handler_type = "realworld"
+reflection = "<html><body><pre>{{\"error\": \"not_found\", \"path\": \"{input}\", \"status\": 404}}</pre></body></html>"
+expected_detection = true
+status_code = 404
+content_type = "text/html"
+category = "real_world"
+
+[[case]]
+id = 5016
+name = "error_debug_mode"
+description = "Debug error page reflects full request details including query"
+handler_type = "realworld"
+reflection = "<html><body><h1>Debug Error</h1><dl><dt>Path</dt><dd>{input}</dd><dt>Query</dt><dd>{input}</dd><dt>Method</dt><dd>GET</dd></dl><pre>Traceback: at {input}</pre></body></html>"
+expected_detection = true
+status_code = 500
+category = "real_world"
+
+[[case]]
+id = 5017
+name = "error_xml_parse_error"
+description = "XML parse error page reflects malformed input in error details"
+handler_type = "realworld"
+reflection = "<html><body><h1>XML Parse Error</h1><p>Failed to parse: <code>{input}</code></p><p>Expected valid XML at position 0</p></body></html>"
+expected_detection = true
+status_code = 400
+category = "real_world"
+
+[[case]]
+id = 5018
+name = "error_403_forbidden"
+description = "403 page reflects denied resource path"
+handler_type = "realworld"
+reflection = "<html><body><h1>403 Forbidden</h1><p>Access denied to: {input}</p><p>Contact administrator if you believe this is an error.</p></body></html>"
+expected_detection = true
+status_code = 403
+category = "real_world"
+
+[[case]]
+id = 5019
+name = "error_sanitized_complete"
+description = "Error page with full HTML entity encoding - should be safe"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = false
+filter = "encode_angles|encode_quotes"
+page_template = "error_page"
+category = "real_world"

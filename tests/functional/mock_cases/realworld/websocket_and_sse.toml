@@ -1,0 +1,55 @@
+# WebSocket, Server-Sent Events, and real-time communication XSS patterns
+
+[[case]]
+id = 5411
+name = "ws_chat_display"
+description = "WebSocket chat page reflects initial message data in DOM"
+handler_type = "realworld"
+reflection = "<html><body><div id=\"messages\"><div class=\"msg\" data-user=\"{input}\"><strong>{input}</strong>: {input}</div></div><script>var ws = new WebSocket('ws://localhost/chat'); var user = '{input}'; ws.onmessage = function(e) {{ document.getElementById('messages').innerHTML += e.data; }};</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5412
+name = "ws_connection_info"
+description = "WebSocket connection status page reflects endpoint URL"
+handler_type = "realworld"
+reflection = "<html><body><h2>WebSocket Connection</h2><div class=\"status\"><p>Endpoint: <code>{input}</code></p><p>Status: Connected</p></div><script>var endpoint = '{input}'; new WebSocket(endpoint);</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5413
+name = "sse_event_display"
+description = "Server-Sent Events display page reflects event source URL and data"
+handler_type = "realworld"
+reflection = "<html><body><h2>Live Events</h2><div id=\"events\"><div class=\"event\" data-type=\"{input}\"><span class=\"type\">{input}</span><pre>{input}</pre></div></div><script>var src = new EventSource('{input}'); src.onmessage = function(e) {{ document.getElementById('events').innerHTML += '<p>' + e.data + '</p>'; }};</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5414
+name = "realtime_notification"
+description = "Real-time notification overlay reflecting event payload"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"notification-toast\" data-action=\"{input}\"><h4>{input}</h4><p>{input}</p><a href=\"{input}\" class=\"action\">View</a></div><script>var payload = {{title: '{input}', body: '{input}', url: '{input}'}}; showNotification(payload);</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5415
+name = "polling_status_page"
+description = "AJAX polling status page reflecting status message"
+handler_type = "realworld"
+reflection = "<html><body><div id=\"status\"><h2>Job Status</h2><p class=\"message\">{input}</p><div class=\"progress\" data-label=\"{input}\"></div></div><script>var jobId = '{input}'; setInterval(function(){{ fetch('/status/' + jobId).then(r => r.text()).then(t => document.getElementById('status').innerHTML = t); }}, 5000);</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5416
+name = "webhook_payload_viewer"
+description = "Webhook incoming payload viewer reflecting raw payload data"
+handler_type = "realworld"
+reflection = "<html><body><h2>Incoming Webhook</h2><div class=\"payload\"><h3>Headers</h3><pre>Content-Type: application/json\nX-Hook-Signature: {input}</pre><h3>Body</h3><pre>{input}</pre></div><script>var payload = '{input}'; console.log('Received:', payload);</script></body></html>"
+expected_detection = true
+category = "real_world"

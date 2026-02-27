@@ -1,0 +1,81 @@
+# Comment section XSS test cases - real-world comment/forum patterns
+
+[[case]]
+id = 5061
+name = "comment_strip_tags"
+description = "Comment section strips all HTML tags from user content"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = false
+filter = "strip_tags"
+page_template = "comment_section"
+category = "real_world"
+
+[[case]]
+id = 5062
+name = "comment_partial_sanitize"
+description = "Comment section strips script tags but allows other tags (img, a)"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+filter = "strip_script"
+page_template = "comment_section"
+category = "real_world"
+
+[[case]]
+id = 5063
+name = "comment_data_author"
+description = "Comment data-author attribute reflects username without encoding"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "comment_section"
+category = "real_world"
+
+[[case]]
+id = 5064
+name = "comment_bbcode_rendered"
+description = "Forum comment with BBCode rendered to HTML allowing img tags"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"post\"><div class=\"content\">{input}</div><div class=\"sig\">User signature: {input}</div></div></body></html>"
+expected_detection = true
+filter = "strip_script"
+category = "real_world"
+
+[[case]]
+id = 5065
+name = "comment_quote_reply"
+description = "Quote reply reflects original comment in blockquote"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"reply\"><blockquote cite=\"{input}\">{input}</blockquote><textarea placeholder=\"Your reply...\"></textarea></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5066
+name = "comment_nested_thread"
+description = "Nested comment thread with parent author name in data attributes"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"thread\"><div class=\"comment\" data-parent=\"{input}\"><span class=\"reply-to\">In reply to {input}:</span><p>{input}</p></div></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5067
+name = "comment_markdown_rendered"
+description = "Markdown comment rendered to HTML with links preserved"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"markdown-body\"><p>{input}</p><a href=\"{input}\">{input}</a></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5068
+name = "comment_fully_escaped"
+description = "Comment section with complete HTML encoding - safe"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = false
+filter = "strip_tags"
+page_template = "comment_section"
+category = "real_world"

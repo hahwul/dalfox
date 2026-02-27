@@ -1,0 +1,184 @@
+# CVE-inspired XSS patterns - real-world vulnerability patterns
+
+[[case]]
+id = 5091
+name = "cve_filename_reflection"
+description = "File upload page reflects filename in error message without encoding"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "file_upload"
+category = "cve"
+reference = "generic-filename-xss"
+
+[[case]]
+id = 5092
+name = "cve_wordpress_plugin"
+description = "WordPress-style plugin page reflects search param in admin context"
+handler_type = "realworld"
+reflection = "<div class=\"wrap\"><h1>Search: {input}</h1><table><tr><td>{input}</td></tr></table></div>"
+expected_detection = true
+category = "cve"
+reference = "wordpress-plugin-reflected-xss"
+
+[[case]]
+id = 5093
+name = "cve_spring_boot_error"
+description = "Spring Boot Whitelabel error page reflects path in error message"
+handler_type = "realworld"
+reflection = "<html><body><h1>Whitelabel Error Page</h1><p>There was an unexpected error (type=Not Found, status=404).</p><p>{input}</p></body></html>"
+expected_detection = true
+status_code = 404
+category = "cve"
+reference = "spring-boot-whitelabel-xss"
+
+[[case]]
+id = 5094
+name = "cve_php_info_reflection"
+description = "PHP info-style page reflects query string in pre-formatted output"
+handler_type = "realworld"
+reflection = "<html><body><h1>Server Info</h1><pre>REQUEST_URI: /info?query={input}\nQUERY_STRING: query={input}</pre></body></html>"
+expected_detection = true
+category = "cve"
+reference = "php-info-reflection"
+
+[[case]]
+id = 5095
+name = "cve_angular_template"
+description = "Angular-style template injection via double curly braces in page"
+handler_type = "realworld"
+reflection = "<html><body ng-app><div>{input}</div></body></html>"
+expected_detection = true
+category = "cve"
+reference = "angular-template-injection"
+
+[[case]]
+id = 5096
+name = "cve_jira_field_reflection"
+description = "Jira-style issue page reflects custom field value without encoding"
+handler_type = "realworld"
+reflection = "<html><body><div id=\"issue-detail\"><h2>Issue: PROJ-123</h2><dl><dt>Summary</dt><dd>{input}</dd><dt>Reporter</dt><dd>{input}</dd></dl></div></body></html>"
+expected_detection = true
+category = "cve"
+reference = "jira-field-reflection"
+
+[[case]]
+id = 5097
+name = "cve_jenkins_build_param"
+description = "Jenkins-style build page reflects build parameter in console output"
+handler_type = "realworld"
+reflection = "<html><body><h1>Build #42</h1><pre class=\"console\">Building with parameter: {input}\nStarting build...\nBuild SUCCESS</pre></body></html>"
+expected_detection = true
+category = "cve"
+reference = "jenkins-build-param-xss"
+
+[[case]]
+id = 5098
+name = "cve_apache_directory_listing"
+description = "Apache-style directory listing reflects path in title and breadcrumb"
+handler_type = "realworld"
+reflection = "<html><head><title>Index of /{input}</title></head><body><h1>Index of /{input}</h1><pre><a href=\"/\">Parent Directory</a>\n<a href=\"file.txt\">file.txt</a></pre></body></html>"
+expected_detection = true
+category = "cve"
+reference = "apache-directory-listing-xss"
+
+[[case]]
+id = 5099
+name = "cve_drupal_search"
+description = "Drupal-style search page reflects query in multiple locations"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"page-title\"><h1>Search results for {input}</h1></div><ol class=\"search-results\"><li><h3><a href=\"#\">{input} - Page Title</a></h3></li></ol><div class=\"pager\"><a href=\"/search?q={input}&page=2\">Next</a></div></body></html>"
+expected_detection = true
+category = "cve"
+reference = "drupal-search-xss"
+
+[[case]]
+id = 5100
+name = "cve_rails_debug_page"
+description = "Rails-style debug error page reflects params in exception details"
+handler_type = "realworld"
+reflection = "<html><body><h1>ActionController::RoutingError</h1><p>No route matches [GET] \"/{input}\"</p><h2>Parameters:</h2><pre>{{\"query\" => \"{input}\"}}</pre><div id=\"trace\"><pre>/app/controllers/search_controller.rb:12:in `index'</pre></div></body></html>"
+expected_detection = true
+status_code = 500
+category = "cve"
+reference = "rails-debug-page-xss"
+
+[[case]]
+id = 5501
+name = "cve_confluence_macro"
+description = "Confluence-style macro rendering with user-controlled parameters"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"confluence-content\"><div class=\"macro\" data-macro-name=\"{input}\"><div class=\"macro-body\">{input}</div></div><p>{input}</p></div></body></html>"
+expected_detection = true
+category = "cve"
+reference = "confluence-macro-xss"
+
+[[case]]
+id = 5502
+name = "cve_gitlab_issue"
+description = "GitLab-style issue page reflects issue title and labels"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"issue-detail\"><h2 class=\"title\">{input}</h2><div class=\"labels\"><span class=\"label\" style=\"background-color: #428bca\">{input}</span></div><div class=\"description\">{input}</div></div><script>var issueTitle = '{input}';</script></body></html>"
+expected_detection = true
+category = "cve"
+reference = "gitlab-issue-xss"
+
+[[case]]
+id = 5503
+name = "cve_grafana_dashboard"
+description = "Grafana-style dashboard reflects panel title and query in page"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"dashboard\"><div class=\"panel\" data-title=\"{input}\"><h4>{input}</h4><div class=\"panel-content\">Loading...</div></div></div><script>var panelConfig = {{title: '{input}', query: '{input}'}};</script></body></html>"
+expected_detection = true
+category = "cve"
+reference = "grafana-dashboard-xss"
+
+[[case]]
+id = 5504
+name = "cve_kibana_discover"
+description = "Kibana-style discover page reflects query and index pattern"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"discover\"><div class=\"query-bar\"><input value=\"{input}\" class=\"query-input\"></div><div class=\"index-pattern\">Index: {input}</div><table><tr><td>{input}</td><td>log entry</td></tr></table></div></body></html>"
+expected_detection = true
+category = "cve"
+reference = "kibana-discover-xss"
+
+[[case]]
+id = 5505
+name = "cve_sentry_event"
+description = "Sentry-style error tracking page reflects error message and tags"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"event\"><h2>{input}</h2><div class=\"tags\"><span class=\"tag\">{input}</span></div><div class=\"breadcrumbs\"><pre>{input}</pre></div><div class=\"context\"><pre>{{\"query\": \"{input}\"}}</pre></div></div></body></html>"
+expected_detection = true
+category = "cve"
+reference = "sentry-event-xss"
+
+[[case]]
+id = 5506
+name = "cve_redmine_ticket"
+description = "Redmine-style ticket page reflects subject and custom field"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"issue\"><h2>{input}</h2><table class=\"attributes\"><tr><td>Custom Field</td><td>{input}</td></tr><tr><td>Assignee</td><td><a href=\"/users/{input}\">{input}</a></td></tr></table><div class=\"description\">{input}</div></div></body></html>"
+expected_detection = true
+category = "cve"
+reference = "redmine-ticket-xss"
+
+[[case]]
+id = 5507
+name = "cve_phpmyadmin_table"
+description = "phpMyAdmin-style page reflects table and column names"
+handler_type = "realworld"
+reflection = "<html><body><h2>Table: {input}</h2><div class=\"sql-result\"><pre>SELECT * FROM `{input}` WHERE `{input}` LIKE '%search%'</pre><table><thead><tr><th>{input}</th><th>id</th></tr></thead><tbody><tr><td>{input}</td><td>1</td></tr></tbody></table></div></body></html>"
+expected_detection = true
+category = "cve"
+reference = "phpmyadmin-table-xss"
+
+[[case]]
+id = 5508
+name = "cve_sonarqube_project"
+description = "SonarQube-style project page reflects project key and name"
+handler_type = "realworld"
+reflection = "<html><body><nav><a href=\"/\">Home</a> &gt; <a href=\"/project/{input}\">{input}</a></nav><h1>{input}</h1><div class=\"metrics\"><div class=\"metric\" data-key=\"{input}\"><span>{input}</span></div></div></body></html>"
+expected_detection = true
+category = "cve"
+reference = "sonarqube-project-xss"

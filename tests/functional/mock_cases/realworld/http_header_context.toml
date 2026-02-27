@@ -1,0 +1,57 @@
+# HTTP header and response context XSS patterns
+
+[[case]]
+id = 5271
+name = "header_csp_report_page"
+description = "CSP violation report viewer reflects violated directive and blocked URI"
+handler_type = "realworld"
+reflection = "<html><body><h1>CSP Violations</h1><table><tr><td>Blocked URI</td><td>{input}</td></tr><tr><td>Violated Directive</td><td>{input}</td></tr><tr><td>Document URI</td><td><a href=\"{input}\">{input}</a></td></tr></table></body></html>"
+expected_detection = true
+content_type = "text/html"
+category = "real_world"
+
+[[case]]
+id = 5272
+name = "header_server_info"
+description = "Server info page reflects server header and version"
+handler_type = "realworld"
+reflection = "<html><body><h1>Server Information</h1><dl><dt>Server</dt><dd>{input}</dd><dt>X-Powered-By</dt><dd>{input}</dd></dl><pre>Server: {input}\nX-Powered-By: {input}</pre></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5273
+name = "header_cors_config"
+description = "CORS configuration page reflects allowed origins"
+handler_type = "realworld"
+reflection = "<html><body><h1>CORS Settings</h1><form><label>Allowed Origins</label><textarea name=\"origins\">{input}</textarea><label>Allowed Headers</label><input name=\"headers\" value=\"{input}\"></form></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5274
+name = "header_proxy_error"
+description = "Reverse proxy error page reflects upstream URL"
+handler_type = "realworld"
+reflection = "<html><body><h1>502 Bad Gateway</h1><p>Failed to connect to upstream: {input}</p><p>Please check the backend service at <code>{input}</code></p></body></html>"
+expected_detection = true
+status_code = 502
+category = "real_world"
+
+[[case]]
+id = 5275
+name = "header_set_cookie_debug"
+description = "Cookie debug page reflects cookie name and value"
+handler_type = "realworld"
+reflection = "<html><body><h1>Cookie Inspector</h1><table><tr><td>Name</td><td>{input}</td></tr><tr><td>Value</td><td>{input}</td></tr><tr><td>Domain</td><td>{input}</td></tr></table><script>document.cookie = '{input}=' + '{input}';</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5276
+name = "header_request_log"
+description = "Request logging page reflects all request details including headers"
+handler_type = "realworld"
+reflection = "<html><body><h1>Request Log</h1><pre>GET /{input} HTTP/1.1\nHost: example.com\nUser-Agent: {input}\nReferer: {input}\nAccept: text/html</pre></body></html>"
+expected_detection = true
+category = "real_world"

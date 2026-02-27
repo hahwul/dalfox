@@ -1,0 +1,74 @@
+# E-commerce XSS test cases - shopping, product, cart, and checkout patterns
+
+[[case]]
+id = 5201
+name = "ecommerce_product_name"
+description = "Product detail page reflects product name in title, heading, JS, and onclick"
+handler_type = "realworld"
+reflection = "{input}"
+expected_detection = true
+page_template = "ecommerce_product"
+category = "real_world"
+
+[[case]]
+id = 5202
+name = "ecommerce_search_filter"
+description = "Product search with category filter reflected in breadcrumb and results"
+handler_type = "realworld"
+reflection = "<html><body><nav><a href=\"/\">Home</a> &gt; <a href=\"/cat/{input}\">{input}</a></nav><h2>Products in {input}</h2><div class=\"filter\"><input type=\"text\" value=\"{input}\"></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5203
+name = "ecommerce_cart_item"
+description = "Shopping cart page reflects item name and quantity"
+handler_type = "realworld"
+reflection = "<html><body><h1>Cart</h1><table><tr><td class=\"item-name\">{input}</td><td>1</td><td>$19.99</td></tr></table><input type=\"hidden\" name=\"item\" value=\"{input}\"><script>cart.items = [{{name: '{input}', qty: 1}}];</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5204
+name = "ecommerce_review_content"
+description = "Product review page with reviewer name and review text reflected"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"review\" data-author=\"{input}\"><h4>{input}</h4><div class=\"stars\">★★★★☆</div><p class=\"review-text\">{input}</p></div></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5205
+name = "ecommerce_coupon_error"
+description = "Coupon code validation error reflects entered code"
+handler_type = "realworld"
+reflection = "<html><body><div class=\"alert alert-danger\">Invalid coupon code: <strong>{input}</strong></div><form><input name=\"coupon\" value=\"{input}\"><button>Apply</button></form></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5206
+name = "ecommerce_wishlist"
+description = "Wishlist page reflects product names in list and share link"
+handler_type = "realworld"
+reflection = "<html><body><h1>My Wishlist</h1><ul><li data-product=\"{input}\">{input} <a href=\"/share?items={input}\">Share</a></li></ul></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5207
+name = "ecommerce_order_confirm"
+description = "Order confirmation reflects customer name and address"
+handler_type = "realworld"
+reflection = "<html><body><h1>Order Confirmed</h1><div class=\"details\"><p>Ship to: {input}</p><p>Address: {input}</p></div><script>orderTrack.customer = '{input}';</script></body></html>"
+expected_detection = true
+category = "real_world"
+
+[[case]]
+id = 5208
+name = "ecommerce_price_compare"
+description = "Price comparison page reflects product query in multiple locations"
+handler_type = "realworld"
+reflection = "<html><body><h1>Compare prices for: {input}</h1><table><tr><th>Store</th><th>Price</th></tr><tr><td>Store A</td><td><a href=\"/redirect?q={input}\">$19.99</a></td></tr></table><meta name=\"description\" content=\"Compare prices for {input}\"></body></html>"
+expected_detection = true
+category = "real_world"
