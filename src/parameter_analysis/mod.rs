@@ -1012,16 +1012,16 @@ mod tests {
         };
 
         // Simulate cookie loading
-        if let Some(path) = &args.cookie_from_raw {
-            if let Ok(content) = std::fs::read_to_string(path) {
-                for line in content.lines() {
-                    if let Some(cookie_line) = line.strip_prefix("Cookie: ") {
-                        for cookie in cookie_line.split("; ") {
-                            if let Some((name, value)) = cookie.split_once('=') {
-                                target
-                                    .cookies
-                                    .push((name.trim().to_string(), value.trim().to_string()));
-                            }
+        if let Some(path) = &args.cookie_from_raw
+            && let Ok(content) = std::fs::read_to_string(path)
+        {
+            for line in content.lines() {
+                if let Some(cookie_line) = line.strip_prefix("Cookie: ") {
+                    for cookie in cookie_line.split("; ") {
+                        if let Some((name, value)) = cookie.split_once('=') {
+                            target
+                                .cookies
+                                .push((name.trim().to_string(), value.trim().to_string()));
                         }
                     }
                 }
@@ -1089,16 +1089,16 @@ mod tests {
         };
 
         // Simulate cookie loading - file doesn't exist
-        if let Some(path) = &args.cookie_from_raw {
-            if let Ok(content) = std::fs::read_to_string(path) {
-                for line in content.lines() {
-                    if let Some(cookie_line) = line.strip_prefix("Cookie: ") {
-                        for cookie in cookie_line.split("; ") {
-                            if let Some((name, value)) = cookie.split_once('=') {
-                                target
-                                    .cookies
-                                    .push((name.trim().to_string(), value.trim().to_string()));
-                            }
+        if let Some(path) = &args.cookie_from_raw
+            && let Ok(content) = std::fs::read_to_string(path)
+        {
+            for line in content.lines() {
+                if let Some(cookie_line) = line.strip_prefix("Cookie: ") {
+                    for cookie in cookie_line.split("; ") {
+                        if let Some((name, value)) = cookie.split_once('=') {
+                            target
+                                .cookies
+                                .push((name.trim().to_string(), value.trim().to_string()));
                         }
                     }
                 }

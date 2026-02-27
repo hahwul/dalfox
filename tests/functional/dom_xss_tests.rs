@@ -492,11 +492,11 @@ fn test_dom_xss_comprehensive_coverage() {
         let mut detected = false;
 
         for script in scripts {
-            if let Ok(vulnerabilities) = analyzer.analyze(&script) {
-                if !vulnerabilities.is_empty() {
-                    detected = true;
-                    break;
-                }
+            if let Ok(vulnerabilities) = analyzer.analyze(&script)
+                && !vulnerabilities.is_empty()
+            {
+                detected = true;
+                break;
             }
         }
 

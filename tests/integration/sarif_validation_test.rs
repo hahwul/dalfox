@@ -201,7 +201,7 @@ fn test_sarif_severity_to_level_mapping() {
             "test".to_string(),
         );
 
-        let sarif = ScanResult::results_to_sarif(&vec![result], false, false);
+        let sarif = ScanResult::results_to_sarif(&[result], false, false);
         let json: Value = serde_json::from_str(&sarif).unwrap();
 
         let actual_level = json["runs"][0]["results"][0]["level"].as_str().unwrap();
@@ -229,7 +229,7 @@ fn test_sarif_message_with_evidence() {
         "XSS detected".to_string(),
     );
 
-    let sarif = ScanResult::results_to_sarif(&vec![result], false, false);
+    let sarif = ScanResult::results_to_sarif(&[result], false, false);
     let json: Value = serde_json::from_str(&sarif).unwrap();
 
     let message = json["runs"][0]["results"][0]["message"]["text"]
@@ -263,7 +263,7 @@ fn test_sarif_partial_fingerprints() {
         "test".to_string(),
     );
 
-    let sarif = ScanResult::results_to_sarif(&vec![result], false, false);
+    let sarif = ScanResult::results_to_sarif(&[result], false, false);
     let json: Value = serde_json::from_str(&sarif).unwrap();
 
     let fingerprints = &json["runs"][0]["results"][0]["partialFingerprints"];
@@ -293,7 +293,7 @@ fn test_sarif_rule_metadata() {
         "test".to_string(),
     );
 
-    let sarif = ScanResult::results_to_sarif(&vec![result], false, false);
+    let sarif = ScanResult::results_to_sarif(&[result], false, false);
     let json: Value = serde_json::from_str(&sarif).unwrap();
 
     let rule = &json["runs"][0]["tool"]["driver"]["rules"][0];
@@ -307,8 +307,8 @@ fn test_sarif_rule_metadata() {
             .unwrap()
             .contains("XSS")
     );
-    assert!(rule["fullDescription"]["text"].as_str().unwrap().len() > 0);
-    assert!(rule["help"]["text"].as_str().unwrap().len() > 0);
+    assert!(!rule["fullDescription"]["text"].as_str().unwrap().is_empty());
+    assert!(!rule["help"]["text"].as_str().unwrap().is_empty());
     assert_eq!(rule["defaultConfiguration"]["level"], "error");
 
     // Verify tags

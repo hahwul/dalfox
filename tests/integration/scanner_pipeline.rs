@@ -146,7 +146,7 @@ fn test_param_structure_attribute_context() {
 
 #[test]
 fn test_param_location_types() {
-    let locations = vec![
+    let locations = [
         Location::Query,
         Location::Body,
         Location::JsonBody,
@@ -298,7 +298,7 @@ fn test_special_chars_classification() {
 /// Test that multiple parameters can be tracked
 #[test]
 fn test_multiple_parameters() {
-    let params = vec![
+    let params = [
         Param {
             name: "id".to_string(),
             value: "1".to_string(),

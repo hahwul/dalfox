@@ -1167,12 +1167,13 @@ mod tests {
 
     #[test]
     fn test_save_writes_toml_and_json_formats() {
-        let mut cfg = Config::default();
-        cfg.scan = Some(ScanConfig {
-            format: Some("json".to_string()),
-            timeout: Some(3),
-            ..Default::default()
-        });
+        let cfg = Config {
+            scan: Some(ScanConfig {
+                format: Some("json".to_string()),
+                timeout: Some(3),
+                ..Default::default()
+            }),
+        };
 
         let nonce = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

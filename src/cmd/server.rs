@@ -125,6 +125,7 @@ struct ScanOptions {
     cookie: Option<String>,
     worker: Option<usize>,
     delay: Option<u64>,
+    timeout: Option<u64>,
     blind: Option<String>,
     header: Option<Vec<String>>,
     method: Option<String>,
@@ -189,6 +190,51 @@ fn validate_jsonp_callback(cb: &str) -> Option<String> {
         }
     }
     Some(cb.to_string())
+}
+
+/// Try to extract a valid JSONP callback from query params. Returns `Some(cb)` if JSONP is
+/// enabled and a valid callback name is present; `None` otherwise.
+fn extract_jsonp_callback(
+    state: &AppState,
+    params: &std::collections::HashMap<String, String>,
+) -> Option<String> {
+    if !state.jsonp_enabled {
+        return None;
+    }
+    params
+        .get(&state.callback_param_name)
+        .and_then(|s| validate_jsonp_callback(s))
+}
+
+/// Build the final HTTP response body, applying JSONP wrapping when a valid callback is present.
+/// Returns `(content_type_override, body_string)`.  When `jsonp_cb` is `Some`, the body is
+/// wrapped as `callback(json);` and the content-type is set to `application/javascript`.
+fn build_response_body<T: Serialize>(resp: &T, jsonp_cb: Option<&str>) -> (Option<&'static str>, String) {
+    let json = serde_json::to_string(resp).expect("serializable response");
+    match jsonp_cb {
+        Some(cb) => (
+            Some("application/javascript; charset=utf-8"),
+            format!("{}({});", cb, json),
+        ),
+        None => (None, json),
+    }
+}
+
+/// Convenience: build a complete axum response tuple with CORS + optional JSONP.
+fn make_api_response<T: Serialize>(
+    state: &AppState,
+    req_headers: &HeaderMap,
+    params: &std::collections::HashMap<String, String>,
+    status: StatusCode,
+    resp: &T,
+) -> (StatusCode, HeaderMap, String) {
+    let mut cors = build_cors_headers(state, req_headers);
+    let cb = extract_jsonp_callback(state, params);
+    let (ct, body) = build_response_body(resp, cb.as_deref());
+    if let Some(ct_val) = ct {
+        cors.insert("Content-Type", ct_val.parse().expect("static content-type"));
+    }
+    (status, cors, body)
 }
 
 fn build_cors_headers(state: &AppState, req_headers: &HeaderMap) -> HeaderMap {
@@ -332,7 +378,7 @@ async fn run_scan_job(
         skip_mining_dict: false,
         skip_mining_dom: false,
 
-        timeout: 10,
+        timeout: opts.timeout.unwrap_or(crate::cmd::scan::DEFAULT_TIMEOUT_SECS),
         delay: opts.delay.unwrap_or(0),
         proxy: None,
         follow_redirects: false,
@@ -462,100 +508,22 @@ async fn start_scan_handler(
     Json(req): Json<ScanRequest>,
 ) -> impl IntoResponse {
     if !check_api_key(&state, &headers) {
-        let mut cors = build_cors_headers(&state, &headers);
         log(&state, "AUTH", "Unauthorized access to /scan");
         let resp = ApiResponse::<serde_json::Value> {
             code: 401,
             msg: "unauthorized".to_string(),
             data: None,
         };
-        if state.jsonp_enabled
-            && let Some(cb) = params
-                .get(&state.callback_param_name)
-                .and_then(|s| validate_jsonp_callback(s))
-                .and_then(|raw_cb| {
-                    let cb = raw_cb.trim();
-                    if cb.is_empty() || cb.len() > 64 {
-                        None
-                    } else {
-                        let mut it = cb.chars();
-                        match it.next() {
-                            Some(c) if c.is_ascii_alphabetic() || c == '_' || c == '$' => {
-                                if it.all(|ch| {
-                                    ch.is_ascii_alphanumeric()
-                                        || ch == '_'
-                                        || ch == '$'
-                                        || ch == '.'
-                                }) {
-                                    Some(cb.to_string())
-                                } else {
-                                    None
-                                }
-                            }
-                            _ => None,
-                        }
-                    }
-                })
-        {
-            cors.insert(
-                "Content-Type",
-                "application/javascript; charset=utf-8"
-                    .parse()
-                    .expect("static content-type"),
-            );
-            let body = format!("{}({});", cb, serde_json::to_string(&resp).expect("serializable response"));
-            return (StatusCode::UNAUTHORIZED, cors, body);
-        }
-        let body = serde_json::to_string(&resp).expect("serializable response");
-        return (StatusCode::UNAUTHORIZED, cors, body);
+        return make_api_response(&state, &headers, &params, StatusCode::UNAUTHORIZED, &resp);
     }
 
     if req.url.trim().is_empty() {
-        let mut cors = build_cors_headers(&state, &headers);
         let resp = ApiResponse::<serde_json::Value> {
             code: 400,
             msg: "url is required".to_string(),
             data: None,
         };
-        if state.jsonp_enabled
-            && let Some(cb) = params
-                .get(&state.callback_param_name)
-                .and_then(|s| validate_jsonp_callback(s))
-                .and_then(|raw_cb| {
-                    let cb = raw_cb.trim();
-                    if cb.is_empty() || cb.len() > 64 {
-                        None
-                    } else {
-                        let mut it = cb.chars();
-                        match it.next() {
-                            Some(c) if c.is_ascii_alphabetic() || c == '_' || c == '$' => {
-                                if it.all(|ch| {
-                                    ch.is_ascii_alphanumeric()
-                                        || ch == '_'
-                                        || ch == '$'
-                                        || ch == '.'
-                                }) {
-                                    Some(cb.to_string())
-                                } else {
-                                    None
-                                }
-                            }
-                            _ => None,
-                        }
-                    }
-                })
-        {
-            cors.insert(
-                "Content-Type",
-                "application/javascript; charset=utf-8"
-                    .parse()
-                    .expect("static content-type"),
-            );
-            let body = format!("{}({});", cb, serde_json::to_string(&resp).expect("serializable response"));
-            return (StatusCode::BAD_REQUEST, cors, body);
-        }
-        let body = serde_json::to_string(&resp).expect("serializable response");
-        return (StatusCode::BAD_REQUEST, cors, body);
+        return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
     }
 
     let opts = req.options.clone().unwrap_or_default();
@@ -596,48 +564,12 @@ async fn start_scan_handler(
         ));
     });
 
-    let mut cors = build_cors_headers(&state, &headers);
     let resp = ApiResponse::<serde_json::Value> {
         code: 200,
         msg: id,
         data: None,
     };
-    if state.jsonp_enabled
-        && let Some(cb) = params
-            .get(&state.callback_param_name)
-            .and_then(|s| validate_jsonp_callback(s))
-            .and_then(|raw_cb| {
-                let cb = raw_cb.trim();
-                if cb.is_empty() || cb.len() > 64 {
-                    None
-                } else {
-                    let mut it = cb.chars();
-                    match it.next() {
-                        Some(c) if c.is_ascii_alphabetic() || c == '_' || c == '$' => {
-                            if it.all(|ch| {
-                                ch.is_ascii_alphanumeric() || ch == '_' || ch == '$' || ch == '.'
-                            }) {
-                                Some(cb.to_string())
-                            } else {
-                                None
-                            }
-                        }
-                        _ => None,
-                    }
-                }
-            })
-    {
-        cors.insert(
-            "Content-Type",
-            "application/javascript; charset=utf-8"
-                    .parse()
-                    .expect("static content-type"),
-        );
-        let body = format!("{}({});", cb, serde_json::to_string(&resp).expect("serializable response"));
-        return (StatusCode::OK, cors, body);
-    }
-    let body = serde_json::to_string(&resp).expect("serializable response");
-    (StatusCode::OK, cors, body)
+    make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
 }
 
 async fn get_result_handler(
@@ -647,60 +579,19 @@ async fn get_result_handler(
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     if !check_api_key(&state, &headers) {
-        let mut cors = build_cors_headers(&state, &headers);
         log(&state, "AUTH", "Unauthorized access to /result");
         let resp = ApiResponse::<ResultPayload> {
             code: 401,
             msg: "unauthorized".to_string(),
             data: None,
         };
-        if state.jsonp_enabled
-            && let Some(cb) = params
-                .get(&state.callback_param_name)
-                .and_then(|s| validate_jsonp_callback(s))
-                .and_then(|raw_cb| {
-                    let cb = raw_cb.trim();
-                    if cb.is_empty() || cb.len() > 64 {
-                        None
-                    } else {
-                        let mut it = cb.chars();
-                        match it.next() {
-                            Some(c) if c.is_ascii_alphabetic() || c == '_' || c == '$' => {
-                                if it.all(|ch| {
-                                    ch.is_ascii_alphanumeric()
-                                        || ch == '_'
-                                        || ch == '$'
-                                        || ch == '.'
-                                }) {
-                                    Some(cb.to_string())
-                                } else {
-                                    None
-                                }
-                            }
-                            _ => None,
-                        }
-                    }
-                })
-        {
-            cors.insert(
-                "Content-Type",
-                "application/javascript; charset=utf-8"
-                    .parse()
-                    .expect("static content-type"),
-            );
-            let body = format!("{}({});", cb, serde_json::to_string(&resp).expect("serializable response"));
-            return (StatusCode::UNAUTHORIZED, cors, body);
-        }
-        let body = serde_json::to_string(&resp).expect("serializable response");
-        return (StatusCode::UNAUTHORIZED, cors, body);
+        return make_api_response(&state, &headers, &params, StatusCode::UNAUTHORIZED, &resp);
     }
 
     let job = {
         let jobs = state.jobs.lock().await;
         jobs.get(&id).cloned()
     };
-
-    let mut cors = build_cors_headers(&state, &headers);
 
     match job {
         Some(j) => {
@@ -718,45 +609,7 @@ async fn get_result_handler(
                 },
                 data: Some(payload),
             };
-            if state.jsonp_enabled
-                && let Some(cb) = params
-                    .get(&state.callback_param_name)
-                    .and_then(|s| validate_jsonp_callback(s))
-                    .and_then(|raw_cb| {
-                        let cb = raw_cb.trim();
-                        if cb.is_empty() || cb.len() > 64 {
-                            None
-                        } else {
-                            let mut it = cb.chars();
-                            match it.next() {
-                                Some(c) if c.is_ascii_alphabetic() || c == '_' || c == '$' => {
-                                    if it.all(|ch| {
-                                        ch.is_ascii_alphanumeric()
-                                            || ch == '_'
-                                            || ch == '$'
-                                            || ch == '.'
-                                    }) {
-                                        Some(cb.to_string())
-                                    } else {
-                                        None
-                                    }
-                                }
-                                _ => None,
-                            }
-                        }
-                    })
-            {
-                cors.insert(
-                    "Content-Type",
-                    "application/javascript; charset=utf-8"
-                    .parse()
-                    .expect("static content-type"),
-                );
-                let body = format!("{}({});", cb, serde_json::to_string(&resp).expect("serializable response"));
-                return (StatusCode::OK, cors, body);
-            }
-            let body = serde_json::to_string(&resp).expect("serializable response");
-            (StatusCode::OK, cors, body)
+            make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
         }
         None => {
             let resp = ApiResponse::<ResultPayload> {
@@ -764,45 +617,7 @@ async fn get_result_handler(
                 msg: "not found".to_string(),
                 data: None,
             };
-            if state.jsonp_enabled
-                && let Some(cb) = params
-                    .get(&state.callback_param_name)
-                    .and_then(|s| validate_jsonp_callback(s))
-                    .and_then(|raw_cb| {
-                        let cb = raw_cb.trim();
-                        if cb.is_empty() || cb.len() > 64 {
-                            None
-                        } else {
-                            let mut it = cb.chars();
-                            match it.next() {
-                                Some(c) if c.is_ascii_alphabetic() || c == '_' || c == '$' => {
-                                    if it.all(|ch| {
-                                        ch.is_ascii_alphanumeric()
-                                            || ch == '_'
-                                            || ch == '$'
-                                            || ch == '.'
-                                    }) {
-                                        Some(cb.to_string())
-                                    } else {
-                                        None
-                                    }
-                                }
-                                _ => None,
-                            }
-                        }
-                    })
-            {
-                cors.insert(
-                    "Content-Type",
-                    "application/javascript; charset=utf-8"
-                    .parse()
-                    .expect("static content-type"),
-                );
-                let body = format!("{}({});", cb, serde_json::to_string(&resp).expect("serializable response"));
-                return (StatusCode::NOT_FOUND, cors, body);
-            }
-            let body = serde_json::to_string(&resp).expect("serializable response");
-            (StatusCode::NOT_FOUND, cors, body)
+            make_api_response(&state, &headers, &params, StatusCode::NOT_FOUND, &resp)
         }
     }
 }
@@ -822,101 +637,23 @@ async fn get_scan_handler(
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> impl IntoResponse {
     if !check_api_key(&state, &headers) {
-        let mut cors = build_cors_headers(&state, &headers);
         log(&state, "AUTH", "Unauthorized access to /scan");
         let resp = ApiResponse::<serde_json::Value> {
             code: 401,
             msg: "unauthorized".to_string(),
             data: None,
         };
-        if state.jsonp_enabled
-            && let Some(cb) = params
-                .get(&state.callback_param_name)
-                .and_then(|s| validate_jsonp_callback(s))
-                .and_then(|raw_cb| {
-                    let cb = raw_cb.trim();
-                    if cb.is_empty() || cb.len() > 64 {
-                        None
-                    } else {
-                        let mut it = cb.chars();
-                        match it.next() {
-                            Some(c) if c.is_ascii_alphabetic() || c == '_' || c == '$' => {
-                                if it.all(|ch| {
-                                    ch.is_ascii_alphanumeric()
-                                        || ch == '_'
-                                        || ch == '$'
-                                        || ch == '.'
-                                }) {
-                                    Some(cb.to_string())
-                                } else {
-                                    None
-                                }
-                            }
-                            _ => None,
-                        }
-                    }
-                })
-        {
-            cors.insert(
-                "Content-Type",
-                "application/javascript; charset=utf-8"
-                    .parse()
-                    .expect("static content-type"),
-            );
-            let body = format!("{}({});", cb, serde_json::to_string(&resp).expect("serializable response"));
-            return (StatusCode::UNAUTHORIZED, cors, body);
-        }
-        let body = serde_json::to_string(&resp).expect("serializable response");
-        return (StatusCode::UNAUTHORIZED, cors, body);
+        return make_api_response(&state, &headers, &params, StatusCode::UNAUTHORIZED, &resp);
     }
 
     let url = params.get("url").cloned().unwrap_or_default();
     if url.trim().is_empty() {
-        let mut cors = build_cors_headers(&state, &headers);
         let resp = ApiResponse::<serde_json::Value> {
             code: 400,
             msg: "url is required".to_string(),
             data: None,
         };
-        if state.jsonp_enabled
-            && let Some(cb) = params
-                .get(&state.callback_param_name)
-                .and_then(|s| validate_jsonp_callback(s))
-                .and_then(|raw_cb| {
-                    let cb = raw_cb.trim();
-                    if cb.is_empty() || cb.len() > 64 {
-                        None
-                    } else {
-                        let mut it = cb.chars();
-                        match it.next() {
-                            Some(c) if c.is_ascii_alphabetic() || c == '_' || c == '$' => {
-                                if it.all(|ch| {
-                                    ch.is_ascii_alphanumeric()
-                                        || ch == '_'
-                                        || ch == '$'
-                                        || ch == '.'
-                                }) {
-                                    Some(cb.to_string())
-                                } else {
-                                    None
-                                }
-                            }
-                            _ => None,
-                        }
-                    }
-                })
-        {
-            cors.insert(
-                "Content-Type",
-                "application/javascript; charset=utf-8"
-                    .parse()
-                    .expect("static content-type"),
-            );
-            let body = format!("{}({});", cb, serde_json::to_string(&resp).expect("serializable response"));
-            return (StatusCode::BAD_REQUEST, cors, body);
-        }
-        let body = serde_json::to_string(&resp).expect("serializable response");
-        return (StatusCode::BAD_REQUEST, cors, body);
+        return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
     }
 
     // Build ScanOptions from query parameters
@@ -943,6 +680,7 @@ async fn get_scan_handler(
     let cookie = params.get("cookie").cloned();
     let worker = params.get("worker").and_then(|s| s.parse::<usize>().ok());
     let delay = params.get("delay").and_then(|s| s.parse::<u64>().ok());
+    let timeout = params.get("timeout").and_then(|s| s.parse::<u64>().ok());
     let blind = params.get("blind").cloned();
     let method = params
         .get("method")
@@ -959,43 +697,34 @@ async fn get_scan_handler(
         .map(|s| s == "true")
         .unwrap_or(false);
 
-    // Reuse POST handler flow by building a ScanRequest and calling the same internal logic:
-    let req = ScanRequest {
-        url: url.clone(),
-        options: Some(ScanOptions {
-            cookie,
-            worker,
-            delay,
-            blind,
-            header: Some(opt_headers),
-            method: Some(method),
-            data: data_opt,
-            user_agent,
-            encoders: Some(encoders),
-            remote_payloads: params.get("remote_payloads").map(|s| {
-                s.split(',')
-                    .map(|x| x.trim().to_string())
-                    .filter(|x| !x.is_empty())
-                    .collect::<Vec<_>>()
-            }),
-            remote_wordlists: params.get("remote_wordlists").map(|s| {
-                s.split(',')
-                    .map(|x| x.trim().to_string())
-                    .filter(|x| !x.is_empty())
-                    .collect::<Vec<_>>()
-            }),
-            include_request: Some(include_request),
-            include_response: Some(include_response),
+    let opts = ScanOptions {
+        cookie,
+        worker,
+        delay,
+        timeout,
+        blind,
+        header: Some(opt_headers),
+        method: Some(method),
+        data: data_opt,
+        user_agent,
+        encoders: Some(encoders),
+        remote_payloads: params.get("remote_payloads").map(|s| {
+            s.split(',')
+                .map(|x| x.trim().to_string())
+                .filter(|x| !x.is_empty())
+                .collect::<Vec<_>>()
         }),
+        remote_wordlists: params.get("remote_wordlists").map(|s| {
+            s.split(',')
+                .map(|x| x.trim().to_string())
+                .filter(|x| !x.is_empty())
+                .collect::<Vec<_>>()
+        }),
+        include_request: Some(include_request),
+        include_response: Some(include_response),
     };
 
-    // Call the same pipeline as POST (duplicating minimal code to avoid refactor)
-    // Start job (reuse code from start_scan_handler but adapted for GET inputs)
-    let opts = req.options.clone().unwrap_or_default();
-    let include_request = opts.include_request.unwrap_or(false);
-    let include_response = opts.include_response.unwrap_or(false);
-
-    let id = make_scan_id(&req.url);
+    let id = make_scan_id(&url);
     {
         let mut jobs = state.jobs.lock().await;
         jobs.insert(
@@ -1008,10 +737,11 @@ async fn get_scan_handler(
             },
         );
     }
-    log(&state, "JOB", &format!("queued id={} url={}", id, req.url));
+    log(&state, "JOB", &format!("queued id={} url={}", id, url));
 
     let id_for_resp = id.clone();
     let state_clone = state.clone();
+    let url_clone = url.clone();
     tokio::task::spawn_blocking(move || {
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -1019,36 +749,20 @@ async fn get_scan_handler(
             .expect("failed to build current-thread runtime");
         rt.block_on(run_scan_job(
             state_clone,
-            id.clone(),
-            req.url.clone(),
-            opts.clone(),
+            id,
+            url_clone,
+            opts,
             include_request,
             include_response,
         ));
     });
 
-    let mut cors = build_cors_headers(&state, &headers);
     let resp = ApiResponse::<serde_json::Value> {
         code: 200,
         msg: id_for_resp,
         data: None,
     };
-    if state.jsonp_enabled
-        && let Some(cb) = params
-            .get(&state.callback_param_name)
-            .and_then(|s| validate_jsonp_callback(s))
-    {
-        cors.insert(
-            "Content-Type",
-            "application/javascript; charset=utf-8"
-                    .parse()
-                    .expect("static content-type"),
-        );
-        let body = format!("{}({});", cb, serde_json::to_string(&resp).expect("serializable response"));
-        return (StatusCode::OK, cors, body);
-    }
-    let body = serde_json::to_string(&resp).expect("serializable response");
-    (StatusCode::OK, cors, body)
+    make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
 }
 
 async fn options_result_handler(
@@ -1885,6 +1599,7 @@ mod tests {
             cookie: Some("session=abc".to_string()),
             worker: Some(4),
             delay: Some(0),
+            timeout: None,
             blind: None,
             header: Some(vec![
                 "X-Test: 1".to_string(),

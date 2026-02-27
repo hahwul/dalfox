@@ -93,6 +93,100 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
     payloads
 }
 
+/// Generate adaptive payloads using per-parameter analysis data (valid/invalid specials).
+/// When a parameter has analysis data, this applies targeted encoding to bypass filters.
+pub fn generate_adaptive_payloads(
+    context: &InjectionContext,
+    invalid_specials: &[char],
+    valid_specials: &[char],
+) -> Vec<String> {
+    let base_payloads = generate_dynamic_payloads(context);
+
+    // Use adaptive encoders from the encoding module
+    let adaptive_encoders =
+        crate::encoding::generate_adaptive_encodings(invalid_specials, valid_specials);
+
+    // Apply adaptive encoders
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for p in &base_payloads {
+        // Original
+        if seen.insert(p.clone()) {
+            out.push(p.clone());
+        }
+        // Adaptive variants based on what's blocked
+        let adaptive_variants = crate::encoding::apply_adaptive_encoding(p, invalid_specials);
+        for v in adaptive_variants {
+            if seen.insert(v.clone()) {
+                out.push(v);
+            }
+        }
+        // Standard encoder variants
+        for enc in &adaptive_encoders {
+            let v = match enc.as_str() {
+                "url" => crate::encoding::url_encode(p),
+                "html" => crate::encoding::html_entity_encode(p),
+                "2url" => crate::encoding::double_url_encode(p),
+                "unicode" => crate::encoding::unicode_fullwidth_encode(p),
+                "zwsp" => crate::encoding::zero_width_encode(p),
+                _ => continue,
+            };
+            if seen.insert(v.clone()) {
+                out.push(v);
+            }
+        }
+    }
+    out
+}
+
+pub fn load_custom_payloads(path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let cache = CUSTOM_PAYLOAD_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(guard) = cache.lock()
+        && let Some(cached) = guard.get(path)
+    {
+        return Ok(cached.clone());
+    }
+
+    let content = std::fs::read_to_string(path)?;
+    let payloads: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(path.to_string(), payloads.clone());
+    }
+
+    Ok(payloads)
+}
+
+pub fn get_dynamic_payloads(
+    context: &InjectionContext,
+    args: &ScanArgs,
+) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+    let mut base_payloads = vec![];
+
+    if args.only_custom_payload {
+        if let Some(path) = &args.custom_payload {
+            base_payloads.extend(load_custom_payloads(path)?);
+        }
+    } else {
+        base_payloads.extend(generate_dynamic_payloads(context));
+        if let Some(path) = &args.custom_payload {
+            base_payloads.extend(load_custom_payloads(path)?);
+        }
+    }
+
+    // Include remote payloads if available (initialized via --remote-payloads at runtime)
+    if let Some(remotes) = crate::payload::get_remote_payloads()
+        && !remotes.is_empty()
+    {
+        base_payloads.extend(remotes.as_ref().clone());
+    }
+
+    // Expand with shared encoder policy helper; handles "none" and deduplication
+    let payloads = crate::encoding::apply_encoders_to_payloads(&base_payloads, &args.encoders);
+
+    Ok(payloads)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -398,98 +492,4 @@ mod tests {
                 .all(|p| !p.contains("%3C") && !p.contains("&#x"))
         );
     }
-}
-
-/// Generate adaptive payloads using per-parameter analysis data (valid/invalid specials).
-/// When a parameter has analysis data, this applies targeted encoding to bypass filters.
-pub fn generate_adaptive_payloads(
-    context: &InjectionContext,
-    invalid_specials: &[char],
-    valid_specials: &[char],
-) -> Vec<String> {
-    let base_payloads = generate_dynamic_payloads(context);
-
-    // Use adaptive encoders from the encoding module
-    let adaptive_encoders =
-        crate::encoding::generate_adaptive_encodings(invalid_specials, valid_specials);
-
-    // Apply adaptive encoders
-    let mut out = Vec::new();
-    let mut seen = std::collections::HashSet::new();
-    for p in &base_payloads {
-        // Original
-        if seen.insert(p.clone()) {
-            out.push(p.clone());
-        }
-        // Adaptive variants based on what's blocked
-        let adaptive_variants = crate::encoding::apply_adaptive_encoding(p, invalid_specials);
-        for v in adaptive_variants {
-            if seen.insert(v.clone()) {
-                out.push(v);
-            }
-        }
-        // Standard encoder variants
-        for enc in &adaptive_encoders {
-            let v = match enc.as_str() {
-                "url" => crate::encoding::url_encode(p),
-                "html" => crate::encoding::html_entity_encode(p),
-                "2url" => crate::encoding::double_url_encode(p),
-                "unicode" => crate::encoding::unicode_fullwidth_encode(p),
-                "zwsp" => crate::encoding::zero_width_encode(p),
-                _ => continue,
-            };
-            if seen.insert(v.clone()) {
-                out.push(v);
-            }
-        }
-    }
-    out
-}
-
-pub fn load_custom_payloads(path: &str) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    let cache = CUSTOM_PAYLOAD_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    if let Ok(guard) = cache.lock()
-        && let Some(cached) = guard.get(path)
-    {
-        return Ok(cached.clone());
-    }
-
-    let content = std::fs::read_to_string(path)?;
-    let payloads: Vec<String> = content.lines().map(|s| s.to_string()).collect();
-
-    if let Ok(mut guard) = cache.lock() {
-        guard.insert(path.to_string(), payloads.clone());
-    }
-
-    Ok(payloads)
-}
-
-pub fn get_dynamic_payloads(
-    context: &InjectionContext,
-    args: &ScanArgs,
-) -> Result<Vec<String>, Box<dyn std::error::Error>> {
-    let mut base_payloads = vec![];
-
-    if args.only_custom_payload {
-        if let Some(path) = &args.custom_payload {
-            base_payloads.extend(load_custom_payloads(path)?);
-        }
-    } else {
-        base_payloads.extend(generate_dynamic_payloads(context));
-        if let Some(path) = &args.custom_payload {
-            base_payloads.extend(load_custom_payloads(path)?);
-        }
-    }
-
-    // Include remote payloads if available (initialized via --remote-payloads at runtime)
-    if let Some(remotes) = crate::payload::get_remote_payloads()
-        && !remotes.is_empty()
-    {
-        base_payloads.extend(remotes.as_ref().clone());
-    }
-
-    // Expand with shared encoder policy helper; handles "none" and deduplication
-    let payloads = crate::encoding::apply_encoders_to_payloads(&base_payloads, &args.encoders);
-
-    Ok(payloads)
 }

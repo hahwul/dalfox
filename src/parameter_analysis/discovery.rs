@@ -175,6 +175,185 @@ pub async fn check_header_discovery(
     }
 }
 
+/// Discover reflections in path segments by replacing each segment with the test marker
+pub async fn check_path_discovery(
+    target: &Target,
+    reflection_params: Arc<Mutex<Vec<Param>>>,
+    semaphore: Arc<Semaphore>,
+) {
+    let arc_target = Arc::new(target.clone());
+    let test_value = crate::scanning::markers::open_marker();
+    let path = target.url.path();
+    // Split non-empty segments
+    let segments: Vec<&str> = path
+        .trim_matches('/')
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .collect();
+    if segments.is_empty() {
+        return;
+    }
+
+    let client = target.build_client().unwrap_or_else(|_| Client::new());
+
+    let mut handles = Vec::new();
+
+    for (idx, original) in segments.iter().enumerate() {
+        let mut new_segments: Vec<String> = segments.iter().map(|s| s.to_string()).collect();
+        new_segments[idx] = test_value.to_string();
+        let new_path = format!("/{}", new_segments.join("/"));
+
+        let mut new_url = target.url.clone();
+        new_url.set_path(&new_path);
+
+        let client_clone = client.clone();
+        let data = target.data.clone();
+        let method = target.method.clone();
+        let target_clone = arc_target.clone();
+        let delay = target.delay;
+        let semaphore_clone = semaphore.clone();
+        let param_name = format!("path_segment_{}", idx);
+        let original_value = original.to_string();
+
+        // Skip if already discovered (e.g., duplicate path pattern)
+        {
+            let guard = reflection_params.lock().await;
+            if guard.iter().any(|p| {
+                p.name == param_name && p.location == crate::parameter_analysis::Location::Path
+            }) {
+                continue;
+            }
+        }
+
+        // Spawn task returning Option<Param> for batched collection
+        let handle = tokio::spawn(async move {
+            let permit = semaphore_clone.acquire().await.unwrap();
+            let m = method.parse().unwrap_or(reqwest::Method::GET);
+            let request =
+                crate::utils::build_request(&client_clone, &target_clone, m, new_url, data.clone());
+
+            crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let mut discovered: Option<Param> = None;
+            if let Ok(resp) = request.send().await
+                && let Ok(text) = resp.text().await
+                && text.contains(test_value)
+            {
+                let (valid, invalid) = classify_special_chars(&text);
+                discovered = Some(Param {
+                    name: param_name,
+                    value: original_value,
+                    location: crate::parameter_analysis::Location::Path,
+                    injection_context: Some(detect_injection_context(&text)),
+                    valid_specials: Some(valid),
+                    invalid_specials: Some(invalid),
+                });
+            }
+            if delay > 0 {
+                sleep(Duration::from_millis(delay)).await;
+            }
+            drop(permit);
+            discovered
+        });
+        handles.push(handle);
+    }
+
+    // Batch collect discovered path params
+    let mut batch: Vec<Param> = Vec::new();
+    for h in handles {
+        if let Ok(opt) = h.await
+            && let Some(p) = opt
+        {
+            batch.push(p);
+        }
+    }
+    if !batch.is_empty() {
+        let mut guard = reflection_params.lock().await;
+        guard.extend(batch);
+    }
+}
+
+pub async fn check_cookie_discovery(
+    target: &Target,
+    reflection_params: Arc<Mutex<Vec<Param>>>,
+    semaphore: Arc<Semaphore>,
+) {
+    let arc_target = Arc::new(target.clone());
+    let client = target.build_client().unwrap_or_else(|_| Client::new());
+    let test_value = crate::scanning::markers::open_marker();
+
+    let mut handles = vec![];
+
+    for (cookie_name, cookie_value) in &target.cookies {
+        let client_clone = client.clone();
+        let url = target.url.clone();
+        let cookies = target.cookies.clone();
+        let data = target.data.clone();
+        let method = target.method.clone();
+        let delay = target.delay;
+        let semaphore_clone = semaphore.clone();
+        let cookie_name = cookie_name.clone();
+        let cookie_value = cookie_value.clone();
+        let target_clone = arc_target.clone();
+
+        // Spawn task returning Option<Param> for batched collection
+        let handle = tokio::spawn(async move {
+            let permit = semaphore_clone.acquire().await.unwrap();
+            let m = method.parse().unwrap_or(reqwest::Method::GET);
+            // Compose cookie header overriding the probed cookie while preserving others
+            let others =
+                crate::utils::compose_cookie_header_excluding(&cookies, Some(&cookie_name));
+            let cookie_header = match others {
+                Some(s) => format!("{}; {}={}", s, cookie_name, test_value),
+                None => format!("{}={}", cookie_name, test_value),
+            };
+            let request = crate::utils::build_request_with_cookie(
+                &client_clone,
+                &target_clone,
+                m,
+                url,
+                data.clone(),
+                Some(cookie_header),
+            );
+            crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let mut discovered: Option<Param> = None;
+            if let Ok(resp) = request.send().await
+                && let Ok(text) = resp.text().await
+                && text.contains(test_value)
+            {
+                let (valid, invalid) = classify_special_chars(&text);
+                discovered = Some(Param {
+                    name: cookie_name,
+                    value: cookie_value,
+                    location: crate::parameter_analysis::Location::Header,
+                    injection_context: Some(detect_injection_context(&text)),
+                    valid_specials: Some(valid),
+                    invalid_specials: Some(invalid),
+                });
+            }
+            if delay > 0 {
+                sleep(Duration::from_millis(delay)).await;
+            }
+            drop(permit);
+            discovered
+        });
+        handles.push(handle);
+    }
+
+    // Batch collect cookie params
+    let mut batch: Vec<Param> = Vec::new();
+    for handle in handles {
+        if let Ok(opt) = handle.await
+            && let Some(p) = opt
+        {
+            batch.push(p);
+        }
+    }
+    if !batch.is_empty() {
+        let mut guard = reflection_params.lock().await;
+        guard.extend(batch);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -416,15 +595,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_check_path_discovery_skips_existing_segment() {
-        // URL with a single non-empty segment -> index 0
         let target = {
             let mut t = parse_target("https://example.com/only").unwrap();
-            // Ensure deterministic small timeout to avoid long waits if something goes wrong
             t.timeout = 1;
             t
         };
 
-        // reflection_params already contains path_segment_0 so discovery should skip it
         let reflection_params = Arc::new(Mutex::new(vec![Param {
             name: "path_segment_0".to_string(),
             value: "only".to_string(),
@@ -434,21 +610,18 @@ mod tests {
             invalid_specials: None,
         }]));
 
-        // Limit parallelism to 1 to keep behavior deterministic
         let semaphore = Arc::new(Semaphore::new(1));
 
         let before_len = reflection_params.lock().await.len();
         check_path_discovery(&target, reflection_params.clone(), semaphore.clone()).await;
         let after_len = reflection_params.lock().await.len();
 
-        // No new params should be added because the only segment was already discovered
         assert_eq!(before_len, 1);
         assert_eq!(after_len, 1);
     }
 
     #[tokio::test]
     async fn test_check_path_discovery_respects_semaphore_single_permit() {
-        // No path segments ("/") => early return, but we still validate it handles a single-permit semaphore
         let target = {
             let mut t = parse_target("https://example.com/").unwrap();
             t.timeout = 1;
@@ -456,10 +629,8 @@ mod tests {
         };
 
         let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
-        // Single permit semaphore; if the function tried to over-acquire, this could deadlock
         let semaphore = Arc::new(Semaphore::new(1));
 
-        // Should complete without blocking and without adding params
         check_path_discovery(&target, reflection_params.clone(), semaphore.clone()).await;
         assert!(reflection_params.lock().await.is_empty());
     }
@@ -485,184 +656,5 @@ mod tests {
         )
         .await;
         assert!(reflection_params.lock().await.is_empty());
-    }
-}
-
-/// Discover reflections in path segments by replacing each segment with the test marker
-pub async fn check_path_discovery(
-    target: &Target,
-    reflection_params: Arc<Mutex<Vec<Param>>>,
-    semaphore: Arc<Semaphore>,
-) {
-    let arc_target = Arc::new(target.clone());
-    let test_value = crate::scanning::markers::open_marker();
-    let path = target.url.path();
-    // Split non-empty segments
-    let segments: Vec<&str> = path
-        .trim_matches('/')
-        .split('/')
-        .filter(|s| !s.is_empty())
-        .collect();
-    if segments.is_empty() {
-        return;
-    }
-
-    let client = target.build_client().unwrap_or_else(|_| Client::new());
-
-    let mut handles = Vec::new();
-
-    for (idx, original) in segments.iter().enumerate() {
-        let mut new_segments: Vec<String> = segments.iter().map(|s| s.to_string()).collect();
-        new_segments[idx] = test_value.to_string();
-        let new_path = format!("/{}", new_segments.join("/"));
-
-        let mut new_url = target.url.clone();
-        new_url.set_path(&new_path);
-
-        let client_clone = client.clone();
-        let data = target.data.clone();
-        let method = target.method.clone();
-        let target_clone = arc_target.clone();
-        let delay = target.delay;
-        let semaphore_clone = semaphore.clone();
-        let param_name = format!("path_segment_{}", idx);
-        let original_value = original.to_string();
-
-        // Skip if already discovered (e.g., duplicate path pattern)
-        {
-            let guard = reflection_params.lock().await;
-            if guard.iter().any(|p| {
-                p.name == param_name && p.location == crate::parameter_analysis::Location::Path
-            }) {
-                continue;
-            }
-        }
-
-        // Spawn task returning Option<Param> for batched collection
-        let handle = tokio::spawn(async move {
-            let permit = semaphore_clone.acquire().await.unwrap();
-            let m = method.parse().unwrap_or(reqwest::Method::GET);
-            let request =
-                crate::utils::build_request(&client_clone, &target_clone, m, new_url, data.clone());
-
-            crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let mut discovered: Option<Param> = None;
-            if let Ok(resp) = request.send().await
-                && let Ok(text) = resp.text().await
-                && text.contains(test_value)
-            {
-                let (valid, invalid) = classify_special_chars(&text);
-                discovered = Some(Param {
-                    name: param_name,
-                    value: original_value,
-                    location: crate::parameter_analysis::Location::Path,
-                    injection_context: Some(detect_injection_context(&text)),
-                    valid_specials: Some(valid),
-                    invalid_specials: Some(invalid),
-                });
-            }
-            if delay > 0 {
-                sleep(Duration::from_millis(delay)).await;
-            }
-            drop(permit);
-            discovered
-        });
-        handles.push(handle);
-    }
-
-    // Batch collect discovered path params
-    let mut batch: Vec<Param> = Vec::new();
-    for h in handles {
-        if let Ok(opt) = h.await
-            && let Some(p) = opt
-        {
-            batch.push(p);
-        }
-    }
-    if !batch.is_empty() {
-        let mut guard = reflection_params.lock().await;
-        guard.extend(batch);
-    }
-}
-
-pub async fn check_cookie_discovery(
-    target: &Target,
-    reflection_params: Arc<Mutex<Vec<Param>>>,
-    semaphore: Arc<Semaphore>,
-) {
-    let arc_target = Arc::new(target.clone());
-    let client = target.build_client().unwrap_or_else(|_| Client::new());
-    let test_value = crate::scanning::markers::open_marker();
-
-    let mut handles = vec![];
-
-    for (cookie_name, cookie_value) in &target.cookies {
-        let client_clone = client.clone();
-        let url = target.url.clone();
-        let cookies = target.cookies.clone();
-        let data = target.data.clone();
-        let method = target.method.clone();
-        let delay = target.delay;
-        let semaphore_clone = semaphore.clone();
-        let cookie_name = cookie_name.clone();
-        let cookie_value = cookie_value.clone();
-        let target_clone = arc_target.clone();
-
-        // Spawn task returning Option<Param> for batched collection
-        let handle = tokio::spawn(async move {
-            let permit = semaphore_clone.acquire().await.unwrap();
-            let m = method.parse().unwrap_or(reqwest::Method::GET);
-            // Compose cookie header overriding the probed cookie while preserving others
-            let others =
-                crate::utils::compose_cookie_header_excluding(&cookies, Some(&cookie_name));
-            let cookie_header = match others {
-                Some(s) => format!("{}; {}={}", s, cookie_name, test_value),
-                None => format!("{}={}", cookie_name, test_value),
-            };
-            let request = crate::utils::build_request_with_cookie(
-                &client_clone,
-                &target_clone,
-                m,
-                url,
-                data.clone(),
-                Some(cookie_header),
-            );
-            crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let mut discovered: Option<Param> = None;
-            if let Ok(resp) = request.send().await
-                && let Ok(text) = resp.text().await
-                && text.contains(test_value)
-            {
-                let (valid, invalid) = classify_special_chars(&text);
-                discovered = Some(Param {
-                    name: cookie_name,
-                    value: cookie_value,
-                    location: crate::parameter_analysis::Location::Header,
-                    injection_context: Some(detect_injection_context(&text)),
-                    valid_specials: Some(valid),
-                    invalid_specials: Some(invalid),
-                });
-            }
-            if delay > 0 {
-                sleep(Duration::from_millis(delay)).await;
-            }
-            drop(permit);
-            discovered
-        });
-        handles.push(handle);
-    }
-
-    // Batch collect cookie params
-    let mut batch: Vec<Param> = Vec::new();
-    for handle in handles {
-        if let Ok(opt) = handle.await
-            && let Some(p) = opt
-        {
-            batch.push(p);
-        }
-    }
-    if !batch.is_empty() {
-        let mut guard = reflection_params.lock().await;
-        guard.extend(batch);
     }
 }

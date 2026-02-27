@@ -152,7 +152,7 @@ mod tests {
     #[test]
     fn test_blind_template_placeholder_and_replacement() {
         let tpl = crate::payload::XSS_BLIND_PAYLOADS
-            .get(0)
+            .first()
             .copied()
             .unwrap_or("\"'><script src={}></script>");
         assert!(

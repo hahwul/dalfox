@@ -232,7 +232,7 @@ mod tests {
         assert_eq!(target.delay, 0);
         assert!(target.proxy.is_none());
         assert_eq!(target.workers, 10);
-        assert_eq!(target.follow_redirects, false);
+        assert!(!target.follow_redirects);
     }
 
     #[test]

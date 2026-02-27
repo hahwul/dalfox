@@ -816,13 +816,13 @@ mod tests {
         );
 
         // Test each severity level mapping
-        let sarif_high = Result::results_to_sarif(&vec![high], false, false);
+        let sarif_high = Result::results_to_sarif(&[high], false, false);
         assert!(sarif_high.contains("\"level\": \"error\""));
 
-        let sarif_medium = Result::results_to_sarif(&vec![medium], false, false);
+        let sarif_medium = Result::results_to_sarif(&[medium], false, false);
         assert!(sarif_medium.contains("\"level\": \"warning\""));
 
-        let sarif_low = Result::results_to_sarif(&vec![low], false, false);
+        let sarif_low = Result::results_to_sarif(&[low], false, false);
         assert!(sarif_low.contains("\"level\": \"note\""));
     }
 

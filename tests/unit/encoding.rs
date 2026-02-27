@@ -197,7 +197,7 @@ mod encoder_policy {
     #[test]
     fn test_expand_single_payload() {
         let out =
-            expand_payload_with_encoders("<", &vec!["2url".to_string(), "base64".to_string()]);
+            expand_payload_with_encoders("<", &["2url".to_string(), "base64".to_string()]);
         assert!(out.contains(&"<".to_string()));
         assert!(out.contains(&double_url_encode("<")));
         assert!(out.contains(&base64_encode("<")));
