@@ -73,6 +73,33 @@ pub(crate) fn has_marker_evidence(payload: &str, text: &str) -> bool {
     class_ok && id_ok
 }
 
+fn payload_is_executable_url_protocol(payload: &str) -> bool {
+    let lowered = payload.trim().to_ascii_lowercase();
+    lowered.starts_with("javascript:")
+        || lowered.starts_with("data:text/html")
+        || lowered.starts_with("vbscript:")
+}
+
+fn has_executable_url_attribute_evidence(payload: &str, text: &str) -> bool {
+    if !payload_is_executable_url_protocol(payload) {
+        return false;
+    }
+
+    let payload_lower = payload.trim().to_ascii_lowercase();
+    let document = scraper::Html::parse_document(text);
+    let Ok(selector) = scraper::Selector::parse("*") else {
+        return false;
+    };
+    let dangerous_attrs = ["href", "src", "data", "action", "formaction", "xlink:href"];
+
+    document.select(&selector).any(|node| {
+        node.value().attrs().any(|(name, value)| {
+            dangerous_attrs.contains(&name.to_ascii_lowercase().as_str())
+                && value.trim().to_ascii_lowercase() == payload_lower
+        })
+    })
+}
+
 pub async fn check_dom_verification(
     target: &Target,
     param: &Param,
@@ -236,7 +263,8 @@ pub async fn check_dom_verification_with_client(
                         && crate::utils::is_htmlish_content_type(ct)
                         && crate::scanning::check_reflection::classify_reflection(&text, payload)
                             .is_some()
-                        && has_marker_evidence(payload, &text)
+                        && (has_marker_evidence(payload, &text)
+                            || has_executable_url_attribute_evidence(payload, &text))
                     {
                         return (true, Some(text));
                     }
@@ -254,7 +282,8 @@ pub async fn check_dom_verification_with_client(
             if let Ok(text) = resp.text().await
                 && crate::utils::is_htmlish_content_type(ct)
                 && crate::scanning::check_reflection::classify_reflection(&text, payload).is_some()
-                && has_marker_evidence(payload, &text)
+                && (has_marker_evidence(payload, &text)
+                    || has_executable_url_attribute_evidence(payload, &text))
             {
                 return (true, Some(text));
             }
@@ -422,6 +451,11 @@ mod tests {
         )
     }
 
+    async fn url_attribute_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
+        let q = params.get("q").cloned().unwrap_or_default();
+        Html(format!("<iframe src=\"{}\"></iframe>", q))
+    }
+
     async fn sxss_html_handler(State(state): State<TestState>) -> Html<String> {
         Html(format!("<div>{}</div>", state.stored_payload))
     }
@@ -438,6 +472,7 @@ mod tests {
         let app = Router::new()
             .route("/dom/html", get(html_handler))
             .route("/dom/decoded", get(decoded_payload_handler))
+            .route("/dom/url-attribute", get(url_attribute_handler))
             .route("/dom/xhtml", get(xhtml_handler))
             .route("/dom/json", get(json_handler))
             .route("/dom/no-payload", get(html_without_payload_handler))
@@ -727,6 +762,33 @@ mod tests {
         let payload = "<img class=\"dalfox\" src=x onerror=alert(1)>";
         let body = "<html><body><img class=\"dalfox\"></body></html>";
         assert!(has_marker_evidence(payload, body));
+    }
+
+    #[test]
+    fn test_has_executable_url_attribute_evidence_detects_iframe_src_protocol() {
+        let payload = "javascript:alert(1)";
+        let body = "<html><body><iframe src=\"javascript:alert(1)\"></iframe></body></html>";
+        assert!(has_executable_url_attribute_evidence(payload, body));
+    }
+
+    #[tokio::test]
+    async fn test_check_dom_verification_accepts_executable_url_attribute_protocol() {
+        let addr = start_mock_server("stored").await;
+        let target = make_target(addr, "/dom/url-attribute");
+        let param = make_param();
+        let args = default_scan_args();
+
+        let (found, body) =
+            check_dom_verification(&target, &param, "javascript:alert(1)", &args).await;
+
+        assert!(
+            found,
+            "javascript: payloads reflected into iframe src should verify"
+        );
+        assert!(
+            body.unwrap_or_default()
+                .contains("iframe src=\"javascript:alert(1)\"")
+        );
     }
 
     #[tokio::test]

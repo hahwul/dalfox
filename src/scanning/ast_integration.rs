@@ -110,6 +110,7 @@ pub fn generate_dom_xss_poc(source: &str, sink: &str) -> (String, String) {
 
 fn source_uses_bootstrap_query_param(source: &str) -> bool {
     source.contains("window.name")
+        || source.contains("window.opener")
         || source.contains("document.referrer")
         || source.contains("localStorage")
         || source.contains("sessionStorage")
@@ -262,6 +263,13 @@ pub fn build_dom_xss_manual_poc_hint(
         ));
     }
 
+    if source.contains("window.opener") {
+        return Some(format!(
+            "from a same-origin page set window.name = {0}; window.__xssmazePreview = {{ html: {0} }}; window.open({1}, '_blank');",
+            quoted_payload, quoted_url
+        ));
+    }
+
     if source.contains("document.referrer") {
         return Some(format!(
             "open {} from an attacker-controlled page whose URL/referrer carries {};",
@@ -410,6 +418,32 @@ pub fn has_self_bootstrap_verification(js_code: &str, source: &str) -> bool {
         return normalized_js.contains("window.name=seed");
     }
 
+    if source.contains("window.opener") {
+        return normalized_js.contains("window.opener")
+            && normalized_js.contains("window.open(location.pathname")
+            && (normalized_js.contains("window.name=seed")
+                || normalized_js.contains("window.__xssmazePreview={html:seed}"));
+    }
+
+    if source.contains("document.referrer") {
+        return normalized_js.contains("document.referrer")
+            && contains_any(
+                &normalized_js,
+                &[
+                    "searchParams.set('child','1')",
+                    "searchParams.set(\"child\",\"1\")",
+                ],
+            )
+            && contains_any(
+                &normalized_js,
+                &[
+                    "document.getElementById('relay').src=",
+                    "document.getElementById(\"relay\").src=",
+                    ".src=relayUrl.pathname+",
+                ],
+            );
+    }
+
     if source.contains("localStorage.getItem(") {
         if let Some(key) = extract_parenthesized_suffix(source, "localStorage.getItem(") {
             return has_storage_bootstrap(&normalized_js, "localStorage", key);
@@ -425,8 +459,33 @@ pub fn has_self_bootstrap_verification(js_code: &str, source: &str) -> bool {
     }
 
     if source.contains("history.state") {
-        return normalized_js.contains("history.replaceState(seed")
-            || normalized_js.contains("history.pushState(seed");
+        return contains_any(
+            &normalized_js,
+            &[
+                "history.replaceState(seed",
+                "history.pushState(seed",
+                "history.replaceState({html:seed}",
+                "history.pushState({html:seed}",
+            ],
+        );
+    }
+
+    if source.contains("document.referrer") {
+        return normalized_js.contains("document.write(document.referrer)")
+            && contains_any(
+                &normalized_js,
+                &[
+                    "searchParams.set('child','1')",
+                    "searchParams.set(\"child\",\"1\")",
+                ],
+            )
+            && contains_any(
+                &normalized_js,
+                &[
+                    "searchParams.delete('seed')",
+                    "searchParams.delete(\"seed\")",
+                ],
+            );
     }
 
     if source.contains("event.newValue") || source.contains("event.oldValue") {
@@ -439,6 +498,17 @@ pub fn has_self_bootstrap_verification(js_code: &str, source: &str) -> bool {
             ],
         ) && normalized_js.contains("localStorage.setItem(")
             && normalized_js.contains("seed");
+    }
+
+    if source.contains("ServiceWorker.message") {
+        return contains_any(
+            &normalized_js,
+            &[
+                "serviceWorker.dispatchEvent(newMessageEvent('message'",
+                "serviceWorker.dispatchEvent(newMessageEvent(\"message\"",
+                "controller?.postMessage(",
+            ],
+        ) && normalized_js.contains("seed");
     }
 
     if source.contains("BroadcastChannel.message")
@@ -696,6 +766,19 @@ document.getElementById('x').innerHTML = param;
     }
 
     #[test]
+    fn test_build_dom_xss_poc_url_uses_seed_bootstrap_for_window_opener() {
+        let payload = "<img src=x onerror=alert(1) class=dalfox>";
+        let url = build_dom_xss_poc_url(
+            "https://example.com/opener/level1/?seed=a",
+            "window.opener",
+            payload,
+        );
+        let parsed = url::Url::parse(&url).expect("valid poc url");
+        let pairs: Vec<(String, String)> = parsed.query_pairs().into_owned().collect();
+        assert_eq!(pairs, vec![("seed".to_string(), payload.to_string())]);
+    }
+
+    #[test]
     fn test_build_dom_xss_poc_url_uses_seed_bootstrap_for_storage_source() {
         let payload = "<img src=x onerror=alert(1) class=dalfox>";
         let url = build_dom_xss_poc_url(
@@ -784,6 +867,22 @@ document.getElementById('x').innerHTML = param;
         assert!(hint.contains("window.open('about:blank')"));
         assert!(hint.contains("w.name = \"<img src=x onerror=alert(1)>\""));
         assert!(hint.contains("https://example.com/dom/level13/"));
+    }
+
+    #[test]
+    fn test_build_dom_xss_manual_poc_hint_for_window_opener() {
+        let hint = build_dom_xss_manual_poc_hint(
+            "https://example.com/opener/level1/",
+            "window.opener",
+            "<img src=x onerror=alert(1)>",
+        )
+        .expect("window.opener should produce a manual hint");
+        assert!(hint.contains("same-origin page"));
+        assert!(hint.contains("window.name = \"<img src=x onerror=alert(1)>\""));
+        assert!(
+            hint.contains("window.__xssmazePreview = { html: \"<img src=x onerror=alert(1)>\" }")
+        );
+        assert!(hint.contains("https://example.com/opener/level1/"));
     }
 
     #[test]
@@ -949,6 +1048,39 @@ document.getElementById('x').innerHTML = param;
     }
 
     #[test]
+    fn test_has_self_bootstrap_verification_for_window_opener_name_bootstrap() {
+        let js = r#"
+            const url = new URL(location.href);
+            const seed = url.searchParams.get('seed');
+            if (seed && !window.opener) {
+              window.name = seed;
+              window.open(location.pathname, 'xssmaze:opener:level1');
+            } else if (window.opener) {
+              document.getElementById('output').innerHTML = window.opener.name || '';
+            }
+        "#;
+
+        assert!(has_self_bootstrap_verification(js, "window.opener"));
+    }
+
+    #[test]
+    fn test_has_self_bootstrap_verification_for_window_opener_object_bootstrap() {
+        let js = r#"
+            const url = new URL(location.href);
+            const seed = url.searchParams.get('seed');
+            if (seed && !window.opener) {
+              window.__xssmazePreview = { html: seed };
+              window.open(location.pathname, 'xssmaze:opener:level2');
+            } else if (window.opener) {
+              const bootstrap = window.opener.__xssmazePreview || {};
+              document.getElementById('preview').setAttribute('srcdoc', bootstrap.html || '');
+            }
+        "#;
+
+        assert!(has_self_bootstrap_verification(js, "window.opener"));
+    }
+
+    #[test]
     fn test_has_self_bootstrap_verification_for_local_storage_keyed_source() {
         let js = r#"
             const url = new URL(location.href);
@@ -1003,6 +1135,42 @@ document.getElementById('x').innerHTML = param;
         "#;
 
         assert!(has_self_bootstrap_verification(js, "ServiceWorker.message"));
+    }
+
+    #[test]
+    fn test_has_self_bootstrap_verification_for_history_state_object_bootstrap() {
+        let js = r#"
+            const url = new URL(location.href);
+            const seed = url.searchParams.get('seed');
+            if (seed) {
+              history.replaceState({ html: seed }, '', location.pathname);
+            }
+
+            const state = history.state || {};
+            document.getElementById('preview').setAttribute('srcdoc', state.html || '');
+        "#;
+
+        assert!(has_self_bootstrap_verification(js, "history.state"));
+    }
+
+    #[test]
+    fn test_has_self_bootstrap_verification_for_document_referrer_child_relay() {
+        let js = r#"
+            const url = new URL(location.href);
+            const seed = url.searchParams.get('seed');
+            const child = url.searchParams.get('child');
+            if (child === '1') {
+              document.write(document.referrer);
+            } else if (seed) {
+              const relayUrl = new URL(location.href);
+              relayUrl.searchParams.delete('seed');
+              relayUrl.searchParams.set('child', '1');
+              document.getElementById('relay').src =
+                relayUrl.pathname + '?' + relayUrl.searchParams.toString();
+            }
+        "#;
+
+        assert!(has_self_bootstrap_verification(js, "document.referrer"));
     }
 
     #[test]

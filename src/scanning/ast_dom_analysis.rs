@@ -1931,6 +1931,13 @@ impl<'a> DomXssVisitor<'a> {
                 }
                 self.find_source_in_expr(&member.object)
             }
+            Expression::ParenthesizedExpression(paren) => {
+                self.find_source_in_expr(&paren.expression)
+            }
+            Expression::SequenceExpression(seq) => seq
+                .expressions
+                .last()
+                .and_then(|expr| self.find_source_in_expr(expr)),
             _ => None,
         }
     }
@@ -1990,6 +1997,7 @@ impl<'a> DomXssVisitor<'a> {
                     }
                 }
             }
+
             _ => {}
         }
     }
@@ -3739,6 +3747,69 @@ document.getElementById('x').innerHTML = ref;
         assert!(
             !result.is_empty(),
             "Should detect document.referrer as source"
+        );
+    }
+
+    #[test]
+    fn test_document_referrer_child_bootstrap_to_contextual_fragment() {
+        let code = r#"
+const url = new URL(location.href);
+const seed = url.searchParams.get('seed');
+const child = url.searchParams.get('child') === '1';
+
+if (child) {
+  const referrer = document.referrer;
+  const encoded = (referrer.split('seed=')[1] || '').split('&')[0] || '';
+  const html = decodeURIComponent(encoded.replace(/\+/g, '%20'));
+  const range = document.createRange();
+  const fragment = range.createContextualFragment(html);
+  document.getElementById('output').appendChild(fragment);
+} else if (seed) {
+  const childUrl = new URL(location.href);
+  childUrl.searchParams.delete('seed');
+  childUrl.searchParams.set('child', '1');
+  document.getElementById('child').src =
+    childUrl.pathname + '?' + childUrl.searchParams.toString();
+} else {
+  const referrer = document.referrer;
+  const encoded = (referrer.split('seed=')[1] || '').split('&')[0] || '';
+  const html = decodeURIComponent(encoded.replace(/\+/g, '%20'));
+  const range = document.createRange();
+  const fragment = range.createContextualFragment(html);
+  document.getElementById('output').appendChild(fragment);
+}
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result.iter().any(|vuln| vuln.source == "document.referrer"
+                && vuln.sink == "createContextualFragment"),
+            "Expected document.referrer -> createContextualFragment flow, got {:?}",
+            result
+                .iter()
+                .map(|v| (v.source.clone(), v.sink.clone()))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_document_referrer_split_chain_remains_tainted() {
+        let code = r#"
+const referrer = document.referrer;
+const encoded = (referrer.split('seed=')[1] || '').split('&')[0] || '';
+document.write(encoded);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source == "document.referrer" && vuln.sink == "document.write"),
+            "Expected document.referrer split chain to stay tainted, got {:?}",
+            result
+                .iter()
+                .map(|v| (v.source.clone(), v.sink.clone()))
+                .collect::<Vec<_>>()
         );
     }
 

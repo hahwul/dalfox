@@ -251,6 +251,7 @@ fn ast_source_uses_browser_url_surface(source: &str) -> bool {
         || source.contains("location.href")
         || source.contains("location.pathname")
         || source.contains("document.URL")
+        || source.contains("window.opener")
         || source.contains("event.newValue")
         || source.contains("event.oldValue")
 }

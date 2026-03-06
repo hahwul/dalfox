@@ -11,6 +11,9 @@ test_all:
 xssmaze_smoke:
     cargo test test_cli_scans_xssmaze_json_endpoint_without_deep_scan -- --ignored --nocapture
 
+compare_v2_xssmaze:
+    cargo test test_v3_is_not_worse_than_local_v2_on_xssmaze_subset -- --ignored --nocapture
+
 #fix:
 #    cargo fmt
 #    cargo clippy --fix --allow-dirty
