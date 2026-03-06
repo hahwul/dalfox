@@ -123,6 +123,17 @@ pub fn detect_injection_context(text: &str) -> InjectionContext {
         }
     }
 
+    // 1b) CSS context: marker appears in any <style> text
+    if let Ok(sel) = scraper::Selector::parse("style") {
+        for el in document.select(&sel) {
+            let s = el.text().collect::<Vec<_>>().join("");
+            if s.contains(marker) {
+                let delim = infer_quote_delimiter(text, marker);
+                return InjectionContext::Css(delim);
+            }
+        }
+    }
+
     // 2) Attribute context: marker in any attribute value
     if let Ok(any) = scraper::Selector::parse("*") {
         for el in document.select(&any) {
@@ -139,10 +150,11 @@ pub fn detect_injection_context(text: &str) -> InjectionContext {
         }
     }
 
-    // 3) HTML text context: marker in non-script text nodes
+    // 3) HTML text context: marker in non-script, non-style text nodes
     if let Ok(any) = scraper::Selector::parse("*") {
         for el in document.select(&any) {
-            if el.value().name().eq_ignore_ascii_case("script") {
+            let tag = el.value().name();
+            if tag.eq_ignore_ascii_case("script") || tag.eq_ignore_ascii_case("style") {
                 continue;
             }
             let s = el.text().collect::<Vec<_>>().join("");
@@ -307,6 +319,7 @@ pub async fn probe_dictionary_params(
                                 ),
                                 valid_specials: None,
                                 invalid_specials: None,
+                    pre_encoding: None,
                             });
                             if !silence {
                                 eprintln!(
@@ -340,6 +353,7 @@ pub async fn probe_dictionary_params(
                                     injection_context: Some(context),
                                     valid_specials: Some(valid),
                                     invalid_specials: Some(invalid),
+                    pre_encoding: None,
                                 });
                                 if !silence {
                                     eprintln!(
@@ -406,6 +420,7 @@ pub async fn probe_dictionary_params(
                 injection_context: orig.injection_context.clone(),
                 valid_specials: orig.valid_specials.clone(),
                 invalid_specials: orig.invalid_specials.clone(),
+                    pre_encoding: None,
             });
         } else {
             guard.push(Param {
@@ -415,6 +430,7 @@ pub async fn probe_dictionary_params(
                 injection_context: Some(crate::parameter_analysis::InjectionContext::Html(None)),
                 valid_specials: None,
                 invalid_specials: None,
+                    pre_encoding: None,
             });
         }
     }
@@ -524,6 +540,7 @@ pub async fn probe_body_params(
                                 injection_context: Some(context),
                                 valid_specials: Some(valid),
                                 invalid_specials: Some(invalid),
+                    pre_encoding: None,
                             });
                             if !silence {
                                 eprintln!(
@@ -587,6 +604,7 @@ pub async fn probe_body_params(
                     injection_context: orig.injection_context.clone(),
                     valid_specials: orig.valid_specials.clone(),
                     invalid_specials: orig.invalid_specials.clone(),
+                    pre_encoding: None,
                 });
             } else {
                 guard.push(Param {
@@ -598,6 +616,7 @@ pub async fn probe_body_params(
                     )),
                     valid_specials: None,
                     invalid_specials: None,
+                    pre_encoding: None,
                 });
             }
         }
@@ -711,6 +730,7 @@ pub async fn probe_response_id_params(
                                 injection_context: Some(context),
                                 valid_specials: Some(valid),
                                 invalid_specials: Some(invalid),
+                    pre_encoding: None,
                             });
                             if !silence {
                                 eprintln!(
@@ -772,6 +792,7 @@ pub async fn probe_response_id_params(
                     injection_context: orig.injection_context.clone(),
                     valid_specials: orig.valid_specials.clone(),
                     invalid_specials: orig.invalid_specials.clone(),
+                    pre_encoding: None,
                 });
             } else {
                 guard.push(Param {
@@ -783,6 +804,7 @@ pub async fn probe_response_id_params(
                     )),
                     valid_specials: None,
                     invalid_specials: None,
+                    pre_encoding: None,
                 });
             }
         }
@@ -910,6 +932,7 @@ pub async fn probe_json_body_params(
                             injection_context: Some(context),
                             valid_specials: Some(valid),
                             invalid_specials: Some(invalid),
+                    pre_encoding: None,
                         });
                         if !silence {
                             eprintln!(
@@ -973,6 +996,7 @@ pub async fn probe_json_body_params(
                 injection_context: orig.injection_context.clone(),
                 valid_specials: orig.valid_specials.clone(),
                 invalid_specials: orig.invalid_specials.clone(),
+                    pre_encoding: None,
             });
         } else {
             guard.push(Param {
@@ -982,6 +1006,7 @@ pub async fn probe_json_body_params(
                 injection_context: Some(crate::parameter_analysis::InjectionContext::Html(None)),
                 valid_specials: None,
                 invalid_specials: None,
+                    pre_encoding: None,
             });
         }
     }

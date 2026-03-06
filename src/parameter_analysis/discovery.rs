@@ -2,6 +2,7 @@ use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::{Param, classify_special_chars, detect_injection_context};
 use crate::target_parser::Target;
 use reqwest::Client;
+use scraper;
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{Duration, sleep};
@@ -24,6 +25,8 @@ pub async fn check_discovery(
         if !args.skip_reflection_path {
             check_path_discovery(target, reflection_params.clone(), semaphore.clone()).await;
         }
+        // Form discovery: parse HTML forms and test POST parameters
+        check_form_discovery(target, reflection_params.clone(), semaphore.clone()).await;
     }
     target.reflection_params = reflection_params.lock().await.clone();
 }
@@ -93,6 +96,7 @@ pub async fn check_query_discovery(
                         ),
                         valid_specials: None,
                         invalid_specials: None,
+                    pre_encoding: None,
                     });
                 } else if let Ok(text) = resp.text().await
                     && text.contains(test_value)
@@ -105,6 +109,7 @@ pub async fn check_query_discovery(
                         injection_context: Some(detect_injection_context(&text)),
                         valid_specials: Some(valid),
                         invalid_specials: Some(invalid),
+                    pre_encoding: None,
                     });
                 }
             }
@@ -119,18 +124,82 @@ pub async fn check_query_discovery(
 
     // Batch collect results to reduce mutex contention
     let mut batch: Vec<Param> = Vec::new();
+    let mut discovered_names: std::collections::HashSet<String> = std::collections::HashSet::new();
     for handle in handles {
         if let Ok(opt_param) = handle.await
             && let Some(p) = opt_param
         {
+            discovered_names.insert(p.name.clone());
             batch.push(p);
         }
     }
+
+    // Encoding probe: for params not yet discovered, try base64-encoded markers
+    let encoding_probes: &[(&str, fn(&str) -> String)] = &[
+        ("base64", |s| crate::encoding::base64_encode(s)),
+        ("2base64", |s| crate::encoding::base64_encode(&crate::encoding::base64_encode(s))),
+    ];
+    for (name, value) in target.url.query_pairs() {
+        let name = name.to_string();
+        if discovered_names.contains(&name) {
+            continue;
+        }
+        for &(enc_name, encode_fn) in encoding_probes {
+            let encoded_marker = encode_fn(test_value);
+            let mut url = target.url.clone();
+            url.query_pairs_mut().clear();
+            for (n, v) in target.url.query_pairs() {
+                if n.as_ref() == name.as_str() {
+                    url.query_pairs_mut().append_pair(&n, &encoded_marker);
+                } else {
+                    url.query_pairs_mut().append_pair(&n, &v);
+                }
+            }
+            let _permit = semaphore.acquire().await.unwrap();
+            let m = target.method.parse().unwrap_or(reqwest::Method::GET);
+            let request = crate::utils::build_request(
+                &client, target, m, url, target.data.clone(),
+            );
+            crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if let Ok(resp) = request.send().await
+                && let Ok(text) = resp.text().await
+                && text.contains(test_value)
+            {
+                let (valid, invalid) = classify_special_chars(&text);
+                discovered_names.insert(name.clone());
+                batch.push(Param {
+                    name: name.clone(),
+                    value: value.to_string(),
+                    location: crate::parameter_analysis::Location::Query,
+                    injection_context: Some(detect_injection_context(&text)),
+                    valid_specials: Some(valid),
+                    invalid_specials: Some(invalid),
+                    pre_encoding: Some(enc_name.to_string()),
+                });
+                break; // Found working encoding, no need to try more
+            }
+            if target.delay > 0 {
+                sleep(Duration::from_millis(target.delay)).await;
+            }
+        }
+    }
+
     if !batch.is_empty() {
         let mut guard = reflection_params.lock().await;
         guard.extend(batch);
     }
 }
+
+/// Common HTTP headers to proactively test for reflection,
+/// even when they are not explicitly provided by the user.
+const COMMON_PROBE_HEADERS: &[&str] = &[
+    "Referer",
+    "User-Agent",
+    "Authorization",
+    "Cookie",
+    "X-Forwarded-For",
+    "X-Forwarded-Host",
+];
 
 pub async fn check_header_discovery(
     target: &Target,
@@ -143,7 +212,23 @@ pub async fn check_header_discovery(
 
     let mut handles = vec![];
 
-    for (header_name, header_value) in &target.headers {
+    // Build a set of header names to test: explicit headers + common probes
+    let mut headers_to_test: Vec<(String, String)> = target
+        .headers
+        .iter()
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect();
+    let existing_names: std::collections::HashSet<String> = headers_to_test
+        .iter()
+        .map(|(k, _)| k.to_ascii_lowercase())
+        .collect();
+    for &hdr in COMMON_PROBE_HEADERS {
+        if !existing_names.contains(&hdr.to_ascii_lowercase()) {
+            headers_to_test.push((hdr.to_string(), String::new()));
+        }
+    }
+
+    for (header_name, header_value) in &headers_to_test {
         let client_clone = client.clone();
         let url = target.url.clone();
         let data = target.data.clone();
@@ -176,6 +261,7 @@ pub async fn check_header_discovery(
                     injection_context: Some(detect_injection_context(&text)),
                     valid_specials: Some(valid),
                     invalid_specials: Some(invalid),
+                    pre_encoding: None,
                 });
             }
             if delay > 0 {
@@ -273,6 +359,7 @@ pub async fn check_path_discovery(
                     injection_context: Some(detect_injection_context(&text)),
                     valid_specials: Some(valid),
                     invalid_specials: Some(invalid),
+                    pre_encoding: None,
                 });
             }
             if delay > 0 {
@@ -355,6 +442,7 @@ pub async fn check_cookie_discovery(
                     injection_context: Some(detect_injection_context(&text)),
                     valid_specials: Some(valid),
                     invalid_specials: Some(invalid),
+                    pre_encoding: None,
                 });
             }
             if delay > 0 {
@@ -375,6 +463,234 @@ pub async fn check_cookie_discovery(
             batch.push(p);
         }
     }
+    if !batch.is_empty() {
+        let mut guard = reflection_params.lock().await;
+        guard.extend(batch);
+    }
+}
+
+/// Discover POST form parameters by parsing HTML forms from the GET response.
+pub async fn check_form_discovery(
+    target: &Target,
+    reflection_params: Arc<Mutex<Vec<Param>>>,
+    semaphore: Arc<Semaphore>,
+) {
+    // Only discover forms when the target doesn't already have POST data
+    if target.data.is_some() || target.method.eq_ignore_ascii_case("POST") {
+        return;
+    }
+
+    let client = target.build_client().unwrap_or_else(|_| Client::new());
+    let test_value = crate::scanning::markers::open_marker();
+
+    // Fetch the page via GET to find forms
+    let method = reqwest::Method::GET;
+    let request = crate::utils::build_request(&client, target, method, target.url.clone(), None);
+    crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let html = match request.send().await {
+        Ok(resp) => match resp.text().await {
+            Ok(text) => text,
+            Err(_) => return,
+        },
+        Err(_) => return,
+    };
+
+    // Parse forms
+    let document = scraper::Html::parse_document(&html);
+    let Ok(form_sel) = scraper::Selector::parse("form") else {
+        return;
+    };
+    let Ok(input_sel) = scraper::Selector::parse("input, textarea, select") else {
+        return;
+    };
+
+    let mut batch: Vec<Param> = Vec::new();
+
+    for form in document.select(&form_sel) {
+        let form_method = form.value().attr("method").unwrap_or("get");
+        if !form_method.eq_ignore_ascii_case("post") {
+            continue;
+        }
+
+        // Resolve form action URL
+        let action = form.value().attr("action").unwrap_or("");
+        let form_url = if action.is_empty() || action == "#" {
+            target.url.clone()
+        } else if let Ok(resolved) = target.url.join(action) {
+            resolved
+        } else {
+            continue;
+        };
+
+        // Collect form fields
+        let mut fields: Vec<(String, String)> = Vec::new();
+        for input in form.select(&input_sel) {
+            let name = input.value().attr("name").unwrap_or("").to_string();
+            if name.is_empty() {
+                continue;
+            }
+            let value = input.value().attr("value").unwrap_or("").to_string();
+            fields.push((name, value));
+        }
+        if fields.is_empty() {
+            continue;
+        }
+
+        // Test each field for reflection via POST
+        for (field_name, field_value) in &fields {
+            let _permit = semaphore.acquire().await.unwrap();
+            let mut post_pairs: Vec<(String, String)> = Vec::new();
+            for (n, v) in &fields {
+                if n == field_name {
+                    post_pairs.push((n.clone(), test_value.to_string()));
+                } else {
+                    post_pairs.push((n.clone(), v.clone()));
+                }
+            }
+            let body = url::form_urlencoded::Serializer::new(String::new())
+                .extend_pairs(&post_pairs)
+                .finish();
+            let m = reqwest::Method::POST;
+            let rb = crate::utils::build_request(&client, target, m, form_url.clone(), Some(body));
+            let rb = crate::utils::apply_header_overrides(
+                rb,
+                &[(
+                    "Content-Type".to_string(),
+                    "application/x-www-form-urlencoded".to_string(),
+                )],
+            );
+            crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if let Ok(resp) = rb.send().await
+                && let Ok(text) = resp.text().await
+            {
+                if text.contains(&test_value) {
+                    let (valid, invalid) = classify_special_chars(&text);
+                    batch.push(Param {
+                        name: field_name.clone(),
+                        value: field_value.clone(),
+                        location: crate::parameter_analysis::Location::Body,
+                        injection_context: Some(detect_injection_context(&text)),
+                        valid_specials: Some(valid),
+                        invalid_specials: Some(invalid),
+                    pre_encoding: None,
+                    });
+                }
+            }
+            if target.delay > 0 {
+                sleep(Duration::from_millis(target.delay)).await;
+            }
+        }
+
+        // Also try JSON body if the form has a single text-like field
+        if fields.len() <= 3 {
+            let _permit = semaphore.acquire().await.unwrap();
+            let json_body = {
+                let mut map = serde_json::Map::new();
+                for (n, _) in &fields {
+                    map.insert(n.clone(), serde_json::Value::String(test_value.to_string()));
+                }
+                serde_json::Value::Object(map).to_string()
+            };
+            let m = reqwest::Method::POST;
+            let rb = crate::utils::build_request(
+                &client,
+                target,
+                m,
+                form_url.clone(),
+                Some(json_body),
+            );
+            let rb = crate::utils::apply_header_overrides(
+                rb,
+                &[("Content-Type".to_string(), "application/json".to_string())],
+            );
+            crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if let Ok(resp) = rb.send().await
+                && let Ok(text) = resp.text().await
+                && text.contains(test_value)
+            {
+                let (valid, invalid) = classify_special_chars(&text);
+                for (field_name, field_value) in &fields {
+                    batch.push(Param {
+                        name: field_name.clone(),
+                        value: field_value.clone(),
+                        location: crate::parameter_analysis::Location::JsonBody,
+                        injection_context: Some(detect_injection_context(&text)),
+                        valid_specials: Some(valid.clone()),
+                        invalid_specials: Some(invalid.clone()),
+                    pre_encoding: None,
+                    });
+                }
+            }
+        }
+    }
+
+    // Also detect JSON POST endpoints from JavaScript (XHR / fetch with JSON.stringify)
+    // Look for patterns like: JSON.stringify({"key":"value",...})
+    let json_re = regex::Regex::new(r#"JSON\.stringify\(\s*\{([^}]+)\}\s*\)"#).ok();
+    if let Some(ref re) = json_re {
+        for caps in re.captures_iter(&html) {
+            if let Some(inner) = caps.get(1) {
+                // Parse key names from the JSON-like object literal
+                let key_re = regex::Regex::new(r#"["']?(\w+)["']?\s*:"#).unwrap();
+                let mut json_fields: Vec<(String, String)> = Vec::new();
+                for kcap in key_re.captures_iter(inner.as_str()) {
+                    if let Some(k) = kcap.get(1) {
+                        json_fields.push((k.as_str().to_string(), "a".to_string()));
+                    }
+                }
+                if json_fields.is_empty() {
+                    continue;
+                }
+
+                // Try JSON body with each field replaced by test_value
+                for (field_name, field_value) in &json_fields {
+                    let _permit = semaphore.acquire().await.unwrap();
+                    let mut map = serde_json::Map::new();
+                    for (n, v) in &json_fields {
+                        if n == field_name {
+                            map.insert(n.clone(), serde_json::Value::String(test_value.to_string()));
+                        } else {
+                            map.insert(n.clone(), serde_json::Value::String(v.clone()));
+                        }
+                    }
+                    let json_body = serde_json::Value::Object(map).to_string();
+                    let m = reqwest::Method::POST;
+                    let rb = crate::utils::build_request(
+                        &client,
+                        target,
+                        m,
+                        target.url.clone(),
+                        Some(json_body),
+                    );
+                    let rb = crate::utils::apply_header_overrides(
+                        rb,
+                        &[("Content-Type".to_string(), "application/json".to_string())],
+                    );
+                    crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if let Ok(resp) = rb.send().await
+                        && let Ok(text) = resp.text().await
+                    {
+                        if text.contains(&test_value) {
+                            let (valid, invalid) = classify_special_chars(&text);
+                            batch.push(Param {
+                                name: field_name.clone(),
+                                value: field_value.clone(),
+                                location: crate::parameter_analysis::Location::JsonBody,
+                                injection_context: Some(detect_injection_context(&text)),
+                                valid_specials: Some(valid),
+                                invalid_specials: Some(invalid),
+                    pre_encoding: None,
+                            });
+                        }
+                    }
+                    if target.delay > 0 {
+                        sleep(Duration::from_millis(target.delay)).await;
+                    }
+                }
+            }
+        }
+    }
+
     if !batch.is_empty() {
         let mut guard = reflection_params.lock().await;
         guard.extend(batch);
@@ -526,9 +842,8 @@ mod tests {
         check_header_discovery(&target, reflection_params.clone(), semaphore).await;
 
         let params = reflection_params.lock().await.clone();
-        assert_eq!(params.len(), 1);
-        let p = &params[0];
-        assert_eq!(p.name, "X-Reflect-Me");
+        assert!(params.len() >= 1, "should discover at least the explicit header");
+        let p = params.iter().find(|p| p.name == "X-Reflect-Me").expect("X-Reflect-Me should be discovered");
         assert_eq!(p.value, "orig");
         assert_eq!(p.location, Location::Header);
         assert!(p.injection_context.is_some());
@@ -635,6 +950,7 @@ mod tests {
             injection_context: None,
             valid_specials: None,
             invalid_specials: None,
+                    pre_encoding: None,
         }]));
 
         let semaphore = Arc::new(Semaphore::new(1));

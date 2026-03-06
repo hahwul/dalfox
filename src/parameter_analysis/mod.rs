@@ -38,6 +38,7 @@ pub enum InjectionContext {
     Javascript(Option<DelimiterType>),
     Attribute(Option<DelimiterType>),
     AttributeUrl(Option<DelimiterType>),
+    Css(Option<DelimiterType>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,6 +54,11 @@ pub struct Param {
     // Special characters that appear to be filtered, encoded, or not reflected
     #[serde(skip_serializing_if = "Option::is_none")]
     pub invalid_specials: Option<Vec<char>>,
+    /// Pre-encoding required before injection (e.g. "base64", "2base64").
+    /// When set, payloads are pre-encoded before sending and reflection is
+    /// checked against the original (decoded) payload.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pre_encoding: Option<String>,
 }
 
 /// Set of special characters to probe with patterns like: dalfox'<char>dlafox"
@@ -529,6 +535,7 @@ mod tests {
             injection_context: Some(InjectionContext::Html(None)),
             valid_specials: None,
             invalid_specials: None,
+                    pre_encoding: None,
         });
     }
 
@@ -711,6 +718,7 @@ mod tests {
             injection_context: Some(InjectionContext::Html(None)),
             valid_specials: None,
             invalid_specials: None,
+                    pre_encoding: None,
         });
 
         assert!(!target.reflection_params.is_empty());
@@ -732,6 +740,7 @@ mod tests {
             injection_context: Some(InjectionContext::Html(None)),
             valid_specials: None,
             invalid_specials: None,
+                    pre_encoding: None,
         });
 
         assert!(!target.reflection_params.is_empty());
@@ -753,6 +762,7 @@ mod tests {
             injection_context: Some(InjectionContext::Html(None)),
             valid_specials: None,
             invalid_specials: None,
+                    pre_encoding: None,
         });
 
         assert!(!target.reflection_params.is_empty());
@@ -949,6 +959,7 @@ mod tests {
                 injection_context: Some(InjectionContext::Html(None)),
                 valid_specials: None,
                 invalid_specials: None,
+                    pre_encoding: None,
             },
             Param {
                 name: "sort".to_string(),
@@ -957,6 +968,7 @@ mod tests {
                 injection_context: Some(InjectionContext::Html(None)),
                 valid_specials: None,
                 invalid_specials: None,
+                    pre_encoding: None,
             },
             Param {
                 name: "id".to_string(),
@@ -965,6 +977,7 @@ mod tests {
                 injection_context: Some(InjectionContext::Html(None)),
                 valid_specials: None,
                 invalid_specials: None,
+                    pre_encoding: None,
             },
             Param {
                 name: "session".to_string(),
@@ -973,6 +986,7 @@ mod tests {
                 injection_context: Some(InjectionContext::Html(None)),
                 valid_specials: None,
                 invalid_specials: None,
+                    pre_encoding: None,
             },
         ];
 
@@ -1013,6 +1027,7 @@ mod tests {
                 injection_context: Some(InjectionContext::Html(None)),
                 valid_specials: None,
                 invalid_specials: None,
+                    pre_encoding: None,
             },
             Param {
                 name: "id".to_string(),
@@ -1021,6 +1036,7 @@ mod tests {
                 injection_context: Some(InjectionContext::Html(None)),
                 valid_specials: None,
                 invalid_specials: None,
+                    pre_encoding: None,
             },
             Param {
                 name: "session".to_string(),
@@ -1029,6 +1045,7 @@ mod tests {
                 injection_context: Some(InjectionContext::Html(None)),
                 valid_specials: None,
                 invalid_specials: None,
+                    pre_encoding: None,
             },
         ];
 
@@ -1053,6 +1070,7 @@ mod tests {
             injection_context: Some(InjectionContext::Html(None)),
             valid_specials: None,
             invalid_specials: None,
+                    pre_encoding: None,
         }];
 
         // Empty filters should return all params
@@ -1070,6 +1088,7 @@ mod tests {
             injection_context: Some(InjectionContext::Html(None)),
             valid_specials: None,
             invalid_specials: None,
+                    pre_encoding: None,
         }];
 
         // Invalid filter format (too many colons) should be treated as name only
@@ -1154,6 +1173,7 @@ mod tests {
             injection_context: None,
             valid_specials: None,
             invalid_specials: None,
+                    pre_encoding: None,
         }
     }
 

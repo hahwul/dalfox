@@ -6,8 +6,27 @@ use std::sync::OnceLock;
 use std::sync::atomic::Ordering;
 use tokio::time::{Duration, sleep};
 
+/// Apply pre-encoding to a payload if the parameter requires it.
+/// Returns the encoded payload, or the original if no encoding is needed.
+pub fn apply_pre_encoding_pub(payload: &str, pre_encoding: &Option<String>) -> String {
+    apply_pre_encoding(payload, pre_encoding)
+}
+
+fn apply_pre_encoding(payload: &str, pre_encoding: &Option<String>) -> String {
+    match pre_encoding.as_deref() {
+        Some("base64") => crate::encoding::base64_encode(payload),
+        Some("2base64") => {
+            crate::encoding::base64_encode(&crate::encoding::base64_encode(payload))
+        }
+        _ => payload.to_string(),
+    }
+}
+
 /// Safe HTML tags where reflected content cannot execute scripts.
-const SAFE_TAGS: &[&str] = &["textarea", "noscript", "style", "xmp", "plaintext", "title"];
+/// Safe HTML tags where reflected content cannot execute scripts.
+/// Note: `<style>` is intentionally excluded — CSS injection can break out
+/// via `</style>` and inject executable HTML.
+const SAFE_TAGS: &[&str] = &["textarea", "noscript", "xmp", "plaintext", "title"];
 
 /// Check whether *all* occurrences of `payload` in `html` fall inside safe tags
 /// (textarea, noscript, style, xmp, plaintext, title).  If the payload appears
@@ -249,8 +268,12 @@ async fn fetch_injection_response_with_client(
         return None;
     }
 
+    // Apply pre-encoding if the parameter requires it (e.g. base64, 2base64)
+    let encoded_payload = apply_pre_encoding(payload, &param.pre_encoding);
+    let payload = encoded_payload.as_str();
+
     // Build injection request based on parameter location
-    let method = target.method.parse().unwrap_or(reqwest::Method::GET);
+    let default_method = target.method.parse().unwrap_or(reqwest::Method::GET);
     let inject_request = match param.location {
         Location::Header => {
             // Header injection: use original URL, inject payload as the header value
@@ -258,7 +281,7 @@ async fn fetch_injection_response_with_client(
             let rb = crate::utils::build_request(
                 client,
                 target,
-                method,
+                default_method,
                 parsed_url,
                 target.data.clone(),
             );
@@ -267,6 +290,8 @@ async fn fetch_injection_response_with_client(
         }
         Location::Body => {
             // Body injection: use original URL, replace param value in form-encoded body
+            // Force POST for body params even if the original target method was GET
+            let method = reqwest::Method::POST;
             let parsed_url = target.url.clone();
             let body = if let Some(ref data) = target.data {
                 let mut pairs: Vec<(String, String)> = url::form_urlencoded::parse(data.as_bytes())
@@ -295,10 +320,13 @@ async fn fetch_injection_response_with_client(
                     urlencoding::encode(payload)
                 ))
             };
-            crate::utils::build_request(client, target, method, parsed_url, body)
+            let rb = crate::utils::build_request(client, target, method, parsed_url, body);
+            rb.header("Content-Type", "application/x-www-form-urlencoded")
         }
         Location::JsonBody => {
             // JSON body injection: use original URL, replace param value in JSON body
+            // Force POST for JSON body params
+            let method = reqwest::Method::POST;
             let parsed_url = target.url.clone();
             let body = if let Some(ref data) = target.data {
                 // Attempt to parse as JSON and replace the param value
@@ -325,7 +353,13 @@ async fn fetch_injection_response_with_client(
             let inject_url =
                 crate::scanning::url_inject::build_injected_url(&target.url, param, payload);
             let parsed_url = url::Url::parse(&inject_url).unwrap_or_else(|_| target.url.clone());
-            crate::utils::build_request(client, target, method, parsed_url, target.data.clone())
+            crate::utils::build_request(
+                client,
+                target,
+                default_method,
+                parsed_url,
+                target.data.clone(),
+            )
         }
     };
 
@@ -469,6 +503,7 @@ mod tests {
             injection_context: None,
             valid_specials: None,
             invalid_specials: None,
+                    pre_encoding: None,
         }
     }
 
@@ -930,9 +965,14 @@ mod tests {
 
     #[test]
     fn test_safe_context_style() {
+        // Style is intentionally NOT a safe context — CSS injection can break
+        // out via </style> and inject executable HTML.
         let payload = "expression(alert(1))";
         let html = format!("<html><style>{}</style></html>", payload);
-        assert!(is_in_safe_context(&html, payload));
+        assert!(
+            !is_in_safe_context(&html, payload),
+            "style should NOT be a safe context"
+        );
     }
 
     #[test]

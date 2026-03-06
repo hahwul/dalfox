@@ -124,7 +124,11 @@ pub async fn check_dom_verification_with_client(
         return (false, None);
     }
 
-    let method = target.method.parse().unwrap_or(reqwest::Method::GET);
+    // Apply pre-encoding if the parameter requires it
+    let encoded_payload = crate::scanning::check_reflection::apply_pre_encoding_pub(payload, &param.pre_encoding);
+    let payload = encoded_payload.as_str();
+
+    let default_method = target.method.parse().unwrap_or(reqwest::Method::GET);
     let inject_request = match param.location {
         Location::Header => {
             let parsed_url = target.url.clone();
@@ -142,7 +146,7 @@ pub async fn check_dom_verification_with_client(
                 crate::utils::build_request_with_cookie(
                     client,
                     target,
-                    method,
+                    default_method,
                     parsed_url,
                     target.data.clone(),
                     Some(cookie_header),
@@ -151,7 +155,7 @@ pub async fn check_dom_verification_with_client(
                 let base = crate::utils::build_request(
                     client,
                     target,
-                    method,
+                    default_method,
                     parsed_url,
                     target.data.clone(),
                 );
@@ -162,6 +166,7 @@ pub async fn check_dom_verification_with_client(
             }
         }
         Location::Body => {
+            let method = reqwest::Method::POST;
             let parsed_url = target.url.clone();
             let body = if let Some(ref data) = target.data {
                 let mut pairs: Vec<(String, String)> = url::form_urlencoded::parse(data.as_bytes())
@@ -200,6 +205,7 @@ pub async fn check_dom_verification_with_client(
             )
         }
         Location::JsonBody => {
+            let method = reqwest::Method::POST;
             let parsed_url = target.url.clone();
             let body = if let Some(ref data) = target.data {
                 if let Ok(mut json_val) = serde_json::from_str::<serde_json::Value>(data) {
@@ -227,7 +233,7 @@ pub async fn check_dom_verification_with_client(
                 crate::scanning::url_inject::build_injected_url(&target.url, param, payload);
             let inject_url =
                 url::Url::parse(&inject_url_str).unwrap_or_else(|_| target.url.clone());
-            crate::utils::build_request(client, target, method, inject_url, target.data.clone())
+            crate::utils::build_request(client, target, default_method, inject_url, target.data.clone())
         }
     };
 
@@ -323,6 +329,7 @@ mod tests {
             injection_context: None,
             valid_specials: None,
             invalid_specials: None,
+                    pre_encoding: None,
         }
     }
 
@@ -592,6 +599,7 @@ mod tests {
             injection_context: None,
             valid_specials: None,
             invalid_specials: None,
+                    pre_encoding: None,
         };
         let args = default_scan_args();
 
@@ -619,6 +627,7 @@ mod tests {
             injection_context: None,
             valid_specials: None,
             invalid_specials: None,
+                    pre_encoding: None,
         };
         let args = default_scan_args();
 
@@ -648,6 +657,7 @@ mod tests {
             injection_context: None,
             valid_specials: None,
             invalid_specials: None,
+                    pre_encoding: None,
         };
         let args = default_scan_args();
 
@@ -678,6 +688,7 @@ mod tests {
             injection_context: None,
             valid_specials: None,
             invalid_specials: None,
+                    pre_encoding: None,
         };
         let args = default_scan_args();
 

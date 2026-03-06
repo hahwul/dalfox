@@ -175,6 +175,7 @@ mod tests {
             injection_context: None,
             valid_specials: None,
             invalid_specials: None,
+                    pre_encoding: None,
         };
         let out = build_injected_url(&base, &param, "PAY");
         assert!(out.contains("a=PAY"));
@@ -191,6 +192,7 @@ mod tests {
             injection_context: None,
             valid_specials: None,
             invalid_specials: None,
+                    pre_encoding: None,
         };
         let out = build_injected_url(&base, &param, "X");
         assert!(out.contains("q=X"));
@@ -206,6 +208,7 @@ mod tests {
             injection_context: None,
             valid_specials: None,
             invalid_specials: None,
+                    pre_encoding: None,
         };
         let out = build_injected_url(&base, &param, "%3Cimg%20src=x%3E");
         assert!(out.contains("q=%3Cimg%20src%3Dx%3E"));
@@ -222,6 +225,7 @@ mod tests {
             injection_context: None,
             valid_specials: None,
             invalid_specials: None,
+                    pre_encoding: None,
         };
         let out = build_injected_url(&base, &param, "PAY LOAD");
         assert!(out.contains("q=PAY%20LOAD"));
@@ -237,6 +241,7 @@ mod tests {
             injection_context: None,
             valid_specials: None,
             invalid_specials: None,
+                    pre_encoding: None,
         };
         let out = build_injected_url(&base, &param, "PAY LOAD");
         // space should be %20
@@ -253,6 +258,7 @@ mod tests {
             injection_context: None,
             valid_specials: None,
             invalid_specials: None,
+                    pre_encoding: None,
         };
         let out = build_injected_url(&base, &param, "X");
         assert_eq!(out, "https://example.com/a");
@@ -268,6 +274,7 @@ mod tests {
             injection_context: None,
             valid_specials: None,
             invalid_specials: None,
+                    pre_encoding: None,
         };
         let out = build_injected_url(&base, &param, "IGNORED");
         assert_eq!(out, base.as_str());

