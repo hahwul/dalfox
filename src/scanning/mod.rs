@@ -21,6 +21,21 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::{Mutex, Semaphore};
 
+fn reflection_kind_note(kind: crate::scanning::check_reflection::ReflectionKind) -> &'static str {
+    match kind {
+        crate::scanning::check_reflection::ReflectionKind::Raw => "reflected",
+        crate::scanning::check_reflection::ReflectionKind::HtmlEntityDecoded => {
+            "reflected after HTML-entity decoding"
+        }
+        crate::scanning::check_reflection::ReflectionKind::UrlDecoded => {
+            "reflected after URL/form decoding"
+        }
+        crate::scanning::check_reflection::ReflectionKind::HtmlThenUrlDecoded => {
+            "reflected after HTML-entity and URL/form decoding"
+        }
+    }
+}
+
 fn get_fallback_reflection_payloads(
     args: &ScanArgs,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
@@ -38,6 +53,7 @@ fn get_fallback_reflection_payloads(
         );
         base_payloads.extend(crate::payload::get_dynamic_xss_html_payloads());
         base_payloads.extend(crate::payload::get_mxss_payloads());
+        base_payloads.extend(crate::payload::get_protocol_injection_payloads());
         if let Some(path) = &args.custom_payload {
             base_payloads.extend(crate::scanning::xss_common::load_custom_payloads(path)?);
         }
@@ -88,17 +104,10 @@ fn get_dom_payloads(
         Some(ctx) => {
             // If param has analysis data, use adaptive encoding for better bypass
             if param.invalid_specials.is_some() || param.valid_specials.is_some() {
-                let invalid = param
-                    .invalid_specials
-                    .as_deref()
-                    .unwrap_or_default();
-                let valid = param
-                    .valid_specials
-                    .as_deref()
-                    .unwrap_or_default();
-                let payloads = crate::scanning::xss_common::generate_adaptive_payloads(
-                    ctx, invalid, valid,
-                );
+                let invalid = param.invalid_specials.as_deref().unwrap_or_default();
+                let valid = param.valid_specials.as_deref().unwrap_or_default();
+                let payloads =
+                    crate::scanning::xss_common::generate_adaptive_payloads(ctx, invalid, valid);
                 return Ok(payloads);
             }
             // Use locally generated payloads only (no remote) to avoid large cross-product in DOM verification
@@ -125,6 +134,7 @@ fn get_dom_payloads(
                 base_payloads.extend(crate::payload::get_dynamic_xss_attribute_payloads());
                 base_payloads.extend(crate::payload::get_mxss_payloads());
                 base_payloads.extend(crate::payload::get_dom_clobbering_payloads());
+                base_payloads.extend(crate::payload::get_protocol_injection_payloads());
                 if let Some(path) = &args.custom_payload {
                     base_payloads.extend(
                         crate::scanning::xss_common::load_custom_payloads(path)
@@ -232,6 +242,17 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
     }
 
     request_lines.join("\r\n")
+}
+
+fn ast_source_uses_browser_url_surface(source: &str) -> bool {
+    source.contains("location.hash")
+        || source.contains("location.search")
+        || source.contains("URLSearchParams.get(")
+        || source.contains("location.href")
+        || source.contains("location.pathname")
+        || source.contains("document.URL")
+        || source.contains("event.newValue")
+        || source.contains("event.oldValue")
 }
 
 #[allow(dead_code)]
@@ -373,6 +394,11 @@ pub async fn run_scanning(
                         target_clone.url.as_str(),
                     );
                     for (vuln, payload, description) in findings {
+                        let self_bootstrap_verified =
+                            crate::scanning::ast_integration::has_self_bootstrap_verification(
+                                &js_code,
+                                &vuln.source,
+                            );
                         let ast_key = format!(
                             "{}|{}|{}|{}|{}",
                             param_clone.name, vuln.line, vuln.column, vuln.source, vuln.sink
@@ -381,12 +407,21 @@ pub async fn run_scanning(
                             continue;
                         }
                         local_ast_seen.insert(ast_key);
-                        let result_url = crate::scanning::url_inject::build_injected_url(
-                            &target_clone.url,
-                            &param_clone,
-                            // Use the actual executable payload from analysis for POC path
-                            &payload,
-                        );
+                        let source_uses_url_surface =
+                            ast_source_uses_browser_url_surface(&vuln.source);
+                        let result_url = if source_uses_url_surface {
+                            crate::scanning::ast_integration::build_dom_xss_poc_url(
+                                target_clone.url.as_str(),
+                                &vuln.source,
+                                &payload,
+                            )
+                        } else {
+                            crate::scanning::url_inject::build_injected_url(
+                                &target_clone.url,
+                                &param_clone,
+                                &payload,
+                            )
+                        };
                         let mut ast_result = crate::scanning::result::Result::new(
                             "A".to_string(),
                             "DOM-XSS".to_string(),
@@ -408,8 +443,10 @@ pub async fn run_scanning(
                             0,
                             format!("{} (검증 필요)", description),
                         );
-                        ast_result.request =
-                            Some(build_request_text(&target_clone, &param_clone, &payload));
+                        if !source_uses_url_surface {
+                            ast_result.request =
+                                Some(build_request_text(&target_clone, &param_clone, &payload));
+                        }
                         ast_result.response = Some(response_text.clone());
                         // Lightweight runtime verification (non-headless)
                         let (verified, rt_resp, note) =
@@ -431,6 +468,11 @@ pub async fn run_scanning(
                             ast_result.severity = "High".to_string();
                             ast_result.message_str =
                                 format!("{} [경량 확인: 검증됨]", ast_result.message_str);
+                        } else if self_bootstrap_verified {
+                            ast_result.result_type = "V".to_string();
+                            ast_result.severity = "High".to_string();
+                            ast_result.message_str =
+                                format!("{} [정적 self-bootstrap 확인]", ast_result.message_str);
                         } else {
                             ast_result.message_str =
                                 format!("{} [경량 확인: 미검증]", ast_result.message_str);
@@ -497,6 +539,11 @@ pub async fn run_scanning(
                                 target_clone.url.as_str(),
                             );
                         for (vuln, payload, description) in findings {
+                            let self_bootstrap_verified =
+                                crate::scanning::ast_integration::has_self_bootstrap_verification(
+                                    &js_code,
+                                    &vuln.source,
+                                );
                             let ast_key = format!(
                                 "{}|{}|{}|{}|{}",
                                 param_clone.name, vuln.line, vuln.column, vuln.source, vuln.sink
@@ -506,11 +553,21 @@ pub async fn run_scanning(
                             }
                             local_ast_seen.insert(ast_key);
                             // Create an AST-based DOM XSS result with actual executable payload
-                            let result_url = crate::scanning::url_inject::build_injected_url(
-                                &target_clone.url,
-                                &param_clone,
-                                &payload,
-                            );
+                            let source_uses_url_surface =
+                                ast_source_uses_browser_url_surface(&vuln.source);
+                            let result_url = if source_uses_url_surface {
+                                crate::scanning::ast_integration::build_dom_xss_poc_url(
+                                    target_clone.url.as_str(),
+                                    &vuln.source,
+                                    &payload,
+                                )
+                            } else {
+                                crate::scanning::url_inject::build_injected_url(
+                                    &target_clone.url,
+                                    &param_clone,
+                                    &payload,
+                                )
+                            };
                             let mut ast_result = crate::scanning::result::Result::new(
                                 "A".to_string(), // AST-detected
                                 "DOM-XSS".to_string(),
@@ -532,8 +589,10 @@ pub async fn run_scanning(
                                 0,
                                 format!("{} (검증 필요)", description),
                             );
-                            ast_result.request =
-                                Some(build_request_text(&target_clone, &param_clone, &payload));
+                            if !source_uses_url_surface {
+                                ast_result.request =
+                                    Some(build_request_text(&target_clone, &param_clone, &payload));
+                            }
                             ast_result.response = Some(response_text.clone());
                             // Lightweight runtime verification (non-headless)
                             let (verified, rt_resp, note) =
@@ -556,6 +615,13 @@ pub async fn run_scanning(
                                 ast_result.severity = "High".to_string();
                                 ast_result.message_str =
                                     format!("{} [경량 확인: 검증됨]", ast_result.message_str);
+                            } else if self_bootstrap_verified {
+                                ast_result.result_type = "V".to_string();
+                                ast_result.severity = "High".to_string();
+                                ast_result.message_str = format!(
+                                    "{} [정적 self-bootstrap 확인]",
+                                    ast_result.message_str
+                                );
                             } else {
                                 ast_result.message_str =
                                     format!("{} [경량 확인: 미검증]", ast_result.message_str);
@@ -585,42 +651,44 @@ pub async fn run_scanning(
                     };
 
                     if should_add {
-                        // Only emit a POC result when raw payload is present in response.
-                        if matches!(kind, crate::scanning::check_reflection::ReflectionKind::Raw) {
-                            // Build result URL with the reflected payload (via helper)
-                            let result_url = crate::scanning::url_inject::build_injected_url(
-                                &target_clone.url,
-                                &param_clone,
-                                &reflection_payload,
-                            );
+                        // Build result URL with the reflected payload (via helper)
+                        let result_url = crate::scanning::url_inject::build_injected_url(
+                            &target_clone.url,
+                            &param_clone,
+                            &reflection_payload,
+                        );
 
-                            // Record reflected XSS finding (fallback path)
-                            let mut result = crate::scanning::result::Result::new(
-                                "R".to_string(),
-                                "inHTML".to_string(),
-                                target_clone.method.clone(),
-                                result_url,
-                                param_clone.name.clone(),
-                                reflection_payload.clone(),
-                                format!("Reflected XSS detected for param {}", param_clone.name),
-                                "CWE-79".to_string(),
-                                "Info".to_string(),
-                                606,
-                                format!(
-                                    "[R] Triggered XSS Payload (reflected): {}={}",
-                                    param_clone.name, reflection_payload
-                                ),
-                            );
-                            result.request = Some(build_request_text(
-                                &target_clone,
-                                &param_clone,
-                                &reflection_payload,
-                            ));
-                            result.response = reflection_response_text;
+                        let reflection_note = reflection_kind_note(kind);
 
-                            // Defer pushing to shared results (batched)
-                            local_results.push(result);
-                        }
+                        // Record reflected XSS finding (fallback path)
+                        let mut result = crate::scanning::result::Result::new(
+                            "R".to_string(),
+                            "inHTML".to_string(),
+                            target_clone.method.clone(),
+                            result_url,
+                            param_clone.name.clone(),
+                            reflection_payload.clone(),
+                            format!(
+                                "Reflected XSS detected for param {} ({})",
+                                param_clone.name, reflection_note
+                            ),
+                            "CWE-79".to_string(),
+                            "Info".to_string(),
+                            606,
+                            format!(
+                                "[R] Triggered XSS Payload ({}): {}={}",
+                                reflection_note, param_clone.name, reflection_payload
+                            ),
+                        );
+                        result.request = Some(build_request_text(
+                            &target_clone,
+                            &param_clone,
+                            &reflection_payload,
+                        ));
+                        result.response = reflection_response_text;
+
+                        // Defer pushing to shared results (batched)
+                        local_results.push(result);
                     }
                 }
             }

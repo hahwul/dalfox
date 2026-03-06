@@ -67,19 +67,46 @@ pub async fn check_query_discovery(
                 crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
             crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             let mut discovered: Option<Param> = None;
-            if let Ok(resp) = request.send().await
-                && let Ok(text) = resp.text().await
-                && text.contains(test_value)
-            {
-                let (valid, invalid) = classify_special_chars(&text);
-                discovered = Some(Param {
-                    name,
-                    value,
-                    location: crate::parameter_analysis::Location::Query,
-                    injection_context: Some(detect_injection_context(&text)),
-                    valid_specials: Some(valid),
-                    invalid_specials: Some(invalid),
-                });
+            if let Ok(resp) = request.send().await {
+                // Check for redirect reflection: if the response is a 3xx redirect,
+                // the Location header may contain the reflected marker value.
+                let is_redirect = resp.status().is_redirection();
+                let location_reflection = if is_redirect {
+                    resp.headers()
+                        .get("location")
+                        .and_then(|v| v.to_str().ok())
+                        .map(|loc| loc.contains(test_value))
+                        .unwrap_or(false)
+                } else {
+                    false
+                };
+
+                if location_reflection {
+                    // Redirect context: marker reflected in Location header.
+                    // Use Attribute context since the value is placed in a URI attribute.
+                    discovered = Some(Param {
+                        name,
+                        value,
+                        location: crate::parameter_analysis::Location::Query,
+                        injection_context: Some(
+                            crate::parameter_analysis::InjectionContext::AttributeUrl(None),
+                        ),
+                        valid_specials: None,
+                        invalid_specials: None,
+                    });
+                } else if let Ok(text) = resp.text().await
+                    && text.contains(test_value)
+                {
+                    let (valid, invalid) = classify_special_chars(&text);
+                    discovered = Some(Param {
+                        name,
+                        value,
+                        location: crate::parameter_analysis::Location::Query,
+                        injection_context: Some(detect_injection_context(&text)),
+                        valid_specials: Some(valid),
+                        invalid_specials: Some(invalid),
+                    });
+                }
             }
             if delay > 0 {
                 sleep(Duration::from_millis(delay)).await;

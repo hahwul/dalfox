@@ -98,7 +98,15 @@ pub fn load_all_mock_cases(base_dir: &Path) -> Result<HashMap<String, Vec<MockCa
     let mut cases_by_type: HashMap<String, Vec<MockCase>> = HashMap::new();
 
     // Define the handler types we support
-    let handler_types = vec!["query", "header", "cookie", "path", "body", "dom_xss", "realworld"];
+    let handler_types = vec![
+        "query",
+        "header",
+        "cookie",
+        "path",
+        "body",
+        "dom_xss",
+        "realworld",
+    ];
 
     for handler_type in handler_types {
         let type_dir = base_dir.join(handler_type);

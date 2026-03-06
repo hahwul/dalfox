@@ -8,7 +8,6 @@ pub use mining::*;
 pub static REQUEST_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 use crate::cmd::scan::ScanArgs;
-use crate::encoding::{base64_encode, double_url_encode, html_entity_encode, url_encode};
 use crate::target_parser::Target;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use reqwest::Client;
@@ -38,6 +37,7 @@ pub enum InjectionContext {
     Html(Option<DelimiterType>),
     Javascript(Option<DelimiterType>),
     Attribute(Option<DelimiterType>),
+    AttributeUrl(Option<DelimiterType>),
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,7 +128,6 @@ pub async fn active_probe_param(
     target: &Target,
     mut param: Param,
     semaphore: Arc<Semaphore>,
-    encoders: Arc<Vec<String>>,
 ) -> Param {
     let client = target.build_client().unwrap_or_else(|_| Client::new());
 
@@ -151,7 +150,6 @@ pub async fn active_probe_param(
         let valid_ref = valid_specials.clone();
         let invalid_ref = invalid_specials.clone();
 
-        let encoders_clone = encoders.clone();
         let handle = tokio::spawn(async move {
             let _permit = sem_clone.acquire().await.unwrap();
             let payload = format!(
@@ -360,210 +358,13 @@ pub async fn active_probe_param(
             if reflected_ok {
                 valid_ref.lock().await.push(c);
             } else {
-                // Dynamic fallback probing using user-specified encoders
-                // Iterate through encoders from args.encoders (passed in) except "none"
-                let mut alt_reflected = false;
-                let priorities = ["url", "html", "2url", "base64"];
-                let mut ordered: Vec<String> = Vec::new();
-                for p in priorities.iter() {
-                    if encoders_clone.iter().any(|e| e == p) {
-                        ordered.push(p.to_string());
-                    }
-                }
-                for enc in ordered {
-                    let encoded_piece = match enc.as_str() {
-                        "url" => url_encode(&c.to_string()),
-                        "html" => html_entity_encode(&c.to_string()),
-                        "2url" => double_url_encode(&c.to_string()),
-                        "base64" => base64_encode(&c.to_string()),
-                        _ => continue,
-                    };
-                    let payload_enc = format!(
-                        "{}{}{}",
-                        crate::scanning::markers::open_marker(),
-                        encoded_piece,
-                        crate::scanning::markers::close_marker()
-                    );
-                    let req_method2 = method.parse().unwrap_or(reqwest::Method::GET);
-                    let mut url2 = url_original.clone();
-                    let mut request_builder2;
-                    match location {
-                        Location::Query => {
-                            let mut new_pairs: Vec<(String, String)> = Vec::new();
-                            let mut replaced = false;
-                            for (k, v) in url_original.query_pairs() {
-                                if k == param_name {
-                                    new_pairs.push((k.to_string(), payload_enc.clone()));
-                                    replaced = true;
-                                } else {
-                                    new_pairs.push((k.to_string(), v.to_string()));
-                                }
-                            }
-                            if !replaced {
-                                new_pairs.push((param_name.clone(), payload_enc.clone()));
-                            }
-                            url2.query_pairs_mut().clear();
-                            for (k, v) in new_pairs {
-                                url2.query_pairs_mut().append_pair(&k, &v);
-                            }
-                            request_builder2 = client_clone.request(req_method2, url2);
-                        }
-                        Location::Body => {
-                            let body_string;
-                            if let Some(d) = &data {
-                                let mut pairs: Vec<(String, String)> =
-                                    url::form_urlencoded::parse(d.as_bytes())
-                                        .map(|(k, v)| (k.to_string(), v.to_string()))
-                                        .collect();
-                                let mut found = false;
-                                for (k, v) in &mut pairs {
-                                    if *k == param_name {
-                                        *v = payload_enc.clone();
-                                        found = true;
-                                    }
-                                }
-                                if !found {
-                                    pairs.push((param_name.clone(), payload_enc.clone()));
-                                }
-                                body_string = url::form_urlencoded::Serializer::new(String::new())
-                                    .extend_pairs(pairs)
-                                    .finish();
-                            } else {
-                                body_string = format!("{}={}", param_name, payload_enc);
-                            }
-                            request_builder2 = client_clone
-                                .request(req_method2, url2)
-                                .header("Content-Type", "application/x-www-form-urlencoded")
-                                .body(body_string);
-                        }
-                        Location::Header => {
-                            let is_cookie = cookies.iter().any(|(n, _)| n == &param_name);
-                            request_builder2 = client_clone.request(req_method2, url2);
-                            if is_cookie {
-                                let mut cookie_header = String::new();
-                                for (k, v) in &cookies {
-                                    if k == &param_name {
-                                        cookie_header.push_str(&format!("{}={}; ", k, payload_enc));
-                                    } else {
-                                        cookie_header.push_str(&format!("{}={}; ", k, v));
-                                    }
-                                }
-                                if !cookie_header.is_empty() {
-                                    cookie_header.pop();
-                                    cookie_header.pop();
-                                    request_builder2 =
-                                        request_builder2.header("Cookie", cookie_header);
-                                }
-                            } else {
-                                for (k, v) in &headers {
-                                    if k == &param_name {
-                                        request_builder2 =
-                                            request_builder2.header(k, payload_enc.clone());
-                                    } else {
-                                        request_builder2 = request_builder2.header(k, v);
-                                    }
-                                }
-                            }
-                        }
-                        Location::Path => {
-                            let mut url_path = url2.clone();
-                            if let Some(idx_str) = param_name.strip_prefix("path_segment_")
-                                && let Ok(idx) = idx_str.parse::<usize>()
-                            {
-                                let original_path = url_path.path();
-                                let mut segments: Vec<String> = if original_path == "/" {
-                                    Vec::new()
-                                } else {
-                                    original_path
-                                        .trim_matches('/')
-                                        .split('/')
-                                        .filter(|s| !s.is_empty())
-                                        .map(|s| s.to_string())
-                                        .collect()
-                                };
-                                if idx < segments.len() {
-                                    segments[idx] = payload_enc.clone();
-                                    let new_path = if segments.is_empty() {
-                                        "/".to_string()
-                                    } else {
-                                        format!("/{}", segments.join("/"))
-                                    };
-                                    url_path.set_path(&new_path);
-                                }
-                            }
-                            request_builder2 = client_clone.request(req_method2, url_path);
-                        }
-                        Location::JsonBody => {
-                            // JSON fallback probing
-                            let mut json_value_opt: Option<Value> = None;
-                            if let Some(d) = &data
-                                && let Ok(parsed) = serde_json::from_str::<Value>(d)
-                            {
-                                json_value_opt = Some(parsed);
-                            }
-                            let mut root = json_value_opt
-                                .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-                            if let Value::Object(ref mut map) = root {
-                                map.insert(param_name.clone(), Value::String(payload_enc.clone()));
-                            } else {
-                                let mut map = serde_json::Map::new();
-                                map.insert(param_name.clone(), Value::String(payload_enc.clone()));
-                                root = Value::Object(map);
-                            }
-                            let body_string = serde_json::to_string(&root).unwrap_or_else(|_| {
-                                format!("{{\"{}\":\"{}\"}}", param_name, payload_enc)
-                            });
-                            request_builder2 = client_clone
-                                .request(req_method2, url2)
-                                .header("Content-Type", "application/json")
-                                .body(body_string);
-                        }
-                    }
-                    if let Some(ua) = &user_agent {
-                        request_builder2 = request_builder2.header("User-Agent", ua);
-                    }
-                    // Aggregate cookies once (skip if probing a cookie param already set above)
-                    let is_cookie_param = location == Location::Header
-                        && cookies.iter().any(|(n, _)| n == &param_name);
-                    if !is_cookie_param && !cookies.is_empty() {
-                        let mut cookie_header = String::new();
-                        for (ck, cv) in &cookies {
-                            if ck == &param_name && location == Location::Header {
-                                continue;
-                            }
-                            cookie_header.push_str(&format!("{}={}; ", ck, cv));
-                        }
-                        if !cookie_header.is_empty() {
-                            cookie_header.pop();
-                            cookie_header.pop();
-                            request_builder2 = request_builder2.header("Cookie", cookie_header);
-                        }
-                    }
-                    if let Some(d) = &data
-                        && matches!(location, Location::Query | Location::Header)
-                    {
-                        request_builder2 = request_builder2.body(d.clone());
-                    }
-                    if let Ok(resp2) = {
-                        crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                        request_builder2.send().await
-                    } && let Ok(text2) = resp2.text().await
-                        && let Some(segment2) = extract_reflected_segment(&text2)
-                        && (segment2.contains(c)
-                            || segment2.contains(&encoded_piece)
-                            || segment2
-                                .to_ascii_uppercase()
-                                .contains(&format!("%{:02X}", c as u32)))
-                    {
-                        alt_reflected = true;
-                        break;
-                    }
-                }
-                if alt_reflected {
-                    valid_ref.lock().await.push(c);
-                } else {
-                    invalid_ref.lock().await.push(c);
-                }
+                // Literal character is blocked by the server.  Classify as
+                // invalid so payload generators can skip payloads that rely
+                // on the raw char (e.g. angle-bracket tag payloads in
+                // attribute context).  Encoded-bypass opportunities are
+                // handled separately by the encoding pipeline during
+                // scanning.
+                invalid_ref.lock().await.push(c);
             }
         });
         handles.push(handle);
@@ -619,14 +420,12 @@ pub async fn analyze_parameters(
     // Concurrent active probing per parameter
     let probe_semaphore = Arc::new(Semaphore::new(target.workers));
     let probe_target = Arc::new(target.clone());
-    let probe_encoders = Arc::new(args.encoders.clone());
     let mut param_handles = Vec::new();
     for p in target.reflection_params.clone() {
         let target_ref = probe_target.clone();
         let sem = probe_semaphore.clone();
-        let encoders_clone = probe_encoders.clone();
         param_handles.push(tokio::spawn(async move {
-            active_probe_param(target_ref.as_ref(), p, sem, encoders_clone).await
+            active_probe_param(target_ref.as_ref(), p, sem).await
         }));
     }
     let mut probed = Vec::with_capacity(param_handles.len());
@@ -1388,18 +1187,11 @@ mod tests {
     async fn test_active_probe_param_query_path_failure_paths() {
         let target = probe_target();
         let semaphore = Arc::new(Semaphore::new(8));
-        let encoders = Arc::new(vec![
-            "url".to_string(),
-            "html".to_string(),
-            "2url".to_string(),
-            "base64".to_string(),
-        ]);
 
         let query_res = active_probe_param(
             &target,
             probe_param("x", Location::Query),
             semaphore.clone(),
-            encoders.clone(),
         )
         .await;
         assert!(query_res.valid_specials.as_ref().is_some());
@@ -1416,7 +1208,6 @@ mod tests {
             &target,
             probe_param("path_segment_1", Location::Path),
             semaphore,
-            encoders,
         )
         .await;
         assert!(path_res.valid_specials.as_ref().is_some());
@@ -1435,18 +1226,11 @@ mod tests {
         let mut target = probe_target();
         target.data = Some("{\"json_key\":\"v\"}".to_string());
         let semaphore = Arc::new(Semaphore::new(8));
-        let encoders = Arc::new(vec![
-            "url".to_string(),
-            "html".to_string(),
-            "2url".to_string(),
-            "base64".to_string(),
-        ]);
 
         let body_res = active_probe_param(
             &target,
             probe_param("foo", Location::Body),
             semaphore.clone(),
-            encoders.clone(),
         )
         .await;
         assert!(body_res.valid_specials.as_ref().is_some());
@@ -1463,7 +1247,6 @@ mod tests {
             &target,
             probe_param("session", Location::Header),
             semaphore.clone(),
-            encoders.clone(),
         )
         .await;
         assert!(header_cookie_res.valid_specials.as_ref().is_some());
@@ -1480,7 +1263,6 @@ mod tests {
             &target,
             probe_param("X-Test", Location::Header),
             semaphore.clone(),
-            encoders.clone(),
         )
         .await;
         assert!(header_plain_res.valid_specials.as_ref().is_some());
@@ -1497,7 +1279,6 @@ mod tests {
             &target,
             probe_param("json_key", Location::JsonBody),
             semaphore,
-            encoders,
         )
         .await;
         assert!(json_res.valid_specials.as_ref().is_some());

@@ -1,4 +1,4 @@
-use crate::parameter_analysis::Param;
+use crate::parameter_analysis::{Location, Param};
 use crate::target_parser::Target;
 use reqwest::Client;
 
@@ -25,11 +25,77 @@ pub async fn verify_dom_xss_light_with_client(
     param: &Param,
     payload: &str,
 ) -> (bool, Option<String>, Option<String>) {
-    let inject_url = crate::scanning::url_inject::build_injected_url(&target.url, param, payload);
-    let parsed_url = url::Url::parse(&inject_url).unwrap_or_else(|_| target.url.clone());
     let method = target.method.parse().unwrap_or(reqwest::Method::GET);
-    let request =
-        crate::utils::build_request(client, target, method, parsed_url, target.data.clone());
+    let request = match param.location {
+        Location::Header => {
+            let parsed_url = target.url.clone();
+            let rb = crate::utils::build_request(
+                client,
+                target,
+                method,
+                parsed_url,
+                target.data.clone(),
+            );
+            crate::utils::apply_header_overrides(rb, &[(param.name.clone(), payload.to_string())])
+        }
+        Location::Body => {
+            let parsed_url = target.url.clone();
+            let body = if let Some(ref data) = target.data {
+                let mut pairs: Vec<(String, String)> = url::form_urlencoded::parse(data.as_bytes())
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect();
+                let mut found = false;
+                for pair in &mut pairs {
+                    if pair.0 == param.name {
+                        pair.1 = payload.to_string();
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    pairs.push((param.name.clone(), payload.to_string()));
+                }
+                Some(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .extend_pairs(&pairs)
+                        .finish(),
+                )
+            } else {
+                Some(format!(
+                    "{}={}",
+                    urlencoding::encode(&param.name),
+                    urlencoding::encode(payload)
+                ))
+            };
+            crate::utils::build_request(client, target, method, parsed_url, body)
+        }
+        Location::JsonBody => {
+            let parsed_url = target.url.clone();
+            let body = if let Some(ref data) = target.data {
+                if let Ok(mut json_val) = serde_json::from_str::<serde_json::Value>(data) {
+                    if let Some(obj) = json_val.as_object_mut() {
+                        obj.insert(
+                            param.name.clone(),
+                            serde_json::Value::String(payload.to_string()),
+                        );
+                    }
+                    Some(serde_json::to_string(&json_val).unwrap_or_else(|_| data.clone()))
+                } else {
+                    Some(data.replace(&param.value, payload))
+                }
+            } else {
+                Some(serde_json::json!({ &param.name: payload }).to_string())
+            };
+            let rb = crate::utils::build_request(client, target, method, parsed_url, body);
+            rb.header("Content-Type", "application/json")
+        }
+        _ => {
+            let inject_url =
+                crate::scanning::url_inject::build_injected_url(&target.url, param, payload);
+            let parsed_url = url::Url::parse(&inject_url).unwrap_or_else(|_| target.url.clone());
+            crate::utils::build_request(client, target, method, parsed_url, target.data.clone())
+        }
+    };
 
     let mut note: Option<String> = None;
     if let Ok(resp) = request.send().await {
@@ -44,12 +110,14 @@ pub async fn verify_dom_xss_light_with_client(
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());
         if let Ok(text) = resp.text().await {
-            // 1) Raw payload present
-            if crate::utils::is_htmlish_content_type(&ct) && text.contains(payload) {
+            // 1) Payload reflection present after normalization
+            if crate::utils::is_htmlish_content_type(&ct)
+                && crate::scanning::check_reflection::classify_reflection(&text, payload).is_some()
+            {
                 if crate::scanning::check_dom_verification::has_marker_evidence(payload, &text) {
                     return (true, Some(text), Some("marker-reflected".to_string()));
                 }
-                note = Some("raw reflection without marker evidence".to_string());
+                note = Some("payload reflection without marker evidence".to_string());
             }
             // 2) Marker element present
             if crate::utils::is_htmlish_content_type(&ct)
@@ -188,7 +256,7 @@ mod tests {
         assert!(response.expect("response").contains(payload));
         assert_eq!(
             note,
-            Some("raw reflection without marker evidence".to_string())
+            Some("payload reflection without marker evidence".to_string())
         );
     }
 

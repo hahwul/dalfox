@@ -221,6 +221,35 @@ pub fn is_htmlish_content_type(ct: &str) -> bool {
     )
 }
 
+/// Allow-list check for content types that are still worth scanning for XSS,
+/// even when they are not directly HTML documents.
+///
+/// This is intentionally broader than `is_htmlish_content_type` because
+/// browser-executable or browser-consumed responses such as JSONP, raw JSON
+/// fragments, and SVG documents can still surface XSS gadgets or reflective
+/// payloads that Dalfox should analyze during preflight.
+pub fn is_xss_scannable_content_type(ct: &str) -> bool {
+    if is_htmlish_content_type(ct) {
+        return true;
+    }
+
+    let Some(primary) = content_type_primary(ct) else {
+        return false;
+    };
+
+    matches!(
+        primary.as_str(),
+        "application/json"
+            | "text/json"
+            | "application/javascript"
+            | "text/javascript"
+            | "application/ecmascript"
+            | "text/ecmascript"
+            | "application/x-javascript"
+            | "image/svg+xml"
+    )
+}
+
 /// Build a preflight request for content-type detection.
 /// - If `prefer_head` is true, uses HEAD; otherwise GET.
 /// - When using GET and `range_bytes` is Some(n), adds `Range: bytes=0-(n-1)`
@@ -366,6 +395,25 @@ mod tests {
         assert!(!is_htmlish_content_type("text/plain"));
         assert!(!is_htmlish_content_type("image/svg+xml"));
         assert!(!is_htmlish_content_type("invalid"));
+    }
+
+    #[test]
+    fn test_is_xss_scannable_content_type_allow_list() {
+        assert!(is_xss_scannable_content_type("text/html"));
+        assert!(is_xss_scannable_content_type("application/json"));
+        assert!(is_xss_scannable_content_type("application/javascript"));
+        assert!(is_xss_scannable_content_type(
+            "text/javascript; charset=utf-8"
+        ));
+        assert!(is_xss_scannable_content_type("image/svg+xml"));
+    }
+
+    #[test]
+    fn test_is_xss_scannable_content_type_deny_list() {
+        assert!(!is_xss_scannable_content_type("text/plain"));
+        assert!(!is_xss_scannable_content_type("image/png"));
+        assert!(!is_xss_scannable_content_type("application/octet-stream"));
+        assert!(!is_xss_scannable_content_type("invalid"));
     }
 
     #[test]

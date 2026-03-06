@@ -1,4 +1,4 @@
-use crate::parameter_analysis::Param;
+use crate::parameter_analysis::{Location, Param};
 use crate::target_parser::Target;
 use reqwest::Client;
 use scraper;
@@ -9,38 +9,63 @@ use tokio::time::{Duration, sleep};
 #[allow(dead_code)]
 static DALFOX_SELECTOR: OnceLock<scraper::Selector> = OnceLock::new();
 
+fn payload_uses_legacy_class_marker(payload: &str) -> bool {
+    payload.contains("class=dalfox")
+        || payload.contains("class=\"dalfox\"")
+        || payload.contains("class='dalfox'")
+}
+
+fn payload_uses_legacy_id_marker(payload: &str) -> bool {
+    payload.contains("id=dalfox")
+        || payload.contains("id=\"dalfox\"")
+        || payload.contains("id='dalfox'")
+}
+
 pub(crate) fn has_marker_evidence(payload: &str, text: &str) -> bool {
     let class_marker = crate::scanning::markers::class_marker();
     let id_marker = crate::scanning::markers::id_marker();
 
-    let need_class = payload.contains(class_marker);
-    let need_id = payload.contains(id_marker);
+    let mut class_selectors = Vec::new();
+    if payload.contains(class_marker) {
+        class_selectors.push(format!(".{}", class_marker));
+    }
+    if payload_uses_legacy_class_marker(payload) {
+        class_selectors.push(".dalfox".to_string());
+    }
+
+    let mut id_selectors = Vec::new();
+    if payload.contains(id_marker) {
+        id_selectors.push(format!("#{}", id_marker));
+    }
+    if payload_uses_legacy_id_marker(payload) {
+        id_selectors.push("#dalfox".to_string());
+    }
 
     // Avoid promoting raw reflection to DOM-verified unless payload carries Dalfox marker(s).
-    if !need_class && !need_id {
+    if class_selectors.is_empty() && id_selectors.is_empty() {
         return false;
     }
 
     let document = scraper::Html::parse_document(text);
 
-    let class_ok = if need_class {
-        let sel = format!(".{}", class_marker);
-        if let Ok(selector) = scraper::Selector::parse(&sel) {
-            document.select(&selector).next().is_some()
-        } else {
-            false
-        }
+    let class_ok = if !class_selectors.is_empty() {
+        class_selectors.iter().any(|sel| {
+            scraper::Selector::parse(sel)
+                .ok()
+                .and_then(|selector| document.select(&selector).next())
+                .is_some()
+        })
     } else {
         true
     };
 
-    let id_ok = if need_id {
-        let sel = format!("#{}", id_marker);
-        if let Ok(selector) = scraper::Selector::parse(&sel) {
-            document.select(&selector).next().is_some()
-        } else {
-            false
-        }
+    let id_ok = if !id_selectors.is_empty() {
+        id_selectors.iter().any(|sel| {
+            scraper::Selector::parse(sel)
+                .ok()
+                .and_then(|selector| document.select(&selector).next())
+                .is_some()
+        })
     } else {
         true
     };
@@ -72,15 +97,112 @@ pub async fn check_dom_verification_with_client(
         return (false, None);
     }
 
-    // Build URL or body based on param location for injection
-    let inject_url_str =
-        crate::scanning::url_inject::build_injected_url(&target.url, param, payload);
-    let inject_url = url::Url::parse(&inject_url_str).unwrap_or_else(|_| target.url.clone());
-
-    // Send injection request (centralized builder)
     let method = target.method.parse().unwrap_or(reqwest::Method::GET);
-    let inject_request =
-        crate::utils::build_request(client, target, method, inject_url, target.data.clone());
+    let inject_request = match param.location {
+        Location::Header => {
+            let parsed_url = target.url.clone();
+            if target.cookies.iter().any(|(name, _)| name == &param.name) {
+                let others = crate::utils::compose_cookie_header_excluding(
+                    &target.cookies,
+                    Some(&param.name),
+                );
+                let cookie_header = match others {
+                    Some(rest) if !rest.is_empty() => {
+                        format!("{}={}; {}", param.name, payload, rest)
+                    }
+                    _ => format!("{}={}", param.name, payload),
+                };
+                crate::utils::build_request_with_cookie(
+                    client,
+                    target,
+                    method,
+                    parsed_url,
+                    target.data.clone(),
+                    Some(cookie_header),
+                )
+            } else {
+                let base = crate::utils::build_request(
+                    client,
+                    target,
+                    method,
+                    parsed_url,
+                    target.data.clone(),
+                );
+                crate::utils::apply_header_overrides(
+                    base,
+                    &[(param.name.clone(), payload.to_string())],
+                )
+            }
+        }
+        Location::Body => {
+            let parsed_url = target.url.clone();
+            let body = if let Some(ref data) = target.data {
+                let mut pairs: Vec<(String, String)> = url::form_urlencoded::parse(data.as_bytes())
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect();
+                let mut found = false;
+                for pair in &mut pairs {
+                    if pair.0 == param.name {
+                        pair.1 = payload.to_string();
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    pairs.push((param.name.clone(), payload.to_string()));
+                }
+                Some(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .extend_pairs(&pairs)
+                        .finish(),
+                )
+            } else {
+                Some(format!(
+                    "{}={}",
+                    urlencoding::encode(&param.name),
+                    urlencoding::encode(payload)
+                ))
+            };
+            let base = crate::utils::build_request(client, target, method, parsed_url, body);
+            crate::utils::apply_header_overrides(
+                base,
+                &[(
+                    "Content-Type".to_string(),
+                    "application/x-www-form-urlencoded".to_string(),
+                )],
+            )
+        }
+        Location::JsonBody => {
+            let parsed_url = target.url.clone();
+            let body = if let Some(ref data) = target.data {
+                if let Ok(mut json_val) = serde_json::from_str::<serde_json::Value>(data) {
+                    if let Some(obj) = json_val.as_object_mut() {
+                        obj.insert(
+                            param.name.clone(),
+                            serde_json::Value::String(payload.to_string()),
+                        );
+                    }
+                    Some(serde_json::to_string(&json_val).unwrap_or_else(|_| data.clone()))
+                } else {
+                    Some(data.replace(&param.value, payload))
+                }
+            } else {
+                Some(serde_json::json!({ &param.name: payload }).to_string())
+            };
+            let base = crate::utils::build_request(client, target, method, parsed_url, body);
+            crate::utils::apply_header_overrides(
+                base,
+                &[("Content-Type".to_string(), "application/json".to_string())],
+            )
+        }
+        _ => {
+            let inject_url_str =
+                crate::scanning::url_inject::build_injected_url(&target.url, param, payload);
+            let inject_url =
+                url::Url::parse(&inject_url_str).unwrap_or_else(|_| target.url.clone());
+            crate::utils::build_request(client, target, method, inject_url, target.data.clone())
+        }
+    };
 
     // Send the injection request
     crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -112,7 +234,8 @@ pub async fn check_dom_verification_with_client(
                         .unwrap_or("");
                     if let Ok(text) = resp.text().await
                         && crate::utils::is_htmlish_content_type(ct)
-                        && text.contains(payload)
+                        && crate::scanning::check_reflection::classify_reflection(&text, payload)
+                            .is_some()
                         && has_marker_evidence(payload, &text)
                     {
                         return (true, Some(text));
@@ -130,7 +253,7 @@ pub async fn check_dom_verification_with_client(
                 .unwrap_or("");
             if let Ok(text) = resp.text().await
                 && crate::utils::is_htmlish_content_type(ct)
-                && text.contains(payload)
+                && crate::scanning::check_reflection::classify_reflection(&text, payload).is_some()
                 && has_marker_evidence(payload, &text)
             {
                 return (true, Some(text));
@@ -149,8 +272,8 @@ mod tests {
     use crate::target_parser::parse_target;
     use axum::{
         Router,
-        extract::{Query, State},
-        http::StatusCode,
+        extract::{Form, Json, Query, State},
+        http::{HeaderMap, StatusCode},
         response::{Html, IntoResponse},
         routing::get,
     };
@@ -255,6 +378,50 @@ mod tests {
         Html("<div>no payload</div>")
     }
 
+    async fn decoded_payload_handler(
+        Query(params): Query<HashMap<String, String>>,
+    ) -> Html<String> {
+        let q = params.get("q").cloned().unwrap_or_default();
+        let decoded = urlencoding::decode(&q)
+            .map(|value| value.into_owned())
+            .unwrap_or(q);
+        Html(format!("<div>{}</div>", decoded))
+    }
+
+    async fn header_reflection_handler(headers: HeaderMap) -> Html<String> {
+        let value = headers
+            .get("x-test")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        Html(format!("<div>{}</div>", value))
+    }
+
+    async fn cookie_reflection_handler(headers: HeaderMap) -> Html<String> {
+        let value = headers
+            .get("cookie")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default();
+        Html(format!("<div>{}</div>", value))
+    }
+
+    async fn form_reflection_handler(Form(params): Form<HashMap<String, String>>) -> Html<String> {
+        let value = params.get("q").cloned().unwrap_or_default();
+        Html(format!("<div>{}</div>", value))
+    }
+
+    async fn json_reflection_handler(Json(body): Json<serde_json::Value>) -> impl IntoResponse {
+        let value = body
+            .get("q")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        (
+            StatusCode::OK,
+            [("content-type", "text/html")],
+            format!("<div>{}</div>", value),
+        )
+    }
+
     async fn sxss_html_handler(State(state): State<TestState>) -> Html<String> {
         Html(format!("<div>{}</div>", state.stored_payload))
     }
@@ -270,9 +437,17 @@ mod tests {
     async fn start_mock_server(stored_payload: &str) -> SocketAddr {
         let app = Router::new()
             .route("/dom/html", get(html_handler))
+            .route("/dom/decoded", get(decoded_payload_handler))
             .route("/dom/xhtml", get(xhtml_handler))
             .route("/dom/json", get(json_handler))
             .route("/dom/no-payload", get(html_without_payload_handler))
+            .route("/dom/header", get(header_reflection_handler))
+            .route("/dom/cookie", get(cookie_reflection_handler))
+            .route("/dom/form", axum::routing::post(form_reflection_handler))
+            .route(
+                "/dom/json-body",
+                axum::routing::post(json_reflection_handler),
+            )
             .route("/sxss/html", get(sxss_html_handler))
             .route("/sxss/json", get(sxss_json_handler))
             .with_state(TestState {
@@ -367,6 +542,116 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_check_dom_verification_injects_header_params() {
+        let payload = format!(
+            "<img src=x onerror=alert(1) class={}>",
+            crate::scanning::markers::class_marker()
+        );
+        let addr = start_mock_server("stored").await;
+        let target = parse_target(&format!("http://{}:{}/dom/header", addr.ip(), addr.port()))
+            .expect("valid target");
+        let param = Param {
+            name: "X-Test".to_string(),
+            value: "seed".to_string(),
+            location: Location::Header,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+        };
+        let args = default_scan_args();
+
+        let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
+        assert!(found);
+        assert!(body.unwrap_or_default().contains(&payload));
+    }
+
+    #[tokio::test]
+    async fn test_check_dom_verification_injects_cookie_params() {
+        let payload = format!(
+            "<img src=x onerror=alert(1) class={}>",
+            crate::scanning::markers::class_marker()
+        );
+        let addr = start_mock_server("stored").await;
+        let mut target = parse_target(&format!("http://{}:{}/dom/cookie", addr.ip(), addr.port()))
+            .expect("valid target");
+        target
+            .cookies
+            .push(("session".to_string(), "seed".to_string()));
+        let param = Param {
+            name: "session".to_string(),
+            value: "seed".to_string(),
+            location: Location::Header,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+        };
+        let args = default_scan_args();
+
+        let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
+        assert!(found);
+        assert!(
+            body.unwrap_or_default()
+                .contains(&format!("session={}", payload))
+        );
+    }
+
+    #[tokio::test]
+    async fn test_check_dom_verification_injects_form_body_params() {
+        let payload = format!(
+            "<img src=x onerror=alert(1) class={}>",
+            crate::scanning::markers::class_marker()
+        );
+        let addr = start_mock_server("stored").await;
+        let mut target = parse_target(&format!("http://{}:{}/dom/form", addr.ip(), addr.port()))
+            .expect("valid target");
+        target.method = "POST".to_string();
+        target.data = Some("q=seed".to_string());
+        let param = Param {
+            name: "q".to_string(),
+            value: "seed".to_string(),
+            location: Location::Body,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+        };
+        let args = default_scan_args();
+
+        let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
+        assert!(found);
+        assert!(body.unwrap_or_default().contains(&payload));
+    }
+
+    #[tokio::test]
+    async fn test_check_dom_verification_injects_json_body_params() {
+        let payload = format!(
+            "<img src=x onerror=alert(1) class={}>",
+            crate::scanning::markers::class_marker()
+        );
+        let addr = start_mock_server("stored").await;
+        let mut target = parse_target(&format!(
+            "http://{}:{}/dom/json-body",
+            addr.ip(),
+            addr.port()
+        ))
+        .expect("valid target");
+        target.method = "POST".to_string();
+        target.data = Some("{\"q\":\"seed\"}".to_string());
+        let param = Param {
+            name: "q".to_string(),
+            value: "seed".to_string(),
+            location: Location::JsonBody,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+        };
+        let args = default_scan_args();
+
+        let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
+        assert!(found);
+        assert!(body.unwrap_or_default().contains(&payload));
+    }
+
+    #[tokio::test]
     async fn test_check_dom_verification_sxss_uses_secondary_url() {
         let payload = format!(
             "<img src=x onerror=alert(1) class={}>",
@@ -435,5 +720,34 @@ mod tests {
         let payload = format!("<img src=x onerror=alert(1) class={}>", marker);
         let body = format!("<html><body><img class=\"{}\"></body></html>", marker);
         assert!(has_marker_evidence(&payload, &body));
+    }
+
+    #[test]
+    fn test_has_marker_evidence_detects_legacy_dalfox_class_marker_element() {
+        let payload = "<img class=\"dalfox\" src=x onerror=alert(1)>";
+        let body = "<html><body><img class=\"dalfox\"></body></html>";
+        assert!(has_marker_evidence(payload, body));
+    }
+
+    #[tokio::test]
+    async fn test_check_dom_verification_accepts_decoded_payload_variant_with_marker() {
+        let payload = crate::encoding::url_encode(&format!(
+            "<img src=x onerror=alert(1) class={}>",
+            crate::scanning::markers::class_marker()
+        ));
+        let addr = start_mock_server("stored").await;
+        let target = make_target(addr, "/dom/decoded");
+        let param = make_param();
+        let args = default_scan_args();
+
+        let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
+        assert!(
+            found,
+            "decoded payload variants with DOM markers should verify"
+        );
+        assert!(
+            body.unwrap_or_default()
+                .contains(crate::scanning::markers::class_marker())
+        );
     }
 }

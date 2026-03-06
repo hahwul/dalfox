@@ -1,4 +1,4 @@
-use crate::parameter_analysis::Param;
+use crate::parameter_analysis::{Location, Param};
 use crate::target_parser::Target;
 use regex::Regex;
 use reqwest::Client;
@@ -128,22 +128,70 @@ fn decode_html_entities(input: &str) -> String {
         .to_string()
 }
 
+/// Decode form-style URL-encoded text where spaces may be preserved as '+'.
+/// This is intentionally narrow and only used for reflection normalization.
+fn decode_form_urlencoded_like(input: &str) -> Option<String> {
+    let normalized = input.replace('+', "%20");
+    let decoded = urlencoding::decode(&normalized).ok()?.into_owned();
+    if decoded == input {
+        None
+    } else {
+        Some(decoded)
+    }
+}
+
+fn payload_variants(payload: &str) -> Vec<String> {
+    let mut variants = vec![payload.to_string()];
+    let mut seen = std::collections::HashSet::from([payload.to_string()]);
+
+    let html_dec = decode_html_entities(payload);
+    if seen.insert(html_dec.clone()) {
+        variants.push(html_dec.clone());
+    }
+
+    for seed in [payload.to_string(), html_dec] {
+        let mut current = seed;
+        for _ in 0..4 {
+            let Ok(url_dec) = urlencoding::decode(&current) else {
+                break;
+            };
+            let url_dec = url_dec.into_owned();
+            if url_dec == current {
+                break;
+            }
+            if seen.insert(url_dec.clone()) {
+                variants.push(url_dec.clone());
+            }
+            current = url_dec;
+        }
+    }
+
+    variants
+}
+
 /// Determine if payload is reflected in any normalization variant.
-fn classify_reflection(resp_text: &str, payload: &str) -> Option<ReflectionKind> {
+pub(crate) fn classify_reflection(resp_text: &str, payload: &str) -> Option<ReflectionKind> {
+    let payload_variants = payload_variants(payload);
+
     // Direct match first (fast path)
     if resp_text.contains(payload) {
         return Some(ReflectionKind::Raw);
     }
 
     let html_dec = decode_html_entities(resp_text);
-    if html_dec.contains(payload) {
+    if payload_variants
+        .iter()
+        .any(|candidate| html_dec.contains(candidate))
+    {
         return Some(ReflectionKind::HtmlEntityDecoded);
     }
 
     // Check URL decoded version of raw
     if let Ok(url_dec) = urlencoding::decode(resp_text)
         && url_dec != resp_text
-        && url_dec.contains(payload)
+        && payload_variants
+            .iter()
+            .any(|candidate| url_dec.contains(candidate))
     {
         return Some(ReflectionKind::UrlDecoded);
     }
@@ -151,7 +199,25 @@ fn classify_reflection(resp_text: &str, payload: &str) -> Option<ReflectionKind>
     // Check URL decoded version of HTML decoded
     if let Ok(url_dec_html) = urlencoding::decode(&html_dec)
         && url_dec_html != html_dec
-        && url_dec_html.contains(payload)
+        && payload_variants
+            .iter()
+            .any(|candidate| url_dec_html.contains(candidate))
+    {
+        return Some(ReflectionKind::HtmlThenUrlDecoded);
+    }
+
+    if let Some(form_dec) = decode_form_urlencoded_like(resp_text)
+        && payload_variants
+            .iter()
+            .any(|candidate| form_dec.contains(candidate))
+    {
+        return Some(ReflectionKind::UrlDecoded);
+    }
+
+    if let Some(form_dec_html) = decode_form_urlencoded_like(&html_dec)
+        && payload_variants
+            .iter()
+            .any(|candidate| form_dec_html.contains(candidate))
     {
         return Some(ReflectionKind::HtmlThenUrlDecoded);
     }
@@ -183,14 +249,85 @@ async fn fetch_injection_response_with_client(
         return None;
     }
 
-    // Build URL or body based on param location for injection (refactored to shared helper)
-    let inject_url = crate::scanning::url_inject::build_injected_url(&target.url, param, payload);
-
-    // Send injection request (centralized builder)
+    // Build injection request based on parameter location
     let method = target.method.parse().unwrap_or(reqwest::Method::GET);
-    let parsed_url = url::Url::parse(&inject_url).unwrap_or_else(|_| target.url.clone());
-    let inject_request =
-        crate::utils::build_request(client, target, method, parsed_url, target.data.clone());
+    let inject_request = match param.location {
+        Location::Header => {
+            // Header injection: use original URL, inject payload as the header value
+            let parsed_url = target.url.clone();
+            let rb = crate::utils::build_request(
+                client,
+                target,
+                method,
+                parsed_url,
+                target.data.clone(),
+            );
+            // Override/add the header with the payload value
+            crate::utils::apply_header_overrides(rb, &[(param.name.clone(), payload.to_string())])
+        }
+        Location::Body => {
+            // Body injection: use original URL, replace param value in form-encoded body
+            let parsed_url = target.url.clone();
+            let body = if let Some(ref data) = target.data {
+                let mut pairs: Vec<(String, String)> = url::form_urlencoded::parse(data.as_bytes())
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect();
+                let mut found = false;
+                for pair in &mut pairs {
+                    if pair.0 == param.name {
+                        pair.1 = payload.to_string();
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    pairs.push((param.name.clone(), payload.to_string()));
+                }
+                Some(
+                    url::form_urlencoded::Serializer::new(String::new())
+                        .extend_pairs(&pairs)
+                        .finish(),
+                )
+            } else {
+                Some(format!(
+                    "{}={}",
+                    urlencoding::encode(&param.name),
+                    urlencoding::encode(payload)
+                ))
+            };
+            crate::utils::build_request(client, target, method, parsed_url, body)
+        }
+        Location::JsonBody => {
+            // JSON body injection: use original URL, replace param value in JSON body
+            let parsed_url = target.url.clone();
+            let body = if let Some(ref data) = target.data {
+                // Attempt to parse as JSON and replace the param value
+                if let Ok(mut json_val) = serde_json::from_str::<serde_json::Value>(data) {
+                    if let Some(obj) = json_val.as_object_mut() {
+                        obj.insert(
+                            param.name.clone(),
+                            serde_json::Value::String(payload.to_string()),
+                        );
+                    }
+                    Some(serde_json::to_string(&json_val).unwrap_or_else(|_| data.clone()))
+                } else {
+                    // Fallback: simple string replacement of the param's original value
+                    Some(data.replace(&param.value, payload))
+                }
+            } else {
+                Some(serde_json::json!({ &param.name: payload }).to_string())
+            };
+            let rb = crate::utils::build_request(client, target, method, parsed_url, body);
+            rb.header("Content-Type", "application/json")
+        }
+        _ => {
+            // Query / Path: inject payload into the URL
+            let inject_url =
+                crate::scanning::url_inject::build_injected_url(&target.url, param, payload);
+            let parsed_url = url::Url::parse(&inject_url).unwrap_or_else(|_| target.url.clone());
+            crate::utils::build_request(client, target, method, parsed_url, target.data.clone())
+        }
+    };
 
     // Send the injection request
     let inject_resp = inject_request.send().await;
@@ -227,6 +364,18 @@ async fn fetch_injection_response_with_client(
     } else {
         // Normal reflection check
         if let Ok(resp) = inject_resp {
+            // Check for redirect context: if the response is a 3xx redirect,
+            // the Location header may contain the reflected payload.
+            if resp.status().is_redirection() {
+                if let Some(location) = resp.headers().get("location").and_then(|v| v.to_str().ok())
+                {
+                    if location.contains(payload) {
+                        // Synthesize a response text that includes the Location value
+                        // so reflection detection can find it
+                        return Some(location.to_string());
+                    }
+                }
+            }
             resp.text().await.ok()
         } else {
             None
@@ -406,6 +555,14 @@ mod tests {
         Html(format!("<div>{}</div>", urlencoding::encode(&q)))
     }
 
+    async fn form_urlencoded_handler(
+        Query(params): Query<HashMap<String, String>>,
+    ) -> Html<String> {
+        let q = params.get("q").cloned().unwrap_or_default();
+        let encoded = urlencoding::encode(&q).to_string().replace("%20", "+");
+        Html(format!("<div>{}</div>", encoded))
+    }
+
     async fn none_handler() -> Html<&'static str> {
         Html("<div>not reflected</div>")
     }
@@ -428,6 +585,7 @@ mod tests {
             .route("/reflect/raw", get(raw_handler))
             .route("/reflect/html-entity", get(html_entity_handler))
             .route("/reflect/url-encoded", get(url_encoded_handler))
+            .route("/reflect/form-url-encoded", get(form_urlencoded_handler))
             .route("/reflect/none", get(none_handler))
             .route("/reflect/json", get(json_handler))
             .route("/sxss/stored", get(sxss_handler))
@@ -552,6 +710,37 @@ mod tests {
     }
 
     #[test]
+    fn test_is_payload_reflected_form_urlencoded_plus_spaces() {
+        let payload = "<img src=x onerror=alert(1) class=dalfox>";
+        let resp = "<img+src=x+onerror=alert(1)+class=dalfox>";
+        assert_eq!(
+            classify_reflection(resp, payload),
+            Some(ReflectionKind::UrlDecoded)
+        );
+    }
+
+    #[test]
+    fn test_is_payload_reflected_percent_encoded_with_plus_spaces() {
+        let payload = "<img src=x onerror=alert(1) class=dalfox>";
+        let resp = "%3Cimg+src%3Dx+onerror%3Dalert%281%29+class%3Ddalfox%3E";
+        assert_eq!(
+            classify_reflection(resp, payload),
+            Some(ReflectionKind::UrlDecoded)
+        );
+    }
+
+    #[test]
+    fn test_is_payload_reflected_quadruple_encoded_payload_variant() {
+        let payload =
+            crate::encoding::quadruple_url_encode("<img src=x onerror=alert(1) class=dalfox>");
+        let resp = "<img+src=x+onerror=alert(1)+class=dalfox>";
+        assert_eq!(
+            classify_reflection(resp, &payload),
+            Some(ReflectionKind::UrlDecoded)
+        );
+    }
+
+    #[test]
     fn test_is_payload_reflected_double_layer_percent_entity_then_url() {
         // Server returns percent sign as HTML-entity, which then precedes URL-encoded payload
         let payload = "<script>alert(1)</script>";
@@ -615,6 +804,23 @@ mod tests {
 
         let found = check_reflection(&target, &param, payload, &args).await;
         assert!(found, "URL-encoded reflection should be detected");
+    }
+
+    #[tokio::test]
+    async fn test_check_reflection_detects_form_urlencoded_response_runtime() {
+        let payload = "<img src=x onerror=alert(1) class=dalfox>";
+        let addr = start_mock_server("stored").await;
+        let target = make_target(addr, "/reflect/form-url-encoded");
+        let param = make_param();
+        let args = default_scan_args();
+
+        let (kind, body) = check_reflection_with_response(&target, &param, payload, &args).await;
+        assert_eq!(kind, Some(ReflectionKind::UrlDecoded));
+        assert!(
+            body.unwrap_or_default()
+                .contains("%3Cimg+src%3Dx+onerror%3Dalert%281%29+class%3Ddalfox%3E"),
+            "form-style encoded response should be preserved for inspection"
+        );
     }
 
     #[tokio::test]
@@ -751,6 +957,9 @@ mod tests {
 
     #[test]
     fn test_safe_context_no_payload() {
-        assert!(is_in_safe_context("<html><body>nothing</body></html>", "PAYLOAD"));
+        assert!(is_in_safe_context(
+            "<html><body>nothing</body></html>",
+            "PAYLOAD"
+        ));
     }
 }

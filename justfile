@@ -8,6 +8,9 @@ test:
 test_all:
     cargo test -- --include-ignored
 
+xssmaze_smoke:
+    cargo test test_cli_scans_xssmaze_json_endpoint_without_deep_scan -- --ignored --nocapture
+
 #fix:
 #    cargo fmt
 #    cargo clippy --fix --allow-dirty

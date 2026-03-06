@@ -105,6 +105,13 @@ pub fn detect_injection_context(text: &str) -> InjectionContext {
         None
     }
 
+    fn is_url_like_attribute(name: &str) -> bool {
+        matches!(
+            name.to_ascii_lowercase().as_str(),
+            "src" | "href" | "xlink:href" | "data" | "action" | "formaction" | "poster"
+        )
+    }
+
     // 1) JavaScript context: marker appears in any <script> text
     if let Ok(sel) = scraper::Selector::parse("script") {
         for el in document.select(&sel) {
@@ -119,10 +126,14 @@ pub fn detect_injection_context(text: &str) -> InjectionContext {
     // 2) Attribute context: marker in any attribute value
     if let Ok(any) = scraper::Selector::parse("*") {
         for el in document.select(&any) {
-            for (_name, v) in el.value().attrs() {
+            for (name, v) in el.value().attrs() {
                 if v.contains(marker) {
                     let delim = infer_quote_delimiter(text, marker);
-                    return InjectionContext::Attribute(delim);
+                    return if is_url_like_attribute(name) {
+                        InjectionContext::AttributeUrl(delim)
+                    } else {
+                        InjectionContext::Attribute(delim)
+                    };
                 }
             }
         }
@@ -267,28 +278,39 @@ pub async fn probe_dictionary_params(
                 crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
 
                 let mut discovered: Option<Param> = None;
-                if let Ok(r) = resp
-                    && let Ok(text) = r.text().await
-                {
-                    let mut st = stats_clone.lock().await;
-                    st.record_attempt();
-                    if text.contains(crate::scanning::markers::open_marker()) {
+                if let Ok(r) = resp {
+                    // Check for redirect reflection: if the response is a 3xx redirect,
+                    // the Location header may contain the reflected marker value.
+                    let is_redirect = r.status().is_redirection();
+                    let location_has_marker = if is_redirect {
+                        r.headers()
+                            .get("location")
+                            .and_then(|v| v.to_str().ok())
+                            .map(|loc| loc.contains(crate::scanning::markers::open_marker()))
+                            .unwrap_or(false)
+                    } else {
+                        false
+                    };
+
+                    if location_has_marker {
+                        // Redirect context: marker reflected in Location header.
+                        let mut st = stats_clone.lock().await;
+                        st.record_attempt();
                         st.record_reflection();
                         if !st.collapsed {
-                            let context = detect_injection_context(&text);
-                            let (valid, invalid) =
-                                crate::parameter_analysis::classify_special_chars(&text);
                             discovered = Some(Param {
                                 name: param_name.clone(),
                                 value: crate::scanning::markers::open_marker().to_string(),
                                 location: crate::parameter_analysis::Location::Query,
-                                injection_context: Some(context),
-                                valid_specials: Some(valid),
-                                invalid_specials: Some(invalid),
+                                injection_context: Some(
+                                    crate::parameter_analysis::InjectionContext::AttributeUrl(None),
+                                ),
+                                valid_specials: None,
+                                invalid_specials: None,
                             });
                             if !silence {
                                 eprintln!(
-                                    "Discovered parameter: {} (EWMA {:.2}, {}/{})",
+                                    "Discovered parameter (redirect): {} (EWMA {:.2}, {}/{})",
                                     param_name, st.ewma_ratio, st.reflections, st.attempts
                                 );
                             }
@@ -302,8 +324,42 @@ pub async fn probe_dictionary_params(
                                 }
                             }
                         }
-                    } else {
-                        st.record_non_reflection();
+                    } else if let Ok(text) = r.text().await {
+                        let mut st = stats_clone.lock().await;
+                        st.record_attempt();
+                        if text.contains(crate::scanning::markers::open_marker()) {
+                            st.record_reflection();
+                            if !st.collapsed {
+                                let context = detect_injection_context(&text);
+                                let (valid, invalid) =
+                                    crate::parameter_analysis::classify_special_chars(&text);
+                                discovered = Some(Param {
+                                    name: param_name.clone(),
+                                    value: crate::scanning::markers::open_marker().to_string(),
+                                    location: crate::parameter_analysis::Location::Query,
+                                    injection_context: Some(context),
+                                    valid_specials: Some(valid),
+                                    invalid_specials: Some(invalid),
+                                });
+                                if !silence {
+                                    eprintln!(
+                                        "Discovered parameter: {} (EWMA {:.2}, {}/{})",
+                                        param_name, st.ewma_ratio, st.reflections, st.attempts
+                                    );
+                                }
+                                if st.should_collapse() {
+                                    st.collapsed = true;
+                                    if !silence {
+                                        eprintln!(
+                                            "[mining-collapse] High reflection EWMA {:.2} after {} attempts ({} reflections)",
+                                            st.ewma_ratio, st.attempts, st.reflections
+                                        );
+                                    }
+                                }
+                            }
+                        } else {
+                            st.record_non_reflection();
+                        }
                     }
                 }
 
@@ -613,7 +669,8 @@ pub async fn probe_response_id_params(
                 continue;
             }
             let mut url = target.url.clone();
-            url.query_pairs_mut().append_pair(&param, "dalfox");
+            url.query_pairs_mut()
+                .append_pair(&param, crate::scanning::markers::open_marker());
             let client_clone = client.clone();
 
             let data = target.data.clone();
@@ -983,6 +1040,10 @@ pub async fn mine_parameters(
 mod tests {
     use super::*;
     use crate::target_parser::parse_target;
+    use axum::{Router, extract::Query, response::Html, routing::get};
+    use std::collections::HashMap;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use tokio::time::{Duration, sleep};
 
     fn default_scan_args() -> ScanArgs {
         ScanArgs {
@@ -1096,6 +1157,17 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_detect_injection_context_url_attribute_double_quote() {
+        let marker = crate::scanning::markers::open_marker();
+        let body = format!("<iframe src=\"{}\"></iframe>", marker);
+        let ctx = detect_injection_context(&body);
+        assert_eq!(
+            ctx,
+            InjectionContext::AttributeUrl(Some(DelimiterType::DoubleQuote))
+        );
+    }
+
     #[tokio::test]
     async fn test_probe_dictionary_params_returns_when_wordlist_file_missing() {
         let target = parse_target("http://127.0.0.1:1").expect("parse target");
@@ -1191,5 +1263,47 @@ mod tests {
         .await;
 
         assert!(reflection_params.lock().await.is_empty());
+    }
+
+    async fn dom_mining_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
+        let marker = params.get("search").cloned().unwrap_or_default();
+        Html(format!(
+            "<form><input id=\"search\" name=\"search\" value=\"seed\"></form><div>{}</div>",
+            marker
+        ))
+    }
+
+    async fn start_dom_mining_server() -> SocketAddr {
+        let app = Router::new().route("/dom-mining", get(dom_mining_handler));
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("bind listener");
+        let addr = listener.local_addr().expect("listener addr");
+
+        tokio::spawn(async move {
+            let _ = axum::serve(listener, app).await;
+        });
+
+        sleep(Duration::from_millis(20)).await;
+        addr
+    }
+
+    #[tokio::test]
+    async fn test_probe_response_id_params_discovers_reflected_input_name() {
+        let addr = start_dom_mining_server().await;
+        let target = parse_target(&format!("http://{}:{}/dom-mining", addr.ip(), addr.port()))
+            .expect("parse target");
+        let args = default_scan_args();
+        let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+        let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+
+        probe_response_id_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+
+        let params = reflection_params.lock().await.clone();
+        assert!(params.iter().any(|p| {
+            p.name == "search"
+                && p.location == Location::Query
+                && p.value == crate::scanning::markers::open_marker()
+        }));
     }
 }

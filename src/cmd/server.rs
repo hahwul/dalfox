@@ -209,7 +209,10 @@ fn extract_jsonp_callback(
 /// Build the final HTTP response body, applying JSONP wrapping when a valid callback is present.
 /// Returns `(content_type_override, body_string)`.  When `jsonp_cb` is `Some`, the body is
 /// wrapped as `callback(json);` and the content-type is set to `application/javascript`.
-fn build_response_body<T: Serialize>(resp: &T, jsonp_cb: Option<&str>) -> (Option<&'static str>, String) {
+fn build_response_body<T: Serialize>(
+    resp: &T,
+    jsonp_cb: Option<&str>,
+) -> (Option<&'static str>, String) {
     let json = serde_json::to_string(resp).expect("serializable response");
     match jsonp_cb {
         Some(cb) => (
@@ -244,22 +247,16 @@ fn build_cors_headers(state: &AppState, req_headers: &HeaderMap) -> HeaderMap {
     }
 
     // Methods/Headers (configured or defaults)
-    let allow_methods = state
-        .allow_methods
-        .parse()
-        .unwrap_or_else(|_| {
-            "GET,POST,OPTIONS,PUT,PATCH,DELETE"
-                .parse()
-                .expect("static CORS methods header")
-        });
-    let allow_headers = state
-        .allow_headers
-        .parse()
-        .unwrap_or_else(|_| {
-            "Content-Type,X-API-KEY,Authorization"
-                .parse()
-                .expect("static CORS headers header")
-        });
+    let allow_methods = state.allow_methods.parse().unwrap_or_else(|_| {
+        "GET,POST,OPTIONS,PUT,PATCH,DELETE"
+            .parse()
+            .expect("static CORS methods header")
+    });
+    let allow_headers = state.allow_headers.parse().unwrap_or_else(|_| {
+        "Content-Type,X-API-KEY,Authorization"
+            .parse()
+            .expect("static CORS headers header")
+    });
 
     // Wildcard
     if state.allow_all_origins {
@@ -378,7 +375,9 @@ async fn run_scan_job(
         skip_mining_dict: false,
         skip_mining_dom: false,
 
-        timeout: opts.timeout.unwrap_or(crate::cmd::scan::DEFAULT_TIMEOUT_SECS),
+        timeout: opts
+            .timeout
+            .unwrap_or(crate::cmd::scan::DEFAULT_TIMEOUT_SECS),
         delay: opts.delay.unwrap_or(0),
         proxy: None,
         follow_redirects: false,

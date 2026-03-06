@@ -4,7 +4,7 @@ use base64::{Engine, engine::general_purpose::STANDARD};
 /// Policy:
 /// - If encoders contains "none", return only the original payloads (deduplicated), no variants.
 /// - Otherwise, include original payload and, for each encoder present, append its variant(s).
-/// - Encoder application order is fixed to: url, html, 2url, base64
+/// - Encoder application order is fixed to: url, html, 2url, 3url, 4url, base64
 /// - Results are de-duplicated while preserving the first occurrence order.
 pub fn apply_encoders_to_payloads(base_payloads: &[String], encoders: &[String]) -> Vec<String> {
     // Dedup base first while preserving order
@@ -25,7 +25,9 @@ pub fn apply_encoders_to_payloads(base_payloads: &[String], encoders: &[String])
     let mut out_seen = std::collections::HashSet::new();
 
     // Expansion order
-    let prio = ["url", "html", "2url", "base64", "unicode", "zwsp"];
+    let prio = [
+        "url", "html", "2url", "3url", "4url", "base64", "unicode", "zwsp",
+    ];
 
     // Pre-calculate active encoders
     let active_encoders: Vec<&str> = prio
@@ -45,6 +47,8 @@ pub fn apply_encoders_to_payloads(base_payloads: &[String], encoders: &[String])
                 "url" => url_encode(p),
                 "html" => html_entity_encode(p),
                 "2url" => double_url_encode(p),
+                "3url" => triple_url_encode(p),
+                "4url" => quadruple_url_encode(p),
                 "base64" => base64_encode(p),
                 "unicode" => unicode_fullwidth_encode(p),
                 "zwsp" => zero_width_encode(p),
@@ -91,10 +95,13 @@ mod encoder_policy_tests {
 
     #[test]
     fn test_expand_single_payload() {
-        let out =
-            expand_payload_with_encoders("<", &["2url".to_string(), "base64".to_string()]);
+        let out = expand_payload_with_encoders(
+            "<",
+            &["2url".to_string(), "3url".to_string(), "base64".to_string()],
+        );
         assert!(out.contains(&"<".to_string()));
         assert!(out.contains(&double_url_encode("<")));
+        assert!(out.contains(&triple_url_encode("<")));
         assert!(out.contains(&base64_encode("<")));
     }
 }
@@ -103,6 +110,14 @@ mod encoder_policy_tests {
 /// Example: "<" becomes "%3C"
 pub fn url_encode(payload: &str) -> String {
     urlencoding::encode(payload).to_string()
+}
+
+fn repeat_url_encode(payload: &str, rounds: usize) -> String {
+    let mut encoded = payload.to_string();
+    for _ in 0..rounds {
+        encoded = url_encode(&encoded);
+    }
+    encoded
 }
 
 /// Base64-encodes the given payload string.
@@ -126,7 +141,19 @@ pub fn html_entity_encode(payload: &str) -> String {
 /// First encodes, then encodes the result again.
 /// Example: "<" becomes "%253C"
 pub fn double_url_encode(payload: &str) -> String {
-    url_encode(&url_encode(payload))
+    repeat_url_encode(payload, 2)
+}
+
+/// Triple URL-encodes the given payload string.
+/// Useful when the target or framework decodes percent-encoding more than twice.
+pub fn triple_url_encode(payload: &str) -> String {
+    repeat_url_encode(payload, 3)
+}
+
+/// Quadruple URL-encodes the given payload string.
+/// Useful when one decode happens in request parsing before application logic.
+pub fn quadruple_url_encode(payload: &str) -> String {
+    repeat_url_encode(payload, 4)
 }
 
 /// Unicode fullwidth encoding: maps ASCII 0x21-0x7E to fullwidth equivalents
@@ -195,6 +222,8 @@ pub fn generate_adaptive_encodings(
         encoders.push("html".to_string());
         encoders.push("url".to_string());
         encoders.push("2url".to_string());
+        encoders.push("3url".to_string());
+        encoders.push("4url".to_string());
         encoders.push("unicode".to_string());
     }
 
@@ -215,10 +244,7 @@ pub fn generate_adaptive_encodings(
 }
 
 /// Apply adaptive encoding to a single payload based on which chars are blocked.
-pub fn apply_adaptive_encoding(
-    payload: &str,
-    invalid_specials: &[char],
-) -> Vec<String> {
+pub fn apply_adaptive_encoding(payload: &str, invalid_specials: &[char]) -> Vec<String> {
     let mut variants = vec![payload.to_string()];
 
     let angle_blocked = invalid_specials.contains(&'<') || invalid_specials.contains(&'>');
@@ -230,6 +256,8 @@ pub fn apply_adaptive_encoding(
         variants.push(selective_html_encode(payload, &['<', '>']));
         variants.push(url_encode(payload));
         variants.push(double_url_encode(payload));
+        variants.push(triple_url_encode(payload));
+        variants.push(quadruple_url_encode(payload));
         variants.push(unicode_fullwidth_encode(payload));
         // Combo: url(html)
         variants.push(url_encode(&selective_html_encode(payload, &['<', '>'])));
@@ -300,6 +328,17 @@ mod tests {
         assert_eq!(
             double_url_encode("<script>alert(1)</script>"),
             "%253Cscript%253Ealert%25281%2529%253C%252Fscript%253E"
+        );
+    }
+
+    #[test]
+    fn test_deep_url_encode() {
+        assert_eq!(triple_url_encode("<"), "%25253C");
+        assert_eq!(quadruple_url_encode("<"), "%2525253C");
+        assert_eq!(triple_url_encode("<"), url_encode(&double_url_encode("<")));
+        assert_eq!(
+            quadruple_url_encode("<"),
+            url_encode(&triple_url_encode("<"))
         );
     }
 
@@ -387,6 +426,8 @@ mod tests {
         assert!(encoders.contains(&"html".to_string()));
         assert!(encoders.contains(&"url".to_string()));
         assert!(encoders.contains(&"2url".to_string()));
+        assert!(encoders.contains(&"3url".to_string()));
+        assert!(encoders.contains(&"4url".to_string()));
         assert!(encoders.contains(&"unicode".to_string()));
     }
 
@@ -412,6 +453,16 @@ mod tests {
         assert_eq!(variants[0], "<img src=x>");
         // Should contain a variant with encoded angles
         assert!(variants.iter().any(|v| !v.contains('<')));
+        assert!(
+            variants
+                .iter()
+                .any(|v| v == &triple_url_encode("<img src=x>"))
+        );
+        assert!(
+            variants
+                .iter()
+                .any(|v| v == &quadruple_url_encode("<img src=x>"))
+        );
     }
 
     #[test]

@@ -718,7 +718,7 @@ pub fn default_toml_template() -> String {
 # max_targets_per_host = 100
 
 # XSS SCANNING
-# encoders = ["url", "html"]  # none, url, 2url, html, base64
+# encoders = ["url", "html"]  # none, url, 2url, 3url, 4url, html, base64
 # remote_payloads = ["payloadbox", "portswigger"]
 # custom_blind_xss_payload = "blind.txt"
 # blind_callback_url = "https://your-bxss-callback.com"

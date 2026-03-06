@@ -5,7 +5,7 @@
 
 use dalfox::encoding::{
     apply_encoders_to_payloads, base64_encode, double_url_encode, expand_payload_with_encoders,
-    html_entity_encode, url_encode,
+    html_entity_encode, quadruple_url_encode, triple_url_encode, url_encode,
 };
 
 mod url_encoding {
@@ -107,6 +107,17 @@ mod double_url_encoding {
     fn test_double_url_encode_empty_string() {
         assert_eq!(double_url_encode(""), "");
     }
+
+    #[test]
+    fn test_deep_url_encode_special_chars() {
+        assert_eq!(triple_url_encode("<"), "%25253C");
+        assert_eq!(quadruple_url_encode("<"), "%2525253C");
+        assert_eq!(triple_url_encode("<"), url_encode(&double_url_encode("<")));
+        assert_eq!(
+            quadruple_url_encode("<"),
+            url_encode(&triple_url_encode("<"))
+        );
+    }
 }
 
 mod base64_encoding {
@@ -196,11 +207,14 @@ mod encoder_policy {
 
     #[test]
     fn test_expand_single_payload() {
-        let out =
-            expand_payload_with_encoders("<", &["2url".to_string(), "base64".to_string()]);
+        let out = expand_payload_with_encoders(
+            "<",
+            &["2url".to_string(), "3url".to_string(), "4url".to_string()],
+        );
         assert!(out.contains(&"<".to_string()));
         assert!(out.contains(&double_url_encode("<")));
-        assert!(out.contains(&base64_encode("<")));
+        assert!(out.contains(&triple_url_encode("<")));
+        assert!(out.contains(&quadruple_url_encode("<")));
     }
 
     #[test]
@@ -218,5 +232,27 @@ mod encoder_policy {
         let out = apply_encoders_to_payloads(&bases, &encs);
         // With no encoders, only originals should be returned
         assert_eq!(out, vec!["<x>".to_string()]);
+    }
+
+    #[test]
+    fn test_apply_encoders_supports_deep_url_order() {
+        let bases = vec!["<x>".to_string()];
+        let encs = vec![
+            "4url".to_string(),
+            "url".to_string(),
+            "3url".to_string(),
+            "2url".to_string(),
+        ];
+        let out = apply_encoders_to_payloads(&bases, &encs);
+        assert_eq!(
+            out,
+            vec![
+                "<x>".to_string(),
+                url_encode("<x>"),
+                double_url_encode("<x>"),
+                triple_url_encode("<x>"),
+                quadruple_url_encode("<x>"),
+            ]
+        );
     }
 }

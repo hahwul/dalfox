@@ -77,9 +77,221 @@ struct DomXssVisitor<'a> {
     field_taints: HashMap<String, String>,
     /// Top-level global variable taint tracking
     global_taints: HashSet<String>,
+    /// Track `urlVar -> base source` for `new URL(tainted)` instances.
+    url_object_sources: HashMap<String, String>,
+    /// Track `paramsVar -> base source` for `url.searchParams` aliases.
+    url_search_params_sources: HashMap<String, String>,
+    /// Track variables known to hold URLSearchParams objects.
+    url_search_params_objects: HashSet<String>,
+    /// Track `paramsVar.key -> upstream source` for URLSearchParams set/get reparses.
+    url_search_params_field_sources: HashMap<String, String>,
 }
 
 impl<'a> DomXssVisitor<'a> {
+    fn extract_static_string_argument(call: &CallExpression<'a>, idx: usize) -> Option<String> {
+        let arg = call.arguments.get(idx)?;
+        let expr = arg.as_expression()?;
+        match expr {
+            Expression::StringLiteral(s) => Some(s.value.to_string()),
+            Expression::TemplateLiteral(t) if t.expressions.is_empty() && t.quasis.len() == 1 => {
+                t.quasis.first().map(|q| q.value.raw.to_string())
+            }
+            _ => None,
+        }
+    }
+
+    fn normalize_search_param_source(&self, source: &str) -> String {
+        match source {
+            "location.href" | "document.URL" | "document.documentURI" | "document.baseURI" => {
+                "location.search".to_string()
+            }
+            _ => source.to_string(),
+        }
+    }
+
+    fn compose_search_param_source(&self, base_source: &str, param_name: &str) -> String {
+        if base_source.starts_with("URLSearchParams.get(") {
+            format!("{base_source}.get({param_name})")
+        } else {
+            format!("URLSearchParams.get({param_name})")
+        }
+    }
+
+    fn storage_get_source(&self, call: &CallExpression<'a>, callee_str: &str) -> Option<String> {
+        if callee_str != "localStorage.getItem" && callee_str != "sessionStorage.getItem" {
+            return None;
+        }
+
+        if let Some(key) = Self::extract_static_string_argument(call, 0) {
+            Some(format!("{callee_str}({key})"))
+        } else {
+            Some(callee_str.to_string())
+        }
+    }
+
+    fn url_source_from_argument(&self, arg: &Argument<'a>) -> Option<String> {
+        let expr = match arg {
+            Argument::SpreadElement(spread) => &spread.argument,
+            _ => arg.as_expression()?,
+        };
+        self.find_source_in_expr(expr)
+            .map(|source| self.normalize_search_param_source(&source))
+    }
+
+    fn url_object_source_from_new_expression(
+        &self,
+        new_expr: &NewExpression<'a>,
+    ) -> Option<String> {
+        let Expression::Identifier(id) = &new_expr.callee else {
+            return None;
+        };
+        if id.name.as_str() != "URL" {
+            return None;
+        }
+
+        new_expr
+            .arguments
+            .first()
+            .and_then(|arg| self.url_source_from_argument(arg))
+    }
+
+    fn url_object_source_for_expr(&self, expr: &Expression<'a>) -> Option<String> {
+        match expr {
+            Expression::Identifier(id) => self.url_object_sources.get(id.name.as_str()).cloned(),
+            Expression::NewExpression(new_expr) => {
+                self.url_object_source_from_new_expression(new_expr)
+            }
+            Expression::ParenthesizedExpression(paren) => {
+                self.url_object_source_for_expr(&paren.expression)
+            }
+            _ => None,
+        }
+    }
+
+    fn url_search_params_source_for_member(
+        &self,
+        member: &StaticMemberExpression<'a>,
+    ) -> Option<String> {
+        if member.property.name.as_str() != "searchParams" {
+            return None;
+        }
+
+        self.url_object_source_for_expr(&member.object)
+    }
+
+    fn url_search_params_source_for_expr(&self, expr: &Expression<'a>) -> Option<String> {
+        match expr {
+            Expression::Identifier(id) => self
+                .url_search_params_sources
+                .get(id.name.as_str())
+                .cloned(),
+            Expression::NewExpression(new_expr) => {
+                let Expression::Identifier(id) = &new_expr.callee else {
+                    return None;
+                };
+                if id.name.as_str() != "URLSearchParams" {
+                    return None;
+                }
+                new_expr
+                    .arguments
+                    .first()
+                    .and_then(|arg| self.url_source_from_argument(arg))
+            }
+            Expression::StaticMemberExpression(member) => {
+                self.url_search_params_source_for_member(member)
+            }
+            Expression::ParenthesizedExpression(paren) => {
+                self.url_search_params_source_for_expr(&paren.expression)
+            }
+            _ => None,
+        }
+    }
+
+    fn url_search_params_get_source(
+        &self,
+        call: &CallExpression<'a>,
+        object: &Expression<'a>,
+    ) -> Option<String> {
+        let base_source = self.url_search_params_source_for_expr(object)?;
+
+        if let Some(param_name) = Self::extract_static_string_argument(call, 0) {
+            if let Some(source) = self.url_search_params_field_source_for_expr(object, &param_name)
+            {
+                return Some(source);
+            }
+            Some(self.compose_search_param_source(&base_source, &param_name))
+        } else {
+            Some(base_source)
+        }
+    }
+
+    fn url_search_params_field_key(var_name: &str, param_name: &str) -> String {
+        format!("{var_name}.{param_name}")
+    }
+
+    fn url_search_params_field_source_for_expr(
+        &self,
+        expr: &Expression<'a>,
+        param_name: &str,
+    ) -> Option<String> {
+        let Expression::Identifier(id) = expr else {
+            return None;
+        };
+        self.url_search_params_field_sources
+            .get(&Self::url_search_params_field_key(
+                id.name.as_str(),
+                param_name,
+            ))
+            .cloned()
+    }
+
+    fn clear_url_search_params_field_sources(&mut self, var_name: &str) {
+        let prefix = format!("{var_name}.");
+        self.url_search_params_field_sources
+            .retain(|key, _| !key.starts_with(&prefix));
+    }
+
+    fn clone_url_search_params_field_sources(&mut self, from: &str, to: &str) {
+        let prefix = format!("{from}.");
+        let cloned = self
+            .url_search_params_field_sources
+            .iter()
+            .filter_map(|(key, value)| {
+                key.strip_prefix(&prefix)
+                    .map(|suffix| (Self::url_search_params_field_key(to, suffix), value.clone()))
+            })
+            .collect::<Vec<_>>();
+
+        for (key, value) in cloned {
+            self.url_search_params_field_sources.insert(key, value);
+        }
+    }
+
+    fn clone_url_search_params_field_sources_from_expr(
+        &mut self,
+        expr: &Expression<'a>,
+        target: &str,
+    ) {
+        let Expression::CallExpression(call) = expr else {
+            return;
+        };
+        let Some(method) = self.get_callee_property_name(&call.callee) else {
+            return;
+        };
+        if method != "toString" {
+            return;
+        }
+        let Some(target_obj) = self.get_callee_object_expr(&call.callee) else {
+            return;
+        };
+        let Expression::Identifier(id) = target_obj else {
+            return;
+        };
+        if self.url_search_params_objects.contains(id.name.as_str()) {
+            self.clone_url_search_params_field_sources(id.name.as_str(), target);
+        }
+    }
+
     fn new(source_code: &'a str) -> Self {
         let mut sources = HashSet::new();
         // Common DOM XSS sources
@@ -103,6 +315,10 @@ impl<'a> DomXssVisitor<'a> {
         // PostMessage data (event.data, e.data)
         sources.insert("event.data".to_string());
         sources.insert("e.data".to_string());
+        sources.insert("event.newValue".to_string());
+        sources.insert("e.newValue".to_string());
+        sources.insert("event.oldValue".to_string());
+        sources.insert("e.oldValue".to_string());
         // Window opener
         sources.insert("window.opener".to_string());
         // Modern DOM sources
@@ -188,6 +404,10 @@ impl<'a> DomXssVisitor<'a> {
             source_code,
             field_taints: HashMap::new(),
             global_taints: HashSet::new(),
+            url_object_sources: HashMap::new(),
+            url_search_params_sources: HashMap::new(),
+            url_search_params_objects: HashSet::new(),
+            url_search_params_field_sources: HashMap::new(),
         }
     }
 
@@ -212,9 +432,10 @@ impl<'a> DomXssVisitor<'a> {
             Expression::StaticMemberExpression(inner) => self
                 .get_member_string(inner)
                 .map(|obj| format!("{}.{}", obj, property)),
-            Expression::MetaProperty(meta) => {
-                Some(format!("{}.{}.{}", meta.meta.name, meta.property.name, property))
-            }
+            Expression::MetaProperty(meta) => Some(format!(
+                "{}.{}.{}",
+                meta.meta.name, meta.property.name, property
+            )),
             _ => None,
         }
     }
@@ -458,17 +679,18 @@ impl<'a> DomXssVisitor<'a> {
                     }
                     _ => {
                         if let Some(elem_expr) = elem.as_expression()
-                            && current_idx == param_idx {
-                                let tainted = self.is_tainted(elem_expr);
-                                return (
-                                    tainted,
-                                    if tainted {
-                                        self.find_source_in_expr(elem_expr)
-                                    } else {
-                                        None
-                                    },
-                                );
-                            }
+                            && current_idx == param_idx
+                        {
+                            let tainted = self.is_tainted(elem_expr);
+                            return (
+                                tainted,
+                                if tainted {
+                                    self.find_source_in_expr(elem_expr)
+                                } else {
+                                    None
+                                },
+                            );
+                        }
                         current_idx += 1;
                     }
                 }
@@ -503,9 +725,10 @@ impl<'a> DomXssVisitor<'a> {
                 }
                 _ => {
                     if let Some(elem_expr) = elem.as_expression()
-                        && current_idx == param_idx {
-                            return self.eval_static_string_expr(elem_expr);
-                        }
+                        && current_idx == param_idx
+                    {
+                        return self.eval_static_string_expr(elem_expr);
+                    }
                     current_idx += 1;
                 }
             }
@@ -694,7 +917,8 @@ impl<'a> DomXssVisitor<'a> {
                 .and_then(|arg0| self.get_callable_target_key_from_argument(arg0));
 
             if let Some(target_name) = target_key.as_ref()
-                && (self.sanitizers.contains(target_name) || Self::is_likely_sanitizer_name(target_name))
+                && (self.sanitizers.contains(target_name)
+                    || Self::is_likely_sanitizer_name(target_name))
             {
                 return (false, None);
             }
@@ -814,10 +1038,19 @@ impl<'a> DomXssVisitor<'a> {
 
         // Direct source calls (e.g., localStorage.getItem(...))
         if let Expression::StaticMemberExpression(member) = &call.callee {
-            if let Some(callee_str) = self.get_member_string(member)
-                && self.sources.contains(&callee_str)
+            if member.property.name.as_str() == "get"
+                && let Some(source) = self.url_search_params_get_source(call, &member.object)
             {
-                return (true, Some(callee_str));
+                return (true, Some(source));
+            }
+
+            if let Some(callee_str) = self.get_member_string(member) {
+                if let Some(storage_source) = self.storage_get_source(call, &callee_str) {
+                    return (true, Some(storage_source));
+                }
+                if self.sources.contains(&callee_str) {
+                    return (true, Some(callee_str));
+                }
             }
 
             // Method call on tainted object (e.g., tainted.slice())
@@ -856,6 +1089,9 @@ impl<'a> DomXssVisitor<'a> {
                     || self.global_taints.contains(id.name.as_str())
             }
             Expression::StaticMemberExpression(member) => {
+                if self.url_search_params_source_for_member(member).is_some() {
+                    return true;
+                }
                 if let Some(full_path) = self.get_member_string(member) {
                     // Check field-level taint first for precise tracking
                     if self.field_taints.contains_key(&full_path) {
@@ -1286,6 +1522,7 @@ impl<'a> DomXssVisitor<'a> {
         if let Some(init) = &decl.init {
             if let BindingPatternKind::BindingIdentifier(id) = &decl.id.kind {
                 let var_name = id.name.as_str();
+                self.clear_url_search_params_field_sources(var_name);
 
                 // Register summaries for function expressions assigned to variables.
                 if let Expression::FunctionExpression(func_expr) = init
@@ -1339,6 +1576,50 @@ impl<'a> DomXssVisitor<'a> {
                     self.bound_function_aliases.remove(var_name);
                 }
 
+                let mut assigned_url_object_source = false;
+                if let Expression::NewExpression(new_expr) = init
+                    && let Some(source) = self.url_object_source_from_new_expression(new_expr)
+                {
+                    self.url_object_sources.insert(var_name.to_string(), source);
+                    assigned_url_object_source = true;
+                }
+                if !assigned_url_object_source {
+                    self.url_object_sources.remove(var_name);
+                }
+
+                let mut assigned_url_search_params_source = false;
+                if let Expression::StaticMemberExpression(member) = init
+                    && let Some(source) = self.url_search_params_source_for_member(member)
+                {
+                    self.tainted_vars.insert(var_name.to_string());
+                    self.var_aliases
+                        .insert(var_name.to_string(), source.clone());
+                    self.url_search_params_sources
+                        .insert(var_name.to_string(), source);
+                    assigned_url_search_params_source = true;
+                }
+                if !assigned_url_search_params_source {
+                    self.url_search_params_sources.remove(var_name);
+                }
+
+                let mut assigned_url_search_params_object = false;
+                if let Expression::StaticMemberExpression(member) = init
+                    && self.url_search_params_source_for_member(member).is_some()
+                {
+                    self.url_search_params_objects.insert(var_name.to_string());
+                    assigned_url_search_params_object = true;
+                }
+                if let Expression::NewExpression(new_expr) = init
+                    && let Expression::Identifier(id) = &new_expr.callee
+                    && id.name.as_str() == "URLSearchParams"
+                {
+                    self.url_search_params_objects.insert(var_name.to_string());
+                    assigned_url_search_params_object = true;
+                }
+                if !assigned_url_search_params_object {
+                    self.url_search_params_objects.remove(var_name);
+                }
+
                 // Check if initializer is a source or tainted
                 if let Some(source_expr) = self.get_expr_string(init)
                     && self.sources.contains(&source_expr)
@@ -1357,7 +1638,56 @@ impl<'a> DomXssVisitor<'a> {
                 {
                     // Mark this variable as tainted
                     self.tainted_vars.insert(var_name.to_string());
-                    self.var_aliases.insert(var_name.to_string(), callee_str);
+                    let source = self
+                        .storage_get_source(call, &callee_str)
+                        .unwrap_or(callee_str);
+                    self.var_aliases.insert(var_name.to_string(), source);
+                }
+
+                // Check for new URL(tainted) / new URLSearchParams(tainted)
+                if let Expression::NewExpression(new_expr) = init
+                    && let Expression::Identifier(id) = &new_expr.callee
+                    && (id.name.as_str() == "URL" || id.name.as_str() == "URLSearchParams")
+                    && !new_expr.arguments.is_empty()
+                    && let Some(arg) = new_expr.arguments.first()
+                {
+                    let is_arg_tainted = match arg {
+                        Argument::SpreadElement(spread) => self.is_tainted(&spread.argument),
+                        _ => arg
+                            .as_expression()
+                            .map(|e| self.is_tainted(e))
+                            .unwrap_or(false),
+                    };
+                    if is_arg_tainted {
+                        self.tainted_vars.insert(var_name.to_string());
+                        let source_expr = match arg {
+                            Argument::SpreadElement(spread) => Some(&spread.argument),
+                            _ => arg.as_expression(),
+                        };
+                        let source = source_expr
+                            .and_then(|e| self.find_source_in_expr(e))
+                            .map(|source| {
+                                if id.name.as_str() == "URLSearchParams" {
+                                    self.normalize_search_param_source(&source)
+                                } else {
+                                    source
+                                }
+                            })
+                            .unwrap_or_else(|| "location.search".to_string());
+                        self.var_aliases
+                            .insert(var_name.to_string(), source.clone());
+                        if id.name.as_str() == "URLSearchParams" {
+                            self.url_search_params_objects.insert(var_name.to_string());
+                            self.url_search_params_sources
+                                .insert(var_name.to_string(), source);
+                            if let Some(source_expr) = source_expr {
+                                self.clone_url_search_params_field_sources_from_expr(
+                                    source_expr,
+                                    var_name,
+                                );
+                            }
+                        }
+                    }
                 }
 
                 // Check for taintedVar.get() calls (URLSearchParams.get, Map.get, etc.)
@@ -1366,53 +1696,20 @@ impl<'a> DomXssVisitor<'a> {
                     && let Expression::StaticMemberExpression(member) = &call.callee
                     && member.property.name.as_str() == "get"
                 {
-                    // Check if the object is tainted (e.g., urlParams.get())
-                    if self.is_tainted(&member.object) {
+                    if let Some(source) = self.url_search_params_get_source(call, &member.object) {
+                        self.tainted_vars.insert(var_name.to_string());
+                        self.var_aliases.insert(var_name.to_string(), source);
+                    } else if self.is_tainted(&member.object) {
+                        // Check if the object is tainted (e.g., taintedMap.get())
                         self.tainted_vars.insert(var_name.to_string());
                         if let Some(source) = self.find_source_in_expr(&member.object) {
+                            let source = self.normalize_search_param_source(&source);
                             self.var_aliases.insert(var_name.to_string(), source);
                         } else {
                             self.var_aliases
-                                .insert(var_name.to_string(), "URLSearchParams.get".to_string());
+                                .insert(var_name.to_string(), "location.search".to_string());
                         }
                     }
-                }
-
-                // Check for new URL(tainted).searchParams
-                // e.g., urlParams = new URL(location.href).searchParams
-                if let Expression::StaticMemberExpression(member) = init
-                    && member.property.name.as_str() == "searchParams"
-                {
-                    // Check if the object is new URL(tainted)
-                    if let Expression::NewExpression(new_expr) = &member.object
-                        && let Expression::Identifier(id) = &new_expr.callee
-                            && id.name.as_str() == "URL" && !new_expr.arguments.is_empty() {
-                                // Check if the first argument is tainted
-                                if let Some(arg) = new_expr.arguments.first() {
-                                    let is_arg_tainted = match arg {
-                                        Argument::SpreadElement(spread) => {
-                                            self.is_tainted(&spread.argument)
-                                        }
-                                        _ => arg
-                                            .as_expression()
-                                            .map(|e| self.is_tainted(e))
-                                            .unwrap_or(false),
-                                    };
-                                    if is_arg_tainted {
-                                        self.tainted_vars.insert(var_name.to_string());
-                                        let source_expr = match arg {
-                                            Argument::SpreadElement(spread) => {
-                                                Some(&spread.argument)
-                                            }
-                                            _ => arg.as_expression(),
-                                        };
-                                        let source = source_expr
-                                            .and_then(|e| self.find_source_in_expr(e))
-                                            .unwrap_or_else(|| "URL.searchParams".to_string());
-                                        self.var_aliases.insert(var_name.to_string(), source);
-                                    }
-                                }
-                            }
                 }
 
                 // Check for JSON.parse(tainted) - taint propagates through JSON.parse
@@ -1512,12 +1809,22 @@ impl<'a> DomXssVisitor<'a> {
         match expr {
             Expression::Identifier(id) => self.var_aliases.get(id.name.as_str()).cloned(),
             Expression::StaticMemberExpression(member) => {
+                if let Some(source) = self.url_search_params_source_for_member(member) {
+                    return Some(source);
+                }
                 if let Some(full_path) = self.get_member_string(member) {
-                    if let Some(source) = self.field_taints.get(&full_path) {
+                    if matches!(
+                        full_path.as_str(),
+                        "event.data" | "e.data" | "event.newValue"
+                    ) && let Some(source) = self.field_taints.get(&full_path)
+                    {
                         return Some(source.clone());
                     }
                     if self.sources.contains(&full_path) {
                         return Some(full_path);
+                    }
+                    if let Some(source) = self.field_taints.get(&full_path) {
+                        return Some(source.clone());
                     }
                 }
                 self.find_source_in_expr(&member.object)
@@ -1588,7 +1895,9 @@ impl<'a> DomXssVisitor<'a> {
                     if let Some(callee_str) = self.get_member_string(member)
                         && self.sources.contains(&callee_str)
                     {
-                        return Some(callee_str);
+                        return self
+                            .storage_get_source(call, &callee_str)
+                            .or(Some(callee_str));
                     }
                     if let Some(source) = self.find_source_in_expr(&member.object) {
                         return Some(source);
@@ -1685,6 +1994,169 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
+    fn walk_event_handler_body(
+        &mut self,
+        param_name: &str,
+        event_source: &str,
+        statements: &oxc_allocator::Vec<'a, Statement<'a>>,
+    ) {
+        let saved_tainted = self.tainted_vars.clone();
+        let saved_aliases = self.var_aliases.clone();
+        let saved_field_taints = self.field_taints.clone();
+
+        self.tainted_vars.insert(param_name.to_string());
+        self.var_aliases
+            .insert(param_name.to_string(), event_source.to_string());
+        if matches!(event_source, "event.data" | "e.data") || event_source.ends_with(".message") {
+            self.field_taints
+                .insert(format!("{param_name}.data"), event_source.to_string());
+        } else if event_source == "event.newValue" {
+            self.field_taints.insert(
+                format!("{param_name}.newValue"),
+                "event.newValue".to_string(),
+            );
+            self.field_taints.insert(
+                format!("{param_name}.oldValue"),
+                "event.oldValue".to_string(),
+            );
+        }
+
+        self.walk_statements(statements);
+
+        self.tainted_vars = saved_tainted;
+        self.var_aliases = saved_aliases;
+        self.field_taints = saved_field_taints;
+    }
+
+    fn message_event_source_for_receiver(&self, receiver: &Expression<'a>) -> String {
+        match receiver {
+            Expression::Identifier(id) => match self.instance_classes.get(id.name.as_str()) {
+                Some(class_name) if class_name == "BroadcastChannel" => {
+                    "BroadcastChannel.message".to_string()
+                }
+                Some(class_name) if class_name == "WebSocket" => "WebSocket.message".to_string(),
+                Some(class_name) if class_name == "Worker" => "Worker.message".to_string(),
+                Some(class_name) if class_name == "SharedWorker" => {
+                    "SharedWorker.message".to_string()
+                }
+                Some(class_name) if class_name == "EventSource" => {
+                    "EventSource.message".to_string()
+                }
+                Some(class_name) if class_name == "MessagePort" => {
+                    "MessagePort.message".to_string()
+                }
+                _ => "event.data".to_string(),
+            },
+            Expression::StaticMemberExpression(member) => {
+                if let Some(full_path) = self.get_member_string(member)
+                    && full_path == "navigator.serviceWorker"
+                {
+                    return "ServiceWorker.message".to_string();
+                }
+
+                if matches!(member.property.name.as_str(), "port1" | "port2")
+                    && let Expression::Identifier(id) = &member.object
+                    && matches!(
+                        self.instance_classes
+                            .get(id.name.as_str())
+                            .map(|name| name.as_str()),
+                        Some("MessageChannel")
+                    )
+                {
+                    return "MessagePort.message".to_string();
+                }
+
+                if member.property.name.as_str() == "port"
+                    && let Expression::Identifier(id) = &member.object
+                    && matches!(
+                        self.instance_classes
+                            .get(id.name.as_str())
+                            .map(|name| name.as_str()),
+                        Some("SharedWorker")
+                    )
+                {
+                    return "SharedWorker.message".to_string();
+                }
+
+                self.message_event_source_for_receiver(&member.object)
+            }
+            _ => "event.data".to_string(),
+        }
+    }
+
+    fn event_listener_source(
+        &self,
+        receiver: &Expression<'a>,
+        arg: Option<&Argument<'a>>,
+    ) -> Option<String> {
+        let event_name = arg
+            .and_then(|arg| arg.as_expression())
+            .and_then(|expr| match expr {
+                Expression::StringLiteral(s) => Some(s.value.as_str()),
+                _ => None,
+            })?;
+
+        if event_name.eq_ignore_ascii_case("message") {
+            Some(self.message_event_source_for_receiver(receiver))
+        } else if event_name.eq_ignore_ascii_case("storage") {
+            Some("event.newValue".to_string())
+        } else {
+            None
+        }
+    }
+
+    fn analyze_onmessage_assignment(
+        &mut self,
+        span: oxc_span::Span,
+        receiver: &Expression<'a>,
+        property_name: &str,
+        right: &Expression<'a>,
+    ) {
+        if property_name != "onmessage" {
+            return;
+        }
+
+        match right {
+            Expression::FunctionExpression(func) => {
+                if let Some(param) = func.params.items.first()
+                    && let BindingPatternKind::BindingIdentifier(id) = &param.pattern.kind
+                    && let Some(body) = &func.body
+                {
+                    let event_source = self.message_event_source_for_receiver(receiver);
+                    self.walk_event_handler_body(id.name.as_str(), &event_source, &body.statements);
+                }
+            }
+            Expression::ArrowFunctionExpression(arrow) => {
+                if let Some(param) = arrow.params.items.first()
+                    && let BindingPatternKind::BindingIdentifier(id) = &param.pattern.kind
+                {
+                    let event_source = self.message_event_source_for_receiver(receiver);
+                    self.walk_event_handler_body(
+                        id.name.as_str(),
+                        &event_source,
+                        &arrow.body.statements,
+                    );
+                }
+            }
+            Expression::Identifier(handler_id) => {
+                if let Some(sink_name) = self
+                    .function_summaries
+                    .get(handler_id.name.as_str())
+                    .and_then(|summary| summary.tainted_param_sinks.get(&0))
+                    .cloned()
+                {
+                    self.report_vulnerability_with_source(
+                        span,
+                        &sink_name,
+                        "Tainted message event data may reach sink through callback",
+                        Some(self.message_event_source_for_receiver(receiver)),
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
     /// Walk through an assignment expression
     fn walk_assignment_expression(&mut self, assign: &AssignmentExpression<'a>) {
         let right_tainted = self.is_tainted(&assign.right);
@@ -1698,6 +2170,12 @@ impl<'a> DomXssVisitor<'a> {
         match &assign.left {
             AssignmentTarget::StaticMemberExpression(member) => {
                 let prop_name = member.property.name.as_str();
+                self.analyze_onmessage_assignment(
+                    assign.span(),
+                    &member.object,
+                    prop_name,
+                    &assign.right,
+                );
                 let is_sink = self.is_assignment_sink_property(prop_name);
 
                 // Also check if the full member path is a sink (e.g., location.href)
@@ -1745,6 +2223,14 @@ impl<'a> DomXssVisitor<'a> {
             }
             AssignmentTarget::ComputedMemberExpression(member) => {
                 let prop_name = self.get_computed_property_string(member);
+                if let Some(property_name) = prop_name.as_deref() {
+                    self.analyze_onmessage_assignment(
+                        assign.span(),
+                        &member.object,
+                        property_name,
+                        &assign.right,
+                    );
+                }
                 let is_sink = prop_name
                     .as_deref()
                     .map(|name| self.is_assignment_sink_property(name))
@@ -1830,53 +2316,35 @@ impl<'a> DomXssVisitor<'a> {
 
     /// Walk through a call expression
     fn walk_call_expression(&mut self, call: &CallExpression<'a>) {
+        if let Expression::StaticMemberExpression(member) = &call.callee
+            && member.property.name.as_str() == "set"
+            && call.arguments.len() >= 2
+        {
+            let (value_tainted, source_hint) = self.argument_taint_and_source(&call.arguments[1]);
+            if value_tainted && let Expression::Identifier(obj_id) = &member.object {
+                self.tainted_vars.insert(obj_id.name.to_string());
+                if let Some(source) = source_hint {
+                    self.var_aliases.insert(obj_id.name.to_string(), source);
+                }
+            }
+        }
+
         // Check if this is an addEventListener call with a function argument
         if let Expression::StaticMemberExpression(member) = &call.callee
             && member.property.name.as_str() == "addEventListener"
             && call.arguments.len() >= 2
         {
-            let is_message_event = call
-                .arguments
-                .first()
-                .and_then(|arg| arg.as_expression())
-                .and_then(|expr| match expr {
-                    Expression::StringLiteral(s) => {
-                        Some(s.value.as_str().eq_ignore_ascii_case("message"))
-                    }
-                    _ => None,
-                })
-                .unwrap_or(false);
+            let event_source = self.event_listener_source(&member.object, call.arguments.first());
 
             // The second argument might be a function with event parameter
             if let Some(Argument::FunctionExpression(func)) = call.arguments.get(1) {
                 // Mark the first parameter as tainted (it's the event object)
                 if let Some(param) = func.params.items.first()
                     && let BindingPatternKind::BindingIdentifier(id) = &param.pattern.kind
+                    && let Some(body) = &func.body
+                    && let Some(event_source) = event_source.as_deref()
                 {
-                    let param_name = id.name.as_str();
-                    // Save state before analyzing event handler
-                    let saved_tainted = self.tainted_vars.clone();
-                    let saved_aliases = self.var_aliases.clone();
-
-                    // Mark event parameter as tainted
-                    self.tainted_vars.insert(param_name.to_string());
-                    self.var_aliases.insert(
-                        param_name.to_string(),
-                        if is_message_event {
-                            "event.data".to_string()
-                        } else {
-                            "event".to_string()
-                        },
-                    );
-
-                    // Walk the function body
-                    if let Some(body) = &func.body {
-                        self.walk_statements(&body.statements);
-                    }
-
-                    // Restore state
-                    self.tainted_vars = saved_tainted;
-                    self.var_aliases = saved_aliases;
+                    self.walk_event_handler_body(id.name.as_str(), event_source, &body.statements);
                     return;
                 }
             }
@@ -1884,32 +2352,19 @@ impl<'a> DomXssVisitor<'a> {
             if let Some(Argument::ArrowFunctionExpression(arrow)) = call.arguments.get(1)
                 && let Some(param) = arrow.params.items.first()
                 && let BindingPatternKind::BindingIdentifier(id) = &param.pattern.kind
+                && let Some(event_source) = event_source.as_deref()
             {
-                let param_name = id.name.as_str();
-                let saved_tainted = self.tainted_vars.clone();
-                let saved_aliases = self.var_aliases.clone();
-
-                self.tainted_vars.insert(param_name.to_string());
-                self.var_aliases.insert(
-                    param_name.to_string(),
-                    if is_message_event {
-                        "event.data".to_string()
-                    } else {
-                        "event".to_string()
-                    },
+                self.walk_event_handler_body(
+                    id.name.as_str(),
+                    event_source,
+                    &arrow.body.statements,
                 );
-
-                // Arrow functions have a FunctionBody
-                self.walk_statements(&arrow.body.statements);
-
-                self.tainted_vars = saved_tainted;
-                self.var_aliases = saved_aliases;
                 return;
             }
 
             // Handle named callback references:
             // window.addEventListener('message', handleMessage)
-            if is_message_event
+            if let Some(event_source) = event_source.as_deref()
                 && let Some(Argument::Identifier(handler_id)) = call.arguments.get(1)
                 && let Some(sink_name) = self
                     .function_summaries
@@ -1921,7 +2376,7 @@ impl<'a> DomXssVisitor<'a> {
                     call.span(),
                     &sink_name,
                     "Tainted message event data may reach sink through callback",
-                    Some("event.data".to_string()),
+                    Some(event_source.to_string()),
                 );
                 return;
             }
@@ -2219,8 +2674,9 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
 
-        // Propagate taint through common array mutation methods
+        // Propagate taint through common mutation methods.
         // e.g. arr.push(location.hash); document.write(arr[0]);
+        // e.g. params.set('html', tainted); replay = new URLSearchParams(params.toString());
         if let Some(method) = self.get_callee_property_name(&call.callee)
             && let Some(target_obj) = self.get_callee_object_expr(&call.callee)
             && let Expression::Identifier(id) = target_obj
@@ -2248,12 +2704,32 @@ impl<'a> DomXssVisitor<'a> {
                         }
                     }
                 }
+                "set" if self.url_search_params_objects.contains(target) => {
+                    if let Some(arg) = call.arguments.get(1) {
+                        let (is_arg_tainted, source_hint) = self.argument_taint_and_source(arg);
+                        if is_arg_tainted {
+                            tainted_source = source_hint;
+                            if let Some(param_name) = Self::extract_static_string_argument(call, 0)
+                                && let Some(source) = tainted_source.clone()
+                            {
+                                self.url_search_params_field_sources.insert(
+                                    Self::url_search_params_field_key(target, &param_name),
+                                    source,
+                                );
+                            }
+                        }
+                    }
+                }
                 _ => {}
             }
 
             if let Some(source) = tainted_source {
                 self.tainted_vars.insert(target.to_string());
-                self.var_aliases.insert(target.to_string(), source);
+                self.var_aliases.insert(target.to_string(), source.clone());
+                if method == "set" && self.url_search_params_objects.contains(target) {
+                    self.url_search_params_sources
+                        .insert(target.to_string(), source);
+                }
             }
         }
 
@@ -2357,98 +2833,85 @@ impl<'a> DomXssVisitor<'a> {
         // (e.g., el.insertAdjacentHTML, document['write'](...))
         let member_method_name = self.get_callee_property_name(&call.callee);
         if let Some(method_name) = member_method_name
-            && self.sinks.contains(method_name.as_str()) {
-                // Special-case setAttribute to only dangerous attributes
-                if method_name == "setAttribute" && call.arguments.len() >= 2 {
-                    let attr_name_lc = call
-                        .arguments
-                        .first()
-                        .and_then(|arg0| self.eval_static_string_arg(arg0))
-                        .map(|name| name.to_ascii_lowercase());
-                    if let Some(name) = attr_name_lc {
-                        let dangerous = name.starts_with("on")
-                            || name == "href"
-                            || name == "xlink:href"
-                            || name == "srcdoc";
-                        if dangerous && let Some(arg1) = call.arguments.get(1) {
-                            let tainted = match arg1 {
-                                Argument::SpreadElement(sp) => self.is_tainted(&sp.argument),
-                                _ => arg1
-                                    .as_expression()
-                                    .map(|e| self.is_tainted(e))
-                                    .unwrap_or(false),
-                            };
-                            if tainted {
-                                self.report_vulnerability(
-                                    call.span(),
-                                    &format!("setAttribute:{}", name),
-                                    "Tainted data assigned to dangerous attribute",
-                                );
-                                return;
-                            }
-                        }
-                    }
-                // Special-case execCommand - only insertHTML is dangerous, and the third arg is the value
-                } else if method_name == "execCommand" && call.arguments.len() >= 3 {
-                    let cmd_name_lc = call
-                        .arguments
-                        .first()
-                        .and_then(|arg0| self.eval_static_string_arg(arg0))
-                        .map(|name| name.to_ascii_lowercase());
-                    if let Some(cmd) = cmd_name_lc
-                        && cmd == "inserthtml"
-                            && let Some(arg2) = call.arguments.get(2) {
-                                let tainted = match arg2 {
-                                    Argument::SpreadElement(sp) => self.is_tainted(&sp.argument),
-                                    _ => arg2
-                                        .as_expression()
-                                        .map(|e| self.is_tainted(e))
-                                        .unwrap_or(false),
-                                };
-                                if tainted {
-                                    self.report_vulnerability(
-                                        call.span(),
-                                        "execCommand:insertHTML",
-                                        "Tainted data passed to insertHTML command",
-                                    );
-                                    return;
-                                }
-                            }
-                } else {
-                    // Generic method sink: if any argument is tainted
-                    let mut arg_tainted = false;
-                    for (idx, arg) in call.arguments.iter().enumerate() {
-                        // For insertAdjacentHTML, the second argument is HTML
-                        let consider = if method_name == "insertAdjacentHTML" {
-                            idx == 1
-                        } else {
-                            true
-                        };
-                        if !consider {
-                            continue;
-                        }
-                        let tainted = match arg {
-                            Argument::SpreadElement(sp) => self.is_tainted(&sp.argument),
-                            _ => arg
-                                .as_expression()
-                                .map(|e| self.is_tainted(e))
-                                .unwrap_or(false),
-                        };
+            && self.sinks.contains(method_name.as_str())
+        {
+            // Special-case setAttribute to only dangerous attributes
+            if method_name == "setAttribute" && call.arguments.len() >= 2 {
+                let attr_name_lc = call
+                    .arguments
+                    .first()
+                    .and_then(|arg0| self.eval_static_string_arg(arg0))
+                    .map(|name| name.to_ascii_lowercase());
+                if let Some(name) = attr_name_lc {
+                    let dangerous = name.starts_with("on")
+                        || name == "href"
+                        || name == "xlink:href"
+                        || name == "srcdoc";
+                    if dangerous && let Some(arg1) = call.arguments.get(1) {
+                        let (tainted, source_hint) = self.argument_taint_and_source(arg1);
                         if tainted {
-                            arg_tainted = true;
-                            break;
+                            self.report_vulnerability_with_source(
+                                call.span(),
+                                &format!("setAttribute:{}", name),
+                                "Tainted data assigned to dangerous attribute",
+                                source_hint,
+                            );
+                            return;
                         }
                     }
-                    if arg_tainted {
-                        self.report_vulnerability(
+                }
+            // Special-case execCommand - only insertHTML is dangerous, and the third arg is the value
+            } else if method_name == "execCommand" && call.arguments.len() >= 3 {
+                let cmd_name_lc = call
+                    .arguments
+                    .first()
+                    .and_then(|arg0| self.eval_static_string_arg(arg0))
+                    .map(|name| name.to_ascii_lowercase());
+                if let Some(cmd) = cmd_name_lc
+                    && cmd == "inserthtml"
+                    && let Some(arg2) = call.arguments.get(2)
+                {
+                    let (tainted, source_hint) = self.argument_taint_and_source(arg2);
+                    if tainted {
+                        self.report_vulnerability_with_source(
                             call.span(),
-                            &method_name,
-                            "Tainted data passed to sink method",
+                            "execCommand:insertHTML",
+                            "Tainted data passed to insertHTML command",
+                            source_hint,
                         );
                         return;
                     }
                 }
+            } else {
+                // Generic method sink: if any argument is tainted
+                let mut tainted_source: Option<String> = None;
+                for (idx, arg) in call.arguments.iter().enumerate() {
+                    // For insertAdjacentHTML, the second argument is HTML
+                    let consider = if method_name == "insertAdjacentHTML" {
+                        idx == 1
+                    } else {
+                        true
+                    };
+                    if !consider {
+                        continue;
+                    }
+                    let (tainted, source_hint) = self.argument_taint_and_source(arg);
+                    if tainted {
+                        tainted_source = source_hint;
+                        break;
+                    }
+                }
+                if tainted_source.is_some() {
+                    self.report_vulnerability_with_source(
+                        call.span(),
+                        &method_name,
+                        "Tainted data passed to sink method",
+                        tainted_source,
+                    );
+                    return;
+                }
             }
+        }
         // Walk the callee
         self.walk_expression(&call.callee);
     }
@@ -2716,6 +3179,40 @@ eval(userInput);
         let analyzer = AstDomAnalyzer::new();
         let result = analyzer.analyze(code).unwrap();
         assert!(!result.is_empty(), "Should detect sessionStorage as source");
+    }
+
+    #[test]
+    fn test_sessionstorage_getitem_source() {
+        let code = r#"
+const stored = sessionStorage.getItem('payload') || '';
+document.getElementById('output').innerHTML = stored;
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source == "sessionStorage.getItem(payload)"),
+            "Expected keyed sessionStorage source, got {:?}",
+            result.iter().map(|v| v.source.clone()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_localstorage_getitem_source_preserves_static_key() {
+        let code = r#"
+const stored = localStorage.getItem('xssmaze:browser-state:level2') || '';
+document.getElementById('output').innerHTML = stored;
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source == "localStorage.getItem(xssmaze:browser-state:level2)"),
+            "Expected keyed localStorage source, got {:?}",
+            result.iter().map(|v| v.source.clone()).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -3257,6 +3754,98 @@ eval(name);
     }
 
     #[test]
+    fn test_window_name_canonical_source_wins_over_bootstrap_provenance() {
+        let code = r#"
+const current = new URL(location.href);
+window.name = current.searchParams.get('seed') || '';
+document.getElementById('output').innerHTML = window.name;
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result.iter().any(|vuln| vuln.source == "window.name"),
+            "Expected canonical window.name source, got {:?}",
+            result.iter().map(|v| v.source.clone()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_sessionstorage_canonical_source_wins_over_bootstrap_provenance() {
+        let code = r#"
+const current = new URL(location.href);
+const seed = current.searchParams.get('seed');
+sessionStorage.setItem('payload', seed || '');
+const stored = sessionStorage.getItem('payload') || '';
+const range = document.createRange();
+const fragment = range.createContextualFragment(stored);
+document.getElementById('output').appendChild(fragment);
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source == "sessionStorage.getItem(payload)"),
+            "Expected keyed sessionStorage source, got {:?}",
+            result.iter().map(|v| v.source.clone()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_sessionstorage_branch_bootstrap_preserves_canonical_getitem_source() {
+        let code = r#"
+const url = new URL(location.href);
+const seed = url.searchParams.get('seed');
+if (seed) {
+    sessionStorage.setItem('xssmaze:browser-state:level3', seed);
+    url.searchParams.delete('seed');
+    const nextSearch = url.searchParams.toString();
+    location.replace(url.pathname + (nextSearch ? '?' + nextSearch : ''));
+} else {
+    const stored = sessionStorage.getItem('xssmaze:browser-state:level3') || '';
+    const range = document.createRange();
+    const fragment = range.createContextualFragment(stored);
+    document.getElementById('output').appendChild(fragment);
+}
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source == "sessionStorage.getItem(xssmaze:browser-state:level3)"),
+            "Expected keyed sessionStorage source, got {:?}",
+            result.iter().map(|v| v.source.clone()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_localstorage_branch_bootstrap_preserves_canonical_getitem_source() {
+        let code = r#"
+const url = new URL(location.href);
+const seed = url.searchParams.get('seed');
+if (seed) {
+    localStorage.setItem('xssmaze:browser-state:level2', seed);
+    url.searchParams.delete('seed');
+    const nextSearch = url.searchParams.toString();
+    location.replace(url.pathname + (nextSearch ? '?' + nextSearch : ''));
+} else {
+    const stored = localStorage.getItem('xssmaze:browser-state:level2') || '';
+    document.getElementById('output').insertAdjacentHTML('beforeend', stored);
+}
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source == "localStorage.getItem(xssmaze:browser-state:level2)"),
+            "Expected keyed localStorage source, got {:?}",
+            result.iter().map(|v| v.source.clone()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn test_document_base_uri_source() {
         let code = r#"
 let base = document.baseURI;
@@ -3731,6 +4320,163 @@ document.write(result);
     }
 
     #[test]
+    fn test_urlsearchparams_get_from_location_href_is_normalized_to_location_search() {
+        let code = r#"
+            let urlParams = new URL(location.href).searchParams;
+            let query = urlParams.get('query');
+            document.getElementById('out').innerHTML = query;
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(!result.is_empty(), "Should detect URLSearchParams.get flow");
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source == "URLSearchParams.get(query)"),
+            "Expected URLSearchParams.get(query) source, got {:?}",
+            result.iter().map(|v| v.source.clone()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_domparser_flow_from_urlsearchparams_is_normalized_to_location_search() {
+        let code = r#"
+            const urlParams = new URL(location.href).searchParams;
+            const query = urlParams.get('query');
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(query, 'text/html');
+            document.getElementById('output').innerHTML = doc.body.innerHTML;
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(!result.is_empty(), "Should detect DOMParser flow");
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source == "URLSearchParams.get(query)"),
+            "Expected URLSearchParams.get(query) source, got {:?}",
+            result.iter().map(|v| v.source.clone()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_reparse_url_object_flow_tracks_nested_searchparams() {
+        let code = r#"
+            const current = new URL(location.href);
+            const cloned = new URLSearchParams(current.searchParams.toString());
+            const replay = new URL(location.pathname + '?' + cloned.toString(), location.origin);
+            const query = replay.searchParams.get('query') || '';
+            document.getElementById('output').innerHTML = query;
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect reparsed URLSearchParams flow"
+        );
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source == "URLSearchParams.get(query)"),
+            "Expected URLSearchParams.get(query) source, got {:?}",
+            result.iter().map(|v| v.source.clone()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_reparse_urlsearchparams_set_then_get_tracks_source() {
+        let code = r#"
+            const current = new URL(location.href);
+            const staged = new URLSearchParams();
+            staged.set('html', current.searchParams.get('query') || '');
+            const replay = new URLSearchParams(staged.toString());
+            document.getElementById('preview').setAttribute('srcdoc', replay.get('html') || '');
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect URLSearchParams.set/get reparse flow"
+        );
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source.contains("URLSearchParams.get")),
+            "Expected URLSearchParams-derived source, got {:?}",
+            result.iter().map(|v| v.source.clone()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_nested_urlsearchparams_blob_flow_preserves_outer_bootstrap_source() {
+        let code = r#"
+            const outer = new URL(location.href).searchParams;
+            const blob = outer.get('blob') || '';
+            const nested = new URLSearchParams(blob.charAt(0) == '?' ? blob.slice(1) : blob);
+            const query = nested.get('query') || '';
+            document.getElementById('output').innerHTML = query;
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(!result.is_empty(), "Should detect nested blob reparse flow");
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source == "URLSearchParams.get(blob).get(query)"),
+            "Expected nested URLSearchParams source, got {:?}",
+            result.iter().map(|v| v.source.clone()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_double_nested_urlsearchparams_blob_flow_preserves_full_chain() {
+        let code = r#"
+            const current = new URL(location.href).searchParams;
+            const blob = current.get('blob') || '';
+            const first = new URLSearchParams(blob.charAt(0) == '?' ? blob.slice(1) : blob);
+            const outer = first.get('outer') || '';
+            const second = new URLSearchParams(outer.charAt(0) == '?' ? outer.slice(1) : outer);
+            const query = second.get('query') || '';
+            document.getElementById('output').innerHTML = query;
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect double nested blob reparse flow"
+        );
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source == "URLSearchParams.get(blob).get(outer).get(query)"),
+            "Expected double nested URLSearchParams source, got {:?}",
+            result.iter().map(|v| v.source.clone()).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_srcdoc_sink_preserves_precise_urlsearchparams_source() {
+        let code = r#"
+            const current = new URL(location.href);
+            const staged = new URLSearchParams();
+            staged.set('html', current.searchParams.get('query') || '');
+            const replay = new URLSearchParams(staged.toString());
+            document.getElementById('preview').setAttribute('srcdoc', replay.get('html') || '');
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result.iter().any(|vuln| vuln.sink == "setAttribute:srcdoc"
+                && vuln.source == "URLSearchParams.get(query)"),
+            "Expected precise URLSearchParams source for srcdoc sink, got {:?}",
+            result
+                .iter()
+                .map(|v| format!("{} -> {}", v.source, v.sink))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
     fn test_json_parse_taint_propagation() {
         let code = r#"
             let input = location.hash;
@@ -3980,6 +4726,236 @@ document.write(result);
         assert!(
             result.is_empty(),
             "Named message callback should not be flagged when using safe sink"
+        );
+    }
+
+    #[test]
+    fn test_onmessage_assignment_callback_flow_detected() {
+        let code = r#"
+            const receiver = new BroadcastChannel('demo');
+            receiver.onmessage = function(event) {
+                document.getElementById('out').innerHTML = event.data;
+            };
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source == "BroadcastChannel.message" && vuln.sink == "innerHTML"),
+            "Expected BroadcastChannel.message source, got {:?}",
+            result
+                .iter()
+                .map(|vuln| format!("{} -> {}", vuln.source, vuln.sink))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_named_onmessage_assignment_callback_flow_detected() {
+        let code = r#"
+            function onMessage(event) {
+                document.getElementById('out').insertAdjacentHTML('beforeend', event.data);
+            }
+            const channel = new MessageChannel();
+            channel.port1.onmessage = onMessage;
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source == "MessagePort.message"
+                    && vuln.sink == "insertAdjacentHTML"),
+            "Expected MessagePort.message source, got {:?}",
+            result
+                .iter()
+                .map(|vuln| format!("{} -> {}", vuln.source, vuln.sink))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_message_channel_bootstrap_prefers_message_port_source() {
+        let code = r#"
+            const url = new URL(location.href);
+            const seed = url.searchParams.get('seed');
+            const channel = new MessageChannel();
+            channel.port1.onmessage = function(event) {
+                document.getElementById('output').insertAdjacentHTML('beforeend', event.data);
+            };
+
+            if (seed) {
+                channel.port2.postMessage(seed);
+            }
+        "#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source == "MessagePort.message"
+                    && vuln.sink == "insertAdjacentHTML"),
+            "Expected MessagePort.message source for relay, got {:?}",
+            result
+                .iter()
+                .map(|vuln| format!("{} -> {}", vuln.source, vuln.sink))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_service_worker_message_event_source_is_preserved() {
+        let code = r#"
+            navigator.serviceWorker.addEventListener('message', function(event) {
+                document.getElementById('out').innerHTML = event.data;
+            });
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source == "ServiceWorker.message" && vuln.sink == "innerHTML"),
+            "Expected ServiceWorker.message source, got {:?}",
+            result
+                .iter()
+                .map(|vuln| format!("{} -> {}", vuln.source, vuln.sink))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_event_source_message_event_source_is_preserved() {
+        let code = r#"
+            const stream = new EventSource('/events');
+            stream.addEventListener('message', function(event) {
+                document.getElementById('out').innerHTML = event.data;
+            });
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source == "EventSource.message" && vuln.sink == "innerHTML"),
+            "Expected EventSource.message source, got {:?}",
+            result
+                .iter()
+                .map(|vuln| format!("{} -> {}", vuln.source, vuln.sink))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_event_source_onmessage_source_is_preserved() {
+        let code = r#"
+            const stream = new EventSource('/events');
+            stream.onmessage = function(event) {
+                document.getElementById('out').insertAdjacentHTML('beforeend', event.data);
+            };
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source == "EventSource.message"
+                    && vuln.sink == "insertAdjacentHTML"),
+            "Expected EventSource.message source for onmessage, got {:?}",
+            result
+                .iter()
+                .map(|vuln| format!("{} -> {}", vuln.source, vuln.sink))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_websocket_onmessage_source_is_preserved() {
+        let code = r#"
+            const socket = new WebSocket('wss://example.invalid/xssmaze');
+            socket.onmessage = function(event) {
+                document.getElementById('out').innerHTML = event.data;
+            };
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source == "WebSocket.message" && vuln.sink == "innerHTML"),
+            "Expected WebSocket.message source, got {:?}",
+            result
+                .iter()
+                .map(|vuln| format!("{} -> {}", vuln.source, vuln.sink))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_shared_worker_message_source_is_preserved() {
+        let code = r#"
+            const shared = new SharedWorker('/shared-worker.js');
+            shared.port.onmessage = function(event) {
+                const range = document.createRange();
+                const fragment = range.createContextualFragment(event.data);
+                document.getElementById('out').appendChild(fragment);
+            };
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source == "SharedWorker.message"
+                    && vuln.sink == "createContextualFragment"),
+            "Expected SharedWorker.message source, got {:?}",
+            result
+                .iter()
+                .map(|vuln| format!("{} -> {}", vuln.source, vuln.sink))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_storage_event_newvalue_detected_for_custom_param_name() {
+        let code = r#"
+            window.addEventListener('storage', (evt) => {
+                document.getElementById('out').innerHTML = evt.newValue;
+            });
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source == "event.newValue" && vuln.sink == "innerHTML"),
+            "Expected event.newValue source for storage event, got {:?}",
+            result
+                .iter()
+                .map(|vuln| format!("{} -> {}", vuln.source, vuln.sink))
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_storage_event_oldvalue_detected_for_function_expression() {
+        let code = r#"
+            window.addEventListener('storage', function(storageEvent) {
+                document.getElementById('out').insertAdjacentHTML('beforeend', storageEvent.oldValue);
+            });
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            result
+                .iter()
+                .any(|vuln| vuln.source == "event.oldValue" && vuln.sink == "insertAdjacentHTML"),
+            "Expected event.oldValue source for storage event, got {:?}",
+            result
+                .iter()
+                .map(|vuln| format!("{} -> {}", vuln.source, vuln.sink))
+                .collect::<Vec<_>>()
         );
     }
 

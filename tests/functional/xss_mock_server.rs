@@ -9,24 +9,50 @@ use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 // Pre-compiled regex patterns to avoid compiling inside loops (clippy::regex_creation_in_loops)
-static RE_STRIP_TAGS: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"<[^>]*>").unwrap());
-static RE_STRIP_SCRIPT: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)<script[^>]*>.*?</script>|<script[^>]*>|</script>").unwrap());
-static RE_STRIP_ON_EVENTS: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)\bon\w+\s*=").unwrap());
-static RE_WAF_BASIC: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)</?script").unwrap());
-static RE_WAF_MODERATE: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)</?script|on\w+\s*=|</?iframe|</?object|</?embed").unwrap());
-static RE_WAF_STRICT: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)</?script|on\w+\s*=|javascript:|alert|confirm|prompt|<|>").unwrap());
-static RE_STRIP_IFRAME: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)</?iframe[^>]*>").unwrap());
-static RE_STRIP_IMG: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)<img[^>]*>").unwrap());
-static RE_STRIP_SVG: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)</?svg[^>]*>").unwrap());
-static RE_WAF_SVG_AWARE: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)</?script|</?svg|</?math|on\w+\s*=").unwrap());
-static RE_WAF_URL_PROTOCOL: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)javascript\s*:|data\s*:").unwrap());
-static RE_REPLACE_SCRIPT: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)<(/?script)").unwrap());
-static RE_ALLOWED_TAGS: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)<(/?(?:p|b|i|em|strong|br|ul|ol|li|a))\b[^>]*>").unwrap());
-static RE_STRIP_STYLE: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"(?i)<style[^>]*>.*?</style>|</?style[^>]*>").unwrap());
-static RE_STRIP_DANGEROUS_ATTRS: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r#"(?i)\bon\w+\s*=|href\s*=\s*["']?\s*javascript:|src\s*=\s*["']?\s*data:"#).unwrap());
-static RE_WAF_CLOUDFLARE: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r#"(?i)</?script|</?svg|</?iframe|on\w+\s*=|javascript:|alert\s*\(|eval\s*\(|document\.(cookie|write|domain)"#).unwrap());
-static RE_WAF_AKAMAI: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r#"(?i)<script|on(error|load|click|mouse)\s*=|javascript:|<img[^>]+onerror|<svg|alert\(|String\.fromCharCode"#).unwrap());
-static RE_NORMALIZE_WS: LazyLock<regex::Regex> = LazyLock::new(|| regex::Regex::new(r"\s+").unwrap());
+static RE_STRIP_TAGS: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"<[^>]*>").unwrap());
+static RE_STRIP_SCRIPT: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(?i)<script[^>]*>.*?</script>|<script[^>]*>|</script>").unwrap()
+});
+static RE_STRIP_ON_EVENTS: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?i)\bon\w+\s*=").unwrap());
+static RE_WAF_BASIC: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?i)</?script").unwrap());
+static RE_WAF_MODERATE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(?i)</?script|on\w+\s*=|</?iframe|</?object|</?embed").unwrap()
+});
+static RE_WAF_STRICT: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(?i)</?script|on\w+\s*=|javascript:|alert|confirm|prompt|<|>").unwrap()
+});
+static RE_STRIP_IFRAME: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?i)</?iframe[^>]*>").unwrap());
+static RE_STRIP_IMG: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?i)<img[^>]*>").unwrap());
+static RE_STRIP_SVG: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?i)</?svg[^>]*>").unwrap());
+static RE_WAF_SVG_AWARE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?i)</?script|</?svg|</?math|on\w+\s*=").unwrap());
+static RE_WAF_URL_PROTOCOL: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?i)javascript\s*:|data\s*:").unwrap());
+static RE_REPLACE_SCRIPT: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?i)<(/?script)").unwrap());
+static RE_ALLOWED_TAGS: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r"(?i)<(/?(?:p|b|i|em|strong|br|ul|ol|li|a))\b[^>]*>").unwrap()
+});
+static RE_STRIP_STYLE: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"(?i)<style[^>]*>.*?</style>|</?style[^>]*>").unwrap());
+static RE_STRIP_DANGEROUS_ATTRS: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r#"(?i)\bon\w+\s*=|href\s*=\s*["']?\s*javascript:|src\s*=\s*["']?\s*data:"#)
+        .unwrap()
+});
+static RE_WAF_CLOUDFLARE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r#"(?i)</?script|</?svg|</?iframe|on\w+\s*=|javascript:|alert\s*\(|eval\s*\(|document\.(cookie|write|domain)"#).unwrap()
+});
+static RE_WAF_AKAMAI: LazyLock<regex::Regex> = LazyLock::new(|| {
+    regex::Regex::new(r#"(?i)<script|on(error|load|click|mouse)\s*=|javascript:|<img[^>]+onerror|<svg|alert\(|String\.fromCharCode"#).unwrap()
+});
+static RE_NORMALIZE_WS: LazyLock<regex::Regex> =
+    LazyLock::new(|| regex::Regex::new(r"\s+").unwrap());
 
 use axum::{
     Router,
@@ -106,15 +132,9 @@ fn apply_filter(input: &str, filter_chain: &str) -> String {
         }
         result = match filter {
             // Tag removal filters
-            "strip_tags" => {
-                RE_STRIP_TAGS.replace_all(&result, "").to_string()
-            }
-            "strip_script" => {
-                RE_STRIP_SCRIPT.replace_all(&result, "").to_string()
-            }
-            "strip_on_events" => {
-                RE_STRIP_ON_EVENTS.replace_all(&result, "").to_string()
-            }
+            "strip_tags" => RE_STRIP_TAGS.replace_all(&result, "").to_string(),
+            "strip_script" => RE_STRIP_SCRIPT.replace_all(&result, "").to_string(),
+            "strip_on_events" => RE_STRIP_ON_EVENTS.replace_all(&result, "").to_string(),
             // Character removal filters
             "remove_angles" => result.replace(['<', '>'], ""),
             "remove_quotes" => result.replace(['"', '\''], ""),
@@ -127,13 +147,25 @@ fn apply_filter(input: &str, filter_chain: &str) -> String {
             "encode_single_quotes" => result.replace('\'', "&#39;"),
             // WAF simulation filters
             "waf_basic" => {
-                if RE_WAF_BASIC.is_match(&result) { "".to_string() } else { result }
+                if RE_WAF_BASIC.is_match(&result) {
+                    "".to_string()
+                } else {
+                    result
+                }
             }
             "waf_moderate" => {
-                if RE_WAF_MODERATE.is_match(&result) { "".to_string() } else { result }
+                if RE_WAF_MODERATE.is_match(&result) {
+                    "".to_string()
+                } else {
+                    result
+                }
             }
             "waf_strict" => {
-                if RE_WAF_STRICT.is_match(&result) { "".to_string() } else { result }
+                if RE_WAF_STRICT.is_match(&result) {
+                    "".to_string()
+                } else {
+                    result
+                }
             }
             // Keyword removal (dynamic pattern, can't hoist to static)
             _ if filter.starts_with("remove_keyword:") => {
@@ -147,17 +179,14 @@ fn apply_filter(input: &str, filter_chain: &str) -> String {
             "remove_backslash" => result.replace('\\', ""),
             "remove_colon" => result.replace(':', ""),
             "remove_equals" => result.replace('=', ""),
-            "alphanumeric_only" => result.chars().filter(|c| c.is_alphanumeric() || *c == ' ').collect(),
+            "alphanumeric_only" => result
+                .chars()
+                .filter(|c| c.is_alphanumeric() || *c == ' ')
+                .collect(),
             // Tag-specific stripping
-            "strip_iframe" => {
-                RE_STRIP_IFRAME.replace_all(&result, "").to_string()
-            }
-            "strip_img" => {
-                RE_STRIP_IMG.replace_all(&result, "").to_string()
-            }
-            "strip_svg" => {
-                RE_STRIP_SVG.replace_all(&result, "").to_string()
-            }
+            "strip_iframe" => RE_STRIP_IFRAME.replace_all(&result, "").to_string(),
+            "strip_img" => RE_STRIP_IMG.replace_all(&result, "").to_string(),
+            "strip_svg" => RE_STRIP_SVG.replace_all(&result, "").to_string(),
             // Encoding (extended)
             "encode_ampersand" => result.replace('&', "&amp;"),
             "encode_full_html" => result
@@ -168,14 +197,14 @@ fn apply_filter(input: &str, filter_chain: &str) -> String {
                 .replace('\'', "&#39;"),
             // WAF extended
             "waf_svg_aware" => {
-                if RE_WAF_SVG_AWARE.is_match(&result) { "".to_string() } else { result }
+                if RE_WAF_SVG_AWARE.is_match(&result) {
+                    "".to_string()
+                } else {
+                    result
+                }
             }
-            "waf_url_protocol" => {
-                RE_WAF_URL_PROTOCOL.replace_all(&result, "").to_string()
-            }
-            "replace_script_text" => {
-                RE_REPLACE_SCRIPT.replace_all(&result, "&lt;$1").to_string()
-            }
+            "waf_url_protocol" => RE_WAF_URL_PROTOCOL.replace_all(&result, "").to_string(),
+            "replace_script_text" => RE_REPLACE_SCRIPT.replace_all(&result, "&lt;$1").to_string(),
             // Allow-list based sanitization
             "allow_basic_html" => {
                 // Strip all tags except p, b, i, em, strong, br, ul, ol, li, a
@@ -184,11 +213,13 @@ fn apply_filter(input: &str, filter_chain: &str) -> String {
                 // 2. Strip all remaining tags
                 // 3. Restore allowed tags from placeholders
                 let mut placeholders = Vec::new();
-                let pass1 = RE_ALLOWED_TAGS.replace_all(&result, |caps: &regex::Captures| {
-                    let idx = placeholders.len();
-                    placeholders.push(caps[0].to_string());
-                    format!("\x00ALLOWED_{}\x00", idx)
-                }).to_string();
+                let pass1 = RE_ALLOWED_TAGS
+                    .replace_all(&result, |caps: &regex::Captures| {
+                        let idx = placeholders.len();
+                        placeholders.push(caps[0].to_string());
+                        format!("\x00ALLOWED_{}\x00", idx)
+                    })
+                    .to_string();
                 let pass2 = RE_STRIP_TAGS.replace_all(&pass1, "").to_string();
                 let mut out = pass2;
                 for (idx, tag) in placeholders.iter().enumerate() {
@@ -196,29 +227,31 @@ fn apply_filter(input: &str, filter_chain: &str) -> String {
                 }
                 out
             }
-            "strip_style" => {
-                RE_STRIP_STYLE.replace_all(&result, "").to_string()
-            }
-            "strip_dangerous_attrs" => {
-                RE_STRIP_DANGEROUS_ATTRS.replace_all(&result, "").to_string()
-            }
+            "strip_style" => RE_STRIP_STYLE.replace_all(&result, "").to_string(),
+            "strip_dangerous_attrs" => RE_STRIP_DANGEROUS_ATTRS
+                .replace_all(&result, "")
+                .to_string(),
             // Additional character removal
             "remove_backtick" => result.replace('`', ""),
             "remove_dollar" => result.replace('$', ""),
             "remove_curly_braces" => result.replace(['{', '}'], ""),
             // WAF (extended)
             "waf_cloudflare_sim" => {
-                if RE_WAF_CLOUDFLARE.is_match(&result) { "".to_string() } else { result }
+                if RE_WAF_CLOUDFLARE.is_match(&result) {
+                    "".to_string()
+                } else {
+                    result
+                }
             }
             "waf_akamai_sim" => {
-                if RE_WAF_AKAMAI.is_match(&result) { "".to_string() } else { result }
+                if RE_WAF_AKAMAI.is_match(&result) {
+                    "".to_string()
+                } else {
+                    result
+                }
             }
-            "normalize_whitespace" => {
-                RE_NORMALIZE_WS.replace_all(&result, " ").trim().to_string()
-            }
-            "double_encode_angles" => {
-                result.replace('<', "&amp;lt;").replace('>', "&amp;gt;")
-            }
+            "normalize_whitespace" => RE_NORMALIZE_WS.replace_all(&result, " ").trim().to_string(),
+            "double_encode_angles" => result.replace('<', "&amp;lt;").replace('>', "&amp;gt;"),
             // Case transformation
             "lowercase" => result.to_lowercase(),
             "uppercase" => result.to_uppercase(),
@@ -363,13 +396,10 @@ fn get_page_template(template_key: &str, reflected: &str) -> String {
 <script>window.location = "{reflected}";</script>
 </body></html>"#
         ),
-        "api_json" => format!(
-            r#"{{"status":"ok","data":{{"message":"{reflected}","query":"{reflected}"}}}}"#
-        ),
-        "jsonp_callback" => format!(
-            r#"/**/ {}({{"status":"ok","data":"result"}});"#,
-            reflected
-        ),
+        "api_json" => {
+            format!(r#"{{"status":"ok","data":{{"message":"{reflected}","query":"{reflected}"}}}}"#)
+        }
+        "jsonp_callback" => format!(r#"/**/ {}({{"status":"ok","data":"result"}});"#, reflected),
         "dashboard" => format!(
             r#"<!DOCTYPE html>
 <html><head><title>Dashboard</title></head>
@@ -2352,7 +2382,8 @@ async fn test_realworld_xss_by_category() {
     };
     println!(
         "\nrealworld overall positive coverage: {}/{} ({:.1}%)",
-        total_expected_detected, total_expected,
+        total_expected_detected,
+        total_expected,
         overall_rate * 100.0
     );
 

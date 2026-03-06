@@ -17,7 +17,10 @@ use tokio::task::LocalSet;
 
 use urlencoding;
 
-use crate::encoding::{base64_encode, double_url_encode, html_entity_encode, url_encode};
+use crate::encoding::{
+    base64_encode, double_url_encode, html_entity_encode, quadruple_url_encode, triple_url_encode,
+    url_encode,
+};
 use crate::parameter_analysis::analyze_parameters;
 use crate::scanning::result::Result;
 use crate::target_parser::*;
@@ -35,6 +38,21 @@ pub const DEFAULT_MAX_TARGETS_PER_HOST: usize = 100;
 pub const DEFAULT_METHOD: &str = "GET";
 
 static GLOBAL_ENCODERS: OnceLock<Vec<String>> = OnceLock::new();
+
+fn build_ast_dom_message(
+    description: &str,
+    source: &str,
+    target_url: &str,
+    payload: &str,
+) -> String {
+    if let Some(hint) =
+        crate::scanning::ast_integration::build_dom_xss_manual_poc_hint(target_url, source, payload)
+    {
+        format!("{description} (검증 필요) [manual POC: {hint}]")
+    } else {
+        format!("{description} (검증 필요) [경량 확인: 파라미터 없음]")
+    }
+}
 
 fn generate_poc(result: &crate::scanning::result::Result, poc_type: &str) -> String {
     // Helper: selective path encoding (space, #, ?, % only) to keep exploit chars visible.
@@ -64,6 +82,8 @@ fn generate_poc(result: &crate::scanning::result::Result, poc_type: &str) -> Str
                 "none" => continue,
                 "url" => return url_encode(raw_payload),
                 "2url" => return double_url_encode(raw_payload),
+                "3url" => return triple_url_encode(raw_payload),
+                "4url" => return quadruple_url_encode(raw_payload),
                 "html" => return html_entity_encode(raw_payload),
                 "base64" => return base64_encode(raw_payload),
                 _ => {}
@@ -196,7 +216,7 @@ fn dedupe_ast_results(results: Vec<Result>) -> Vec<Result> {
 }
 
 fn is_allowed_content_type(ct: &str) -> bool {
-    crate::utils::is_htmlish_content_type(ct)
+    crate::utils::is_xss_scannable_content_type(ct)
 }
 
 #[cfg(test)]
@@ -204,8 +224,8 @@ mod tests {
     use super::{
         DEFAULT_DELAY_MS, DEFAULT_ENCODERS, DEFAULT_MAX_CONCURRENT_TARGETS,
         DEFAULT_MAX_TARGETS_PER_HOST, DEFAULT_METHOD, DEFAULT_TIMEOUT_SECS, DEFAULT_WORKERS,
-        ScanArgs, dedupe_ast_results, extract_context, generate_poc, is_allowed_content_type,
-        preflight_content_type,
+        ScanArgs, build_ast_dom_message, dedupe_ast_results, extract_context, generate_poc,
+        is_allowed_content_type, preflight_content_type,
     };
     use crate::scanning::result::Result as ScanResult;
     use crate::target_parser::parse_target;
@@ -302,11 +322,13 @@ mod tests {
         assert!(is_allowed_content_type("text/html"));
         assert!(is_allowed_content_type("text/html; charset=utf-8"));
         assert!(is_allowed_content_type("application/xml"));
+        assert!(is_allowed_content_type("application/json"));
+        assert!(is_allowed_content_type("application/javascript"));
+        assert!(is_allowed_content_type("image/svg+xml"));
     }
 
     #[test]
     fn test_denied_content_types() {
-        assert!(!is_allowed_content_type("application/json"));
         assert!(!is_allowed_content_type("text/plain"));
         assert!(!is_allowed_content_type("image/png"));
     }
@@ -315,7 +337,7 @@ mod tests {
     fn test_edge_cases() {
         assert!(!is_allowed_content_type(""));
         assert!(!is_allowed_content_type("invalid"));
-        assert!(!is_allowed_content_type("application/json; charset=utf-8"));
+        assert!(is_allowed_content_type("application/json; charset=utf-8"));
     }
 
     #[test]
@@ -564,6 +586,73 @@ mod tests {
         );
         let out = generate_poc(&r, "plain");
         assert!(out.contains("A%20B%23%3F%25"));
+    }
+
+    #[test]
+    fn test_build_ast_dom_message_keeps_url_source_wording() {
+        let message = build_ast_dom_message(
+            "DOM-based XSS via location.hash to innerHTML",
+            "location.hash",
+            "https://example.com/dom/level2/",
+            "<img src=x onerror=alert(1)>",
+        );
+        assert_eq!(
+            message,
+            "DOM-based XSS via location.hash to innerHTML (검증 필요) [경량 확인: 파라미터 없음]"
+        );
+    }
+
+    #[test]
+    fn test_build_ast_dom_message_adds_postmessage_manual_hint() {
+        let message = build_ast_dom_message(
+            "DOM-based XSS via e.data to innerHTML",
+            "e.data",
+            "https://example.com/dom/level23/",
+            "<img src=x onerror=alert(1)>",
+        );
+        assert!(message.contains("[manual POC:"));
+        assert!(message.contains("window.open"));
+        assert!(message.contains("postMessage"));
+    }
+
+    #[test]
+    fn test_build_ast_dom_message_adds_referrer_manual_hint() {
+        let message = build_ast_dom_message(
+            "DOM-based XSS via document.referrer to document.write",
+            "document.referrer",
+            "https://example.com/dom/level14/",
+            "<img src=x onerror=alert(1)>",
+        );
+        assert!(message.contains("[manual POC:"));
+        assert!(message.contains("document.referrer"));
+        assert!(message.contains("attacker-controlled page"));
+    }
+
+    #[test]
+    fn test_build_ast_dom_message_adds_cookie_manual_hint() {
+        let message = build_ast_dom_message(
+            "DOM-based XSS via document.cookie to document.write",
+            "document.cookie",
+            "https://example.com/dom/level12/",
+            "<img src=x onerror=alert(1)>",
+        );
+        assert!(message.contains("[manual POC:"));
+        assert!(message.contains("same-origin cookie"));
+        assert!(message.contains("cookie-safe variant may be needed"));
+    }
+
+    #[test]
+    fn test_build_ast_dom_message_keeps_pathname_wording() {
+        let message = build_ast_dom_message(
+            "DOM-based XSS via location.pathname to document.write",
+            "location.pathname",
+            "https://example.com/dom/level28/",
+            "<img src=x onerror=alert(1)>",
+        );
+        assert_eq!(
+            message,
+            "DOM-based XSS via location.pathname to document.write (검증 필요) [경량 확인: 파라미터 없음]"
+        );
     }
 
     #[tokio::test]
@@ -865,7 +954,7 @@ pub struct ScanArgs {
     pub max_targets_per_host: usize,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Specify payload encoders to use (comma-separated). Options: none, url, 2url, html, base64. Default: url,html
+    /// Specify payload encoders to use (comma-separated). Options: none, url, 2url, 3url, 4url, html, base64. Default: url,html
     #[arg(short = 'e', long, value_delimiter = ',', default_values = &["url", "html"])]
     pub encoders: Vec<String>,
 
@@ -1480,12 +1569,29 @@ pub async fn run_scan(args: &ScanArgs) {
                                 target.url.as_str(),
                             );
                             for (vuln, payload, description) in findings {
+                                let self_bootstrap_verified =
+                                    crate::scanning::ast_integration::has_self_bootstrap_verification(
+                                        &js_code,
+                                        &vuln.source,
+                                    );
+                                let poc_url =
+                                    crate::scanning::ast_integration::build_dom_xss_poc_url(
+                                        target.url.as_str(),
+                                        &vuln.source,
+                                        &payload,
+                                    );
+                                let message = build_ast_dom_message(
+                                    &description,
+                                    &vuln.source,
+                                    target.url.as_str(),
+                                    &payload,
+                                );
                                 // Create an AST-based DOM XSS result with actual executable payload
                                 let ast_result = crate::scanning::result::Result::new(
                                     "A".to_string(), // AST-detected
                                     "DOM-XSS".to_string(),
                                     target.method.clone(),
-                                    target.url.to_string(),
+                                    poc_url,
                                     "-".to_string(), // No specific parameter
                                     payload, // Actual XSS payload
                                     format!("{}:{}:{} - {} (Source: {}, Sink: {})",
@@ -1494,8 +1600,17 @@ pub async fn run_scan(args: &ScanArgs) {
                                     "CWE-79".to_string(),
                                     "Medium".to_string(),
                                     0,
-                                    format!("{} (검증 필요) [경량 확인: 파라미터 없음]", description),
+                                    message,
                                 );
+                                let mut ast_result = ast_result;
+                                if self_bootstrap_verified {
+                                    ast_result.result_type = "V".to_string();
+                                    ast_result.severity = "High".to_string();
+                                    ast_result.message_str = format!(
+                                        "{} [정적 self-bootstrap 확인]",
+                                        ast_result.message_str
+                                    );
+                                }
                                 ast_batch.push(ast_result);
                             }
                         }
@@ -1549,7 +1664,7 @@ pub async fn run_scan(args: &ScanArgs) {
                             1
                         } else {
                             let mut f = 1;
-                            for e in ["url", "html", "2url", "base64"] {
+                            for e in ["url", "html", "2url", "3url", "4url", "base64"] {
                                 if args_clone.encoders.iter().any(|x| x == e) {
                                     f += 1;
                                 }

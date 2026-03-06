@@ -341,10 +341,7 @@ mod tests {
     fn test_sanitize_lines_trims_whitespace() {
         let input = "  <script>alert(1)</script>  \n\t<img src=x>\t";
         let result = sanitize_lines(input);
-        assert_eq!(
-            result,
-            vec!["<script>alert(1)</script>", "<img src=x>"]
-        );
+        assert_eq!(result, vec!["<script>alert(1)</script>", "<img src=x>"]);
     }
 
     #[test]
@@ -397,7 +394,10 @@ mod tests {
 
     #[test]
     fn test_register_custom_payload_provider() {
-        register_payload_provider("custom", vec!["https://example.com/payloads.txt".to_string()]);
+        register_payload_provider(
+            "custom",
+            vec!["https://example.com/payloads.txt".to_string()],
+        );
         let providers = list_payload_providers();
         assert!(providers.contains(&"custom".to_string()));
     }
