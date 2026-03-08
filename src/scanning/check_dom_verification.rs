@@ -124,9 +124,12 @@ pub async fn check_dom_verification_with_client(
         return (false, None);
     }
 
-    // Apply pre-encoding if the parameter requires it
+    // Apply pre-encoding if the parameter requires it.
+    // Use encoded_payload for building the HTTP request, but keep `payload`
+    // (the raw/original payload) for response body analysis — the server
+    // decodes the encoding and reflects the raw content.
     let encoded_payload = crate::scanning::check_reflection::apply_pre_encoding_pub(payload, &param.pre_encoding);
-    let payload = encoded_payload.as_str();
+    let wire_payload = encoded_payload.as_str();
 
     let default_method = target.parse_method();
     let inject_request = match param.location {
@@ -139,9 +142,9 @@ pub async fn check_dom_verification_with_client(
                 );
                 let cookie_header = match others {
                     Some(rest) if !rest.is_empty() => {
-                        format!("{}={}; {}", param.name, payload, rest)
+                        format!("{}={}; {}", param.name, wire_payload, rest)
                     }
-                    _ => format!("{}={}", param.name, payload),
+                    _ => format!("{}={}", param.name, wire_payload),
                 };
                 crate::utils::build_request_with_cookie(
                     client,
@@ -161,7 +164,7 @@ pub async fn check_dom_verification_with_client(
                 );
                 crate::utils::apply_header_overrides(
                     base,
-                    &[(param.name.clone(), payload.to_string())],
+                    &[(param.name.clone(), wire_payload.to_string())],
                 )
             }
         }
@@ -175,13 +178,13 @@ pub async fn check_dom_verification_with_client(
                 let mut found = false;
                 for pair in &mut pairs {
                     if pair.0 == param.name {
-                        pair.1 = payload.to_string();
+                        pair.1 = wire_payload.to_string();
                         found = true;
                         break;
                     }
                 }
                 if !found {
-                    pairs.push((param.name.clone(), payload.to_string()));
+                    pairs.push((param.name.clone(), wire_payload.to_string()));
                 }
                 Some(
                     url::form_urlencoded::Serializer::new(String::new())
@@ -192,7 +195,7 @@ pub async fn check_dom_verification_with_client(
                 Some(format!(
                     "{}={}",
                     urlencoding::encode(&param.name),
-                    urlencoding::encode(payload)
+                    urlencoding::encode(wire_payload)
                 ))
             };
             let base = crate::utils::build_request(client, target, method, parsed_url, body);
@@ -212,15 +215,15 @@ pub async fn check_dom_verification_with_client(
                     if let Some(obj) = json_val.as_object_mut() {
                         obj.insert(
                             param.name.clone(),
-                            serde_json::Value::String(payload.to_string()),
+                            serde_json::Value::String(wire_payload.to_string()),
                         );
                     }
                     Some(serde_json::to_string(&json_val).unwrap_or_else(|_| data.clone()))
                 } else {
-                    Some(data.replace(&param.value, payload))
+                    Some(data.replace(&param.value, wire_payload))
                 }
             } else {
-                Some(serde_json::json!({ &param.name: payload }).to_string())
+                Some(serde_json::json!({ &param.name: wire_payload }).to_string())
             };
             let base = crate::utils::build_request(client, target, method, parsed_url, body);
             crate::utils::apply_header_overrides(
@@ -230,7 +233,7 @@ pub async fn check_dom_verification_with_client(
         }
         _ => {
             let inject_url_str =
-                crate::scanning::url_inject::build_injected_url(&target.url, param, payload);
+                crate::scanning::url_inject::build_injected_url(&target.url, param, wire_payload);
             let inject_url =
                 url::Url::parse(&inject_url_str).unwrap_or_else(|_| target.url.clone());
             crate::utils::build_request(client, target, default_method, inject_url, target.data.clone())
@@ -280,18 +283,61 @@ pub async fn check_dom_verification_with_client(
     } else {
         // Normal DOM verification
         if let Ok(resp) = inject_resp {
+            let status = resp.status();
             let headers = resp.headers().clone();
             let ct = headers
                 .get(reqwest::header::CONTENT_TYPE)
                 .and_then(|v| v.to_str().ok())
                 .unwrap_or("");
-            if let Ok(text) = resp.text().await
-                && crate::utils::is_htmlish_content_type(ct)
-                && crate::scanning::check_reflection::classify_reflection(&text, payload).is_some()
-                && (has_marker_evidence(payload, &text)
-                    || has_executable_url_attribute_evidence(payload, &text))
-            {
-                return (true, Some(text));
+
+            // Check redirect Location header for executable URL protocols (e.g. javascript:alert(1))
+            if status.is_redirection() {
+                if let Some(location) = headers.get(reqwest::header::LOCATION)
+                    && let Ok(loc_str) = location.to_str()
+                {
+                    let loc_lower = loc_str.trim().to_ascii_lowercase();
+                    if payload_is_executable_url_protocol(payload)
+                        && loc_lower.starts_with(&payload.trim().to_ascii_lowercase())
+                    {
+                        let synthetic_body = format!(
+                            "<html><body><a href=\"{}\">redirect</a></body></html>",
+                            loc_str
+                        );
+                        return (true, Some(synthetic_body));
+                    }
+                    // Also check if payload is reflected in Location header (open redirect)
+                    if crate::scanning::check_reflection::classify_reflection(loc_str, payload).is_some() {
+                        let synthetic_body = format!(
+                            "<html><body>Redirect to: {}</body></html>",
+                            loc_str
+                        );
+                        return (true, Some(synthetic_body));
+                    }
+                }
+            }
+
+            if let Ok(text) = resp.text().await {
+                // Standard HTML DOM verification
+                if crate::utils::is_htmlish_content_type(ct)
+                    && crate::scanning::check_reflection::classify_reflection(&text, payload).is_some()
+                    && (has_marker_evidence(payload, &text)
+                        || has_executable_url_attribute_evidence(payload, &text))
+                {
+                    return (true, Some(text));
+                }
+
+                // For non-HTML content types (JSONP, JSON with HTML, etc.),
+                // check if payload with marker is reflected in response body
+                if !crate::utils::is_htmlish_content_type(ct)
+                    && crate::scanning::check_reflection::classify_reflection(&text, payload).is_some()
+                {
+                    // Try parsing the response as if it were HTML to find marker evidence
+                    if has_marker_evidence(payload, &text)
+                        || has_executable_url_attribute_evidence(payload, &text)
+                    {
+                        return (true, Some(text));
+                    }
+                }
             }
         }
     }
@@ -552,7 +598,22 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_check_dom_verification_rejects_non_html_content_type() {
+    async fn test_check_dom_verification_rejects_non_html_without_marker() {
+        // Non-HTML responses without marker evidence should still be rejected
+        let payload = "<script>alert(1)</script>";
+        let addr = start_mock_server("stored").await;
+        let target = make_target(addr, "/dom/json");
+        let param = make_param();
+        let args = default_scan_args();
+
+        let (found, body) = check_dom_verification(&target, &param, payload, &args).await;
+        assert!(!found, "application/json without marker should not pass DOM verification");
+        assert!(body.is_none(), "non-html responses without marker should not be returned");
+    }
+
+    #[tokio::test]
+    async fn test_check_dom_verification_accepts_non_html_with_marker() {
+        // Non-HTML responses WITH marker evidence should pass (JSONP/JSON XSS cases)
         let payload = format!(
             "<script class={}>alert(1)</script>",
             crate::scanning::markers::class_marker()
@@ -562,9 +623,8 @@ mod tests {
         let param = make_param();
         let args = default_scan_args();
 
-        let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
-        assert!(!found, "application/json should not pass DOM verification");
-        assert!(body.is_none(), "non-html responses should not be returned");
+        let (found, _body) = check_dom_verification(&target, &param, &payload, &args).await;
+        assert!(found, "non-HTML responses with marker evidence should pass DOM verification for JSONP/JSON XSS");
     }
 
     #[tokio::test]

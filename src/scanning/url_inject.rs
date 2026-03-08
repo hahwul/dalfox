@@ -66,6 +66,9 @@ fn selective_path_segment_encode(raw: &str) -> String {
             '#' => out.push_str("%23"),
             '?' => out.push_str("%3F"),
             '%' => out.push_str("%25"),
+            '\n' => out.push_str("%0A"),
+            '\t' => out.push_str("%09"),
+            '\r' => out.push_str("%0D"),
             _ => out.push(ch),
         }
     }

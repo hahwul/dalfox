@@ -155,6 +155,8 @@ pub async fn check_query_discovery(
     let encoding_probes: &[(&str, fn(&str) -> String)] = &[
         ("base64", |s| crate::encoding::base64_encode(s)),
         ("2base64", |s| crate::encoding::base64_encode(&crate::encoding::base64_encode(s))),
+        ("2url", |s| crate::encoding::url_encode(&crate::encoding::url_encode(s))),
+        ("3url", |s| crate::encoding::url_encode(&crate::encoding::url_encode(&crate::encoding::url_encode(s)))),
     ];
     for (name, value) in target.url.query_pairs() {
         let name = name.to_string();
@@ -182,15 +184,18 @@ pub async fn check_query_discovery(
                 && let Ok(text) = resp.text().await
                 && text.contains(test_value)
             {
-                let (valid, invalid) = classify_special_chars(&text);
+                // For pre-encoded params (base64/2base64), skip special char
+                // classification. The encoding bypasses HTTP-level filtering,
+                // and leaving specials as None ensures all payload types are tried
+                // without adaptive filtering that would incorrectly block payloads.
                 discovered_names.insert(name.clone());
                 batch.push(Param {
                     name: name.clone(),
                     value: value.to_string(),
                     location: crate::parameter_analysis::Location::Query,
                     injection_context: Some(detect_injection_context(&text)),
-                    valid_specials: Some(valid),
-                    invalid_specials: Some(invalid),
+                    valid_specials: None,
+                    invalid_specials: None,
                     pre_encoding: Some(enc_name.to_string()),
                 });
                 break; // Found working encoding, no need to try more

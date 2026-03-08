@@ -18,6 +18,10 @@ fn apply_pre_encoding(payload: &str, pre_encoding: &Option<String>) -> String {
         Some("2base64") => {
             crate::encoding::base64_encode(&crate::encoding::base64_encode(payload))
         }
+        Some("2url") => crate::encoding::url_encode(&crate::encoding::url_encode(payload)),
+        Some("3url") => crate::encoding::url_encode(&crate::encoding::url_encode(
+            &crate::encoding::url_encode(payload),
+        )),
         _ => payload.to_string(),
     }
 }

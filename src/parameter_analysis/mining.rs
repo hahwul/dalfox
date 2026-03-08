@@ -289,9 +289,24 @@ pub async fn probe_dictionary_params(
 
                 let mut discovered: Option<Param> = None;
                 if let Ok(r) = resp {
+                    // Skip server error responses (5xx) — debug error pages often
+                    // reflect query params in stack traces, causing false positives.
+                    let status = r.status();
+                    if status.is_server_error() {
+                        let mut st = stats_clone.lock().await;
+                        st.record_attempt();
+                        drop(permit);
+                        if delay > 0 {
+                            sleep(Duration::from_millis(delay)).await;
+                        }
+                        if let Some(ref pb) = pb_clone {
+                            pb.inc(1);
+                        }
+                        return discovered;
+                    }
                     // Check for redirect reflection: if the response is a 3xx redirect,
                     // the Location header may contain the reflected marker value.
-                    let is_redirect = r.status().is_redirection();
+                    let is_redirect = status.is_redirection();
                     let location_has_marker = if is_redirect {
                         r.headers()
                             .get("location")
@@ -404,12 +419,24 @@ pub async fn probe_dictionary_params(
         guard.extend(batch);
     }
 
-    // Apply collapse post-processing once (instead of inside tasks mutating aggressively)
+    // Apply collapse post-processing once (instead of inside tasks mutating aggressively).
+    // Only collapse Query params — preserve params discovered via other channels
+    // (Body from form discovery, Header from header discovery, Path, etc.).
     let st_final = stats.lock().await;
     if st_final.collapsed {
         let mut guard = reflection_params.lock().await;
-        let preserved = guard.first().cloned();
+        // Preserve non-Query params (Body, Header, Path, JsonBody, Cookie, etc.)
+        let non_query: Vec<Param> = guard
+            .iter()
+            .filter(|p| !matches!(p.location, crate::parameter_analysis::Location::Query))
+            .cloned()
+            .collect();
+        let preserved = guard
+            .iter()
+            .find(|p| matches!(p.location, crate::parameter_analysis::Location::Query))
+            .cloned();
         guard.clear();
+        guard.extend(non_query);
         if let Some(orig) = preserved {
             guard.push(Param {
                 name: "any".to_string(),
@@ -588,12 +615,22 @@ pub async fn probe_body_params(
             guard.extend(batch);
         }
 
-        // If collapsed after attempts, normalize to single 'any' param
+        // If collapsed after attempts, normalize Body params to single 'any' param.
+        // Preserve non-Body params discovered via other channels.
         let st_final = stats.lock().await;
         if st_final.collapsed {
             let mut guard = reflection_params.lock().await;
-            let preserved = guard.first().cloned();
+            let non_body: Vec<Param> = guard
+                .iter()
+                .filter(|p| !matches!(p.location, Location::Body))
+                .cloned()
+                .collect();
+            let preserved = guard
+                .iter()
+                .find(|p| matches!(p.location, Location::Body))
+                .cloned();
             guard.clear();
+            guard.extend(non_body);
             if let Some(orig) = preserved {
                 guard.push(Param {
                     name: "any".to_string(),
@@ -644,6 +681,7 @@ pub async fn probe_response_id_params(
     let __resp = base_request.send().await;
     crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
     if let Ok(resp) = __resp
+        && !resp.status().is_server_error()
         && let Ok(text) = resp.text().await
     {
         let document = scraper::Html::parse_document(&text);
@@ -708,9 +746,21 @@ pub async fn probe_response_id_params(
                 let mut discovered: Option<Param> = None;
                 let __resp = request.send().await;
                 crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
-                if let Ok(resp) = __resp
-                    && let Ok(text) = resp.text().await
-                {
+                if let Ok(resp) = __resp {
+                    // Skip 5xx error responses — debug pages often reflect params
+                    if resp.status().is_server_error() {
+                        let mut st = stats_clone.lock().await;
+                        st.record_attempt();
+                        drop(permit);
+                        if delay > 0 {
+                            sleep(Duration::from_millis(delay)).await;
+                        }
+                        if let Some(ref pb) = pb_clone {
+                            pb.inc(1);
+                        }
+                        return discovered;
+                    }
+                    if let Ok(text) = resp.text().await {
                     let mut st = stats_clone.lock().await;
                     st.record_attempt();
                     if text.contains(crate::scanning::markers::open_marker()) {
@@ -748,6 +798,7 @@ pub async fn probe_response_id_params(
                     } else {
                         st.record_non_reflection();
                     }
+                    }
                 }
                 if delay > 0 {
                     sleep(Duration::from_millis(delay)).await;
@@ -775,12 +826,22 @@ pub async fn probe_response_id_params(
             let mut guard = reflection_params.lock().await;
             guard.extend(batch);
         }
-        // Collapse post-processing (single 'any' param) if adaptive stats triggered it
+        // Collapse post-processing (single 'any' param) if adaptive stats triggered it.
+        // Preserve non-Query params discovered via other channels.
         let st_final = stats.lock().await;
         if st_final.collapsed {
             let mut guard = reflection_params.lock().await;
-            let preserved = guard.first().cloned();
+            let non_query: Vec<Param> = guard
+                .iter()
+                .filter(|p| !matches!(p.location, crate::parameter_analysis::Location::Query))
+                .cloned()
+                .collect();
+            let preserved = guard
+                .iter()
+                .find(|p| matches!(p.location, crate::parameter_analysis::Location::Query))
+                .cloned();
             guard.clear();
+            guard.extend(non_query);
             if let Some(orig) = preserved {
                 guard.push(Param {
                     name: "any".to_string(),
@@ -978,12 +1039,22 @@ pub async fn probe_json_body_params(
         guard.extend(batch);
     }
 
-    // Collapse normalization to single 'any' JSON param if triggered
+    // Collapse normalization to single 'any' JSON param if triggered.
+    // Preserve non-JsonBody params discovered via other channels.
     let st_final = stats.lock().await;
     if st_final.collapsed {
         let mut guard = reflection_params.lock().await;
-        let preserved = guard.first().cloned();
+        let non_json: Vec<Param> = guard
+            .iter()
+            .filter(|p| !matches!(p.location, Location::JsonBody))
+            .cloned()
+            .collect();
+        let preserved = guard
+            .iter()
+            .find(|p| matches!(p.location, Location::JsonBody))
+            .cloned();
         guard.clear();
+        guard.extend(non_json);
         if let Some(orig) = preserved {
             guard.push(Param {
                 name: "any".to_string(),

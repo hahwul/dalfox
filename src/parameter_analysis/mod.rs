@@ -151,19 +151,30 @@ pub async fn active_probe_param(
         let data = target.data.clone();
         let param_name = param.name.clone();
         let location = param.location.clone();
+        let pre_encoding = param.pre_encoding.clone();
 
         let valid_ref = valid_specials.clone();
         let invalid_ref = invalid_specials.clone();
 
         let handle = tokio::spawn(async move {
             let _permit = sem_clone.acquire().await.unwrap();
-            let payload = format!(
+            let raw_payload = format!(
                 "{}{}{}",
                 crate::scanning::markers::open_marker(),
                 c,
                 crate::scanning::markers::close_marker()
             );
-            let req_method = parsed_method;
+            // Apply pre-encoding (base64/2base64) so the server can decode
+            // the probe value the same way it decodes normal user input.
+            let payload = crate::scanning::check_reflection::apply_pre_encoding_pub(
+                &raw_payload,
+                &pre_encoding,
+            );
+            // Force POST for Body/JsonBody params even when default target method is GET
+            let req_method = match location {
+                Location::Body | Location::JsonBody => reqwest::Method::POST,
+                _ => parsed_method,
+            };
             let mut url = url_original.clone();
             let mut request_builder;
 
@@ -234,12 +245,19 @@ pub async fn active_probe_param(
                             request_builder = request_builder.header("Cookie", cookie_header);
                         }
                     } else {
+                        let mut injected = false;
                         for (k, v) in &headers {
                             if k == &param_name {
                                 request_builder = request_builder.header(k, payload.clone());
+                                injected = true;
                             } else {
                                 request_builder = request_builder.header(k, v);
                             }
+                        }
+                        // If param was discovered (e.g. via check_header_discovery)
+                        // but isn't in the user-provided headers, inject it directly.
+                        if !injected {
+                            request_builder = request_builder.header(&param_name, payload.clone());
                         }
                     }
                 }
@@ -329,29 +347,42 @@ pub async fn active_probe_param(
                 crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 request_builder.send().await
             } {
-                if let Ok(text) = resp.text().await {
-                    if let Some(segment) = extract_reflected_segment(&text) {
-                        if segment.contains(c) {
-                            true
-                        } else {
-                            let encs = encoded_variants(c);
-                            let mut found = false;
-                            for e in encs {
-                                if segment.contains(e) {
-                                    found = true;
-                                    break;
-                                }
-                            }
-                            if !found {
-                                let pct = format!("%{:02X}", c as u32);
-                                if segment.to_ascii_uppercase().contains(&pct) {
-                                    found = true;
-                                }
-                            }
-                            found
-                        }
+                // For redirect responses, also check the Location header
+                let redirect_text = if resp.status().is_redirection() {
+                    resp.headers()
+                        .get(reqwest::header::LOCATION)
+                        .and_then(|v| v.to_str().ok())
+                        .map(|s| s.to_string())
+                } else {
+                    None
+                };
+                let body_text = resp.text().await.ok();
+                // Combine redirect Location and body for reflection checking
+                let combined = match (&redirect_text, &body_text) {
+                    (Some(loc), Some(body)) => format!("{}{}", loc, body),
+                    (Some(loc), None) => loc.clone(),
+                    (None, Some(body)) => body.clone(),
+                    (None, None) => String::new(),
+                };
+                if let Some(segment) = extract_reflected_segment(&combined) {
+                    if segment.contains(c) {
+                        true
                     } else {
-                        false
+                        let encs = encoded_variants(c);
+                        let mut found = false;
+                        for e in encs {
+                            if segment.contains(e) {
+                                found = true;
+                                break;
+                            }
+                        }
+                        if !found {
+                            let pct = format!("%{:02X}", c as u32);
+                            if segment.to_ascii_uppercase().contains(&pct) {
+                                found = true;
+                            }
+                        }
+                        found
                     }
                 } else {
                     false
@@ -382,8 +413,63 @@ pub async fn active_probe_param(
     let v = valid_specials.lock().await.clone();
     let iv = invalid_specials.lock().await.clone();
 
-    param.valid_specials = Some(v);
-    param.invalid_specials = Some(iv);
+    param.valid_specials = Some(v.clone());
+    param.invalid_specials = Some(iv.clone());
+
+    // If '<' is invalid and no pre_encoding is set, try double/triple URL encoding
+    // to detect servers that multi-decode input (e.g. double URL decode).
+    if param.pre_encoding.is_none()
+        && iv.contains(&'<')
+        && matches!(param.location, Location::Query)
+    {
+        let open = crate::scanning::markers::open_marker();
+        let close = crate::scanning::markers::close_marker();
+        let raw_marker = format!("{}<{}", open, close);
+
+        // Note: append_pair adds one URL-encoding layer automatically,
+        // so we encode (N-1) times for N-decode detection.
+        for (enc_name, rounds) in [("2url", 1u8), ("3url", 2u8)] {
+            let mut encoded = raw_marker.clone();
+            for _ in 0..rounds {
+                encoded = crate::encoding::url_encode(&encoded);
+            }
+
+            let _permit = semaphore.acquire().await.unwrap();
+            let mut url = target.url.clone();
+            let mut new_pairs: Vec<(String, String)> = Vec::new();
+            let mut replaced = false;
+            for (k, val) in url.query_pairs() {
+                if k == param.name {
+                    new_pairs.push((k.to_string(), encoded.clone()));
+                    replaced = true;
+                } else {
+                    new_pairs.push((k.to_string(), val.to_string()));
+                }
+            }
+            if !replaced {
+                new_pairs.push((param.name.clone(), encoded.clone()));
+            }
+            url.query_pairs_mut().clear();
+            for (k, val) in &new_pairs {
+                url.query_pairs_mut().append_pair(k, val);
+            }
+            let request_builder = client.request(target.parse_method(), url);
+            crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if let Ok(resp) = request_builder.send().await
+                && let Ok(text) = resp.text().await
+                && text.contains(&raw_marker)
+            {
+                param.pre_encoding = Some(enc_name.to_string());
+                // With multi-URL-decode, skip special char filtering — the encoding
+                // bypasses HTTP-level filters. Set specials to None so all payloads
+                // are tried.
+                param.valid_specials = None;
+                param.invalid_specials = None;
+                break;
+            }
+        }
+    }
+
     param
 }
 
