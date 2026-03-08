@@ -15,7 +15,6 @@ use crate::scanning::check_dom_verification::check_dom_verification_with_client;
 use crate::scanning::check_reflection::check_reflection_with_response_client;
 use crate::target_parser::Target;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use reqwest::Client;
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -278,7 +277,7 @@ pub async fn run_scanning(
         return;
     }
     let arc_target = Arc::new(target.clone());
-    let shared_client = Arc::new(arc_target.build_client().unwrap_or_else(|_| Client::new()));
+    let shared_client = Arc::new(arc_target.build_client_or_default());
     let semaphore = Arc::new(Semaphore::new(if args.sxss { 1 } else { target.workers }));
     let limit = args.limit;
 

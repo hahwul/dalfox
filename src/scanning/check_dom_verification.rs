@@ -109,7 +109,7 @@ pub async fn check_dom_verification(
     if args.skip_xss_scanning {
         return (false, None);
     }
-    let client = target.build_client().unwrap_or_else(|_| Client::new());
+    let client = target.build_client_or_default();
     check_dom_verification_with_client(&client, target, param, payload, args).await
 }
 
@@ -128,7 +128,7 @@ pub async fn check_dom_verification_with_client(
     let encoded_payload = crate::scanning::check_reflection::apply_pre_encoding_pub(payload, &param.pre_encoding);
     let payload = encoded_payload.as_str();
 
-    let default_method = target.method.parse().unwrap_or(reqwest::Method::GET);
+    let default_method = target.parse_method();
     let inject_request = match param.location {
         Location::Header => {
             let parsed_url = target.url.clone();

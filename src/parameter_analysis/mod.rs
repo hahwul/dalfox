@@ -10,7 +10,6 @@ pub static REQUEST_COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::
 use crate::cmd::scan::ScanArgs;
 use crate::target_parser::Target;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
 use std::sync::Arc;
@@ -135,7 +134,7 @@ pub async fn active_probe_param(
     mut param: Param,
     semaphore: Arc<Semaphore>,
 ) -> Param {
-    let client = target.build_client().unwrap_or_else(|_| Client::new());
+    let client = target.build_client_or_default();
 
     let mut handles = Vec::new();
     let valid_specials = Arc::new(Mutex::new(Vec::<char>::new()));
@@ -144,7 +143,7 @@ pub async fn active_probe_param(
     for &c in SPECIAL_PROBE_CHARS {
         let sem_clone = semaphore.clone();
         let client_clone = client.clone();
-        let method = target.method.clone();
+        let parsed_method = target.parse_method();
         let url_original = target.url.clone();
         let headers = target.headers.clone();
         let cookies = target.cookies.clone();
@@ -164,7 +163,7 @@ pub async fn active_probe_param(
                 c,
                 crate::scanning::markers::close_marker()
             );
-            let req_method = method.parse().unwrap_or(reqwest::Method::GET);
+            let req_method = parsed_method;
             let mut url = url_original.clone();
             let mut request_builder;
 

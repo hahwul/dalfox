@@ -3,7 +3,6 @@ use crate::parameter_analysis::{DelimiterType, InjectionContext, Location, Param
 use crate::payload::mining::GF_PATTERNS_PARAMS;
 use crate::target_parser::Target;
 use indicatif::ProgressBar;
-use reqwest::Client;
 use scraper;
 use std::sync::{Arc, atomic::Ordering};
 
@@ -177,7 +176,7 @@ pub async fn probe_dictionary_params(
 ) {
     let arc_target = Arc::new(target.clone());
     let silence = args.silence;
-    let client = target.build_client().unwrap_or_else(|_| Client::new());
+    let client = target.build_client_or_default();
 
     // Resolve candidate parameter names (remote, file, or built-ins)
     let mut params: Vec<String> = Vec::new();
@@ -272,7 +271,7 @@ pub async fn probe_dictionary_params(
             let client_clone = client.clone();
 
             let data = target.data.clone();
-            let method = target.method.clone();
+            let parsed_method = target.parse_method();
             let target_clone = arc_target.clone();
             let delay = target.delay;
             let semaphore_clone = semaphore.clone();
@@ -282,9 +281,8 @@ pub async fn probe_dictionary_params(
 
             let handle = tokio::spawn(async move {
                 let permit = semaphore_clone.acquire().await.unwrap();
-                let m = method.parse().unwrap_or(reqwest::Method::GET);
                 let request =
-                    crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
+                    crate::utils::build_request(&client_clone, &target_clone, parsed_method, url, data.clone());
 
                 let resp = request.send().await;
                 crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
@@ -445,7 +443,7 @@ pub async fn probe_body_params(
 ) {
     let arc_target = Arc::new(target.clone());
     let silence = args.silence;
-    let client = target.build_client().unwrap_or_else(|_| Client::new());
+    let client = target.build_client_or_default();
 
     if let Some(data) = &args.data {
         // Assume form data for now (application/x-www-form-urlencoded)
@@ -499,7 +497,7 @@ pub async fn probe_body_params(
             let client_clone = client.clone();
             let url = target.url.clone();
 
-            let method = target.method.clone();
+            let parsed_method = reqwest::Method::POST;
             let target_clone = arc_target.clone();
             let delay = target.delay;
             let semaphore_clone = semaphore.clone();
@@ -509,7 +507,7 @@ pub async fn probe_body_params(
 
             let handle = tokio::spawn(async move {
                 let permit = semaphore_clone.acquire().await.unwrap();
-                let m = method.parse().unwrap_or(reqwest::Method::POST);
+                let m = parsed_method;
                 let base =
                     crate::utils::build_request(&client_clone, &target_clone, m, url, Some(body));
                 let overrides = vec![(
@@ -632,13 +630,13 @@ pub async fn probe_response_id_params(
 ) {
     let arc_target = Arc::new(target.clone());
     let silence = args.silence;
-    let client = target.build_client().unwrap_or_else(|_| Client::new());
+    let client = target.build_client_or_default();
 
     // First, get the HTML to find input ids and names
     let base_request = crate::utils::build_request(
         &client,
         target,
-        target.method.parse().unwrap_or(reqwest::Method::GET),
+        target.parse_method(),
         target.url.clone(),
         target.data.clone(),
     );
@@ -693,10 +691,9 @@ pub async fn probe_response_id_params(
             let client_clone = client.clone();
 
             let data = target.data.clone();
-            let method = target.method.clone();
+            let parsed_method = target.parse_method();
             let target_clone = arc_target.clone();
             let delay = target.delay;
-            // removed unused variable reflection_params_clone
             let semaphore_clone = semaphore.clone();
             let param = param.clone();
             let pb_clone = pb.clone();
@@ -704,7 +701,7 @@ pub async fn probe_response_id_params(
 
             let handle = tokio::spawn(async move {
                 let permit = semaphore_clone.acquire().await.unwrap();
-                let m = method.parse().unwrap_or(reqwest::Method::GET);
+                let m = parsed_method;
                 let request =
                     crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
                 // Prepare optional discovered Param container for batched return
@@ -820,7 +817,7 @@ pub async fn probe_json_body_params(
 ) {
     let arc_target = Arc::new(target.clone());
     let silence = args.silence;
-    let client = target.build_client().unwrap_or_else(|_| Client::new());
+    let client = target.build_client_or_default();
 
     // Detect JSON body from args.data; only proceed if it's a JSON object
     let base_json: serde_json::Value = match &args.data {
@@ -869,7 +866,7 @@ pub async fn probe_json_body_params(
         let client_clone = client.clone();
         let url = target.url.clone();
 
-        let method = target.method.clone();
+        let parsed_method = reqwest::Method::POST;
         let target_clone = arc_target.clone();
         let delay = target.delay;
         let semaphore_clone = semaphore.clone();
@@ -904,9 +901,8 @@ pub async fn probe_json_body_params(
                 )
             });
 
-            let m = method.parse().unwrap_or(reqwest::Method::POST);
             let base =
-                crate::utils::build_request(&client_clone, &target_clone, m, url, Some(body));
+                crate::utils::build_request(&client_clone, &target_clone, parsed_method, url, Some(body));
             let overrides = vec![("Content-Type".to_string(), "application/json".to_string())];
             let request = crate::utils::apply_header_overrides(base, &overrides);
 

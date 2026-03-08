@@ -1,11 +1,28 @@
 use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::{Param, classify_special_chars, detect_injection_context};
 use crate::target_parser::Target;
-use reqwest::Client;
 use scraper;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{Duration, sleep};
+
+/// Cached regex for detecting JSON.stringify patterns in JavaScript source.
+fn json_stringify_regex() -> &'static regex::Regex {
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        regex::Regex::new(r#"JSON\.stringify\(\s*\{([^}]+)\}\s*\)"#)
+            .expect("json_stringify_regex is a valid pattern")
+    })
+}
+
+/// Cached regex for extracting key names from JSON-like object literals.
+fn json_key_regex() -> &'static regex::Regex {
+    static RE: OnceLock<regex::Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        regex::Regex::new(r#"["']?(\w+)["']?\s*:"#)
+            .expect("json_key_regex is a valid pattern")
+    })
+}
 
 pub async fn check_discovery(
     target: &mut Target,
@@ -37,7 +54,7 @@ pub async fn check_query_discovery(
     semaphore: Arc<Semaphore>,
 ) {
     let arc_target = Arc::new(target.clone());
-    let client = target.build_client().unwrap_or_else(|_| Client::new());
+    let client = target.build_client_or_default();
     let test_value = crate::scanning::markers::open_marker();
 
     let mut handles = vec![];
@@ -55,7 +72,7 @@ pub async fn check_query_discovery(
         }
         let client_clone = client.clone();
         let data = target.data.clone();
-        let method = target.method.clone();
+        let parsed_method = target.parse_method();
         let delay = target.delay;
         let semaphore_clone = semaphore.clone();
         let name = name.to_string();
@@ -65,7 +82,7 @@ pub async fn check_query_discovery(
         // Spawn a task that returns Option<Param> instead of locking per discovery.
         let handle = tokio::spawn(async move {
             let permit = semaphore_clone.acquire().await.unwrap();
-            let m = method.parse().unwrap_or(reqwest::Method::GET);
+            let m = parsed_method;
             let request =
                 crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
             crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -156,7 +173,7 @@ pub async fn check_query_discovery(
                 }
             }
             let _permit = semaphore.acquire().await.unwrap();
-            let m = target.method.parse().unwrap_or(reqwest::Method::GET);
+            let m = target.parse_method();
             let request = crate::utils::build_request(
                 &client, target, m, url, target.data.clone(),
             );
@@ -207,7 +224,7 @@ pub async fn check_header_discovery(
     semaphore: Arc<Semaphore>,
 ) {
     let arc_target = Arc::new(target.clone());
-    let client = target.build_client().unwrap_or_else(|_| Client::new());
+    let client = target.build_client_or_default();
     let test_value = crate::scanning::markers::open_marker();
 
     let mut handles = vec![];
@@ -232,7 +249,7 @@ pub async fn check_header_discovery(
         let client_clone = client.clone();
         let url = target.url.clone();
         let data = target.data.clone();
-        let method = target.method.clone();
+        let parsed_method = target.parse_method();
         let delay = target.delay;
         let semaphore_clone = semaphore.clone();
         let header_name = header_name.clone();
@@ -242,7 +259,7 @@ pub async fn check_header_discovery(
         // Spawn task returning Option<Param> to batch reduce mutex contention
         let handle = tokio::spawn(async move {
             let permit = semaphore_clone.acquire().await.unwrap();
-            let m = method.parse().unwrap_or(reqwest::Method::GET);
+            let m = parsed_method;
             let base =
                 crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
             let overrides = vec![(header_name.clone(), test_value.to_string())];
@@ -307,7 +324,7 @@ pub async fn check_path_discovery(
         return;
     }
 
-    let client = target.build_client().unwrap_or_else(|_| Client::new());
+    let client = target.build_client_or_default();
 
     let mut handles = Vec::new();
 
@@ -321,7 +338,7 @@ pub async fn check_path_discovery(
 
         let client_clone = client.clone();
         let data = target.data.clone();
-        let method = target.method.clone();
+        let parsed_method = target.parse_method();
         let target_clone = arc_target.clone();
         let delay = target.delay;
         let semaphore_clone = semaphore.clone();
@@ -341,7 +358,7 @@ pub async fn check_path_discovery(
         // Spawn task returning Option<Param> for batched collection
         let handle = tokio::spawn(async move {
             let permit = semaphore_clone.acquire().await.unwrap();
-            let m = method.parse().unwrap_or(reqwest::Method::GET);
+            let m = parsed_method;
             let request =
                 crate::utils::build_request(&client_clone, &target_clone, m, new_url, data.clone());
 
@@ -392,7 +409,7 @@ pub async fn check_cookie_discovery(
     semaphore: Arc<Semaphore>,
 ) {
     let arc_target = Arc::new(target.clone());
-    let client = target.build_client().unwrap_or_else(|_| Client::new());
+    let client = target.build_client_or_default();
     let test_value = crate::scanning::markers::open_marker();
 
     let mut handles = vec![];
@@ -402,7 +419,7 @@ pub async fn check_cookie_discovery(
         let url = target.url.clone();
         let cookies = target.cookies.clone();
         let data = target.data.clone();
-        let method = target.method.clone();
+        let parsed_method = target.parse_method();
         let delay = target.delay;
         let semaphore_clone = semaphore.clone();
         let cookie_name = cookie_name.clone();
@@ -412,7 +429,7 @@ pub async fn check_cookie_discovery(
         // Spawn task returning Option<Param> for batched collection
         let handle = tokio::spawn(async move {
             let permit = semaphore_clone.acquire().await.unwrap();
-            let m = method.parse().unwrap_or(reqwest::Method::GET);
+            let m = parsed_method;
             // Compose cookie header overriding the probed cookie while preserving others
             let others =
                 crate::utils::compose_cookie_header_excluding(&cookies, Some(&cookie_name));
@@ -480,7 +497,7 @@ pub async fn check_form_discovery(
         return;
     }
 
-    let client = target.build_client().unwrap_or_else(|_| Client::new());
+    let client = target.build_client_or_default();
     let test_value = crate::scanning::markers::open_marker();
 
     // Fetch the page via GET to find forms
@@ -626,12 +643,12 @@ pub async fn check_form_discovery(
 
     // Also detect JSON POST endpoints from JavaScript (XHR / fetch with JSON.stringify)
     // Look for patterns like: JSON.stringify({"key":"value",...})
-    let json_re = regex::Regex::new(r#"JSON\.stringify\(\s*\{([^}]+)\}\s*\)"#).ok();
-    if let Some(ref re) = json_re {
+    {
+        let re = json_stringify_regex();
         for caps in re.captures_iter(&html) {
             if let Some(inner) = caps.get(1) {
                 // Parse key names from the JSON-like object literal
-                let key_re = regex::Regex::new(r#"["']?(\w+)["']?\s*:"#).unwrap();
+                let key_re = json_key_regex();
                 let mut json_fields: Vec<(String, String)> = Vec::new();
                 for kcap in key_re.captures_iter(inner.as_str()) {
                     if let Some(k) = kcap.get(1) {

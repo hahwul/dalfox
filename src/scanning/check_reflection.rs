@@ -253,7 +253,7 @@ async fn fetch_injection_response(
     if args.skip_xss_scanning {
         return None;
     }
-    let client = target.build_client().unwrap_or_else(|_| Client::new());
+    let client = target.build_client_or_default();
     fetch_injection_response_with_client(&client, target, param, payload, args).await
 }
 
@@ -273,7 +273,7 @@ async fn fetch_injection_response_with_client(
     let payload = encoded_payload.as_str();
 
     // Build injection request based on parameter location
-    let default_method = target.method.parse().unwrap_or(reqwest::Method::GET);
+    let default_method = target.parse_method();
     let inject_request = match param.location {
         Location::Header => {
             // Header injection: use original URL, inject payload as the header value

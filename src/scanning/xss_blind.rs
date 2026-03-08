@@ -41,12 +41,10 @@ pub async fn blind_scanning(target: &Target, callback_url: &str) {
 }
 
 async fn send_blind_request(target: &Target, param_name: &str, payload: &str, param_type: &str) {
-    use reqwest::Client;
     use tokio::time::{Duration, sleep};
     use url::form_urlencoded;
-    // use global request counter: crate::REQUEST_COUNT
 
-    let client = target.build_client().unwrap_or_else(|_| Client::new());
+    let client = target.build_client_or_default();
 
     let url = match param_type {
         "query" => {
@@ -80,7 +78,7 @@ async fn send_blind_request(target: &Target, param_name: &str, payload: &str, pa
     };
 
     let mut request = client.request(
-        target.method.parse().unwrap_or(reqwest::Method::GET),
+        target.parse_method(),
         url.clone(),
     );
 

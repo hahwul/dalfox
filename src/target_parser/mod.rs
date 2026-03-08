@@ -20,6 +20,23 @@ pub struct Target {
 }
 
 impl Target {
+    /// Parse the method string into a `reqwest::Method`, defaulting to GET on failure.
+    /// This avoids repeating `.method.parse().unwrap_or(reqwest::Method::GET)` everywhere.
+    pub fn parse_method(&self) -> reqwest::Method {
+        self.method.parse().unwrap_or(reqwest::Method::GET)
+    }
+
+    /// Build a reqwest Client, falling back to a default Client on error.
+    /// Logs a warning in debug mode if the build fails.
+    pub fn build_client_or_default(&self) -> Client {
+        self.build_client().unwrap_or_else(|e| {
+            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("[warn] failed to build client: {}, using default", e);
+            }
+            Client::new()
+        })
+    }
+
     pub fn build_client(&self) -> Result<Client, Box<dyn std::error::Error>> {
         let mut client_builder = Client::builder()
             .timeout(Duration::from_secs(self.timeout))

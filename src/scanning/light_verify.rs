@@ -15,7 +15,7 @@ pub async fn verify_dom_xss_light(
     param: &Param,
     payload: &str,
 ) -> (bool, Option<String>, Option<String>) {
-    let client = target.build_client().unwrap_or_else(|_| Client::new());
+    let client = target.build_client_or_default();
     verify_dom_xss_light_with_client(&client, target, param, payload).await
 }
 
@@ -25,7 +25,7 @@ pub async fn verify_dom_xss_light_with_client(
     param: &Param,
     payload: &str,
 ) -> (bool, Option<String>, Option<String>) {
-    let method = target.method.parse().unwrap_or(reqwest::Method::GET);
+    let method = target.parse_method();
     let request = match param.location {
         Location::Header => {
             let parsed_url = target.url.clone();
