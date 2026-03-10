@@ -90,6 +90,34 @@ fn is_in_safe_context(html: &str, payload: &str) -> bool {
     true
 }
 
+/// Like `is_in_safe_context` but also checks decoded forms of the payload.
+/// This catches cases where an encoded payload (URL/HTML-entity) is sent,
+/// the server decodes it, and reflects the decoded form inside a safe tag.
+fn is_in_safe_context_decoded(html: &str, payload: &str) -> bool {
+    // Check the raw payload form (only if it's actually present in the HTML)
+    if html.contains(payload) && is_in_safe_context(html, payload) {
+        return true;
+    }
+    // Check URL-decoded form
+    if let Ok(url_decoded) = urlencoding::decode(payload) {
+        if url_decoded != payload
+            && html.contains(url_decoded.as_ref())
+            && is_in_safe_context(html, &url_decoded)
+        {
+            return true;
+        }
+    }
+    // Check HTML-entity-decoded form
+    let html_decoded = decode_html_entities(payload);
+    if html_decoded != payload
+        && html.contains(&html_decoded)
+        && is_in_safe_context(html, &html_decoded)
+    {
+        return true;
+    }
+    false
+}
+
 static ENTITY_REGEX: OnceLock<Regex> = OnceLock::new();
 static NAMED_ENTITY_REGEX: OnceLock<Regex> = OnceLock::new();
 
@@ -429,7 +457,7 @@ pub async fn check_reflection(
 ) -> bool {
     if let Some(text) = fetch_injection_response(target, param, payload, args).await {
         match classify_reflection(&text, payload) {
-            Some(ReflectionKind::Raw) if is_in_safe_context(&text, payload) => false,
+            Some(_) if is_in_safe_context_decoded(&text, payload) => false,
             Some(_) => true,
             None => false,
         }
@@ -447,7 +475,7 @@ pub async fn check_reflection_with_response(
     if let Some(text) = fetch_injection_response(target, param, payload, args).await {
         let kind = classify_reflection(&text, payload);
         let kind = match kind {
-            Some(ReflectionKind::Raw) if is_in_safe_context(&text, payload) => None,
+            Some(_) if is_in_safe_context_decoded(&text, payload) => None,
             other => other,
         };
         (kind, Some(text))
@@ -468,7 +496,7 @@ pub async fn check_reflection_with_response_client(
     {
         let kind = classify_reflection(&text, payload);
         let kind = match kind {
-            Some(ReflectionKind::Raw) if is_in_safe_context(&text, payload) => None,
+            Some(_) if is_in_safe_context_decoded(&text, payload) => None,
             other => other,
         };
         (kind, Some(text))
@@ -1005,5 +1033,26 @@ mod tests {
             "<html><body>nothing</body></html>",
             "PAYLOAD"
         ));
+    }
+
+    #[test]
+    fn test_safe_context_title_breakout() {
+        let payload = "</title><IMG src=x onerror=alert(1) ClAss=dlxtest>";
+        let html = format!("<html><head><title>{}</title></head><body></body></html>", payload);
+        // Breakout payload closes the title tag, so the IMG is outside the safe context
+        assert!(
+            !is_in_safe_context(&html, payload),
+            "title breakout payload should NOT be considered safe"
+        );
+    }
+
+    #[test]
+    fn test_safe_context_textarea_breakout() {
+        let payload = "</textarea><IMG src=x onerror=alert(1) ClAss=dlxtest>";
+        let html = format!("<html><body><textarea>{}</textarea></body></html>", payload);
+        assert!(
+            !is_in_safe_context(&html, payload),
+            "textarea breakout payload should NOT be considered safe"
+        );
     }
 }

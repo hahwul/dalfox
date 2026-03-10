@@ -547,6 +547,15 @@ mod tests {
         // Check encoded versions
         assert!(payloads.iter().any(|p| p.contains("%3C")));
         assert!(payloads.iter().any(|p| p.contains("&#x")));
+        // Check that safe-tag breakout payloads are included
+        assert!(
+            payloads.iter().any(|p| p.contains("</title>")),
+            "should contain title breakout payloads"
+        );
+        assert!(
+            payloads.iter().any(|p| p.contains("</textarea>")),
+            "should contain textarea breakout payloads"
+        );
     }
 
     #[test]

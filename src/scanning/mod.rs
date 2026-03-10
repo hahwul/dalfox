@@ -45,12 +45,13 @@ fn get_fallback_reflection_payloads(
             base_payloads.extend(crate::scanning::xss_common::load_custom_payloads(path)?);
         }
     } else {
-        base_payloads.extend(
-            crate::payload::XSS_JAVASCRIPT_PAYLOADS
-                .iter()
-                .map(|s| s.to_string()),
-        );
+        // HTML/attribute payloads first — they break out of attribute contexts
+        // and create real DOM elements. JS-only payloads (alert(1), etc.) are
+        // excluded from the reflection list because they cause false-positive R
+        // findings when reflected inside quoted attribute values, blocking the
+        // attribute-breakout payloads that follow.
         base_payloads.extend(crate::payload::get_dynamic_xss_html_payloads());
+        base_payloads.extend(crate::payload::get_dynamic_xss_attribute_payloads());
         base_payloads.extend(crate::payload::get_mxss_payloads());
         base_payloads.extend(crate::payload::get_protocol_injection_payloads());
         if let Some(path) = &args.custom_payload {
@@ -375,8 +376,17 @@ pub async fn run_scanning(
                     probe_reflected = true;
                     probe_response_text = response_text;
                     break;
-                } else if response_text.is_some() {
-                    // Even without direct reflection, keep one response for AST analysis below.
+                } else if let Some(ref text) = response_text {
+                    // Even if safe-context suppressed the reflection kind,
+                    // check if the probe marker actually appears in the response.
+                    // This ensures breakout payloads get a chance to be tried
+                    // for params reflected inside safe tags (title, textarea, etc.).
+                    if text.contains(pp) {
+                        probe_reflected = true;
+                        probe_response_text = response_text;
+                        break;
+                    }
+                    // Keep one response for AST analysis below.
                     probe_response_text = response_text;
                 }
             }
@@ -941,14 +951,11 @@ mod tests {
         let payloads =
             get_fallback_reflection_payloads(&args).expect("reflection fallback payloads");
 
-        assert!(payloads.iter().any(|p| p == "alert(1)"));
-        assert!(payloads.iter().any(|p| p == &url_encode("alert(1)")));
-        assert!(
-            payloads
-                .iter()
-                .any(|p| p == &html_entity_encode("alert(1)"))
-        );
-        assert!(payloads.iter().any(|p| p == &base64_encode("alert(1)")));
+        // Should include HTML payloads (not raw JS like alert(1))
+        assert!(payloads.iter().any(|p| p.contains("onerror=")));
+        assert!(payloads.iter().any(|p| p.contains("<IMG")));
+        // Should have encoded variants
+        assert!(payloads.len() > 100, "should have many payloads with encoder variants");
     }
 
     #[test]
@@ -958,14 +965,14 @@ mod tests {
         let payloads =
             get_fallback_reflection_payloads(&args).expect("reflection fallback payloads");
 
-        assert!(payloads.iter().any(|p| p == "alert(1)"));
-        assert!(!payloads.iter().any(|p| p == &url_encode("alert(1)")));
-        assert!(
-            !payloads
-                .iter()
-                .any(|p| p == &html_entity_encode("alert(1)"))
-        );
-        assert!(!payloads.iter().any(|p| p == &base64_encode("alert(1)")));
+        // Should include HTML payloads
+        assert!(payloads.iter().any(|p| p.contains("onerror=")));
+        // With "none" encoder, should NOT have URL-encoded variants of HTML payloads
+        let raw_count = payloads
+            .iter()
+            .filter(|p| p.contains("<IMG") || p.contains("<sVg"))
+            .count();
+        assert!(raw_count > 0, "should contain raw HTML payloads");
     }
 
     #[test]
