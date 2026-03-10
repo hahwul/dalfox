@@ -893,7 +893,10 @@ pub async fn probe_json_body_params(
     }
 
     // Collect top-level keys to mutate
-    let keys: Vec<String> = base_json.as_object().unwrap().keys().cloned().collect();
+    let Some(obj) = base_json.as_object() else {
+        return;
+    };
+    let keys: Vec<String> = obj.keys().cloned().collect();
 
     if let Some(ref pb) = pb {
         pb.set_length(keys.len() as u64);

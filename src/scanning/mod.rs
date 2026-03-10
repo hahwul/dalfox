@@ -351,7 +351,7 @@ pub async fn run_scanning(
         let findings_count_clone = findings_count.clone();
 
         let handle = tokio::spawn(async move {
-            let _permit = semaphore_clone.acquire().await.unwrap();
+            let _permit = semaphore_clone.acquire().await.expect("semaphore closed unexpectedly");
             // Batch local results to reduce mutex contention
             let mut local_results: Vec<crate::scanning::result::Result> = Vec::new();
             let mut local_ast_seen: HashSet<String> = HashSet::new();
@@ -800,7 +800,9 @@ pub async fn run_scanning(
     }
 
     for handle in handles {
-        handle.await.unwrap();
+        if let Err(e) = handle.await {
+            eprintln!("[!] scanning task failed: {e}");
+        }
     }
 
     if let Some(pb) = pb {

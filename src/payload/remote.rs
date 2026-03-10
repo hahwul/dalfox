@@ -22,7 +22,7 @@ fn ensure_default_registries() {
     // Seed payload providers if empty
     {
         let reg = PAYLOAD_PROVIDER_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
-        let mut m = reg.lock().unwrap();
+        let mut m = reg.lock().unwrap_or_else(|e| e.into_inner());
         if m.is_empty() {
             m.insert(
                 "payloadbox".to_string(),
@@ -37,7 +37,7 @@ fn ensure_default_registries() {
     // Seed wordlist providers if empty
     {
         let reg = WORDLIST_PROVIDER_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
-        let mut m = reg.lock().unwrap();
+        let mut m = reg.lock().unwrap_or_else(|e| e.into_inner());
         if m.is_empty() {
             m.insert(
                 "assetnote".to_string(),
@@ -55,29 +55,33 @@ fn ensure_default_registries() {
 pub fn register_payload_provider<N: AsRef<str>>(name: N, urls: Vec<String>) {
     let reg = PAYLOAD_PROVIDER_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
     let key = name.as_ref().to_ascii_lowercase();
-    let mut m = reg.lock().unwrap();
+    let mut m = reg.lock().unwrap_or_else(|e| e.into_inner());
     m.insert(key, urls);
 }
 
 pub fn register_wordlist_provider<N: AsRef<str>>(name: N, urls: Vec<String>) {
     let reg = WORDLIST_PROVIDER_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
     let key = name.as_ref().to_ascii_lowercase();
-    let mut m = reg.lock().unwrap();
+    let mut m = reg.lock().unwrap_or_else(|e| e.into_inner());
     m.insert(key, urls);
 }
 
 // Optional helpers to enumerate providers
 pub fn list_payload_providers() -> Vec<String> {
     ensure_default_registries();
-    let reg = PAYLOAD_PROVIDER_REGISTRY.get().unwrap();
-    let m = reg.lock().unwrap();
+    let Some(reg) = PAYLOAD_PROVIDER_REGISTRY.get() else {
+        return Vec::new();
+    };
+    let m = reg.lock().unwrap_or_else(|e| e.into_inner());
     m.keys().cloned().collect()
 }
 
 pub fn list_wordlist_providers() -> Vec<String> {
     ensure_default_registries();
-    let reg = WORDLIST_PROVIDER_REGISTRY.get().unwrap();
-    let m = reg.lock().unwrap();
+    let Some(reg) = WORDLIST_PROVIDER_REGISTRY.get() else {
+        return Vec::new();
+    };
+    let m = reg.lock().unwrap_or_else(|e| e.into_inner());
     m.keys().cloned().collect()
 }
 
@@ -242,8 +246,10 @@ pub fn has_remote_wordlists() -> bool {
 /// Build the list of remote URLs for the given payload providers.
 fn collect_payload_provider_urls(providers: &[String]) -> Vec<String> {
     ensure_default_registries();
-    let reg = PAYLOAD_PROVIDER_REGISTRY.get().unwrap();
-    let m = reg.lock().unwrap();
+    let Some(reg) = PAYLOAD_PROVIDER_REGISTRY.get() else {
+        return Vec::new();
+    };
+    let m = reg.lock().unwrap_or_else(|e| e.into_inner());
     let mut urls: Vec<String> = Vec::new();
     for p in providers {
         if let Some(lst) = m.get(&p.to_ascii_lowercase()) {
@@ -256,8 +262,10 @@ fn collect_payload_provider_urls(providers: &[String]) -> Vec<String> {
 /// Build the list of remote URLs for the given wordlist providers.
 fn collect_wordlist_provider_urls(providers: &[String]) -> Vec<String> {
     ensure_default_registries();
-    let reg = WORDLIST_PROVIDER_REGISTRY.get().unwrap();
-    let m = reg.lock().unwrap();
+    let Some(reg) = WORDLIST_PROVIDER_REGISTRY.get() else {
+        return Vec::new();
+    };
+    let m = reg.lock().unwrap_or_else(|e| e.into_inner());
     let mut urls: Vec<String> = Vec::new();
     for p in providers {
         if let Some(lst) = m.get(&p.to_ascii_lowercase()) {
