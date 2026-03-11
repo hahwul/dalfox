@@ -105,6 +105,12 @@ func handleTrigger(options model.Options, payload string, rLog *logrus.Entry) (s
 	bytes, _ := io.ReadAll(resp.Body)
 	str := string(bytes)
 	if resp.Header["Content-Type"] != nil && utils.IsAllowType(resp.Header["Content-Type"][0]) {
+		// Check if body is actually JSON/JSONP despite Content-Type (Issue #884)
+		if utils.IsJSONBody(str) {
+			rLog.WithField("data2", "vds").Debug(false)
+			rLog.WithField("data2", "vrs").Debug(false)
+			return str, resp, false, false, nil
+		}
 		vds := verification.VerifyDOM(str)
 		vrs := verification.VerifyReflection(str, payload)
 		rLog.WithField("data2", "vds").Debug(vds)
@@ -131,6 +137,14 @@ func generateTriggerRequest(options model.Options) *http.Request {
 
 func processResponse(str string, resp *http.Response, payload string, req *http.Request, options model.Options, rLog *logrus.Entry) (string, *http.Response, bool, bool, error) {
 	if resp.Header["Content-Type"] != nil && utils.IsAllowType(resp.Header["Content-Type"][0]) {
+		// Even if Content-Type seems HTML-like, check if the body is actually JSON/JSONP
+		// to prevent false positives when servers return JSON with wrong Content-Type (Issue #884)
+		if utils.IsJSONBody(str) {
+			rLog.WithField("data2", "vds").Debug(false)
+			rLog.WithField("data2", "vrs").Debug(false)
+			rLog.Debug("Skipping: response body looks like JSON/JSONP despite Content-Type")
+			return str, resp, false, false, nil
+		}
 		vds := verification.VerifyDOM(str)
 		vrs := verification.VerifyReflection(str, payload)
 		if !vds && options.ForceHeadlessVerification {

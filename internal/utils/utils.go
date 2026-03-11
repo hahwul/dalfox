@@ -1,7 +1,9 @@
 package utils
 
 import (
+	"encoding/json"
 	"os"
+	"regexp"
 	"strings"
 
 	"golang.org/x/term"
@@ -41,27 +43,69 @@ func CheckPType(str string) bool {
 	return !strings.Contains(str, "toBlind") && !strings.Contains(str, "toGrepping")
 }
 
+// notScanningType defines Content-Types that should not be scanned for XSS.
+// Note: XML types (application/xml, text/xml, image/svg+xml) are intentionally
+// excluded because they are valid XSS vectors (e.g. SVG can contain <script> tags).
+var notScanningType = map[string]struct{}{
+	"application/json":         {},
+	"application/javascript":   {},
+	"application/x-javascript": {},
+	"application/octet-stream": {},
+	"text/javascript":          {},
+	"text/plain":               {},
+	"text/css":                 {},
+	"text/csv":                 {},
+	"image/jpeg":               {},
+	"image/png":                {},
+	"image/bmp":                {},
+	"image/gif":                {},
+	"application/rss+xml":      {},
+	"application/atom+xml":     {},
+	"application/pdf":          {},
+	"application/zip":          {},
+}
+
 // IsAllowType is checking content-type
 func IsAllowType(contentType string) bool {
-	notScanningType := map[string]struct{}{
-		"application/json":       {},
-		"application/javascript": {},
-		"text/javascript":        {},
-		"text/plain":             {},
-		"text/css":               {},
-		"image/jpeg":             {},
-		"image/png":              {},
-		"image/bmp":              {},
-		"image/gif":              {},
-		"application/rss+xml":    {},
-	}
-
 	for n := range notScanningType {
 		if strings.Contains(contentType, n) {
 			return false
 		}
 	}
 	return true
+}
+
+// jsonpPattern matches JSONP callback patterns like: callbackName({...}) or jQuery123({...})
+var jsonpPattern = regexp.MustCompile(`^\s*[a-zA-Z_$][a-zA-Z0-9_$]*\s*\(`)
+
+// IsJSONBody checks if the response body is valid JSON or JSONP content.
+// Uses json.Valid() for strict validation to avoid suppressing real XSS findings
+// on HTML responses that incidentally start with '{' or '['.
+func IsJSONBody(body string) bool {
+	trimmed := strings.TrimSpace(body)
+	if len(trimmed) == 0 {
+		return false
+	}
+	// Standard JSON: validate with json.Valid
+	if trimmed[0] == '{' || trimmed[0] == '[' {
+		return json.Valid([]byte(trimmed))
+	}
+	// JSONP: extract content inside callback and validate the inner JSON
+	if jsonpPattern.MatchString(trimmed) {
+		// Strip optional trailing semicolon
+		content := strings.TrimRight(trimmed, ";")
+		content = strings.TrimSpace(content)
+		if len(content) == 0 || content[len(content)-1] != ')' {
+			return false
+		}
+		start := strings.Index(content, "(")
+		if start == -1 {
+			return false
+		}
+		inner := strings.TrimSpace(content[start+1 : len(content)-1])
+		return json.Valid([]byte(inner))
+	}
+	return false
 }
 
 // GenerateTerminalWidthLine generates a string that fills the terminal width with the specified character
