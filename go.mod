@@ -12,7 +12,7 @@ require (
 	github.com/labstack/echo/v4 v4.15.1
 	github.com/logrusorgru/aurora v2.0.3+incompatible
 	github.com/mark3labs/mcp-go v0.45.0
-	github.com/olekukonko/tablewriter v1.1.3
+	github.com/olekukonko/tablewriter v1.1.4
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/cobra v1.10.1
 	github.com/spf13/pflag v1.0.10
@@ -21,8 +21,8 @@ require (
 	github.com/swaggo/swag v1.16.6
 	github.com/tidwall/sjson v1.2.5
 	github.com/tylerb/graceful v1.2.15
-	golang.org/x/term v0.41.0
 	golang.org/x/sync v0.20.0
+	golang.org/x/term v0.41.0
 )
 
 require (
@@ -33,10 +33,10 @@ require (
 	github.com/antonfisher/nested-logrus-formatter v1.3.1 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/buger/jsonparser v1.1.1 // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/chromedp/sysutil v1.1.0 // indirect
-	github.com/clipperhouse/displaywidth v0.6.2 // indirect
-	github.com/clipperhouse/stringish v0.1.1 // indirect
-	github.com/clipperhouse/uax29/v2 v2.3.0 // indirect
+	github.com/clipperhouse/displaywidth v0.10.0 // indirect
+	github.com/clipperhouse/uax29/v2 v2.6.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/fatih/color v1.18.0 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect
@@ -58,8 +58,8 @@ require (
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mattn/go-runewidth v0.0.19 // indirect
 	github.com/olekukonko/cat v0.0.0-20250911104152-50322a0618f6 // indirect
-	github.com/olekukonko/errors v1.1.0 // indirect
-	github.com/olekukonko/ll v0.1.4-0.20260115111900-9e59c2286df0 // indirect
+	github.com/olekukonko/errors v1.2.0 // indirect
+	github.com/olekukonko/ll v0.1.6 // indirect
 	github.com/pmezard/go-difflib v1.0.0 // indirect
 	github.com/spf13/cast v1.7.1 // indirect
 	github.com/swaggo/files/v2 v2.0.0 // indirect
