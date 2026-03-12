@@ -191,7 +191,7 @@ func Test_IsAllowType(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "Allowed type - application/xml",
+			name: "Allowed type - application/xml (XSS vector)",
 			args: args{
 				contentType: "application/xml",
 			},
@@ -233,7 +233,7 @@ func Test_IsAllowType(t *testing.T) {
 			want: false,
 		},
 		{
-			name: "Allowed type - text/xml",
+			name: "Allowed type - text/xml (XSS vector)",
 			args: args{
 				contentType: "text/xml",
 			},
@@ -318,6 +318,117 @@ func TestGetTerminalWidth(t *testing.T) {
 			// Most terminals are at least 80 columns wide
 			if got < 10 || got > 1000 {
 				t.Errorf("GetTerminalWidth() = %v, value outside reasonable range", got)
+			}
+		})
+	}
+}
+
+func TestIsJSONBody(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		want bool
+	}{
+		{
+			name: "JSON object",
+			body: `{"key": "value"}`,
+			want: true,
+		},
+		{
+			name: "JSON array",
+			body: `[{"key": "value"}]`,
+			want: true,
+		},
+		{
+			name: "JSON with leading whitespace",
+			body: `  {"key": "value"}`,
+			want: true,
+		},
+		{
+			name: "JSON with newline prefix",
+			body: "\n{\"key\": \"value\"}",
+			want: true,
+		},
+		{
+			name: "JSONP callback",
+			body: `jQuery31106094975410109347_1699160396736({"key": "value"})`,
+			want: true,
+		},
+		{
+			name: "JSONP simple callback",
+			body: `callback({"status": "ok"})`,
+			want: true,
+		},
+		{
+			name: "JSONP underscore callback",
+			body: `my_callback({"data": 123})`,
+			want: true,
+		},
+		{
+			name: "HTML content",
+			body: `<html><body><h1>Hello</h1></body></html>`,
+			want: false,
+		},
+		{
+			name: "HTML with doctype",
+			body: `<!DOCTYPE html><html><body></body></html>`,
+			want: false,
+		},
+		{
+			name: "Empty body",
+			body: "",
+			want: false,
+		},
+		{
+			name: "Whitespace only",
+			body: "   \n  ",
+			want: false,
+		},
+		{
+			name: "Plain text",
+			body: "Hello World",
+			want: false,
+		},
+		{
+			name: "XSS payload in HTML",
+			body: `<div ongotpointercapture=print(1) class=dalfox></div>`,
+			want: false,
+		},
+		{
+			name: "JSON API error response",
+			body: `{"error": "not found", "code": 404}`,
+			want: true,
+		},
+		{
+			name: "JSON with reflected XSS payload in value",
+			body: `{"query": "<script>alert(1)</script>", "results": []}`,
+			want: true,
+		},
+		{
+			name: "HTML starting with curly brace",
+			body: `{not valid json<script>alert(1)</script>`,
+			want: false,
+		},
+		{
+			name: "Truncated JSON",
+			body: `{"key": "value`,
+			want: false,
+		},
+		{
+			name: "JSONP with trailing semicolon",
+			body: `callback({"status": "ok"});`,
+			want: true,
+		},
+		{
+			name: "Function call with non-JSON content",
+			body: `callback(<script>alert(1)</script>)`,
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsJSONBody(tt.body); got != tt.want {
+				t.Errorf("IsJSONBody() = %v, want %v for body: %s", got, tt.want, tt.body)
 			}
 		})
 	}

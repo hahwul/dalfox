@@ -124,6 +124,14 @@ func performScanning(target string, options model.Options, query map[*http.Reque
 				if !vStatus[v["param"]] || checkVtype {
 					rl.Block(k.Host)
 					resbody, _, vds, vrs, err := SendReq(k, v["payload"], options)
+
+					// Additional JSON body check to prevent false positives (Issue #884)
+					// Even if SendReq returned vrs/vds=true, skip if the body is JSON/JSONP
+					if (vrs || vds) && utils.IsJSONBody(resbody) {
+						vrs = false
+						vds = false
+					}
+
 					abs := optimization.Abstraction(resbody, v["payload"])
 					if vrs && !utils.ContainsFromArray(abs, v["type"]) && !strings.Contains(v["type"], "inHTML") {
 						vrs = false
