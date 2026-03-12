@@ -70,6 +70,8 @@ pub async fn check_query_discovery(
             valid_specials: None,
             invalid_specials: None,
             pre_encoding: None,
+            form_action_url: None,
+            form_origin_url: None,
         };
         let url_str = build_injected_url(&target.url, &tmp_param, test_value);
         let url = url::Url::parse(&url_str).expect("build_injected_url produces valid URL");
@@ -117,6 +119,8 @@ pub async fn check_query_discovery(
                         valid_specials: None,
                         invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
                     });
                 } else if let Ok(text) = resp.text().await
                     && text.contains(test_value)
@@ -130,6 +134,8 @@ pub async fn check_query_discovery(
                         valid_specials: Some(valid),
                         invalid_specials: Some(invalid),
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
                     });
                 }
             }
@@ -201,6 +207,8 @@ pub async fn check_query_discovery(
                     valid_specials: None,
                     invalid_specials: None,
                     pre_encoding: Some(enc_name.to_string()),
+                    form_action_url: None,
+                    form_origin_url: None,
                 });
                 break; // Found working encoding, no need to try more
             }
@@ -288,6 +296,8 @@ pub async fn check_header_discovery(
                     valid_specials: Some(valid),
                     invalid_specials: Some(invalid),
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
                 });
             }
             if delay > 0 {
@@ -386,6 +396,8 @@ pub async fn check_path_discovery(
                     valid_specials: Some(valid),
                     invalid_specials: Some(invalid),
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
                 });
             }
             if delay > 0 {
@@ -469,6 +481,8 @@ pub async fn check_cookie_discovery(
                     valid_specials: Some(valid),
                     invalid_specials: Some(invalid),
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
                 });
             }
             if delay > 0 {
@@ -613,6 +627,8 @@ pub async fn check_form_discovery(
                     valid_specials: Some(valid),
                     invalid_specials: Some(invalid),
                     pre_encoding: None,
+                    form_action_url: Some(form_url.to_string()),
+                    form_origin_url: Some(target.url.to_string()),
                 });
             }
             if target.delay > 0 {
@@ -657,6 +673,8 @@ pub async fn check_form_discovery(
                         valid_specials: Some(valid.clone()),
                         invalid_specials: Some(invalid.clone()),
                     pre_encoding: None,
+                    form_action_url: Some(form_url.to_string()),
+                    form_origin_url: Some(target.url.to_string()),
                     });
                 }
             }
@@ -719,6 +737,8 @@ pub async fn check_form_discovery(
                             valid_specials: Some(valid),
                             invalid_specials: Some(invalid),
                             pre_encoding: None,
+                            form_action_url: Some(target.url.to_string()),
+                            form_origin_url: Some(target.url.to_string()),
                         });
                     }
                     if target.delay > 0 {
@@ -989,6 +1009,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         }]));
 
         let semaphore = Arc::new(Semaphore::new(1));

@@ -192,6 +192,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         };
         let out = build_injected_url(&base, &param, "PAY");
         assert!(out.contains("a=PAY"));
@@ -209,6 +211,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         };
         let out = build_injected_url(&base, &param, "X");
         assert!(out.contains("q=X"));
@@ -225,6 +229,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         };
         let out = build_injected_url(&base, &param, "%3Cimg%20src=x%3E");
         assert!(out.contains("q=%3Cimg%20src%3Dx%3E"));
@@ -242,6 +248,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         };
         let out = build_injected_url(&base, &param, "PAY LOAD");
         assert!(out.contains("q=PAY%20LOAD"));
@@ -258,6 +266,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         };
         let out = build_injected_url(&base, &param, "PAY LOAD");
         // space should be %20
@@ -275,6 +285,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         };
         let out = build_injected_url(&base, &param, "X");
         assert_eq!(out, "https://example.com/a");
@@ -291,6 +303,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         };
         let out = build_injected_url(&base, &param, "IGNORED");
         assert_eq!(out, base.as_str());

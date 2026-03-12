@@ -39,7 +39,10 @@ pub async fn verify_dom_xss_light_with_client(
             crate::utils::apply_header_overrides(rb, &[(param.name.clone(), payload.to_string())])
         }
         Location::Body => {
-            let parsed_url = target.url.clone();
+            let parsed_url = param.form_action_url
+                .as_ref()
+                .and_then(|u| url::Url::parse(u).ok())
+                .unwrap_or_else(|| target.url.clone());
             let body = if let Some(ref data) = target.data {
                 let mut pairs: Vec<(String, String)> = url::form_urlencoded::parse(data.as_bytes())
                     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -70,7 +73,10 @@ pub async fn verify_dom_xss_light_with_client(
             crate::utils::build_request(client, target, method, parsed_url, body)
         }
         Location::JsonBody => {
-            let parsed_url = target.url.clone();
+            let parsed_url = param.form_action_url
+                .as_ref()
+                .and_then(|u| url::Url::parse(u).ok())
+                .unwrap_or_else(|| target.url.clone());
             let body = if let Some(ref data) = target.data {
                 if let Ok(mut json_val) = serde_json::from_str::<serde_json::Value>(data) {
                     if let Some(obj) = json_val.as_object_mut() {
@@ -170,6 +176,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         }
     }
 

@@ -164,7 +164,10 @@ pub async fn check_dom_verification_with_client(
         }
         Location::Body => {
             let method = reqwest::Method::POST;
-            let parsed_url = target.url.clone();
+            let parsed_url = param.form_action_url
+                .as_ref()
+                .and_then(|u| url::Url::parse(u).ok())
+                .unwrap_or_else(|| target.url.clone());
             let body = if let Some(ref data) = target.data {
                 let mut pairs: Vec<(String, String)> = url::form_urlencoded::parse(data.as_bytes())
                     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -203,7 +206,10 @@ pub async fn check_dom_verification_with_client(
         }
         Location::JsonBody => {
             let method = reqwest::Method::POST;
-            let parsed_url = target.url.clone();
+            let parsed_url = param.form_action_url
+                .as_ref()
+                .and_then(|u| url::Url::parse(u).ok())
+                .unwrap_or_else(|| target.url.clone());
             let body = if let Some(ref data) = target.data {
                 if let Ok(mut json_val) = serde_json::from_str::<serde_json::Value>(data) {
                     if let Some(obj) = json_val.as_object_mut() {
@@ -243,10 +249,9 @@ pub async fn check_dom_verification_with_client(
     }
 
     if args.sxss {
-        // For Stored XSS, check DOM on sxss_url with retry logic
-        if let Some(sxss_url_str) = &args.sxss_url
-            && let Ok(sxss_url) = url::Url::parse(sxss_url_str)
-        {
+        // For Stored XSS, check DOM on auto-resolved URLs with retry logic
+        let check_urls = crate::scanning::check_reflection::resolve_sxss_check_urls(target, param, args);
+        for sxss_url in &check_urls {
             for attempt in 0u64..3 {
                 if attempt > 0 {
                     sleep(Duration::from_millis(500 * attempt)).await;
@@ -371,6 +376,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         }
     }
 
@@ -655,6 +662,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         };
         let args = default_scan_args();
 
@@ -683,6 +692,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         };
         let args = default_scan_args();
 
@@ -713,6 +724,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         };
         let args = default_scan_args();
 
@@ -744,6 +757,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         };
         let args = default_scan_args();
 

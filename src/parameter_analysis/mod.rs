@@ -58,6 +58,12 @@ pub struct Param {
     /// checked against the original (decoded) payload.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pre_encoding: Option<String>,
+    /// POST target URL resolved from form action attribute.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub form_action_url: Option<String>,
+    /// Page URL where the form was discovered (for stored XSS verification).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub form_origin_url: Option<String>,
 }
 
 /// Set of special characters to probe with patterns like: dalfox'<char>dlafox"
@@ -152,6 +158,7 @@ pub async fn active_probe_param(
         let param_name = param.name.clone();
         let location = param.location.clone();
         let pre_encoding = param.pre_encoding.clone();
+        let form_action_url = param.form_action_url.clone();
 
         let valid_ref = valid_specials.clone();
         let invalid_ref = invalid_specials.clone();
@@ -175,6 +182,10 @@ pub async fn active_probe_param(
                 Location::Body | Location::JsonBody => reqwest::Method::POST,
                 _ => parsed_method,
             };
+            let body_url = form_action_url
+                .as_ref()
+                .and_then(|u| url::Url::parse(u).ok())
+                .unwrap_or_else(|| url_original.clone());
             let mut url = url_original.clone();
             let mut request_builder;
 
@@ -223,7 +234,7 @@ pub async fn active_probe_param(
                         body_string = format!("{}={}", param_name, payload);
                     }
                     request_builder = client_clone
-                        .request(req_method, url)
+                        .request(req_method, body_url.clone())
                         .header("Content-Type", "application/x-www-form-urlencoded")
                         .body(body_string);
                 }
@@ -310,7 +321,7 @@ pub async fn active_probe_param(
                     let body_string = serde_json::to_string(&root)
                         .unwrap_or_else(|_| format!("{{\"{}\":\"{}\"}}", param_name, payload));
                     request_builder = client_clone
-                        .request(req_method, url)
+                        .request(req_method, body_url.clone())
                         .header("Content-Type", "application/json")
                         .body(body_string);
                 }
@@ -621,6 +632,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         });
     }
 
@@ -804,6 +817,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         });
 
         assert!(!target.reflection_params.is_empty());
@@ -826,6 +841,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         });
 
         assert!(!target.reflection_params.is_empty());
@@ -848,6 +865,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         });
 
         assert!(!target.reflection_params.is_empty());
@@ -1045,6 +1064,8 @@ mod tests {
                 valid_specials: None,
                 invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
             },
             Param {
                 name: "sort".to_string(),
@@ -1054,6 +1075,8 @@ mod tests {
                 valid_specials: None,
                 invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
             },
             Param {
                 name: "id".to_string(),
@@ -1063,6 +1086,8 @@ mod tests {
                 valid_specials: None,
                 invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
             },
             Param {
                 name: "session".to_string(),
@@ -1072,6 +1097,8 @@ mod tests {
                 valid_specials: None,
                 invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
             },
         ];
 
@@ -1113,6 +1140,8 @@ mod tests {
                 valid_specials: None,
                 invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
             },
             Param {
                 name: "id".to_string(),
@@ -1122,6 +1151,8 @@ mod tests {
                 valid_specials: None,
                 invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
             },
             Param {
                 name: "session".to_string(),
@@ -1131,6 +1162,8 @@ mod tests {
                 valid_specials: None,
                 invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
             },
         ];
 
@@ -1156,6 +1189,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         }];
 
         // Empty filters should return all params
@@ -1174,6 +1209,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         }];
 
         // Invalid filter format (too many colons) should be treated as name only
@@ -1259,6 +1296,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         }
     }
 

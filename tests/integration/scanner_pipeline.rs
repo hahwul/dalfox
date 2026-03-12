@@ -79,6 +79,8 @@ fn test_param_structure_query_location() {
         valid_specials: None,
         invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
     };
 
     assert_eq!(param.name, "id");
@@ -96,6 +98,8 @@ fn test_param_structure_with_injection_context() {
         valid_specials: Some(vec!['<', '>', '"']),
         invalid_specials: Some(vec!['\'', '`']),
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
     };
 
     assert_eq!(param.injection_context, Some(InjectionContext::Html(None)));
@@ -116,6 +120,8 @@ fn test_param_structure_javascript_context() {
         valid_specials: None,
         invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
     };
 
     match &param.injection_context {
@@ -138,6 +144,8 @@ fn test_param_structure_attribute_context() {
         valid_specials: None,
         invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
     };
 
     match &param.injection_context {
@@ -217,6 +225,8 @@ fn test_param_serialization() {
         valid_specials: Some(vec!['<', '>']),
         invalid_specials: Some(vec!['\'']),
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
     };
 
     // Test serialization
@@ -294,6 +304,8 @@ fn test_special_chars_classification() {
         valid_specials: Some(valid_chars.clone()),
         invalid_specials: Some(invalid_chars.clone()),
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
     };
 
     assert!(param.valid_specials.as_ref().unwrap().contains(&'<'));
@@ -313,6 +325,8 @@ fn test_multiple_parameters() {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         },
         Param {
             name: "name".to_string(),
@@ -322,6 +336,8 @@ fn test_multiple_parameters() {
             valid_specials: Some(vec!['<', '>']),
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         },
         Param {
             name: "X-Custom".to_string(),
@@ -331,6 +347,8 @@ fn test_multiple_parameters() {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         },
     ];
 

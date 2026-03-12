@@ -999,8 +999,9 @@ pub struct ScanArgs {
     pub sxss: bool,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// URL to check for Stored XSS reflection (required if --sxss is used)
-    #[arg(long, required_if_eq("sxss", "true"))]
+    /// URL to check for Stored XSS reflection.
+    /// When omitted with --sxss, auto-detects from form discovery context.
+    #[arg(long)]
     pub sxss_url: Option<String>,
 
     #[clap(help_heading = "XSS SCANNING")]

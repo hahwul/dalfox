@@ -819,6 +819,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         });
     }
 
@@ -881,6 +883,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         };
         let args = default_scan_args();
         let payloads = get_dom_payloads(&param, &args).expect("dom payload generation");
@@ -904,6 +908,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         };
         let args = default_scan_args();
         let payloads = get_dom_payloads(&param, &args).expect("dom payload generation");
@@ -923,6 +929,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         };
         let mut args = default_scan_args();
         args.only_custom_payload = true;
@@ -982,6 +990,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         };
 
         let request = build_request_text(&target, &param, "PAYLOAD");
@@ -1004,6 +1014,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         };
 
         let request = build_request_text(&target, &param, "hello world");
@@ -1161,6 +1173,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         });
 
         let args = crate::cmd::scan::ScanArgs {

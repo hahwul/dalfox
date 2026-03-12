@@ -307,6 +307,62 @@ pub(crate) fn classify_reflection(resp_text: &str, payload: &str) -> Option<Refl
     None
 }
 
+/// Resolve SXSS check URLs with priority:
+/// 1. --sxss-url (explicit) -> single URL
+/// 2. param.form_origin_url -> page where form was discovered
+/// 3. param.form_action_url -> form action (GET to check stored output)
+/// 4. target.url -> fallback
+///
+/// Deduplicates URLs to avoid redundant checks.
+pub(crate) fn resolve_sxss_check_urls(
+    target: &Target,
+    param: &Param,
+    args: &crate::cmd::scan::ScanArgs,
+) -> Vec<url::Url> {
+    let mut seen = std::collections::HashSet::new();
+    let mut urls = Vec::new();
+
+    // 1. Explicit --sxss-url takes highest priority
+    if let Some(ref sxss_url_str) = args.sxss_url
+        && let Ok(u) = url::Url::parse(sxss_url_str)
+    {
+        let s = u.to_string();
+        if seen.insert(s) {
+            urls.push(u);
+        }
+    }
+
+    // 2. form_origin_url - page where form was discovered
+    if let Some(ref origin) = param.form_origin_url
+        && let Ok(u) = url::Url::parse(origin)
+    {
+        let s = u.to_string();
+        if seen.insert(s) {
+            urls.push(u);
+        }
+    }
+
+    // 3. form_action_url - form action endpoint (GET to check stored output)
+    if let Some(ref action) = param.form_action_url
+        && let Ok(u) = url::Url::parse(action)
+    {
+        let s = u.to_string();
+        if seen.insert(s) {
+            urls.push(u);
+        }
+    }
+
+    // 4. target.url as fallback
+    {
+        let s = target.url.to_string();
+        if seen.insert(s) {
+            urls.push(target.url.clone());
+        }
+    }
+
+    urls
+}
+
 async fn fetch_injection_response(
     target: &Target,
     param: &Param,
@@ -352,10 +408,13 @@ async fn fetch_injection_response_with_client(
             crate::utils::apply_header_overrides(rb, &[(param.name.clone(), payload.to_string())])
         }
         Location::Body => {
-            // Body injection: use original URL, replace param value in form-encoded body
+            // Body injection: use form action URL if available, else original URL
             // Force POST for body params even if the original target method was GET
             let method = reqwest::Method::POST;
-            let parsed_url = target.url.clone();
+            let parsed_url = param.form_action_url
+                .as_ref()
+                .and_then(|u| url::Url::parse(u).ok())
+                .unwrap_or_else(|| target.url.clone());
             let body = if let Some(ref data) = target.data {
                 let mut pairs: Vec<(String, String)> = url::form_urlencoded::parse(data.as_bytes())
                     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -387,10 +446,13 @@ async fn fetch_injection_response_with_client(
             rb.header("Content-Type", "application/x-www-form-urlencoded")
         }
         Location::JsonBody => {
-            // JSON body injection: use original URL, replace param value in JSON body
+            // JSON body injection: use form action URL if available, else original URL
             // Force POST for JSON body params
             let method = reqwest::Method::POST;
-            let parsed_url = target.url.clone();
+            let parsed_url = param.form_action_url
+                .as_ref()
+                .and_then(|u| url::Url::parse(u).ok())
+                .unwrap_or_else(|| target.url.clone());
             let body = if let Some(ref data) = target.data {
                 // Attempt to parse as JSON and replace the param value
                 if let Ok(mut json_val) = serde_json::from_str::<serde_json::Value>(data) {
@@ -434,15 +496,14 @@ async fn fetch_injection_response_with_client(
         sleep(Duration::from_millis(target.delay)).await;
     }
 
-    // For Stored XSS, check reflection on sxss_url with retry logic
+    // For Stored XSS, check reflection on auto-resolved URLs with retry logic
     if args.sxss {
-        if let Some(sxss_url_str) = &args.sxss_url
-            && let Ok(sxss_url) = url::Url::parse(sxss_url_str)
-        {
+        let check_urls = resolve_sxss_check_urls(target, param, args);
+        for sxss_url in &check_urls {
             // Retry up to 3 times with delay to handle session propagation
-            for attempt in 0..3 {
+            for attempt in 0u64..3 {
                 if attempt > 0 {
-                    sleep(Duration::from_millis(500 * attempt as u64)).await;
+                    sleep(Duration::from_millis(500 * attempt)).await;
                 }
                 let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
                 let check_request =
@@ -565,6 +626,8 @@ mod tests {
             valid_specials: None,
             invalid_specials: None,
                     pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
         }
     }
 
