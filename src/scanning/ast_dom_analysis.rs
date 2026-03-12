@@ -9,6 +9,7 @@ use oxc_ast::ast::*;
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType};
 use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 
 /// Represents a potential DOM XSS vulnerability found via AST analysis
 #[derive(Debug, Clone)]
@@ -56,11 +57,11 @@ struct DomXssVisitor<'a> {
     /// List of detected vulnerabilities
     vulnerabilities: Vec<DomXssVulnerability>,
     /// Known DOM sources (untrusted input sources)
-    sources: HashSet<String>,
+    sources: &'static HashSet<&'static str>,
     /// Known DOM sinks (dangerous operations)
-    sinks: HashSet<String>,
+    sinks: &'static HashSet<&'static str>,
     /// Known sanitizers
-    sanitizers: HashSet<String>,
+    sanitizers: &'static HashSet<&'static str>,
     /// Function summaries used for lightweight inter-procedural taint tracking
     function_summaries: HashMap<String, FunctionSummary>,
     /// Track `instanceVar -> ClassName` for class instance method summary resolution.
@@ -86,6 +87,50 @@ struct DomXssVisitor<'a> {
     /// Track `paramsVar.key -> upstream source` for URLSearchParams set/get reparses.
     url_search_params_field_sources: HashMap<String, String>,
 }
+
+// Module-level DOM source/sink/sanitizer constants
+const DOM_SOURCES: &[&str] = &[
+    "location.search", "location.hash", "location.href", "location.pathname",
+    "document.URL", "document.documentURI", "document.URLUnencoded",
+    "document.baseURI", "document.cookie", "document.referrer",
+    "window.name", "window.location",
+    "localStorage", "sessionStorage",
+    "localStorage.getItem", "sessionStorage.getItem",
+    "event.data", "e.data", "event.newValue", "e.newValue",
+    "event.oldValue", "e.oldValue",
+    "window.opener",
+    "URLSearchParams", "import.meta.url", "location.origin", "location.host",
+    "history.state", "document.domain",
+    "Response.text", "Response.json",
+    "XMLHttpRequest.responseText", "XMLHttpRequest.response",
+];
+
+const DOM_SINKS: &[&str] = &[
+    "innerHTML", "outerHTML", "insertAdjacentHTML", "createContextualFragment",
+    "document.write", "document.writeln",
+    "eval", "setTimeout", "setInterval", "Function", "execScript",
+    "location.href", "location.assign", "location.replace",
+    "src", "srcdoc", "href", "xlink:href", "setAttribute",
+    "html", "append", "prepend", "after", "before",
+    "execCommand",
+];
+
+const DOM_SANITIZERS: &[&str] = &[
+    "DOMPurify.sanitize", "encodeURIComponent", "encodeURI",
+    "encodeHTML", "escapeHTML",
+    "document.createTextNode", "createTextNode",
+    "sanitizeHtml", "xss", "filterXSS",
+    "he.encode", "he.escape", "_.escape",
+    "escapeHtml", "htmlEscape", "htmlEncode",
+    "sanitizeHTML", "validator.escape",
+];
+
+static STATIC_SOURCES: LazyLock<HashSet<&'static str>> =
+    LazyLock::new(|| DOM_SOURCES.iter().copied().collect());
+static STATIC_SINKS: LazyLock<HashSet<&'static str>> =
+    LazyLock::new(|| DOM_SINKS.iter().copied().collect());
+static STATIC_SANITIZERS: LazyLock<HashSet<&'static str>> =
+    LazyLock::new(|| DOM_SANITIZERS.iter().copied().collect());
 
 impl<'a> DomXssVisitor<'a> {
     fn extract_static_string_argument(call: &CallExpression<'a>, idx: usize) -> Option<String> {
@@ -292,69 +337,14 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
-    // DOM XSS source identifiers
-    const DOM_SOURCES: &'static [&'static str] = &[
-        // Common DOM XSS sources
-        "location.search", "location.hash", "location.href", "location.pathname",
-        "document.URL", "document.documentURI", "document.URLUnencoded",
-        "document.baseURI", "document.cookie", "document.referrer",
-        "window.name", "window.location",
-        // Storage APIs
-        "localStorage", "sessionStorage",
-        "localStorage.getItem", "sessionStorage.getItem",
-        // PostMessage data
-        "event.data", "e.data", "event.newValue", "e.newValue",
-        "event.oldValue", "e.oldValue",
-        // Window opener
-        "window.opener",
-        // Modern DOM sources
-        "URLSearchParams", "import.meta.url", "location.origin", "location.host",
-        "history.state", "document.domain",
-        // XHR/Fetch response sources
-        "Response.text", "Response.json",
-        "XMLHttpRequest.responseText", "XMLHttpRequest.response",
-    ];
-
-    // DOM XSS sink identifiers
-    const DOM_SINKS: &'static [&'static str] = &[
-        // Common DOM XSS sinks
-        "innerHTML", "outerHTML", "insertAdjacentHTML", "createContextualFragment",
-        "document.write", "document.writeln",
-        "eval", "setTimeout", "setInterval", "Function", "execScript",
-        "location.href", "location.assign", "location.replace",
-        // Element source attributes
-        "src", "srcdoc", "href", "xlink:href", "setAttribute",
-        // jQuery sinks
-        "html", "append", "prepend", "after", "before",
-        // execCommand with insertHTML command
-        "execCommand",
-        // Note: textContent and innerText are SAFE - they don't parse HTML
-    ];
-
-    // Known sanitizer function names
-    const DOM_SANITIZERS: &'static [&'static str] = &[
-        "DOMPurify.sanitize", "encodeURIComponent", "encodeURI",
-        "encodeHTML", "escapeHTML",
-        "document.createTextNode", "createTextNode",
-        // Specific sanitizer library functions
-        "sanitizeHtml", "xss", "filterXSS",
-        "he.encode", "he.escape", "_.escape",
-        "escapeHtml", "htmlEscape", "htmlEncode",
-        "sanitizeHTML", "validator.escape",
-    ];
-
     fn new(source_code: &'a str) -> Self {
-        let sources = Self::DOM_SOURCES.iter().map(|s| s.to_string()).collect();
-        let sinks = Self::DOM_SINKS.iter().map(|s| s.to_string()).collect();
-        let sanitizers = Self::DOM_SANITIZERS.iter().map(|s| s.to_string()).collect();
-
         Self {
             tainted_vars: HashSet::new(),
             var_aliases: HashMap::new(),
             vulnerabilities: Vec::new(),
-            sources,
-            sinks,
-            sanitizers,
+            sources: &*STATIC_SOURCES,
+            sinks: &*STATIC_SINKS,
+            sanitizers: &*STATIC_SANITIZERS,
             function_summaries: HashMap::new(),
             instance_classes: HashMap::new(),
             bound_function_aliases: HashMap::new(),
@@ -797,7 +787,7 @@ impl<'a> DomXssVisitor<'a> {
 
     fn get_sink_name_for_callable_expr(&self, expr: &Expression<'a>) -> Option<String> {
         if let Some(full_name) = self.get_expr_string(expr)
-            && self.sinks.contains(&full_name)
+            && self.sinks.contains(full_name.as_str())
         {
             return Some(full_name);
         }
@@ -856,7 +846,7 @@ impl<'a> DomXssVisitor<'a> {
     fn call_taint_and_source(&self, call: &CallExpression<'a>) -> (bool, Option<String>) {
         // Sanitizers produce de-tainted values
         if let Some(func_name) = self.get_expr_string(&call.callee)
-            && (self.sanitizers.contains(&func_name) || Self::is_likely_sanitizer_name(&func_name))
+            && (self.sanitizers.contains(func_name.as_str()) || Self::is_likely_sanitizer_name(&func_name))
         {
             return (false, None);
         }
@@ -876,7 +866,7 @@ impl<'a> DomXssVisitor<'a> {
                 .and_then(|arg0| self.get_callable_target_key_from_argument(arg0));
 
             if let Some(target_name) = target_key.as_ref()
-                && (self.sanitizers.contains(target_name)
+                && (self.sanitizers.contains(target_name.as_str())
                     || Self::is_likely_sanitizer_name(target_name))
             {
                 return (false, None);
@@ -898,7 +888,7 @@ impl<'a> DomXssVisitor<'a> {
             }
 
             if let Some(target_name) = target_key
-                && self.sources.contains(&target_name)
+                && self.sources.contains(target_name.as_str())
             {
                 return (true, Some(target_name));
             }
@@ -942,14 +932,14 @@ impl<'a> DomXssVisitor<'a> {
             let mut target_name = self.get_expr_string(target_expr);
             if target_name
                 .as_ref()
-                .map(|name| !self.sources.contains(name))
+                .map(|name| !self.sources.contains(name.as_str()))
                 .unwrap_or(true)
                 && let Some(alias) = target_alias
             {
                 target_name = Some(alias.target.clone());
             }
             if let Some(target_name) = target_name
-                && self.sources.contains(&target_name)
+                && self.sources.contains(target_name.as_str())
             {
                 return (true, Some(target_name));
             }
@@ -990,7 +980,7 @@ impl<'a> DomXssVisitor<'a> {
                 .bound_function_aliases
                 .get(id.name.as_str())
                 .map(|alias| alias.target.clone())
-            && self.sources.contains(&bound_target)
+            && self.sources.contains(bound_target.as_str())
         {
             return (true, Some(bound_target));
         }
@@ -1007,7 +997,7 @@ impl<'a> DomXssVisitor<'a> {
                 if let Some(storage_source) = self.storage_get_source(call, &callee_str) {
                     return (true, Some(storage_source));
                 }
-                if self.sources.contains(&callee_str) {
+                if self.sources.contains(callee_str.as_str()) {
                     return (true, Some(callee_str));
                 }
             }
@@ -1019,7 +1009,7 @@ impl<'a> DomXssVisitor<'a> {
         }
         if let Expression::ComputedMemberExpression(member) = &call.callee {
             if let Some(callee_str) = self.get_computed_member_string(member)
-                && self.sources.contains(&callee_str)
+                && self.sources.contains(callee_str.as_str())
             {
                 return (true, Some(callee_str));
             }
@@ -1057,7 +1047,7 @@ impl<'a> DomXssVisitor<'a> {
                         return true;
                     }
                     // Check if the full path is a known source
-                    if self.sources.contains(&full_path) {
+                    if self.sources.contains(full_path.as_str()) {
                         return true;
                     }
                 }
@@ -1111,7 +1101,7 @@ impl<'a> DomXssVisitor<'a> {
             }
             Expression::ComputedMemberExpression(member) => {
                 if let Some(full_path) = self.get_computed_member_string(member)
-                    && self.sources.contains(&full_path)
+                    && self.sources.contains(full_path.as_str())
                 {
                     return true;
                 }
@@ -1581,7 +1571,7 @@ impl<'a> DomXssVisitor<'a> {
 
                 // Check if initializer is a source or tainted
                 if let Some(source_expr) = self.get_expr_string(init)
-                    && self.sources.contains(&source_expr)
+                    && self.sources.contains(source_expr.as_str())
                 {
                     self.tainted_vars.insert(var_name.to_string());
                     self.var_aliases
@@ -1779,7 +1769,7 @@ impl<'a> DomXssVisitor<'a> {
                     {
                         return Some(source.clone());
                     }
-                    if self.sources.contains(&full_path) {
+                    if self.sources.contains(full_path.as_str()) {
                         return Some(full_path);
                     }
                     if let Some(source) = self.field_taints.get(&full_path) {
@@ -1852,7 +1842,7 @@ impl<'a> DomXssVisitor<'a> {
                 if let Expression::StaticMemberExpression(member) = &call.callee {
                     // Direct source call (e.g., localStorage.getItem(...))
                     if let Some(callee_str) = self.get_member_string(member)
-                        && self.sources.contains(&callee_str)
+                        && self.sources.contains(callee_str.as_str())
                     {
                         return self
                             .storage_get_source(call, &callee_str)
@@ -1872,7 +1862,7 @@ impl<'a> DomXssVisitor<'a> {
                         }
                         Argument::StaticMemberExpression(member) => {
                             if let Some(member_str) = self.get_member_string(member)
-                                && self.sources.contains(&member_str)
+                                && self.sources.contains(member_str.as_str())
                             {
                                 return Some(member_str);
                             }
@@ -1884,7 +1874,7 @@ impl<'a> DomXssVisitor<'a> {
             }
             Expression::ComputedMemberExpression(member) => {
                 if let Some(full_path) = self.get_computed_member_string(member)
-                    && self.sources.contains(&full_path)
+                    && self.sources.contains(full_path.as_str())
                 {
                     return Some(full_path);
                 }
@@ -2147,7 +2137,7 @@ impl<'a> DomXssVisitor<'a> {
 
                 // Also check if the full member path is a sink (e.g., location.href)
                 let full_path_is_sink = if let Some(full_path) = self.get_member_string(member) {
-                    self.sinks.contains(&full_path)
+                    self.sinks.contains(full_path.as_str())
                 } else {
                     false
                 };
@@ -2204,7 +2194,7 @@ impl<'a> DomXssVisitor<'a> {
                     .unwrap_or(false);
                 let full_path_is_sink = self
                     .get_computed_member_string(member)
-                    .map(|full_path| self.sinks.contains(&full_path))
+                    .map(|full_path| self.sinks.contains(full_path.as_str()))
                     .unwrap_or(false);
 
                 if (is_sink || full_path_is_sink) && right_tainted {
@@ -2403,14 +2393,14 @@ impl<'a> DomXssVisitor<'a> {
                 target_expr.and_then(|expr| self.get_sink_name_for_callable_expr(expr));
             if target_sink_name.is_none()
                 && let Some(alias) = target_alias_owned.as_ref()
-                && self.sinks.contains(&alias.target)
+                && self.sinks.contains(alias.target.as_str())
             {
                 target_sink_name = Some(alias.target.clone());
             }
 
             if let Some(sink_name) = target_sink_name {
                 if let Some(target_alias) = target_alias_owned.as_ref()
-                    && self.sinks.contains(&target_alias.target)
+                    && self.sinks.contains(target_alias.target.as_str())
                 {
                     for bound_arg in &target_alias.bound_args {
                         if bound_arg.tainted {
@@ -2429,7 +2419,7 @@ impl<'a> DomXssVisitor<'a> {
                     let target_method_name = target_expr
                         .and_then(|expr| self.get_callee_property_name(expr))
                         .or_else(|| {
-                            if self.sinks.contains(&sink_name) {
+                            if self.sinks.contains(sink_name.as_str()) {
                                 Some(sink_name.clone())
                             } else {
                                 None
@@ -2586,19 +2576,19 @@ impl<'a> DomXssVisitor<'a> {
             let mut target_func_name = self.get_expr_string(target_expr);
             if target_func_name
                 .as_ref()
-                .map(|name| !self.sinks.contains(name))
+                .map(|name| !self.sinks.contains(name.as_str()))
                 .unwrap_or(true)
                 && let Some(alias) = target_alias_owned.as_ref()
-                && self.sinks.contains(&alias.target)
+                && self.sinks.contains(alias.target.as_str())
             {
                 target_func_name = Some(alias.target.clone());
             }
 
             if let Some(target_func_name) =
-                target_func_name.filter(|name| self.sinks.contains(name))
+                target_func_name.filter(|name| self.sinks.contains(name.as_str()))
             {
                 if let Some(target_alias) = target_alias_owned.as_ref()
-                    && self.sinks.contains(&target_alias.target)
+                    && self.sinks.contains(target_alias.target.as_str())
                 {
                     for bound_arg in &target_alias.bound_args {
                         if bound_arg.tainted {
@@ -2745,13 +2735,13 @@ impl<'a> DomXssVisitor<'a> {
         // Check if calling a sink function (full name like document.write)
         let direct_sink_name = self
             .get_expr_string(&call.callee)
-            .filter(|name| self.sinks.contains(name));
+            .filter(|name| self.sinks.contains(name.as_str()));
         let bound_sink_name = if direct_sink_name.is_none() {
             if let Expression::Identifier(id) = &call.callee {
                 self.bound_function_aliases
                     .get(id.name.as_str())
                     .and_then(|alias| {
-                        if self.sinks.contains(&alias.target) {
+                        if self.sinks.contains(alias.target.as_str()) {
                             Some(alias.target.clone())
                         } else {
                             None
@@ -2765,7 +2755,7 @@ impl<'a> DomXssVisitor<'a> {
         };
         if let Some(func_name) = direct_sink_name.or(bound_sink_name) {
             if let Some(bound_alias) = alias_owned.as_ref()
-                && self.sinks.contains(&bound_alias.target)
+                && self.sinks.contains(bound_alias.target.as_str())
             {
                 for bound_arg in &bound_alias.bound_args {
                     if bound_arg.tainted {

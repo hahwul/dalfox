@@ -1,5 +1,6 @@
 use crate::cmd::scan::ScanArgs;
-use crate::parameter_analysis::{Param, classify_special_chars, detect_injection_context};
+use crate::parameter_analysis::{Location, Param, classify_special_chars, detect_injection_context};
+use crate::scanning::url_inject::build_injected_url;
 use crate::target_parser::Target;
 use scraper;
 use std::sync::{Arc, OnceLock};
@@ -61,15 +62,17 @@ pub async fn check_query_discovery(
 
     // Check existing query params for reflection
     for (name, value) in target.url.query_pairs() {
-        let mut url = target.url.clone();
-        url.query_pairs_mut().clear();
-        for (n, v) in target.url.query_pairs() {
-            if n == name {
-                url.query_pairs_mut().append_pair(&n, test_value);
-            } else {
-                url.query_pairs_mut().append_pair(&n, &v);
-            }
-        }
+        let tmp_param = Param {
+            name: name.to_string(),
+            value: String::new(),
+            location: Location::Query,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+        };
+        let url_str = build_injected_url(&target.url, &tmp_param, test_value);
+        let url = url::Url::parse(&url_str).expect("build_injected_url produces valid URL");
         let client_clone = client.clone();
         let data = target.data.clone();
         let parsed_method = target.parse_method();
@@ -559,20 +562,34 @@ pub async fn check_form_discovery(
             continue;
         }
 
+        // Pre-encode field names and values once for form body construction
+        let encoded_fields: Vec<(String, String)> = fields
+            .iter()
+            .map(|(n, v)| {
+                let enc_n = url::form_urlencoded::byte_serialize(n.as_bytes()).collect::<String>();
+                let enc_v = url::form_urlencoded::byte_serialize(v.as_bytes()).collect::<String>();
+                (enc_n, enc_v)
+            })
+            .collect();
+        let encoded_test_value: String =
+            url::form_urlencoded::byte_serialize(test_value.as_bytes()).collect();
+
         // Test each field for reflection via POST
-        for (field_name, field_value) in &fields {
+        for (field_idx, (field_name, field_value)) in fields.iter().enumerate() {
             let _permit = semaphore.acquire().await.unwrap();
-            let mut post_pairs: Vec<(String, String)> = Vec::new();
-            for (n, v) in &fields {
-                if n == field_name {
-                    post_pairs.push((n.clone(), test_value.to_string()));
-                } else {
-                    post_pairs.push((n.clone(), v.clone()));
-                }
-            }
-            let body = url::form_urlencoded::Serializer::new(String::new())
-                .extend_pairs(&post_pairs)
-                .finish();
+            // Build body by joining pre-encoded pairs, substituting the target field
+            let body = encoded_fields
+                .iter()
+                .enumerate()
+                .map(|(i, (enc_n, enc_v))| {
+                    if i == field_idx {
+                        format!("{}={}", enc_n, encoded_test_value)
+                    } else {
+                        format!("{}={}", enc_n, enc_v)
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join("&");
             let m = reqwest::Method::POST;
             let rb = crate::utils::build_request(&client, target, m, form_url.clone(), Some(body));
             let rb = crate::utils::apply_header_overrides(

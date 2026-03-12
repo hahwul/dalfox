@@ -14,15 +14,14 @@
 
 use crate::parameter_analysis::{Location, Param};
 
+const HEX: &[u8; 16] = b"0123456789ABCDEF";
+
 fn is_hex(byte: u8) -> bool {
     byte.is_ascii_hexdigit()
 }
 
-/// Percent-encode a query component while preserving any existing `%XX` sequences.
-/// This lets caller-supplied encoder variants such as `2url`/`4url` survive query
-/// construction without being unintentionally encoded again.
-fn encode_query_component_preserving_pct(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len() * 3);
+/// Percent-encode a query component directly into `out`, preserving existing `%XX` sequences.
+fn encode_query_component_preserving_pct_into(raw: &str, out: &mut String) {
     let bytes = raw.as_bytes();
     let mut idx = 0;
 
@@ -46,13 +45,12 @@ fn encode_query_component_preserving_pct(raw: &str) -> String {
             let mut buf = [0u8; 4];
             for byte in ch.encode_utf8(&mut buf).as_bytes() {
                 out.push('%');
-                out.push_str(&format!("{:02X}", byte));
+                out.push(HEX[(*byte >> 4) as usize] as char);
+                out.push(HEX[(*byte & 0xF) as usize] as char);
             }
         }
         idx += ch.len_utf8();
     }
-
-    out
 }
 
 /// Selectively encode a path segment for readability while preserving most characters
@@ -85,35 +83,50 @@ fn selective_path_segment_encode(raw: &str) -> String {
 pub fn build_injected_url(base: &url::Url, param: &Param, injected: &str) -> String {
     match param.location {
         Location::Query => {
-            let mut pairs: Vec<(String, String)> = base
-                .query_pairs()
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect();
+            // Build the URL string directly without cloning Url or allocating Vec
+            let base_str = base.as_str();
+            // Find prefix before query (scheme + authority + path)
+            let prefix = if let Some(q_pos) = base_str.find('?') {
+                &base_str[..q_pos]
+            } else {
+                base_str
+            };
+            // Preserve fragment
+            let fragment = base.fragment();
+
+            let mut result = String::with_capacity(base_str.len() + injected.len() + 16);
+            result.push_str(prefix);
+            result.push('?');
+
             let mut found = false;
-            for pair in &mut pairs {
-                if pair.0 == param.name {
-                    pair.1 = injected.to_string();
+            let mut first = true;
+            for (k, v) in base.query_pairs() {
+                if !first {
+                    result.push('&');
+                }
+                first = false;
+                encode_query_component_preserving_pct_into(&k, &mut result);
+                result.push('=');
+                if k == param.name && !found {
+                    encode_query_component_preserving_pct_into(injected, &mut result);
                     found = true;
-                    break;
+                } else {
+                    encode_query_component_preserving_pct_into(&v, &mut result);
                 }
             }
             if !found {
-                pairs.push((param.name.clone(), injected.to_string()));
+                if !first {
+                    result.push('&');
+                }
+                encode_query_component_preserving_pct_into(&param.name, &mut result);
+                result.push('=');
+                encode_query_component_preserving_pct_into(injected, &mut result);
             }
-            let query = pairs
-                .iter()
-                .map(|(k, v)| {
-                    format!(
-                        "{}={}",
-                        encode_query_component_preserving_pct(k),
-                        encode_query_component_preserving_pct(v)
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            let mut url = base.clone();
-            url.set_query(Some(&query));
-            url.to_string()
+            if let Some(frag) = fragment {
+                result.push('#');
+                result.push_str(frag);
+            }
+            result
         }
         Location::Path => {
             let mut url = base.clone();

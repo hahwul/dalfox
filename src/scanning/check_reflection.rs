@@ -26,41 +26,69 @@ fn apply_pre_encoding(payload: &str, pre_encoding: &Option<String>) -> String {
     }
 }
 
-/// Safe HTML tags where reflected content cannot execute scripts.
-/// Note: `<style>` is intentionally excluded — CSS injection can break out
-/// via `</style>` and inject executable HTML.
-const SAFE_TAGS: &[&str] = &["textarea", "noscript", "xmp", "plaintext", "title"];
-
 /// Check whether *all* occurrences of `payload` in `html` fall inside safe tags
 /// (textarea, noscript, style, xmp, plaintext, title).  If the payload appears
 /// at least once outside a safe tag, returns `false`.
 ///
 /// Uses a simple tag-stack approach on the raw HTML for reliability, because DOM
 /// parsers like `scraper` may normalize text content inside raw-text elements.
+/// Find `needle` in `haystack` using ASCII case-insensitive comparison,
+/// starting from byte offset `from`. Returns the byte offset of the match.
+fn find_ascii_case_insensitive(haystack: &[u8], needle: &[u8], from: usize) -> Option<usize> {
+    if needle.is_empty() || from + needle.len() > haystack.len() {
+        return None;
+    }
+    let end = haystack.len() - needle.len();
+    let first = needle[0].to_ascii_lowercase();
+    let mut i = from;
+    while i <= end {
+        if haystack[i].to_ascii_lowercase() == first
+            && haystack[i..i + needle.len()]
+                .iter()
+                .zip(needle)
+                .all(|(a, b)| a.eq_ignore_ascii_case(b))
+        {
+            return Some(i);
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Pre-computed safe tag patterns: (open_tag_prefix, close_tag)
+/// e.g. ("textarea" → (b"<textarea", b"</textarea>"))
+const SAFE_TAG_PATTERNS: &[(&[u8], &[u8])] = &[
+    (b"<textarea", b"</textarea>"),
+    (b"<noscript", b"</noscript>"),
+    (b"<xmp", b"</xmp>"),
+    (b"<plaintext", b"</plaintext>"),
+    (b"<title", b"</title>"),
+];
+
 fn is_in_safe_context(html: &str, payload: &str) -> bool {
     // Quick check: payload must be present
     if !html.contains(payload) {
         return true; // nothing reflected, vacuously safe
     }
 
-    let lower_html = html.to_lowercase();
+    let html_bytes = html.as_bytes();
 
     // Build safe-context ranges by scanning for opening/closing safe tags
     let mut safe_ranges: Vec<(usize, usize)> = Vec::new();
-    for &tag in SAFE_TAGS {
-        let open_pattern = format!("<{}", tag);
-        let close_pattern = format!("</{}>", tag);
+    for &(open_pattern, close_pattern) in SAFE_TAG_PATTERNS {
         let mut search_pos = 0;
-        while let Some(open_start) = lower_html[search_pos..].find(&open_pattern) {
-            let abs_open = search_pos + open_start;
+        while let Some(open_start) =
+            find_ascii_case_insensitive(html_bytes, open_pattern, search_pos)
+        {
             // Find the end of the opening tag '>'
-            if let Some(tag_end_offset) = html[abs_open..].find('>') {
-                let content_start = abs_open + tag_end_offset + 1;
-                // Find closing tag
-                if let Some(close_offset) = lower_html[content_start..].find(&close_pattern) {
-                    let content_end = content_start + close_offset;
-                    safe_ranges.push((content_start, content_end));
-                    search_pos = content_end + close_pattern.len();
+            if let Some(tag_end_offset) = html[open_start..].find('>') {
+                let content_start = open_start + tag_end_offset + 1;
+                // Find closing tag (case-insensitive)
+                if let Some(close_start) =
+                    find_ascii_case_insensitive(html_bytes, close_pattern, content_start)
+                {
+                    safe_ranges.push((content_start, close_start));
+                    search_pos = close_start + close_pattern.len();
                 } else {
                     // No closing tag found, rest of document is in safe context
                     safe_ranges.push((content_start, html.len()));
@@ -190,16 +218,21 @@ fn decode_form_urlencoded_like(input: &str) -> Option<String> {
 }
 
 fn payload_variants(payload: &str) -> Vec<String> {
-    let mut variants = vec![payload.to_string()];
-    let mut seen = std::collections::HashSet::from([payload.to_string()]);
+    let mut variants = Vec::with_capacity(10);
+    let mut seen = std::collections::HashSet::with_capacity(10);
+    let owned_payload = payload.to_string();
+    seen.insert(owned_payload.clone());
+    variants.push(owned_payload);
 
     let html_dec = decode_html_entities(payload);
     if seen.insert(html_dec.clone()) {
         variants.push(html_dec.clone());
     }
 
-    for seed in [payload.to_string(), html_dec] {
-        let mut current = seed;
+    // Iterate over seeds: first payload (index 0), then html_dec (index 1 if different)
+    let seeds_count = variants.len();
+    for i in 0..seeds_count {
+        let mut current = variants[i].clone();
         for _ in 0..4 {
             let Ok(url_dec) = urlencoding::decode(&current) else {
                 break;
