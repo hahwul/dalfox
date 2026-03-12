@@ -548,9 +548,9 @@ pub async fn check_form_discovery(
 
     for form in document.select(&form_sel) {
         let form_method = form.value().attr("method").unwrap_or("get");
-        if !form_method.eq_ignore_ascii_case("post") {
-            continue;
-        }
+        let is_post = form_method.eq_ignore_ascii_case("post");
+        let enctype = form.value().attr("enctype").unwrap_or("");
+        let is_multipart = enctype.eq_ignore_ascii_case("multipart/form-data");
 
         // Resolve form action URL
         let action = form.value().attr("action").unwrap_or("");
@@ -576,63 +576,152 @@ pub async fn check_form_discovery(
             continue;
         }
 
-        // Pre-encode field names and values once for form body construction
-        let encoded_fields: Vec<(String, String)> = fields
-            .iter()
-            .map(|(n, v)| {
-                let enc_n = url::form_urlencoded::byte_serialize(n.as_bytes()).collect::<String>();
-                let enc_v = url::form_urlencoded::byte_serialize(v.as_bytes()).collect::<String>();
-                (enc_n, enc_v)
-            })
-            .collect();
-        let encoded_test_value: String =
-            url::form_urlencoded::byte_serialize(test_value.as_bytes()).collect();
-
-        // Test each field for reflection via POST
-        for (field_idx, (field_name, field_value)) in fields.iter().enumerate() {
-            let _permit = semaphore.acquire().await.unwrap();
-            // Build body by joining pre-encoded pairs, substituting the target field
-            let body = encoded_fields
-                .iter()
-                .enumerate()
-                .map(|(i, (enc_n, enc_v))| {
+        if is_post && is_multipart {
+            // Multipart form: test each field via multipart/form-data POST
+            for (field_idx, (field_name, field_value)) in fields.iter().enumerate() {
+                let _permit = semaphore.acquire().await.unwrap();
+                let mut form = reqwest::multipart::Form::new();
+                for (i, (n, v)) in fields.iter().enumerate() {
                     if i == field_idx {
-                        format!("{}={}", enc_n, encoded_test_value)
+                        form = form.text(n.clone(), test_value.to_string());
                     } else {
-                        format!("{}={}", enc_n, enc_v)
+                        form = form.text(n.clone(), v.clone());
                     }
-                })
-                .collect::<Vec<_>>()
-                .join("&");
-            let m = reqwest::Method::POST;
-            let rb = crate::utils::build_request(&client, target, m, form_url.clone(), Some(body));
-            let rb = crate::utils::apply_header_overrides(
-                rb,
-                &[(
-                    "Content-Type".to_string(),
-                    "application/x-www-form-urlencoded".to_string(),
-                )],
-            );
-            crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            if let Ok(resp) = rb.send().await
-                && let Ok(text) = resp.text().await
-                && text.contains(test_value)
-            {
-                let (valid, invalid) = classify_special_chars(&text);
-                batch.push(Param {
-                    name: field_name.clone(),
-                    value: field_value.clone(),
-                    location: crate::parameter_analysis::Location::Body,
-                    injection_context: Some(detect_injection_context(&text)),
-                    valid_specials: Some(valid),
-                    invalid_specials: Some(invalid),
-                    pre_encoding: None,
-                    form_action_url: Some(form_url.to_string()),
-                    form_origin_url: Some(target.url.to_string()),
-                });
+                }
+                let rb = crate::utils::build_request(
+                    &client,
+                    target,
+                    reqwest::Method::POST,
+                    form_url.clone(),
+                    None,
+                )
+                .multipart(form);
+                crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if let Ok(resp) = rb.send().await
+                    && let Ok(text) = resp.text().await
+                    && text.contains(test_value)
+                {
+                    let (valid, invalid) = classify_special_chars(&text);
+                    batch.push(Param {
+                        name: field_name.clone(),
+                        value: field_value.clone(),
+                        location: crate::parameter_analysis::Location::MultipartBody,
+                        injection_context: Some(detect_injection_context(&text)),
+                        valid_specials: Some(valid),
+                        invalid_specials: Some(invalid),
+                        pre_encoding: None,
+                        form_action_url: Some(form_url.to_string()),
+                        form_origin_url: Some(target.url.to_string()),
+                    });
+                }
+                if target.delay > 0 {
+                    sleep(Duration::from_millis(target.delay)).await;
+                }
             }
-            if target.delay > 0 {
-                sleep(Duration::from_millis(target.delay)).await;
+        } else if is_post {
+            // Pre-encode field names and values once for form body construction
+            let encoded_fields: Vec<(String, String)> = fields
+                .iter()
+                .map(|(n, v)| {
+                    let enc_n =
+                        url::form_urlencoded::byte_serialize(n.as_bytes()).collect::<String>();
+                    let enc_v =
+                        url::form_urlencoded::byte_serialize(v.as_bytes()).collect::<String>();
+                    (enc_n, enc_v)
+                })
+                .collect();
+            let encoded_test_value: String =
+                url::form_urlencoded::byte_serialize(test_value.as_bytes()).collect();
+
+            // Test each field for reflection via POST
+            for (field_idx, (field_name, field_value)) in fields.iter().enumerate() {
+                let _permit = semaphore.acquire().await.unwrap();
+                // Build body by joining pre-encoded pairs, substituting the target field
+                let body = encoded_fields
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (enc_n, enc_v))| {
+                        if i == field_idx {
+                            format!("{}={}", enc_n, encoded_test_value)
+                        } else {
+                            format!("{}={}", enc_n, enc_v)
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join("&");
+                let m = reqwest::Method::POST;
+                let rb =
+                    crate::utils::build_request(&client, target, m, form_url.clone(), Some(body));
+                let rb = crate::utils::apply_header_overrides(
+                    rb,
+                    &[(
+                        "Content-Type".to_string(),
+                        "application/x-www-form-urlencoded".to_string(),
+                    )],
+                );
+                crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if let Ok(resp) = rb.send().await
+                    && let Ok(text) = resp.text().await
+                    && text.contains(test_value)
+                {
+                    let (valid, invalid) = classify_special_chars(&text);
+                    batch.push(Param {
+                        name: field_name.clone(),
+                        value: field_value.clone(),
+                        location: crate::parameter_analysis::Location::Body,
+                        injection_context: Some(detect_injection_context(&text)),
+                        valid_specials: Some(valid),
+                        invalid_specials: Some(invalid),
+                        pre_encoding: None,
+                        form_action_url: Some(form_url.to_string()),
+                        form_origin_url: Some(target.url.to_string()),
+                    });
+                }
+                if target.delay > 0 {
+                    sleep(Duration::from_millis(target.delay)).await;
+                }
+            }
+        } else {
+            // GET form: test each field as query parameter on the form action URL
+            for (field_name, field_value) in &fields {
+                let _permit = semaphore.acquire().await.unwrap();
+                let mut test_url = form_url.clone();
+                // Build query: set all fields, replace target field with test value
+                {
+                    let mut pairs = test_url.query_pairs_mut();
+                    pairs.clear();
+                    for (n, v) in &fields {
+                        if n == field_name {
+                            pairs.append_pair(n, test_value);
+                        } else {
+                            pairs.append_pair(n, v);
+                        }
+                    }
+                }
+                let m = reqwest::Method::GET;
+                let rb =
+                    crate::utils::build_request(&client, target, m, test_url.clone(), None);
+                crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                if let Ok(resp) = rb.send().await
+                    && let Ok(text) = resp.text().await
+                    && text.contains(test_value)
+                {
+                    let (valid, invalid) = classify_special_chars(&text);
+                    batch.push(Param {
+                        name: field_name.clone(),
+                        value: field_value.clone(),
+                        location: crate::parameter_analysis::Location::Query,
+                        injection_context: Some(detect_injection_context(&text)),
+                        valid_specials: Some(valid),
+                        invalid_specials: Some(invalid),
+                        pre_encoding: None,
+                        form_action_url: Some(form_url.to_string()),
+                        form_origin_url: Some(target.url.to_string()),
+                    });
+                }
+                if target.delay > 0 {
+                    sleep(Duration::from_millis(target.delay)).await;
+                }
             }
         }
 
@@ -807,6 +896,7 @@ mod tests {
             blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
+            inject_marker: None,
             skip_xss_scanning: true,
             deep_scan: false,
             sxss: false,

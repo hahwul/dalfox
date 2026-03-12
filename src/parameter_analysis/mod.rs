@@ -20,6 +20,7 @@ pub enum Location {
     Query,
     Body,
     JsonBody,
+    MultipartBody,
     Header,
     Path,
 }
@@ -177,9 +178,11 @@ pub async fn active_probe_param(
                 &raw_payload,
                 &pre_encoding,
             );
-            // Force POST for Body/JsonBody params even when default target method is GET
+            // Force POST for Body/JsonBody/MultipartBody params even when default target method is GET
             let req_method = match location {
-                Location::Body | Location::JsonBody => reqwest::Method::POST,
+                Location::Body | Location::JsonBody | Location::MultipartBody => {
+                    reqwest::Method::POST
+                }
                 _ => parsed_method,
             };
             let body_url = form_action_url
@@ -325,6 +328,39 @@ pub async fn active_probe_param(
                         .header("Content-Type", "application/json")
                         .body(body_string);
                 }
+                Location::MultipartBody => {
+                    // Build multipart/form-data body
+                    let mut form = reqwest::multipart::Form::new();
+                    if let Some(d) = &data {
+                        for pair in d.split('&') {
+                            if let Some((k, v)) = pair.split_once('=') {
+                                let k = urlencoding::decode(k)
+                                    .unwrap_or(std::borrow::Cow::Borrowed(k))
+                                    .to_string();
+                                let v = urlencoding::decode(v)
+                                    .unwrap_or(std::borrow::Cow::Borrowed(v))
+                                    .to_string();
+                                if k == param_name {
+                                    form = form.text(k, payload.clone());
+                                } else {
+                                    form = form.text(k, v);
+                                }
+                            }
+                        }
+                    }
+                    // If param not found in existing data, add it
+                    if data.is_none()
+                        || !data
+                            .as_ref()
+                            .unwrap_or(&String::new())
+                            .contains(&param_name)
+                    {
+                        form = form.text(param_name.clone(), payload.clone());
+                    }
+                    request_builder = client_clone
+                        .request(req_method, body_url.clone())
+                        .multipart(form);
+                }
             }
 
             if let Some(ua) = &user_agent {
@@ -431,39 +467,79 @@ pub async fn active_probe_param(
     // to detect servers that multi-decode input (e.g. double URL decode).
     if param.pre_encoding.is_none()
         && iv.contains(&'<')
-        && matches!(param.location, Location::Query)
+        && matches!(param.location, Location::Query | Location::Path)
     {
         let open = crate::scanning::markers::open_marker();
         let close = crate::scanning::markers::close_marker();
         let raw_marker = format!("{}<{}", open, close);
 
-        // Note: append_pair adds one URL-encoding layer automatically,
-        // so we encode (N-1) times for N-decode detection.
         for (enc_name, rounds) in [("2url", 1u8), ("3url", 2u8)] {
             let mut encoded = raw_marker.clone();
+            // For Query: append_pair adds one URL-encoding layer automatically,
+            // so we encode (N-1) times for N-decode detection.
+            // For Path: selective_path_segment_encode encodes '%' to '%25' (one layer),
+            // so we also encode (N-1) extra times.
             for _ in 0..rounds {
                 encoded = crate::encoding::url_encode(&encoded);
             }
 
             let _permit = semaphore.acquire().await.unwrap();
-            let mut url = target.url.clone();
-            let mut new_pairs: Vec<(String, String)> = Vec::new();
-            let mut replaced = false;
-            for (k, val) in url.query_pairs() {
-                if k == param.name {
-                    new_pairs.push((k.to_string(), encoded.clone()));
-                    replaced = true;
-                } else {
-                    new_pairs.push((k.to_string(), val.to_string()));
+            let url = match param.location {
+                Location::Query => {
+                    let mut url = target.url.clone();
+                    let mut new_pairs: Vec<(String, String)> = Vec::new();
+                    let mut replaced = false;
+                    for (k, val) in url.query_pairs() {
+                        if k == param.name {
+                            new_pairs.push((k.to_string(), encoded.clone()));
+                            replaced = true;
+                        } else {
+                            new_pairs.push((k.to_string(), val.to_string()));
+                        }
+                    }
+                    if !replaced {
+                        new_pairs.push((param.name.clone(), encoded.clone()));
+                    }
+                    url.query_pairs_mut().clear();
+                    for (k, val) in &new_pairs {
+                        url.query_pairs_mut().append_pair(k, val);
+                    }
+                    url
                 }
-            }
-            if !replaced {
-                new_pairs.push((param.name.clone(), encoded.clone()));
-            }
-            url.query_pairs_mut().clear();
-            for (k, val) in &new_pairs {
-                url.query_pairs_mut().append_pair(k, val);
-            }
+                Location::Path => {
+                    let mut url = target.url.clone();
+                    if let Some(idx_str) = param.name.strip_prefix("path_segment_")
+                        && let Ok(idx) = idx_str.parse::<usize>()
+                    {
+                        let original_path = url.path().to_string();
+                        let segments: Vec<&str> = if original_path == "/" {
+                            Vec::new()
+                        } else {
+                            original_path
+                                .trim_matches('/')
+                                .split('/')
+                                .filter(|s| !s.is_empty())
+                                .collect()
+                        };
+                        if idx < segments.len() {
+                            // Encode '%' for the path so the server receives the multi-encoded payload
+                            let path_encoded = encoded.replace('%', "%25");
+                            let mut new_path = String::new();
+                            for (i, segment) in segments.iter().enumerate() {
+                                new_path.push('/');
+                                if i == idx {
+                                    new_path.push_str(&path_encoded);
+                                } else {
+                                    new_path.push_str(segment);
+                                }
+                            }
+                            url.set_path(&new_path);
+                        }
+                    }
+                    url
+                }
+                _ => unreachable!(),
+            };
             let request_builder = client.request(target.parse_method(), url);
             crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if let Ok(resp) = request_builder.send().await
@@ -582,6 +658,7 @@ fn filter_params(params: Vec<Param>, param_specs: &[String], target: &Target) ->
                                 Location::Query => "query",
                                 Location::Body => "body",
                                 Location::JsonBody => "json",
+                                Location::MultipartBody => "multipart",
                                 Location::Path => "path",
                                 Location::Header => {
                                     if target.cookies.iter().any(|(n, _)| n == &p.name) {
@@ -677,6 +754,7 @@ mod tests {
             blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
+            inject_marker: None,
 
             skip_xss_scanning: false,
             deep_scan: false,
@@ -741,6 +819,7 @@ mod tests {
             blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
+            inject_marker: None,
 
             skip_xss_scanning: false,
             deep_scan: false,
@@ -797,6 +876,7 @@ mod tests {
             blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
+            inject_marker: None,
 
             skip_xss_scanning: false,
             deep_scan: false,
@@ -913,6 +993,7 @@ mod tests {
             blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
+            inject_marker: None,
 
             skip_xss_scanning: false,
             deep_scan: false,
@@ -990,6 +1071,7 @@ mod tests {
             blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
+            inject_marker: None,
 
             skip_xss_scanning: false,
             deep_scan: false,
@@ -1262,6 +1344,7 @@ mod tests {
             blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
+            inject_marker: None,
             skip_xss_scanning: false,
             deep_scan: false,
             sxss: false,

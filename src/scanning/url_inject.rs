@@ -159,7 +159,7 @@ pub fn build_injected_url(base: &url::Url, param: &Param, injected: &str) -> Str
             }
             url.to_string()
         }
-        Location::Body | Location::JsonBody => {
+        Location::Body | Location::JsonBody | Location::MultipartBody => {
             // For body params, the URL itself does not change.
             // Return the base URL as-is; actual payload injection happens in the
             // request body (handled by the caller when building the request).

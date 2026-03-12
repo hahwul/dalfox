@@ -90,6 +90,7 @@ pub struct ScanConfig {
     pub blind_callback_url: Option<String>,
     pub custom_payload: Option<String>,
     pub only_custom_payload: Option<bool>,
+    pub inject_marker: Option<String>,
     pub skip_xss_scanning: Option<bool>,
     pub deep_scan: Option<bool>,
     pub sxss: Option<bool>,
@@ -224,6 +225,9 @@ impl Config {
             }
             if let Some(v) = scan.only_custom_payload {
                 args.only_custom_payload = v;
+            }
+            if let Some(v) = &scan.inject_marker {
+                args.inject_marker = Some(v.clone());
             }
             if let Some(v) = scan.skip_xss_scanning {
                 args.skip_xss_scanning = v;
@@ -541,6 +545,11 @@ impl Config {
             {
                 args.only_custom_payload = v;
             }
+            if let Some(v) = &scan.inject_marker
+                && args.inject_marker.is_none()
+            {
+                args.inject_marker = Some(v.clone());
+            }
             if let Some(v) = scan.skip_xss_scanning
                 && !args.skip_xss_scanning
             {
@@ -789,6 +798,7 @@ mod tests {
             blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
+            inject_marker: None,
             skip_xss_scanning: false,
             deep_scan: false,
             sxss: false,
@@ -838,6 +848,7 @@ mod tests {
             blind_callback_url: Some("https://bxss.example/callback".to_string()),
             custom_payload: Some("custom.txt".to_string()),
             only_custom_payload: Some(true),
+            inject_marker: None,
             skip_xss_scanning: Some(true),
             deep_scan: Some(true),
             sxss: Some(true),

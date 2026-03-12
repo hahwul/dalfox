@@ -98,6 +98,7 @@ const DOM_SOURCES: &[&str] = &[
     "localStorage.getItem", "sessionStorage.getItem",
     "event.data", "e.data", "event.newValue", "e.newValue",
     "event.oldValue", "e.oldValue",
+    "e.target.value", "event.target.value",
     "window.opener",
     "URLSearchParams", "import.meta.url", "location.origin", "location.host",
     "history.state", "document.domain",
@@ -1976,6 +1977,16 @@ impl<'a> DomXssVisitor<'a> {
                 format!("{param_name}.oldValue"),
                 "event.oldValue".to_string(),
             );
+        } else if event_source == "e.target.value" || event_source == "event.target.value" {
+            // Input/change events: e.target.value is user-controlled
+            self.field_taints.insert(
+                format!("{param_name}.target.value"),
+                "e.target.value".to_string(),
+            );
+            self.field_taints.insert(
+                format!("{param_name}.target"),
+                "e.target.value".to_string(),
+            );
         }
 
         self.walk_statements(statements);
@@ -2057,6 +2068,16 @@ impl<'a> DomXssVisitor<'a> {
             Some(self.message_event_source_for_receiver(receiver))
         } else if event_name.eq_ignore_ascii_case("storage") {
             Some("event.newValue".to_string())
+        } else if matches!(
+            event_name.to_ascii_lowercase().as_str(),
+            "input" | "change" | "keyup" | "keydown" | "keypress" | "paste" | "cut"
+        ) {
+            // User-controlled input events: e.target.value is the tainted source
+            Some("e.target.value".to_string())
+        } else if event_name.eq_ignore_ascii_case("hashchange") {
+            Some("location.hash".to_string())
+        } else if event_name.eq_ignore_ascii_case("popstate") {
+            Some("history.state".to_string())
         } else {
             None
         }
@@ -3184,6 +3205,26 @@ document.getElementById('msg').innerHTML = data;
         assert!(
             !result.is_empty(),
             "Should detect e.data (postMessage) as source"
+        );
+    }
+
+    #[test]
+    fn test_input_event_target_value() {
+        // e.target.value from input events is user-controlled
+        let code = r#"
+document.getElementById('source1').addEventListener('input', (e)=>{
+    document.getElementById('sink1').innerHTML = e.target.value;
+})
+"#;
+        let analyzer = AstDomAnalyzer::new();
+        let result = analyzer.analyze(code).unwrap();
+        assert!(
+            !result.is_empty(),
+            "Should detect e.target.value (input event) as source flowing to innerHTML sink"
+        );
+        assert!(
+            result.iter().any(|v| v.sink.contains("innerHTML")),
+            "Sink should be innerHTML"
         );
     }
 

@@ -390,6 +390,7 @@ async fn run_scan_job(
         blind_callback_url: opts.blind.clone(),
         custom_payload: None,
         only_custom_payload: false,
+        inject_marker: None,
 
         skip_xss_scanning: false,
         deep_scan: false,

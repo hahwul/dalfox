@@ -273,6 +273,7 @@ mod tests {
             blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
+            inject_marker: None,
             skip_xss_scanning: false,
             deep_scan: false,
             sxss: false,
@@ -929,7 +930,7 @@ pub struct ScanArgs {
     pub delay: u64,
 
     #[clap(help_heading = "NETWORK")]
-    /// Proxy URL (e.g., http://localhost:8080)
+    /// Proxy URL (e.g., http://localhost:8080, socks5://localhost:9050)
     #[arg(long)]
     pub proxy: Option<String>,
 
@@ -982,6 +983,12 @@ pub struct ScanArgs {
     /// Only test custom payloads. Example: --only-custom-payload --custom-payload=p.txt
     #[arg(long)]
     pub only_custom_payload: bool,
+
+    #[clap(help_heading = "XSS SCANNING")]
+    /// Custom injection point marker. Replace this string with payloads in URL/headers/body.
+    /// Example: --inject-marker 'FUZZ' with URL 'http://example.com/?q=FUZZ'
+    #[arg(long)]
+    pub inject_marker: Option<String>,
 
     #[clap(help_heading = "XSS SCANNING")]
     /// Skip XSS scanning entirely
@@ -1321,6 +1328,15 @@ pub async fn run_scan(args: &ScanArgs) {
         }
     }
 
+    // Deduplicate targets by URL + method to avoid redundant scans (e.g. pipe input with duplicates)
+    {
+        let mut seen = std::collections::HashSet::new();
+        parsed_targets.retain(|t| {
+            let key = format!("{}|{}", t.url, t.method);
+            seen.insert(key)
+        });
+    }
+
     if parsed_targets.is_empty() {
         if !args.silence {
             eprintln!("Error: No targets specified");
@@ -1553,7 +1569,110 @@ pub async fn run_scan(args: &ScanArgs) {
                 };
                 let mut __analysis_args = args_clone.clone();
                 __analysis_args.silence = true;
-                analyze_parameters(&mut target, &__analysis_args, multi_pb_clone).await;
+                if let Some(ref marker) = args_clone.inject_marker {
+                    // Custom injection marker mode: skip normal discovery/mining
+                    // and create params from marker positions in URL/headers/body
+                    use crate::parameter_analysis::{Location, Param};
+                    let mut marker_params = Vec::new();
+
+                    // Check URL query params
+                    for (k, v) in target.url.query_pairs() {
+                        if v.contains(marker.as_str()) {
+                            marker_params.push(Param {
+                                name: k.to_string(),
+                                value: v.to_string(),
+                                location: Location::Query,
+                                injection_context: None,
+                                valid_specials: None,
+                                invalid_specials: None,
+                                pre_encoding: None,
+                                form_action_url: None,
+                                form_origin_url: None,
+                            });
+                        }
+                    }
+
+                    // Check body params
+                    if let Some(ref data) = target.data {
+                        if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(data) {
+                            if let Some(obj) = json_val.as_object() {
+                                for (k, v) in obj {
+                                    if let Some(s) = v.as_str() {
+                                        if s.contains(marker.as_str()) {
+                                            marker_params.push(Param {
+                                                name: k.clone(),
+                                                value: s.to_string(),
+                                                location: Location::JsonBody,
+                                                injection_context: None,
+                                                valid_specials: None,
+                                                invalid_specials: None,
+                                                pre_encoding: None,
+                                                form_action_url: None,
+                                                form_origin_url: None,
+                                            });
+                                        }
+                                    }
+                                }
+                            }
+                        } else {
+                            for pair in data.split('&') {
+                                if let Some((k, v)) = pair.split_once('=') {
+                                    if v.contains(marker.as_str()) {
+                                        marker_params.push(Param {
+                                            name: k.to_string(),
+                                            value: v.to_string(),
+                                            location: Location::Body,
+                                            injection_context: None,
+                                            valid_specials: None,
+                                            invalid_specials: None,
+                                            pre_encoding: None,
+                                            form_action_url: None,
+                                            form_origin_url: None,
+                                        });
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Check headers
+                    for (k, v) in &target.headers {
+                        if v.contains(marker.as_str()) {
+                            marker_params.push(Param {
+                                name: k.clone(),
+                                value: v.clone(),
+                                location: Location::Header,
+                                injection_context: None,
+                                valid_specials: None,
+                                invalid_specials: None,
+                                pre_encoding: None,
+                                form_action_url: None,
+                                form_origin_url: None,
+                            });
+                        }
+                    }
+
+                    // Check cookies
+                    for (k, v) in &target.cookies {
+                        if v.contains(marker.as_str()) {
+                            marker_params.push(Param {
+                                name: k.clone(),
+                                value: v.clone(),
+                                location: Location::Header,
+                                injection_context: None,
+                                valid_specials: None,
+                                invalid_specials: None,
+                                pre_encoding: None,
+                                form_action_url: None,
+                                form_origin_url: None,
+                            });
+                        }
+                    }
+
+                    target.reflection_params = marker_params;
+                } else {
+                    analyze_parameters(&mut target, &__analysis_args, multi_pb_clone).await;
+                }
                 if let Some((tx, done_rx)) = __analyze_spinner {
                     let _ = tx.send(());
                     let _ = done_rx.await;

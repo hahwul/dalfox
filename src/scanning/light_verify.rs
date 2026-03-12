@@ -95,6 +95,30 @@ pub async fn verify_dom_xss_light_with_client(
             let rb = crate::utils::build_request(client, target, method, parsed_url, body);
             rb.header("Content-Type", "application/json")
         }
+        Location::MultipartBody => {
+            let parsed_url = param.form_action_url
+                .as_ref()
+                .and_then(|u| url::Url::parse(u).ok())
+                .unwrap_or_else(|| target.url.clone());
+            let mut form = reqwest::multipart::Form::new();
+            if let Some(ref data) = target.data {
+                for pair in data.split('&') {
+                    if let Some((k, v)) = pair.split_once('=') {
+                        let k = urlencoding::decode(k).unwrap_or(std::borrow::Cow::Borrowed(k)).to_string();
+                        let v = urlencoding::decode(v).unwrap_or(std::borrow::Cow::Borrowed(v)).to_string();
+                        if k == param.name {
+                            form = form.text(k, payload.to_string());
+                        } else {
+                            form = form.text(k, v);
+                        }
+                    }
+                }
+            } else {
+                form = form.text(param.name.clone(), payload.to_string());
+            }
+            crate::utils::build_request(client, target, method, parsed_url, None)
+                .multipart(form)
+        }
         _ => {
             let inject_url =
                 crate::scanning::url_inject::build_injected_url(&target.url, param, payload);

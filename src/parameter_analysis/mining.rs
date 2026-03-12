@@ -1204,6 +1204,7 @@ mod tests {
             blind_callback_url: None,
             custom_payload: None,
             only_custom_payload: false,
+            inject_marker: None,
             skip_xss_scanning: false,
             deep_scan: false,
             sxss: false,
