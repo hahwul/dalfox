@@ -256,15 +256,6 @@ fn ast_source_uses_browser_url_surface(source: &str) -> bool {
         || source.contains("event.oldValue")
 }
 
-#[allow(dead_code)]
-fn build_injected_url(
-    base: &url::Url,
-    param: &crate::parameter_analysis::Param,
-    injected: &str,
-) -> String {
-    crate::scanning::url_inject::build_injected_url(base, param, injected)
-}
-
 pub async fn run_scanning(
     target: &Target,
     args: Arc<ScanArgs>,
@@ -815,7 +806,6 @@ pub use xss_blind::blind_scanning;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::encoding::{base64_encode, html_entity_encode, url_encode};
     use crate::parameter_analysis::{InjectionContext, Location, Param};
     use crate::target_parser::parse_target;
 

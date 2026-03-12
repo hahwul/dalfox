@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use tokio::sync::Mutex;
 
+use crate::cmd::JobStatus;
 use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::analyze_parameters;
 use crate::scanning::result::{Result as ScanResult, SanitizedResult};
@@ -97,11 +98,11 @@ struct AppState {
 
 #[derive(Clone)]
 struct Job {
-    status: String, // queued | running | done | error
+    status: JobStatus,
     results: Option<Vec<SanitizedResult>>,
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: wire into SanitizedResult to include raw request data
     include_request: bool,
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: wire into SanitizedResult to include raw response data
     include_response: bool,
 }
 
@@ -140,7 +141,7 @@ struct ScanOptions {
 
 #[derive(Debug, Clone, Serialize)]
 struct ResultPayload {
-    status: String,
+    status: JobStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     results: Option<Vec<SanitizedResult>>,
 }
@@ -161,12 +162,6 @@ fn check_api_key(state: &AppState, headers: &HeaderMap) -> bool {
 
 fn make_scan_id(s: &str) -> String {
     crate::utils::make_scan_id(s)
-}
-
-/// Return a compact, 7-character prefix of a scan id for log display.
-#[allow(dead_code)]
-fn short_scan_id(id: &str) -> String {
-    crate::utils::short_scan_id(id)
 }
 
 // Validate JSONP callback name to prevent XSS via callback parameter.
@@ -335,7 +330,7 @@ async fn run_scan_job(
     {
         let mut jobs = state.jobs.lock().await;
         if let Some(job) = jobs.get_mut(&job_id) {
-            job.status = "running".to_string();
+            job.status = JobStatus::Running;
         }
     }
 
@@ -459,7 +454,7 @@ async fn run_scan_job(
         Err(_) => {
             let mut jobs = state.jobs.lock().await;
             if let Some(job) = jobs.get_mut(&job_id) {
-                job.status = "error".to_string();
+                job.status = JobStatus::Error;
                 job.results = None;
             }
             return;
@@ -494,7 +489,7 @@ async fn run_scan_job(
 
     let mut jobs = state.jobs.lock().await;
     if let Some(job) = jobs.get_mut(&job_id) {
-        job.status = "done".to_string();
+        job.status = JobStatus::Done;
         job.results = Some(final_results);
     }
     log(&state, "JOB", &format!("done id={} url={}", job_id, url));
@@ -535,7 +530,7 @@ async fn start_scan_handler(
         jobs.insert(
             id.clone(),
             Job {
-                status: "queued".to_string(),
+                status: JobStatus::Queued,
                 results: None,
                 include_request,
                 include_response,
@@ -601,7 +596,7 @@ async fn get_result_handler(
             log(&state, "RESULT", &format!("id={} status={}", id, j.status));
             let resp = ApiResponse {
                 code: 200,
-                msg: if j.status == "done" {
+                msg: if j.status == JobStatus::Done {
                     "ok".to_string()
                 } else {
                     "running".to_string()
@@ -729,7 +724,7 @@ async fn get_scan_handler(
         jobs.insert(
             id.clone(),
             Job {
-                status: "queued".to_string(),
+                status: JobStatus::Queued,
                 results: None,
                 include_request,
                 include_response,
@@ -970,8 +965,8 @@ mod tests {
         let id = make_scan_id("https://example.com");
         assert_eq!(id.len(), 64);
         assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
-        assert_eq!(short_scan_id(&id).len(), 7);
-        assert_eq!(short_scan_id("abc"), "abc");
+        assert_eq!(crate::utils::short_scan_id(&id).len(), 7);
+        assert_eq!(crate::utils::short_scan_id("abc"), "abc");
     }
 
     #[test]
@@ -1083,7 +1078,7 @@ mod tests {
             jobs.insert(
                 id.clone(),
                 Job {
-                    status: "queued".to_string(),
+                    status: JobStatus::Queued,
                     results: None,
                     include_request: false,
                     include_response: false,
@@ -1103,7 +1098,7 @@ mod tests {
 
         let jobs = state.jobs.lock().await;
         let job = jobs.get(&id).expect("job should exist");
-        assert_eq!(job.status, "error");
+        assert_eq!(job.status, JobStatus::Error);
     }
 
     #[tokio::test]
@@ -1204,7 +1199,7 @@ mod tests {
             jobs.insert(
                 id.clone(),
                 Job {
-                    status: "done".to_string(),
+                    status: JobStatus::Done,
                     results: None,
                     include_request: false,
                     include_response: false,
@@ -1285,7 +1280,7 @@ mod tests {
             jobs.insert(
                 ok_id.clone(),
                 Job {
-                    status: "done".to_string(),
+                    status: JobStatus::Done,
                     results: None,
                     include_request: false,
                     include_response: false,
@@ -1361,7 +1356,7 @@ mod tests {
             jobs.insert(
                 id.clone(),
                 Job {
-                    status: "running".to_string(),
+                    status: JobStatus::Running,
                     results: None,
                     include_request: false,
                     include_response: false,
@@ -1451,7 +1446,7 @@ mod tests {
             .to_string();
         let jobs = state.jobs.lock().await;
         let job = jobs.get(&id).expect("job should be inserted");
-        assert_eq!(job.status, "queued");
+        assert_eq!(job.status, JobStatus::Queued);
         assert!(job.include_request);
         assert!(job.include_response);
     }
@@ -1517,7 +1512,7 @@ mod tests {
             jobs.insert(
                 id.clone(),
                 Job {
-                    status: "running".to_string(),
+                    status: JobStatus::Running,
                     results: None,
                     include_request: false,
                     include_response: false,
@@ -1571,7 +1566,7 @@ mod tests {
 
         let jobs = state.jobs.lock().await;
         let job = jobs.get(&id).expect("job inserted");
-        assert_eq!(job.status, "queued");
+        assert_eq!(job.status, JobStatus::Queued);
         assert!(job.include_request);
         assert!(job.include_response);
     }
@@ -1586,7 +1581,7 @@ mod tests {
             jobs.insert(
                 id.clone(),
                 Job {
-                    status: "queued".to_string(),
+                    status: JobStatus::Queued,
                     results: None,
                     include_request: false,
                     include_response: false,
@@ -1631,7 +1626,7 @@ mod tests {
 
         let jobs = state.jobs.lock().await;
         let job = jobs.get(&id).expect("job should remain");
-        assert_eq!(job.status, "done");
+        assert_eq!(job.status, JobStatus::Done);
         assert!(job.results.is_some());
     }
 
@@ -1644,7 +1639,7 @@ mod tests {
             jobs.insert(
                 id.clone(),
                 Job {
-                    status: "done".to_string(),
+                    status: JobStatus::Done,
                     results: Some(Vec::new()),
                     include_request: false,
                     include_response: false,
@@ -1685,7 +1680,7 @@ mod tests {
 
         let jobs = state.jobs.lock().await;
         let job = jobs.get(&id).expect("job inserted");
-        assert_eq!(job.status, "queued");
+        assert_eq!(job.status, JobStatus::Queued);
         assert!(!job.include_request);
         assert!(!job.include_response);
     }

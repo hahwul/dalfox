@@ -152,7 +152,8 @@ pub async fn check_query_discovery(
     }
 
     // Encoding probe: for params not yet discovered, try base64-encoded markers
-    let encoding_probes: &[(&str, fn(&str) -> String)] = &[
+    type EncodingProbe = (&'static str, fn(&str) -> String);
+    let encoding_probes: &[EncodingProbe] = &[
         ("base64", |s| crate::encoding::base64_encode(s)),
         ("2base64", |s| crate::encoding::base64_encode(&crate::encoding::base64_encode(s))),
         ("2url", |s| crate::encoding::url_encode(&crate::encoding::url_encode(s))),
@@ -584,19 +585,18 @@ pub async fn check_form_discovery(
             crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             if let Ok(resp) = rb.send().await
                 && let Ok(text) = resp.text().await
+                && text.contains(test_value)
             {
-                if text.contains(&test_value) {
-                    let (valid, invalid) = classify_special_chars(&text);
-                    batch.push(Param {
-                        name: field_name.clone(),
-                        value: field_value.clone(),
-                        location: crate::parameter_analysis::Location::Body,
-                        injection_context: Some(detect_injection_context(&text)),
-                        valid_specials: Some(valid),
-                        invalid_specials: Some(invalid),
+                let (valid, invalid) = classify_special_chars(&text);
+                batch.push(Param {
+                    name: field_name.clone(),
+                    value: field_value.clone(),
+                    location: crate::parameter_analysis::Location::Body,
+                    injection_context: Some(detect_injection_context(&text)),
+                    valid_specials: Some(valid),
+                    invalid_specials: Some(invalid),
                     pre_encoding: None,
-                    });
-                }
+                });
             }
             if target.delay > 0 {
                 sleep(Duration::from_millis(target.delay)).await;
@@ -691,19 +691,18 @@ pub async fn check_form_discovery(
                     crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     if let Ok(resp) = rb.send().await
                         && let Ok(text) = resp.text().await
+                        && text.contains(test_value)
                     {
-                        if text.contains(&test_value) {
-                            let (valid, invalid) = classify_special_chars(&text);
-                            batch.push(Param {
-                                name: field_name.clone(),
-                                value: field_value.clone(),
-                                location: crate::parameter_analysis::Location::JsonBody,
-                                injection_context: Some(detect_injection_context(&text)),
-                                valid_specials: Some(valid),
-                                invalid_specials: Some(invalid),
-                    pre_encoding: None,
-                            });
-                        }
+                        let (valid, invalid) = classify_special_chars(&text);
+                        batch.push(Param {
+                            name: field_name.clone(),
+                            value: field_value.clone(),
+                            location: crate::parameter_analysis::Location::JsonBody,
+                            injection_context: Some(detect_injection_context(&text)),
+                            valid_specials: Some(valid),
+                            invalid_specials: Some(invalid),
+                            pre_encoding: None,
+                        });
                     }
                     if target.delay > 0 {
                         sleep(Duration::from_millis(target.delay)).await;
@@ -864,7 +863,7 @@ mod tests {
         check_header_discovery(&target, reflection_params.clone(), semaphore).await;
 
         let params = reflection_params.lock().await.clone();
-        assert!(params.len() >= 1, "should discover at least the explicit header");
+        assert!(!params.is_empty(), "should discover at least the explicit header");
         let p = params.iter().find(|p| p.name == "X-Reflect-Me").expect("X-Reflect-Me should be discovered");
         assert_eq!(p.value, "orig");
         assert_eq!(p.location, Location::Header);

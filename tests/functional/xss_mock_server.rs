@@ -1081,8 +1081,7 @@ async fn run_scan_test(
     v.as_array().expect("json should be an array").clone()
 }
 
-/// Run only discovery phase against a single target and report if any reflection params were found.
-async fn run_discovery_once(
+struct DiscoveryOpts {
     addr: SocketAddr,
     url_path: String,
     method: String,
@@ -1092,7 +1091,21 @@ async fn run_discovery_once(
     skip_reflection_header: bool,
     skip_reflection_cookie: bool,
     skip_reflection_path: bool,
-) -> bool {
+}
+
+/// Run only discovery phase against a single target and report if any reflection params were found.
+async fn run_discovery_once(opts: DiscoveryOpts) -> bool {
+    let DiscoveryOpts {
+        addr,
+        url_path,
+        method,
+        headers,
+        cookies,
+        body,
+        skip_reflection_header,
+        skip_reflection_cookie,
+        skip_reflection_path,
+    } = opts;
     let url = format!("http://{}:{}{}", addr.ip(), addr.port(), url_path);
     let mut target = parse_target(&url).unwrap();
     target.method = method;
@@ -1615,17 +1628,17 @@ async fn test_cookie_reflection_v2() {
 
         let cookie_name = case.cookie_name.as_deref().unwrap_or("test");
 
-        let found = run_discovery_once(
+        let found = run_discovery_once(DiscoveryOpts {
             addr,
-            format!("/cookie/{}", case_id),
-            "GET".to_string(),
-            vec![],
-            vec![(cookie_name.to_string(), "seed".to_string())],
-            None,
-            true,
-            false,
-            true,
-        )
+            url_path: format!("/cookie/{}", case_id),
+            method: "GET".to_string(),
+            headers: vec![],
+            cookies: vec![(cookie_name.to_string(), "seed".to_string())],
+            body: None,
+            skip_reflection_header: true,
+            skip_reflection_cookie: false,
+            skip_reflection_path: true,
+        })
         .await;
         if found {
             detected += 1;
@@ -1833,17 +1846,17 @@ async fn test_cookie_reflection_diverse_xss_contexts_v2() {
             .unwrap_or_else(|| panic!("Missing cookie case id {}", case_id));
         let cookie_name = case.cookie_name.as_deref().unwrap_or("test");
 
-        let found = run_discovery_once(
+        let found = run_discovery_once(DiscoveryOpts {
             addr,
-            format!("/cookie/{}", case_id),
-            "GET".to_string(),
-            vec![],
-            vec![(cookie_name.to_string(), "seed".to_string())],
-            None,
-            true,
-            false,
-            true,
-        )
+            url_path: format!("/cookie/{}", case_id),
+            method: "GET".to_string(),
+            headers: vec![],
+            cookies: vec![(cookie_name.to_string(), "seed".to_string())],
+            body: None,
+            skip_reflection_header: true,
+            skip_reflection_cookie: false,
+            skip_reflection_path: true,
+        })
         .await;
         if found != case.expected_detection {
             failed.push(format!(
@@ -1877,17 +1890,17 @@ async fn test_cookie_reflection_advanced_xss_coverage_v2() {
             .unwrap_or_else(|| panic!("Missing cookie case id {}", case_id));
         let cookie_name = case.cookie_name.as_deref().unwrap_or("test");
 
-        let found = run_discovery_once(
+        let found = run_discovery_once(DiscoveryOpts {
             addr,
-            format!("/cookie/{}", case_id),
-            "GET".to_string(),
-            vec![],
-            vec![(cookie_name.to_string(), "seed".to_string())],
-            None,
-            true,
-            false,
-            true,
-        )
+            url_path: format!("/cookie/{}", case_id),
+            method: "GET".to_string(),
+            headers: vec![],
+            cookies: vec![(cookie_name.to_string(), "seed".to_string())],
+            body: None,
+            skip_reflection_header: true,
+            skip_reflection_cookie: false,
+            skip_reflection_path: true,
+        })
         .await;
         if found {
             found_count += 1;

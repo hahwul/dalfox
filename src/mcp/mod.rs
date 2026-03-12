@@ -33,6 +33,7 @@ use rmcp::{
 };
 
 use crate::{
+    cmd::JobStatus,
     cmd::scan::ScanArgs,
     parameter_analysis::analyze_parameters,
     scanning::result::{Result as ScanResult, SanitizedResult},
@@ -42,11 +43,11 @@ use crate::{
 /// Internal job representation.
 #[derive(Clone)]
 struct Job {
-    status: String,                        // queued | running | done | error
+    status: JobStatus,
     results: Option<Vec<SanitizedResult>>, // Present when done (or partial in future)
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: wire into SanitizedResult to include raw request data
     include_request: bool,
-    #[allow(dead_code)]
+    #[allow(dead_code)] // TODO: wire into SanitizedResult to include raw response data
     include_response: bool,
 }
 
@@ -85,7 +86,7 @@ impl DalfoxMcp {
         {
             let mut jobs = self.jobs.lock().await;
             if let Some(j) = jobs.get_mut(&scan_id) {
-                j.status = "running".into();
+                j.status = JobStatus::Running;
             }
         }
 
@@ -126,7 +127,7 @@ impl DalfoxMcp {
                 Self::log("ERR", &format!("parse_target failed: {}", e));
                 let mut jobs = self.jobs.lock().await;
                 if let Some(j) = jobs.get_mut(&scan_id) {
-                    j.status = "error".into();
+                    j.status = JobStatus::Error;
                 }
                 return;
             }
@@ -158,7 +159,7 @@ impl DalfoxMcp {
         {
             let mut jobs = self.jobs.lock().await;
             if let Some(j) = jobs.get_mut(&scan_id) {
-                j.status = "done".into();
+                j.status = JobStatus::Done;
                 j.results = Some(sanitized);
             }
         }
@@ -239,7 +240,7 @@ impl DalfoxMcp {
             jobs.insert(
                 scan_id.clone(),
                 Job {
-                    status: "queued".into(),
+                    status: JobStatus::Queued,
                     results: None,
                     include_request,
                     include_response,
@@ -482,7 +483,7 @@ impl DalfoxMcp {
 
         let out = serde_json::json!({
             "scan_id": scan_id,
-            "status": "queued"
+            "status": JobStatus::Queued
         });
         Ok(CallToolResult::success(vec![Content::text(
             out.to_string(),
@@ -671,7 +672,7 @@ mod tests {
             jobs.insert(
                 scan_id.clone(),
                 Job {
-                    status: "queued".to_string(),
+                    status: JobStatus::Queued,
                     results: None,
                     include_request: false,
                     include_response: false,
@@ -685,7 +686,7 @@ mod tests {
 
         let jobs = mcp.jobs.lock().await;
         let job = jobs.get(&scan_id).expect("job exists");
-        assert_eq!(job.status, "error");
+        assert_eq!(job.status, JobStatus::Error);
     }
 
     #[tokio::test]

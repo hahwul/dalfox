@@ -292,102 +292,61 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
-    fn new(source_code: &'a str) -> Self {
-        let mut sources = HashSet::new();
+    // DOM XSS source identifiers
+    const DOM_SOURCES: &'static [&'static str] = &[
         // Common DOM XSS sources
-        sources.insert("location.search".to_string());
-        sources.insert("location.hash".to_string());
-        sources.insert("location.href".to_string());
-        sources.insert("location.pathname".to_string());
-        sources.insert("document.URL".to_string());
-        sources.insert("document.documentURI".to_string());
-        sources.insert("document.URLUnencoded".to_string());
-        sources.insert("document.baseURI".to_string());
-        sources.insert("document.cookie".to_string());
-        sources.insert("document.referrer".to_string());
-        sources.insert("window.name".to_string());
-        sources.insert("window.location".to_string());
+        "location.search", "location.hash", "location.href", "location.pathname",
+        "document.URL", "document.documentURI", "document.URLUnencoded",
+        "document.baseURI", "document.cookie", "document.referrer",
+        "window.name", "window.location",
         // Storage APIs
-        sources.insert("localStorage".to_string());
-        sources.insert("sessionStorage".to_string());
-        sources.insert("localStorage.getItem".to_string());
-        sources.insert("sessionStorage.getItem".to_string());
-        // PostMessage data (event.data, e.data)
-        sources.insert("event.data".to_string());
-        sources.insert("e.data".to_string());
-        sources.insert("event.newValue".to_string());
-        sources.insert("e.newValue".to_string());
-        sources.insert("event.oldValue".to_string());
-        sources.insert("e.oldValue".to_string());
+        "localStorage", "sessionStorage",
+        "localStorage.getItem", "sessionStorage.getItem",
+        // PostMessage data
+        "event.data", "e.data", "event.newValue", "e.newValue",
+        "event.oldValue", "e.oldValue",
         // Window opener
-        sources.insert("window.opener".to_string());
+        "window.opener",
         // Modern DOM sources
-        sources.insert("URLSearchParams".to_string());
-        sources.insert("import.meta.url".to_string());
-        sources.insert("location.origin".to_string());
-        sources.insert("location.host".to_string());
-        sources.insert("history.state".to_string());
-        sources.insert("document.domain".to_string());
+        "URLSearchParams", "import.meta.url", "location.origin", "location.host",
+        "history.state", "document.domain",
         // XHR/Fetch response sources
-        sources.insert("Response.text".to_string());
-        sources.insert("Response.json".to_string());
-        sources.insert("XMLHttpRequest.responseText".to_string());
-        sources.insert("XMLHttpRequest.response".to_string());
+        "Response.text", "Response.json",
+        "XMLHttpRequest.responseText", "XMLHttpRequest.response",
+    ];
 
-        let mut sinks = HashSet::new();
+    // DOM XSS sink identifiers
+    const DOM_SINKS: &'static [&'static str] = &[
         // Common DOM XSS sinks
-        sinks.insert("innerHTML".to_string());
-        sinks.insert("outerHTML".to_string());
-        sinks.insert("insertAdjacentHTML".to_string());
-        sinks.insert("createContextualFragment".to_string());
-        sinks.insert("document.write".to_string());
-        sinks.insert("document.writeln".to_string());
-        sinks.insert("eval".to_string());
-        sinks.insert("setTimeout".to_string());
-        sinks.insert("setInterval".to_string());
-        sinks.insert("Function".to_string());
-        sinks.insert("execScript".to_string());
-        sinks.insert("location.href".to_string());
-        sinks.insert("location.assign".to_string());
-        sinks.insert("location.replace".to_string());
+        "innerHTML", "outerHTML", "insertAdjacentHTML", "createContextualFragment",
+        "document.write", "document.writeln",
+        "eval", "setTimeout", "setInterval", "Function", "execScript",
+        "location.href", "location.assign", "location.replace",
         // Element source attributes
-        sinks.insert("src".to_string());
-        sinks.insert("srcdoc".to_string());
-        sinks.insert("href".to_string());
-        sinks.insert("xlink:href".to_string());
-        sinks.insert("setAttribute".to_string());
+        "src", "srcdoc", "href", "xlink:href", "setAttribute",
         // jQuery sinks
-        sinks.insert("html".to_string());
-        sinks.insert("append".to_string());
-        sinks.insert("prepend".to_string());
-        sinks.insert("after".to_string());
-        sinks.insert("before".to_string());
+        "html", "append", "prepend", "after", "before",
         // execCommand with insertHTML command
-        sinks.insert("execCommand".to_string());
+        "execCommand",
         // Note: textContent and innerText are SAFE - they don't parse HTML
-        // Previously textContent was incorrectly included as a sink, but it
-        // only sets the text content without HTML parsing, making it safe from XSS
+    ];
 
-        let mut sanitizers = HashSet::new();
-        sanitizers.insert("DOMPurify.sanitize".to_string());
-        sanitizers.insert("encodeURIComponent".to_string());
-        sanitizers.insert("encodeURI".to_string());
-        sanitizers.insert("encodeHTML".to_string());
-        sanitizers.insert("escapeHTML".to_string());
-        sanitizers.insert("document.createTextNode".to_string());
-        sanitizers.insert("createTextNode".to_string());
+    // Known sanitizer function names
+    const DOM_SANITIZERS: &'static [&'static str] = &[
+        "DOMPurify.sanitize", "encodeURIComponent", "encodeURI",
+        "encodeHTML", "escapeHTML",
+        "document.createTextNode", "createTextNode",
         // Specific sanitizer library functions
-        sanitizers.insert("sanitizeHtml".to_string());
-        sanitizers.insert("xss".to_string());
-        sanitizers.insert("filterXSS".to_string());
-        sanitizers.insert("he.encode".to_string());
-        sanitizers.insert("he.escape".to_string());
-        sanitizers.insert("_.escape".to_string());
-        sanitizers.insert("escapeHtml".to_string());
-        sanitizers.insert("htmlEscape".to_string());
-        sanitizers.insert("htmlEncode".to_string());
-        sanitizers.insert("sanitizeHTML".to_string());
-        sanitizers.insert("validator.escape".to_string());
+        "sanitizeHtml", "xss", "filterXSS",
+        "he.encode", "he.escape", "_.escape",
+        "escapeHtml", "htmlEscape", "htmlEncode",
+        "sanitizeHTML", "validator.escape",
+    ];
+
+    fn new(source_code: &'a str) -> Self {
+        let sources = Self::DOM_SOURCES.iter().map(|s| s.to_string()).collect();
+        let sinks = Self::DOM_SINKS.iter().map(|s| s.to_string()).collect();
+        let sanitizers = Self::DOM_SANITIZERS.iter().map(|s| s.to_string()).collect();
 
         Self {
             tainted_vars: HashSet::new(),

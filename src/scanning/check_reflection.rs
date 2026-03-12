@@ -27,7 +27,6 @@ fn apply_pre_encoding(payload: &str, pre_encoding: &Option<String>) -> String {
 }
 
 /// Safe HTML tags where reflected content cannot execute scripts.
-/// Safe HTML tags where reflected content cannot execute scripts.
 /// Note: `<style>` is intentionally excluded — CSS injection can break out
 /// via `</style>` and inject executable HTML.
 const SAFE_TAGS: &[&str] = &["textarea", "noscript", "xmp", "plaintext", "title"];
@@ -99,13 +98,12 @@ fn is_in_safe_context_decoded(html: &str, payload: &str) -> bool {
         return true;
     }
     // Check URL-decoded form
-    if let Ok(url_decoded) = urlencoding::decode(payload) {
-        if url_decoded != payload
-            && html.contains(url_decoded.as_ref())
-            && is_in_safe_context(html, &url_decoded)
-        {
-            return true;
-        }
+    if let Ok(url_decoded) = urlencoding::decode(payload)
+        && url_decoded != payload
+        && html.contains(url_decoded.as_ref())
+        && is_in_safe_context(html, &url_decoded)
+    {
+        return true;
     }
     // Check HTML-entity-decoded form
     let html_decoded = decode_html_entities(payload);
@@ -432,15 +430,13 @@ async fn fetch_injection_response_with_client(
         if let Ok(resp) = inject_resp {
             // Check for redirect context: if the response is a 3xx redirect,
             // the Location header may contain the reflected payload.
-            if resp.status().is_redirection() {
-                if let Some(location) = resp.headers().get("location").and_then(|v| v.to_str().ok())
-                {
-                    if location.contains(payload) {
-                        // Synthesize a response text that includes the Location value
-                        // so reflection detection can find it
-                        return Some(location.to_string());
-                    }
-                }
+            if resp.status().is_redirection()
+                && let Some(location) = resp.headers().get("location").and_then(|v| v.to_str().ok())
+                && location.contains(payload)
+            {
+                // Synthesize a response text that includes the Location value
+                // so reflection detection can find it
+                return Some(location.to_string());
             }
             resp.text().await.ok()
         } else {

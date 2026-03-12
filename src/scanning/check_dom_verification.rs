@@ -1,13 +1,7 @@
 use crate::parameter_analysis::{Location, Param};
 use crate::target_parser::Target;
 use reqwest::Client;
-use scraper;
-use std::sync::OnceLock;
-
 use tokio::time::{Duration, sleep};
-
-#[allow(dead_code)]
-static DALFOX_SELECTOR: OnceLock<scraper::Selector> = OnceLock::new();
 
 fn payload_uses_legacy_class_marker(payload: &str) -> bool {
     payload.contains("class=dalfox")
@@ -291,28 +285,29 @@ pub async fn check_dom_verification_with_client(
                 .unwrap_or("");
 
             // Check redirect Location header for executable URL protocols (e.g. javascript:alert(1))
-            if status.is_redirection() {
-                if let Some(location) = headers.get(reqwest::header::LOCATION)
-                    && let Ok(loc_str) = location.to_str()
+            if status.is_redirection()
+                && let Some(location) = headers.get(reqwest::header::LOCATION)
+                && let Ok(loc_str) = location.to_str()
+            {
+                let loc_lower = loc_str.trim().to_ascii_lowercase();
+                if payload_is_executable_url_protocol(payload)
+                    && loc_lower.starts_with(&payload.trim().to_ascii_lowercase())
                 {
-                    let loc_lower = loc_str.trim().to_ascii_lowercase();
-                    if payload_is_executable_url_protocol(payload)
-                        && loc_lower.starts_with(&payload.trim().to_ascii_lowercase())
-                    {
-                        let synthetic_body = format!(
-                            "<html><body><a href=\"{}\">redirect</a></body></html>",
-                            loc_str
-                        );
-                        return (true, Some(synthetic_body));
-                    }
-                    // Also check if payload is reflected in Location header (open redirect)
-                    if crate::scanning::check_reflection::classify_reflection(loc_str, payload).is_some() {
-                        let synthetic_body = format!(
-                            "<html><body>Redirect to: {}</body></html>",
-                            loc_str
-                        );
-                        return (true, Some(synthetic_body));
-                    }
+                    let synthetic_body = format!(
+                        "<html><body><a href=\"{}\">redirect</a></body></html>",
+                        loc_str
+                    );
+                    return (true, Some(synthetic_body));
+                }
+                // Also check if payload is reflected in Location header (open redirect)
+                if crate::scanning::check_reflection::classify_reflection(loc_str, payload)
+                    .is_some()
+                {
+                    let synthetic_body = format!(
+                        "<html><body>Redirect to: {}</body></html>",
+                        loc_str
+                    );
+                    return (true, Some(synthetic_body));
                 }
             }
 
