@@ -398,6 +398,9 @@ async fn run_scan_job(
         sxss_url: None,
         sxss_method: "GET".to_string(),
         skip_ast_analysis: false,
+        waf_bypass: "auto".to_string(),
+        skip_waf_probe: false,
+        force_waf: None,
         remote_payloads: opts.remote_payloads.clone().unwrap_or_default(),
         remote_wordlists: opts.remote_wordlists.clone().unwrap_or_default(),
 

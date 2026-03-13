@@ -978,6 +978,9 @@ mod tests {
             sxss_url: None,
             sxss_method: "GET".to_string(),
             skip_ast_analysis: false,
+            waf_bypass: "auto".to_string(),
+            skip_waf_probe: false,
+            force_waf: None,
         }
     }
 

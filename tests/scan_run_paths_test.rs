@@ -52,6 +52,9 @@ fn base_scan_args() -> ScanArgs {
         sxss_url: None,
         sxss_method: "GET".to_string(),
         skip_ast_analysis: false,
+        waf_bypass: "off".to_string(),
+        skip_waf_probe: true,
+        force_waf: None,
         targets: vec![],
     }
 }

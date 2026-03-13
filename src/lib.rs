@@ -15,6 +15,7 @@ pub mod payload;
 pub mod scanning;
 pub mod target_parser;
 pub mod utils;
+pub mod waf;
 
 pub use std::sync::atomic::AtomicBool;
 pub use std::sync::atomic::AtomicU64;

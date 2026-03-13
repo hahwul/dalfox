@@ -97,6 +97,10 @@ pub struct ScanConfig {
     pub sxss_url: Option<String>,
     pub sxss_method: Option<String>,
     pub skip_ast_analysis: Option<bool>,
+    // WAF
+    pub waf_bypass: Option<String>,
+    pub skip_waf_probe: Option<bool>,
+    pub force_waf: Option<String>,
     // LOGGING/DEBUG
     pub debug: Option<bool>,
 }
@@ -580,6 +584,18 @@ impl Config {
             {
                 args.skip_ast_analysis = v;
             }
+            // WAF
+            if let Some(v) = &scan.waf_bypass {
+                args.waf_bypass = v.clone();
+            }
+            if let Some(v) = scan.skip_waf_probe
+                && !args.skip_waf_probe
+            {
+                args.skip_waf_probe = v;
+            }
+            if let Some(v) = &scan.force_waf {
+                args.force_waf = Some(v.clone());
+            }
         }
     }
 }
@@ -805,6 +821,9 @@ mod tests {
             sxss_url: None,
             sxss_method: "GET".to_string(),
             skip_ast_analysis: false,
+            waf_bypass: "auto".to_string(),
+            skip_waf_probe: false,
+            force_waf: None,
             targets: vec![],
         }
     }
@@ -855,6 +874,9 @@ mod tests {
             sxss_url: Some("https://example.com/sxss".to_string()),
             sxss_method: Some("POST".to_string()),
             skip_ast_analysis: Some(true),
+            waf_bypass: Some("auto".to_string()),
+            skip_waf_probe: Some(false),
+            force_waf: None,
             debug: Some(true),
         }
     }

@@ -291,18 +291,62 @@ pub async fn run_scanning(
     let semaphore = Arc::new(Semaphore::new(if args.sxss { 1 } else { target.workers }));
     let limit = args.limit;
 
+    // Compute WAF bypass strategy if WAF was detected
+    let waf_strategy = if args.waf_bypass != "off" {
+        target.waf_info.as_ref().and_then(|waf_info| {
+            if waf_info.is_empty() {
+                None
+            } else {
+                let waf_types: Vec<&crate::waf::WafType> = waf_info.waf_types();
+                Some(crate::waf::bypass::merge_strategies(&waf_types))
+            }
+        })
+    } else {
+        None
+    };
+
     // Precompute payload sets once per parameter to avoid repeated expansion work.
     let mut total_tasks = 0u64;
     let mut param_jobs: Vec<(Param, Vec<String>, Vec<String>)> =
         Vec::with_capacity(target.reflection_params.len());
     for param in &target.reflection_params {
-        let reflection_payloads = if let Some(context) = &param.injection_context {
+        let mut reflection_payloads = if let Some(context) = &param.injection_context {
             crate::scanning::xss_common::get_dynamic_payloads(context, args.as_ref())
                 .unwrap_or_else(|_| vec![])
         } else {
             get_fallback_reflection_payloads(args.as_ref()).unwrap_or_else(|_| vec![])
         };
-        let dom_payloads = get_dom_payloads(param, args.as_ref()).unwrap_or_else(|_| vec![]);
+        let mut dom_payloads = get_dom_payloads(param, args.as_ref()).unwrap_or_else(|_| vec![]);
+
+        // Apply WAF bypass mutations and extra encoders if WAF was detected
+        if let Some(ref strategy) = waf_strategy {
+            // Apply mutations (max 3 variants per base payload to prevent explosion)
+            if !strategy.mutations.is_empty() {
+                reflection_payloads = crate::waf::bypass::apply_mutations(
+                    &reflection_payloads,
+                    &strategy.mutations,
+                    3,
+                );
+                dom_payloads = crate::waf::bypass::apply_mutations(
+                    &dom_payloads,
+                    &strategy.mutations,
+                    3,
+                );
+            }
+
+            // Apply extra WAF bypass encoders to payloads
+            if !strategy.extra_encoders.is_empty() {
+                reflection_payloads = crate::encoding::apply_encoders_to_payloads(
+                    &reflection_payloads,
+                    &strategy.extra_encoders,
+                );
+                dom_payloads = crate::encoding::apply_encoders_to_payloads(
+                    &dom_payloads,
+                    &strategy.extra_encoders,
+                );
+            }
+        }
+
         total_tasks += reflection_payloads.len() as u64 * (1 + dom_payloads.len() as u64);
         param_jobs.push((param.clone(), reflection_payloads, dom_payloads));
     }
@@ -896,6 +940,9 @@ mod tests {
             sxss_url: None,
             sxss_method: "GET".to_string(),
             skip_ast_analysis: false,
+            waf_bypass: "auto".to_string(),
+            skip_waf_probe: false,
+            force_waf: None,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         }
@@ -1099,6 +1146,9 @@ mod tests {
             sxss_url: None,
             sxss_method: "GET".to_string(),
             skip_ast_analysis: false,
+            waf_bypass: "auto".to_string(),
+            skip_waf_probe: false,
+            force_waf: None,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -1170,6 +1220,9 @@ mod tests {
             sxss_url: None,
             sxss_method: "GET".to_string(),
             skip_ast_analysis: false,
+            waf_bypass: "auto".to_string(),
+            skip_waf_probe: false,
+            force_waf: None,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -1251,6 +1304,9 @@ mod tests {
             sxss_url: None,
             sxss_method: "GET".to_string(),
             skip_ast_analysis: false,
+            waf_bypass: "auto".to_string(),
+            skip_waf_probe: false,
+            force_waf: None,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -1318,6 +1374,9 @@ mod tests {
             sxss_url: None,
             sxss_method: "GET".to_string(),
             skip_ast_analysis: false,
+            waf_bypass: "auto".to_string(),
+            skip_waf_probe: false,
+            force_waf: None,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };

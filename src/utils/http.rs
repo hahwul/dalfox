@@ -80,7 +80,7 @@ pub fn has_header(headers: &[(String, String)], name: &str) -> bool {
 /// Apply provided headers (verbatim), then apply User-Agent if present (overrides any existing).
 /// If `cookie_header` is Some, attach it. Otherwise, if no Cookie header exists in headers,
 /// auto-attach from target.cookies (when non-empty).
-fn apply_headers_ua_cookies(
+pub fn apply_headers_ua_cookies(
     mut rb: RequestBuilder,
     target: &Target,
     cookie_header: Option<String>,

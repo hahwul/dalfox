@@ -285,6 +285,9 @@ mod tests {
             sxss_url: None,
             sxss_method: "GET".to_string(),
             skip_ast_analysis: false,
+            waf_bypass: "auto".to_string(),
+            skip_waf_probe: false,
+            force_waf: None,
             targets: vec![],
         }
     }
@@ -675,17 +678,18 @@ mod tests {
         target.cookies.push(("sid".to_string(), "abc".to_string()));
         target.delay = 1;
 
-        let args = default_scan_args();
-        let (ct, csp, body) = preflight_content_type(&target, &args)
+        let mut args = default_scan_args();
+        args.skip_waf_probe = true; // avoid extra request in test
+        let preflight = preflight_content_type(&target, &args)
             .await
             .expect("preflight response");
         handle.abort();
 
-        assert!(ct.contains("text/html"));
-        let (name, value) = csp.expect("csp header should be present");
+        assert!(preflight.content_type.contains("text/html"));
+        let (name, value) = preflight.csp_header.expect("csp header should be present");
         assert_eq!(name, "Content-Security-Policy");
         assert_eq!(value, "default-src 'self'");
-        assert_eq!(body.as_deref(), Some("ok"));
+        assert_eq!(preflight.response_body.as_deref(), Some("ok"));
     }
 
     #[tokio::test]
@@ -694,24 +698,33 @@ mod tests {
         let (url, handle) = spawn_preflight_server(None, html).await;
 
         let target = parse_target(&url).expect("valid target");
-        let args = default_scan_args();
-        let (ct, csp, body) = preflight_content_type(&target, &args)
+        let mut args = default_scan_args();
+        args.skip_waf_probe = true;
+        let preflight = preflight_content_type(&target, &args)
             .await
             .expect("preflight response");
         handle.abort();
 
-        assert!(ct.contains("text/html"));
-        let (name, value) = csp.expect("meta csp should be parsed");
+        assert!(preflight.content_type.contains("text/html"));
+        let (name, value) = preflight.csp_header.expect("meta csp should be parsed");
         assert_eq!(name, "Content-Security-Policy-Report-Only");
         assert_eq!(value, "script-src 'none'");
-        assert!(body.expect("body expected").contains("http-equiv"));
+        assert!(preflight.response_body.expect("body expected").contains("http-equiv"));
     }
+}
+
+/// Preflight result containing content-type, CSP, body, and WAF info.
+struct PreflightResult {
+    content_type: String,
+    csp_header: Option<(String, String)>,
+    response_body: Option<String>,
+    waf_result: crate::waf::WafDetectionResult,
 }
 
 async fn preflight_content_type(
     target: &crate::target_parser::Target,
-    _args: &ScanArgs,
-) -> Option<(String, Option<(String, String)>, Option<String>)> {
+    args: &ScanArgs,
+) -> Option<PreflightResult> {
     let client = target.build_client().ok()?;
 
     // Prefer HEAD for fast Content-Type detection
@@ -723,17 +736,18 @@ async fn preflight_content_type(
     }
     crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let resp = request_builder.send().await.ok()?;
-    let headers = resp.headers();
-    let ct_opt = headers
+    let head_status = resp.status().as_u16();
+    let head_headers = resp.headers().clone();
+    let ct_opt = head_headers
         .get(CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .map(|s| s.to_string());
-    let mut csp_header = headers
+    let mut csp_header = head_headers
         .get("content-security-policy")
         .and_then(|v| v.to_str().ok())
         .map(|v| ("Content-Security-Policy".to_string(), v.to_string()))
         .or_else(|| {
-            headers
+            head_headers
                 .get("content-security-policy-report-only")
                 .and_then(|v| v.to_str().ok())
                 .map(|v| {
@@ -743,44 +757,104 @@ async fn preflight_content_type(
                     )
                 })
         });
+
+    // WAF detection from HEAD response headers (zero extra requests)
+    let mut waf_result = if args.waf_bypass != "off" {
+        crate::waf::fingerprint_from_response(&head_headers, None, head_status)
+    } else {
+        crate::waf::WafDetectionResult::default()
+    };
+
     // Always fetch a small body for CSP parsing and AST analysis
     let mut response_body: Option<String> = None;
     let get_req = crate::utils::build_preflight_request(&client, target, false, Some(8192));
     crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    if let Ok(get_resp) = get_req.send().await
-        && let Ok(body) = get_resp.text().await
-    {
-        response_body = Some(body.clone());
-        // Only parse CSP if not already found
-        if csp_header.is_none() {
-            let doc = Html::parse_document(&body);
-            {
-                let sel = cached_meta_csp_selector();
-                for el in doc.select(sel) {
-                    let http_equiv = el
-                        .value()
-                        .attr("http-equiv")
-                        .unwrap_or("")
-                        .to_ascii_lowercase();
-                    if http_equiv == "content-security-policy"
-                        || http_equiv == "content-security-policy-report-only"
-                    {
-                        let content = el.value().attr("content").unwrap_or("").to_string();
-                        if !content.is_empty() {
-                            let name = if http_equiv == "content-security-policy" {
-                                "Content-Security-Policy".to_string()
-                            } else {
-                                "Content-Security-Policy-Report-Only".to_string()
-                            };
-                            csp_header = Some((name, content));
-                            break;
+    if let Ok(get_resp) = get_req.send().await {
+        let get_status = get_resp.status().as_u16();
+        let get_headers = get_resp.headers().clone();
+        if let Ok(body) = get_resp.text().await {
+            response_body = Some(body.clone());
+
+            // WAF detection from GET response (headers + body)
+            if args.waf_bypass != "off" {
+                let body_waf = crate::waf::fingerprint_from_response(&get_headers, Some(&body), get_status);
+                crate::waf::merge_results(&mut waf_result, body_waf);
+            }
+
+            // Only parse CSP if not already found
+            if csp_header.is_none() {
+                let doc = Html::parse_document(&body);
+                {
+                    let sel = cached_meta_csp_selector();
+                    for el in doc.select(sel) {
+                        let http_equiv = el
+                            .value()
+                            .attr("http-equiv")
+                            .unwrap_or("")
+                            .to_ascii_lowercase();
+                        if http_equiv == "content-security-policy"
+                            || http_equiv == "content-security-policy-report-only"
+                        {
+                            let content = el.value().attr("content").unwrap_or("").to_string();
+                            if !content.is_empty() {
+                                let name = if http_equiv == "content-security-policy" {
+                                    "Content-Security-Policy".to_string()
+                                } else {
+                                    "Content-Security-Policy-Report-Only".to_string()
+                                };
+                                csp_header = Some((name, content));
+                                break;
+                            }
                         }
                     }
                 }
             }
         }
     }
-    ct_opt.map(|ct| (ct, csp_header, response_body))
+
+    // Provocation probe for stronger WAF detection (costs one extra request)
+    if args.waf_bypass != "off" && !args.skip_waf_probe {
+        let probe_result = crate::waf::fingerprint_with_probe(target, &client).await;
+        crate::waf::merge_results(&mut waf_result, probe_result);
+    }
+
+    // Handle --force-waf override
+    if let Some(ref forced) = args.force_waf {
+        waf_result = crate::waf::WafDetectionResult {
+            detected: vec![crate::waf::WafFingerprint {
+                waf_type: parse_waf_type(forced),
+                confidence: 1.0,
+                evidence: "forced via --force-waf".to_string(),
+            }],
+        };
+    }
+
+    ct_opt.map(|ct| PreflightResult {
+        content_type: ct,
+        csp_header,
+        response_body,
+        waf_result,
+    })
+}
+
+/// Parse a WAF type string (from --force-waf) into a WafType enum.
+fn parse_waf_type(s: &str) -> crate::waf::WafType {
+    match s.to_ascii_lowercase().as_str() {
+        "cloudflare" | "cf" => crate::waf::WafType::Cloudflare,
+        "aws" | "awswaf" | "aws-waf" => crate::waf::WafType::AwsWaf,
+        "akamai" => crate::waf::WafType::Akamai,
+        "imperva" | "incapsula" => crate::waf::WafType::Imperva,
+        "modsecurity" | "modsec" => crate::waf::WafType::ModSecurity,
+        "sucuri" => crate::waf::WafType::Sucuri,
+        "f5" | "bigip" | "f5-bigip" => crate::waf::WafType::F5BigIp,
+        "barracuda" => crate::waf::WafType::Barracuda,
+        "fortiweb" | "forti" => crate::waf::WafType::FortiWeb,
+        "azure" | "azurewaf" | "azure-waf" => crate::waf::WafType::AzureWaf,
+        "cloudarmor" | "cloud-armor" | "gcp" => crate::waf::WafType::CloudArmor,
+        "fastly" => crate::waf::WafType::Fastly,
+        "wordfence" => crate::waf::WafType::Wordfence,
+        other => crate::waf::WafType::Unknown(other.to_string()),
+    }
 }
 
 #[derive(Clone, Args)]
@@ -1006,6 +1080,21 @@ pub struct ScanArgs {
     /// Skip AST-based DOM XSS detection (analyzes JavaScript in responses)
     #[arg(long)]
     pub skip_ast_analysis: bool,
+
+    #[clap(help_heading = "WAF")]
+    /// WAF bypass mode: auto (detect+bypass), force (use --force-waf), off (disable). Default: auto
+    #[arg(long, default_value = "auto")]
+    pub waf_bypass: String,
+
+    #[clap(help_heading = "WAF")]
+    /// Skip WAF fingerprinting probes (header-only detection, no provocation request)
+    #[arg(long)]
+    pub skip_waf_probe: bool,
+
+    #[clap(help_heading = "WAF")]
+    /// Force a specific WAF type for bypass strategies (e.g., cloudflare, akamai, modsecurity)
+    #[arg(long)]
+    pub force_waf: Option<String>,
 
     #[clap(help_heading = "TARGETS")]
     /// Targets (URLs or file paths)
@@ -1500,13 +1589,17 @@ pub async fn run_scan(args: &ScanArgs) {
                         let _ = done_rx.await;
                     }
 
-                    if let Some((ct, csp_header, response_body)) = __preflight_info {
-                        preflight_response_body = response_body;
-                        if let Some((hn, hv)) = csp_header {
+                    if let Some(preflight) = __preflight_info {
+                        preflight_response_body = preflight.response_body;
+                        if let Some((hn, hv)) = preflight.csp_header {
                             __preflight_csp_present = true;
                             __preflight_csp_header = Some((hn, hv));
                         }
-                        if !is_allowed_content_type(&ct) {
+                        // Store WAF detection result on target
+                        if !preflight.waf_result.is_empty() {
+                            target.waf_info = Some(preflight.waf_result);
+                        }
+                        if !is_allowed_content_type(&preflight.content_type) {
                             // Skip this target early
                             return None;
                         }
@@ -1534,6 +1627,31 @@ pub async fn run_scan(args: &ScanArgs) {
                             println!("\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m CSP: enabled", ts);
                             if let Some((hn, hv)) = &__preflight_csp_header {
                                 println!("  \x1b[90m└──\x1b[0m \x1b[38;5;247m{}:\x1b[0m \x1b[38;5;247m{}\x1b[0m", hn, hv);
+                            }
+                        }
+                        // Log WAF detection
+                        if let Some(ref waf_info) = target.waf_info {
+                            for fp in &waf_info.detected {
+                                println!(
+                                    "\x1b[90m{}\x1b[0m \x1b[33mWAF\x1b[0m {} detected (confidence: {:.0}%, evidence: {})",
+                                    ts, fp.waf_type, fp.confidence * 100.0, fp.evidence
+                                );
+                            }
+                            if args_clone.waf_bypass != "off" {
+                                let waf_types: Vec<&crate::waf::WafType> = waf_info.waf_types();
+                                let strategy = crate::waf::bypass::merge_strategies(&waf_types);
+                                if !strategy.extra_encoders.is_empty() {
+                                    println!(
+                                        "  \x1b[90m└──\x1b[0m \x1b[38;5;247mbypass encoders: {}\x1b[0m",
+                                        strategy.extra_encoders.join(", ")
+                                    );
+                                }
+                                if !strategy.mutations.is_empty() {
+                                    println!(
+                                        "  \x1b[90m└──\x1b[0m \x1b[38;5;247mbypass mutations: {} types\x1b[0m",
+                                        strategy.mutations.len()
+                                    );
+                                }
                             }
                         }
                     }

@@ -1069,6 +1069,9 @@ async fn run_scan_test(
         sxss_url: None,
         sxss_method: "GET".to_string(),
         skip_ast_analysis: false,
+        waf_bypass: "off".to_string(),
+        skip_waf_probe: true,
+        force_waf: None,
         remote_payloads: vec![],
         remote_wordlists: vec![],
     };
@@ -1162,6 +1165,9 @@ async fn run_discovery_once(opts: DiscoveryOpts) -> bool {
         sxss_url: None,
         sxss_method: "GET".to_string(),
         skip_ast_analysis: true,
+        waf_bypass: "off".to_string(),
+        skip_waf_probe: true,
+        force_waf: None,
         remote_payloads: vec![],
         remote_wordlists: vec![],
     };

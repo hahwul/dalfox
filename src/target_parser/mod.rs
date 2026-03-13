@@ -17,6 +17,7 @@ pub struct Target {
     pub proxy: Option<String>,
     pub workers: usize,
     pub follow_redirects: bool,
+    pub waf_info: Option<crate::waf::WafDetectionResult>,
 }
 
 impl Target {
@@ -78,6 +79,7 @@ pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
         proxy: None,
         workers: 10,
         follow_redirects: false,
+        waf_info: None,
     })
 }
 
@@ -232,6 +234,7 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
         proxy: None,
         workers: 10,
         follow_redirects: false,
+        waf_info: None,
     })
 }
 

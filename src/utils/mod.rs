@@ -15,8 +15,9 @@ pub use banner::print_banner_once;
 pub use scan_id::{make_scan_id, short_scan_id};
 // Re-export http helpers at `crate::utils::*`
 pub use http::{
-    apply_header_overrides, build_preflight_request, build_request, build_request_with_cookie,
-    compose_cookie_header_excluding, is_htmlish_content_type, is_xss_scannable_content_type,
+    apply_header_overrides, apply_headers_ua_cookies, build_preflight_request, build_request,
+    build_request_with_cookie, compose_cookie_header_excluding, is_htmlish_content_type,
+    is_xss_scannable_content_type,
 };
 
 // Re-export remote payload/wordlist getters at `crate::utils::*`
