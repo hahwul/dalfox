@@ -86,7 +86,7 @@ pub async fn check_query_discovery(
 
         // Spawn a task that returns Option<Param> instead of locking per discovery.
         let handle = tokio::spawn(async move {
-            let permit = semaphore_clone.acquire().await.unwrap();
+            let permit = semaphore_clone.acquire().await.expect("acquire semaphore permit");
             let m = parsed_method;
             let request =
                 crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
@@ -184,7 +184,7 @@ pub async fn check_query_discovery(
                     url.query_pairs_mut().append_pair(&n, &v);
                 }
             }
-            let _permit = semaphore.acquire().await.unwrap();
+            let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
             let m = target.parse_method();
             let request = crate::utils::build_request(
                 &client, target, m, url, target.data.clone(),
@@ -275,7 +275,7 @@ pub async fn check_header_discovery(
 
         // Spawn task returning Option<Param> to batch reduce mutex contention
         let handle = tokio::spawn(async move {
-            let permit = semaphore_clone.acquire().await.unwrap();
+            let permit = semaphore_clone.acquire().await.expect("acquire semaphore permit");
             let m = parsed_method;
             let base =
                 crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
@@ -376,7 +376,7 @@ pub async fn check_path_discovery(
 
         // Spawn task returning Option<Param> for batched collection
         let handle = tokio::spawn(async move {
-            let permit = semaphore_clone.acquire().await.unwrap();
+            let permit = semaphore_clone.acquire().await.expect("acquire semaphore permit");
             let m = parsed_method;
             let request =
                 crate::utils::build_request(&client_clone, &target_clone, m, new_url, data.clone());
@@ -449,7 +449,7 @@ pub async fn check_cookie_discovery(
 
         // Spawn task returning Option<Param> for batched collection
         let handle = tokio::spawn(async move {
-            let permit = semaphore_clone.acquire().await.unwrap();
+            let permit = semaphore_clone.acquire().await.expect("acquire semaphore permit");
             let m = parsed_method;
             // Compose cookie header overriding the probed cookie while preserving others
             let others =
@@ -579,7 +579,7 @@ pub async fn check_form_discovery(
         if is_post && is_multipart {
             // Multipart form: test each field via multipart/form-data POST
             for (field_idx, (field_name, field_value)) in fields.iter().enumerate() {
-                let _permit = semaphore.acquire().await.unwrap();
+                let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
                 let mut form = reqwest::multipart::Form::new();
                 for (i, (n, v)) in fields.iter().enumerate() {
                     if i == field_idx {
@@ -635,7 +635,7 @@ pub async fn check_form_discovery(
 
             // Test each field for reflection via POST
             for (field_idx, (field_name, field_value)) in fields.iter().enumerate() {
-                let _permit = semaphore.acquire().await.unwrap();
+                let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
                 // Build body by joining pre-encoded pairs, substituting the target field
                 let body = encoded_fields
                     .iter()
@@ -684,7 +684,7 @@ pub async fn check_form_discovery(
         } else {
             // GET form: test each field as query parameter on the form action URL
             for (field_name, field_value) in &fields {
-                let _permit = semaphore.acquire().await.unwrap();
+                let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
                 let mut test_url = form_url.clone();
                 // Build query: set all fields, replace target field with test value
                 {
@@ -727,7 +727,7 @@ pub async fn check_form_discovery(
 
         // Also try JSON body if the form has a single text-like field
         if fields.len() <= 3 {
-            let _permit = semaphore.acquire().await.unwrap();
+            let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
             let json_body = {
                 let mut map = serde_json::Map::new();
                 for (n, _) in &fields {
@@ -790,7 +790,7 @@ pub async fn check_form_discovery(
 
                 // Try JSON body with each field replaced by test_value
                 for (field_name, field_value) in &json_fields {
-                    let _permit = semaphore.acquire().await.unwrap();
+                    let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
                     let mut map = serde_json::Map::new();
                     for (n, v) in &json_fields {
                         if n == field_name {

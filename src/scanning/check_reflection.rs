@@ -225,11 +225,11 @@ fn payload_variants(payload: &str) -> Vec<String> {
     variants.push(owned_payload);
 
     let html_dec = decode_html_entities(payload);
-    if seen.insert(html_dec.clone()) {
-        variants.push(html_dec.clone());
+    if !seen.contains(&html_dec) {
+        seen.insert(html_dec.clone());
+        variants.push(html_dec);
     }
 
-    // Iterate over seeds: first payload (index 0), then html_dec (index 1 if different)
     let seeds_count = variants.len();
     for i in 0..seeds_count {
         let mut current = variants[i].clone();
@@ -241,7 +241,8 @@ fn payload_variants(payload: &str) -> Vec<String> {
             if url_dec == current {
                 break;
             }
-            if seen.insert(url_dec.clone()) {
+            if !seen.contains(&url_dec) {
+                seen.insert(url_dec.clone());
                 variants.push(url_dec.clone());
             }
             current = url_dec;

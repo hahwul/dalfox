@@ -280,7 +280,7 @@ pub async fn probe_dictionary_params(
             let stats_clone = stats.clone();
 
             let handle = tokio::spawn(async move {
-                let permit = semaphore_clone.acquire().await.unwrap();
+                let permit = semaphore_clone.acquire().await.expect("acquire semaphore permit");
                 let request =
                     crate::utils::build_request(&client_clone, &target_clone, parsed_method, url, data.clone());
 
@@ -541,7 +541,7 @@ pub async fn probe_body_params(
             let stats_clone = stats.clone();
 
             let handle = tokio::spawn(async move {
-                let permit = semaphore_clone.acquire().await.unwrap();
+                let permit = semaphore_clone.acquire().await.expect("acquire semaphore permit");
                 let m = parsed_method;
                 let base =
                     crate::utils::build_request(&client_clone, &target_clone, m, url, Some(body));
@@ -752,7 +752,7 @@ pub async fn probe_response_id_params(
             let stats_clone = stats.clone();
 
             let handle = tokio::spawn(async move {
-                let permit = semaphore_clone.acquire().await.unwrap();
+                let permit = semaphore_clone.acquire().await.expect("acquire semaphore permit");
                 let m = parsed_method;
                 let request =
                     crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
@@ -960,7 +960,7 @@ pub async fn probe_json_body_params(
         let base_json_clone = base_json.clone();
 
         let handle = tokio::spawn(async move {
-            let permit = semaphore_clone.acquire().await.unwrap();
+            let permit = semaphore_clone.acquire().await.expect("acquire semaphore permit");
 
             // Build mutated JSON with this key set to marker
             let mut root = base_json_clone;

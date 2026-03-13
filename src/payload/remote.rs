@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -91,6 +91,21 @@ pub struct RemoteFetchOptions {
     pub proxy: Option<String>,
 }
 
+/// Build a reqwest Client with the given remote fetch options (timeout, proxy).
+fn build_remote_client(opts: &RemoteFetchOptions) -> Result<Client, Box<dyn std::error::Error>> {
+    let mut builder = Client::builder()
+        .timeout(Duration::from_secs(
+            opts.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS),
+        ))
+        .danger_accept_invalid_certs(true);
+    if let Some(pxy) = opts.proxy.as_ref()
+        && let Ok(proxy) = reqwest::Proxy::all(pxy)
+    {
+        builder = builder.proxy(proxy);
+    }
+    Ok(builder.build()?)
+}
+
 /// Initialize and cache remote XSS payloads with explicit options (timeout/proxy).
 /// This is idempotent: subsequent calls are no-ops once initialized.
 pub async fn init_remote_payloads_with(
@@ -107,17 +122,7 @@ pub async fn init_remote_payloads_with(
         return Ok(());
     }
 
-    let mut client_builder = Client::builder()
-        .timeout(Duration::from_secs(
-            opts.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS),
-        ))
-        .danger_accept_invalid_certs(true);
-    if let Some(pxy) = opts.proxy.as_ref()
-        && let Ok(proxy) = reqwest::Proxy::all(pxy)
-    {
-        client_builder = client_builder.proxy(proxy);
-    }
-    let client = client_builder.build()?;
+    let client = build_remote_client(&opts)?;
 
     let lines = fetch_multiple_text_lists(&client, &urls).await;
     let sanitized = sanitize_lines(&lines);
@@ -143,17 +148,7 @@ pub async fn init_remote_wordlists_with(
         return Ok(());
     }
 
-    let mut client_builder = Client::builder()
-        .timeout(Duration::from_secs(
-            opts.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS),
-        ))
-        .danger_accept_invalid_certs(true);
-    if let Some(pxy) = opts.proxy.as_ref()
-        && let Ok(proxy) = reqwest::Proxy::all(pxy)
-    {
-        client_builder = client_builder.proxy(proxy);
-    }
-    let client = client_builder.build()?;
+    let client = build_remote_client(&opts)?;
 
     let lines = fetch_multiple_text_lists(&client, &urls).await;
     let sanitized = sanitize_lines(&lines);
@@ -325,12 +320,10 @@ fn sanitize_lines(text: &str) -> Vec<String> {
         .collect()
 }
 
-/// Deduplicate and sort lines (case-sensitive, stable).
+/// Deduplicate and sort lines (case-sensitive).
 fn dedup_and_sort(mut lines: Vec<String>) -> Vec<String> {
-    // Use a HashSet for O(1) deduplication, then sort to have deterministic ordering.
-    let mut set: HashSet<String> = HashSet::with_capacity(lines.len());
-    lines.retain(|s| set.insert(s.clone()));
     lines.sort();
+    lines.dedup();
     lines
 }
 

@@ -20,6 +20,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::{Mutex, Semaphore};
 
+struct FoundParams {
+    reflection: HashSet<String>,
+    dom: HashSet<String>,
+}
+
 fn reflection_kind_note(kind: crate::scanning::check_reflection::ReflectionKind) -> &'static str {
     match kind {
         crate::scanning::check_reflection::ReflectionKind::Raw => "reflected",
@@ -305,18 +310,19 @@ pub async fn run_scanning(
         None
     };
 
-    let found_reflection_params = Arc::new(Mutex::new(HashSet::new()));
-    let found_dom_params = Arc::new(Mutex::new(HashSet::new()));
+    let found_params = Arc::new(Mutex::new(FoundParams {
+        reflection: HashSet::new(),
+        dom: HashSet::new(),
+    }));
 
     let mut handles = vec![];
 
     for (param_clone, reflection_payloads, dom_payloads) in param_jobs {
-        let already_ref = found_reflection_params
-            .lock()
-            .await
-            .contains(&param_clone.name);
-        let already_dom = found_dom_params.lock().await.contains(&param_clone.name);
-        if (already_ref || already_dom) && !args.deep_scan {
+        let already_found = {
+            let fp = found_params.lock().await;
+            fp.reflection.contains(&param_clone.name) || fp.dom.contains(&param_clone.name)
+        };
+        if already_found && !args.deep_scan {
             // Skip further testing for this param if reflection or DOM XSS already found and not deep scanning
             continue;
         }
@@ -335,8 +341,7 @@ pub async fn run_scanning(
         let target_clone = arc_target.clone();
         let results_clone = results.clone();
         let pb_clone = pb.clone();
-        let found_reflection_params_clone = found_reflection_params.clone();
-        let found_dom_params_clone = found_dom_params.clone();
+        let found_params_clone = found_params.clone();
         let overall_pb_clone = overall_pb.clone();
         let shared_client_clone = shared_client.clone();
         let findings_count_clone = findings_count.clone();
@@ -347,6 +352,8 @@ pub async fn run_scanning(
             let mut local_results: Vec<crate::scanning::result::Result> = Vec::new();
             let mut local_ast_seen: HashSet<String> = HashSet::new();
             let mut ast_analysis_done = false;
+            let mut reflection_found_locally = false;
+            let mut dom_found_locally = false;
             let client = shared_client_clone.as_ref();
 
             // Stage 0: fast probe to avoid large payload blasts on non-reflective params
@@ -503,12 +510,12 @@ pub async fn run_scanning(
                     return;
                 }
                 // Skip reflection if already found for this param
-                let reflection_tuple = {
-                    let already_found = found_reflection_params_clone
-                        .lock()
-                        .await
-                        .contains(&param_clone.name);
-                    if already_found {
+                let reflection_tuple = if reflection_found_locally {
+                    (None, None)
+                } else {
+                    let already = found_params_clone.lock().await.reflection.contains(&param_clone.name);
+                    if already {
+                        reflection_found_locally = true;
                         (None, None)
                     } else {
                         check_reflection_with_response_client(
@@ -642,9 +649,10 @@ pub async fn run_scanning(
                     let should_add = if args_clone.deep_scan {
                         true
                     } else {
-                        let mut found = found_reflection_params_clone.lock().await;
-                        if !found.contains(&param_clone.name) {
-                            found.insert(param_clone.name.clone());
+                        let mut found = found_params_clone.lock().await;
+                        if !found.reflection.contains(&param_clone.name) {
+                            found.reflection.insert(param_clone.name.clone());
+                            reflection_found_locally = true;
                             true
                         } else {
                             false
@@ -703,10 +711,15 @@ pub async fn run_scanning(
                     return;
                 }
                 // Skip DOM verification if already found for this param
-                let already_dom_found = found_dom_params_clone
-                    .lock()
-                    .await
-                    .contains(&param_clone.name);
+                let already_dom_found = if dom_found_locally {
+                    true
+                } else {
+                    let is_found = found_params_clone.lock().await.dom.contains(&param_clone.name);
+                    if is_found {
+                        dom_found_locally = true;
+                    }
+                    is_found
+                };
                 if already_dom_found {
                     if let Some(ref pb) = pb_clone {
                         pb.inc(1);
@@ -728,9 +741,10 @@ pub async fn run_scanning(
                     let should_add = if args_clone.deep_scan {
                         true
                     } else {
-                        let mut found = found_dom_params_clone.lock().await;
-                        if !found.contains(&param_clone.name) {
-                            found.insert(param_clone.name.clone());
+                        let mut found = found_params_clone.lock().await;
+                        if !found.dom.contains(&param_clone.name) {
+                            found.dom.insert(param_clone.name.clone());
+                            dom_found_locally = true;
                             true
                         } else {
                             false
