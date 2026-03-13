@@ -173,6 +173,80 @@ pub fn build_injected_url(base: &url::Url, param: &Param, injected: &str) -> Str
             // Header injection does not alter the URL.
             base.to_string()
         }
+        Location::Fragment => {
+            // Fragment injection: replace the target param value inside the URL fragment.
+            // Supports SPA-style routing fragments like `#/redir?url=value` and simple
+            // `#key=value` fragments.
+            let base_str = base.as_str();
+            let frag = base.fragment().unwrap_or("");
+
+            // Split fragment into route prefix and query part
+            let (route_prefix, query_part) = if let Some(q_pos) = frag.find('?') {
+                (&frag[..q_pos], &frag[q_pos + 1..])
+            } else {
+                // No '?' — treat the whole fragment as key=value pairs
+                ("", frag)
+            };
+
+            // Parse key=value pairs from the query part
+            let pairs: Vec<(&str, &str)> = query_part
+                .split('&')
+                .filter(|s| !s.is_empty())
+                .map(|pair| {
+                    if let Some((k, v)) = pair.split_once('=') {
+                        (k, v)
+                    } else {
+                        (pair, "")
+                    }
+                })
+                .collect();
+
+            // Rebuild the fragment with injected value
+            let mut new_frag = String::with_capacity(frag.len() + injected.len() + 16);
+            new_frag.push_str(route_prefix);
+            if !route_prefix.is_empty() || !pairs.is_empty() {
+                if !route_prefix.is_empty() {
+                    new_frag.push('?');
+                }
+            }
+
+            let mut found = false;
+            let mut first = true;
+            for (k, v) in &pairs {
+                if !first {
+                    new_frag.push('&');
+                }
+                first = false;
+                new_frag.push_str(k);
+                new_frag.push('=');
+                if *k == param.name && !found {
+                    new_frag.push_str(injected);
+                    found = true;
+                } else {
+                    new_frag.push_str(v);
+                }
+            }
+            if !found {
+                if !first {
+                    new_frag.push('&');
+                }
+                new_frag.push_str(&param.name);
+                new_frag.push('=');
+                new_frag.push_str(injected);
+            }
+
+            // Build result: everything before '#' + new fragment
+            let prefix = if let Some(hash_pos) = base_str.find('#') {
+                &base_str[..hash_pos]
+            } else {
+                base_str
+            };
+            let mut result = String::with_capacity(prefix.len() + 1 + new_frag.len());
+            result.push_str(prefix);
+            result.push('#');
+            result.push_str(&new_frag);
+            result
+        }
     }
 }
 
@@ -312,5 +386,98 @@ mod tests {
         };
         let out = build_injected_url(&base, &param, "IGNORED");
         assert_eq!(out, base.as_str());
+    }
+
+    #[test]
+    fn test_fragment_injection_spa_route() {
+        let base = make_url("http://example.com/#/redir?url=foo");
+        let param = Param {
+            name: "url".into(),
+            value: "foo".into(),
+            location: Location::Fragment,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            form_action_url: None,
+            form_origin_url: None,
+        };
+        let out = build_injected_url(&base, &param, "javascript:alert()");
+        assert_eq!(out, "http://example.com/#/redir?url=javascript:alert()");
+    }
+
+    #[test]
+    fn test_fragment_injection_simple_kv() {
+        let base = make_url("http://example.com/#key=val&other=123");
+        let param = Param {
+            name: "key".into(),
+            value: "val".into(),
+            location: Location::Fragment,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            form_action_url: None,
+            form_origin_url: None,
+        };
+        let out = build_injected_url(&base, &param, "PAYLOAD");
+        assert_eq!(out, "http://example.com/#key=PAYLOAD&other=123");
+    }
+
+    #[test]
+    fn test_fragment_injection_append_when_absent() {
+        let base = make_url("http://example.com/#/path?existing=1");
+        let param = Param {
+            name: "newparam".into(),
+            value: "".into(),
+            location: Location::Fragment,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            form_action_url: None,
+            form_origin_url: None,
+        };
+        let out = build_injected_url(&base, &param, "INJECTED");
+        assert_eq!(
+            out,
+            "http://example.com/#/path?existing=1&newparam=INJECTED"
+        );
+    }
+
+    #[test]
+    fn test_fragment_injection_no_existing_fragment() {
+        let base = make_url("http://example.com/page");
+        let param = Param {
+            name: "url".into(),
+            value: "".into(),
+            location: Location::Fragment,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            form_action_url: None,
+            form_origin_url: None,
+        };
+        let out = build_injected_url(&base, &param, "PAY");
+        assert_eq!(out, "http://example.com/page#url=PAY");
+    }
+
+    #[test]
+    fn test_fragment_injection_multiple_params() {
+        let base = make_url("http://example.com/#/app?a=1&b=2&c=3");
+        let param = Param {
+            name: "b".into(),
+            value: "2".into(),
+            location: Location::Fragment,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            form_action_url: None,
+            form_origin_url: None,
+        };
+        let out = build_injected_url(&base, &param, "XSS");
+        assert_eq!(out, "http://example.com/#/app?a=1&b=XSS&c=3");
     }
 }

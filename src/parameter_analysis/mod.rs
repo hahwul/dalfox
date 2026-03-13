@@ -23,6 +23,7 @@ pub enum Location {
     MultipartBody,
     Header,
     Path,
+    Fragment,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -361,6 +362,24 @@ pub async fn active_probe_param(
                         .request(req_method, body_url.clone())
                         .multipart(form);
                 }
+                Location::Fragment => {
+                    // Fragment injection: payload goes into the URL fragment.
+                    // Use build_injected_url which handles fragment param replacement.
+                    let inject_url_str = crate::scanning::url_inject::build_injected_url(
+                        &url_original, &crate::parameter_analysis::Param {
+                            name: param_name.clone(),
+                            value: String::new(),
+                            location: Location::Fragment,
+                            injection_context: None,
+                            valid_specials: None,
+                            invalid_specials: None,
+                            pre_encoding: None,
+                            form_action_url: None,
+                            form_origin_url: None,
+                        }, &payload);
+                    let frag_url = url::Url::parse(&inject_url_str).unwrap_or_else(|_| url_original.clone());
+                    request_builder = client_clone.request(req_method, frag_url);
+                }
             }
 
             if let Some(ua) = &user_agent {
@@ -385,7 +404,7 @@ pub async fn active_probe_param(
                 }
             }
             if let Some(d) = &data
-                && matches!(location, Location::Query | Location::Header)
+                && matches!(location, Location::Query | Location::Header | Location::Fragment)
             {
                 request_builder = request_builder.body(d.clone());
             }
@@ -660,6 +679,7 @@ fn filter_params(params: Vec<Param>, param_specs: &[String], target: &Target) ->
                                 Location::JsonBody => "json",
                                 Location::MultipartBody => "multipart",
                                 Location::Path => "path",
+                                Location::Fragment => "fragment",
                                 Location::Header => {
                                     if target.cookies.iter().any(|(n, _)| n == &p.name) {
                                         "cookie"
