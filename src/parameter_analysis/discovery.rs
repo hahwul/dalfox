@@ -7,6 +7,18 @@ use std::sync::{Arc, OnceLock};
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{Duration, sleep};
 
+fn cached_form_selector() -> &'static scraper::Selector {
+    static SEL: OnceLock<scraper::Selector> = OnceLock::new();
+    SEL.get_or_init(|| scraper::Selector::parse("form").expect("valid selector"))
+}
+
+fn cached_input_textarea_select_selector() -> &'static scraper::Selector {
+    static SEL: OnceLock<scraper::Selector> = OnceLock::new();
+    SEL.get_or_init(|| {
+        scraper::Selector::parse("input, textarea, select").expect("valid selector")
+    })
+}
+
 /// Cached regex for detecting JSON.stringify patterns in JavaScript source.
 fn json_stringify_regex() -> &'static regex::Regex {
     static RE: OnceLock<regex::Regex> = OnceLock::new();
@@ -347,9 +359,9 @@ pub async fn check_path_discovery(
 
     let mut handles = Vec::new();
 
+    let mut new_segments: Vec<String> = segments.iter().map(|s| s.to_string()).collect();
     for (idx, original) in segments.iter().enumerate() {
-        let mut new_segments: Vec<String> = segments.iter().map(|s| s.to_string()).collect();
-        new_segments[idx] = test_value.to_string();
+        let saved = std::mem::replace(&mut new_segments[idx], test_value.to_string());
         let new_path = format!("/{}", new_segments.join("/"));
 
         let mut new_url = target.url.clone();
@@ -370,6 +382,7 @@ pub async fn check_path_discovery(
             if guard.iter().any(|p| {
                 p.name == param_name && p.location == crate::parameter_analysis::Location::Path
             }) {
+                new_segments[idx] = saved;
                 continue;
             }
         }
@@ -407,6 +420,7 @@ pub async fn check_path_discovery(
             discovered
         });
         handles.push(handle);
+        new_segments[idx] = saved;
     }
 
     // Batch collect discovered path params
@@ -537,16 +551,12 @@ pub async fn check_form_discovery(
 
     // Parse forms
     let document = scraper::Html::parse_document(&html);
-    let Ok(form_sel) = scraper::Selector::parse("form") else {
-        return;
-    };
-    let Ok(input_sel) = scraper::Selector::parse("input, textarea, select") else {
-        return;
-    };
+    let form_sel = cached_form_selector();
+    let input_sel = cached_input_textarea_select_selector();
 
     let mut batch: Vec<Param> = Vec::new();
 
-    for form in document.select(&form_sel) {
+    for form in document.select(form_sel) {
         let form_method = form.value().attr("method").unwrap_or("get");
         let is_post = form_method.eq_ignore_ascii_case("post");
         let enctype = form.value().attr("enctype").unwrap_or("");
@@ -564,7 +574,7 @@ pub async fn check_form_discovery(
 
         // Collect form fields
         let mut fields: Vec<(String, String)> = Vec::new();
-        for input in form.select(&input_sel) {
+        for input in form.select(input_sel) {
             let name = input.value().attr("name").unwrap_or("").to_string();
             if name.is_empty() {
                 continue;
@@ -640,15 +650,17 @@ pub async fn check_form_discovery(
                 let body = encoded_fields
                     .iter()
                     .enumerate()
-                    .map(|(i, (enc_n, enc_v))| {
+                    .fold(String::new(), |mut acc, (i, (enc_n, enc_v))| {
+                        if !acc.is_empty() { acc.push('&'); }
+                        acc.push_str(enc_n);
+                        acc.push('=');
                         if i == field_idx {
-                            format!("{}={}", enc_n, encoded_test_value)
+                            acc.push_str(&encoded_test_value);
                         } else {
-                            format!("{}={}", enc_n, enc_v)
+                            acc.push_str(enc_v);
                         }
-                    })
-                    .collect::<Vec<_>>()
-                    .join("&");
+                        acc
+                    });
                 let m = reqwest::Method::POST;
                 let rb =
                     crate::utils::build_request(&client, target, m, form_url.clone(), Some(body));

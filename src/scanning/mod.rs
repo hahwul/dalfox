@@ -18,7 +18,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use tokio::sync::{Mutex, Semaphore};
+use tokio::sync::{Mutex, RwLock, Semaphore};
 
 struct FoundParams {
     reflection: HashSet<String>,
@@ -218,35 +218,48 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
         _ => target.url.clone(),
     };
 
-    let mut request_lines = vec![];
-    let path_and_query = format!(
-        "{}{}",
-        url.path(),
-        url.query().map(|q| format!("?{}", q)).unwrap_or_default()
-    );
-    request_lines.push(format!("{} {} HTTP/1.1", target.method, path_and_query));
-    request_lines.push(format!("Host: {}", url.host_str().unwrap_or("")));
+    let mut buf = String::with_capacity(512);
+
+    // Request line
+    buf.push_str(&target.method);
+    buf.push(' ');
+    buf.push_str(url.path());
+    if let Some(q) = url.query() {
+        buf.push('?');
+        buf.push_str(q);
+    }
+    buf.push_str(" HTTP/1.1\r\nHost: ");
+    buf.push_str(url.host_str().unwrap_or(""));
+
     for (k, v) in &target.headers {
-        request_lines.push(format!("{}: {}", k, v));
-    }
-    if !target.cookies.is_empty() {
-        let cookie_header = target
-            .cookies
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect::<Vec<_>>()
-            .join("; ");
-        request_lines.push(format!("Cookie: {}", cookie_header));
-    }
-    if let Some(data) = &target.data {
-        request_lines.push(format!("Content-Length: {}", data.len()));
-        request_lines.push("".to_string());
-        request_lines.push(data.clone());
-    } else {
-        request_lines.push("".to_string());
+        buf.push_str("\r\n");
+        buf.push_str(k);
+        buf.push_str(": ");
+        buf.push_str(v);
     }
 
-    request_lines.join("\r\n")
+    if !target.cookies.is_empty() {
+        buf.push_str("\r\nCookie: ");
+        for (i, (k, v)) in target.cookies.iter().enumerate() {
+            if i > 0 {
+                buf.push_str("; ");
+            }
+            buf.push_str(k);
+            buf.push('=');
+            buf.push_str(v);
+        }
+    }
+
+    if let Some(data) = &target.data {
+        buf.push_str("\r\nContent-Length: ");
+        buf.push_str(&data.len().to_string());
+        buf.push_str("\r\n\r\n");
+        buf.push_str(data);
+    } else {
+        buf.push_str("\r\n");
+    }
+
+    buf
 }
 
 fn ast_source_uses_browser_url_surface(source: &str) -> bool {
@@ -301,7 +314,7 @@ pub async fn run_scanning(
                 .template(
                     "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} {msg}",
                 )
-                .unwrap()
+                .expect("valid progress bar template")
                 .progress_chars("#>-"),
         );
         pb.set_message(format!("Scanning {}", target.url));
@@ -310,7 +323,7 @@ pub async fn run_scanning(
         None
     };
 
-    let found_params = Arc::new(Mutex::new(FoundParams {
+    let found_params = Arc::new(RwLock::new(FoundParams {
         reflection: HashSet::new(),
         dom: HashSet::new(),
     }));
@@ -319,7 +332,7 @@ pub async fn run_scanning(
 
     for (param_clone, reflection_payloads, dom_payloads) in param_jobs {
         let already_found = {
-            let fp = found_params.lock().await;
+            let fp = found_params.read().await;
             fp.reflection.contains(&param_clone.name) || fp.dom.contains(&param_clone.name)
         };
         if already_found && !args.deep_scan {
@@ -513,7 +526,7 @@ pub async fn run_scanning(
                 let reflection_tuple = if reflection_found_locally {
                     (None, None)
                 } else {
-                    let already = found_params_clone.lock().await.reflection.contains(&param_clone.name);
+                    let already = found_params_clone.read().await.reflection.contains(&param_clone.name);
                     if already {
                         reflection_found_locally = true;
                         (None, None)
@@ -649,7 +662,7 @@ pub async fn run_scanning(
                     let should_add = if args_clone.deep_scan {
                         true
                     } else {
-                        let mut found = found_params_clone.lock().await;
+                        let mut found = found_params_clone.write().await;
                         if !found.reflection.contains(&param_clone.name) {
                             found.reflection.insert(param_clone.name.clone());
                             reflection_found_locally = true;
@@ -714,7 +727,7 @@ pub async fn run_scanning(
                 let already_dom_found = if dom_found_locally {
                     true
                 } else {
-                    let is_found = found_params_clone.lock().await.dom.contains(&param_clone.name);
+                    let is_found = found_params_clone.read().await.dom.contains(&param_clone.name);
                     if is_found {
                         dom_found_locally = true;
                     }
@@ -741,7 +754,7 @@ pub async fn run_scanning(
                     let should_add = if args_clone.deep_scan {
                         true
                     } else {
-                        let mut found = found_params_clone.lock().await;
+                        let mut found = found_params_clone.write().await;
                         if !found.dom.contains(&param_clone.name) {
                             found.dom.insert(param_clone.name.clone());
                             dom_found_locally = true;

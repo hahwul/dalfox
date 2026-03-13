@@ -21,20 +21,25 @@ pub fn apply_encoders_to_payloads(base_payloads: &[String], encoders: &[String])
         return bases.into_iter().cloned().collect();
     }
 
-    let mut out: Vec<String> = Vec::new();
-    let mut out_seen = std::collections::HashSet::new();
+    // Use a HashSet for O(1) encoder lookup instead of O(n) linear scan
+    let encoder_set: std::collections::HashSet<&str> =
+        encoders.iter().map(|s| s.as_str()).collect();
 
     // Expansion order
     let prio = [
         "url", "html", "2url", "3url", "4url", "base64", "unicode", "zwsp",
     ];
 
-    // Pre-calculate active encoders
+    // Pre-calculate active encoders using set lookup
     let active_encoders: Vec<&str> = prio
         .iter()
-        .filter(|&&e| encoders.iter().any(|x| x == e))
-        .cloned()
+        .filter(|&&e| encoder_set.contains(e))
+        .copied()
         .collect();
+
+    let estimated_cap = bases.len() * (1 + active_encoders.len());
+    let mut out: Vec<String> = Vec::with_capacity(estimated_cap);
+    let mut out_seen = std::collections::HashSet::with_capacity(estimated_cap);
 
     for p in bases {
         // Always include original first

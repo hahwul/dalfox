@@ -57,7 +57,11 @@ fn encode_query_component_preserving_pct_into(raw: &str, out: &mut String) {
 /// for exploit clarity. This mirrors prior inline logic (space, '#', '?', '%').
 /// If more rigorous encoding is desired, enhance or replace this function centrally.
 fn selective_path_segment_encode(raw: &str) -> String {
-    let mut out = String::with_capacity(raw.len() * 3);
+    // Fast path: if no special chars, return as-is
+    if !raw.bytes().any(|b| matches!(b, b' ' | b'#' | b'?' | b'%' | b'\n' | b'\t' | b'\r')) {
+        return raw.to_string();
+    }
+    let mut out = String::with_capacity(raw.len() + 16);
     for ch in raw.chars() {
         match ch {
             ' ' => out.push_str("%20"),
@@ -133,28 +137,28 @@ pub fn build_injected_url(base: &url::Url, param: &Param, injected: &str) -> Str
             if let Some(idx_str) = param.name.strip_prefix("path_segment_")
                 && let Ok(idx) = idx_str.parse::<usize>()
             {
-                let original_path = url.path();
-                let segments: Vec<&str> = if original_path == "/" {
-                    Vec::new()
-                } else {
-                    original_path
+                let original_path = url.path().to_string();
+                if original_path != "/" {
+                    let encoded = selective_path_segment_encode(injected);
+                    let mut new_path =
+                        String::with_capacity(original_path.len() + encoded.len());
+                    let segments = original_path
                         .trim_matches('/')
                         .split('/')
-                        .filter(|s| !s.is_empty())
-                        .collect()
-                };
-                if idx < segments.len() {
-                    let encoded = selective_path_segment_encode(injected);
-                    let mut new_path = String::with_capacity(original_path.len() + encoded.len());
-                    for (i, segment) in segments.iter().enumerate() {
+                        .filter(|s| !s.is_empty());
+                    let mut count = 0;
+                    for (i, segment) in segments.enumerate() {
                         new_path.push('/');
                         if i == idx {
                             new_path.push_str(&encoded);
                         } else {
                             new_path.push_str(segment);
                         }
+                        count = i + 1;
                     }
-                    url.set_path(&new_path);
+                    if idx < count {
+                        url.set_path(&new_path);
+                    }
                 }
             }
             url.to_string()

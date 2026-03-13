@@ -1,4 +1,15 @@
 use scraper::{Html, Selector};
+use std::sync::OnceLock;
+
+fn cached_script_selector() -> &'static Selector {
+    static SEL: OnceLock<Selector> = OnceLock::new();
+    SEL.get_or_init(|| Selector::parse("script").expect("valid selector"))
+}
+
+fn cached_universal_selector() -> &'static Selector {
+    static SEL: OnceLock<Selector> = OnceLock::new();
+    SEL.get_or_init(|| Selector::parse("*").expect("valid selector"))
+}
 
 /// Extract JavaScript code from HTML response
 /// Looks for <script> tags and inline event handlers
@@ -10,9 +21,10 @@ pub fn extract_javascript_from_html(html: &str) -> Vec<String> {
     let document = Html::parse_document(html);
 
     // Extract from <script> tags
-    if let Ok(selector) = Selector::parse("script") {
-        for element in document.select(&selector) {
-            let text = element.text().collect::<Vec<_>>().join("");
+    {
+        let selector = cached_script_selector();
+        for element in document.select(selector) {
+            let text = element.text().fold(String::new(), |mut acc, t| { acc.push_str(t); acc });
             if !text.trim().is_empty() && seen.insert(text.trim().to_string()) {
                 js_code.push(text);
             }
@@ -20,8 +32,9 @@ pub fn extract_javascript_from_html(html: &str) -> Vec<String> {
     }
 
     // Extract inline event handler attributes (on*) and javascript: URLs
-    if let Ok(all) = Selector::parse("*") {
-        for node in document.select(&all) {
+    {
+        let all = cached_universal_selector();
+        for node in document.select(all) {
             let attrs = node.value().attrs();
             for (name, value) in attrs {
                 let lname = name.to_ascii_lowercase();
@@ -37,7 +50,10 @@ pub fn extract_javascript_from_html(html: &str) -> Vec<String> {
                     }
                 } else if lname == "href" {
                     let vv = v.trim();
-                    if vv.len() >= 11 && vv[..11].eq_ignore_ascii_case("javascript:") {
+                    if vv.len() >= 11
+                        && vv.is_char_boundary(11)
+                        && vv[..11].eq_ignore_ascii_case("javascript:")
+                    {
                         let js = vv[11..].trim();
                         if !js.is_empty() {
                             let snippet = js.to_string();
@@ -81,7 +97,11 @@ fn extract_parenthesized_suffix<'a>(source: &'a str, prefix: &str) -> Option<&'a
 }
 
 fn extract_search_param_value<'a>(payload: &'a str, key: &str) -> &'a str {
-    payload.strip_prefix(&format!("{key}=")).unwrap_or(payload)
+    if let Some(rest) = payload.strip_prefix(key) {
+        rest.strip_prefix('=').unwrap_or(payload)
+    } else {
+        payload
+    }
 }
 
 pub fn generate_dom_xss_poc(source: &str, sink: &str) -> (String, String) {

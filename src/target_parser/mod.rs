@@ -195,7 +195,11 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
     }
 
     // 3) Body (remaining lines after the first blank line)
-    let body = lines.collect::<Vec<&str>>().join("\n");
+    let body = lines.fold(String::new(), |mut acc, l| {
+        if !acc.is_empty() { acc.push('\n'); }
+        acc.push_str(l);
+        acc
+    });
     let data = if body.is_empty() { None } else { Some(body) };
 
     // 4) Build URL

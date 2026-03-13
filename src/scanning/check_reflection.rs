@@ -163,7 +163,7 @@ fn decode_html_entities(input: &str) -> String {
     // Match patterns like &#xHH; or &#xHHHH; or &#DDDD; (hex 'x' is case-insensitive)
     // We purposely limit to reasonable length to avoid catastrophic replacements.
     let re =
-        ENTITY_REGEX.get_or_init(|| Regex::new(r"&#([xX][0-9a-fA-F]{2,6}|[0-9]{2,6});").unwrap());
+        ENTITY_REGEX.get_or_init(|| Regex::new(r"&#([xX][0-9a-fA-F]{2,6}|[0-9]{2,6});").expect("entity regex pattern must be valid"));
     let mut out = String::with_capacity(input.len());
     let mut last = 0;
     for m in re.find_iter(input) {
@@ -190,7 +190,7 @@ fn decode_html_entities(input: &str) -> String {
     // Handle a minimal set of named entities commonly encountered in XSS contexts.
     // Keep decoding narrow but case-insensitive (e.g., &LT; / &Lt;).
     let named_re =
-        NAMED_ENTITY_REGEX.get_or_init(|| Regex::new(r"(?i)&(?:lt|gt|amp|quot|apos);").unwrap());
+        NAMED_ENTITY_REGEX.get_or_init(|| Regex::new(r"(?i)&(?:lt|gt|amp|quot|apos);").expect("named entity regex pattern must be valid"));
     named_re
         .replace_all(&out, |caps: &regex::Captures| {
             match caps[0].to_ascii_lowercase().as_str() {

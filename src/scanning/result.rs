@@ -200,7 +200,8 @@ impl Result {
         include_request: bool,
         include_response: bool,
     ) -> String {
-        let mut out = String::new();
+        use std::fmt::Write;
+        let mut out = String::with_capacity(results.len() * 512 + 256);
 
         // Add header
         out.push_str("# Dalfox Scan Results\n\n");
@@ -209,17 +210,18 @@ impl Result {
         let v_count = results.iter().filter(|r| r.result_type == "V").count();
         let r_count = results.iter().filter(|r| r.result_type == "R").count();
         out.push_str("## Summary\n\n");
-        out.push_str(&format!("- **Total Findings**: {}\n", results.len()));
-        out.push_str(&format!("- **Vulnerabilities (V)**: {}\n", v_count));
-        out.push_str(&format!("- **Reflections (R)**: {}\n\n", r_count));
+        let _ = writeln!(out, "- **Total Findings**: {}", results.len());
+        let _ = writeln!(out, "- **Vulnerabilities (V)**: {}", v_count);
+        let _ = write!(out, "- **Reflections (R)**: {}\n\n", r_count); // double newline intentional
 
         // Add findings table
         if !results.is_empty() {
             out.push_str("## Findings\n\n");
 
             for (idx, result) in results.iter().enumerate() {
-                out.push_str(&format!(
-                    "### {}. {} - {} ({})\n\n",
+                let _ = write!(
+                    out,
+                    "### {}. {} - {} ({})\n\n", // double newline intentional
                     idx + 1,
                     if result.result_type == "V" {
                         "Vulnerability"
@@ -228,46 +230,43 @@ impl Result {
                     },
                     result.param,
                     result.inject_type
-                ));
+                );
 
                 out.push_str("| Field | Value |\n");
                 out.push_str("|-------|-------|\n");
-                out.push_str(&format!("| **Type** | {} |\n", result.result_type));
-                out.push_str(&format!("| **Parameter** | `{}` |\n", result.param));
-                out.push_str(&format!("| **Method** | {} |\n", result.method));
-                out.push_str(&format!(
-                    "| **Injection Type** | {} |\n",
-                    result.inject_type
-                ));
-                out.push_str(&format!("| **Severity** | {} |\n", result.severity));
-                out.push_str(&format!("| **CWE** | {} |\n", result.cwe));
-                out.push_str(&format!("| **URL** | {} |\n", result.data));
-                out.push_str(&format!(
-                    "| **Payload** | `{}` |\n",
+                let _ = writeln!(out, "| **Type** | {} |", result.result_type);
+                let _ = writeln!(out, "| **Parameter** | `{}` |", result.param);
+                let _ = writeln!(out, "| **Method** | {} |", result.method);
+                let _ = writeln!(out, "| **Injection Type** | {} |", result.inject_type);
+                let _ = writeln!(out, "| **Severity** | {} |", result.severity);
+                let _ = writeln!(out, "| **CWE** | {} |", result.cwe);
+                let _ = writeln!(out, "| **URL** | {} |", result.data);
+                let _ = writeln!(
+                    out,
+                    "| **Payload** | `{}` |",
                     result.payload.replace('|', "\\|")
-                ));
+                );
 
                 if !result.evidence.is_empty() {
-                    out.push_str(&format!(
-                        "| **Evidence** | {} |\n",
+                    let _ = writeln!(
+                        out,
+                        "| **Evidence** | {} |",
                         result.evidence.replace('|', "\\|")
-                    ));
+                    );
                 }
 
                 out.push('\n');
 
                 // Include request if requested
                 if include_request && let Some(req) = &result.request {
-                    out.push_str("**Request:**\n\n");
-                    out.push_str("```http\n");
+                    out.push_str("**Request:**\n\n```http\n");
                     out.push_str(req);
                     out.push_str("\n```\n\n");
                 }
 
                 // Include response if requested
                 if include_response && let Some(resp) = &result.response {
-                    out.push_str("**Response:**\n\n");
-                    out.push_str("```http\n");
+                    out.push_str("**Response:**\n\n```http\n");
                     out.push_str(resp);
                     out.push_str("\n```\n\n");
                 }

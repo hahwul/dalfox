@@ -129,13 +129,13 @@ pub async fn verify_dom_xss_light_with_client(
 
     let mut note: Option<String> = None;
     if let Ok(resp) = request.send().await {
-        let headers = resp.headers().clone();
-        let ct = headers
+        // Extract needed header values without cloning the entire HeaderMap
+        let ct = resp.headers()
             .get(reqwest::header::CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
             .unwrap_or("")
             .to_string();
-        let csp = headers
+        let csp = resp.headers()
             .get("Content-Security-Policy")
             .and_then(|v| v.to_str().ok())
             .map(|s| s.to_string());

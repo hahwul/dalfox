@@ -165,7 +165,7 @@ pub async fn active_probe_param(
         let invalid_ref = invalid_specials.clone();
 
         let handle = tokio::spawn(async move {
-            let _permit = sem_clone.acquire().await.unwrap();
+            let _permit = sem_clone.acquire().await.expect("acquire semaphore permit");
             let raw_payload = format!(
                 "{}{}{}",
                 crate::scanning::markers::open_marker(),
@@ -248,9 +248,9 @@ pub async fn active_probe_param(
                         let mut cookie_header = String::new();
                         for (k, v) in &cookies {
                             if k == &param_name {
-                                cookie_header.push_str(&format!("{}={}; ", k, payload));
+                                cookie_header.push_str(k); cookie_header.push('='); cookie_header.push_str(&payload); cookie_header.push_str("; ");
                             } else {
-                                cookie_header.push_str(&format!("{}={}; ", k, v));
+                                cookie_header.push_str(k); cookie_header.push('='); cookie_header.push_str(v); cookie_header.push_str("; ");
                             }
                         }
                         if !cookie_header.is_empty() {
@@ -376,7 +376,7 @@ pub async fn active_probe_param(
                     if ck == &param_name && location == Location::Header {
                         continue;
                     }
-                    cookie_header.push_str(&format!("{}={}; ", ck, cv));
+                    cookie_header.push_str(ck); cookie_header.push('='); cookie_header.push_str(cv); cookie_header.push_str("; ");
                 }
                 if !cookie_header.is_empty() {
                     cookie_header.pop();
@@ -483,7 +483,7 @@ pub async fn active_probe_param(
                 encoded = crate::encoding::url_encode(&encoded);
             }
 
-            let _permit = semaphore.acquire().await.unwrap();
+            let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
             let url = match param.location {
                 Location::Query => {
                     let mut url = target.url.clone();
@@ -570,7 +570,7 @@ pub async fn analyze_parameters(
         pb.set_style(
             ProgressStyle::default_spinner()
                 .template("{spinner:.green} {msg}")
-                .unwrap(),
+                .expect("valid progress style template"),
         );
         pb.set_message(format!("Analyzing parameters for {}", target.url));
         Some(pb)
@@ -599,7 +599,7 @@ pub async fn analyze_parameters(
     let probe_semaphore = Arc::new(Semaphore::new(target.workers));
     let probe_target = Arc::new(target.clone());
     let mut param_handles = Vec::new();
-    for p in target.reflection_params.clone() {
+    for p in std::mem::take(&mut target.reflection_params) {
         let target_ref = probe_target.clone();
         let sem = probe_semaphore.clone();
         param_handles.push(tokio::spawn(async move {

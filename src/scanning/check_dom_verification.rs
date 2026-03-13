@@ -1,7 +1,39 @@
 use crate::parameter_analysis::{Location, Param};
 use crate::target_parser::Target;
 use reqwest::Client;
+use std::sync::OnceLock;
 use tokio::time::{Duration, sleep};
+
+fn cached_universal_selector() -> &'static scraper::Selector {
+    static SEL: OnceLock<scraper::Selector> = OnceLock::new();
+    SEL.get_or_init(|| scraper::Selector::parse("*").expect("valid selector"))
+}
+
+fn cached_class_marker_selector() -> &'static scraper::Selector {
+    static SEL: OnceLock<scraper::Selector> = OnceLock::new();
+    SEL.get_or_init(|| {
+        let marker = crate::scanning::markers::class_marker();
+        scraper::Selector::parse(&format!(".{}", marker)).expect("valid class marker selector")
+    })
+}
+
+fn cached_id_marker_selector() -> &'static scraper::Selector {
+    static SEL: OnceLock<scraper::Selector> = OnceLock::new();
+    SEL.get_or_init(|| {
+        let marker = crate::scanning::markers::id_marker();
+        scraper::Selector::parse(&format!("#{}", marker)).expect("valid id marker selector")
+    })
+}
+
+fn cached_legacy_class_selector() -> &'static scraper::Selector {
+    static SEL: OnceLock<scraper::Selector> = OnceLock::new();
+    SEL.get_or_init(|| scraper::Selector::parse(".dalfox").expect("valid selector"))
+}
+
+fn cached_legacy_id_selector() -> &'static scraper::Selector {
+    static SEL: OnceLock<scraper::Selector> = OnceLock::new();
+    SEL.get_or_init(|| scraper::Selector::parse("#dalfox").expect("valid selector"))
+}
 
 fn payload_uses_legacy_class_marker(payload: &str) -> bool {
     payload.contains("class=dalfox")
@@ -19,47 +51,40 @@ pub(crate) fn has_marker_evidence(payload: &str, text: &str) -> bool {
     let class_marker = crate::scanning::markers::class_marker();
     let id_marker = crate::scanning::markers::id_marker();
 
-    let mut class_selectors = Vec::new();
-    if payload.contains(class_marker) {
-        class_selectors.push(format!(".{}", class_marker));
-    }
-    if payload_uses_legacy_class_marker(payload) {
-        class_selectors.push(".dalfox".to_string());
-    }
-
-    let mut id_selectors = Vec::new();
-    if payload.contains(id_marker) {
-        id_selectors.push(format!("#{}", id_marker));
-    }
-    if payload_uses_legacy_id_marker(payload) {
-        id_selectors.push("#dalfox".to_string());
-    }
+    let has_class = payload.contains(class_marker);
+    let has_legacy_class = payload_uses_legacy_class_marker(payload);
+    let has_id = payload.contains(id_marker);
+    let has_legacy_id = payload_uses_legacy_id_marker(payload);
 
     // Avoid promoting raw reflection to DOM-verified unless payload carries Dalfox marker(s).
-    if class_selectors.is_empty() && id_selectors.is_empty() {
+    if !has_class && !has_legacy_class && !has_id && !has_legacy_id {
         return false;
     }
 
     let document = scraper::Html::parse_document(text);
 
-    let class_ok = if !class_selectors.is_empty() {
-        class_selectors.iter().any(|sel| {
-            scraper::Selector::parse(sel)
-                .ok()
-                .and_then(|selector| document.select(&selector).next())
-                .is_some()
-        })
+    let class_ok = if has_class || has_legacy_class {
+        let mut found = false;
+        if has_class {
+            found = document.select(cached_class_marker_selector()).next().is_some();
+        }
+        if !found && has_legacy_class {
+            found = document.select(cached_legacy_class_selector()).next().is_some();
+        }
+        found
     } else {
         true
     };
 
-    let id_ok = if !id_selectors.is_empty() {
-        id_selectors.iter().any(|sel| {
-            scraper::Selector::parse(sel)
-                .ok()
-                .and_then(|selector| document.select(&selector).next())
-                .is_some()
-        })
+    let id_ok = if has_id || has_legacy_id {
+        let mut found = false;
+        if has_id {
+            found = document.select(cached_id_marker_selector()).next().is_some();
+        }
+        if !found && has_legacy_id {
+            found = document.select(cached_legacy_id_selector()).next().is_some();
+        }
+        found
     } else {
         true
     };
@@ -81,12 +106,10 @@ fn has_executable_url_attribute_evidence(payload: &str, text: &str) -> bool {
 
     let payload_lower = payload.trim().to_ascii_lowercase();
     let document = scraper::Html::parse_document(text);
-    let Ok(selector) = scraper::Selector::parse("*") else {
-        return false;
-    };
+    let selector = cached_universal_selector();
     let dangerous_attrs = ["href", "src", "data", "action", "formaction", "xlink:href"];
 
-    document.select(&selector).any(|node| {
+    document.select(selector).any(|node| {
         node.value().attrs().any(|(name, value)| {
             dangerous_attrs.contains(&name.to_ascii_lowercase().as_str())
                 && value.trim().to_ascii_lowercase() == payload_lower

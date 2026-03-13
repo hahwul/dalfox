@@ -72,6 +72,7 @@ pub fn compose_cookie_header_excluding(
 }
 
 /// Case-insensitive check if a header exists in a (name, value) vector.
+#[inline]
 pub fn has_header(headers: &[(String, String)], name: &str) -> bool {
     headers.iter().any(|(k, _)| k.eq_ignore_ascii_case(name))
 }
@@ -184,6 +185,7 @@ pub fn parse_headers(lines: &[String]) -> Vec<(String, String)> {
 
 /// Extract primary type/subtype (lowercased) from a Content-Type header.
 /// Returns None for invalid formats.
+#[inline]
 pub fn content_type_primary(ct: &str) -> Option<String> {
     if ct.trim().is_empty() {
         return None;
@@ -204,6 +206,7 @@ pub fn content_type_primary(ct: &str) -> Option<String> {
 /// - application/xhtml+xml
 /// - text/xml, application/xml
 /// - application/rss+xml, application/atom+xml
+#[inline]
 pub fn is_htmlish_content_type(ct: &str) -> bool {
     let Some(primary) = content_type_primary(ct) else {
         return false;

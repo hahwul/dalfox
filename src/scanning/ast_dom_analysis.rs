@@ -74,6 +74,8 @@ struct DomXssVisitor<'a> {
     tainted_return_sources: Vec<String>,
     /// Source code for line/column calculation
     source_code: &'a str,
+    /// Precomputed byte offsets of line starts for O(log n) span → line/column lookup
+    line_starts: Vec<usize>,
     /// Field-level taint tracking: "obj.field" -> source
     field_taints: HashMap<String, String>,
     /// Top-level global variable taint tracking
@@ -126,12 +128,21 @@ const DOM_SANITIZERS: &[&str] = &[
     "sanitizeHTML", "validator.escape",
 ];
 
-static STATIC_SOURCES: LazyLock<HashSet<&'static str>> =
-    LazyLock::new(|| DOM_SOURCES.iter().copied().collect());
-static STATIC_SINKS: LazyLock<HashSet<&'static str>> =
-    LazyLock::new(|| DOM_SINKS.iter().copied().collect());
-static STATIC_SANITIZERS: LazyLock<HashSet<&'static str>> =
-    LazyLock::new(|| DOM_SANITIZERS.iter().copied().collect());
+static STATIC_SOURCES: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    let mut set = HashSet::with_capacity(DOM_SOURCES.len());
+    set.extend(DOM_SOURCES.iter().copied());
+    set
+});
+static STATIC_SINKS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    let mut set = HashSet::with_capacity(DOM_SINKS.len());
+    set.extend(DOM_SINKS.iter().copied());
+    set
+});
+static STATIC_SANITIZERS: LazyLock<HashSet<&'static str>> = LazyLock::new(|| {
+    let mut set = HashSet::with_capacity(DOM_SANITIZERS.len());
+    set.extend(DOM_SANITIZERS.iter().copied());
+    set
+});
 
 impl<'a> DomXssVisitor<'a> {
     fn extract_static_string_argument(call: &CallExpression<'a>, idx: usize) -> Option<String> {
@@ -339,6 +350,13 @@ impl<'a> DomXssVisitor<'a> {
     }
 
     fn new(source_code: &'a str) -> Self {
+        // Precompute line start offsets for fast span→line/column lookup
+        let mut line_starts = vec![0usize];
+        for (i, b) in source_code.bytes().enumerate() {
+            if b == b'\n' {
+                line_starts.push(i + 1);
+            }
+        }
         Self {
             tainted_vars: HashSet::new(),
             var_aliases: HashMap::new(),
@@ -352,6 +370,7 @@ impl<'a> DomXssVisitor<'a> {
             collecting_tainted_returns: false,
             tainted_return_sources: Vec::new(),
             source_code,
+            line_starts,
             field_taints: HashMap::new(),
             global_taints: HashSet::new(),
             url_object_sources: HashMap::new(),
@@ -455,9 +474,7 @@ impl<'a> DomXssVisitor<'a> {
                 t.quasis
                     .iter()
                     .filter_map(|q| q.value.cooked)
-                    .map(|a| a.as_str())
-                    .collect::<Vec<_>>()
-                    .join(""),
+                    .fold(String::new(), |mut acc, a| { acc.push_str(a.as_str()); acc }),
             ),
             Expression::BinaryExpression(binary) if binary.operator == BinaryOperator::Addition => {
                 let left = self.eval_static_string_expr(&binary.left)?;
@@ -1138,25 +1155,25 @@ impl<'a> DomXssVisitor<'a> {
         description: &str,
         explicit_source: Option<String>,
     ) {
-        let lines: Vec<&str> = self.source_code.lines().collect();
-        let mut line = 1u32;
-        let mut column = 1u32;
-        let mut current_offset = 0usize;
+        let offset = span.start as usize;
+        // Binary search for the line containing this byte offset
+        let line_idx = match self.line_starts.binary_search(&offset) {
+            Ok(i) => i,
+            Err(i) => i.saturating_sub(1),
+        };
+        let line = (line_idx + 1) as u32;
+        let column = (offset - self.line_starts[line_idx] + 1) as u32;
 
-        for (idx, line_text) in lines.iter().enumerate() {
-            let line_len = line_text.len() + 1; // +1 for newline
-            if current_offset + line_len > span.start as usize {
-                line = (idx + 1) as u32;
-                column = (span.start as usize - current_offset + 1) as u32;
-                break;
-            }
-            current_offset += line_len;
-        }
-
-        let snippet = if line > 0 && (line as usize) <= lines.len() {
-            lines[(line - 1) as usize].trim().to_string()
-        } else {
-            String::new()
+        let snippet = {
+            let start = self.line_starts[line_idx];
+            let end = self
+                .line_starts
+                .get(line_idx + 1)
+                .copied()
+                .unwrap_or(self.source_code.len());
+            // Trim trailing newline from line slice
+            let line_slice = &self.source_code[start..end];
+            line_slice.trim().to_string()
         };
 
         // Find the source that led to this

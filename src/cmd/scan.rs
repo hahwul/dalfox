@@ -39,6 +39,11 @@ pub const DEFAULT_METHOD: &str = "GET";
 
 static GLOBAL_ENCODERS: OnceLock<Vec<String>> = OnceLock::new();
 
+fn cached_meta_csp_selector() -> &'static Selector {
+    static SEL: OnceLock<Selector> = OnceLock::new();
+    SEL.get_or_init(|| Selector::parse("meta[http-equiv][content]").expect("valid selector"))
+}
+
 fn build_ast_dom_message(
     description: &str,
     source: &str,
@@ -709,30 +714,10 @@ async fn preflight_content_type(
 ) -> Option<(String, Option<(String, String)>, Option<String>)> {
     let client = target.build_client().ok()?;
 
-    // Prefer HEAD for fast Content-Type detection; fallback GET with Range elsewhere if needed
-    let mut request_builder =
+    // Prefer HEAD for fast Content-Type detection
+    // build_preflight_request already applies headers, UA, and cookies consistently
+    let request_builder =
         crate::utils::build_preflight_request(&client, target, true, Some(8192));
-    for (k, v) in &target.headers {
-        request_builder = request_builder.header(k, v);
-    }
-    if let Some(ua) = &target.user_agent
-        && !ua.is_empty()
-    {
-        request_builder = request_builder.header("User-Agent", ua);
-    }
-    if !target.cookies.is_empty() {
-        let mut cookie_header = String::new();
-        for (ck, cv) in &target.cookies {
-            cookie_header.push_str(&format!("{}={}; ", ck, cv));
-        }
-        if !cookie_header.is_empty() {
-            cookie_header.pop();
-            cookie_header.pop();
-            request_builder = request_builder.header("Cookie", cookie_header);
-        }
-    }
-    // Request only the first 8KB to reduce transfer while still allowing meta-tag parsing
-    request_builder = request_builder.header("Range", "bytes=0-8191");
     if target.delay > 0 {
         tokio::time::sleep(Duration::from_millis(target.delay)).await;
     }
@@ -769,8 +754,9 @@ async fn preflight_content_type(
         // Only parse CSP if not already found
         if csp_header.is_none() {
             let doc = Html::parse_document(&body);
-            if let Ok(sel) = Selector::parse("meta[http-equiv][content]") {
-                for el in doc.select(&sel) {
+            {
+                let sel = cached_meta_csp_selector();
+                for el in doc.select(sel) {
                     let http_equiv = el
                         .value()
                         .attr("http-equiv")

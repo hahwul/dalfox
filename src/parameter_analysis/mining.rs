@@ -4,11 +4,31 @@ use crate::payload::mining::GF_PATTERNS_PARAMS;
 use crate::target_parser::Target;
 use indicatif::ProgressBar;
 use scraper;
-use std::sync::{Arc, atomic::Ordering};
+use std::sync::{Arc, OnceLock, atomic::Ordering};
 
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{Duration, sleep};
 use url::form_urlencoded;
+
+fn cached_script_selector() -> &'static scraper::Selector {
+    static SEL: OnceLock<scraper::Selector> = OnceLock::new();
+    SEL.get_or_init(|| scraper::Selector::parse("script").expect("valid selector"))
+}
+
+fn cached_style_selector() -> &'static scraper::Selector {
+    static SEL: OnceLock<scraper::Selector> = OnceLock::new();
+    SEL.get_or_init(|| scraper::Selector::parse("style").expect("valid selector"))
+}
+
+fn cached_universal_selector() -> &'static scraper::Selector {
+    static SEL: OnceLock<scraper::Selector> = OnceLock::new();
+    SEL.get_or_init(|| scraper::Selector::parse("*").expect("valid selector"))
+}
+
+fn cached_input_selector() -> &'static scraper::Selector {
+    static SEL: OnceLock<scraper::Selector> = OnceLock::new();
+    SEL.get_or_init(|| scraper::Selector::parse("input[id], input[name]").expect("valid selector"))
+}
 
 const EWMA_ALPHA: f64 = 0.30; // smoothing factor for exponential weighted moving average
 const EWMA_START_VALUE: f64 = 0.0;
@@ -112,9 +132,10 @@ pub fn detect_injection_context(text: &str) -> InjectionContext {
     }
 
     // 1) JavaScript context: marker appears in any <script> text
-    if let Ok(sel) = scraper::Selector::parse("script") {
-        for el in document.select(&sel) {
-            let s = el.text().collect::<Vec<_>>().join("");
+    {
+        let sel = cached_script_selector();
+        for el in document.select(sel) {
+            let s = el.text().fold(String::new(), |mut acc, t| { acc.push_str(t); acc });
             if s.contains(marker) {
                 let delim = infer_quote_delimiter(text, marker);
                 return InjectionContext::Javascript(delim);
@@ -123,9 +144,10 @@ pub fn detect_injection_context(text: &str) -> InjectionContext {
     }
 
     // 1b) CSS context: marker appears in any <style> text
-    if let Ok(sel) = scraper::Selector::parse("style") {
-        for el in document.select(&sel) {
-            let s = el.text().collect::<Vec<_>>().join("");
+    {
+        let sel = cached_style_selector();
+        for el in document.select(sel) {
+            let s = el.text().fold(String::new(), |mut acc, t| { acc.push_str(t); acc });
             if s.contains(marker) {
                 let delim = infer_quote_delimiter(text, marker);
                 return InjectionContext::Css(delim);
@@ -134,8 +156,9 @@ pub fn detect_injection_context(text: &str) -> InjectionContext {
     }
 
     // 2) Attribute context: marker in any attribute value
-    if let Ok(any) = scraper::Selector::parse("*") {
-        for el in document.select(&any) {
+    {
+        let any = cached_universal_selector();
+        for el in document.select(any) {
             for (name, v) in el.value().attrs() {
                 if v.contains(marker) {
                     let delim = infer_quote_delimiter(text, marker);
@@ -150,13 +173,14 @@ pub fn detect_injection_context(text: &str) -> InjectionContext {
     }
 
     // 3) HTML text context: marker in non-script, non-style text nodes
-    if let Ok(any) = scraper::Selector::parse("*") {
-        for el in document.select(&any) {
+    {
+        let any = cached_universal_selector();
+        for el in document.select(any) {
             let tag = el.value().name();
             if tag.eq_ignore_ascii_case("script") || tag.eq_ignore_ascii_case("style") {
                 continue;
             }
-            let s = el.text().collect::<Vec<_>>().join("");
+            let s = el.text().fold(String::new(), |mut acc, t| { acc.push_str(t); acc });
             if s.contains(marker) {
                 return InjectionContext::Html(None);
             }
@@ -702,8 +726,8 @@ pub async fn probe_response_id_params(
 
         // Collect unique ids and names
         let mut params_to_check = std::collections::HashSet::new();
-        let selector = scraper::Selector::parse("input[id], input[name]").unwrap();
-        for element in document.select(&selector) {
+        let selector = cached_input_selector();
+        for element in document.select(selector) {
             if let Some(id) = element.value().attr("id") {
                 params_to_check.insert(id.to_string());
             }

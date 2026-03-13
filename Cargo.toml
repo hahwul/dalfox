@@ -30,3 +30,8 @@ oxc_parser = "0.97.0"
 oxc_ast = "0.97.0"
 oxc_allocator = "0.97.0"
 oxc_span = "0.97.0"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = "symbols"

@@ -260,11 +260,12 @@ pub fn generate_adaptive_payloads(
     let adaptive_encoders =
         crate::encoding::generate_adaptive_encodings(invalid_specials, valid_specials);
 
-    // Apply adaptive encoders
-    let mut out = Vec::new();
-    let mut seen = std::collections::HashSet::new();
+    // Apply adaptive encoders with pre-allocated capacity
+    let estimated_cap = filtered_payloads.len() * (2 + adaptive_encoders.len());
+    let mut out = Vec::with_capacity(estimated_cap);
+    let mut seen = std::collections::HashSet::with_capacity(estimated_cap);
     for p in &filtered_payloads {
-        // Original
+        // Original - insert reference to avoid clone when already seen
         if seen.insert(p.clone()) {
             out.push(p.clone());
         }
@@ -334,7 +335,7 @@ pub fn get_dynamic_payloads(
     if let Some(remotes) = crate::payload::get_remote_payloads()
         && !remotes.is_empty()
     {
-        base_payloads.extend(remotes.as_ref().clone());
+        base_payloads.extend(remotes.iter().cloned());
     }
 
     // Expand with shared encoder policy helper; handles "none" and deduplication
