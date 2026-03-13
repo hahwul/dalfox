@@ -250,6 +250,162 @@ pub fn build_injected_url(base: &url::Url, param: &Param, injected: &str) -> Str
     }
 }
 
+/// HPP (HTTP Parameter Pollution) strategy variants.
+/// Different server stacks handle duplicate query parameters differently,
+/// so we generate multiple HPP variants to increase bypass probability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HppPosition {
+    /// Payload appears as the last duplicate: `?p=safe&p=<payload>`
+    /// Effective against: PHP/Apache (uses last), Ruby/Rack (uses last)
+    Last,
+    /// Payload appears as the first duplicate: `?p=<payload>&p=safe`
+    /// Effective against: JSP/Tomcat (uses first), Python/Flask (uses first)
+    First,
+    /// Payload only, no safe decoy: `?p=<payload>&p=<payload>`
+    /// Useful when server concatenates (ASP.NET/IIS joins with comma)
+    Both,
+}
+
+/// Build an HPP URL variant for a query parameter.
+/// Returns the URL with the parameter duplicated according to the given `position`.
+/// For non-Query locations, returns `None` (HPP only applies to query params).
+pub fn build_hpp_url(
+    base: &url::Url,
+    param: &Param,
+    injected: &str,
+    position: HppPosition,
+) -> Option<String> {
+    if param.location != Location::Query {
+        return None;
+    }
+
+    let base_str = base.as_str();
+    let prefix = if let Some(q_pos) = base_str.find('?') {
+        &base_str[..q_pos]
+    } else {
+        base_str
+    };
+    let fragment = base.fragment();
+
+    let safe_value = &param.value;
+
+    let mut result = String::with_capacity(base_str.len() + injected.len() + param.name.len() + 32);
+    result.push_str(prefix);
+    result.push('?');
+
+    let mut first = true;
+    let mut replaced = false;
+
+    // Rebuild existing query pairs, replacing the target param's value
+    for (k, v) in base.query_pairs() {
+        if k == param.name && !replaced {
+            replaced = true;
+            match position {
+                HppPosition::Last => {
+                    // safe value first, payload second
+                    if !first { result.push('&'); }
+                    first = false;
+                    encode_query_component_preserving_pct_into(&k, &mut result);
+                    result.push('=');
+                    encode_query_component_preserving_pct_into(safe_value, &mut result);
+                    result.push('&');
+                    encode_query_component_preserving_pct_into(&k, &mut result);
+                    result.push('=');
+                    encode_query_component_preserving_pct_into(injected, &mut result);
+                }
+                HppPosition::First => {
+                    // payload first, safe value second
+                    if !first { result.push('&'); }
+                    first = false;
+                    encode_query_component_preserving_pct_into(&k, &mut result);
+                    result.push('=');
+                    encode_query_component_preserving_pct_into(injected, &mut result);
+                    result.push('&');
+                    encode_query_component_preserving_pct_into(&k, &mut result);
+                    result.push('=');
+                    encode_query_component_preserving_pct_into(safe_value, &mut result);
+                }
+                HppPosition::Both => {
+                    // payload in both positions
+                    if !first { result.push('&'); }
+                    first = false;
+                    encode_query_component_preserving_pct_into(&k, &mut result);
+                    result.push('=');
+                    encode_query_component_preserving_pct_into(injected, &mut result);
+                    result.push('&');
+                    encode_query_component_preserving_pct_into(&k, &mut result);
+                    result.push('=');
+                    encode_query_component_preserving_pct_into(injected, &mut result);
+                }
+            }
+        } else {
+            if !first { result.push('&'); }
+            first = false;
+            encode_query_component_preserving_pct_into(&k, &mut result);
+            result.push('=');
+            encode_query_component_preserving_pct_into(&v, &mut result);
+        }
+    }
+
+    // If param wasn't in the original query, append the HPP pair
+    if !replaced {
+        match position {
+            HppPosition::Last => {
+                if !first { result.push('&'); }
+                encode_query_component_preserving_pct_into(&param.name, &mut result);
+                result.push('=');
+                encode_query_component_preserving_pct_into(safe_value, &mut result);
+                result.push('&');
+                encode_query_component_preserving_pct_into(&param.name, &mut result);
+                result.push('=');
+                encode_query_component_preserving_pct_into(injected, &mut result);
+            }
+            HppPosition::First => {
+                if !first { result.push('&'); }
+                encode_query_component_preserving_pct_into(&param.name, &mut result);
+                result.push('=');
+                encode_query_component_preserving_pct_into(injected, &mut result);
+                result.push('&');
+                encode_query_component_preserving_pct_into(&param.name, &mut result);
+                result.push('=');
+                encode_query_component_preserving_pct_into(safe_value, &mut result);
+            }
+            HppPosition::Both => {
+                if !first { result.push('&'); }
+                encode_query_component_preserving_pct_into(&param.name, &mut result);
+                result.push('=');
+                encode_query_component_preserving_pct_into(injected, &mut result);
+                result.push('&');
+                encode_query_component_preserving_pct_into(&param.name, &mut result);
+                result.push('=');
+                encode_query_component_preserving_pct_into(injected, &mut result);
+            }
+        }
+    }
+
+    if let Some(frag) = fragment {
+        result.push('#');
+        result.push_str(frag);
+    }
+
+    Some(result)
+}
+
+/// Generate all HPP URL variants for a given payload.
+/// Returns up to 3 variants (Last, First, Both) for query params, empty vec for others.
+pub fn build_hpp_urls(
+    base: &url::Url,
+    param: &Param,
+    injected: &str,
+) -> Vec<(String, HppPosition)> {
+    [HppPosition::Last, HppPosition::First, HppPosition::Both]
+        .iter()
+        .filter_map(|&pos| {
+            build_hpp_url(base, param, injected, pos).map(|url| (url, pos))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -479,5 +635,138 @@ mod tests {
         };
         let out = build_injected_url(&base, &param, "XSS");
         assert_eq!(out, "http://example.com/#/app?a=1&b=XSS&c=3");
+    }
+
+    // --- HPP tests ---
+
+    #[test]
+    fn test_hpp_last_position() {
+        let base = make_url("https://example.com/path?q=safe&b=2");
+        let param = Param {
+            name: "q".into(),
+            value: "safe".into(),
+            location: Location::Query,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            form_action_url: None,
+            form_origin_url: None,
+        };
+        let out = build_hpp_url(&base, &param, "<script>", HppPosition::Last).unwrap();
+        assert!(out.contains("q=safe&q=%3Cscript%3E"));
+        assert!(out.contains("b=2"));
+    }
+
+    #[test]
+    fn test_hpp_first_position() {
+        let base = make_url("https://example.com/path?q=safe&b=2");
+        let param = Param {
+            name: "q".into(),
+            value: "safe".into(),
+            location: Location::Query,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            form_action_url: None,
+            form_origin_url: None,
+        };
+        let out = build_hpp_url(&base, &param, "<script>", HppPosition::First).unwrap();
+        assert!(out.contains("q=%3Cscript%3E&q=safe"));
+        assert!(out.contains("b=2"));
+    }
+
+    #[test]
+    fn test_hpp_both_position() {
+        let base = make_url("https://example.com/path?q=safe");
+        let param = Param {
+            name: "q".into(),
+            value: "safe".into(),
+            location: Location::Query,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            form_action_url: None,
+            form_origin_url: None,
+        };
+        let out = build_hpp_url(&base, &param, "PAYLOAD", HppPosition::Both).unwrap();
+        assert!(out.contains("q=PAYLOAD&q=PAYLOAD"));
+    }
+
+    #[test]
+    fn test_hpp_non_query_returns_none() {
+        let base = make_url("https://example.com/path");
+        let param = Param {
+            name: "path_segment_0".into(),
+            value: "path".into(),
+            location: Location::Path,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            form_action_url: None,
+            form_origin_url: None,
+        };
+        assert!(build_hpp_url(&base, &param, "PAYLOAD", HppPosition::Last).is_none());
+    }
+
+    #[test]
+    fn test_hpp_absent_param_appended() {
+        let base = make_url("https://example.com/path?other=1");
+        let param = Param {
+            name: "q".into(),
+            value: "".into(),
+            location: Location::Query,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            form_action_url: None,
+            form_origin_url: None,
+        };
+        let out = build_hpp_url(&base, &param, "XSS", HppPosition::Last).unwrap();
+        assert!(out.contains("other=1"));
+        assert!(out.contains("q=&q=XSS"));
+    }
+
+    #[test]
+    fn test_hpp_preserves_fragment() {
+        let base = make_url("https://example.com/path?q=safe#frag");
+        let param = Param {
+            name: "q".into(),
+            value: "safe".into(),
+            location: Location::Query,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            form_action_url: None,
+            form_origin_url: None,
+        };
+        let out = build_hpp_url(&base, &param, "PAY", HppPosition::Last).unwrap();
+        assert!(out.ends_with("#frag"));
+    }
+
+    #[test]
+    fn test_build_hpp_urls_returns_3_variants() {
+        let base = make_url("https://example.com/?q=safe");
+        let param = Param {
+            name: "q".into(),
+            value: "safe".into(),
+            location: Location::Query,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            form_action_url: None,
+            form_origin_url: None,
+        };
+        let variants = build_hpp_urls(&base, &param, "XSS");
+        assert_eq!(variants.len(), 3);
+        assert_eq!(variants[0].1, HppPosition::Last);
+        assert_eq!(variants[1].1, HppPosition::First);
+        assert_eq!(variants[2].1, HppPosition::Both);
     }
 }

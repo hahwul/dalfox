@@ -1,12 +1,14 @@
 pub mod mining;
 pub mod remote;
 pub mod xss_blind;
+pub mod xss_csp_bypass;
 pub mod xss_dom_clobbering;
 pub mod xss_event;
 pub mod xss_html;
 pub mod xss_javascript;
 pub use remote::*;
 pub use xss_blind::*;
+pub use xss_csp_bypass::*;
 pub use xss_dom_clobbering::*;
 pub use xss_event::*;
 pub use xss_html::*;

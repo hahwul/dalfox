@@ -18,6 +18,8 @@ pub struct Target {
     pub workers: usize,
     pub follow_redirects: bool,
     pub waf_info: Option<crate::waf::WafDetectionResult>,
+    pub csp_analysis: Option<crate::payload::xss_csp_bypass::CspAnalysis>,
+    pub tech_info: Option<crate::scanning::tech_detect::TechDetectionResult>,
 }
 
 impl Target {
@@ -80,6 +82,8 @@ pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
         workers: 10,
         follow_redirects: false,
         waf_info: None,
+        csp_analysis: None,
+        tech_info: None,
     })
 }
 
@@ -235,6 +239,8 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
         workers: 10,
         follow_redirects: false,
         waf_info: None,
+        csp_analysis: None,
+        tech_info: None,
     })
 }
 

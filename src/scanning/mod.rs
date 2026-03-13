@@ -5,6 +5,7 @@ pub mod check_reflection;
 pub mod light_verify;
 pub mod markers;
 pub mod result;
+pub mod tech_detect;
 pub mod url_inject;
 pub mod xss_blind;
 pub mod xss_common;
@@ -305,6 +306,20 @@ pub async fn run_scanning(
         None
     };
 
+    // Generate CSP bypass payloads if CSP was analyzed
+    let csp_bypass_payloads: Vec<String> = target
+        .csp_analysis
+        .as_ref()
+        .map(|analysis| crate::payload::xss_csp_bypass::get_csp_bypass_payloads(analysis))
+        .unwrap_or_default();
+
+    // Generate technology-specific payloads
+    let tech_payloads: Vec<String> = target
+        .tech_info
+        .as_ref()
+        .map(|techs| crate::scanning::tech_detect::get_tech_specific_payloads(techs))
+        .unwrap_or_default();
+
     // Precompute payload sets once per parameter to avoid repeated expansion work.
     let mut total_tasks = 0u64;
     let mut param_jobs: Vec<(Param, Vec<String>, Vec<String>)> =
@@ -317,6 +332,18 @@ pub async fn run_scanning(
             get_fallback_reflection_payloads(args.as_ref()).unwrap_or_else(|_| vec![])
         };
         let mut dom_payloads = get_dom_payloads(param, args.as_ref()).unwrap_or_else(|_| vec![]);
+
+        // Append CSP bypass payloads
+        if !csp_bypass_payloads.is_empty() {
+            reflection_payloads.extend(csp_bypass_payloads.clone());
+            dom_payloads.extend(csp_bypass_payloads.clone());
+        }
+
+        // Append technology-specific payloads
+        if !tech_payloads.is_empty() {
+            reflection_payloads.extend(tech_payloads.clone());
+            dom_payloads.extend(tech_payloads.clone());
+        }
 
         // Apply WAF bypass mutations and extra encoders if WAF was detected
         if let Some(ref strategy) = waf_strategy {
@@ -557,6 +584,13 @@ pub async fn run_scanning(
                 }
                 return;
             }
+
+            // Save a reference copy for HPP phase (only first 5 payloads)
+            let reflection_payloads_for_hpp: Vec<String> = if args_clone.hpp {
+                reflection_payloads.iter().take(5).cloned().collect()
+            } else {
+                vec![]
+            };
 
             // Sequential testing for this param
             for reflection_payload in reflection_payloads {
@@ -851,6 +885,77 @@ pub async fn run_scanning(
                     opb.lock().await.inc(1);
                 }
             }
+            // HPP (HTTP Parameter Pollution) phase: test duplicate-param URLs
+            // Only for query params when --hpp is enabled
+            if args_clone.hpp
+                && param_clone.location == crate::parameter_analysis::Location::Query
+            {
+                use crate::scanning::url_inject::{HppPosition, build_hpp_url};
+
+                // Use a small subset of reflection payloads to avoid request explosion
+                let hpp_payloads: Vec<String> = reflection_payloads_for_hpp.iter().take(5).cloned().collect();
+                let hpp_positions = [HppPosition::Last, HppPosition::First, HppPosition::Both];
+
+                'hpp_outer: for hpp_payload in &hpp_payloads {
+                    if let Some(lim) = args_clone.limit
+                        && findings_count_clone.load(Ordering::Relaxed) >= lim
+                    {
+                        break;
+                    }
+                    for &position in &hpp_positions {
+                        if let Some(hpp_url) = build_hpp_url(
+                            &target_clone.url,
+                            &param_clone,
+                            hpp_payload,
+                            position,
+                        ) {
+                            let (kind, response_text) =
+                                crate::scanning::check_reflection::check_reflection_with_hpp_url(
+                                    client,
+                                    &target_clone,
+                                    &param_clone,
+                                    hpp_payload,
+                                    &hpp_url,
+                                    &args_clone,
+                                )
+                                .await;
+
+                            if let Some(kind) = kind {
+                                let pos_label = match position {
+                                    HppPosition::Last => "last",
+                                    HppPosition::First => "first",
+                                    HppPosition::Both => "both",
+                                };
+                                let reflection_note = reflection_kind_note(kind);
+
+                                let mut result = crate::scanning::result::Result::new(
+                                    "R".to_string(),
+                                    "inHTML-HPP".to_string(),
+                                    target_clone.method.clone(),
+                                    hpp_url.clone(),
+                                    param_clone.name.clone(),
+                                    hpp_payload.clone(),
+                                    format!(
+                                        "HPP bypass: reflected XSS for param {} (position={}, {})",
+                                        param_clone.name, pos_label, reflection_note
+                                    ),
+                                    "CWE-79".to_string(),
+                                    "Medium".to_string(),
+                                    606,
+                                    format!(
+                                        "[R] HPP Bypass ({}): {}={} (position={})",
+                                        reflection_note, param_clone.name, hpp_payload, pos_label
+                                    ),
+                                );
+                                result.response = response_text;
+                                local_results.push(result);
+                                break 'hpp_outer; // One HPP finding per param is enough
+                            }
+                        }
+                    }
+                }
+            }
+
             if !local_results.is_empty() {
                 let added = local_results.len();
                 let mut guard = results_clone.lock().await;
@@ -907,6 +1012,8 @@ mod tests {
             method: "GET".to_string(),
             user_agent: None,
             cookie_from_raw: None,
+            include_url: vec![],
+            exclude_url: vec![],
             mining_dict_word: None,
             skip_mining: false,
             skip_mining_dict: false,
@@ -940,6 +1047,7 @@ mod tests {
             sxss_url: None,
             sxss_method: "GET".to_string(),
             skip_ast_analysis: false,
+            hpp: false,
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
             force_waf: None,
@@ -1113,6 +1221,8 @@ mod tests {
             method: "GET".to_string(),
             user_agent: None,
             cookie_from_raw: None,
+            include_url: vec![],
+            exclude_url: vec![],
             mining_dict_word: None,
             skip_mining: false,
             skip_mining_dict: false,
@@ -1146,6 +1256,7 @@ mod tests {
             sxss_url: None,
             sxss_method: "GET".to_string(),
             skip_ast_analysis: false,
+            hpp: false,
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
             force_waf: None,
@@ -1187,6 +1298,8 @@ mod tests {
             method: "POST".to_string(),
             user_agent: None,
             cookie_from_raw: None,
+            include_url: vec![],
+            exclude_url: vec![],
             mining_dict_word: None,
             skip_mining: false,
             skip_mining_dict: false,
@@ -1220,6 +1333,7 @@ mod tests {
             sxss_url: None,
             sxss_method: "GET".to_string(),
             skip_ast_analysis: false,
+            hpp: false,
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
             force_waf: None,
@@ -1271,6 +1385,8 @@ mod tests {
             method: "GET".to_string(),
             user_agent: None,
             cookie_from_raw: None,
+            include_url: vec![],
+            exclude_url: vec![],
             mining_dict_word: None,
             skip_mining: false,
             skip_mining_dict: false,
@@ -1304,6 +1420,7 @@ mod tests {
             sxss_url: None,
             sxss_method: "GET".to_string(),
             skip_ast_analysis: false,
+            hpp: false,
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
             force_waf: None,
@@ -1341,6 +1458,8 @@ mod tests {
             method: "GET".to_string(),
             user_agent: None,
             cookie_from_raw: None,
+            include_url: vec![],
+            exclude_url: vec![],
             mining_dict_word: None,
             skip_mining: false,
             skip_mining_dict: false,
@@ -1374,6 +1493,7 @@ mod tests {
             sxss_url: None,
             sxss_method: "GET".to_string(),
             skip_ast_analysis: false,
+            hpp: false,
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
             force_waf: None,

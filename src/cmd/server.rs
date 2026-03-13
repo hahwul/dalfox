@@ -359,6 +359,8 @@ async fn run_scan_job(
         method: opts.method.clone().unwrap_or_else(|| "GET".to_string()),
         user_agent: opts.user_agent.clone(),
         cookie_from_raw: None,
+        include_url: vec![],
+        exclude_url: vec![],
 
         skip_discovery: false,
         skip_reflection_header: false,
@@ -398,6 +400,7 @@ async fn run_scan_job(
         sxss_url: None,
         sxss_method: "GET".to_string(),
         skip_ast_analysis: false,
+        hpp: false,
         waf_bypass: "auto".to_string(),
         skip_waf_probe: false,
         force_waf: None,

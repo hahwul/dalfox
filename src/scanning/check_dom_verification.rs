@@ -288,9 +288,9 @@ pub async fn check_dom_verification_with_client(
         }
     };
 
-    // Send the injection request
+    // Send the injection request (with rate-limit retry)
     crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let inject_resp = inject_request.send().await;
+    let inject_resp = crate::utils::send_with_retry(inject_request, 3, 5000).await;
 
     if target.delay > 0 {
         sleep(Duration::from_millis(target.delay)).await;
@@ -441,6 +441,8 @@ mod tests {
             method: "GET".to_string(),
             user_agent: None,
             cookie_from_raw: None,
+            include_url: vec![],
+            exclude_url: vec![],
             mining_dict_word: None,
             skip_mining: false,
             skip_mining_dict: false,
@@ -474,6 +476,7 @@ mod tests {
             sxss_url: None,
             sxss_method: "GET".to_string(),
             skip_ast_analysis: false,
+            hpp: false,
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
             force_waf: None,

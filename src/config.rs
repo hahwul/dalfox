@@ -63,6 +63,9 @@ pub struct ScanConfig {
     pub method: Option<String>,
     pub user_agent: Option<String>,
     pub cookie_from_raw: Option<String>,
+    // SCOPE
+    pub include_url: Option<Vec<String>>,
+    pub exclude_url: Option<Vec<String>>,
     // PARAMETER DISCOVERY
     pub skip_discovery: Option<bool>,
     pub skip_reflection_header: Option<bool>,
@@ -97,6 +100,8 @@ pub struct ScanConfig {
     pub sxss_url: Option<String>,
     pub sxss_method: Option<String>,
     pub skip_ast_analysis: Option<bool>,
+    // HPP
+    pub hpp: Option<bool>,
     // WAF
     pub waf_bypass: Option<String>,
     pub skip_waf_probe: Option<bool>,
@@ -158,6 +163,13 @@ impl Config {
             }
             if let Some(v) = &scan.cookie_from_raw {
                 args.cookie_from_raw = Some(v.clone());
+            }
+            // SCOPE
+            if let Some(v) = &scan.include_url {
+                args.include_url = v.clone();
+            }
+            if let Some(v) = &scan.exclude_url {
+                args.exclude_url = v.clone();
             }
             // PARAMETER DISCOVERY
             if let Some(v) = scan.skip_discovery {
@@ -584,6 +596,11 @@ impl Config {
             {
                 args.skip_ast_analysis = v;
             }
+            if let Some(v) = scan.hpp
+                && !args.hpp
+            {
+                args.hpp = v;
+            }
             // WAF
             if let Some(v) = &scan.waf_bypass {
                 args.waf_bypass = v.clone();
@@ -789,6 +806,8 @@ mod tests {
             method: "GET".to_string(),
             user_agent: None,
             cookie_from_raw: None,
+            include_url: vec![],
+            exclude_url: vec![],
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
@@ -821,6 +840,7 @@ mod tests {
             sxss_url: None,
             sxss_method: "GET".to_string(),
             skip_ast_analysis: false,
+            hpp: false,
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
             force_waf: None,
@@ -845,6 +865,8 @@ mod tests {
             method: Some("POST".to_string()),
             user_agent: Some("DalfoxTest/1.0".to_string()),
             cookie_from_raw: Some("request.txt".to_string()),
+            include_url: Some(vec![]),
+            exclude_url: Some(vec![]),
             skip_discovery: Some(true),
             skip_reflection_header: Some(true),
             skip_reflection_cookie: Some(true),
@@ -874,6 +896,7 @@ mod tests {
             sxss_url: Some("https://example.com/sxss".to_string()),
             sxss_method: Some("POST".to_string()),
             skip_ast_analysis: Some(true),
+            hpp: Some(false),
             waf_bypass: Some("auto".to_string()),
             skip_waf_probe: Some(false),
             force_waf: None,

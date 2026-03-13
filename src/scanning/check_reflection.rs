@@ -514,8 +514,8 @@ async fn fetch_injection_response_with_client(
         }
     };
 
-    // Send the injection request
-    let inject_resp = inject_request.send().await;
+    // Send the injection request (with rate-limit retry)
+    let inject_resp = crate::utils::send_with_retry(inject_request, 3, 5000).await;
     crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
 
     if target.delay > 0 {
@@ -621,6 +621,63 @@ pub async fn check_reflection_with_response_client(
     }
 }
 
+/// HPP reflection check: send a request using a pre-built HPP URL (with duplicate params)
+/// and check if the payload is reflected in the response.
+pub async fn check_reflection_with_hpp_url(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    payload: &str,
+    hpp_url: &str,
+    args: &crate::cmd::scan::ScanArgs,
+) -> (Option<ReflectionKind>, Option<String>) {
+    if args.skip_xss_scanning {
+        return (None, None);
+    }
+
+    let encoded_payload = apply_pre_encoding(payload, &param.pre_encoding);
+    let payload_str = encoded_payload.as_str();
+
+    let parsed_url = url::Url::parse(hpp_url).unwrap_or_else(|_| target.url.clone());
+    let default_method = target.parse_method();
+    let inject_request = crate::utils::build_request(
+        client,
+        target,
+        default_method,
+        parsed_url,
+        target.data.clone(),
+    );
+
+    let inject_resp = crate::utils::send_with_retry(inject_request, 3, 5000).await;
+    crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+
+    if target.delay > 0 {
+        tokio::time::sleep(Duration::from_millis(target.delay)).await;
+    }
+
+    if let Ok(resp) = inject_resp {
+        if resp.status().is_redirection()
+            && let Some(location) = resp.headers().get("location").and_then(|v| v.to_str().ok())
+            && location.contains(payload_str)
+        {
+            let kind = classify_reflection(location, payload_str);
+            return (kind, Some(location.to_string()));
+        }
+        if let Ok(text) = resp.text().await {
+            let kind = classify_reflection(&text, payload_str);
+            let kind = match kind {
+                Some(_) if is_in_safe_context_decoded(&text, payload_str) => None,
+                other => other,
+            };
+            (kind, Some(text))
+        } else {
+            (None, None)
+        }
+    } else {
+        (None, None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -669,6 +726,8 @@ mod tests {
             method: "GET".to_string(),
             user_agent: None,
             cookie_from_raw: None,
+            include_url: vec![],
+            exclude_url: vec![],
             mining_dict_word: None,
             skip_mining: false,
             skip_mining_dict: false,
@@ -702,6 +761,7 @@ mod tests {
             sxss_url: None,
             sxss_method: "GET".to_string(),
             skip_ast_analysis: false,
+            hpp: false,
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
             force_waf: None,

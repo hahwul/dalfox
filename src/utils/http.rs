@@ -284,6 +284,61 @@ pub fn build_preflight_request(
     rb
 }
 
+/// Send a request with automatic retry on rate-limiting (HTTP 429) responses.
+///
+/// Respects the `Retry-After` header if present (capped at `max_retry_delay_ms`).
+/// Falls back to exponential backoff: 1s, 2s, 4s.
+/// Returns the response after successful send or after exhausting retries.
+pub async fn send_with_retry(
+    request_builder: RequestBuilder,
+    max_retries: u32,
+    max_retry_delay_ms: u64,
+) -> Result<reqwest::Response, reqwest::Error> {
+    // reqwest::RequestBuilder is not Clone, so we must try_clone before sending.
+    // If cloning fails, just send once without retry capability.
+    let mut attempts = 0u32;
+    let mut current_rb = request_builder;
+
+    loop {
+        let next_rb = current_rb.try_clone();
+        let resp = current_rb.send().await?;
+
+        if resp.status().as_u16() != 429 || attempts >= max_retries {
+            return Ok(resp);
+        }
+
+        // Parse Retry-After header (seconds)
+        let wait_ms = resp
+            .headers()
+            .get("retry-after")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<u64>().ok())
+            .map(|secs| (secs * 1000).min(max_retry_delay_ms))
+            .unwrap_or_else(|| {
+                // Exponential backoff: 1s, 2s, 4s
+                (1000 * (1u64 << attempts.min(3))).min(max_retry_delay_ms)
+            });
+
+        let Some(rb) = next_rb else {
+            // Cannot retry (request body was streamed), return the 429
+            return Ok(resp);
+        };
+
+        if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+            eprintln!(
+                "[rate-limit] HTTP 429 received, retry {}/{} after {}ms",
+                attempts + 1,
+                max_retries,
+                wait_ms
+            );
+        }
+
+        tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
+        current_rb = rb;
+        attempts += 1;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

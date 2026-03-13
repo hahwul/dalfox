@@ -256,6 +256,8 @@ mod tests {
             method: DEFAULT_METHOD.to_string(),
             user_agent: None,
             cookie_from_raw: None,
+            include_url: vec![],
+            exclude_url: vec![],
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
@@ -285,6 +287,7 @@ mod tests {
             sxss_url: None,
             sxss_method: "GET".to_string(),
             skip_ast_analysis: false,
+            hpp: false,
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
             force_waf: None,
@@ -713,12 +716,13 @@ mod tests {
     }
 }
 
-/// Preflight result containing content-type, CSP, body, and WAF info.
+/// Preflight result containing content-type, CSP, body, WAF, and tech detection info.
 struct PreflightResult {
     content_type: String,
     csp_header: Option<(String, String)>,
     response_body: Option<String>,
     waf_result: crate::waf::WafDetectionResult,
+    tech_result: crate::scanning::tech_detect::TechDetectionResult,
 }
 
 async fn preflight_content_type(
@@ -758,6 +762,9 @@ async fn preflight_content_type(
                 })
         });
 
+    // Technology detection accumulator
+    let mut tech_result = crate::scanning::tech_detect::TechDetectionResult::default();
+
     // WAF detection from HEAD response headers (zero extra requests)
     let mut waf_result = if args.waf_bypass != "off" {
         crate::waf::fingerprint_from_response(&head_headers, None, head_status)
@@ -780,6 +787,9 @@ async fn preflight_content_type(
                 let body_waf = crate::waf::fingerprint_from_response(&get_headers, Some(&body), get_status);
                 crate::waf::merge_results(&mut waf_result, body_waf);
             }
+
+            // Technology/framework detection from GET response
+            tech_result = crate::scanning::tech_detect::detect_technologies(&get_headers, Some(&body));
 
             // Only parse CSP if not already found
             if csp_header.is_none() {
@@ -834,6 +844,7 @@ async fn preflight_content_type(
         csp_header,
         response_body,
         waf_result,
+        tech_result,
     })
 }
 
@@ -933,6 +944,16 @@ pub struct ScanArgs {
     /// Load cookies from a raw HTTP request file. Example: --cookie-from-raw 'request.txt'
     #[arg(long)]
     pub cookie_from_raw: Option<String>,
+
+    #[clap(help_heading = "SCOPE")]
+    /// Include only URLs matching these patterns (regex, can be specified multiple times)
+    #[arg(long)]
+    pub include_url: Vec<String>,
+
+    #[clap(help_heading = "SCOPE")]
+    /// Exclude URLs matching these patterns (regex, can be specified multiple times)
+    #[arg(long)]
+    pub exclude_url: Vec<String>,
 
     #[clap(help_heading = "PARAMETER DISCOVERY")]
     /// Skip all discovery checks
@@ -1080,6 +1101,11 @@ pub struct ScanArgs {
     /// Skip AST-based DOM XSS detection (analyzes JavaScript in responses)
     #[arg(long)]
     pub skip_ast_analysis: bool,
+
+    #[clap(help_heading = "XSS SCANNING")]
+    /// Enable HTTP Parameter Pollution (HPP) — duplicate query params to bypass WAF
+    #[arg(long)]
+    pub hpp: bool,
 
     #[clap(help_heading = "WAF")]
     /// WAF bypass mode: auto (detect+bypass), force (use --force-waf), off (disable). Default: auto
@@ -1412,6 +1438,52 @@ pub async fn run_scan(args: &ScanArgs) {
         });
     }
 
+    // Apply URL scope filtering (--include-url / --exclude-url)
+    {
+        let include_patterns: Vec<regex::Regex> = args.include_url.iter()
+            .filter_map(|p| match regex::Regex::new(p) {
+                Ok(r) => Some(r),
+                Err(e) => {
+                    if !args.silence { eprintln!("Warning: invalid --include-url pattern '{}': {}", p, e); }
+                    None
+                }
+            })
+            .collect();
+        let exclude_patterns: Vec<regex::Regex> = args.exclude_url.iter()
+            .filter_map(|p| match regex::Regex::new(p) {
+                Ok(r) => Some(r),
+                Err(e) => {
+                    if !args.silence { eprintln!("Warning: invalid --exclude-url pattern '{}': {}", p, e); }
+                    None
+                }
+            })
+            .collect();
+
+        if !include_patterns.is_empty() || !exclude_patterns.is_empty() {
+            let before = parsed_targets.len();
+            parsed_targets.retain(|t| {
+                let url_str = t.url.as_str();
+                // If include patterns are set, URL must match at least one
+                if !include_patterns.is_empty() && !include_patterns.iter().any(|r| r.is_match(url_str)) {
+                    return false;
+                }
+                // If exclude patterns are set, URL must not match any
+                if exclude_patterns.iter().any(|r| r.is_match(url_str)) {
+                    return false;
+                }
+                true
+            });
+            let filtered = before - parsed_targets.len();
+            if filtered > 0 {
+                log_info(&format!("scope filter: {} target(s) excluded", filtered));
+            }
+        }
+    }
+
+    if args.hpp {
+        log_info("HPP (HTTP Parameter Pollution) enabled — duplicate query params will be tested for WAF bypass");
+    }
+
     if parsed_targets.is_empty() {
         if !args.silence {
             eprintln!("Error: No targets specified");
@@ -1593,11 +1665,17 @@ pub async fn run_scan(args: &ScanArgs) {
                         preflight_response_body = preflight.response_body;
                         if let Some((hn, hv)) = preflight.csp_header {
                             __preflight_csp_present = true;
+                            // Analyze CSP and store on target for bypass payload generation
+                            target.csp_analysis = Some(crate::payload::xss_csp_bypass::analyze_csp(&hv));
                             __preflight_csp_header = Some((hn, hv));
                         }
                         // Store WAF detection result on target
                         if !preflight.waf_result.is_empty() {
                             target.waf_info = Some(preflight.waf_result);
+                        }
+                        // Store technology detection result on target
+                        if !preflight.tech_result.is_empty() {
+                            target.tech_info = Some(preflight.tech_result);
                         }
                         if !is_allowed_content_type(&preflight.content_type) {
                             // Skip this target early
@@ -1652,6 +1730,16 @@ pub async fn run_scan(args: &ScanArgs) {
                                         strategy.mutations.len()
                                     );
                                 }
+                            }
+                        }
+                        // Log detected technologies
+                        if let Some(ref tech_info) = target.tech_info {
+                            let tech_names: Vec<String> = tech_info.detected.iter().map(|d| format!("{}", d.tech)).collect();
+                            if !tech_names.is_empty() {
+                                println!(
+                                    "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m tech: {}",
+                                    ts, tech_names.join(", ")
+                                );
                             }
                         }
                     }
