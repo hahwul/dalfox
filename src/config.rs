@@ -52,6 +52,7 @@ pub struct ScanConfig {
     pub output: Option<String>,
     pub include_request: Option<bool>,
     pub include_response: Option<bool>,
+    pub include_all: Option<bool>,
     pub silence: Option<bool>,
     pub poc_type: Option<String>,
     pub limit: Option<usize>,
@@ -132,6 +133,9 @@ impl Config {
             }
             if let Some(v) = scan.include_response {
                 args.include_response = v;
+            }
+            if let Some(v) = scan.include_all {
+                args.include_all = v;
             }
             if let Some(v) = scan.silence {
                 args.silence = v;
@@ -377,6 +381,11 @@ impl Config {
                 && !args.include_response
             {
                 args.include_response = v;
+            }
+            if let Some(v) = scan.include_all
+                && !args.include_all
+            {
+                args.include_all = v;
             }
             if let Some(v) = scan.silence
                 && !args.silence
@@ -722,6 +731,7 @@ pub fn default_toml_template() -> String {
 # output = "output.txt"
 # include_request = false
 # include_response = false
+# include_all = false          # shorthand for include_request + include_response
 # silence = false
 # debug = false              # enable debug logging (DBG lines)
 # poc_type = "plain"         # plain, curl, httpie, http-request
@@ -796,6 +806,7 @@ mod tests {
             output: None,
             include_request: false,
             include_response: false,
+            include_all: false,
             silence: false,
             poc_type: "plain".to_string(),
             limit: None,
@@ -855,6 +866,7 @@ mod tests {
             output: Some("result.jsonl".to_string()),
             include_request: Some(true),
             include_response: Some(true),
+            include_all: Some(false),
             silence: Some(true),
             poc_type: Some("curl".to_string()),
             limit: Some(42),

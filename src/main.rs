@@ -165,6 +165,10 @@ async fn main() {
                 if let Ok(res) = &config_load {
                     res.config.apply_to_scan_args_if_default(&mut args);
                 }
+                if args.include_all {
+                    args.include_request = true;
+                    args.include_response = true;
+                }
                 cmd::scan::run_scan(&args).await
             }
             Commands::Server(args) => cmd::server::run_server(args).await,
@@ -210,6 +214,7 @@ async fn main() {
             output: None,
             include_request: false,
             include_response: false,
+            include_all: false,
             silence: false,
             poc_type: "plain".to_string(),
             limit: None,
@@ -241,6 +246,10 @@ async fn main() {
         };
         if let Ok(res) = &config_load {
             res.config.apply_to_scan_args_if_default(&mut args);
+        }
+        if args.include_all {
+            args.include_request = true;
+            args.include_response = true;
         }
 
         utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);

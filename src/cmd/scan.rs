@@ -246,6 +246,7 @@ mod tests {
             output: None,
             include_request: false,
             include_response: false,
+            include_all: false,
             silence: true,
             poc_type: "plain".to_string(),
             limit: None,
@@ -894,6 +895,11 @@ pub struct ScanArgs {
     /// Include HTTP response information in output
     #[arg(long)]
     pub include_response: bool,
+
+    #[clap(help_heading = "OUTPUT")]
+    /// Include both HTTP request and response information in output (equivalent to --include-request --include-response)
+    #[arg(long)]
+    pub include_all: bool,
 
     #[clap(help_heading = "OUTPUT")]
     /// Silence all logs except POC output to STDOUT

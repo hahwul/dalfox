@@ -743,6 +743,7 @@ mod tests {
             output: None,
             include_request: false,
             include_response: false,
+            include_all: false,
             silence: true,
             poc_type: "plain".to_string(),
             limit: None,

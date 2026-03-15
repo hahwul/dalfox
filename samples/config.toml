@@ -20,6 +20,8 @@ format = "plain"
 # Include HTTP request/response content in output (JSON/plain detail sections)
 include_request = false
 include_response = false
+# Shorthand: enable both include_request and include_response
+include_all = false
 # Silence logs except POC output (plain mode)
 silence = false
 # POC output: plain|curl|httpie|http-request
