@@ -1195,24 +1195,25 @@ pub struct ScanArgs {
 }
 
 /// Check if a domain matches an out-of-scope pattern.
-/// Supports simple wildcard: `*.example.com` matches `sub.example.com`.
+/// Supports simple wildcard: `*.example.com` matches `sub.example.com` but not `notexample.com`.
 fn domain_matches_pattern(host: &str, pattern: &str) -> bool {
     let host_lower = host.to_lowercase();
     let pattern_lower = pattern.to_lowercase();
-    if pattern_lower.starts_with("*.") {
-        let suffix = &pattern_lower[1..];
-        host_lower.ends_with(suffix) && host_lower.len() > suffix.len()
+    if let Some(base) = pattern_lower.strip_prefix("*.") {
+        // Match exact subdomain boundary: host must end with ".base" or equal "base"
+        host_lower == base
+            || host_lower.ends_with(&format!(".{}", base))
     } else {
         host_lower == pattern_lower
     }
 }
 
 pub async fn run_scan(args: &ScanArgs) {
-    // Apply no-color setting (flag or NO_COLOR env var)
-    if args.no_color || std::env::var("NO_COLOR").is_ok() {
+    // Compute no-color locally (safe for concurrent server-mode scans)
+    let nc = args.no_color || std::env::var("NO_COLOR").is_ok();
+    if nc {
         crate::NO_COLOR.store(true, Ordering::Relaxed);
     }
-    let nc = crate::NO_COLOR.load(Ordering::Relaxed);
 
     // Show banner at the start when using plain format and not silenced
     if args.format == "plain" && !args.silence {
@@ -2189,13 +2190,15 @@ pub async fn run_scan(args: &ScanArgs) {
         for (_host, group) in &host_groups {
             for target in group {
                 for p in &target.reflection_params {
-                    if args.format == "plain" {
+                    if args.format == "json" || args.format == "jsonl" {
+                        let entry = serde_json::json!({
+                            "url": target.url.as_str(),
+                            "param": p.name,
+                            "location": format!("{:?}", p.location),
+                        });
+                        println!("{}", serde_json::to_string(&entry).unwrap_or_default());
+                    } else {
                         println!("[{}] {} ({:?})", target.url, p.name, p.location);
-                    } else if args.format == "json" || args.format == "jsonl" {
-                        println!(
-                            "{{\"url\":\"{}\",\"param\":\"{}\",\"location\":\"{:?}\"}}",
-                            target.url, p.name, p.location
-                        );
                     }
                 }
             }

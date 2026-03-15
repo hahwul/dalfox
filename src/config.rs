@@ -454,6 +454,11 @@ impl Config {
             {
                 args.only_poc = v.clone();
             }
+            if let Some(v) = scan.no_color
+                && !args.no_color
+            {
+                args.no_color = v;
+            }
             // Map debug conservatively: only set when CLI didn't enable it (global false)
             if let Some(v) = scan.debug
                 && !crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed)
@@ -504,7 +509,29 @@ impl Config {
                 args.cookie_from_raw = Some(v.clone());
             }
 
+            // SCOPE (if_default)
+            if let Some(v) = &scan.ignore_param
+                && args.ignore_param.is_empty()
+            {
+                args.ignore_param = v.clone();
+            }
+            if let Some(v) = &scan.out_of_scope
+                && args.out_of_scope.is_empty()
+            {
+                args.out_of_scope = v.clone();
+            }
+            if let Some(v) = &scan.out_of_scope_file
+                && args.out_of_scope_file.is_none()
+            {
+                args.out_of_scope_file = Some(v.clone());
+            }
+
             // PARAMETER DISCOVERY
+            if let Some(v) = scan.only_discovery
+                && !args.only_discovery
+            {
+                args.only_discovery = v;
+            }
             if let Some(v) = scan.skip_discovery
                 && !args.skip_discovery
             {
@@ -631,6 +658,16 @@ impl Config {
                 && args.inject_marker.is_none()
             {
                 args.inject_marker = Some(v.clone());
+            }
+            if let Some(v) = &scan.custom_alert_value
+                && args.custom_alert_value == "1"
+            {
+                args.custom_alert_value = v.clone();
+            }
+            if let Some(v) = &scan.custom_alert_type
+                && args.custom_alert_type == "none"
+            {
+                args.custom_alert_type = v.clone();
             }
             if let Some(v) = scan.skip_xss_scanning
                 && !args.skip_xss_scanning

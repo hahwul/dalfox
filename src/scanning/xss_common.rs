@@ -354,6 +354,13 @@ pub fn get_dynamic_payloads(
                     .replace("alert`1`", &format!("alert`{}`", val))
                     .replace("prompt`1`", &format!("prompt`{}`", val))
                     .replace("confirm`1`", &format!("confirm`{}`", val))
+                    // Comma operator / indirect call patterns: (0,alert)(1)
+                    .replace(",alert)(1)", &format!(",alert)({})", val))
+                    .replace(",confirm)(1)", &format!(",confirm)({})", val))
+                    // Optional chaining: alert?.(1)
+                    .replace("alert?.(1)", &format!("alert?.({})", val))
+                    // Reflect.apply(alert,null,[1])
+                    .replace("alert,null,[1])", &format!("alert,null,[{}])", val))
             })
             .collect()
     } else {
