@@ -1,13 +1,13 @@
-/// CSP bypass payloads generated based on Content-Security-Policy analysis.
-///
-/// These payloads exploit specific weaknesses in CSP configurations:
-/// - `unsafe-inline`: Direct inline script execution
-/// - `unsafe-eval`: eval()-based execution
-/// - Missing `base-uri`: `<base>` tag injection to redirect relative URLs
-/// - Missing `object-src`: Plugin-based execution
-/// - Whitelisted CDN domains: JSONP/Angular/etc. gadgets on allowed origins
-/// - `data:` scheme allowed in script-src
-/// - `strict-dynamic` with nonce/hash: Script gadget injection
+//! CSP bypass payloads generated based on Content-Security-Policy analysis.
+//!
+//! These payloads exploit specific weaknesses in CSP configurations:
+//! - `unsafe-inline`: Direct inline script execution
+//! - `unsafe-eval`: eval()-based execution
+//! - Missing `base-uri`: `<base>` tag injection to redirect relative URLs
+//! - Missing `object-src`: Plugin-based execution
+//! - Whitelisted CDN domains: JSONP/Angular/etc. gadgets on allowed origins
+//! - `data:` scheme allowed in script-src
+//! - `strict-dynamic` with nonce/hash: Script gadget injection
 
 use crate::scanning::markers;
 

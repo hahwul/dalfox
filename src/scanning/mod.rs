@@ -310,14 +310,14 @@ pub async fn run_scanning(
     let csp_bypass_payloads: Vec<String> = target
         .csp_analysis
         .as_ref()
-        .map(|analysis| crate::payload::xss_csp_bypass::get_csp_bypass_payloads(analysis))
+        .map(crate::payload::xss_csp_bypass::get_csp_bypass_payloads)
         .unwrap_or_default();
 
     // Generate technology-specific payloads
     let tech_payloads: Vec<String> = target
         .tech_info
         .as_ref()
-        .map(|techs| crate::scanning::tech_detect::get_tech_specific_payloads(techs))
+        .map(crate::scanning::tech_detect::get_tech_specific_payloads)
         .unwrap_or_default();
 
     // Precompute payload sets once per parameter to avoid repeated expansion work.

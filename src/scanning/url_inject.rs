@@ -204,10 +204,8 @@ pub fn build_injected_url(base: &url::Url, param: &Param, injected: &str) -> Str
             // Rebuild the fragment with injected value
             let mut new_frag = String::with_capacity(frag.len() + injected.len() + 16);
             new_frag.push_str(route_prefix);
-            if !route_prefix.is_empty() || !pairs.is_empty() {
-                if !route_prefix.is_empty() {
-                    new_frag.push('?');
-                }
+            if !route_prefix.is_empty() {
+                new_frag.push('?');
             }
 
             let mut found = false;

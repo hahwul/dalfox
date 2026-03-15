@@ -1,12 +1,12 @@
-/// Technology/framework detection from HTTP response headers and body.
-///
-/// Detects frontend frameworks and libraries to enable targeted XSS payloads:
-/// - Angular → template injection payloads
-/// - React → dangerouslySetInnerHTML vectors
-/// - Vue.js → v-html/template injection
-/// - jQuery → $.globalEval, $.html vectors
-/// - Handlebars/Mustache → template injection
-/// - Svelte/Ember → framework-specific vectors
+//! Technology/framework detection from HTTP response headers and body.
+//!
+//! Detects frontend frameworks and libraries to enable targeted XSS payloads:
+//! - Angular → template injection payloads
+//! - React → dangerouslySetInnerHTML vectors
+//! - Vue.js → v-html/template injection
+//! - jQuery → $.globalEval, $.html vectors
+//! - Handlebars/Mustache → template injection
+//! - Svelte/Ember → framework-specific vectors
 
 use reqwest::header::HeaderMap;
 use serde::{Deserialize, Serialize};

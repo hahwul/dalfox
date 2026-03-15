@@ -261,11 +261,9 @@ impl DalfoxMcp {
         let param_filters: Vec<String> = args
             .get("param")
             .and_then(|v| {
-                if v.is_array() {
+                if let Some(arr) = v.as_array() {
                     Some(
-                        v.as_array()
-                            .unwrap()
-                            .iter()
+                        arr.iter()
                             .filter_map(|x| x.as_str().map(|s| s.to_string()))
                             .collect::<Vec<_>>(),
                     )
@@ -285,11 +283,9 @@ impl DalfoxMcp {
         let headers_list: Vec<String> = args
             .get("headers")
             .and_then(|v| {
-                if v.is_array() {
+                if let Some(arr) = v.as_array() {
                     Some(
-                        v.as_array()
-                            .unwrap()
-                            .iter()
+                        arr.iter()
                             .filter_map(|x| x.as_str().map(|s| s.to_string()))
                             .collect::<Vec<_>>(),
                     )
@@ -304,11 +300,9 @@ impl DalfoxMcp {
         let cookies_list: Vec<String> = args
             .get("cookies")
             .and_then(|v| {
-                if v.is_array() {
+                if let Some(arr) = v.as_array() {
                     Some(
-                        v.as_array()
-                            .unwrap()
-                            .iter()
+                        arr.iter()
                             .filter_map(|x| x.as_str().map(|s| s.to_string()))
                             .collect::<Vec<_>>(),
                     )
@@ -357,11 +351,9 @@ impl DalfoxMcp {
         let encoders: Vec<String> = args
             .get("encoders")
             .and_then(|v| {
-                if v.is_array() {
+                if let Some(arr) = v.as_array() {
                     Some(
-                        v.as_array()
-                            .unwrap()
-                            .iter()
+                        arr.iter()
                             .filter_map(|x| x.as_str().map(|s| s.to_string()))
                             .collect::<Vec<_>>(),
                     )

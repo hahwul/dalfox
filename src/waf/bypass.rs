@@ -27,7 +27,7 @@ pub enum MutationType {
 }
 
 /// A bypass strategy composed of extra encoders and payload mutations.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct BypassStrategy {
     /// Extra encoder names to add beyond user-specified ones.
     pub extra_encoders: Vec<String>,
@@ -35,16 +35,6 @@ pub struct BypassStrategy {
     pub mutations: Vec<MutationType>,
     /// Extra delay (ms) hint to avoid rate-limiting WAFs.
     pub extra_delay_hint_ms: u64,
-}
-
-impl Default for BypassStrategy {
-    fn default() -> Self {
-        Self {
-            extra_encoders: vec![],
-            mutations: vec![],
-            extra_delay_hint_ms: 0,
-        }
-    }
 }
 
 /// Get the optimal bypass strategy for a specific WAF type.
@@ -460,7 +450,7 @@ fn case_alternate(payload: &str) -> String {
             in_tag = false;
             result.push(c);
         } else if in_tag && c.is_ascii_alphabetic() {
-            if tag_char_idx % 2 == 0 {
+            if tag_char_idx.is_multiple_of(2) {
                 result.push(c.to_ascii_uppercase());
             } else {
                 result.push(c.to_ascii_lowercase());

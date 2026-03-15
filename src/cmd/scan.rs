@@ -1936,31 +1936,13 @@ pub async fn run_scan(args: &ScanArgs) {
                         if let Ok(json_val) = serde_json::from_str::<serde_json::Value>(data) {
                             if let Some(obj) = json_val.as_object() {
                                 for (k, v) in obj {
-                                    if let Some(s) = v.as_str() {
-                                        if s.contains(marker.as_str()) {
-                                            marker_params.push(Param {
-                                                name: k.clone(),
-                                                value: s.to_string(),
-                                                location: Location::JsonBody,
-                                                injection_context: None,
-                                                valid_specials: None,
-                                                invalid_specials: None,
-                                                pre_encoding: None,
-                                                form_action_url: None,
-                                                form_origin_url: None,
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                        } else {
-                            for pair in data.split('&') {
-                                if let Some((k, v)) = pair.split_once('=') {
-                                    if v.contains(marker.as_str()) {
+                                    if let Some(s) = v.as_str()
+                                        && s.contains(marker.as_str())
+                                    {
                                         marker_params.push(Param {
-                                            name: k.to_string(),
-                                            value: v.to_string(),
-                                            location: Location::Body,
+                                            name: k.clone(),
+                                            value: s.to_string(),
+                                            location: Location::JsonBody,
                                             injection_context: None,
                                             valid_specials: None,
                                             invalid_specials: None,
@@ -1969,6 +1951,24 @@ pub async fn run_scan(args: &ScanArgs) {
                                             form_origin_url: None,
                                         });
                                     }
+                                }
+                            }
+                        } else {
+                            for pair in data.split('&') {
+                                if let Some((k, v)) = pair.split_once('=')
+                                    && v.contains(marker.as_str())
+                                {
+                                    marker_params.push(Param {
+                                        name: k.to_string(),
+                                        value: v.to_string(),
+                                        location: Location::Body,
+                                        injection_context: None,
+                                        valid_specials: None,
+                                        invalid_specials: None,
+                                        pre_encoding: None,
+                                        form_action_url: None,
+                                        form_origin_url: None,
+                                    });
                                 }
                             }
                         }
@@ -2187,7 +2187,7 @@ pub async fn run_scan(args: &ScanArgs) {
 
     // --only-discovery: print discovered params and exit early
     if args.only_discovery {
-        for (_host, group) in &host_groups {
+        for group in host_groups.values() {
             for target in group {
                 for p in &target.reflection_params {
                     if args.format == "json" || args.format == "jsonl" {
