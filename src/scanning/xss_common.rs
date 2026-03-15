@@ -338,6 +338,28 @@ pub fn get_dynamic_payloads(
         base_payloads.extend(remotes.iter().cloned());
     }
 
+    // Apply custom alert value substitution (--custom-alert-value / --custom-alert-type)
+    let base_payloads = if args.custom_alert_value != "1" || args.custom_alert_type == "str" {
+        let val = if args.custom_alert_type == "str" {
+            format!("'{}'", args.custom_alert_value)
+        } else {
+            args.custom_alert_value.clone()
+        };
+        base_payloads
+            .into_iter()
+            .map(|p| {
+                p.replace("alert(1)", &format!("alert({})", val))
+                    .replace("confirm(1)", &format!("confirm({})", val))
+                    .replace("prompt(1)", &format!("prompt({})", val))
+                    .replace("alert`1`", &format!("alert`{}`", val))
+                    .replace("prompt`1`", &format!("prompt`{}`", val))
+                    .replace("confirm`1`", &format!("confirm`{}`", val))
+            })
+            .collect()
+    } else {
+        base_payloads
+    };
+
     // Expand with shared encoder policy helper; handles "none" and deduplication
     let payloads = crate::encoding::apply_encoders_to_payloads(&base_payloads, &args.encoders);
 
@@ -539,6 +561,8 @@ mod tests {
             custom_payload: None,
             only_custom_payload: false,
             inject_marker: None,
+            custom_alert_value: "1".to_string(),
+            custom_alert_type: "none".to_string(),
             skip_xss_scanning: false,
             deep_scan: false,
             sxss: false,
@@ -626,6 +650,8 @@ mod tests {
             custom_payload: Some("test_payloads.txt".to_string()),
             only_custom_payload: true,
             inject_marker: None,
+            custom_alert_value: "1".to_string(),
+            custom_alert_type: "none".to_string(),
             skip_xss_scanning: false,
             deep_scan: false,
             sxss: false,
@@ -698,6 +724,8 @@ mod tests {
             custom_payload: None,
             only_custom_payload: false,
             inject_marker: None,
+            custom_alert_value: "1".to_string(),
+            custom_alert_type: "none".to_string(),
             skip_xss_scanning: false,
             deep_scan: false,
             sxss: false,

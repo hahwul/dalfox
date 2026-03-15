@@ -401,6 +401,8 @@ async fn run_scan_job(
         custom_payload: None,
         only_custom_payload: false,
         inject_marker: None,
+        custom_alert_value: "1".to_string(),
+        custom_alert_type: "none".to_string(),
 
         skip_xss_scanning: false,
         deep_scan: false,

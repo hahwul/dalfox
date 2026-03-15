@@ -289,6 +289,8 @@ mod tests {
             custom_payload: None,
             only_custom_payload: false,
             inject_marker: None,
+            custom_alert_value: "1".to_string(),
+            custom_alert_type: "none".to_string(),
             skip_xss_scanning: false,
             deep_scan: false,
             sxss: false,
@@ -1113,6 +1115,16 @@ pub struct ScanArgs {
     /// Only test custom payloads. Example: --only-custom-payload --custom-payload=p.txt
     #[arg(long)]
     pub only_custom_payload: bool,
+
+    #[clap(help_heading = "XSS SCANNING")]
+    /// Custom value for alert/prompt/confirm in payloads. Default: "1". Example: --custom-alert-value 'document.domain'
+    #[arg(long, default_value = "1")]
+    pub custom_alert_value: String,
+
+    #[clap(help_heading = "XSS SCANNING")]
+    /// Custom alert function type. Options: none (keep original), str (wrap value in quotes). Default: "none"
+    #[arg(long, default_value = "none")]
+    pub custom_alert_type: String,
 
     #[clap(help_heading = "XSS SCANNING")]
     /// Custom injection point marker. Replace this string with payloads in URL/headers/body.

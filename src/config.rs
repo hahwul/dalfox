@@ -102,6 +102,8 @@ pub struct ScanConfig {
     pub custom_payload: Option<String>,
     pub only_custom_payload: Option<bool>,
     pub inject_marker: Option<String>,
+    pub custom_alert_value: Option<String>,
+    pub custom_alert_type: Option<String>,
     pub skip_xss_scanning: Option<bool>,
     pub deep_scan: Option<bool>,
     pub sxss: Option<bool>,
@@ -277,6 +279,12 @@ impl Config {
             }
             if let Some(v) = &scan.inject_marker {
                 args.inject_marker = Some(v.clone());
+            }
+            if let Some(v) = &scan.custom_alert_value {
+                args.custom_alert_value = v.clone();
+            }
+            if let Some(v) = &scan.custom_alert_type {
+                args.custom_alert_type = v.clone();
             }
             if let Some(v) = scan.skip_xss_scanning {
                 args.skip_xss_scanning = v;
@@ -906,6 +914,8 @@ mod tests {
             custom_payload: None,
             only_custom_payload: false,
             inject_marker: None,
+            custom_alert_value: "1".to_string(),
+            custom_alert_type: "none".to_string(),
             skip_xss_scanning: false,
             deep_scan: false,
             sxss: false,
@@ -971,6 +981,8 @@ mod tests {
             custom_payload: Some("custom.txt".to_string()),
             only_custom_payload: Some(true),
             inject_marker: None,
+            custom_alert_value: Some("1".to_string()),
+            custom_alert_type: Some("none".to_string()),
             skip_xss_scanning: Some(true),
             deep_scan: Some(true),
             sxss: Some(true),
