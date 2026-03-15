@@ -247,9 +247,11 @@ mod tests {
             include_request: false,
             include_response: false,
             include_all: false,
+            no_color: false,
             silence: true,
             poc_type: "plain".to_string(),
             limit: None,
+            only_poc: vec![],
             param: vec![],
             data: None,
             headers: vec![],
@@ -259,6 +261,10 @@ mod tests {
             cookie_from_raw: None,
             include_url: vec![],
             exclude_url: vec![],
+            ignore_param: vec![],
+            out_of_scope: vec![],
+            out_of_scope_file: None,
+            only_discovery: false,
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
@@ -272,6 +278,7 @@ mod tests {
             delay: DEFAULT_DELAY_MS,
             proxy: None,
             follow_redirects: false,
+            ignore_return: vec![],
             workers: DEFAULT_WORKERS,
             max_concurrent_targets: DEFAULT_MAX_CONCURRENT_TARGETS,
             max_targets_per_host: DEFAULT_MAX_TARGETS_PER_HOST,
@@ -292,6 +299,7 @@ mod tests {
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
             force_waf: None,
+            waf_evasion: false,
             targets: vec![],
         }
     }
@@ -902,6 +910,11 @@ pub struct ScanArgs {
     pub include_all: bool,
 
     #[clap(help_heading = "OUTPUT")]
+    /// Disable colored output (also respects NO_COLOR env var)
+    #[arg(long)]
+    pub no_color: bool,
+
+    #[clap(help_heading = "OUTPUT")]
     /// Silence all logs except POC output to STDOUT
     #[arg(short = 'S', long)]
     pub silence: bool,
@@ -915,6 +928,11 @@ pub struct ScanArgs {
     /// Limit the number of results to display. Example: --limit 10
     #[arg(long)]
     pub limit: Option<usize>,
+
+    #[clap(help_heading = "OUTPUT")]
+    /// Filter output to show only specific finding types (comma-separated). Options: v (verified), r (reflected), a (AST DOM XSS). Example: --only-poc "v,r"
+    #[arg(long, value_delimiter = ',')]
+    pub only_poc: Vec<String>,
 
     #[clap(help_heading = "TARGETS")]
     /// Specify parameter names to analyze (e.g., -p sort -p id:query). Types: query, body, json, cookie, header.
@@ -960,6 +978,26 @@ pub struct ScanArgs {
     /// Exclude URLs matching these patterns (regex, can be specified multiple times)
     #[arg(long)]
     pub exclude_url: Vec<String>,
+
+    #[clap(help_heading = "SCOPE")]
+    /// Ignore specific parameters during scanning (can be specified multiple times)
+    #[arg(long)]
+    pub ignore_param: Vec<String>,
+
+    #[clap(help_heading = "SCOPE")]
+    /// Exclude targets whose domain matches these patterns (supports wildcards, e.g. *.dev.example.com)
+    #[arg(long)]
+    pub out_of_scope: Vec<String>,
+
+    #[clap(help_heading = "SCOPE")]
+    /// Load out-of-scope domains from a file (one per line, supports wildcards)
+    #[arg(long)]
+    pub out_of_scope_file: Option<String>,
+
+    #[clap(help_heading = "PARAMETER DISCOVERY")]
+    /// Only perform parameter discovery (skip XSS scanning)
+    #[arg(long)]
+    pub only_discovery: bool,
 
     #[clap(help_heading = "PARAMETER DISCOVERY")]
     /// Skip all discovery checks
@@ -1025,6 +1063,11 @@ pub struct ScanArgs {
     /// Follow HTTP redirects. Example: -F
     #[arg(short = 'F', long)]
     pub follow_redirects: bool,
+
+    #[clap(help_heading = "NETWORK")]
+    /// Ignore specific HTTP status codes during scanning (comma-separated). Example: --ignore-return 302,403,404
+    #[arg(long, value_delimiter = ',')]
+    pub ignore_return: Vec<u16>,
 
     #[clap(help_heading = "ENGINE")]
     /// Number of concurrent workers
@@ -1128,35 +1171,71 @@ pub struct ScanArgs {
     #[arg(long)]
     pub force_waf: Option<String>,
 
+    #[clap(help_heading = "WAF")]
+    /// Auto-throttle scanning when WAF is detected (workers=1, delay=3000ms)
+    #[arg(long)]
+    pub waf_evasion: bool,
+
     #[clap(help_heading = "TARGETS")]
     /// Targets (URLs or file paths)
     #[arg(value_name = "TARGET")]
     pub targets: Vec<String>,
 }
 
+/// Check if a domain matches an out-of-scope pattern.
+/// Supports simple wildcard: `*.example.com` matches `sub.example.com`.
+fn domain_matches_pattern(host: &str, pattern: &str) -> bool {
+    let host_lower = host.to_lowercase();
+    let pattern_lower = pattern.to_lowercase();
+    if pattern_lower.starts_with("*.") {
+        let suffix = &pattern_lower[1..];
+        host_lower.ends_with(suffix) && host_lower.len() > suffix.len()
+    } else {
+        host_lower == pattern_lower
+    }
+}
+
 pub async fn run_scan(args: &ScanArgs) {
+    // Apply no-color setting (flag or NO_COLOR env var)
+    if args.no_color || std::env::var("NO_COLOR").is_ok() {
+        crate::NO_COLOR.store(true, Ordering::Relaxed);
+    }
+    let nc = crate::NO_COLOR.load(Ordering::Relaxed);
+
     // Show banner at the start when using plain format and not silenced
     if args.format == "plain" && !args.silence {
-        crate::utils::print_banner_once(env!("CARGO_PKG_VERSION"), true);
+        crate::utils::print_banner_once(env!("CARGO_PKG_VERSION"), !nc);
     }
     let __dalfox_scan_start = std::time::Instant::now();
     crate::REQUEST_COUNT.store(0, Ordering::Relaxed);
-    let log_info = |msg: &str| {
+    let log_info = move |msg: &str| {
         if args.format == "plain" && !args.silence {
             let ts = chrono::Local::now().format("%-I:%M%p").to_string();
-            println!("\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m {}", ts, msg);
+            if nc {
+                println!("{} INF {}", ts, msg);
+            } else {
+                println!("\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m {}", ts, msg);
+            }
         }
     };
-    let log_warn = |msg: &str| {
+    let log_warn = move |msg: &str| {
         if args.format == "plain" && !args.silence {
             let ts = chrono::Local::now().format("%-I:%M%p").to_string();
-            println!("\x1b[90m{}\x1b[0m \x1b[33mWRN\x1b[0m {}", ts, msg);
+            if nc {
+                println!("{} WRN {}", ts, msg);
+            } else {
+                println!("\x1b[90m{}\x1b[0m \x1b[33mWRN\x1b[0m {}", ts, msg);
+            }
         }
     };
-    let log_dbg = |msg: &str| {
+    let log_dbg = move |msg: &str| {
         if crate::DEBUG.load(Ordering::Relaxed) {
             let ts = chrono::Local::now().format("%-I:%M%p").to_string();
-            println!("\x1b[90m{}\x1b[0m \x1b[35mDBG\x1b[0m {}", ts, msg);
+            if nc {
+                println!("{} DBG {}", ts, msg);
+            } else {
+                println!("\x1b[90m{}\x1b[0m \x1b[35mDBG\x1b[0m {}", ts, msg);
+            }
         }
     };
     // Ephemeral animated spinner for progress (returns (stop_tx, done_rx))
@@ -1372,6 +1451,7 @@ pub async fn run_scan(args: &ScanArgs) {
                     target.delay = args.delay;
                     target.proxy = args.proxy.clone();
                     target.follow_redirects = args.follow_redirects;
+                    target.ignore_return = args.ignore_return.clone();
                     target.workers = args.workers;
                     parsed_targets.push(target);
                 }
@@ -1422,6 +1502,7 @@ pub async fn run_scan(args: &ScanArgs) {
                     target.delay = args.delay;
                     target.proxy = args.proxy.clone();
                     target.follow_redirects = args.follow_redirects;
+                    target.ignore_return = args.ignore_return.clone();
                     target.workers = args.workers;
                     parsed_targets.push(target);
                 }
@@ -1482,6 +1563,40 @@ pub async fn run_scan(args: &ScanArgs) {
             let filtered = before - parsed_targets.len();
             if filtered > 0 {
                 log_info(&format!("scope filter: {} target(s) excluded", filtered));
+            }
+        }
+    }
+
+    // Apply out-of-scope domain filtering (--out-of-scope / --out-of-scope-file)
+    {
+        let mut oos_domains: Vec<String> = args.out_of_scope.clone();
+        if let Some(ref path) = args.out_of_scope_file {
+            match std::fs::read_to_string(path) {
+                Ok(contents) => {
+                    for line in contents.lines() {
+                        let trimmed = line.trim();
+                        if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                            oos_domains.push(trimmed.to_string());
+                        }
+                    }
+                }
+                Err(e) => {
+                    log_warn(&format!("failed to read --out-of-scope-file '{}': {}", path, e));
+                }
+            }
+        }
+        if !oos_domains.is_empty() {
+            let before = parsed_targets.len();
+            parsed_targets.retain(|t| {
+                let host = match t.url.host_str() {
+                    Some(h) => h,
+                    None => return true,
+                };
+                !oos_domains.iter().any(|pattern| domain_matches_pattern(host, pattern))
+            });
+            let filtered = before - parsed_targets.len();
+            if filtered > 0 {
+                log_info(&format!("out-of-scope filter: {} target(s) excluded", filtered));
             }
         }
     }
@@ -1678,6 +1793,19 @@ pub async fn run_scan(args: &ScanArgs) {
                         // Store WAF detection result on target
                         if !preflight.waf_result.is_empty() {
                             target.waf_info = Some(preflight.waf_result);
+
+                            // WAF evasion: auto-throttle when WAF detected
+                            if args_clone.waf_evasion {
+                                target.workers = 1;
+                                target.delay = 3000;
+                                if !args_clone.silence {
+                                    let ts = chrono::Local::now().format("%-I:%M%p").to_string();
+                                    println!(
+                                        "\x1b[90m{}\x1b[0m \x1b[33mWAF\x1b[0m evasion activated: workers=1, delay=3000ms",
+                                        ts
+                                    );
+                                }
+                            }
                         }
                         // Store technology detection result on target
                         if !preflight.tech_result.is_empty() {
@@ -2044,6 +2172,25 @@ pub async fn run_scan(args: &ScanArgs) {
         *group = processed;
     }
 
+    // --only-discovery: print discovered params and exit early
+    if args.only_discovery {
+        for (_host, group) in &host_groups {
+            for target in group {
+                for p in &target.reflection_params {
+                    if args.format == "plain" {
+                        println!("[{}] {} ({:?})", target.url, p.name, p.location);
+                    } else if args.format == "json" || args.format == "jsonl" {
+                        println!(
+                            "{{\"url\":\"{}\",\"param\":\"{}\",\"location\":\"{:?}\"}}",
+                            target.url, p.name, p.location
+                        );
+                    }
+                }
+            }
+        }
+        return;
+    }
+
     // Semaphore for limiting concurrent targets across all hosts
     let global_semaphore = Arc::new(tokio::sync::Semaphore::new(args.max_concurrent_targets));
 
@@ -2117,7 +2264,7 @@ pub async fn run_scan(args: &ScanArgs) {
                 let findings_count_target = findings_count_group.clone();
 
                 let target_handle = tokio::spawn(async move {
-                    if !args_clone.skip_xss_scanning {
+                    if !args_clone.skip_xss_scanning && !args_clone.only_discovery {
                         let __scan_spinner = {
                             let enabled = !args_clone.silence && total_targets_copy == 1;
                             let current = scan_idx_clone.fetch_add(1, Ordering::Relaxed) + 1;
@@ -2185,7 +2332,18 @@ pub async fn run_scan(args: &ScanArgs) {
         println!();
     }
     // Output results
-    let final_results = dedupe_ast_results(results.lock().await.clone());
+    let mut final_results = dedupe_ast_results(results.lock().await.clone());
+
+    // Apply --only-poc filter: keep only results whose type matches the specified filters
+    if !args.only_poc.is_empty() {
+        let allowed: Vec<String> = args
+            .only_poc
+            .iter()
+            .map(|s| s.trim().to_uppercase())
+            .collect();
+        final_results.retain(|r| allowed.contains(&r.result_type));
+    }
+
     let limit = args.limit.unwrap_or(usize::MAX);
     let display_results_len = std::cmp::min(final_results.len(), limit);
     let display_results = &final_results[..display_results_len];

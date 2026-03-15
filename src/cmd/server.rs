@@ -344,6 +344,7 @@ async fn run_scan_job(
         silence: true,
         poc_type: "plain".to_string(),
         limit: None,
+        only_poc: vec![],
 
         param: vec![],
         data: opts.data.clone(),
@@ -360,9 +361,14 @@ async fn run_scan_job(
         method: opts.method.clone().unwrap_or_else(|| "GET".to_string()),
         user_agent: opts.user_agent.clone(),
         cookie_from_raw: None,
+        no_color: true,
         include_url: vec![],
         exclude_url: vec![],
+        ignore_param: vec![],
+        out_of_scope: vec![],
+        out_of_scope_file: None,
 
+        only_discovery: false,
         skip_discovery: false,
         skip_reflection_header: false,
         skip_reflection_cookie: false,
@@ -379,6 +385,7 @@ async fn run_scan_job(
         delay: opts.delay.unwrap_or(0),
         proxy: None,
         follow_redirects: false,
+        ignore_return: vec![],
 
         workers: opts.worker.unwrap_or(50),
         max_concurrent_targets: 50,
@@ -405,6 +412,7 @@ async fn run_scan_job(
         waf_bypass: "auto".to_string(),
         skip_waf_probe: false,
         force_waf: None,
+        waf_evasion: false,
         remote_payloads: opts.remote_payloads.clone().unwrap_or_default(),
         remote_wordlists: opts.remote_wordlists.clone().unwrap_or_default(),
 
@@ -456,6 +464,7 @@ async fn run_scan_job(
             t.delay = args.delay;
             t.proxy = args.proxy.clone();
             t.follow_redirects = args.follow_redirects;
+            t.ignore_return = args.ignore_return.clone();
             t.workers = args.workers;
             t
         }

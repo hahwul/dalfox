@@ -161,6 +161,7 @@ pub async fn active_probe_param(
         let location = param.location.clone();
         let pre_encoding = param.pre_encoding.clone();
         let form_action_url = param.form_action_url.clone();
+        let ignore_return = target.ignore_return.clone();
 
         let valid_ref = valid_specials.clone();
         let invalid_ref = invalid_specials.clone();
@@ -413,45 +414,52 @@ pub async fn active_probe_param(
                 crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 request_builder.send().await
             } {
-                // For redirect responses, also check the Location header
-                let redirect_text = if resp.status().is_redirection() {
-                    resp.headers()
-                        .get(reqwest::header::LOCATION)
-                        .and_then(|v| v.to_str().ok())
-                        .map(|s| s.to_string())
-                } else {
-                    None
-                };
-                let body_text = resp.text().await.ok();
-                // Combine redirect Location and body for reflection checking
-                let combined = match (&redirect_text, &body_text) {
-                    (Some(loc), Some(body)) => format!("{}{}", loc, body),
-                    (Some(loc), None) => loc.clone(),
-                    (None, Some(body)) => body.clone(),
-                    (None, None) => String::new(),
-                };
-                if let Some(segment) = extract_reflected_segment(&combined) {
-                    if segment.contains(c) {
-                        true
-                    } else {
-                        let encs = encoded_variants(c);
-                        let mut found = false;
-                        for e in encs {
-                            if segment.contains(e) {
-                                found = true;
-                                break;
-                            }
-                        }
-                        if !found {
-                            let pct = format!("%{:02X}", c as u32);
-                            if segment.to_ascii_uppercase().contains(&pct) {
-                                found = true;
-                            }
-                        }
-                        found
-                    }
-                } else {
+                // Skip processing if the status code is in the ignore_return list
+                if !ignore_return.is_empty()
+                    && ignore_return.contains(&resp.status().as_u16())
+                {
                     false
+                } else {
+                    // For redirect responses, also check the Location header
+                    let redirect_text = if resp.status().is_redirection() {
+                        resp.headers()
+                            .get(reqwest::header::LOCATION)
+                            .and_then(|v| v.to_str().ok())
+                            .map(|s| s.to_string())
+                    } else {
+                        None
+                    };
+                    let body_text = resp.text().await.ok();
+                    // Combine redirect Location and body for reflection checking
+                    let combined = match (&redirect_text, &body_text) {
+                        (Some(loc), Some(body)) => format!("{}{}", loc, body),
+                        (Some(loc), None) => loc.clone(),
+                        (None, Some(body)) => body.clone(),
+                        (None, None) => String::new(),
+                    };
+                    if let Some(segment) = extract_reflected_segment(&combined) {
+                        if segment.contains(c) {
+                            true
+                        } else {
+                            let encs = encoded_variants(c);
+                            let mut found = false;
+                            for e in encs {
+                                if segment.contains(e) {
+                                    found = true;
+                                    break;
+                                }
+                            }
+                            if !found {
+                                let pct = format!("%{:02X}", c as u32);
+                                if segment.to_ascii_uppercase().contains(&pct) {
+                                    found = true;
+                                }
+                            }
+                            found
+                        }
+                    } else {
+                        false
+                    }
                 }
             } else {
                 false
@@ -609,6 +617,9 @@ pub async fn analyze_parameters(
     )
     .await;
     let mut params = reflection_params.lock().await.clone();
+    if !args.ignore_param.is_empty() {
+        params.retain(|p| !args.ignore_param.iter().any(|ignored| ignored == &p.name));
+    }
     if !args.param.is_empty() {
         params = filter_params(params, &args.param, target);
     }
@@ -750,10 +761,14 @@ mod tests {
             cookie_from_raw: None,
             include_url: vec![],
             exclude_url: vec![],
+            ignore_param: vec![],
+            out_of_scope: vec![],
+            out_of_scope_file: None,
             mining_dict_word: None,
             skip_mining: false,
             skip_mining_dict: false,
             skip_mining_dom: false,
+            only_discovery: false,
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
@@ -762,13 +777,16 @@ mod tests {
             delay: 0,
             proxy: None,
             follow_redirects: false,
+            ignore_return: vec![],
             output: None,
             include_request: false,
             include_response: false,
             include_all: false,
+            no_color: false,
             silence: false,
             poc_type: "plain".to_string(),
             limit: None,
+            only_poc: vec![],
             workers: 10,
             max_concurrent_targets: 10,
             max_targets_per_host: 100,
@@ -789,6 +807,7 @@ mod tests {
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
             force_waf: None,
+            waf_evasion: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -822,10 +841,14 @@ mod tests {
             cookie_from_raw: None,
             include_url: vec![],
             exclude_url: vec![],
+            ignore_param: vec![],
+            out_of_scope: vec![],
+            out_of_scope_file: None,
             mining_dict_word: None,
             skip_mining: true, // Skip mining
             skip_mining_dict: false,
             skip_mining_dom: false,
+            only_discovery: false,
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
@@ -834,13 +857,16 @@ mod tests {
             delay: 0,
             proxy: None,
             follow_redirects: false,
+            ignore_return: vec![],
             output: None,
             include_request: false,
             include_response: false,
             include_all: false,
+            no_color: false,
             silence: false,
             poc_type: "plain".to_string(),
             limit: None,
+            only_poc: vec![],
             workers: 10,
             max_concurrent_targets: 10,
             max_targets_per_host: 100,
@@ -861,6 +887,7 @@ mod tests {
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
             force_waf: None,
+            waf_evasion: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -886,10 +913,14 @@ mod tests {
             cookie_from_raw: None,
             include_url: vec![],
             exclude_url: vec![],
+            ignore_param: vec![],
+            out_of_scope: vec![],
+            out_of_scope_file: None,
             mining_dict_word: None,
             skip_mining: false,
             skip_mining_dict: false,
             skip_mining_dom: false,
+            only_discovery: false,
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
@@ -898,13 +929,16 @@ mod tests {
             delay: 0,
             proxy: None,
             follow_redirects: false,
+            ignore_return: vec![],
             output: None,
             include_request: false,
             include_response: false,
             include_all: false,
+            no_color: false,
             silence: false,
             poc_type: "plain".to_string(),
             limit: None,
+            only_poc: vec![],
             workers: 10,
             max_concurrent_targets: 10,
             max_targets_per_host: 100,
@@ -925,6 +959,7 @@ mod tests {
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
             force_waf: None,
+            waf_evasion: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -1010,10 +1045,14 @@ mod tests {
             cookie_from_raw: Some("samples/sample_request.txt".to_string()),
             include_url: vec![],
             exclude_url: vec![],
+            ignore_param: vec![],
+            out_of_scope: vec![],
+            out_of_scope_file: None,
             mining_dict_word: None,
             skip_mining: false,
             skip_mining_dict: false,
             skip_mining_dom: false,
+            only_discovery: false,
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
@@ -1022,13 +1061,16 @@ mod tests {
             delay: 0,
             proxy: None,
             follow_redirects: false,
+            ignore_return: vec![],
             output: None,
             include_request: false,
             include_response: false,
             include_all: false,
+            no_color: false,
             silence: false,
             poc_type: "plain".to_string(),
             limit: None,
+            only_poc: vec![],
             workers: 10,
             max_concurrent_targets: 10,
             max_targets_per_host: 100,
@@ -1049,6 +1091,7 @@ mod tests {
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
             force_waf: None,
+            waf_evasion: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -1095,10 +1138,14 @@ mod tests {
             cookie_from_raw: Some("nonexistent.txt".to_string()),
             include_url: vec![],
             exclude_url: vec![],
+            ignore_param: vec![],
+            out_of_scope: vec![],
+            out_of_scope_file: None,
             mining_dict_word: None,
             skip_mining: false,
             skip_mining_dict: false,
             skip_mining_dom: false,
+            only_discovery: false,
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
@@ -1107,13 +1154,16 @@ mod tests {
             delay: 0,
             proxy: None,
             follow_redirects: false,
+            ignore_return: vec![],
             output: None,
             include_request: false,
             include_response: false,
             include_all: false,
+            no_color: false,
             silence: false,
             poc_type: "plain".to_string(),
             limit: None,
+            only_poc: vec![],
             workers: 10,
             max_concurrent_targets: 10,
             max_targets_per_host: 100,
@@ -1134,6 +1184,7 @@ mod tests {
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
             force_waf: None,
+            waf_evasion: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -1370,10 +1421,14 @@ mod tests {
             cookie_from_raw: None,
             include_url: vec![],
             exclude_url: vec![],
+            ignore_param: vec![],
+            out_of_scope: vec![],
+            out_of_scope_file: None,
             mining_dict_word: None,
             skip_mining: true,
             skip_mining_dict: true,
             skip_mining_dom: true,
+            only_discovery: false,
             skip_discovery: true,
             skip_reflection_header: true,
             skip_reflection_cookie: true,
@@ -1382,13 +1437,16 @@ mod tests {
             delay: 0,
             proxy: None,
             follow_redirects: false,
+            ignore_return: vec![],
             output: None,
             include_request: false,
             include_response: false,
             include_all: false,
+            no_color: false,
             silence: true,
             poc_type: "plain".to_string(),
             limit: None,
+            only_poc: vec![],
             workers: 1,
             max_concurrent_targets: 1,
             max_targets_per_host: 1,
@@ -1413,6 +1471,7 @@ mod tests {
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
             force_waf: None,
+            waf_evasion: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         }

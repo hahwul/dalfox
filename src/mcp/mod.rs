@@ -106,6 +106,7 @@ impl DalfoxMcp {
                 t.delay = scan_args.delay;
                 t.proxy = scan_args.proxy.clone();
                 t.follow_redirects = scan_args.follow_redirects;
+                t.ignore_return = scan_args.ignore_return.clone();
                 t.workers = scan_args.workers;
                 t.user_agent = scan_args.user_agent.clone().or(Some("".to_string()));
                 t.headers = scan_args
@@ -430,10 +431,14 @@ impl DalfoxMcp {
             cookie_from_raw: None,
             include_url: vec![],
             exclude_url: vec![],
+            ignore_param: vec![],
+            out_of_scope: vec![],
+            out_of_scope_file: None,
             mining_dict_word: None,
             skip_mining: false,
             skip_mining_dict: false,
             skip_mining_dom: false,
+            only_discovery: false,
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
@@ -442,6 +447,7 @@ impl DalfoxMcp {
             delay,
             proxy,
             follow_redirects,
+            ignore_return: vec![],
             output: None,
             include_request,
             include_response,
@@ -449,6 +455,8 @@ impl DalfoxMcp {
             silence: true,
             poc_type: "plain".to_string(),
             limit: None,
+            only_poc: vec![],
+            no_color: false,
             workers: 50,
             max_concurrent_targets: 50,
             max_targets_per_host: 100,
@@ -468,6 +476,7 @@ impl DalfoxMcp {
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
             force_waf: None,
+            waf_evasion: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
@@ -568,10 +577,14 @@ mod tests {
             cookie_from_raw: None,
             include_url: vec![],
             exclude_url: vec![],
+            ignore_param: vec![],
+            out_of_scope: vec![],
+            out_of_scope_file: None,
             mining_dict_word: None,
             skip_mining: false,
             skip_mining_dict: false,
             skip_mining_dom: false,
+            only_discovery: false,
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
@@ -580,13 +593,16 @@ mod tests {
             delay: 0,
             proxy: None,
             follow_redirects: false,
+            ignore_return: vec![],
             output: None,
             include_request: false,
             include_response: false,
             include_all: false,
+            no_color: false,
             silence: true,
             poc_type: "plain".to_string(),
             limit: None,
+            only_poc: vec![],
             workers: 1,
             max_concurrent_targets: 1,
             max_targets_per_host: 1,
@@ -606,6 +622,7 @@ mod tests {
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
             force_waf: None,
+            waf_evasion: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         }

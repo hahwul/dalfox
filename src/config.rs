@@ -56,6 +56,8 @@ pub struct ScanConfig {
     pub silence: Option<bool>,
     pub poc_type: Option<String>,
     pub limit: Option<usize>,
+    pub only_poc: Option<Vec<String>>,
+    pub no_color: Option<bool>,
     // TARGETS
     pub param: Option<Vec<String>>,
     pub data: Option<String>,
@@ -67,7 +69,11 @@ pub struct ScanConfig {
     // SCOPE
     pub include_url: Option<Vec<String>>,
     pub exclude_url: Option<Vec<String>>,
+    pub ignore_param: Option<Vec<String>>,
+    pub out_of_scope: Option<Vec<String>>,
+    pub out_of_scope_file: Option<String>,
     // PARAMETER DISCOVERY
+    pub only_discovery: Option<bool>,
     pub skip_discovery: Option<bool>,
     pub skip_reflection_header: Option<bool>,
     pub skip_reflection_cookie: Option<bool>,
@@ -83,6 +89,7 @@ pub struct ScanConfig {
     pub delay: Option<u64>,
     pub proxy: Option<String>,
     pub follow_redirects: Option<bool>,
+    pub ignore_return: Option<Vec<u16>>,
     // ENGINE
     pub workers: Option<usize>,
     pub max_concurrent_targets: Option<usize>,
@@ -107,6 +114,7 @@ pub struct ScanConfig {
     pub waf_bypass: Option<String>,
     pub skip_waf_probe: Option<bool>,
     pub force_waf: Option<String>,
+    pub waf_evasion: Option<bool>,
     // LOGGING/DEBUG
     pub debug: Option<bool>,
 }
@@ -146,6 +154,12 @@ impl Config {
             if let Some(v) = scan.limit {
                 args.limit = Some(v);
             }
+            if let Some(v) = &scan.only_poc {
+                args.only_poc = v.clone();
+            }
+            if let Some(v) = scan.no_color {
+                args.no_color = v;
+            }
             // TARGETS
             if let Some(v) = &scan.param {
                 args.param = v.clone();
@@ -175,7 +189,19 @@ impl Config {
             if let Some(v) = &scan.exclude_url {
                 args.exclude_url = v.clone();
             }
+            if let Some(v) = &scan.ignore_param {
+                args.ignore_param = v.clone();
+            }
+            if let Some(v) = &scan.out_of_scope {
+                args.out_of_scope = v.clone();
+            }
+            if let Some(v) = &scan.out_of_scope_file {
+                args.out_of_scope_file = Some(v.clone());
+            }
             // PARAMETER DISCOVERY
+            if let Some(v) = scan.only_discovery {
+                args.only_discovery = v;
+            }
             if let Some(v) = scan.skip_discovery {
                 args.skip_discovery = v;
             }
@@ -216,6 +242,9 @@ impl Config {
             }
             if let Some(v) = scan.follow_redirects {
                 args.follow_redirects = v;
+            }
+            if let Some(v) = &scan.ignore_return {
+                args.ignore_return = v.clone();
             }
             // ENGINE
             if let Some(v) = scan.workers {
@@ -282,6 +311,11 @@ impl Config {
             {
                 args.limit = Some(v);
             }
+            if let Some(v) = &scan.only_poc
+                && args.only_poc.is_empty()
+            {
+                args.only_poc = v.clone();
+            }
             // TARGETS
             if let Some(v) = &scan.data
                 && args.data.is_none()
@@ -314,6 +348,11 @@ impl Config {
                 && args.proxy.is_none()
             {
                 args.proxy = Some(v.clone());
+            }
+            if let Some(v) = &scan.ignore_return
+                && args.ignore_return.is_empty()
+            {
+                args.ignore_return = v.clone();
             }
             // XSS SCANNING
             if let Some(v) = &scan.custom_blind_xss_payload
@@ -401,6 +440,11 @@ impl Config {
                 && args.limit.is_none()
             {
                 args.limit = Some(v);
+            }
+            if let Some(v) = &scan.only_poc
+                && args.only_poc.is_empty()
+            {
+                args.only_poc = v.clone();
             }
             // Map debug conservatively: only set when CLI didn't enable it (global false)
             if let Some(v) = scan.debug
@@ -517,6 +561,11 @@ impl Config {
             {
                 args.follow_redirects = v;
             }
+            if let Some(v) = &scan.ignore_return
+                && args.ignore_return.is_empty()
+            {
+                args.ignore_return = v.clone();
+            }
 
             // ENGINE
             if let Some(v) = scan.workers
@@ -621,6 +670,11 @@ impl Config {
             }
             if let Some(v) = &scan.force_waf {
                 args.force_waf = Some(v.clone());
+            }
+            if let Some(v) = scan.waf_evasion
+                && !args.waf_evasion
+            {
+                args.waf_evasion = v;
             }
         }
     }
@@ -807,9 +861,11 @@ mod tests {
             include_request: false,
             include_response: false,
             include_all: false,
+            no_color: false,
             silence: false,
             poc_type: "plain".to_string(),
             limit: None,
+            only_poc: vec![],
             param: vec![],
             data: None,
             headers: vec![],
@@ -819,6 +875,10 @@ mod tests {
             cookie_from_raw: None,
             include_url: vec![],
             exclude_url: vec![],
+            ignore_param: vec![],
+            out_of_scope: vec![],
+            out_of_scope_file: None,
+            only_discovery: false,
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
@@ -832,6 +892,7 @@ mod tests {
             delay: crate::cmd::scan::DEFAULT_DELAY_MS,
             proxy: None,
             follow_redirects: false,
+            ignore_return: vec![],
             workers: crate::cmd::scan::DEFAULT_WORKERS,
             max_concurrent_targets: crate::cmd::scan::DEFAULT_MAX_CONCURRENT_TARGETS,
             max_targets_per_host: crate::cmd::scan::DEFAULT_MAX_TARGETS_PER_HOST,
@@ -855,6 +916,7 @@ mod tests {
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
             force_waf: None,
+            waf_evasion: false,
             targets: vec![],
         }
     }
@@ -870,6 +932,8 @@ mod tests {
             silence: Some(true),
             poc_type: Some("curl".to_string()),
             limit: Some(42),
+            only_poc: Some(vec!["v".to_string()]),
+            no_color: Some(false),
             param: Some(vec!["q".to_string(), "id:query".to_string()]),
             data: Some("name=test".to_string()),
             headers: Some(vec!["X-Test: 1".to_string()]),
@@ -879,6 +943,10 @@ mod tests {
             cookie_from_raw: Some("request.txt".to_string()),
             include_url: Some(vec![]),
             exclude_url: Some(vec![]),
+            ignore_param: Some(vec![]),
+            out_of_scope: Some(vec![]),
+            out_of_scope_file: None,
+            only_discovery: Some(false),
             skip_discovery: Some(true),
             skip_reflection_header: Some(true),
             skip_reflection_cookie: Some(true),
@@ -892,6 +960,7 @@ mod tests {
             delay: Some(123),
             proxy: Some("http://127.0.0.1:8080".to_string()),
             follow_redirects: Some(true),
+            ignore_return: Some(vec![403, 404]),
             workers: Some(7),
             max_concurrent_targets: Some(8),
             max_targets_per_host: Some(9),
@@ -912,6 +981,7 @@ mod tests {
             waf_bypass: Some("auto".to_string()),
             skip_waf_probe: Some(false),
             force_waf: None,
+            waf_evasion: Some(true),
             debug: Some(true),
         }
     }

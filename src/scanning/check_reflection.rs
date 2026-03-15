@@ -548,6 +548,12 @@ async fn fetch_injection_response_with_client(
     } else {
         // Normal reflection check
         if let Ok(resp) = inject_resp {
+            // Skip processing if the status code is in the ignore_return list
+            if !args.ignore_return.is_empty()
+                && args.ignore_return.contains(&resp.status().as_u16())
+            {
+                return None;
+            }
             // Check for redirect context: if the response is a 3xx redirect,
             // the Location header may contain the reflected payload.
             if resp.status().is_redirection()
@@ -656,6 +662,12 @@ pub async fn check_reflection_with_hpp_url(
     }
 
     if let Ok(resp) = inject_resp {
+        // Skip processing if the status code is in the ignore_return list
+        if !args.ignore_return.is_empty()
+            && args.ignore_return.contains(&resp.status().as_u16())
+        {
+            return (None, None);
+        }
         if resp.status().is_redirection()
             && let Some(location) = resp.headers().get("location").and_then(|v| v.to_str().ok())
             && location.contains(payload_str)
@@ -728,10 +740,14 @@ mod tests {
             cookie_from_raw: None,
             include_url: vec![],
             exclude_url: vec![],
+            ignore_param: vec![],
+            out_of_scope: vec![],
+            out_of_scope_file: None,
             mining_dict_word: None,
             skip_mining: false,
             skip_mining_dict: false,
             skip_mining_dom: false,
+            only_discovery: false,
             skip_discovery: false,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
@@ -740,13 +756,16 @@ mod tests {
             delay: 0,
             proxy: None,
             follow_redirects: false,
+            ignore_return: vec![],
             output: None,
             include_request: false,
             include_response: false,
             include_all: false,
+            no_color: false,
             silence: true,
             poc_type: "plain".to_string(),
             limit: None,
+            only_poc: vec![],
             workers: 10,
             max_concurrent_targets: 10,
             max_targets_per_host: 100,
@@ -766,6 +785,7 @@ mod tests {
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
             force_waf: None,
+            waf_evasion: false,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         }
