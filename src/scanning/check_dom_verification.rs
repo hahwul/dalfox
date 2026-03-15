@@ -130,6 +130,270 @@ pub async fn check_dom_verification(
     check_dom_verification_with_client(&client, target, param, payload, args).await
 }
 
+/// Build the HTTP request for injecting the payload based on the parameter location.
+fn build_inject_request(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    wire_payload: &str,
+) -> reqwest::RequestBuilder {
+    let default_method = target.parse_method();
+    match param.location {
+        Location::Header => build_header_request(client, target, param, wire_payload, default_method),
+        Location::Body => build_body_request(client, target, param, wire_payload),
+        Location::JsonBody => build_json_body_request(client, target, param, wire_payload),
+        Location::MultipartBody => build_multipart_request(client, target, param, wire_payload),
+        _ => build_url_inject_request(client, target, param, wire_payload, default_method),
+    }
+}
+
+fn build_header_request(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    wire_payload: &str,
+    method: reqwest::Method,
+) -> reqwest::RequestBuilder {
+    let parsed_url = target.url.clone();
+    if target.cookies.iter().any(|(name, _)| name == &param.name) {
+        let others = crate::utils::compose_cookie_header_excluding(
+            &target.cookies,
+            Some(&param.name),
+        );
+        let cookie_header = match others {
+            Some(rest) if !rest.is_empty() => {
+                format!("{}={}; {}", param.name, wire_payload, rest)
+            }
+            _ => format!("{}={}", param.name, wire_payload),
+        };
+        crate::utils::build_request_with_cookie(
+            client, target, method, parsed_url, target.data.clone(), Some(cookie_header),
+        )
+    } else {
+        let base = crate::utils::build_request(
+            client, target, method, parsed_url, target.data.clone(),
+        );
+        crate::utils::apply_header_overrides(
+            base,
+            &[(param.name.clone(), wire_payload.to_string())],
+        )
+    }
+}
+
+fn resolve_form_action_url(param: &Param, target: &Target) -> url::Url {
+    param
+        .form_action_url
+        .as_ref()
+        .and_then(|u| url::Url::parse(u).ok())
+        .unwrap_or_else(|| target.url.clone())
+}
+
+fn build_body_request(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    wire_payload: &str,
+) -> reqwest::RequestBuilder {
+    let parsed_url = resolve_form_action_url(param, target);
+    let body = if let Some(ref data) = target.data {
+        let mut pairs: Vec<(String, String)> = url::form_urlencoded::parse(data.as_bytes())
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        let mut found = false;
+        for pair in &mut pairs {
+            if pair.0 == param.name {
+                pair.1 = wire_payload.to_string();
+                found = true;
+                break;
+            }
+        }
+        if !found {
+            pairs.push((param.name.clone(), wire_payload.to_string()));
+        }
+        Some(
+            url::form_urlencoded::Serializer::new(String::new())
+                .extend_pairs(&pairs)
+                .finish(),
+        )
+    } else {
+        Some(format!(
+            "{}={}",
+            urlencoding::encode(&param.name),
+            urlencoding::encode(wire_payload)
+        ))
+    };
+    let base = crate::utils::build_request(client, target, reqwest::Method::POST, parsed_url, body);
+    crate::utils::apply_header_overrides(
+        base,
+        &[(
+            "Content-Type".to_string(),
+            "application/x-www-form-urlencoded".to_string(),
+        )],
+    )
+}
+
+fn build_json_body_request(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    wire_payload: &str,
+) -> reqwest::RequestBuilder {
+    let parsed_url = resolve_form_action_url(param, target);
+    let body = if let Some(ref data) = target.data {
+        if let Ok(mut json_val) = serde_json::from_str::<serde_json::Value>(data) {
+            if let Some(obj) = json_val.as_object_mut() {
+                obj.insert(
+                    param.name.clone(),
+                    serde_json::Value::String(wire_payload.to_string()),
+                );
+            }
+            Some(serde_json::to_string(&json_val).unwrap_or_else(|_| data.clone()))
+        } else {
+            Some(data.replace(&param.value, wire_payload))
+        }
+    } else {
+        Some(serde_json::json!({ &param.name: wire_payload }).to_string())
+    };
+    let base = crate::utils::build_request(client, target, reqwest::Method::POST, parsed_url, body);
+    crate::utils::apply_header_overrides(
+        base,
+        &[("Content-Type".to_string(), "application/json".to_string())],
+    )
+}
+
+fn build_multipart_request(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    wire_payload: &str,
+) -> reqwest::RequestBuilder {
+    let parsed_url = resolve_form_action_url(param, target);
+    let mut form = reqwest::multipart::Form::new();
+    if let Some(ref data) = target.data {
+        for pair in data.split('&') {
+            if let Some((k, v)) = pair.split_once('=') {
+                let k = urlencoding::decode(k).unwrap_or(std::borrow::Cow::Borrowed(k)).to_string();
+                let v = urlencoding::decode(v).unwrap_or(std::borrow::Cow::Borrowed(v)).to_string();
+                if k == param.name {
+                    form = form.text(k, wire_payload.to_string());
+                } else {
+                    form = form.text(k, v);
+                }
+            }
+        }
+    } else {
+        form = form.text(param.name.clone(), wire_payload.to_string());
+    }
+    crate::utils::build_request(client, target, reqwest::Method::POST, parsed_url, None)
+        .multipart(form)
+}
+
+fn build_url_inject_request(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    wire_payload: &str,
+    method: reqwest::Method,
+) -> reqwest::RequestBuilder {
+    let inject_url_str =
+        crate::scanning::url_inject::build_injected_url(&target.url, param, wire_payload);
+    let inject_url =
+        url::Url::parse(&inject_url_str).unwrap_or_else(|_| target.url.clone());
+    crate::utils::build_request(client, target, method, inject_url, target.data.clone())
+}
+
+/// Verify DOM evidence in a stored XSS scenario by checking secondary URLs.
+async fn verify_sxss_dom(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    payload: &str,
+    args: &crate::cmd::scan::ScanArgs,
+) -> (bool, Option<String>) {
+    let check_urls = crate::scanning::check_reflection::resolve_sxss_check_urls(target, param, args);
+    for sxss_url in &check_urls {
+        for attempt in 0u64..3 {
+            if attempt > 0 {
+                sleep(Duration::from_millis(500 * attempt)).await;
+            }
+            let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
+            let check_request =
+                crate::utils::build_request(client, target, method, sxss_url.clone(), None);
+
+            crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if let Ok(resp) = check_request.send().await {
+                let headers = resp.headers().clone();
+                let ct = headers
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("");
+                if let Ok(text) = resp.text().await
+                    && crate::utils::is_htmlish_content_type(ct)
+                    && crate::scanning::check_reflection::classify_reflection(&text, payload)
+                        .is_some()
+                    && (has_marker_evidence(payload, &text)
+                        || has_executable_url_attribute_evidence(payload, &text))
+                {
+                    return (true, Some(text));
+                }
+            }
+        }
+    }
+    (false, None)
+}
+
+/// Verify DOM evidence from a normal (non-stored) injection response.
+async fn verify_normal_dom(
+    resp: reqwest::Response,
+    payload: &str,
+) -> (bool, Option<String>) {
+    let status = resp.status();
+    let headers = resp.headers().clone();
+
+    // Check redirect Location header for executable URL protocols (e.g. javascript:alert(1))
+    if status.is_redirection()
+        && let Some(location) = headers.get(reqwest::header::LOCATION)
+        && let Ok(loc_str) = location.to_str()
+        && let Some(result) = check_redirect_location(loc_str, payload)
+    {
+        return result;
+    }
+
+    // Both HTML and non-HTML (JSONP, JSON with HTML) content types are accepted
+    // as long as there is reflection + marker/executable-URL evidence in the response.
+    if let Ok(text) = resp.text().await
+        && crate::scanning::check_reflection::classify_reflection(&text, payload).is_some()
+        && (has_marker_evidence(payload, &text)
+            || has_executable_url_attribute_evidence(payload, &text))
+    {
+        return (true, Some(text));
+    }
+
+    (false, None)
+}
+
+/// Check if a redirect Location header contains evidence of payload injection.
+fn check_redirect_location(loc_str: &str, payload: &str) -> Option<(bool, Option<String>)> {
+    let loc_lower = loc_str.trim().to_ascii_lowercase();
+    if payload_is_executable_url_protocol(payload)
+        && loc_lower.starts_with(&payload.trim().to_ascii_lowercase())
+    {
+        let synthetic_body = format!(
+            "<html><body><a href=\"{}\">redirect</a></body></html>",
+            loc_str
+        );
+        return Some((true, Some(synthetic_body)));
+    }
+    if crate::scanning::check_reflection::classify_reflection(loc_str, payload).is_some() {
+        let synthetic_body = format!(
+            "<html><body>Redirect to: {}</body></html>",
+            loc_str
+        );
+        return Some((true, Some(synthetic_body)));
+    }
+    None
+}
+
 pub async fn check_dom_verification_with_client(
     client: &Client,
     target: &Target,
@@ -148,145 +412,7 @@ pub async fn check_dom_verification_with_client(
     let encoded_payload = crate::scanning::check_reflection::apply_pre_encoding_pub(payload, &param.pre_encoding);
     let wire_payload = encoded_payload.as_str();
 
-    let default_method = target.parse_method();
-    let inject_request = match param.location {
-        Location::Header => {
-            let parsed_url = target.url.clone();
-            if target.cookies.iter().any(|(name, _)| name == &param.name) {
-                let others = crate::utils::compose_cookie_header_excluding(
-                    &target.cookies,
-                    Some(&param.name),
-                );
-                let cookie_header = match others {
-                    Some(rest) if !rest.is_empty() => {
-                        format!("{}={}; {}", param.name, wire_payload, rest)
-                    }
-                    _ => format!("{}={}", param.name, wire_payload),
-                };
-                crate::utils::build_request_with_cookie(
-                    client,
-                    target,
-                    default_method,
-                    parsed_url,
-                    target.data.clone(),
-                    Some(cookie_header),
-                )
-            } else {
-                let base = crate::utils::build_request(
-                    client,
-                    target,
-                    default_method,
-                    parsed_url,
-                    target.data.clone(),
-                );
-                crate::utils::apply_header_overrides(
-                    base,
-                    &[(param.name.clone(), wire_payload.to_string())],
-                )
-            }
-        }
-        Location::Body => {
-            let method = reqwest::Method::POST;
-            let parsed_url = param.form_action_url
-                .as_ref()
-                .and_then(|u| url::Url::parse(u).ok())
-                .unwrap_or_else(|| target.url.clone());
-            let body = if let Some(ref data) = target.data {
-                let mut pairs: Vec<(String, String)> = url::form_urlencoded::parse(data.as_bytes())
-                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                    .collect();
-                let mut found = false;
-                for pair in &mut pairs {
-                    if pair.0 == param.name {
-                        pair.1 = wire_payload.to_string();
-                        found = true;
-                        break;
-                    }
-                }
-                if !found {
-                    pairs.push((param.name.clone(), wire_payload.to_string()));
-                }
-                Some(
-                    url::form_urlencoded::Serializer::new(String::new())
-                        .extend_pairs(&pairs)
-                        .finish(),
-                )
-            } else {
-                Some(format!(
-                    "{}={}",
-                    urlencoding::encode(&param.name),
-                    urlencoding::encode(wire_payload)
-                ))
-            };
-            let base = crate::utils::build_request(client, target, method, parsed_url, body);
-            crate::utils::apply_header_overrides(
-                base,
-                &[(
-                    "Content-Type".to_string(),
-                    "application/x-www-form-urlencoded".to_string(),
-                )],
-            )
-        }
-        Location::JsonBody => {
-            let method = reqwest::Method::POST;
-            let parsed_url = param.form_action_url
-                .as_ref()
-                .and_then(|u| url::Url::parse(u).ok())
-                .unwrap_or_else(|| target.url.clone());
-            let body = if let Some(ref data) = target.data {
-                if let Ok(mut json_val) = serde_json::from_str::<serde_json::Value>(data) {
-                    if let Some(obj) = json_val.as_object_mut() {
-                        obj.insert(
-                            param.name.clone(),
-                            serde_json::Value::String(wire_payload.to_string()),
-                        );
-                    }
-                    Some(serde_json::to_string(&json_val).unwrap_or_else(|_| data.clone()))
-                } else {
-                    Some(data.replace(&param.value, wire_payload))
-                }
-            } else {
-                Some(serde_json::json!({ &param.name: wire_payload }).to_string())
-            };
-            let base = crate::utils::build_request(client, target, method, parsed_url, body);
-            crate::utils::apply_header_overrides(
-                base,
-                &[("Content-Type".to_string(), "application/json".to_string())],
-            )
-        }
-        Location::MultipartBody => {
-            let method = reqwest::Method::POST;
-            let parsed_url = param.form_action_url
-                .as_ref()
-                .and_then(|u| url::Url::parse(u).ok())
-                .unwrap_or_else(|| target.url.clone());
-            let mut form = reqwest::multipart::Form::new();
-            if let Some(ref data) = target.data {
-                for pair in data.split('&') {
-                    if let Some((k, v)) = pair.split_once('=') {
-                        let k = urlencoding::decode(k).unwrap_or(std::borrow::Cow::Borrowed(k)).to_string();
-                        let v = urlencoding::decode(v).unwrap_or(std::borrow::Cow::Borrowed(v)).to_string();
-                        if k == param.name {
-                            form = form.text(k, wire_payload.to_string());
-                        } else {
-                            form = form.text(k, v);
-                        }
-                    }
-                }
-            } else {
-                form = form.text(param.name.clone(), wire_payload.to_string());
-            }
-            crate::utils::build_request(client, target, method, parsed_url, None)
-                .multipart(form)
-        }
-        _ => {
-            let inject_url_str =
-                crate::scanning::url_inject::build_injected_url(&target.url, param, wire_payload);
-            let inject_url =
-                url::Url::parse(&inject_url_str).unwrap_or_else(|_| target.url.clone());
-            crate::utils::build_request(client, target, default_method, inject_url, target.data.clone())
-        }
-    };
+    let inject_request = build_inject_request(client, target, param, wire_payload);
 
     // Send the injection request (with rate-limit retry)
     crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -297,100 +423,12 @@ pub async fn check_dom_verification_with_client(
     }
 
     if args.sxss {
-        // For Stored XSS, check DOM on auto-resolved URLs with retry logic
-        let check_urls = crate::scanning::check_reflection::resolve_sxss_check_urls(target, param, args);
-        for sxss_url in &check_urls {
-            for attempt in 0u64..3 {
-                if attempt > 0 {
-                    sleep(Duration::from_millis(500 * attempt)).await;
-                }
-                let method = args.sxss_method.parse().unwrap_or(reqwest::Method::GET);
-                let check_request =
-                    crate::utils::build_request(client, target, method, sxss_url.clone(), None);
-
-                crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                if let Ok(resp) = check_request.send().await {
-                    let headers = resp.headers().clone();
-                    let ct = headers
-                        .get(reqwest::header::CONTENT_TYPE)
-                        .and_then(|v| v.to_str().ok())
-                        .unwrap_or("");
-                    if let Ok(text) = resp.text().await
-                        && crate::utils::is_htmlish_content_type(ct)
-                        && crate::scanning::check_reflection::classify_reflection(&text, payload)
-                            .is_some()
-                        && (has_marker_evidence(payload, &text)
-                            || has_executable_url_attribute_evidence(payload, &text))
-                    {
-                        return (true, Some(text));
-                    }
-                }
-            }
-        }
+        verify_sxss_dom(client, target, param, payload, args).await
+    } else if let Ok(resp) = inject_resp {
+        verify_normal_dom(resp, payload).await
     } else {
-        // Normal DOM verification
-        if let Ok(resp) = inject_resp {
-            let status = resp.status();
-            let headers = resp.headers().clone();
-            let ct = headers
-                .get(reqwest::header::CONTENT_TYPE)
-                .and_then(|v| v.to_str().ok())
-                .unwrap_or("");
-
-            // Check redirect Location header for executable URL protocols (e.g. javascript:alert(1))
-            if status.is_redirection()
-                && let Some(location) = headers.get(reqwest::header::LOCATION)
-                && let Ok(loc_str) = location.to_str()
-            {
-                let loc_lower = loc_str.trim().to_ascii_lowercase();
-                if payload_is_executable_url_protocol(payload)
-                    && loc_lower.starts_with(&payload.trim().to_ascii_lowercase())
-                {
-                    let synthetic_body = format!(
-                        "<html><body><a href=\"{}\">redirect</a></body></html>",
-                        loc_str
-                    );
-                    return (true, Some(synthetic_body));
-                }
-                // Also check if payload is reflected in Location header (open redirect)
-                if crate::scanning::check_reflection::classify_reflection(loc_str, payload)
-                    .is_some()
-                {
-                    let synthetic_body = format!(
-                        "<html><body>Redirect to: {}</body></html>",
-                        loc_str
-                    );
-                    return (true, Some(synthetic_body));
-                }
-            }
-
-            if let Ok(text) = resp.text().await {
-                // Standard HTML DOM verification
-                if crate::utils::is_htmlish_content_type(ct)
-                    && crate::scanning::check_reflection::classify_reflection(&text, payload).is_some()
-                    && (has_marker_evidence(payload, &text)
-                        || has_executable_url_attribute_evidence(payload, &text))
-                {
-                    return (true, Some(text));
-                }
-
-                // For non-HTML content types (JSONP, JSON with HTML, etc.),
-                // check if payload with marker is reflected in response body
-                if !crate::utils::is_htmlish_content_type(ct)
-                    && crate::scanning::check_reflection::classify_reflection(&text, payload).is_some()
-                {
-                    // Try parsing the response as if it were HTML to find marker evidence
-                    if has_marker_evidence(payload, &text)
-                        || has_executable_url_attribute_evidence(payload, &text)
-                    {
-                        return (true, Some(text));
-                    }
-                }
-            }
-        }
+        (false, None)
     }
-
-    (false, None)
 }
 
 #[cfg(test)]
