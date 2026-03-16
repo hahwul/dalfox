@@ -2,7 +2,7 @@ use clap::Args;
 use indicatif::MultiProgress;
 use reqwest::header::CONTENT_TYPE;
 
-use scraper::{Html, Selector};
+use scraper::Html;
 use std::collections::HashMap;
 use std::fs;
 use std::io::{self, Read, Write};
@@ -39,10 +39,7 @@ pub const DEFAULT_METHOD: &str = "GET";
 
 static GLOBAL_ENCODERS: OnceLock<Vec<String>> = OnceLock::new();
 
-fn cached_meta_csp_selector() -> &'static Selector {
-    static SEL: OnceLock<Selector> = OnceLock::new();
-    SEL.get_or_init(|| Selector::parse("meta[http-equiv][content]").expect("valid selector"))
-}
+use crate::scanning::selectors;
 
 fn build_ast_dom_message(
     description: &str,
@@ -806,7 +803,7 @@ async fn preflight_content_type(
             if csp_header.is_none() {
                 let doc = Html::parse_document(&body);
                 {
-                    let sel = cached_meta_csp_selector();
+                    let sel = selectors::meta_csp();
                     for el in doc.select(sel) {
                         let http_equiv = el
                             .value()

@@ -7,17 +7,7 @@ use std::sync::{Arc, OnceLock};
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{Duration, sleep};
 
-fn cached_form_selector() -> &'static scraper::Selector {
-    static SEL: OnceLock<scraper::Selector> = OnceLock::new();
-    SEL.get_or_init(|| scraper::Selector::parse("form").expect("valid selector"))
-}
-
-fn cached_input_textarea_select_selector() -> &'static scraper::Selector {
-    static SEL: OnceLock<scraper::Selector> = OnceLock::new();
-    SEL.get_or_init(|| {
-        scraper::Selector::parse("input, textarea, select").expect("valid selector")
-    })
-}
+use crate::scanning::selectors;
 
 /// Cached regex for detecting JSON.stringify patterns in JavaScript source.
 fn json_stringify_regex() -> &'static regex::Regex {
@@ -614,8 +604,8 @@ pub async fn check_form_discovery(
 
     // Parse forms
     let document = scraper::Html::parse_document(&html);
-    let form_sel = cached_form_selector();
-    let input_sel = cached_input_textarea_select_selector();
+    let form_sel = selectors::form();
+    let input_sel = selectors::input_textarea_select();
 
     let mut batch: Vec<Param> = Vec::new();
 

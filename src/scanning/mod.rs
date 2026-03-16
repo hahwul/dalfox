@@ -5,6 +5,7 @@ pub mod check_reflection;
 pub mod light_verify;
 pub mod markers;
 pub mod result;
+pub mod selectors;
 pub mod tech_detect;
 pub mod url_inject;
 pub mod xss_blind;

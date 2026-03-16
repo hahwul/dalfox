@@ -4,10 +4,7 @@ use reqwest::Client;
 use std::sync::OnceLock;
 use tokio::time::{Duration, sleep};
 
-fn cached_universal_selector() -> &'static scraper::Selector {
-    static SEL: OnceLock<scraper::Selector> = OnceLock::new();
-    SEL.get_or_init(|| scraper::Selector::parse("*").expect("valid selector"))
-}
+use super::selectors;
 
 fn cached_class_marker_selector() -> &'static scraper::Selector {
     static SEL: OnceLock<scraper::Selector> = OnceLock::new();
@@ -106,7 +103,7 @@ fn has_executable_url_attribute_evidence(payload: &str, text: &str) -> bool {
 
     let payload_lower = payload.trim().to_ascii_lowercase();
     let document = scraper::Html::parse_document(text);
-    let selector = cached_universal_selector();
+    let selector = selectors::universal();
     let dangerous_attrs = ["href", "src", "data", "action", "formaction", "xlink:href"];
 
     document.select(selector).any(|node| {

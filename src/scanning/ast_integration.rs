@@ -1,15 +1,6 @@
-use scraper::{Html, Selector};
-use std::sync::OnceLock;
+use scraper::Html;
 
-fn cached_script_selector() -> &'static Selector {
-    static SEL: OnceLock<Selector> = OnceLock::new();
-    SEL.get_or_init(|| Selector::parse("script").expect("valid selector"))
-}
-
-fn cached_universal_selector() -> &'static Selector {
-    static SEL: OnceLock<Selector> = OnceLock::new();
-    SEL.get_or_init(|| Selector::parse("*").expect("valid selector"))
-}
+use super::selectors;
 
 /// Extract JavaScript code from HTML response
 /// Looks for <script> tags and inline event handlers
@@ -22,7 +13,7 @@ pub fn extract_javascript_from_html(html: &str) -> Vec<String> {
 
     // Extract from <script> tags
     {
-        let selector = cached_script_selector();
+        let selector = selectors::script();
         for element in document.select(selector) {
             let text = element.text().fold(String::new(), |mut acc, t| { acc.push_str(t); acc });
             if !text.trim().is_empty() && seen.insert(text.trim().to_string()) {
@@ -33,7 +24,7 @@ pub fn extract_javascript_from_html(html: &str) -> Vec<String> {
 
     // Extract inline event handler attributes (on*) and javascript: URLs
     {
-        let all = cached_universal_selector();
+        let all = selectors::universal();
         for node in document.select(all) {
             let attrs = node.value().attrs();
             for (name, value) in attrs {
@@ -148,29 +139,9 @@ pub fn has_self_bootstrap_for_source_in_html(html: &str, source: &str) -> bool {
         .any(|js_code| has_self_bootstrap_verification(&js_code, source))
 }
 
-fn set_query_param(mut url: url::Url, key: &str, value: &str) -> String {
-    let mut replaced = false;
-    let pairs: Vec<(String, String)> = url
-        .query_pairs()
-        .map(|(k, v)| {
-            if k == key {
-                replaced = true;
-                (k.into_owned(), value.to_string())
-            } else {
-                (k.into_owned(), v.into_owned())
-            }
-        })
-        .collect();
-
-    if !replaced {
-        return url.to_string();
-    }
-
-    url.query_pairs_mut().clear().extend_pairs(pairs);
-    url.to_string()
-}
-
-fn upsert_query_param(mut url: url::Url, key: &str, value: &str) -> String {
+/// Replace or optionally insert a query parameter in a URL.
+/// When `insert_if_missing` is false, returns the original URL unchanged if the key is not found.
+fn modify_query_param(mut url: url::Url, key: &str, value: &str, insert_if_missing: bool) -> String {
     let mut replaced = false;
     let mut pairs: Vec<(String, String)> = url
         .query_pairs()
@@ -185,11 +156,22 @@ fn upsert_query_param(mut url: url::Url, key: &str, value: &str) -> String {
         .collect();
 
     if !replaced {
+        if !insert_if_missing {
+            return url.to_string();
+        }
         pairs.push((key.to_string(), value.to_string()));
     }
 
     url.query_pairs_mut().clear().extend_pairs(pairs);
     url.to_string()
+}
+
+fn set_query_param(url: url::Url, key: &str, value: &str) -> String {
+    modify_query_param(url, key, value, false)
+}
+
+fn upsert_query_param(url: url::Url, key: &str, value: &str) -> String {
+    modify_query_param(url, key, value, true)
 }
 
 fn build_nested_search_param_value(chain: &[&str], payload: &str) -> Option<String> {
@@ -446,7 +428,8 @@ pub fn has_self_bootstrap_verification(js_code: &str, source: &str) -> bool {
     }
 
     if source.contains("document.referrer") {
-        return normalized_js.contains("document.referrer")
+        // Relay-based bootstrap (iframe relay pattern)
+        let relay_pattern = normalized_js.contains("document.referrer")
             && contains_any(
                 &normalized_js,
                 &[
@@ -462,6 +445,23 @@ pub fn has_self_bootstrap_verification(js_code: &str, source: &str) -> bool {
                     ".src=relayUrl.pathname+",
                 ],
             );
+        // Direct document.write bootstrap pattern
+        let write_pattern = normalized_js.contains("document.write(document.referrer)")
+            && contains_any(
+                &normalized_js,
+                &[
+                    "searchParams.set('child','1')",
+                    "searchParams.set(\"child\",\"1\")",
+                ],
+            )
+            && contains_any(
+                &normalized_js,
+                &[
+                    "searchParams.delete('seed')",
+                    "searchParams.delete(\"seed\")",
+                ],
+            );
+        return relay_pattern || write_pattern;
     }
 
     if source.contains("localStorage.getItem(") {
@@ -488,24 +488,6 @@ pub fn has_self_bootstrap_verification(js_code: &str, source: &str) -> bool {
                 "history.pushState({html:seed}",
             ],
         );
-    }
-
-    if source.contains("document.referrer") {
-        return normalized_js.contains("document.write(document.referrer)")
-            && contains_any(
-                &normalized_js,
-                &[
-                    "searchParams.set('child','1')",
-                    "searchParams.set(\"child\",\"1\")",
-                ],
-            )
-            && contains_any(
-                &normalized_js,
-                &[
-                    "searchParams.delete('seed')",
-                    "searchParams.delete(\"seed\")",
-                ],
-            );
     }
 
     if source.contains("event.newValue") || source.contains("event.oldValue") {
