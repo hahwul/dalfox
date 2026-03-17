@@ -1,9 +1,56 @@
 use serde::{Deserialize, Serialize};
+use std::fmt;
+
+/// Classification of an XSS finding.
+///
+/// Internal code uses descriptive variant names; serialization produces the
+/// single-letter abbreviation for compact user-facing output and backward-
+/// compatible JSON (`"V"`, `"A"`, `"R"`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FindingType {
+    /// DOM-verified XSS — payload confirmed in parsed DOM structure.
+    #[serde(rename = "V")]
+    Verified,
+    /// AST-detected DOM XSS — identified via static JavaScript analysis,
+    /// not yet confirmed at runtime.
+    #[serde(rename = "A")]
+    AstDetected,
+    /// Reflected XSS — payload appears in HTTP response but DOM evidence
+    /// was not confirmed.
+    #[serde(rename = "R")]
+    Reflected,
+}
+
+impl FindingType {
+    /// Short single-letter label used in compact output (POC lines, etc.).
+    pub fn short(&self) -> &'static str {
+        match self {
+            FindingType::Verified => "V",
+            FindingType::AstDetected => "A",
+            FindingType::Reflected => "R",
+        }
+    }
+
+    /// Human-readable descriptive name for logs and verbose output.
+    pub fn description(&self) -> &'static str {
+        match self {
+            FindingType::Verified => "Verified",
+            FindingType::AstDetected => "AST-Detected",
+            FindingType::Reflected => "Reflected",
+        }
+    }
+}
+
+impl fmt::Display for FindingType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.short())
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Result {
     #[serde(rename = "type")]
-    pub result_type: String,
+    pub result_type: FindingType,
     pub inject_type: String,
     pub method: String,
     pub data: String,
@@ -23,7 +70,7 @@ pub struct Result {
 impl Result {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        result_type: String,
+        result_type: FindingType,
         inject_type: String,
         method: String,
         data: String,
@@ -56,7 +103,7 @@ impl Result {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SanitizedResult {
     #[serde(rename = "type")]
-    pub result_type: String,
+    pub result_type: FindingType,
     pub inject_type: String,
     pub method: String,
     pub data: String,
@@ -207,8 +254,8 @@ impl Result {
         out.push_str("# Dalfox Scan Results\n\n");
 
         // Add summary
-        let v_count = results.iter().filter(|r| r.result_type == "V").count();
-        let r_count = results.iter().filter(|r| r.result_type == "R").count();
+        let v_count = results.iter().filter(|r| r.result_type == FindingType::Verified).count();
+        let r_count = results.iter().filter(|r| r.result_type == FindingType::Reflected).count();
         out.push_str("## Summary\n\n");
         let _ = writeln!(out, "- **Total Findings**: {}", results.len());
         let _ = writeln!(out, "- **Vulnerabilities (V)**: {}", v_count);
@@ -223,7 +270,7 @@ impl Result {
                     out,
                     "### {}. {} - {} ({})\n\n", // double newline intentional
                     idx + 1,
-                    if result.result_type == "V" {
+                    if result.result_type == FindingType::Verified {
                         "Vulnerability"
                     } else {
                         "Reflection"
@@ -406,7 +453,7 @@ mod tests {
     #[test]
     fn test_result_creation() {
         let result = Result::new(
-            "V".to_string(),
+            FindingType::Verified,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com?q=test".to_string(),
@@ -419,7 +466,7 @@ mod tests {
             "XSS detected".to_string(),
         );
 
-        assert_eq!(result.result_type, "V");
+        assert_eq!(result.result_type, FindingType::Verified);
         assert_eq!(result.inject_type, "inHTML");
         assert_eq!(result.method, "GET");
         assert_eq!(result.data, "https://example.com?q=test");
@@ -437,7 +484,7 @@ mod tests {
     #[test]
     fn test_result_creation_with_request_response() {
         let mut result = Result::new(
-            "V".to_string(),
+            FindingType::Verified,
             "inJS".to_string(),
             "POST".to_string(),
             "https://example.com".to_string(),
@@ -453,7 +500,7 @@ mod tests {
         result.request = Some("POST / HTTP/1.1\nHost: example.com\n\nkey=value".to_string());
         result.response = Some("HTTP/1.1 200 OK\n\n<html>alert(1)</html>".to_string());
 
-        assert_eq!(result.result_type, "V");
+        assert_eq!(result.result_type, FindingType::Verified);
         assert_eq!(result.severity, "Medium");
         assert!(result.request.is_some());
         assert!(result.response.is_some());
@@ -464,7 +511,7 @@ mod tests {
     #[test]
     fn test_result_serialization() {
         let result = Result::new(
-            "V".to_string(),
+            FindingType::Verified,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com".to_string(),
@@ -512,16 +559,56 @@ mod tests {
         }"#;
 
         let result: Result = serde_json::from_str(json).unwrap();
-        assert_eq!(result.result_type, "V");
+        assert_eq!(result.result_type, FindingType::Verified);
         assert_eq!(result.param, "q");
         assert_eq!(result.severity, "High");
         assert_eq!(result.message_id, 200);
     }
 
     #[test]
+    fn test_result_deserialization_reflected() {
+        let json = r#"{
+            "type": "R",
+            "inject_type": "inHTML",
+            "method": "GET",
+            "data": "https://example.com",
+            "param": "q",
+            "payload": "test",
+            "evidence": "Reflected",
+            "cwe": "CWE-79",
+            "severity": "Info",
+            "message_id": 100,
+            "message_str": "Reflection found"
+        }"#;
+
+        let result: Result = serde_json::from_str(json).unwrap();
+        assert_eq!(result.result_type, FindingType::Reflected);
+    }
+
+    #[test]
+    fn test_result_deserialization_ast_detected() {
+        let json = r#"{
+            "type": "A",
+            "inject_type": "DOM-XSS",
+            "method": "GET",
+            "data": "https://example.com",
+            "param": "-",
+            "payload": "alert(1)",
+            "evidence": "AST finding",
+            "cwe": "CWE-79",
+            "severity": "Medium",
+            "message_id": 0,
+            "message_str": "AST DOM XSS"
+        }"#;
+
+        let result: Result = serde_json::from_str(json).unwrap();
+        assert_eq!(result.result_type, FindingType::AstDetected);
+    }
+
+    #[test]
     fn test_result_different_types() {
         let reflected = Result::new(
-            "R".to_string(),
+            FindingType::Reflected,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com".to_string(),
@@ -535,7 +622,7 @@ mod tests {
         );
 
         let vulnerable = Result::new(
-            "V".to_string(),
+            FindingType::Verified,
             "inJS".to_string(),
             "POST".to_string(),
             "https://example.com".to_string(),
@@ -548,18 +635,18 @@ mod tests {
             "XSS confirmed".to_string(),
         );
 
-        assert_eq!(reflected.result_type, "R");
+        assert_eq!(reflected.result_type, FindingType::Reflected);
         assert_eq!(reflected.severity, "Info");
-        assert_eq!(vulnerable.result_type, "V");
+        assert_eq!(vulnerable.result_type, FindingType::Verified);
         assert_eq!(vulnerable.severity, "High");
         assert_ne!(reflected.result_type, vulnerable.result_type);
     }
 
     #[test]
     fn test_result_edge_cases() {
-        // Empty strings
+        // Empty strings (except result_type which is now an enum)
         let result = Result::new(
-            "".to_string(),
+            FindingType::Reflected,
             "".to_string(),
             "".to_string(),
             "".to_string(),
@@ -572,12 +659,12 @@ mod tests {
             "".to_string(),
         );
 
-        assert_eq!(result.result_type, "");
+        assert_eq!(result.result_type, FindingType::Reflected);
         assert_eq!(result.message_id, 0);
 
         // Special characters
         let result = Result::new(
-            "V".to_string(),
+            FindingType::Verified,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com".to_string(),
@@ -599,7 +686,7 @@ mod tests {
     #[test]
     fn test_results_to_markdown() {
         let result1 = Result::new(
-            "V".to_string(),
+            FindingType::Verified,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com?q=test".to_string(),
@@ -613,7 +700,7 @@ mod tests {
         );
 
         let result2 = Result::new(
-            "R".to_string(),
+            FindingType::Reflected,
             "inJS".to_string(),
             "POST".to_string(),
             "https://example.com/api".to_string(),
@@ -657,7 +744,7 @@ mod tests {
     #[test]
     fn test_results_to_markdown_with_request_response() {
         let mut result = Result::new(
-            "V".to_string(),
+            FindingType::Verified,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com".to_string(),
@@ -699,7 +786,7 @@ mod tests {
     #[test]
     fn test_results_to_sarif_basic() {
         let result = Result::new(
-            "V".to_string(),
+            FindingType::Verified,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com?q=test".to_string(),
@@ -743,7 +830,7 @@ mod tests {
     #[test]
     fn test_results_to_sarif_with_request_response() {
         let mut result = Result::new(
-            "V".to_string(),
+            FindingType::Verified,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com".to_string(),
@@ -773,7 +860,7 @@ mod tests {
     #[test]
     fn test_results_to_sarif_severity_levels() {
         let high = Result::new(
-            "V".to_string(),
+            FindingType::Verified,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com".to_string(),
@@ -787,7 +874,7 @@ mod tests {
         );
 
         let medium = Result::new(
-            "V".to_string(),
+            FindingType::Verified,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com".to_string(),
@@ -801,7 +888,7 @@ mod tests {
         );
 
         let low = Result::new(
-            "R".to_string(),
+            FindingType::Reflected,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com".to_string(),
@@ -838,7 +925,7 @@ mod tests {
     #[test]
     fn test_results_to_toml() {
         let result = Result::new(
-            "V".to_string(),
+            FindingType::Verified,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com?q=test".to_string(),
@@ -866,7 +953,7 @@ mod tests {
     #[test]
     fn test_results_to_sarif_valid_json() {
         let result = Result::new(
-            "V".to_string(),
+            FindingType::Verified,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com".to_string(),
@@ -901,7 +988,7 @@ mod tests {
     #[test]
     fn test_to_json_value_respects_include_flags() {
         let mut result = Result::new(
-            "V".to_string(),
+            FindingType::Verified,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com".to_string(),
@@ -928,7 +1015,7 @@ mod tests {
     #[test]
     fn test_results_to_json_compact_and_jsonl() {
         let mut result = Result::new(
-            "R".to_string(),
+            FindingType::Reflected,
             "inJS".to_string(),
             "POST".to_string(),
             "https://example.com/api".to_string(),

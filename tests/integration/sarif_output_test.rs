@@ -4,7 +4,7 @@ use dalfox::scanning::result::Result as ScanResult;
 #[test]
 fn test_sarif_output_basic_structure() {
     let result = ScanResult::new(
-        "V".to_string(),
+        dalfox::scanning::result::FindingType::Verified,
         "inHTML".to_string(),
         "GET".to_string(),
         "https://example.com?q=test".to_string(),
@@ -73,7 +73,7 @@ fn test_sarif_output_basic_structure() {
 #[test]
 fn test_sarif_output_multiple_results() {
     let result1 = ScanResult::new(
-        "V".to_string(),
+        dalfox::scanning::result::FindingType::Verified,
         "inHTML".to_string(),
         "GET".to_string(),
         "https://example.com?q=test1".to_string(),
@@ -87,7 +87,7 @@ fn test_sarif_output_multiple_results() {
     );
 
     let result2 = ScanResult::new(
-        "R".to_string(),
+        dalfox::scanning::result::FindingType::Reflected,
         "inJS".to_string(),
         "POST".to_string(),
         "https://example.com/api".to_string(),
@@ -131,7 +131,7 @@ fn test_sarif_output_multiple_results() {
 #[test]
 fn test_sarif_output_with_request_response() {
     let mut result = ScanResult::new(
-        "V".to_string(),
+        dalfox::scanning::result::FindingType::Verified,
         "inHTML".to_string(),
         "GET".to_string(),
         "https://example.com?test=xss".to_string(),
@@ -188,7 +188,7 @@ fn test_sarif_output_with_request_response() {
 #[test]
 fn test_sarif_output_locations() {
     let result = ScanResult::new(
-        "V".to_string(),
+        dalfox::scanning::result::FindingType::Verified,
         "inHTML".to_string(),
         "GET".to_string(),
         "https://example.com/path?param=value".to_string(),
@@ -230,7 +230,7 @@ fn test_sarif_output_locations() {
 #[test]
 fn test_sarif_output_properties() {
     let result = ScanResult::new(
-        "V".to_string(),
+        dalfox::scanning::result::FindingType::Verified,
         "inJS".to_string(),
         "POST".to_string(),
         "https://example.com".to_string(),
@@ -289,7 +289,7 @@ fn test_sarif_severity_mappings() {
 
     for (severity, expected_level) in test_cases {
         let result = ScanResult::new(
-            "V".to_string(),
+            dalfox::scanning::result::FindingType::Verified,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com".to_string(),

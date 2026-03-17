@@ -22,7 +22,7 @@ use crate::encoding::{
     url_encode,
 };
 use crate::parameter_analysis::analyze_parameters;
-use crate::scanning::result::Result;
+use crate::scanning::result::{FindingType, Result};
 use crate::target_parser::*;
 
 /// Default encoders used when the user does not specify any via CLI or config.
@@ -170,11 +170,10 @@ fn extract_context(response: &str, payload: &str) -> Option<(usize, String)> {
 }
 
 fn result_priority(result: &Result) -> u8 {
-    let type_score = match result.result_type.as_str() {
-        "V" => 3,
-        "A" => 2,
-        "R" => 1,
-        _ => 0,
+    let type_score = match result.result_type {
+        FindingType::Verified => 3,
+        FindingType::AstDetected => 2,
+        FindingType::Reflected => 1,
     };
     let severity_score = match result.severity.as_str() {
         "High" => 3,
@@ -229,7 +228,7 @@ mod tests {
         ScanArgs, build_ast_dom_message, dedupe_ast_results, extract_context, generate_poc,
         is_allowed_content_type, preflight_content_type,
     };
-    use crate::scanning::result::Result as ScanResult;
+    use crate::scanning::result::{FindingType, Result as ScanResult};
     use crate::target_parser::parse_target;
     use axum::Router;
     use axum::http::{HeaderMap, HeaderName, HeaderValue};
@@ -388,7 +387,7 @@ mod tests {
     #[test]
     fn test_dedupe_ast_results_prefers_verified_variant() {
         let mut ast_a = ScanResult::new(
-            "A".to_string(),
+            FindingType::AstDetected,
             "DOM-XSS".to_string(),
             "GET".to_string(),
             "https://example.com".to_string(),
@@ -403,13 +402,13 @@ mod tests {
         ast_a.request = Some("GET /?q=... HTTP/1.1".to_string());
 
         let mut ast_v = ast_a.clone();
-        ast_v.result_type = "V".to_string();
+        ast_v.result_type = FindingType::Verified;
         ast_v.severity = "High".to_string();
         ast_v.message_str = "desc (검증 필요) [경량 확인: 검증됨]".to_string();
 
         let deduped = dedupe_ast_results(vec![ast_a, ast_v]);
         assert_eq!(deduped.len(), 1);
-        assert_eq!(deduped[0].result_type, "V");
+        assert_eq!(deduped[0].result_type, FindingType::Verified);
         assert_eq!(deduped[0].severity, "High");
     }
 
@@ -418,7 +417,7 @@ mod tests {
         let evidence =
             "https://example.com:3:9 - DOM-based XSS via location.search to innerHTML (Source: location.search, Sink: innerHTML)".to_string();
         let ast_preflight = ScanResult::new(
-            "A".to_string(),
+            FindingType::AstDetected,
             "DOM-XSS".to_string(),
             "GET".to_string(),
             "https://example.com".to_string(),
@@ -431,7 +430,7 @@ mod tests {
             "preflight".to_string(),
         );
         let mut ast_param_verified = ScanResult::new(
-            "V".to_string(),
+            FindingType::Verified,
             "DOM-XSS".to_string(),
             "GET".to_string(),
             "https://example.com/?q=%3Cimg...%3E".to_string(),
@@ -447,14 +446,14 @@ mod tests {
 
         let deduped = dedupe_ast_results(vec![ast_preflight, ast_param_verified.clone()]);
         assert_eq!(deduped.len(), 1);
-        assert_eq!(deduped[0].result_type, "V");
+        assert_eq!(deduped[0].result_type, FindingType::Verified);
         assert_eq!(deduped[0].message_str, ast_param_verified.message_str);
     }
 
     #[test]
     fn test_dedupe_ast_results_keeps_non_ast_entries() {
         let r1 = ScanResult::new(
-            "R".to_string(),
+            FindingType::Reflected,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com".to_string(),
@@ -474,7 +473,7 @@ mod tests {
     #[test]
     fn test_generate_poc_plain_query() {
         let r = ScanResult::new(
-            "R".to_string(),
+            FindingType::Reflected,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com".to_string(),
@@ -494,7 +493,7 @@ mod tests {
     #[test]
     fn test_generate_poc_curl() {
         let r = ScanResult::new(
-            "R".to_string(),
+            FindingType::Reflected,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com".to_string(),
@@ -514,7 +513,7 @@ mod tests {
     #[test]
     fn test_generate_poc_http_request_prefers_request_block() {
         let mut r = ScanResult::new(
-            "R".to_string(),
+            FindingType::Reflected,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com".to_string(),
@@ -534,7 +533,7 @@ mod tests {
     #[test]
     fn test_generate_poc_path_segment_append() {
         let r = ScanResult::new(
-            "R".to_string(),
+            FindingType::Reflected,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://ex.com/foo/bar".to_string(),
@@ -553,7 +552,7 @@ mod tests {
     #[test]
     fn test_generate_poc_http_request_without_request_falls_back_to_url() {
         let r = ScanResult::new(
-            "R".to_string(),
+            FindingType::Reflected,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com".to_string(),
@@ -572,7 +571,7 @@ mod tests {
     #[test]
     fn test_generate_poc_unknown_type_defaults_to_plain_format() {
         let r = ScanResult::new(
-            "R".to_string(),
+            FindingType::Reflected,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com".to_string(),
@@ -592,7 +591,7 @@ mod tests {
     fn test_generate_poc_path_segment_selective_encoding_for_special_chars() {
         let payload = "A B#?%".to_string();
         let r = ScanResult::new(
-            "R".to_string(),
+            FindingType::Reflected,
             "inHTML".to_string(),
             "GET".to_string(),
             format!("https://ex.com/base/{}", payload),
@@ -2044,7 +2043,7 @@ pub async fn run_scan(args: &ScanArgs) {
                                 );
                                 // Create an AST-based DOM XSS result with actual executable payload
                                 let ast_result = crate::scanning::result::Result::new(
-                                    "A".to_string(), // AST-detected
+                                    FindingType::AstDetected, // AST-detected
                                     "DOM-XSS".to_string(),
                                     target.method.clone(),
                                     poc_url,
@@ -2060,7 +2059,7 @@ pub async fn run_scan(args: &ScanArgs) {
                                 );
                                 let mut ast_result = ast_result;
                                 if self_bootstrap_verified {
-                                    ast_result.result_type = "V".to_string();
+                                    ast_result.result_type = FindingType::Verified;
                                     ast_result.severity = "High".to_string();
                                     ast_result.message_str = format!(
                                         "{} [정적 self-bootstrap 확인]",
@@ -2353,7 +2352,7 @@ pub async fn run_scan(args: &ScanArgs) {
             .iter()
             .map(|s| s.trim().to_uppercase())
             .collect();
-        final_results.retain(|r| allowed.contains(&r.result_type));
+        final_results.retain(|r| allowed.iter().any(|a| a == r.result_type.short()));
     }
 
     let limit = args.limit.unwrap_or(usize::MAX);
@@ -2396,19 +2395,26 @@ pub async fn run_scan(args: &ScanArgs) {
         // Plain logger: XSS summary before POC lines
         let v_count = display_results
             .iter()
-            .filter(|r| r.result_type == "V")
+            .filter(|r| r.result_type == FindingType::Verified)
             .count();
         log_warn(&format!("XSS found \x1b[33m{}\x1b[0m XSS", v_count));
 
         for result in display_results {
             let mut poc_line = generate_poc(result, &args.poc_type);
             if args.poc_type == "plain" {
-                if result.result_type == "R" {
-                    let trimmed = poc_line.trim_end();
-                    poc_line = format!("\x1b[33m{}\x1b[0m\n", trimmed);
-                } else if result.result_type == "V" {
-                    let trimmed = poc_line.trim_end();
-                    poc_line = format!("\x1b[31m{}\x1b[0m\n", trimmed);
+                match result.result_type {
+                    FindingType::Reflected => {
+                        let trimmed = poc_line.trim_end();
+                        poc_line = format!("\x1b[33m{}\x1b[0m\n", trimmed);
+                    }
+                    FindingType::Verified => {
+                        let trimmed = poc_line.trim_end();
+                        poc_line = format!("\x1b[31m{}\x1b[0m\n", trimmed);
+                    }
+                    FindingType::AstDetected => {
+                        let trimmed = poc_line.trim_end();
+                        poc_line = format!("\x1b[35m{}\x1b[0m\n", trimmed);
+                    }
                 }
             }
             output.push_str(&poc_line);
@@ -2436,7 +2442,7 @@ pub async fn run_scan(args: &ScanArgs) {
             let last_idx = sections.len().saturating_sub(1);
 
             // 1) Issue
-            let issue_text = if result.result_type == "R" {
+            let issue_text = if result.result_type == FindingType::Reflected {
                 "XSS payload reflected"
             } else {
                 "XSS payload DOM object identified"

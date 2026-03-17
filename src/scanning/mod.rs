@@ -32,6 +32,7 @@ use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::Param;
 use crate::scanning::check_dom_verification::check_dom_verification_with_client;
 use crate::scanning::check_reflection::check_reflection_with_response_client;
+use crate::scanning::result::FindingType;
 use crate::target_parser::Target;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::collections::HashSet;
@@ -538,7 +539,7 @@ pub async fn run_scanning(
                             )
                         };
                         let mut ast_result = crate::scanning::result::Result::new(
-                            "A".to_string(),
+                            FindingType::AstDetected,
                             "DOM-XSS".to_string(),
                             target_clone.method.clone(),
                             result_url.clone(),
@@ -579,12 +580,12 @@ pub async fn run_scanning(
                             ast_result.message_str = format!("{} [{}]", ast_result.message_str, n);
                         }
                         if verified {
-                            ast_result.result_type = "V".to_string();
+                            ast_result.result_type = FindingType::Verified;
                             ast_result.severity = "High".to_string();
                             ast_result.message_str =
                                 format!("{} [경량 확인: 검증됨]", ast_result.message_str);
                         } else if self_bootstrap_verified {
-                            ast_result.result_type = "V".to_string();
+                            ast_result.result_type = FindingType::Verified;
                             ast_result.severity = "High".to_string();
                             ast_result.message_str =
                                 format!("{} [정적 self-bootstrap 확인]", ast_result.message_str);
@@ -691,7 +692,7 @@ pub async fn run_scanning(
                                 )
                             };
                             let mut ast_result = crate::scanning::result::Result::new(
-                                "A".to_string(), // AST-detected
+                                FindingType::AstDetected, // AST-detected
                                 "DOM-XSS".to_string(),
                                 target_clone.method.clone(),
                                 result_url.clone(),
@@ -733,12 +734,12 @@ pub async fn run_scanning(
                                     format!("{} [{}]", ast_result.message_str, n);
                             }
                             if verified {
-                                ast_result.result_type = "V".to_string();
+                                ast_result.result_type = FindingType::Verified;
                                 ast_result.severity = "High".to_string();
                                 ast_result.message_str =
                                     format!("{} [경량 확인: 검증됨]", ast_result.message_str);
                             } else if self_bootstrap_verified {
-                                ast_result.result_type = "V".to_string();
+                                ast_result.result_type = FindingType::Verified;
                                 ast_result.severity = "High".to_string();
                                 ast_result.message_str = format!(
                                     "{} [정적 self-bootstrap 확인]",
@@ -785,7 +786,7 @@ pub async fn run_scanning(
 
                         // Record reflected XSS finding (fallback path)
                         let mut result = crate::scanning::result::Result::new(
-                            "R".to_string(),
+                            FindingType::Reflected,
                             "inHTML".to_string(),
                             target_clone.method.clone(),
                             result_url,
@@ -874,7 +875,7 @@ pub async fn run_scanning(
                         );
 
                         let mut result = crate::scanning::result::Result::new(
-                            "V".to_string(), // DOM-verified => Vulnerability
+                            FindingType::Verified, // DOM-verified => Vulnerability
                             "inHTML".to_string(),
                             target_clone.method.clone(),
                             result_url,
@@ -952,7 +953,7 @@ pub async fn run_scanning(
                                 let reflection_note = reflection_kind_note(kind);
 
                                 let mut result = crate::scanning::result::Result::new(
-                                    "R".to_string(),
+                                    FindingType::Reflected,
                                     "inHTML-HPP".to_string(),
                                     target_clone.method.clone(),
                                     hpp_url.clone(),

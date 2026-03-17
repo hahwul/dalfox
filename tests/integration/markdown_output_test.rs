@@ -4,7 +4,7 @@ use dalfox::scanning::result::Result as ScanResult;
 #[test]
 fn test_markdown_output_single_result() {
     let result = ScanResult::new(
-        "V".to_string(),
+        dalfox::scanning::result::FindingType::Verified,
         "inHTML".to_string(),
         "GET".to_string(),
         "https://example.com?q=test".to_string(),
@@ -43,7 +43,7 @@ fn test_markdown_output_single_result() {
 #[test]
 fn test_markdown_output_multiple_results() {
     let result1 = ScanResult::new(
-        "V".to_string(),
+        dalfox::scanning::result::FindingType::Verified,
         "inHTML".to_string(),
         "GET".to_string(),
         "https://example.com?q=test1".to_string(),
@@ -57,7 +57,7 @@ fn test_markdown_output_multiple_results() {
     );
 
     let result2 = ScanResult::new(
-        "R".to_string(),
+        dalfox::scanning::result::FindingType::Reflected,
         "inJS".to_string(),
         "POST".to_string(),
         "https://example.com/api".to_string(),
@@ -89,7 +89,7 @@ fn test_markdown_output_multiple_results() {
 #[test]
 fn test_markdown_output_with_request_response() {
     let mut result = ScanResult::new(
-        "V".to_string(),
+        dalfox::scanning::result::FindingType::Verified,
         "inHTML".to_string(),
         "GET".to_string(),
         "https://example.com?test=xss".to_string(),
@@ -125,7 +125,7 @@ fn test_markdown_output_with_request_response() {
 #[test]
 fn test_markdown_output_without_request_response() {
     let mut result = ScanResult::new(
-        "V".to_string(),
+        dalfox::scanning::result::FindingType::Verified,
         "inHTML".to_string(),
         "GET".to_string(),
         "https://example.com".to_string(),
@@ -154,7 +154,7 @@ fn test_markdown_output_without_request_response() {
 #[test]
 fn test_markdown_output_special_characters() {
     let result = ScanResult::new(
-        "V".to_string(),
+        dalfox::scanning::result::FindingType::Verified,
         "inHTML".to_string(),
         "GET".to_string(),
         "https://example.com".to_string(),

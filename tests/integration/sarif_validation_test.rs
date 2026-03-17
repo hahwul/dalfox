@@ -6,7 +6,7 @@ use serde_json::Value;
 fn test_sarif_schema_compliance() {
     // Create a comprehensive result with all possible fields
     let mut result = ScanResult::new(
-        "V".to_string(),
+        dalfox::scanning::result::FindingType::Verified,
         "inHTML".to_string(),
         "GET".to_string(),
         "https://example.com/test?param=value".to_string(),
@@ -188,7 +188,7 @@ fn test_sarif_severity_to_level_mapping() {
 
     for (severity, expected_level) in test_cases {
         let result = ScanResult::new(
-            "V".to_string(),
+            dalfox::scanning::result::FindingType::Verified,
             "inHTML".to_string(),
             "GET".to_string(),
             "https://example.com".to_string(),
@@ -216,7 +216,7 @@ fn test_sarif_severity_to_level_mapping() {
 #[test]
 fn test_sarif_message_with_evidence() {
     let result = ScanResult::new(
-        "V".to_string(),
+        dalfox::scanning::result::FindingType::Verified,
         "inHTML".to_string(),
         "GET".to_string(),
         "https://example.com".to_string(),
@@ -250,7 +250,7 @@ fn test_sarif_message_with_evidence() {
 #[test]
 fn test_sarif_partial_fingerprints() {
     let result = ScanResult::new(
-        "V".to_string(),
+        dalfox::scanning::result::FindingType::Verified,
         "inHTML".to_string(),
         "GET".to_string(),
         "https://example.com".to_string(),
@@ -280,7 +280,7 @@ fn test_sarif_partial_fingerprints() {
 #[test]
 fn test_sarif_rule_metadata() {
     let result = ScanResult::new(
-        "V".to_string(),
+        dalfox::scanning::result::FindingType::Verified,
         "inHTML".to_string(),
         "GET".to_string(),
         "https://example.com".to_string(),
