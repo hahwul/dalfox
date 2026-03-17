@@ -1,3 +1,5 @@
+pub mod pre_encoding;
+
 use base64::{Engine, engine::general_purpose::STANDARD};
 
 /// Apply encoder policy to a list of base payloads and return expanded, de-duplicated variants.

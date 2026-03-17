@@ -205,7 +205,7 @@ pub async fn active_probe_param(
             );
             // Apply pre-encoding (base64/2base64) so the server can decode
             // the probe value the same way it decodes normal user input.
-            let payload = crate::scanning::check_reflection::apply_pre_encoding_pub(
+            let payload = crate::encoding::pre_encoding::apply_pre_encoding(
                 &raw_payload,
                 &pre_encoding,
             );
@@ -529,13 +529,14 @@ pub async fn active_probe_param(
         let close = crate::scanning::markers::close_marker();
         let raw_marker = format!("{}<{}", open, close);
 
-        for (enc_name, rounds) in [("2url", 1u8), ("3url", 2u8)] {
+        for (enc_type, rounds) in crate::encoding::pre_encoding::multi_url_decode_probes() {
+            let enc_name = enc_type.as_str();
             let mut encoded = raw_marker.clone();
             // For Query: append_pair adds one URL-encoding layer automatically,
             // so we encode (N-1) times for N-decode detection.
             // For Path: selective_path_segment_encode encodes '%' to '%25' (one layer),
             // so we also encode (N-1) extra times.
-            for _ in 0..rounds {
+            for _ in 0..*rounds {
                 encoded = crate::encoding::url_encode(&encoded);
             }
 

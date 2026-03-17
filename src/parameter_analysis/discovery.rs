@@ -244,19 +244,14 @@ pub async fn check_query_discovery(
     }
 
     // Encoding probe: for params not yet discovered, try base64-encoded markers
-    type EncodingProbe = (&'static str, fn(&str) -> String);
-    let encoding_probes: &[EncodingProbe] = &[
-        ("base64", |s| crate::encoding::base64_encode(s)),
-        ("2base64", |s| crate::encoding::base64_encode(&crate::encoding::base64_encode(s))),
-        ("2url", |s| crate::encoding::url_encode(&crate::encoding::url_encode(s))),
-        ("3url", |s| crate::encoding::url_encode(&crate::encoding::url_encode(&crate::encoding::url_encode(s)))),
-    ];
+    let encoding_probes = crate::encoding::pre_encoding::encoding_probes();
     for (name, value) in target.url.query_pairs() {
         let name = name.to_string();
         if discovered_names.contains(&name) {
             continue;
         }
-        for &(enc_name, encode_fn) in encoding_probes {
+        for (enc_type, encode_fn) in encoding_probes {
+            let enc_name = enc_type.as_str();
             let encoded_marker = encode_fn(test_value);
             let mut url = target.url.clone();
             url.query_pairs_mut().clear();

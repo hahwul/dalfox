@@ -23,25 +23,8 @@ use std::sync::OnceLock;
 use std::sync::atomic::Ordering;
 use tokio::time::{Duration, sleep};
 
-/// Apply pre-encoding to a payload if the parameter requires it.
-/// Returns the encoded payload, or the original if no encoding is needed.
-pub fn apply_pre_encoding_pub(payload: &str, pre_encoding: &Option<String>) -> String {
-    apply_pre_encoding(payload, pre_encoding)
-}
-
-fn apply_pre_encoding(payload: &str, pre_encoding: &Option<String>) -> String {
-    match pre_encoding.as_deref() {
-        Some("base64") => crate::encoding::base64_encode(payload),
-        Some("2base64") => {
-            crate::encoding::base64_encode(&crate::encoding::base64_encode(payload))
-        }
-        Some("2url") => crate::encoding::url_encode(&crate::encoding::url_encode(payload)),
-        Some("3url") => crate::encoding::url_encode(&crate::encoding::url_encode(
-            &crate::encoding::url_encode(payload),
-        )),
-        _ => payload.to_string(),
-    }
-}
+/// Re-export for callers outside this module (e.g. DOM verification, active probing).
+pub use crate::encoding::pre_encoding::apply_pre_encoding;
 
 /// Check whether *all* occurrences of `payload` in `html` fall inside safe tags
 /// (textarea, noscript, style, xmp, plaintext, title).  If the payload appears
