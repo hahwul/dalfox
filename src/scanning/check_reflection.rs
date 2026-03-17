@@ -389,8 +389,10 @@ async fn fetch_injection_response_with_client(
     }
 
     // Apply pre-encoding if the parameter requires it (e.g. base64, 2base64)
+    // Use encoded_payload for building the HTTP request, but keep `payload`
+    // (the raw/original payload) for response body analysis — the server
+    // decodes the encoding and reflects the raw content.
     let encoded_payload = apply_pre_encoding(payload, &param.pre_encoding);
-    let payload = encoded_payload.as_str();
 
     // Build injection request based on parameter location
     let default_method = target.parse_method();
@@ -405,8 +407,8 @@ async fn fetch_injection_response_with_client(
                 parsed_url,
                 target.data.clone(),
             );
-            // Override/add the header with the payload value
-            crate::utils::apply_header_overrides(rb, &[(param.name.clone(), payload.to_string())])
+            // Override/add the header with the encoded payload value
+            crate::utils::apply_header_overrides(rb, &[(param.name.clone(), encoded_payload.to_string())])
         }
         Location::Body => {
             // Body injection: use form action URL if available, else original URL
@@ -423,13 +425,13 @@ async fn fetch_injection_response_with_client(
                 let mut found = false;
                 for pair in &mut pairs {
                     if pair.0 == param.name {
-                        pair.1 = payload.to_string();
+                        pair.1 = encoded_payload.to_string();
                         found = true;
                         break;
                     }
                 }
                 if !found {
-                    pairs.push((param.name.clone(), payload.to_string()));
+                    pairs.push((param.name.clone(), encoded_payload.to_string()));
                 }
                 Some(
                     url::form_urlencoded::Serializer::new(String::new())
@@ -440,7 +442,7 @@ async fn fetch_injection_response_with_client(
                 Some(format!(
                     "{}={}",
                     urlencoding::encode(&param.name),
-                    urlencoding::encode(payload)
+                    urlencoding::encode(&encoded_payload)
                 ))
             };
             let rb = crate::utils::build_request(client, target, method, parsed_url, body);
@@ -460,16 +462,16 @@ async fn fetch_injection_response_with_client(
                     if let Some(obj) = json_val.as_object_mut() {
                         obj.insert(
                             param.name.clone(),
-                            serde_json::Value::String(payload.to_string()),
+                            serde_json::Value::String(encoded_payload.to_string()),
                         );
                     }
                     Some(serde_json::to_string(&json_val).unwrap_or_else(|_| data.clone()))
                 } else {
                     // Fallback: simple string replacement of the param's original value
-                    Some(data.replace(&param.value, payload))
+                    Some(data.replace(&param.value, &encoded_payload))
                 }
             } else {
-                Some(serde_json::json!({ &param.name: payload }).to_string())
+                Some(serde_json::json!({ &param.name: &*encoded_payload }).to_string())
             };
             let rb = crate::utils::build_request(client, target, method, parsed_url, body);
             rb.header("Content-Type", "application/json")
@@ -487,22 +489,22 @@ async fn fetch_injection_response_with_client(
                         let k = urlencoding::decode(k).unwrap_or(std::borrow::Cow::Borrowed(k)).to_string();
                         let v = urlencoding::decode(v).unwrap_or(std::borrow::Cow::Borrowed(v)).to_string();
                         if k == param.name {
-                            form = form.text(k, payload.to_string());
+                            form = form.text(k, encoded_payload.to_string());
                         } else {
                             form = form.text(k, v);
                         }
                     }
                 }
             } else {
-                form = form.text(param.name.clone(), payload.to_string());
+                form = form.text(param.name.clone(), encoded_payload.to_string());
             }
             crate::utils::build_request(client, target, method, parsed_url, None)
                 .multipart(form)
         }
         _ => {
-            // Query / Path: inject payload into the URL
+            // Query / Path: inject encoded payload into the URL
             let inject_url =
-                crate::scanning::url_inject::build_injected_url(&target.url, param, payload);
+                crate::scanning::url_inject::build_injected_url(&target.url, param, &encoded_payload);
             let parsed_url = url::Url::parse(&inject_url).unwrap_or_else(|_| target.url.clone());
             crate::utils::build_request(
                 client,
@@ -558,7 +560,7 @@ async fn fetch_injection_response_with_client(
             // the Location header may contain the reflected payload.
             if resp.status().is_redirection()
                 && let Some(location) = resp.headers().get("location").and_then(|v| v.to_str().ok())
-                && location.contains(payload)
+                && location.contains(&*encoded_payload)
             {
                 // Synthesize a response text that includes the Location value
                 // so reflection detection can find it
@@ -632,7 +634,7 @@ pub async fn check_reflection_with_response_client(
 pub async fn check_reflection_with_hpp_url(
     client: &Client,
     target: &Target,
-    param: &Param,
+    _param: &Param,
     payload: &str,
     hpp_url: &str,
     args: &crate::cmd::scan::ScanArgs,
@@ -641,9 +643,8 @@ pub async fn check_reflection_with_hpp_url(
         return (None, None);
     }
 
-    let encoded_payload = apply_pre_encoding(payload, &param.pre_encoding);
-    let payload_str = encoded_payload.as_str();
-
+    // HPP URL already has the encoded payload injected; we only need to
+    // check if the server reflects the raw payload in the response.
     let parsed_url = url::Url::parse(hpp_url).unwrap_or_else(|_| target.url.clone());
     let default_method = target.parse_method();
     let inject_request = crate::utils::build_request(
@@ -670,15 +671,15 @@ pub async fn check_reflection_with_hpp_url(
         }
         if resp.status().is_redirection()
             && let Some(location) = resp.headers().get("location").and_then(|v| v.to_str().ok())
-            && location.contains(payload_str)
+            && location.contains(payload)
         {
-            let kind = classify_reflection(location, payload_str);
+            let kind = classify_reflection(location, payload);
             return (kind, Some(location.to_string()));
         }
         if let Ok(text) = resp.text().await {
-            let kind = classify_reflection(&text, payload_str);
+            let kind = classify_reflection(&text, payload);
             let kind = match kind {
-                Some(_) if is_in_safe_context_decoded(&text, payload_str) => None,
+                Some(_) if is_in_safe_context_decoded(&text, payload) => None,
                 other => other,
             };
             (kind, Some(text))

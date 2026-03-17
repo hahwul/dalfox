@@ -74,25 +74,25 @@ fn generate_poc(result: &crate::scanning::result::Result, poc_type: &str) -> Str
 
     // Apply user-specified encoders (highest precedence first) to path payload if requested.
     // We only transform the payload portion inside the path (if any); query/body already handled upstream.
-    fn apply_path_encoders_if_requested(raw_payload: &str) -> String {
+    fn apply_path_encoders_if_requested(payload: &str) -> String {
         let Some(encs) = GLOBAL_ENCODERS.get() else {
-            return selective_path_encode(raw_payload);
+            return selective_path_encode(payload);
         };
         // Priority order: explicit user order (stop at first transforming encoder that is not 'none')
         for enc in encs {
             match enc.as_str() {
                 "none" => continue,
-                "url" => return url_encode(raw_payload),
-                "2url" => return double_url_encode(raw_payload),
-                "3url" => return triple_url_encode(raw_payload),
-                "4url" => return quadruple_url_encode(raw_payload),
-                "html" => return html_entity_encode(raw_payload),
-                "base64" => return base64_encode(raw_payload),
+                "url" => return url_encode(payload),
+                "2url" => return double_url_encode(payload),
+                "3url" => return triple_url_encode(payload),
+                "4url" => return quadruple_url_encode(payload),
+                "html" => return html_entity_encode(payload),
+                "base64" => return base64_encode(payload),
                 _ => {}
             }
         }
         // Fallback to selective path encode
-        selective_path_encode(raw_payload)
+        selective_path_encode(payload)
     }
 
     let attack_url = {

@@ -294,7 +294,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_verify_dom_xss_light_marker_element_present_without_raw_payload() {
+    async fn test_verify_dom_xss_light_marker_element_present_without_payload() {
         let marker = crate::scanning::markers::class_marker().to_string();
         let addr = start_mock_server(&marker).await;
         let target = make_target(addr, "/marker-only");

@@ -16,7 +16,7 @@
 //!
 //! **Side effects:** One HTTP request (with rate-limit retry). For stored XSS
 //! (`--sxss`), sends the injection request then checks a secondary URL for
-//! the stored payload. Applies `pre_encoding` as `wire_payload` for the
+//! the stored payload. Applies `pre_encoding` as `encoded_payload` for the
 //! request but checks DOM evidence against the raw `payload`.
 
 use crate::parameter_analysis::{Location, Param};
@@ -153,15 +153,15 @@ fn build_inject_request(
     client: &Client,
     target: &Target,
     param: &Param,
-    wire_payload: &str,
+    encoded_payload: &str,
 ) -> reqwest::RequestBuilder {
     let default_method = target.parse_method();
     match param.location {
-        Location::Header => build_header_request(client, target, param, wire_payload, default_method),
-        Location::Body => build_body_request(client, target, param, wire_payload),
-        Location::JsonBody => build_json_body_request(client, target, param, wire_payload),
-        Location::MultipartBody => build_multipart_request(client, target, param, wire_payload),
-        _ => build_url_inject_request(client, target, param, wire_payload, default_method),
+        Location::Header => build_header_request(client, target, param, encoded_payload, default_method),
+        Location::Body => build_body_request(client, target, param, encoded_payload),
+        Location::JsonBody => build_json_body_request(client, target, param, encoded_payload),
+        Location::MultipartBody => build_multipart_request(client, target, param, encoded_payload),
+        _ => build_url_inject_request(client, target, param, encoded_payload, default_method),
     }
 }
 
@@ -169,7 +169,7 @@ fn build_header_request(
     client: &Client,
     target: &Target,
     param: &Param,
-    wire_payload: &str,
+    encoded_payload: &str,
     method: reqwest::Method,
 ) -> reqwest::RequestBuilder {
     let parsed_url = target.url.clone();
@@ -180,9 +180,9 @@ fn build_header_request(
         );
         let cookie_header = match others {
             Some(rest) if !rest.is_empty() => {
-                format!("{}={}; {}", param.name, wire_payload, rest)
+                format!("{}={}; {}", param.name, encoded_payload, rest)
             }
-            _ => format!("{}={}", param.name, wire_payload),
+            _ => format!("{}={}", param.name, encoded_payload),
         };
         crate::utils::build_request_with_cookie(
             client, target, method, parsed_url, target.data.clone(), Some(cookie_header),
@@ -193,7 +193,7 @@ fn build_header_request(
         );
         crate::utils::apply_header_overrides(
             base,
-            &[(param.name.clone(), wire_payload.to_string())],
+            &[(param.name.clone(), encoded_payload.to_string())],
         )
     }
 }
@@ -210,7 +210,7 @@ fn build_body_request(
     client: &Client,
     target: &Target,
     param: &Param,
-    wire_payload: &str,
+    encoded_payload: &str,
 ) -> reqwest::RequestBuilder {
     let parsed_url = resolve_form_action_url(param, target);
     let body = if let Some(ref data) = target.data {
@@ -220,13 +220,13 @@ fn build_body_request(
         let mut found = false;
         for pair in &mut pairs {
             if pair.0 == param.name {
-                pair.1 = wire_payload.to_string();
+                pair.1 = encoded_payload.to_string();
                 found = true;
                 break;
             }
         }
         if !found {
-            pairs.push((param.name.clone(), wire_payload.to_string()));
+            pairs.push((param.name.clone(), encoded_payload.to_string()));
         }
         Some(
             url::form_urlencoded::Serializer::new(String::new())
@@ -237,7 +237,7 @@ fn build_body_request(
         Some(format!(
             "{}={}",
             urlencoding::encode(&param.name),
-            urlencoding::encode(wire_payload)
+            urlencoding::encode(encoded_payload)
         ))
     };
     let base = crate::utils::build_request(client, target, reqwest::Method::POST, parsed_url, body);
@@ -254,7 +254,7 @@ fn build_json_body_request(
     client: &Client,
     target: &Target,
     param: &Param,
-    wire_payload: &str,
+    encoded_payload: &str,
 ) -> reqwest::RequestBuilder {
     let parsed_url = resolve_form_action_url(param, target);
     let body = if let Some(ref data) = target.data {
@@ -262,15 +262,15 @@ fn build_json_body_request(
             if let Some(obj) = json_val.as_object_mut() {
                 obj.insert(
                     param.name.clone(),
-                    serde_json::Value::String(wire_payload.to_string()),
+                    serde_json::Value::String(encoded_payload.to_string()),
                 );
             }
             Some(serde_json::to_string(&json_val).unwrap_or_else(|_| data.clone()))
         } else {
-            Some(data.replace(&param.value, wire_payload))
+            Some(data.replace(&param.value, encoded_payload))
         }
     } else {
-        Some(serde_json::json!({ &param.name: wire_payload }).to_string())
+        Some(serde_json::json!({ &param.name: encoded_payload }).to_string())
     };
     let base = crate::utils::build_request(client, target, reqwest::Method::POST, parsed_url, body);
     crate::utils::apply_header_overrides(
@@ -283,7 +283,7 @@ fn build_multipart_request(
     client: &Client,
     target: &Target,
     param: &Param,
-    wire_payload: &str,
+    encoded_payload: &str,
 ) -> reqwest::RequestBuilder {
     let parsed_url = resolve_form_action_url(param, target);
     let mut form = reqwest::multipart::Form::new();
@@ -293,14 +293,14 @@ fn build_multipart_request(
                 let k = urlencoding::decode(k).unwrap_or(std::borrow::Cow::Borrowed(k)).to_string();
                 let v = urlencoding::decode(v).unwrap_or(std::borrow::Cow::Borrowed(v)).to_string();
                 if k == param.name {
-                    form = form.text(k, wire_payload.to_string());
+                    form = form.text(k, encoded_payload.to_string());
                 } else {
                     form = form.text(k, v);
                 }
             }
         }
     } else {
-        form = form.text(param.name.clone(), wire_payload.to_string());
+        form = form.text(param.name.clone(), encoded_payload.to_string());
     }
     crate::utils::build_request(client, target, reqwest::Method::POST, parsed_url, None)
         .multipart(form)
@@ -310,11 +310,11 @@ fn build_url_inject_request(
     client: &Client,
     target: &Target,
     param: &Param,
-    wire_payload: &str,
+    encoded_payload: &str,
     method: reqwest::Method,
 ) -> reqwest::RequestBuilder {
     let inject_url_str =
-        crate::scanning::url_inject::build_injected_url(&target.url, param, wire_payload);
+        crate::scanning::url_inject::build_injected_url(&target.url, param, encoded_payload);
     let inject_url =
         url::Url::parse(&inject_url_str).unwrap_or_else(|_| target.url.clone());
     crate::utils::build_request(client, target, method, inject_url, target.data.clone())
@@ -428,9 +428,8 @@ pub async fn check_dom_verification_with_client(
     // (the raw/original payload) for response body analysis — the server
     // decodes the encoding and reflects the raw content.
     let encoded_payload = crate::encoding::pre_encoding::apply_pre_encoding(payload, &param.pre_encoding);
-    let wire_payload = encoded_payload.as_str();
 
-    let inject_request = build_inject_request(client, target, param, wire_payload);
+    let inject_request = build_inject_request(client, target, param, &encoded_payload);
 
     // Send the injection request (with rate-limit retry)
     crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

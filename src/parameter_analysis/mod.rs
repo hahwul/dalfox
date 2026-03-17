@@ -197,7 +197,7 @@ pub async fn active_probe_param(
 
         let handle = tokio::spawn(async move {
             let _permit = sem_clone.acquire().await.expect("acquire semaphore permit");
-            let raw_payload = format!(
+            let probe_payload = format!(
                 "{}{}{}",
                 crate::scanning::markers::open_marker(),
                 c,
@@ -206,7 +206,7 @@ pub async fn active_probe_param(
             // Apply pre-encoding (base64/2base64) so the server can decode
             // the probe value the same way it decodes normal user input.
             let payload = crate::encoding::pre_encoding::apply_pre_encoding(
-                &raw_payload,
+                &probe_payload,
                 &pre_encoding,
             );
             // Force POST for Body/JsonBody/MultipartBody params even when default target method is GET
