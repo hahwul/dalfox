@@ -1,3 +1,24 @@
+//! # Stage 6: DOM Verification
+//!
+//! Confirms that a reflected payload actually creates exploitable DOM structure
+//! (not just textual reflection). This upgrades a finding from type "R"
+//! (Reflected) to "V" (DOM-verified).
+//!
+//! **Input:** `(Param, payload: &str)` — a parameter + payload that already
+//! passed Stage 5 reflection check.
+//!
+//! **Output:** `(bool, Option<String>)` — whether DOM evidence was found, and
+//! the response HTML body. Evidence requires *both* reflection *and* one of:
+//! - Dalfox marker element (class/id `dlx`-hex or legacy `dalfox`) found via
+//!   CSS selector in parsed DOM
+//! - Executable URL protocol (`javascript:`, `data:text/html`, `vbscript:`)
+//!   reflected into a dangerous attribute (href, src, action, etc.)
+//!
+//! **Side effects:** One HTTP request (with rate-limit retry). For stored XSS
+//! (`--sxss`), sends the injection request then checks a secondary URL for
+//! the stored payload. Applies `pre_encoding` as `wire_payload` for the
+//! request but checks DOM evidence against the raw `payload`.
+
 use crate::parameter_analysis::{Location, Param};
 use crate::target_parser::Target;
 use reqwest::Client;

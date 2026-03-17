@@ -1,3 +1,22 @@
+//! # Parameter Analysis (Stages 1–3)
+//!
+//! Orchestrates Discovery → Mining → Active Probing to produce a finalized
+//! list of reflected parameters with confirmed injection characteristics.
+//!
+//! ## Stage 3: Active Probing (`active_probe_param`)
+//!
+//! **Input:** `DiscoveredParams` — parameters from Stages 1-2 with naive
+//! special character classification and injection context.
+//!
+//! **Output:** `ProbedParams` — parameters with:
+//! - `valid_specials` / `invalid_specials` actively confirmed via per-char probes
+//! - `injection_context` refined from actual response analysis
+//! - `pre_encoding` auto-detected (base64, 2base64, 2url, 3url) when `<` is
+//!   invalid in naive check but valid after encoding
+//!
+//! **Side effects:** HTTP requests (one per special character per parameter).
+//! Runs concurrently via tokio tasks bounded by `target.workers`.
+
 pub mod discovery;
 pub mod mining;
 
@@ -14,6 +33,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::{self, Value};
 use std::sync::Arc;
 use tokio::sync::{Mutex, Semaphore};
+
+/// Parameters after Stage 1 (Discovery) and Stage 2 (Mining).
+/// Each `Param` has naive `valid_specials`/`invalid_specials` and a tentative
+/// `injection_context`, but `pre_encoding` is still `None`.
+pub type DiscoveredParams = Vec<Param>;
+
+/// Parameters after Stage 3 (Active Probing).
+/// Each `Param` now carries actively confirmed `valid_specials`/`invalid_specials`,
+/// a refined `injection_context`, and auto-detected `pre_encoding`.
+pub type ProbedParams = Vec<Param>;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Location {
@@ -605,9 +634,12 @@ pub async fn analyze_parameters(
         None
     };
 
+    // === Stage 1: Discovery — identify reflecting parameters ===
     let reflection_params = Arc::new(Mutex::new(Vec::new()));
     let semaphore = Arc::new(Semaphore::new(target.workers));
     check_discovery(target, args, reflection_params.clone(), semaphore.clone()).await;
+
+    // === Stage 2: Mining — discover additional parameters from HTML/JS/dict ===
     mine_parameters(
         target,
         args,
@@ -624,8 +656,8 @@ pub async fn analyze_parameters(
         params = filter_params(params, &args.param, target);
     }
     target.reflection_params = params;
-    // Active special character probing (overwrite naive classification)
-    // Concurrent active probing per parameter
+
+    // === Stage 3: Active Probing — confirm specials, detect pre_encoding ===
     let probe_semaphore = Arc::new(Semaphore::new(target.workers));
     let probe_target = Arc::new(target.clone());
     let mut param_handles = Vec::new();

@@ -1,3 +1,20 @@
+//! # Scanning (Stages 4–6)
+//!
+//! Drives payload generation, reflection checking, and DOM verification for
+//! each probed parameter.
+//!
+//! ## Stage 4: Payload Generation (`run_scanning` — first half)
+//! Builds per-parameter payload sets based on `injection_context`, CSP bypass,
+//! technology-specific payloads, and WAF bypass mutations/encoders.
+//! Output: `ParamPayloadJob` tuples fed into the concurrent scan loop.
+//!
+//! ## Stage 5: Reflection Check (see `check_reflection` module)
+//! Each payload is injected and the response is checked for reflection.
+//!
+//! ## Stage 6: DOM Verification (see `check_dom_verification` module)
+//! Reflected payloads are verified for actual DOM evidence to upgrade
+//! findings from "R" (Reflected) to "V" (DOM-verified).
+
 pub mod ast_dom_analysis;
 pub mod ast_integration;
 pub mod check_dom_verification;
@@ -21,6 +38,10 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::{Mutex, RwLock, Semaphore};
+
+/// A per-parameter work unit for the scan loop: the parameter, its reflection
+/// payloads (checked in Stage 5), and its DOM payloads (verified in Stage 6).
+pub type ParamPayloadJob = (Param, Vec<String>, Vec<String>);
 
 struct FoundParams {
     reflection: HashSet<String>,
@@ -321,9 +342,9 @@ pub async fn run_scanning(
         .map(crate::scanning::tech_detect::get_tech_specific_payloads)
         .unwrap_or_default();
 
-    // Precompute payload sets once per parameter to avoid repeated expansion work.
+    // === Stage 4: Payload Generation — build per-parameter payload sets ===
     let mut total_tasks = 0u64;
-    let mut param_jobs: Vec<(Param, Vec<String>, Vec<String>)> =
+    let mut param_jobs: Vec<ParamPayloadJob> =
         Vec::with_capacity(target.reflection_params.len());
     for param in &target.reflection_params {
         let mut reflection_payloads = if let Some(context) = &param.injection_context {
@@ -402,6 +423,7 @@ pub async fn run_scanning(
 
     let mut handles = vec![];
 
+    // === Stage 5 & 6: Reflection Check + DOM Verification (per payload) ===
     for (param_clone, reflection_payloads, dom_payloads) in param_jobs {
         let already_found = {
             let fp = found_params.read().await;

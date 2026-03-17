@@ -1,3 +1,21 @@
+//! # Stage 1: Discovery
+//!
+//! Identifies which parameters reflect user input in the HTTP response.
+//!
+//! **Input:** `Target` (URL, method, headers, cookies) + `ScanArgs` flags.
+//!
+//! **Output:** Appends `Param` entries to the shared `reflection_params` list.
+//! Each `Param` carries:
+//! - `name`, `value`, `location` (Query/Body/Header/Path/Fragment)
+//! - `valid_specials` / `invalid_specials` — **naive** classification based on
+//!   whether the character already appears in the response body (not yet
+//!   actively probed).
+//! - `injection_context` — **naive** guess from surrounding HTML/JS context.
+//! - `pre_encoding` — `None` at this stage (set later in Stage 3).
+//!
+//! **Side effects:** HTTP requests (one per parameter per location type).
+//! Respects `--skip-discovery`, `--skip-reflection-header`, etc.
+
 use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::{Location, Param, classify_special_chars, detect_injection_context};
 use crate::scanning::url_inject::build_injected_url;

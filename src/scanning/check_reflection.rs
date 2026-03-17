@@ -1,3 +1,20 @@
+//! # Stage 5: Reflection Check
+//!
+//! Determines whether a specific payload string appears in the HTTP response,
+//! accounting for server-side transformations (HTML-entity encoding, URL
+//! encoding, etc.).
+//!
+//! **Input:** `(Param, payload: &str)` — a single parameter + candidate payload.
+//!
+//! **Output:** `(Option<ReflectionKind>, Option<String>)` — the kind of
+//! reflection detected (Raw, HtmlEntityDecoded, UrlDecoded, HtmlThenUrlDecoded)
+//! and the response body text. `None` kind means no reflection found.
+//!
+//! **Side effects:** One HTTP request per call (with rate-limit retry).
+//! Applies `pre_encoding` from the `Param` before sending. Checks response
+//! against the *raw* (unencoded) payload. Suppresses reflection inside safe
+//! tags (textarea, noscript, style, xmp, plaintext, title).
+
 use crate::parameter_analysis::{Location, Param};
 use crate::target_parser::Target;
 use regex::Regex;

@@ -1,3 +1,21 @@
+//! # Stage 2: Mining
+//!
+//! Discovers additional parameters by analyzing HTML forms, JavaScript source,
+//! dictionary wordlists, and GF-pattern lists — then probes each for reflection.
+//!
+//! **Input:** `Target` + `ScanArgs` + the initial `reflection_params` from Stage 1.
+//!
+//! **Output:** Extends the shared `reflection_params` list with newly discovered
+//! `Param` entries that reflect. Each carries the same naive `valid_specials`,
+//! `invalid_specials`, and `injection_context` as Stage 1 output.
+//!
+//! **Side effects:** HTTP requests for DOM/dict/GF mining probes. Uses EWMA-based
+//! collapse detection to short-circuit when a target reflects everything
+//! (sustained ≥85% reflection rate after ≥15 attempts). Filters out 5xx
+//! responses to avoid false positives from debug/error pages.
+//!
+//! **Skippable via:** `--skip-mining`, `--skip-mining-dict`, `--skip-mining-dom`.
+
 use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::{DelimiterType, InjectionContext, Location, Param};
 use crate::payload::mining::GF_PATTERNS_PARAMS;
