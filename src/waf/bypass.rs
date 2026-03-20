@@ -263,7 +263,8 @@ pub fn apply_mutations(
     let mut seen = std::collections::HashSet::with_capacity(out.capacity());
 
     for payload in payloads {
-        if seen.insert(payload.clone()) {
+        if !seen.contains(payload.as_str()) {
+            seen.insert(payload.clone());
             out.push(payload.clone());
         }
 
@@ -273,7 +274,8 @@ pub fn apply_mutations(
                 break;
             }
             let variant = apply_single_mutation(payload, mutation);
-            if variant != *payload && seen.insert(variant.clone()) {
+            if variant != *payload && !seen.contains(variant.as_str()) {
+                seen.insert(variant.clone());
                 out.push(variant);
                 variant_count += 1;
             }
@@ -303,11 +305,25 @@ fn apply_single_mutation(payload: &str, mutation: &MutationType) -> String {
 
 // ── Mutation implementations ────────────────────────────────────────
 
+/// Try the first matching `(from, to)` replacement on `payload` using a single
+/// `find()` scan per pattern (no redundant `contains()` + `replacen()` double scan).
+fn try_first_replace(payload: &str, patterns: &[(&str, &str)]) -> String {
+    for &(from, to) in patterns {
+        if let Some(pos) = payload.find(from) {
+            let mut result = String::with_capacity(payload.len() + to.len() - from.len());
+            result.push_str(&payload[..pos]);
+            result.push_str(to);
+            result.push_str(&payload[pos + from.len()..]);
+            return result;
+        }
+    }
+    payload.to_string()
+}
+
 /// Insert HTML comments in the middle of common HTML tag names.
 /// `<script>` → `<scr<!---->ipt>`, `<img` → `<im<!---->g`
 fn html_comment_split(payload: &str) -> String {
-    // Split known tag names
-    let replacements = [
+    try_first_replace(payload, &[
         ("<script", "<scr<!---->ipt"),
         ("<SCRIPT", "<SCR<!---->IPT"),
         ("<Script", "<Scr<!---->ipt"),
@@ -319,22 +335,13 @@ fn html_comment_split(payload: &str) -> String {
         ("<SVG", "<SV<!---->G"),
         ("<iframe", "<ifr<!---->ame"),
         ("<IFRAME", "<IFR<!---->AME"),
-    ];
-
-    let mut result = payload.to_string();
-    for (from, to) in &replacements {
-        if result.contains(from) {
-            result = result.replacen(from, to, 1);
-            break; // Apply one split per payload to keep it valid
-        }
-    }
-    result
+    ])
 }
 
 /// Insert tabs/newlines/carriage returns between HTML tags and their attributes.
 /// `<img src=x` → `<img\tsrc=x`
 fn whitespace_mutation(payload: &str) -> String {
-    let tag_attr_patterns = [
+    try_first_replace(payload, &[
         ("<img src", "<img\tsrc"),
         ("<IMG src", "<IMG\tsrc"),
         ("<IMG SRC", "<IMG\tSRC"),
@@ -349,99 +356,54 @@ fn whitespace_mutation(payload: &str) -> String {
         ("<marquee onstart", "<marquee\tonstart"),
         ("<video src", "<video\tsrc"),
         ("<audio src", "<audio\rsrc"),
-    ];
-
-    let mut result = payload.to_string();
-    for (from, to) in &tag_attr_patterns {
-        if result.contains(from) {
-            result = result.replacen(from, to, 1);
-            break;
-        }
-    }
-    result
+    ])
 }
 
 /// Split JavaScript function names with comments.
 /// `alert(1)` → `al/**/ert(1)`
 fn js_comment_split(payload: &str) -> String {
-    let js_patterns = [
+    try_first_replace(payload, &[
         ("alert(", "al/**/ert("),
         ("confirm(", "con/**/firm("),
         ("prompt(", "pro/**/mpt("),
         ("eval(", "ev/**/al("),
         ("alert`", "al/**/ert`"),
-    ];
-
-    let mut result = payload.to_string();
-    for (from, to) in &js_patterns {
-        if result.contains(from) {
-            result = result.replacen(from, to, 1);
-            break;
-        }
-    }
-    result
+    ])
 }
 
 /// Replace function call parentheses with backtick template literals.
 /// `alert(1)` → `` alert`1` ``
 fn backtick_parens(payload: &str) -> String {
-    let parens_patterns = [
+    try_first_replace(payload, &[
         ("alert(1)", "alert`1`"),
         ("alert(document.domain)", "alert`${document.domain}`"),
         ("alert(document.cookie)", "alert`${document.cookie}`"),
         ("confirm(1)", "confirm`1`"),
         ("prompt(1)", "prompt`1`"),
-    ];
-
-    let mut result = payload.to_string();
-    for (from, to) in &parens_patterns {
-        if result.contains(from) {
-            result = result.replacen(from, to, 1);
-            break;
-        }
-    }
-    result
+    ])
 }
 
 /// Replace alert() calls with constructor chain to avoid keyword detection.
 /// `alert(1)` → `[].constructor.constructor('alert(1)')()`
 fn constructor_chain(payload: &str) -> String {
-    let patterns = [
+    try_first_replace(payload, &[
         ("alert(1)", "[].constructor.constructor('alert(1)')()"),
         ("alert(document.domain)", "[].constructor.constructor('alert(document.domain)')()"),
         ("confirm(1)", "[].constructor.constructor('confirm(1)')()"),
         ("prompt(1)", "[].constructor.constructor('prompt(1)')()"),
-    ];
-
-    let mut result = payload.to_string();
-    for (from, to) in &patterns {
-        if result.contains(from) {
-            result = result.replacen(from, to, 1);
-            break;
-        }
-    }
-    result
+    ])
 }
 
 /// Replace first chars of JS function names with unicode escapes.
 /// `alert` → `\u0061lert`
 fn unicode_js_escape(payload: &str) -> String {
-    let patterns = [
+    try_first_replace(payload, &[
         ("alert", "\\u0061lert"),
         ("confirm", "\\u0063onfirm"),
         ("prompt", "\\u0070rompt"),
         ("eval", "\\u0065val"),
         ("document", "\\u0064ocument"),
-    ];
-
-    let mut result = payload.to_string();
-    for (from, to) in &patterns {
-        if result.contains(from) {
-            result = result.replacen(from, to, 1);
-            break;
-        }
-    }
-    result
+    ])
 }
 
 /// Encode angle brackets with mixed decimal and hex HTML entities.
@@ -495,7 +457,7 @@ fn mixed_html_entities(payload: &str) -> String {
 /// `<svg onload=alert(1)>` → `<svg/onload=alert(1)>`
 /// `<img src=x onerror=alert(1)>` → `<img/src=x onerror=alert(1)>`
 fn slash_separator(payload: &str) -> String {
-    let patterns = [
+    try_first_replace(payload, &[
         ("<svg onload", "<svg/onload"),
         ("<SVG ONLOAD", "<SVG/ONLOAD"),
         ("<SVG onload", "<SVG/onload"),
@@ -508,16 +470,7 @@ fn slash_separator(payload: &str) -> String {
         ("<marquee onstart", "<marquee/onstart"),
         ("<video src", "<video/src"),
         ("<audio src", "<audio/src"),
-    ];
-
-    let mut result = payload.to_string();
-    for (from, to) in &patterns {
-        if result.contains(from) {
-            result = result.replacen(from, to, 1);
-            break;
-        }
-    }
-    result
+    ])
 }
 
 /// Replace parentheses with HTML entities to bypass JS function call detection.
@@ -588,10 +541,12 @@ fn exotic_whitespace(payload: &str) -> String {
     ];
 
     for &(from, tag, ws, attr) in PATTERNS {
-        if payload.contains(from) {
-            let mut result = payload.to_string();
+        if let Some(pos) = payload.find(from) {
             let replacement = format!("{}{}{}", tag, ws, attr);
-            result = result.replacen(from, &replacement, 1);
+            let mut result = String::with_capacity(payload.len() + replacement.len() - from.len());
+            result.push_str(&payload[..pos]);
+            result.push_str(&replacement);
+            result.push_str(&payload[pos + from.len()..]);
             return result;
         }
     }

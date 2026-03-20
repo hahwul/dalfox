@@ -110,11 +110,25 @@ pub(crate) fn has_marker_evidence(payload: &str, text: &str) -> bool {
     class_ok && id_ok
 }
 
+/// Case-insensitive ASCII prefix check without allocating a lowercased copy.
+/// Only ASCII bytes are case-folded; non-ASCII bytes are compared as-is.
+/// Callers must ensure `prefix` is ASCII (e.g. protocol schemes like "javascript:").
+fn starts_with_ascii_ci(s: &str, prefix: &str) -> bool {
+    s.len() >= prefix.len()
+        && s.as_bytes()[..prefix.len()].eq_ignore_ascii_case(prefix.as_bytes())
+}
+
 fn payload_is_executable_url_protocol(payload: &str) -> bool {
-    let lowered = payload.trim().to_ascii_lowercase();
-    lowered.starts_with("javascript:")
-        || lowered.starts_with("data:text/html")
-        || lowered.starts_with("vbscript:")
+    let trimmed = payload.trim();
+    starts_with_ascii_ci(trimmed, "javascript:")
+        || starts_with_ascii_ci(trimmed, "data:text/html")
+        || starts_with_ascii_ci(trimmed, "vbscript:")
+}
+
+fn is_dangerous_attr(name: &str) -> bool {
+    ["href", "src", "data", "action", "formaction", "xlink:href"]
+        .iter()
+        .any(|&attr| name.eq_ignore_ascii_case(attr))
 }
 
 fn has_executable_url_attribute_evidence(payload: &str, text: &str) -> bool {
@@ -122,15 +136,14 @@ fn has_executable_url_attribute_evidence(payload: &str, text: &str) -> bool {
         return false;
     }
 
-    let payload_lower = payload.trim().to_ascii_lowercase();
+    let payload_trimmed = payload.trim();
     let document = scraper::Html::parse_document(text);
     let selector = selectors::universal();
-    let dangerous_attrs = ["href", "src", "data", "action", "formaction", "xlink:href"];
 
     document.select(selector).any(|node| {
         node.value().attrs().any(|(name, value)| {
-            dangerous_attrs.contains(&name.to_ascii_lowercase().as_str())
-                && value.trim().to_ascii_lowercase() == payload_lower
+            is_dangerous_attr(name)
+                && value.trim().eq_ignore_ascii_case(payload_trimmed)
         })
     })
 }
@@ -392,9 +405,10 @@ async fn verify_normal_dom(
 
 /// Check if a redirect Location header contains evidence of payload injection.
 fn check_redirect_location(loc_str: &str, payload: &str) -> Option<(bool, Option<String>)> {
-    let loc_lower = loc_str.trim().to_ascii_lowercase();
+    let loc_trimmed = loc_str.trim();
+    let payload_trimmed = payload.trim();
     if payload_is_executable_url_protocol(payload)
-        && loc_lower.starts_with(&payload.trim().to_ascii_lowercase())
+        && starts_with_ascii_ci(loc_trimmed, payload_trimmed)
     {
         let synthetic_body = format!(
             "<html><body><a href=\"{}\">redirect</a></body></html>",

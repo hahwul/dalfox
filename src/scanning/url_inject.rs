@@ -13,6 +13,7 @@
 //!   unicode escaping) can be layered in higher-level modules if needed.
 
 use crate::parameter_analysis::{Location, Param};
+use std::borrow::Cow;
 
 const HEX: &[u8; 16] = b"0123456789ABCDEF";
 
@@ -56,10 +57,10 @@ fn encode_query_component_preserving_pct_into(raw: &str, out: &mut String) {
 /// Selectively encode a path segment for readability while preserving most characters
 /// for exploit clarity. This mirrors prior inline logic (space, '#', '?', '%').
 /// If more rigorous encoding is desired, enhance or replace this function centrally.
-fn selective_path_segment_encode(raw: &str) -> String {
-    // Fast path: if no special chars, return as-is
+fn selective_path_segment_encode(raw: &str) -> Cow<'_, str> {
+    // Fast path: if no special chars, return borrowed (no allocation)
     if !raw.bytes().any(|b| matches!(b, b' ' | b'#' | b'?' | b'%' | b'\n' | b'\t' | b'\r')) {
-        return raw.to_string();
+        return Cow::Borrowed(raw);
     }
     let mut out = String::with_capacity(raw.len() + 16);
     for ch in raw.chars() {
@@ -74,7 +75,7 @@ fn selective_path_segment_encode(raw: &str) -> String {
             _ => out.push(ch),
         }
     }
-    out
+    Cow::Owned(out)
 }
 
 /// Build a URL string with the given parameter injected/replaced by `injected`.
