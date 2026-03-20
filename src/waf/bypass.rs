@@ -6,7 +6,7 @@
 use super::WafType;
 
 /// Types of payload mutations that can be applied for WAF bypass.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum MutationType {
     /// Insert HTML comments inside tag names: `<scr<!---->ipt>`
     HtmlCommentSplit,
@@ -220,20 +220,24 @@ pub fn get_bypass_strategy(waf: &WafType) -> BypassStrategy {
 /// Merge bypass strategies from multiple detected WAFs into a single combined strategy.
 pub fn merge_strategies(waf_types: &[&WafType]) -> BypassStrategy {
     let mut combined = BypassStrategy::default();
+    let mut seen_encoders = std::collections::HashSet::new();
+    let mut seen_mutations = std::collections::HashSet::new();
 
     for waf in waf_types {
         let strategy = get_bypass_strategy(waf);
 
-        // Merge extra encoders (deduplicate)
+        // Merge extra encoders (deduplicate via HashSet)
         for enc in strategy.extra_encoders {
-            if !combined.extra_encoders.contains(&enc) {
+            if !seen_encoders.contains(&enc) {
+                seen_encoders.insert(enc.clone());
                 combined.extra_encoders.push(enc);
             }
         }
 
-        // Merge mutations (deduplicate)
+        // Merge mutations (deduplicate via HashSet)
         for mutation in strategy.mutations {
-            if !combined.mutations.contains(&mutation) {
+            if !seen_mutations.contains(&mutation) {
+                seen_mutations.insert(mutation.clone());
                 combined.mutations.push(mutation);
             }
         }

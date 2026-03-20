@@ -40,6 +40,10 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tokio::sync::{Mutex, RwLock, Semaphore};
 
+/// Maximum number of WAF mutation variants generated per base payload.
+/// Prevents payload explosion when WAF bypass mutations are applied.
+const MAX_WAF_MUTATION_VARIANTS_PER_PAYLOAD: usize = 3;
+
 /// A per-parameter work unit for the scan loop: the parameter, its reflection
 /// payloads (checked in Stage 5), and its DOM payloads (verified in Stage 6).
 pub type ParamPayloadJob = (Param, Vec<String>, Vec<String>);
@@ -183,6 +187,116 @@ fn get_dom_payloads(
             Ok(out)
         }
     }
+}
+
+/// Run AST-based DOM XSS static analysis on the given response HTML.
+///
+/// Extracts JavaScript blocks, analyses each for DOM XSS flows, performs
+/// lightweight runtime verification, and returns any findings.  De-duplicates
+/// against `ast_seen` (shared across calls for the same parameter).
+async fn run_ast_dom_analysis(
+    client: &reqwest::Client,
+    target: &Target,
+    param: &Param,
+    response_text: &str,
+    ast_seen: &mut HashSet<String>,
+) -> Vec<crate::scanning::result::Result> {
+    let mut results = Vec::new();
+    let js_blocks =
+        crate::scanning::ast_integration::extract_javascript_from_html(response_text);
+    for js_code in js_blocks {
+        let findings = crate::scanning::ast_integration::analyze_javascript_for_dom_xss(
+            &js_code,
+            target.url.as_str(),
+        );
+        for (vuln, payload, description) in findings {
+            let self_bootstrap_verified =
+                crate::scanning::ast_integration::has_self_bootstrap_verification(
+                    &js_code,
+                    &vuln.source,
+                );
+            let ast_key = format!(
+                "{}|{}|{}|{}|{}",
+                param.name, vuln.line, vuln.column, vuln.source, vuln.sink
+            );
+            if ast_seen.contains(&ast_key) {
+                continue;
+            }
+            ast_seen.insert(ast_key);
+            let source_uses_url_surface =
+                ast_source_uses_browser_url_surface(&vuln.source);
+            let result_url = if source_uses_url_surface {
+                crate::scanning::ast_integration::build_dom_xss_poc_url(
+                    target.url.as_str(),
+                    &vuln.source,
+                    &payload,
+                )
+            } else {
+                crate::scanning::url_inject::build_injected_url(
+                    &target.url,
+                    param,
+                    &payload,
+                )
+            };
+            let mut ast_result = crate::scanning::result::Result::new(
+                FindingType::AstDetected,
+                "DOM-XSS".to_string(),
+                target.method.clone(),
+                result_url.clone(),
+                param.name.clone(),
+                payload.clone(),
+                format!(
+                    "{}:{}:{} - {} (Source: {}, Sink: {})",
+                    target.url.as_str(),
+                    vuln.line,
+                    vuln.column,
+                    description,
+                    vuln.source,
+                    vuln.sink
+                ),
+                "CWE-79".to_string(),
+                "Medium".to_string(),
+                0,
+                format!("{} (검증 필요)", description),
+            );
+            if !source_uses_url_surface {
+                ast_result.request =
+                    Some(build_request_text(target, param, &payload));
+            }
+            ast_result.response = Some(response_text.to_string());
+            // Lightweight runtime verification (non-headless)
+            let (verified, rt_resp, note) =
+                crate::scanning::light_verify::verify_dom_xss_light_with_client(
+                    client,
+                    target,
+                    param,
+                    &payload,
+                )
+                .await;
+            if let Some(runtime_response) = rt_resp {
+                ast_result.response = Some(runtime_response);
+            }
+            if let Some(n) = note {
+                ast_result.message_str = format!("{} [{}]", ast_result.message_str, n);
+            }
+            if verified {
+                ast_result.result_type = FindingType::Verified;
+                ast_result.severity = "High".to_string();
+                ast_result.message_str =
+                    format!("{} [경량 확인: 검증됨]", ast_result.message_str);
+            } else if self_bootstrap_verified {
+                ast_result.result_type = FindingType::Verified;
+                ast_result.severity = "High".to_string();
+                ast_result.message_str =
+                    format!("{} [정적 self-bootstrap 확인]", ast_result.message_str);
+            } else {
+                ast_result.message_str =
+                    format!("{} [경량 확인: 미검증]", ast_result.message_str);
+            }
+            results.push(ast_result);
+        }
+    }
+    results
 }
 
 fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
@@ -347,6 +461,14 @@ pub async fn run_scanning(
         .map(crate::scanning::tech_detect::get_tech_specific_payloads)
         .unwrap_or_default();
 
+    // Pre-merge shared payloads (CSP bypass + tech-specific) to avoid repeated cloning
+    let shared_payloads: Vec<String> = {
+        let mut sp = Vec::with_capacity(csp_bypass_payloads.len() + tech_payloads.len());
+        sp.extend(csp_bypass_payloads.iter().cloned());
+        sp.extend(tech_payloads.iter().cloned());
+        sp
+    };
+
     // === Stage 4: Payload Generation — build per-parameter payload sets ===
     let mut total_tasks = 0u64;
     let mut param_jobs: Vec<ParamPayloadJob> =
@@ -360,31 +482,23 @@ pub async fn run_scanning(
         };
         let mut dom_payloads = get_dom_payloads(param, args.as_ref()).unwrap_or_else(|_| vec![]);
 
-        // Append CSP bypass payloads
-        if !csp_bypass_payloads.is_empty() {
-            reflection_payloads.extend(csp_bypass_payloads.clone());
-            dom_payloads.extend(csp_bypass_payloads.clone());
-        }
-
-        // Append technology-specific payloads
-        if !tech_payloads.is_empty() {
-            reflection_payloads.extend(tech_payloads.clone());
-            dom_payloads.extend(tech_payloads.clone());
-        }
+        // Append shared payloads (CSP bypass + tech-specific)
+        reflection_payloads.extend(shared_payloads.iter().cloned());
+        dom_payloads.extend(shared_payloads.iter().cloned());
 
         // Apply WAF bypass mutations and extra encoders if WAF was detected
         if let Some(ref strategy) = waf_strategy {
-            // Apply mutations (max 3 variants per base payload to prevent explosion)
+            // Apply mutations (capped per base payload to prevent explosion)
             if !strategy.mutations.is_empty() {
                 reflection_payloads = crate::waf::bypass::apply_mutations(
                     &reflection_payloads,
                     &strategy.mutations,
-                    3,
+                    MAX_WAF_MUTATION_VARIANTS_PER_PAYLOAD,
                 );
                 dom_payloads = crate::waf::bypass::apply_mutations(
                     &dom_payloads,
                     &strategy.mutations,
-                    3,
+                    MAX_WAF_MUTATION_VARIANTS_PER_PAYLOAD,
                 );
             }
 
@@ -506,100 +620,15 @@ pub async fn run_scanning(
                 && let Some(ref response_text) = probe_response_text
             {
                 ast_analysis_done = true;
-                let js_blocks =
-                    crate::scanning::ast_integration::extract_javascript_from_html(response_text);
-                for js_code in js_blocks {
-                    let findings = crate::scanning::ast_integration::analyze_javascript_for_dom_xss(
-                        &js_code,
-                        target_clone.url.as_str(),
-                    );
-                    for (vuln, payload, description) in findings {
-                        let self_bootstrap_verified =
-                            crate::scanning::ast_integration::has_self_bootstrap_verification(
-                                &js_code,
-                                &vuln.source,
-                            );
-                        let ast_key = format!(
-                            "{}|{}|{}|{}|{}",
-                            param_clone.name, vuln.line, vuln.column, vuln.source, vuln.sink
-                        );
-                        if local_ast_seen.contains(&ast_key) {
-                            continue;
-                        }
-                        local_ast_seen.insert(ast_key);
-                        let source_uses_url_surface =
-                            ast_source_uses_browser_url_surface(&vuln.source);
-                        let result_url = if source_uses_url_surface {
-                            crate::scanning::ast_integration::build_dom_xss_poc_url(
-                                target_clone.url.as_str(),
-                                &vuln.source,
-                                &payload,
-                            )
-                        } else {
-                            crate::scanning::url_inject::build_injected_url(
-                                &target_clone.url,
-                                &param_clone,
-                                &payload,
-                            )
-                        };
-                        let mut ast_result = crate::scanning::result::Result::new(
-                            FindingType::AstDetected,
-                            "DOM-XSS".to_string(),
-                            target_clone.method.clone(),
-                            result_url.clone(),
-                            param_clone.name.clone(),
-                            payload.clone(),
-                            format!(
-                                "{}:{}:{} - {} (Source: {}, Sink: {})",
-                                target_clone.url.as_str(),
-                                vuln.line,
-                                vuln.column,
-                                description,
-                                vuln.source,
-                                vuln.sink
-                            ),
-                            "CWE-79".to_string(),
-                            "Medium".to_string(),
-                            0,
-                            format!("{} (검증 필요)", description),
-                        );
-                        if !source_uses_url_surface {
-                            ast_result.request =
-                                Some(build_request_text(&target_clone, &param_clone, &payload));
-                        }
-                        ast_result.response = Some(response_text.clone());
-                        // Lightweight runtime verification (non-headless)
-                        let (verified, rt_resp, note) =
-                            crate::scanning::light_verify::verify_dom_xss_light_with_client(
-                                client,
-                                &target_clone,
-                                &param_clone,
-                                &payload,
-                            )
-                            .await;
-                        if let Some(runtime_response) = rt_resp {
-                            ast_result.response = Some(runtime_response);
-                        }
-                        if let Some(n) = note {
-                            ast_result.message_str = format!("{} [{}]", ast_result.message_str, n);
-                        }
-                        if verified {
-                            ast_result.result_type = FindingType::Verified;
-                            ast_result.severity = "High".to_string();
-                            ast_result.message_str =
-                                format!("{} [경량 확인: 검증됨]", ast_result.message_str);
-                        } else if self_bootstrap_verified {
-                            ast_result.result_type = FindingType::Verified;
-                            ast_result.severity = "High".to_string();
-                            ast_result.message_str =
-                                format!("{} [정적 self-bootstrap 확인]", ast_result.message_str);
-                        } else {
-                            ast_result.message_str =
-                                format!("{} [경량 확인: 미검증]", ast_result.message_str);
-                        }
-                        local_results.push(ast_result);
-                    }
-                }
+                let ast_findings = run_ast_dom_analysis(
+                    client,
+                    &target_clone,
+                    &param_clone,
+                    response_text,
+                    &mut local_ast_seen,
+                )
+                .await;
+                local_results.extend(ast_findings);
             }
 
             // If probe found no reflection and not in deep_scan, skip heavy payload loops for this param
@@ -656,106 +685,15 @@ pub async fn run_scanning(
                     && let Some(ref response_text) = reflection_response_text
                 {
                     ast_analysis_done = true;
-                    let js_blocks = crate::scanning::ast_integration::extract_javascript_from_html(
+                    let ast_findings = run_ast_dom_analysis(
+                        client,
+                        &target_clone,
+                        &param_clone,
                         response_text,
-                    );
-                    for js_code in js_blocks {
-                        let findings =
-                            crate::scanning::ast_integration::analyze_javascript_for_dom_xss(
-                                &js_code,
-                                target_clone.url.as_str(),
-                            );
-                        for (vuln, payload, description) in findings {
-                            let self_bootstrap_verified =
-                                crate::scanning::ast_integration::has_self_bootstrap_verification(
-                                    &js_code,
-                                    &vuln.source,
-                                );
-                            let ast_key = format!(
-                                "{}|{}|{}|{}|{}",
-                                param_clone.name, vuln.line, vuln.column, vuln.source, vuln.sink
-                            );
-                            if local_ast_seen.contains(&ast_key) {
-                                continue;
-                            }
-                            local_ast_seen.insert(ast_key);
-                            // Create an AST-based DOM XSS result with actual executable payload
-                            let source_uses_url_surface =
-                                ast_source_uses_browser_url_surface(&vuln.source);
-                            let result_url = if source_uses_url_surface {
-                                crate::scanning::ast_integration::build_dom_xss_poc_url(
-                                    target_clone.url.as_str(),
-                                    &vuln.source,
-                                    &payload,
-                                )
-                            } else {
-                                crate::scanning::url_inject::build_injected_url(
-                                    &target_clone.url,
-                                    &param_clone,
-                                    &payload,
-                                )
-                            };
-                            let mut ast_result = crate::scanning::result::Result::new(
-                                FindingType::AstDetected, // AST-detected
-                                "DOM-XSS".to_string(),
-                                target_clone.method.clone(),
-                                result_url.clone(),
-                                param_clone.name.clone(),
-                                payload.clone(), // Actual XSS payload
-                                format!(
-                                    "{}:{}:{} - {} (Source: {}, Sink: {})",
-                                    target_clone.url.as_str(),
-                                    vuln.line,
-                                    vuln.column,
-                                    description,
-                                    vuln.source,
-                                    vuln.sink
-                                ),
-                                "CWE-79".to_string(),
-                                "Medium".to_string(),
-                                0,
-                                format!("{} (검증 필요)", description),
-                            );
-                            if !source_uses_url_surface {
-                                ast_result.request =
-                                    Some(build_request_text(&target_clone, &param_clone, &payload));
-                            }
-                            ast_result.response = Some(response_text.clone());
-                            // Lightweight runtime verification (non-headless)
-                            let (verified, rt_resp, note) =
-                                crate::scanning::light_verify::verify_dom_xss_light_with_client(
-                                    client,
-                                    &target_clone,
-                                    &param_clone,
-                                    &payload,
-                                )
-                                .await;
-                            if let Some(runtime_response) = rt_resp {
-                                ast_result.response = Some(runtime_response);
-                            }
-                            if let Some(n) = note {
-                                ast_result.message_str =
-                                    format!("{} [{}]", ast_result.message_str, n);
-                            }
-                            if verified {
-                                ast_result.result_type = FindingType::Verified;
-                                ast_result.severity = "High".to_string();
-                                ast_result.message_str =
-                                    format!("{} [경량 확인: 검증됨]", ast_result.message_str);
-                            } else if self_bootstrap_verified {
-                                ast_result.result_type = FindingType::Verified;
-                                ast_result.severity = "High".to_string();
-                                ast_result.message_str = format!(
-                                    "{} [정적 self-bootstrap 확인]",
-                                    ast_result.message_str
-                                );
-                            } else {
-                                ast_result.message_str =
-                                    format!("{} [경량 확인: 미검증]", ast_result.message_str);
-                            }
-                            local_results.push(ast_result);
-                        }
-                    }
+                        &mut local_ast_seen,
+                    )
+                    .await;
+                    local_results.extend(ast_findings);
                 }
 
                 if let Some(ref pb) = pb_clone {

@@ -26,6 +26,9 @@ use tokio::time::{Duration, sleep};
 /// Re-export for callers outside this module (e.g. DOM verification, active probing).
 pub use crate::encoding::pre_encoding::apply_pre_encoding;
 
+/// Maximum number of iterative URL-decode passes when building payload variants.
+const MAX_URL_DECODE_ITERATIONS: usize = 4;
+
 /// Check whether *all* occurrences of `payload` in `html` fall inside safe tags
 /// (textarea, noscript, style, xmp, plaintext, title).  If the payload appears
 /// at least once outside a safe tag, returns `false`.
@@ -233,7 +236,7 @@ fn payload_variants(payload: &str) -> Vec<String> {
     let seeds_count = variants.len();
     for i in 0..seeds_count {
         let mut current = variants[i].clone();
-        for _ in 0..4 {
+        for _ in 0..MAX_URL_DECODE_ITERATIONS {
             let Ok(url_dec) = urlencoding::decode(&current) else {
                 break;
             };
@@ -254,12 +257,13 @@ fn payload_variants(payload: &str) -> Vec<String> {
 
 /// Determine if payload is reflected in any normalization variant.
 pub(crate) fn classify_reflection(resp_text: &str, payload: &str) -> Option<ReflectionKind> {
-    let payload_variants = payload_variants(payload);
-
-    // Direct match first (fast path)
+    // Direct match first (fast path — avoids payload_variants allocation)
     if resp_text.contains(payload) {
         return Some(ReflectionKind::Raw);
     }
+
+    // Only build variant list when the fast path misses
+    let payload_variants = payload_variants(payload);
 
     let html_dec = decode_html_entities(resp_text);
     if payload_variants
