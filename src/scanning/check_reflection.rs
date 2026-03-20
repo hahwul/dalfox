@@ -550,9 +550,27 @@ async fn fetch_injection_response_with_client(
     } else {
         // Normal reflection check
         if let Ok(resp) = inject_resp {
+            let status_code = resp.status().as_u16();
+
+            // Track WAF block status codes for adaptive throttling
+            if status_code == 403 || status_code == 406 || status_code == 429 || status_code == 503 {
+                crate::WAF_BLOCK_COUNT.fetch_add(1, Ordering::Relaxed);
+                let consecutive = crate::WAF_CONSECUTIVE_BLOCKS.fetch_add(1, Ordering::Relaxed) + 1;
+                // Apply adaptive backoff when consecutive blocks exceed threshold
+                if consecutive >= 3 {
+                    let escalation = (consecutive - 3).min(4) as u64;
+                    let backoff_ms = 2000u64 * (1u64 << escalation);
+                    let backoff_ms = backoff_ms.min(30_000);
+                    sleep(Duration::from_millis(backoff_ms)).await;
+                }
+            } else {
+                // Reset consecutive block counter on successful response
+                crate::WAF_CONSECUTIVE_BLOCKS.store(0, Ordering::Relaxed);
+            }
+
             // Skip processing if the status code is in the ignore_return list
             if !args.ignore_return.is_empty()
-                && args.ignore_return.contains(&resp.status().as_u16())
+                && args.ignore_return.contains(&status_code)
             {
                 return None;
             }

@@ -29,7 +29,7 @@ pub fn apply_encoders_to_payloads(base_payloads: &[String], encoders: &[String])
 
     // Expansion order
     let prio = [
-        "url", "html", "2url", "3url", "4url", "base64", "unicode", "zwsp",
+        "url", "html", "htmlpad", "2url", "3url", "4url", "base64", "unicode", "zwsp",
     ];
 
     // Pre-calculate active encoders using set lookup
@@ -53,6 +53,7 @@ pub fn apply_encoders_to_payloads(base_payloads: &[String], encoders: &[String])
             let v = match e {
                 "url" => url_encode(p),
                 "html" => html_entity_encode(p),
+                "htmlpad" => html_entity_zero_padded_encode(p),
                 "2url" => double_url_encode(p),
                 "3url" => triple_url_encode(p),
                 "4url" => quadruple_url_encode(p),
@@ -179,6 +180,23 @@ pub fn unicode_fullwidth_encode(payload: &str) -> String {
             }
         })
         .collect()
+}
+
+/// HTML entity encoding with zero-padded hex codes.
+/// Bypasses WAF regex patterns that expect exactly `&#xNN;` format.
+/// Example: "<" becomes "&#x0000003c;" (with extra leading zeros)
+pub fn html_entity_zero_padded_encode(payload: &str) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(payload.len() * 12);
+    for c in payload.chars() {
+        if c.is_ascii_alphanumeric() || c == ' ' {
+            out.push(c);
+        } else {
+            // Use 7-digit zero-padded hex for special chars
+            let _ = write!(out, "&#x{:07x};", c as u32);
+        }
+    }
+    out
 }
 
 /// Zero-width space encoding: inserts U+200B after key characters commonly
@@ -425,6 +443,27 @@ mod tests {
     fn test_zero_width_encode_preserves_non_special() {
         let encoded = zero_width_encode("abc");
         assert_eq!(encoded, "abc");
+    }
+
+    #[test]
+    fn test_html_entity_zero_padded_encode() {
+        let result = html_entity_zero_padded_encode("<");
+        assert!(result.contains("&#x000003c;"));
+        assert!(!result.contains('<'));
+
+        let result2 = html_entity_zero_padded_encode("<script>");
+        assert!(result2.contains("&#x000003c;"));
+        assert!(result2.contains("script"));
+        assert!(result2.contains("&#x000003e;"));
+    }
+
+    #[test]
+    fn test_htmlpad_in_apply_encoders() {
+        let bases = vec!["<x>".to_string()];
+        let encs = vec!["htmlpad".to_string()];
+        let out = apply_encoders_to_payloads(&bases, &encs);
+        assert!(out.len() >= 2);
+        assert!(out.iter().any(|p| p.contains("&#x")));
     }
 
     #[test]

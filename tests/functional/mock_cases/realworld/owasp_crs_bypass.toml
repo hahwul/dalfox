@@ -1,0 +1,141 @@
+# OWASP CRS bypass test cases
+#
+# These test cases simulate OWASP Core Rule Set (CRS) filtering patterns.
+# CRS rule IDs targeted:
+#   941100 - XSS via libinjection
+#   941110 - Script Tag Vector
+#   941120 - Event Handler Vector
+#   941130 - Attribute Vector
+#   941160 - NoScript XSS InjectionChecker
+#   941320 - Possible XSS Attack - HTML Tag Handler
+#   941370 - JavaScript global variable
+
+[[case]]
+id = 5541
+name = "crs_script_tag_blocked"
+description = "CRS 941110: Basic script tag injection blocked; needs alternative tag"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "strip_script|strip_iframe"
+category = "owasp_crs"
+
+[[case]]
+id = 5542
+name = "crs_event_handler_case_insensitive"
+description = "CRS 941120: Event handlers blocked case-insensitively; slash-separator may bypass"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "waf_basic"
+category = "owasp_crs"
+
+[[case]]
+id = 5543
+name = "crs_svg_animate_bypass"
+description = "CRS 941110: SVG animate/set elements may not be in tag denylist"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "strip_script|strip_img|strip_iframe"
+category = "owasp_crs"
+
+[[case]]
+id = 5544
+name = "crs_exotic_whitespace_bypass"
+description = "CRS 941320: Form feed/vertical tab between tag and attrs may bypass regex"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "waf_basic"
+category = "owasp_crs"
+
+[[case]]
+id = 5545
+name = "crs_html_entity_parens_bypass"
+description = "CRS 941370: JS function detection bypassed with HTML entity-encoded parens"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "remove_parens"
+category = "owasp_crs"
+
+[[case]]
+id = 5546
+name = "crs_constructor_chain_bypass"
+description = "CRS 941370: alert/confirm/prompt blocked; constructor chain alternative"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "remove_keyword:alert|remove_keyword:confirm|remove_keyword:prompt"
+category = "owasp_crs"
+
+[[case]]
+id = 5547
+name = "crs_js_context_string_break"
+description = "CRS may not block JS context breakout without HTML tags"
+handler_type = "realworld"
+reflection = "<script>var x = '{input}';</script>"
+expected_detection = true
+filter = "waf_basic"
+category = "owasp_crs"
+
+[[case]]
+id = 5548
+name = "crs_slash_separated_attrs"
+description = "CRS 941160: Slash-separated tag attributes bypass whitespace regex"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "waf_moderate"
+category = "owasp_crs"
+
+[[case]]
+id = 5549
+name = "crs_custom_element_bypass"
+description = "CRS tag denylist doesn't include custom elements (x-tag)"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "strip_script|strip_img|strip_svg|strip_iframe"
+category = "owasp_crs"
+
+[[case]]
+id = 5550
+name = "crs_math_ml_context"
+description = "CRS may not fully cover MathML namespace elements"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = true
+filter = "strip_script|strip_img"
+category = "owasp_crs"
+
+[[case]]
+id = 5551
+name = "crs_atob_keyword_reconstruction"
+description = "CRS 941370: atob-based keyword reconstruction avoids alert/eval patterns"
+handler_type = "realworld"
+reflection = "<script>var x = '{input}';</script>"
+expected_detection = true
+filter = "remove_keyword:alert"
+category = "owasp_crs"
+
+[[case]]
+id = 5552
+name = "crs_function_constructor_bypass"
+description = "CRS: Function constructor with split string avoids keyword detection"
+handler_type = "realworld"
+reflection = "<script>var x = '{input}';</script>"
+expected_detection = true
+filter = "remove_keyword:alert|remove_keyword:eval"
+category = "owasp_crs"
+
+[[case]]
+id = 5553
+name = "crs_strict_multi_filter"
+description = "CRS paranoia level 3+: most vectors blocked, very few bypasses possible"
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+expected_detection = false
+filter = "waf_strict"
+category = "owasp_crs"

@@ -8,6 +8,11 @@ pub mod bypass;
 use reqwest::header::HeaderMap;
 use serde::{Deserialize, Serialize};
 
+// WAF block tracking uses global atomics in lib.rs (WAF_BLOCK_COUNT,
+// WAF_CONSECUTIVE_BLOCKS) rather than a per-instance tracker, because
+// WAF rate-limiting is IP-level and applies across all concurrent scan
+// tasks for the same target.
+
 /// Known WAF types that can be fingerprinted.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WafType {
@@ -16,6 +21,9 @@ pub enum WafType {
     Akamai,
     Imperva,
     ModSecurity,
+    /// OWASP Core Rule Set — detected when ModSecurity + CRS body patterns are present.
+    /// Gets a dedicated bypass strategy tuned to CRS rule IDs 941xxx.
+    OwaspCrs,
     Sucuri,
     F5BigIp,
     Barracuda,
@@ -35,6 +43,7 @@ impl std::fmt::Display for WafType {
             WafType::Akamai => write!(f, "Akamai"),
             WafType::Imperva => write!(f, "Imperva/Incapsula"),
             WafType::ModSecurity => write!(f, "ModSecurity"),
+            WafType::OwaspCrs => write!(f, "OWASP CRS"),
             WafType::Sucuri => write!(f, "Sucuri"),
             WafType::F5BigIp => write!(f, "F5 BIG-IP"),
             WafType::Barracuda => write!(f, "Barracuda"),
@@ -191,6 +200,15 @@ pub fn fingerprint_from_response(
             BodyRule { pattern: "modsecurity", waf_type: WafType::ModSecurity, confidence: 0.85, evidence_label: "ModSecurity in body" },
             BodyRule { pattern: "mod_security", waf_type: WafType::ModSecurity, confidence: 0.85, evidence_label: "mod_security in body" },
             BodyRule { pattern: "not acceptable!", waf_type: WafType::ModSecurity, confidence: 0.4, evidence_label: "Not Acceptable error (possible ModSecurity)" },
+            // OWASP CRS (often runs on ModSecurity but has distinctive patterns)
+            BodyRule { pattern: "owasp_crs", waf_type: WafType::OwaspCrs, confidence: 0.95, evidence_label: "OWASP CRS rule ID in body" },
+            BodyRule { pattern: "owasp crs", waf_type: WafType::OwaspCrs, confidence: 0.9, evidence_label: "OWASP CRS mention in body" },
+            BodyRule { pattern: "coreruleset", waf_type: WafType::OwaspCrs, confidence: 0.9, evidence_label: "CoreRuleSet reference in body" },
+            BodyRule { pattern: "core rule set", waf_type: WafType::OwaspCrs, confidence: 0.85, evidence_label: "Core Rule Set reference in body" },
+            BodyRule { pattern: "id \"941", waf_type: WafType::OwaspCrs, confidence: 0.95, evidence_label: "CRS XSS rule ID 941xxx in body" },
+            BodyRule { pattern: "id \"942", waf_type: WafType::OwaspCrs, confidence: 0.9, evidence_label: "CRS SQLi rule ID 942xxx in body" },
+            BodyRule { pattern: "id \"949", waf_type: WafType::OwaspCrs, confidence: 0.9, evidence_label: "CRS blocking rule ID 949xxx in body" },
+            BodyRule { pattern: "id \"980", waf_type: WafType::OwaspCrs, confidence: 0.85, evidence_label: "CRS correlation rule ID 980xxx in body" },
             // Sucuri
             BodyRule { pattern: "access denied - sucuri website firewall", waf_type: WafType::Sucuri, confidence: 0.95, evidence_label: "Sucuri block page" },
             BodyRule { pattern: "sucuri cloudproxy", waf_type: WafType::Sucuri, confidence: 0.9, evidence_label: "Sucuri CloudProxy in body" },
@@ -414,6 +432,33 @@ mod tests {
     fn test_display_waf_types() {
         assert_eq!(format!("{}", WafType::Cloudflare), "Cloudflare");
         assert_eq!(format!("{}", WafType::Imperva), "Imperva/Incapsula");
+        assert_eq!(format!("{}", WafType::OwaspCrs), "OWASP CRS");
         assert_eq!(format!("{}", WafType::Unknown("test".to_string())), "Unknown (test)");
+    }
+
+    #[test]
+    fn test_owasp_crs_detection_by_rule_id() {
+        let headers = make_headers(&[]);
+        let body = r#"<html><body>ModSecurity: Access denied with code 403. id "941110"</body></html>"#;
+        let result = fingerprint_from_response(&headers, Some(body), 403);
+        assert!(result.waf_types().contains(&&WafType::OwaspCrs));
+    }
+
+    #[test]
+    fn test_owasp_crs_detection_by_name() {
+        let headers = make_headers(&[]);
+        let body = "Blocked by OWASP_CRS/3.3.4";
+        let result = fingerprint_from_response(&headers, Some(body), 403);
+        assert!(result.waf_types().contains(&&WafType::OwaspCrs));
+    }
+
+    #[test]
+    fn test_owasp_crs_plus_modsecurity_dual_detect() {
+        let headers = make_headers(&[("server", "Apache/2.4 (ModSecurity)")]);
+        let body = r#"ModSecurity: Access denied. id "941100" OWASP_CRS/3.3.4"#;
+        let result = fingerprint_from_response(&headers, Some(body), 403);
+        // Should detect both ModSecurity engine and OWASP CRS ruleset
+        assert!(result.waf_types().contains(&&WafType::OwaspCrs));
+        assert!(result.waf_types().contains(&&WafType::ModSecurity));
     }
 }
