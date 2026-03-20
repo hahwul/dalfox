@@ -74,4 +74,6 @@ pub use std::sync::atomic::AtomicU64;
 
 pub static DEBUG: AtomicBool = AtomicBool::new(false);
 pub static REQUEST_COUNT: AtomicU64 = AtomicU64::new(0);
+pub static WAF_BLOCK_COUNT: AtomicU64 = AtomicU64::new(0);
+pub static WAF_CONSECUTIVE_BLOCKS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 pub static NO_COLOR: AtomicBool = AtomicBool::new(false);

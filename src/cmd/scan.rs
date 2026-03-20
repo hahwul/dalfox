@@ -863,6 +863,7 @@ fn parse_waf_type(s: &str) -> crate::waf::WafType {
         "akamai" => crate::waf::WafType::Akamai,
         "imperva" | "incapsula" => crate::waf::WafType::Imperva,
         "modsecurity" | "modsec" => crate::waf::WafType::ModSecurity,
+        "owasp-crs" | "owaspcrs" | "crs" => crate::waf::WafType::OwaspCrs,
         "sucuri" => crate::waf::WafType::Sucuri,
         "f5" | "bigip" | "f5-bigip" => crate::waf::WafType::F5BigIp,
         "barracuda" => crate::waf::WafType::Barracuda,

