@@ -1,13 +1,13 @@
 module github.com/hahwul/dalfox/v2
 
-go 1.25.0
+go 1.26
 
 require (
 	github.com/PuerkitoBio/goquery v1.12.0
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751
 	github.com/briandowns/spinner v1.23.2
-	github.com/chromedp/cdproto v0.0.0-20250724212937-08a3db8b4327
-	github.com/chromedp/chromedp v0.14.2
+	github.com/chromedp/cdproto v0.0.0-20260321001828-e3e3800016bc
+	github.com/chromedp/chromedp v0.15.1
 	github.com/hahwul/volt v1.0.7
 	github.com/labstack/echo/v4 v4.15.1
 	github.com/logrusorgru/aurora v2.0.3+incompatible
@@ -37,7 +37,7 @@ require (
 	github.com/clipperhouse/uax29/v2 v2.6.0 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/fatih/color v1.18.0 // indirect
-	github.com/go-json-experiment/json v0.0.0-20250725192818-e39067aee2d2 // indirect
+	github.com/go-json-experiment/json v0.0.0-20260214004413-d219187c3433 // indirect
 	github.com/go-openapi/jsonpointer v0.19.6 // indirect
 	github.com/go-openapi/jsonreference v0.20.2 // indirect
 	github.com/go-openapi/spec v0.20.9 // indirect
