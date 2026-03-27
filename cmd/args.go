@@ -35,12 +35,14 @@ type Args struct {
 	HarFilePath               string // Path to save HAR files
 	CustomBlindXSSPayloadFile string // Path to custom blind XSS payload file
 	OutOfScopeFile            string // File containing domains to exclude
+	LimitResultType           string // Finding type filter for limit-result (all, v, r)
 
 	// Integer options
 	Timeout     int // Request timeout in seconds
 	Delay       int // Delay between requests in milliseconds
 	Concurrence int // Number of concurrent workers
 	MaxCPU      int // Maximum CPU cores to use
+	LimitResult int // Maximum number of findings before early stop
 
 	// Boolean options
 	OnlyDiscovery             bool // Only perform parameter discovery

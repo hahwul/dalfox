@@ -37,6 +37,14 @@ func performScanning(target string, options model.Options, query map[*http.Reque
 	queries := make(chan Queries)
 	resultsChan := make(chan model.PoC)
 	doneChan := make(chan bool)
+	limiter := newResultLimiter(options.LimitResult)
+	limitResultType := normalizeLimitResultType(options.LimitResultType)
+	countLimitedResult := func(resultType string) bool {
+		if !shouldCountResultByType(resultType, limitResultType) {
+			return true
+		}
+		return limiter.allowAndCount()
+	}
 
 	go func() {
 		for result := range resultsChan {
@@ -62,7 +70,15 @@ func performScanning(target string, options model.Options, query map[*http.Reque
 				wgg.Add(1)
 				go func() {
 					for v := range dchan {
+						if limiter.shouldStop() {
+							queryCount++
+							continue
+						}
 						if CheckXSSWithHeadless(v, options) {
+							if !countLimitedResult("V") {
+								queryCount++
+								continue
+							}
 							printing.DalLog("VULN", "Triggered XSS Payload (found dialog in headless)", options)
 							poc := model.PoC{
 								Type:       "V",
@@ -114,7 +130,7 @@ func performScanning(target string, options model.Options, query map[*http.Reque
 		wg.Add(1)
 		go func() {
 			for reqJob := range queries {
-				if checkVStatus(vStatus) {
+				if limiter.shouldStop() || checkVStatus(vStatus) {
 					continue
 				}
 				k := reqJob.request
@@ -141,6 +157,9 @@ func performScanning(target string, options model.Options, query map[*http.Reque
 							protected := verification.VerifyReflection(resbody, "\\"+v["payload"]) && !strings.Contains(v["payload"], "\\")
 							if !protected && !vStatus[v["param"]] {
 								if options.UseHeadless && CheckXSSWithHeadless(k.URL.String(), options) {
+									if !countLimitedResult("V") {
+										continue
+									}
 									poc := model.PoC{
 										Type:       "V",
 										InjectType: v["type"],
@@ -162,6 +181,9 @@ func performScanning(target string, options model.Options, query map[*http.Reque
 									}
 									resultsChan <- poc
 								} else {
+									if !countLimitedResult("R") {
+										continue
+									}
 									poc := model.PoC{
 										Type:       "R",
 										InjectType: v["type"],
@@ -185,6 +207,9 @@ func performScanning(target string, options model.Options, query map[*http.Reque
 							}
 						} else if strings.Contains(v["type"], "inATTR") {
 							if vds && !vStatus[v["param"]] {
+								if !countLimitedResult("V") {
+									continue
+								}
 								poc := model.PoC{
 									Type:       "V",
 									InjectType: v["type"],
@@ -206,6 +231,9 @@ func performScanning(target string, options model.Options, query map[*http.Reque
 								}
 								resultsChan <- poc
 							} else if vrs && !vStatus[v["param"]] {
+								if !countLimitedResult("R") {
+									continue
+								}
 								poc := model.PoC{
 									Type:       "R",
 									InjectType: v["type"],
@@ -228,6 +256,9 @@ func performScanning(target string, options model.Options, query map[*http.Reque
 							}
 						} else {
 							if vds && !vStatus[v["param"]] {
+								if !countLimitedResult("V") {
+									continue
+								}
 								poc := model.PoC{
 									Type:       "V",
 									InjectType: v["type"],
@@ -249,6 +280,9 @@ func performScanning(target string, options model.Options, query map[*http.Reque
 								}
 								resultsChan <- poc
 							} else if vrs && !vStatus[v["param"]] {
+								if !countLimitedResult("R") {
+									continue
+								}
 								poc := model.PoC{
 									Type:       "R",
 									InjectType: v["type"],
