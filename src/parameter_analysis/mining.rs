@@ -78,6 +78,12 @@ impl MiningSampleStats {
 
 pub fn detect_injection_context(text: &str) -> InjectionContext {
     let marker = crate::scanning::markers::open_marker();
+    detect_injection_context_with_marker(text, marker)
+}
+
+/// Like `detect_injection_context` but uses a caller-supplied marker string.
+/// Useful for probes that don't use the standard alphanumeric marker (e.g. numeric-only probes).
+pub fn detect_injection_context_with_marker(text: &str, marker: &str) -> InjectionContext {
     if !text.contains(marker) {
         return InjectionContext::Html(None);
     }

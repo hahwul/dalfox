@@ -250,6 +250,9 @@ pub fn is_xss_scannable_content_type(ct: &str) -> bool {
             | "text/ecmascript"
             | "application/x-javascript"
             | "image/svg+xml"
+            // text/plain may render as HTML when X-Content-Type-Options is absent
+            // and the response contains HTML-like content (content-type sniffing).
+            | "text/plain"
     )
 }
 

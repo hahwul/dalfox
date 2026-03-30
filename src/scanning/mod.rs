@@ -631,6 +631,23 @@ pub async fn run_scanning(
                 local_results.extend(ast_findings);
             }
 
+            // If probe found no reflection, try a numeric-only probe to detect
+            // letter-stripping filters (e.g., /[a-zA-Z]/ removal).
+            if !probe_reflected {
+                let numeric_probe = "90197752";
+                let (kind, _) = check_reflection_with_response_client(
+                    client,
+                    &target_clone,
+                    &param_clone,
+                    numeric_probe,
+                    &args_clone,
+                )
+                .await;
+                if kind.is_some() {
+                    probe_reflected = true;
+                }
+            }
+
             // If probe found no reflection and not in deep_scan, skip heavy payload loops for this param
             if !probe_reflected && !args_clone.deep_scan {
                 if !local_results.is_empty() {

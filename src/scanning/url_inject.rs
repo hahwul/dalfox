@@ -103,29 +103,48 @@ pub fn build_injected_url(base: &url::Url, param: &Param, injected: &str) -> Str
             result.push_str(prefix);
             result.push('?');
 
-            let mut found = false;
-            let mut first = true;
-            for (k, v) in base.query_pairs() {
-                if !first {
-                    result.push('&');
-                }
-                first = false;
-                encode_query_component_preserving_pct_into(&k, &mut result);
-                result.push('=');
-                if k == param.name && !found {
-                    encode_query_component_preserving_pct_into(injected, &mut result);
-                    found = true;
-                } else {
+            // Special handling for parameter key injection: payload becomes the key
+            if param.name == "__dalfox_key_inject__" {
+                let mut first = true;
+                for (k, v) in base.query_pairs() {
+                    if !first {
+                        result.push('&');
+                    }
+                    first = false;
+                    encode_query_component_preserving_pct_into(&k, &mut result);
+                    result.push('=');
                     encode_query_component_preserving_pct_into(&v, &mut result);
                 }
-            }
-            if !found {
                 if !first {
                     result.push('&');
                 }
-                encode_query_component_preserving_pct_into(&param.name, &mut result);
-                result.push('=');
                 encode_query_component_preserving_pct_into(injected, &mut result);
+                result.push_str("=1");
+            } else {
+                let mut found = false;
+                let mut first = true;
+                for (k, v) in base.query_pairs() {
+                    if !first {
+                        result.push('&');
+                    }
+                    first = false;
+                    encode_query_component_preserving_pct_into(&k, &mut result);
+                    result.push('=');
+                    if k == param.name && !found {
+                        encode_query_component_preserving_pct_into(injected, &mut result);
+                        found = true;
+                    } else {
+                        encode_query_component_preserving_pct_into(&v, &mut result);
+                    }
+                }
+                if !found {
+                    if !first {
+                        result.push('&');
+                    }
+                    encode_query_component_preserving_pct_into(&param.name, &mut result);
+                    result.push('=');
+                    encode_query_component_preserving_pct_into(injected, &mut result);
+                }
             }
             if let Some(frag) = fragment {
                 result.push('#');
