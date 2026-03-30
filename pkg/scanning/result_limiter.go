@@ -39,15 +39,15 @@ func (rl *resultLimiter) allowAndCount() bool {
 	}
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
-	if rl.count >= rl.limit {
-		rl.stop = true
-		return false
+	if rl.count < rl.limit {
+		rl.count++
+		if rl.count >= rl.limit {
+			rl.stop = true
+		}
+		return true
 	}
-	rl.count++
-	if rl.count >= rl.limit {
-		rl.stop = true
-	}
-	return true
+	rl.stop = true
+	return false
 }
 
 func normalizeLimitResultType(limitResultType string) string {
