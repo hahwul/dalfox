@@ -398,11 +398,13 @@ const COMMON_PROBE_HEADERS: &[&str] = &[
     "Referer",
     "User-Agent",
     "Accept",
+    "Accept-Language",
     "Authorization",
     "Cookie",
     "X-Forwarded-For",
     "X-Forwarded-Host",
     "X-Custom-Header",
+    "X-Debug",
     "Origin",
 ];
 
