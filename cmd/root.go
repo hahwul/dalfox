@@ -42,6 +42,7 @@ const (
 	DefaultMethod           = "GET"   // Default HTTP method
 	DefaultPoCType          = "plain" // Default Proof of Concept format
 	DefaultReportFormat     = "plain" // Default report format
+	DefaultLimitResultType  = "all"   // Default finding type filter for limit-result
 )
 
 var options model.Options
@@ -120,12 +121,14 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&args.PoCType, "poc-type", "plain", "Select the PoC type. Supported: plain, curl, httpie, http-request. Example: --poc-type 'curl'")
 	rootCmd.PersistentFlags().StringVar(&args.ReportFormat, "report-format", "plain", "Set the format of the report. Supported: plain, json, markdown, md. Example: --report-format 'json'")
 	rootCmd.PersistentFlags().StringVar(&args.HarFilePath, "har-file-path", "", "Specify the path to save HAR files of scan requests. Example: --har-file-path 'scan.har'")
+	rootCmd.PersistentFlags().StringVar(&args.LimitResultType, "limit-result-type", DefaultLimitResultType, "Set finding type filter for --limit-result. Supported: all, v, r. Example: --limit-result-type 'v'")
 
 	// Int
 	rootCmd.PersistentFlags().IntVar(&args.Timeout, "timeout", 10, "Set the request timeout in seconds. Example: --timeout 10")
 	rootCmd.PersistentFlags().IntVar(&args.Delay, "delay", 0, "Set the delay between requests to the same host in milliseconds. Example: --delay 1000")
 	rootCmd.PersistentFlags().IntVarP(&args.Concurrence, "worker", "w", 100, "Set the number of concurrent workers. Example: -w 100")
 	rootCmd.PersistentFlags().IntVar(&args.MaxCPU, "max-cpu", 1, "Set the maximum number of CPUs to use. Example: --max-cpu 1")
+	rootCmd.PersistentFlags().IntVar(&args.LimitResult, "limit-result", 0, "Stop scanning after N findings (0 = unlimited). Example: --limit-result 1")
 
 	// Bool
 	rootCmd.PersistentFlags().BoolVar(&args.OnlyDiscovery, "only-discovery", false, "Only perform parameter analysis, skip XSS scanning. Example: --only-discovery")
@@ -255,7 +258,7 @@ func initializeFlagGroups() {
 		"Scanning": {"param", "ignore-param", "out-of-scope", "out-of-scope-file", "blind", "timeout", "delay", "worker", "skip-headless", "deep-domxss", "waf-evasion", "skip-discovery", "force-headless-verification", "use-bav", "skip-bav", "skip-mining-dom", "skip-mining-dict", "skip-mining-all", "skip-xss-scanning", "only-custom-payload", "skip-grepping", "detailed-analysis", "fast-scan", "magic-char-test", "context-aware"},
 		"Mining":   {"mining-dict-word", "mining-dict", "mining-dom"},
 		"Output":   {"output", "format", "only-poc", "report", "output-all", "output-request", "output-response", "poc-type", "report-format", "silence", "no-color", "no-spinner"},
-		"Advanced": {"custom-alert-value", "custom-alert-type", "found-action", "found-action-shell", "proxy", "ignore-return", "max-cpu", "only-discovery", "follow-redirects", "debug"},
+		"Advanced": {"custom-alert-value", "custom-alert-type", "found-action", "found-action-shell", "proxy", "ignore-return", "max-cpu", "limit-result", "limit-result-type", "only-discovery", "follow-redirects", "debug"},
 	}
 
 	rootCmd.PersistentFlags().VisitAll(func(f *pflag.Flag) {
@@ -325,6 +328,8 @@ func initConfig() {
 		Timeout:                   args.Timeout,
 		Concurrence:               args.Concurrence,
 		MaxCPU:                    args.MaxCPU,
+		LimitResult:               args.LimitResult,
+		LimitResultType:           args.LimitResultType,
 		Delay:                     args.Delay,
 		OnlyDiscovery:             args.OnlyDiscovery,
 		OnlyCustomPayload:         args.OnlyCustomPayload,
@@ -432,6 +437,12 @@ func initConfig() {
 		}
 		if args.MaxCPU == DefaultMaxCPU && cfgOptions.MaxCPU != 0 {
 			options.MaxCPU = cfgOptions.MaxCPU
+		}
+		if args.LimitResult == 0 && cfgOptions.LimitResult != 0 {
+			options.LimitResult = cfgOptions.LimitResult
+		}
+		if args.LimitResultType == DefaultLimitResultType && cfgOptions.LimitResultType != "" {
+			options.LimitResultType = cfgOptions.LimitResultType
 		}
 		if args.Delay == 0 && cfgOptions.Delay != 0 {
 			options.Delay = cfgOptions.Delay

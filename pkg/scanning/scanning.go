@@ -37,6 +37,14 @@ func performScanning(target string, options model.Options, query map[*http.Reque
 	queries := make(chan Queries)
 	resultsChan := make(chan model.PoC)
 	doneChan := make(chan bool)
+	limiter := newResultLimiter(options.LimitResult)
+	limitResultType := normalizeLimitResultType(options.LimitResultType)
+	countLimitedResult := func(resultType string) bool {
+		if !shouldCountResultByType(resultType, limitResultType) {
+			return true
+		}
+		return limiter.allowAndCount()
+	}
 
 	go func() {
 		for result := range resultsChan {
@@ -62,7 +70,15 @@ func performScanning(target string, options model.Options, query map[*http.Reque
 				wgg.Add(1)
 				go func() {
 					for v := range dchan {
+						if limiter.shouldStop() {
+							queryCount++
+							continue
+						}
 						if CheckXSSWithHeadless(v, options) {
+							if !countLimitedResult("V") {
+								queryCount++
+								continue
+							}
 							printing.DalLog("VULN", "Triggered XSS Payload (found dialog in headless)", options)
 							poc := model.PoC{
 								Type:       "V",
@@ -114,160 +130,171 @@ func performScanning(target string, options model.Options, query map[*http.Reque
 		wg.Add(1)
 		go func() {
 			for reqJob := range queries {
-				if checkVStatus(vStatus) {
-					continue
-				}
 				k := reqJob.request
 				v := reqJob.metadata
-				checkVtype := utils.CheckPType(v["type"])
+				if !(limiter.shouldStop() || checkVStatus(vStatus)) {
+					checkVtype := utils.CheckPType(v["type"])
 
-				if !vStatus[v["param"]] || checkVtype {
-					rl.Block(k.Host)
-					resbody, _, vds, vrs, err := SendReq(k, v["payload"], options)
+					if !vStatus[v["param"]] || checkVtype {
+						rl.Block(k.Host)
+						resbody, _, vds, vrs, err := SendReq(k, v["payload"], options)
 
-					// Additional JSON body check to prevent false positives (Issue #884)
-					// Even if SendReq returned vrs/vds=true, skip if the body is JSON/JSONP
-					if (vrs || vds) && utils.IsJSONBody(resbody) {
-						vrs = false
-						vds = false
-					}
+						// Additional JSON body check to prevent false positives (Issue #884)
+						// Even if SendReq returned vrs/vds=true, skip if the body is JSON/JSONP
+						if (vrs || vds) && utils.IsJSONBody(resbody) {
+							vrs = false
+							vds = false
+						}
 
-					abs := optimization.Abstraction(resbody, v["payload"])
-					if vrs && !utils.ContainsFromArray(abs, v["type"]) && !strings.Contains(v["type"], "inHTML") {
-						vrs = false
-					}
-					if err == nil {
-						if strings.Contains(v["type"], "inJS") && vrs {
-							protected := verification.VerifyReflection(resbody, "\\"+v["payload"]) && !strings.Contains(v["payload"], "\\")
-							if !protected && !vStatus[v["param"]] {
-								if options.UseHeadless && CheckXSSWithHeadless(k.URL.String(), options) {
-									poc := model.PoC{
-										Type:       "V",
-										InjectType: v["type"],
-										Method:     k.Method,
-										Data:       printing.MakePoC(k.URL.String(), k, options),
-										Param:      v["param"],
-										Payload:    "",
-										Evidence:   "",
-										CWE:        "CWE-79",
-										Severity:   "High",
-										PoCType:    options.PoCType,
-										MessageID:  har.MessageIDFromRequest(k),
-										MessageStr: "Triggered XSS Payload (found dialog in headless)",
+						abs := optimization.Abstraction(resbody, v["payload"])
+						if vrs && !utils.ContainsFromArray(abs, v["type"]) && !strings.Contains(v["type"], "inHTML") {
+							vrs = false
+						}
+						if err == nil {
+							if strings.Contains(v["type"], "inJS") && vrs {
+								protected := verification.VerifyReflection(resbody, "\\"+v["payload"]) && !strings.Contains(v["payload"], "\\")
+								if !protected && !vStatus[v["param"]] {
+									if options.UseHeadless && CheckXSSWithHeadless(k.URL.String(), options) {
+										if countLimitedResult("V") {
+											poc := model.PoC{
+												Type:       "V",
+												InjectType: v["type"],
+												Method:     k.Method,
+												Data:       printing.MakePoC(k.URL.String(), k, options),
+												Param:      v["param"],
+												Payload:    "",
+												Evidence:   "",
+												CWE:        "CWE-79",
+												Severity:   "High",
+												PoCType:    options.PoCType,
+												MessageID:  har.MessageIDFromRequest(k),
+												MessageStr: "Triggered XSS Payload (found dialog in headless)",
+											}
+											printing.LogPoC(&poc, resbody, k, options, showV, "VULN", "Triggered XSS Payload (found dialog in headless)")
+											vStatus[v["param"]] = true
+											if options.FoundAction != "" {
+												foundAction(options, target, k.URL.String(), "VULN")
+											}
+											resultsChan <- poc
+										}
+									} else {
+										if countLimitedResult("R") {
+											poc := model.PoC{
+												Type:       "R",
+												InjectType: v["type"],
+												Method:     k.Method,
+												Data:       printing.MakePoC(k.URL.String(), k, options),
+												Param:      v["param"],
+												Payload:    v["payload"],
+												Evidence:   printing.CodeView(resbody, v["payload"]),
+												CWE:        "CWE-79",
+												Severity:   "Medium",
+												PoCType:    options.PoCType,
+												MessageID:  har.MessageIDFromRequest(k),
+												MessageStr: "Reflected Payload in JS: " + v["param"] + "=" + v["payload"],
+											}
+											printing.LogPoC(&poc, resbody, k, options, showR, "WEAK", "Reflected Payload in JS: "+v["param"]+"="+v["payload"])
+											if options.FoundAction != "" {
+												foundAction(options, target, k.URL.String(), "WEAK")
+											}
+											resultsChan <- poc
+										}
 									}
-									printing.LogPoC(&poc, resbody, k, options, showV, "VULN", "Triggered XSS Payload (found dialog in headless)")
-									vStatus[v["param"]] = true
-									if options.FoundAction != "" {
-										foundAction(options, target, k.URL.String(), "VULN")
+								}
+							} else if strings.Contains(v["type"], "inATTR") {
+								if vds && !vStatus[v["param"]] {
+									if countLimitedResult("V") {
+										poc := model.PoC{
+											Type:       "V",
+											InjectType: v["type"],
+											Method:     k.Method,
+											Data:       printing.MakePoC(k.URL.String(), k, options),
+											Param:      v["param"],
+											Payload:    v["payload"],
+											Evidence:   printing.CodeView(resbody, v["payload"]),
+											CWE:        "CWE-83",
+											Severity:   "High",
+											PoCType:    options.PoCType,
+											MessageID:  har.MessageIDFromRequest(k),
+											MessageStr: "Triggered XSS Payload (found DOM Object): " + v["param"] + "=" + v["payload"],
+										}
+										printing.LogPoC(&poc, resbody, k, options, showV, "VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"])
+										vStatus[v["param"]] = true
+										if options.FoundAction != "" {
+											foundAction(options, target, k.URL.String(), "VULN")
+										}
+										resultsChan <- poc
 									}
-									resultsChan <- poc
-								} else {
-									poc := model.PoC{
-										Type:       "R",
-										InjectType: v["type"],
-										Method:     k.Method,
-										Data:       printing.MakePoC(k.URL.String(), k, options),
-										Param:      v["param"],
-										Payload:    v["payload"],
-										Evidence:   printing.CodeView(resbody, v["payload"]),
-										CWE:        "CWE-79",
-										Severity:   "Medium",
-										PoCType:    options.PoCType,
-										MessageID:  har.MessageIDFromRequest(k),
-										MessageStr: "Reflected Payload in JS: " + v["param"] + "=" + v["payload"],
+								} else if vrs && !vStatus[v["param"]] {
+									if countLimitedResult("R") {
+										poc := model.PoC{
+											Type:       "R",
+											InjectType: v["type"],
+											Method:     k.Method,
+											Data:       printing.MakePoC(k.URL.String(), k, options),
+											Param:      v["param"],
+											Payload:    v["payload"],
+											Evidence:   printing.CodeView(resbody, v["payload"]),
+											CWE:        "CWE-83",
+											Severity:   "Medium",
+											PoCType:    options.PoCType,
+											MessageID:  har.MessageIDFromRequest(k),
+											MessageStr: "Reflected Payload in Attribute: " + v["param"] + "=" + v["payload"],
+										}
+										printing.LogPoC(&poc, resbody, k, options, showR, "WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"])
+										if options.FoundAction != "" {
+											foundAction(options, target, k.URL.String(), "WEAK")
+										}
+										resultsChan <- poc
 									}
-									printing.LogPoC(&poc, resbody, k, options, showR, "WEAK", "Reflected Payload in JS: "+v["param"]+"="+v["payload"])
-									if options.FoundAction != "" {
-										foundAction(options, target, k.URL.String(), "WEAK")
+								}
+							} else {
+								if vds && !vStatus[v["param"]] {
+									if countLimitedResult("V") {
+										poc := model.PoC{
+											Type:       "V",
+											InjectType: v["type"],
+											Method:     k.Method,
+											Data:       printing.MakePoC(k.URL.String(), k, options),
+											Param:      v["param"],
+											Payload:    v["payload"],
+											Evidence:   printing.CodeView(resbody, v["payload"]),
+											CWE:        "CWE-79",
+											Severity:   "High",
+											PoCType:    options.PoCType,
+											MessageID:  har.MessageIDFromRequest(k),
+											MessageStr: "Triggered XSS Payload (found DOM Object): " + v["param"] + "=" + v["payload"],
+										}
+										printing.LogPoC(&poc, resbody, k, options, showV, "VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"])
+										vStatus[v["param"]] = true
+										if options.FoundAction != "" {
+											foundAction(options, target, k.URL.String(), "VULN")
+										}
+										resultsChan <- poc
 									}
-									resultsChan <- poc
+								} else if vrs && !vStatus[v["param"]] {
+									if countLimitedResult("R") {
+										poc := model.PoC{
+											Type:       "R",
+											InjectType: v["type"],
+											Method:     k.Method,
+											Data:       printing.MakePoC(k.URL.String(), k, options),
+											Param:      v["param"],
+											Payload:    v["payload"],
+											Evidence:   printing.CodeView(resbody, v["payload"]),
+											CWE:        "CWE-79",
+											Severity:   "Medium",
+											PoCType:    options.PoCType,
+											MessageID:  har.MessageIDFromRequest(k),
+											MessageStr: "Reflected Payload in HTML: " + v["param"] + "=" + v["payload"],
+										}
+										printing.LogPoC(&poc, resbody, k, options, showR, "WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"])
+										if options.FoundAction != "" {
+											foundAction(options, target, k.URL.String(), "WEAK")
+										}
+										resultsChan <- poc
+									}
 								}
-							}
-						} else if strings.Contains(v["type"], "inATTR") {
-							if vds && !vStatus[v["param"]] {
-								poc := model.PoC{
-									Type:       "V",
-									InjectType: v["type"],
-									Method:     k.Method,
-									Data:       printing.MakePoC(k.URL.String(), k, options),
-									Param:      v["param"],
-									Payload:    v["payload"],
-									Evidence:   printing.CodeView(resbody, v["payload"]),
-									CWE:        "CWE-83",
-									Severity:   "High",
-									PoCType:    options.PoCType,
-									MessageID:  har.MessageIDFromRequest(k),
-									MessageStr: "Triggered XSS Payload (found DOM Object): " + v["param"] + "=" + v["payload"],
-								}
-								printing.LogPoC(&poc, resbody, k, options, showV, "VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"])
-								vStatus[v["param"]] = true
-								if options.FoundAction != "" {
-									foundAction(options, target, k.URL.String(), "VULN")
-								}
-								resultsChan <- poc
-							} else if vrs && !vStatus[v["param"]] {
-								poc := model.PoC{
-									Type:       "R",
-									InjectType: v["type"],
-									Method:     k.Method,
-									Data:       printing.MakePoC(k.URL.String(), k, options),
-									Param:      v["param"],
-									Payload:    v["payload"],
-									Evidence:   printing.CodeView(resbody, v["payload"]),
-									CWE:        "CWE-83",
-									Severity:   "Medium",
-									PoCType:    options.PoCType,
-									MessageID:  har.MessageIDFromRequest(k),
-									MessageStr: "Reflected Payload in Attribute: " + v["param"] + "=" + v["payload"],
-								}
-								printing.LogPoC(&poc, resbody, k, options, showR, "WEAK", "Reflected Payload in Attribute: "+v["param"]+"="+v["payload"])
-								if options.FoundAction != "" {
-									foundAction(options, target, k.URL.String(), "WEAK")
-								}
-								resultsChan <- poc
-							}
-						} else {
-							if vds && !vStatus[v["param"]] {
-								poc := model.PoC{
-									Type:       "V",
-									InjectType: v["type"],
-									Method:     k.Method,
-									Data:       printing.MakePoC(k.URL.String(), k, options),
-									Param:      v["param"],
-									Payload:    v["payload"],
-									Evidence:   printing.CodeView(resbody, v["payload"]),
-									CWE:        "CWE-79",
-									Severity:   "High",
-									PoCType:    options.PoCType,
-									MessageID:  har.MessageIDFromRequest(k),
-									MessageStr: "Triggered XSS Payload (found DOM Object): " + v["param"] + "=" + v["payload"],
-								}
-								printing.LogPoC(&poc, resbody, k, options, showV, "VULN", "Triggered XSS Payload (found DOM Object): "+v["param"]+"="+v["payload"])
-								vStatus[v["param"]] = true
-								if options.FoundAction != "" {
-									foundAction(options, target, k.URL.String(), "VULN")
-								}
-								resultsChan <- poc
-							} else if vrs && !vStatus[v["param"]] {
-								poc := model.PoC{
-									Type:       "R",
-									InjectType: v["type"],
-									Method:     k.Method,
-									Data:       printing.MakePoC(k.URL.String(), k, options),
-									Param:      v["param"],
-									Payload:    v["payload"],
-									Evidence:   printing.CodeView(resbody, v["payload"]),
-									CWE:        "CWE-79",
-									Severity:   "Medium",
-									PoCType:    options.PoCType,
-									MessageID:  har.MessageIDFromRequest(k),
-									MessageStr: "Reflected Payload in HTML: " + v["param"] + "=" + v["payload"],
-								}
-								printing.LogPoC(&poc, resbody, k, options, showR, "WEAK", "Reflected Payload in HTML: "+v["param"]+"="+v["payload"])
-								if options.FoundAction != "" {
-									foundAction(options, target, k.URL.String(), "WEAK")
-								}
-								resultsChan <- poc
 							}
 						}
 					}

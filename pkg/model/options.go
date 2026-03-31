@@ -91,14 +91,15 @@ type Options struct {
 	ReportBool       bool
 
 	// Advanced Options
-	TriggerMethod string `json:"trigger-method,omitempty"`
-	Trigger       string `json:"trigger,omitempty"`
-	LimitResult   int    `json:"limit-result,omitempty"`
-	Sequence      int    `json:"sequence,omitempty"`
-	IsAPI         bool   `json:"is-api,omitempty"`
-	IsLibrary     bool   `json:"is-library,omitempty"`
-	Mass          bool   `json:"mass,omitempty"`
-	MulticastMode bool   `json:"multicast-mode,omitempty"`
+	TriggerMethod   string `json:"trigger-method,omitempty"`
+	Trigger         string `json:"trigger,omitempty"`
+	LimitResult     int    `json:"limit-result,omitempty"`
+	LimitResultType string `json:"limit-result-type,omitempty"`
+	Sequence        int    `json:"sequence,omitempty"`
+	IsAPI           bool   `json:"is-api,omitempty"`
+	IsLibrary       bool   `json:"is-library,omitempty"`
+	Mass            bool   `json:"mass,omitempty"`
+	MulticastMode   bool   `json:"multicast-mode,omitempty"`
 
 	// Runtime Options
 	AllURLS         int
