@@ -224,6 +224,7 @@ async fn main() {
             silence: false,
             poc_type: "plain".to_string(),
             limit: None,
+            limit_result_type: "all".to_string(),
             only_poc: vec![],
             workers: cmd::scan::DEFAULT_WORKERS,
             max_concurrent_targets: cmd::scan::DEFAULT_MAX_CONCURRENT_TARGETS,

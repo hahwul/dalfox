@@ -48,6 +48,19 @@ const MAX_WAF_MUTATION_VARIANTS_PER_PAYLOAD: usize = 3;
 /// payloads (checked in Stage 5), and its DOM payloads (verified in Stage 6).
 pub type ParamPayloadJob = (Param, Vec<String>, Vec<String>);
 
+/// Count how many results in `results` match the `--limit-result-type` filter.
+/// Returns `results.len()` when filter is `"all"` (default).
+/// `filter` must already be uppercased (normalised once at scan start).
+fn count_matching_results(results: &[crate::scanning::result::Result], filter: &str) -> usize {
+    if filter == "ALL" {
+        return results.len();
+    }
+    results
+        .iter()
+        .filter(|r| r.result_type.short() == filter)
+        .count()
+}
+
 struct FoundParams {
     reflection: HashSet<String>,
     dom: HashSet<String>,
@@ -428,6 +441,7 @@ pub async fn run_scanning(
     let shared_client = Arc::new(arc_target.build_client_or_default());
     let semaphore = Arc::new(Semaphore::new(if args.sxss { 1 } else { target.workers }));
     let limit = args.limit;
+    let limit_result_type: Arc<str> = Arc::from(args.limit_result_type.to_uppercase());
 
     // Reset WAF block counters for this scan
     crate::WAF_BLOCK_COUNT.store(0, std::sync::atomic::Ordering::Relaxed);
@@ -571,6 +585,7 @@ pub async fn run_scanning(
         let overall_pb_clone = overall_pb.clone();
         let shared_client_clone = shared_client.clone();
         let findings_count_clone = findings_count.clone();
+        let limit_result_type_clone = limit_result_type.clone();
 
         let handle = tokio::spawn(async move {
             let _permit = semaphore_clone.acquire().await.expect("semaphore closed unexpectedly");
@@ -651,7 +666,7 @@ pub async fn run_scanning(
             // If probe found no reflection and not in deep_scan, skip heavy payload loops for this param
             if !probe_reflected && !args_clone.deep_scan {
                 if !local_results.is_empty() {
-                    let added = local_results.len();
+                    let added = count_matching_results(&local_results, &limit_result_type_clone);
                     let mut guard = results_clone.lock().await;
                     guard.extend(local_results);
                     findings_count_clone.fetch_add(added, Ordering::Relaxed);
@@ -940,7 +955,7 @@ pub async fn run_scanning(
             }
 
             if !local_results.is_empty() {
-                let added = local_results.len();
+                let added = count_matching_results(&local_results, &limit_result_type_clone);
                 let mut guard = results_clone.lock().await;
                 guard.extend(local_results);
                 findings_count_clone.fetch_add(added, Ordering::Relaxed);
@@ -979,6 +994,44 @@ mod tests {
     use super::*;
     use crate::parameter_analysis::{InjectionContext, Location, Param};
     use crate::target_parser::parse_target;
+
+    fn make_result(ft: FindingType) -> crate::scanning::result::Result {
+        crate::scanning::result::Result::new(
+            ft, String::new(), String::new(), String::new(),
+            String::new(), String::new(), String::new(),
+            String::new(), String::new(), 0, String::new(),
+        )
+    }
+
+    #[test]
+    fn test_count_matching_results_all() {
+        let results = vec![
+            make_result(FindingType::Verified),
+            make_result(FindingType::Reflected),
+            make_result(FindingType::AstDetected),
+        ];
+        assert_eq!(count_matching_results(&results, "ALL"), 3);
+    }
+
+    #[test]
+    fn test_count_matching_results_filtered() {
+        let results = vec![
+            make_result(FindingType::Verified),
+            make_result(FindingType::Reflected),
+            make_result(FindingType::Reflected),
+            make_result(FindingType::AstDetected),
+        ];
+        assert_eq!(count_matching_results(&results, "V"), 1);
+        assert_eq!(count_matching_results(&results, "R"), 2);
+        assert_eq!(count_matching_results(&results, "A"), 1);
+    }
+
+    #[test]
+    fn test_count_matching_results_empty() {
+        let results: Vec<crate::scanning::result::Result> = vec![];
+        assert_eq!(count_matching_results(&results, "ALL"), 0);
+        assert_eq!(count_matching_results(&results, "V"), 0);
+    }
 
     // Mock function for XSS scanning tests (similar to parameter analysis mocks)
     fn mock_add_reflection_param(target: &mut Target, name: &str, location: Location) {
@@ -1034,6 +1087,7 @@ mod tests {
             silence: true,
             poc_type: "plain".to_string(),
             limit: None,
+            limit_result_type: "all".to_string(),
             only_poc: vec![],
             workers: 10,
             max_concurrent_targets: 10,
@@ -1254,6 +1308,7 @@ mod tests {
             silence: false,
             poc_type: "plain".to_string(),
             limit: None,
+            limit_result_type: "all".to_string(),
             only_poc: vec![],
             workers: 10,
             max_concurrent_targets: 10,
@@ -1342,6 +1397,7 @@ mod tests {
             silence: false,
             poc_type: "plain".to_string(),
             limit: None,
+            limit_result_type: "all".to_string(),
             only_poc: vec![],
             workers: 10,
             max_concurrent_targets: 10,
@@ -1440,6 +1496,7 @@ mod tests {
             silence: false,
             poc_type: "plain".to_string(),
             limit: None,
+            limit_result_type: "all".to_string(),
             only_poc: vec![],
             workers: 10,
             max_concurrent_targets: 10,
@@ -1524,6 +1581,7 @@ mod tests {
             silence: false,
             poc_type: "plain".to_string(),
             limit: None,
+            limit_result_type: "all".to_string(),
             only_poc: vec![],
             workers: 10,
             max_concurrent_targets: 10,

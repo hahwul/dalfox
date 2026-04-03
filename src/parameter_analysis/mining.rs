@@ -1235,6 +1235,7 @@ mod tests {
             silence: true,
             poc_type: "plain".to_string(),
             limit: None,
+            limit_result_type: "all".to_string(),
             only_poc: vec![],
             workers: 1,
             max_concurrent_targets: 1,

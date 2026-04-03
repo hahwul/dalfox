@@ -56,6 +56,7 @@ pub struct ScanConfig {
     pub silence: Option<bool>,
     pub poc_type: Option<String>,
     pub limit: Option<usize>,
+    pub limit_result_type: Option<String>,
     pub only_poc: Option<Vec<String>>,
     pub no_color: Option<bool>,
     // TARGETS
@@ -155,6 +156,9 @@ impl Config {
             }
             if let Some(v) = scan.limit {
                 args.limit = Some(v);
+            }
+            if let Some(v) = &scan.limit_result_type {
+                args.limit_result_type = v.clone();
             }
             if let Some(v) = &scan.only_poc {
                 args.only_poc = v.clone();
@@ -319,6 +323,11 @@ impl Config {
             {
                 args.limit = Some(v);
             }
+            if let Some(v) = &scan.limit_result_type
+                && args.limit_result_type == "all"
+            {
+                args.limit_result_type = v.clone();
+            }
             if let Some(v) = &scan.only_poc
                 && args.only_poc.is_empty()
             {
@@ -448,6 +457,11 @@ impl Config {
                 && args.limit.is_none()
             {
                 args.limit = Some(v);
+            }
+            if let Some(v) = &scan.limit_result_type
+                && args.limit_result_type == "all"
+            {
+                args.limit_result_type = v.clone();
             }
             if let Some(v) = &scan.only_poc
                 && args.only_poc.is_empty()
@@ -910,6 +924,7 @@ mod tests {
             silence: false,
             poc_type: "plain".to_string(),
             limit: None,
+            limit_result_type: "all".to_string(),
             only_poc: vec![],
             param: vec![],
             data: None,
@@ -979,6 +994,7 @@ mod tests {
             silence: Some(true),
             poc_type: Some("curl".to_string()),
             limit: Some(42),
+            limit_result_type: Some("v".to_string()),
             only_poc: Some(vec!["v".to_string()]),
             no_color: Some(false),
             param: Some(vec!["q".to_string(), "id:query".to_string()]),
@@ -1146,6 +1162,7 @@ mod tests {
         assert!(args.silence);
         assert_eq!(args.poc_type, "curl");
         assert_eq!(args.limit, Some(42));
+        assert_eq!(args.limit_result_type, "v");
         assert_eq!(args.param, vec!["q".to_string(), "id:query".to_string()]);
         assert_eq!(args.data.as_deref(), Some("name=test"));
         assert_eq!(args.headers, vec!["X-Test: 1".to_string()]);
@@ -1205,6 +1222,7 @@ mod tests {
 
         assert_eq!(args.output.as_deref(), Some("result.jsonl"));
         assert_eq!(args.limit, Some(42));
+        assert_eq!(args.limit_result_type, "v");
         assert_eq!(args.data.as_deref(), Some("name=test"));
         assert_eq!(args.user_agent.as_deref(), Some("DalfoxTest/1.0"));
         assert_eq!(args.cookie_from_raw.as_deref(), Some("request.txt"));

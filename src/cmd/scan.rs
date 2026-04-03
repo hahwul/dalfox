@@ -247,6 +247,7 @@ mod tests {
             silence: true,
             poc_type: "plain".to_string(),
             limit: None,
+            limit_result_type: "all".to_string(),
             only_poc: vec![],
             param: vec![],
             data: None,
@@ -927,6 +928,11 @@ pub struct ScanArgs {
     /// Limit the number of results to display. Example: --limit 10
     #[arg(long)]
     pub limit: Option<usize>,
+
+    #[clap(help_heading = "OUTPUT")]
+    /// Filter which finding types count toward --limit: all (default), v (verified), r (reflected), a (AST DOM XSS). Example: --limit-result-type v
+    #[arg(long, default_value = "all", value_parser = clap::builder::PossibleValuesParser::new(["all", "v", "r", "a", "V", "R", "A"]))]
+    pub limit_result_type: String,
 
     #[clap(help_heading = "OUTPUT")]
     /// Filter output to show only specific finding types (comma-separated). Options: v (verified), r (reflected), a (AST DOM XSS). Example: --only-poc "v,r"
