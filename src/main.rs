@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 
 use dalfox::{DEBUG, cmd, config, mcp, utils};
+use dalfox::cmd::scan::ScanOutcome;
 
 #[derive(Parser)]
 #[command(name = "dalfox")]
@@ -161,8 +162,8 @@ async fn main() {
     // Exit codes:
     //   0 = success, no findings
     //   1 = success, findings found
-    //   2 = input/configuration error (reserved for future use)
-    let has_findings;
+    //   2 = input/configuration/runtime error
+    let outcome;
 
     if let Some(command) = cli.command {
         match command {
@@ -175,32 +176,32 @@ async fn main() {
                     args.include_request = true;
                     args.include_response = true;
                 }
-                has_findings = cmd::scan::run_scan(&args).await;
+                outcome = cmd::scan::run_scan(&args).await;
             }
             Commands::Server(args) => {
                 cmd::server::run_server(args).await;
-                has_findings = false;
+                outcome = ScanOutcome::Clean;
             }
             Commands::Payload(args) => {
                 cmd::payload::run_payload(args);
-                has_findings = false;
+                outcome = ScanOutcome::Clean;
             }
             Commands::Mcp => {
                 // Run MCP stdio server (no banner already)
                 if let Err(e) = mcp::run_mcp_server().await {
                     eprintln!("MCP server error: {e}");
                 }
-                has_findings = false;
+                outcome = ScanOutcome::Clean;
             }
 
             Commands::Url(args) => {
-                has_findings = cmd::url::run_url(args).await;
+                outcome = cmd::url::run_url(args).await;
             }
             Commands::File(args) => {
-                has_findings = cmd::file::run_file(args).await;
+                outcome = cmd::file::run_file(args).await;
             }
             Commands::Pipe(args) => {
-                has_findings = cmd::pipe::run_pipe(args).await;
+                outcome = cmd::pipe::run_pipe(args).await;
             }
         }
     } else {
@@ -283,10 +284,12 @@ async fn main() {
         }
 
         utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
-        has_findings = cmd::scan::run_scan(&args).await;
+        outcome = cmd::scan::run_scan(&args).await;
     }
 
-    if has_findings {
-        std::process::exit(1);
+    match outcome {
+        ScanOutcome::Clean => {} // exit 0
+        ScanOutcome::Findings => std::process::exit(1),
+        ScanOutcome::Error => std::process::exit(2),
     }
 }

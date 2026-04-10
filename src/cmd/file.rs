@@ -19,7 +19,7 @@ fn into_scan_args(args: FileArgs) -> ScanArgs {
     scan_args
 }
 
-pub async fn run_file(args: FileArgs) -> bool {
+pub async fn run_file(args: FileArgs) -> crate::cmd::scan::ScanOutcome {
     let scan_args = into_scan_args(args);
     crate::cmd::scan::run_scan(&scan_args).await
 }

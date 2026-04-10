@@ -130,12 +130,18 @@ fn assert_v2_binary(binary: &Path) {
 }
 
 fn extract_json_array(stdout: &str) -> Vec<Value> {
+    // JSON output is now wrapped: {"meta": {...}, "findings": [...]}
     let start = stdout
         .lines()
-        .position(|line| line.trim_start().starts_with('['))
-        .expect("dalfox stdout should contain a JSON array");
+        .position(|line| line.trim_start().starts_with('{') || line.trim_start().starts_with('['))
+        .expect("dalfox stdout should contain JSON output");
     let json = stdout.lines().skip(start).collect::<Vec<_>>().join("\n");
-    serde_json::from_str(&json).expect("dalfox output should be valid JSON")
+    let v: Value = serde_json::from_str(&json).expect("dalfox output should be valid JSON");
+    if let Some(findings) = v.get("findings") {
+        findings.as_array().cloned().unwrap_or_default()
+    } else {
+        v.as_array().cloned().unwrap_or_default()
+    }
 }
 
 fn meaningful_findings(findings: Vec<Value>) -> Vec<Value> {

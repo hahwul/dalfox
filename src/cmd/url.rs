@@ -19,7 +19,7 @@ fn into_scan_args(args: UrlArgs) -> ScanArgs {
     scan_args
 }
 
-pub async fn run_url(args: UrlArgs) -> bool {
+pub async fn run_url(args: UrlArgs) -> crate::cmd::scan::ScanOutcome {
     let scan_args = into_scan_args(args);
     crate::cmd::scan::run_scan(&scan_args).await
 }

@@ -1211,6 +1211,17 @@ fn domain_matches_pattern(host: &str, pattern: &str) -> bool {
     }
 }
 
+/// Outcome of a scan run, used to determine CLI exit code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ScanOutcome {
+    /// Scan completed successfully, no findings.
+    Clean,
+    /// Scan completed successfully, one or more findings.
+    Findings,
+    /// Scan failed due to input, configuration, or runtime error.
+    Error,
+}
+
 /// Emit a structured error to stderr when format is json/jsonl, otherwise plain eprintln.
 fn emit_error(format: &str, code: &str, message: &str) {
     if format == "json" || format == "jsonl" {
@@ -1229,7 +1240,8 @@ fn emit_error(format: &str, code: &str, message: &str) {
     }
 }
 
-pub async fn run_scan(args: &ScanArgs) -> bool {
+/// Run a scan and return the outcome: `Clean` (no findings), `Findings`, or `Error`.
+pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // Compute no-color locally (safe for concurrent server-mode scans)
     let nc = args.no_color || std::env::var("NO_COLOR").is_ok();
     if nc {
@@ -1330,7 +1342,7 @@ pub async fn run_scan(args: &ScanArgs) -> bool {
                 if !args.silence {
                     emit_error(&args.format, "NO_TARGETS", "No targets specified");
                 }
-                return false;
+                return ScanOutcome::Error;
             }
         } else {
             // Check if all targets look like raw HTTP requests or files containing them
@@ -1385,7 +1397,7 @@ pub async fn run_scan(args: &ScanArgs) -> bool {
                     if !args.silence {
                         emit_error(&args.format, "NO_FILE", "No file specified for input-type=file");
                     }
-                    return false;
+                    return ScanOutcome::Error;
                 }
                 let file_path = &args.targets[0];
                 match fs::read_to_string(file_path) {
@@ -1394,7 +1406,7 @@ pub async fn run_scan(args: &ScanArgs) -> bool {
                         if !args.silence {
                             emit_error(&args.format, "FILE_READ_ERROR", &format!("Error reading file {}: {}", file_path, e));
                         }
-                        return false;
+                        return ScanOutcome::Error;
                     }
                 }
             }
@@ -1416,7 +1428,7 @@ pub async fn run_scan(args: &ScanArgs) -> bool {
                         if !args.silence {
                             emit_error(&args.format, "STDIN_ERROR", &format!("Error reading from stdin: {}", e));
                         }
-                        return false;
+                        return ScanOutcome::Error;
                     }
                 }
             }
@@ -1427,12 +1439,12 @@ pub async fn run_scan(args: &ScanArgs) -> bool {
 
             _ => {
                 if !args.silence {
-                    eprintln!(
-                        "Error: Invalid input-type '{}'. Use 'auto', 'url', 'file', 'pipe', or 'raw-http'",
+                    emit_error(&args.format, "INVALID_INPUT_TYPE", &format!(
+                        "Invalid input-type '{}'. Use 'auto', 'url', 'file', 'pipe', or 'raw-http'",
                         input_type
-                    );
+                    ));
                 }
-                return false;
+                return ScanOutcome::Error;
             }
         };
     }
@@ -1441,7 +1453,7 @@ pub async fn run_scan(args: &ScanArgs) -> bool {
         if !args.silence {
             emit_error(&args.format, "NO_TARGETS", "No targets specified");
         }
-        return false;
+        return ScanOutcome::Error;
     }
 
     let mut parsed_targets = Vec::new();
@@ -1493,7 +1505,7 @@ pub async fn run_scan(args: &ScanArgs) -> bool {
                     if !args.silence {
                         emit_error(&args.format, "PARSE_ERROR", &format!("Error parsing raw HTTP request '{}': {}", s, e));
                     }
-                    return false;
+                    return ScanOutcome::Error;
                 }
             }
         } else {
@@ -1544,7 +1556,7 @@ pub async fn run_scan(args: &ScanArgs) -> bool {
                     if !args.silence {
                         emit_error(&args.format, "PARSE_ERROR", &format!("Error parsing target '{}': {}", s, e));
                     }
-                    return false;
+                    return ScanOutcome::Error;
                 }
             }
         }
@@ -1643,7 +1655,7 @@ pub async fn run_scan(args: &ScanArgs) -> bool {
         if !args.silence {
             emit_error(&args.format, "NO_TARGETS", "No targets specified");
         }
-        return false;
+        return ScanOutcome::Error;
     }
 
     // Load cookies from raw HTTP request file if specified
@@ -2224,7 +2236,7 @@ pub async fn run_scan(args: &ScanArgs) -> bool {
                 }
             }
         }
-        return false;
+        return ScanOutcome::Clean;
     }
 
     // Semaphore for limiting concurrent targets across all hosts
@@ -2617,5 +2629,9 @@ pub async fn run_scan(args: &ScanArgs) -> bool {
         }
     }
 
-    !final_results.is_empty()
+    if final_results.is_empty() {
+        ScanOutcome::Clean
+    } else {
+        ScanOutcome::Findings
+    }
 }

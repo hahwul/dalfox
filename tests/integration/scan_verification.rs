@@ -414,7 +414,11 @@ async fn run_scan_and_collect(mut args: ScanArgs) -> Vec<serde_json::Value> {
         Err(_) => return vec![],
     };
 
-    v.as_array().cloned().unwrap_or_default()
+    // JSON output is now wrapped: {"meta": {...}, "findings": [...]}
+    v["findings"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
 }
 
 /// Assert at least one finding exists, with a descriptive label on failure.

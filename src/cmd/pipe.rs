@@ -15,7 +15,7 @@ fn into_scan_args(args: PipeArgs) -> ScanArgs {
     scan_args
 }
 
-pub async fn run_pipe(args: PipeArgs) -> bool {
+pub async fn run_pipe(args: PipeArgs) -> crate::cmd::scan::ScanOutcome {
     let scan_args = into_scan_args(args);
     crate::cmd::scan::run_scan(&scan_args).await
 }

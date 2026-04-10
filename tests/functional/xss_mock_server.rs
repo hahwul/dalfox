@@ -1095,9 +1095,13 @@ async fn run_scan_test(
 
     let content = std::fs::read_to_string(&out_path).expect("scan should write JSON output file");
     let v: serde_json::Value =
-        serde_json::from_str(&content).expect("output should be valid JSON array");
+        serde_json::from_str(&content).expect("output should be valid JSON");
 
-    v.as_array().expect("json should be an array").clone()
+    // JSON output is now wrapped: {"meta": {...}, "findings": [...]}
+    v["findings"]
+        .as_array()
+        .expect("json should have a 'findings' array")
+        .clone()
 }
 
 struct DiscoveryOpts {
