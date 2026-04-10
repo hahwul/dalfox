@@ -908,7 +908,7 @@ the target is reachable. Returns results synchronously (no polling needed)."
                             return serde_json::json!({
                                 "target": target_url,
                                 "reachable": false,
-                                "error_code": "CONNECTION_FAILED",
+                                "error_code": crate::cmd::error_codes::CONNECTION_FAILED,
                                 "params_discovered": 0,
                                 "estimated_total_requests": 0,
                                 "params": [],

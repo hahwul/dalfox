@@ -1077,7 +1077,7 @@ async fn preflight_handler(
                     return serde_json::json!({
                         "target": target_url,
                         "reachable": false,
-                        "error_code": "CONNECTION_FAILED",
+                        "error_code": crate::cmd::error_codes::CONNECTION_FAILED,
                         "params_discovered": 0,
                         "estimated_total_requests": 0,
                         "params": [],
@@ -1116,7 +1116,7 @@ async fn preflight_handler(
                         return serde_json::json!({
                             "target": target_url,
                             "reachable": true,
-                            "error_code": "PARSE_FAILED",
+                            "error_code": crate::cmd::error_codes::PARSE_ERROR,
                             "params_discovered": 0,
                             "estimated_total_requests": 0,
                             "params": [],

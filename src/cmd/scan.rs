@@ -1346,7 +1346,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 "pipe".to_string()
             } else {
                 if !args.silence {
-                    emit_error(&args.format, "NO_TARGETS", "No targets specified");
+                    emit_error(&args.format, crate::cmd::error_codes::NO_TARGETS, "No targets specified");
                 }
                 return ScanOutcome::Error;
             }
@@ -1401,7 +1401,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             "file" => {
                 if args.targets.is_empty() {
                     if !args.silence {
-                        emit_error(&args.format, "NO_FILE", "No file specified for input-type=file");
+                        emit_error(&args.format, crate::cmd::error_codes::NO_FILE, "No file specified for input-type=file");
                     }
                     return ScanOutcome::Error;
                 }
@@ -1410,7 +1410,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                     Ok(content) => content.lines().map(|s| s.to_string()).collect(),
                     Err(e) => {
                         if !args.silence {
-                            emit_error(&args.format, "FILE_READ_ERROR", &format!("Error reading file {}: {}", file_path, e));
+                            emit_error(&args.format, crate::cmd::error_codes::FILE_READ_ERROR, &format!("Error reading file {}: {}", file_path, e));
                         }
                         return ScanOutcome::Error;
                     }
@@ -1432,7 +1432,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                         .collect(),
                     Err(e) => {
                         if !args.silence {
-                            emit_error(&args.format, "STDIN_ERROR", &format!("Error reading from stdin: {}", e));
+                            emit_error(&args.format, crate::cmd::error_codes::STDIN_ERROR, &format!("Error reading from stdin: {}", e));
                         }
                         return ScanOutcome::Error;
                     }
@@ -1445,7 +1445,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
 
             _ => {
                 if !args.silence {
-                    emit_error(&args.format, "INVALID_INPUT_TYPE", &format!(
+                    emit_error(&args.format, crate::cmd::error_codes::INVALID_INPUT_TYPE, &format!(
                         "Invalid input-type '{}'. Use 'auto', 'url', 'file', 'pipe', or 'raw-http'",
                         input_type
                     ));
@@ -1457,7 +1457,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
 
     if target_strings.is_empty() {
         if !args.silence {
-            emit_error(&args.format, "NO_TARGETS", "No targets specified");
+            emit_error(&args.format, crate::cmd::error_codes::NO_TARGETS, "No targets specified");
         }
         return ScanOutcome::Error;
     }
@@ -1509,7 +1509,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 }
                 Err(e) => {
                     if !args.silence {
-                        emit_error(&args.format, "PARSE_ERROR", &format!("Error parsing raw HTTP request '{}': {}", s, e));
+                        emit_error(&args.format, crate::cmd::error_codes::PARSE_ERROR, &format!("Error parsing raw HTTP request '{}': {}", s, e));
                     }
                     return ScanOutcome::Error;
                 }
@@ -1560,7 +1560,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 }
                 Err(e) => {
                     if !args.silence {
-                        emit_error(&args.format, "PARSE_ERROR", &format!("Error parsing target '{}': {}", s, e));
+                        emit_error(&args.format, crate::cmd::error_codes::PARSE_ERROR, &format!("Error parsing target '{}': {}", s, e));
                     }
                     return ScanOutcome::Error;
                 }
@@ -1659,7 +1659,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
 
     if parsed_targets.is_empty() {
         if !args.silence {
-            emit_error(&args.format, "NO_TARGETS", "No targets specified");
+            emit_error(&args.format, crate::cmd::error_codes::NO_TARGETS, "No targets specified");
         }
         return ScanOutcome::Error;
     }
@@ -2533,7 +2533,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 .filter(|r| r.data.starts_with(prefix))
                 .count();
             let (status, error_code) = if skipped.contains(url) {
-                ("skipped", Some("CONTENT_TYPE_MISMATCH"))
+                ("skipped", Some(crate::cmd::error_codes::CONTENT_TYPE_MISMATCH))
             } else if finding_count > 0 {
                 ("findings", None)
             } else {
