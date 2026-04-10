@@ -96,15 +96,27 @@ struct AppState {
     callback_param_name: String,
 }
 
+/// Progress counters shared with a running scan task.
+#[derive(Clone, Default)]
+struct JobProgress {
+    requests_sent: Arc<std::sync::atomic::AtomicU64>,
+    findings_so_far: Arc<std::sync::atomic::AtomicU64>,
+    params_total: Arc<std::sync::atomic::AtomicU32>,
+    params_tested: Arc<std::sync::atomic::AtomicU32>,
+}
+
 #[derive(Clone)]
 struct Job {
     status: JobStatus,
     results: Option<Vec<SanitizedResult>>,
-    #[allow(dead_code)] // TODO: wire into SanitizedResult to include raw request data
+    #[allow(dead_code)] // Used indirectly via ScanArgs
     include_request: bool,
-    #[allow(dead_code)] // TODO: wire into SanitizedResult to include raw response data
+    #[allow(dead_code)] // Used indirectly via ScanArgs
     include_response: bool,
     callback_url: Option<String>,
+    progress: JobProgress,
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
+    error_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -147,6 +159,19 @@ struct ResultPayload {
     status: JobStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     results: Option<Vec<SanitizedResult>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    progress: Option<ProgressPayload>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct ProgressPayload {
+    params_total: u32,
+    params_tested: u32,
+    requests_sent: u64,
+    findings_so_far: u64,
+    estimated_completion_pct: u32,
 }
 
 fn check_api_key(state: &AppState, headers: &HeaderMap) -> bool {
@@ -330,12 +355,16 @@ async fn run_scan_job(
     include_request: bool,
     include_response: bool,
 ) {
-    {
+    // Grab progress counters and cancellation flag
+    let (progress, cancel_flag) = {
         let mut jobs = state.jobs.lock().await;
         if let Some(job) = jobs.get_mut(&job_id) {
             job.status = JobStatus::Running;
+            (job.progress.clone(), job.cancelled.clone())
+        } else {
+            return;
         }
-    }
+    };
 
     let args = ScanArgs {
         input_type: "url".to_string(),
@@ -475,10 +504,12 @@ async fn run_scan_job(
             t.workers = args.workers;
             t
         }
-        Err(_) => {
+        Err(e) => {
+            let msg = format!("parse_target failed: {}", e);
             let mut jobs = state.jobs.lock().await;
             if let Some(job) = jobs.get_mut(&job_id) {
                 job.status = JobStatus::Error;
+                job.error_message = Some(msg);
                 job.results = None;
             }
             return;
@@ -493,19 +524,46 @@ async fn run_scan_job(
     silent_args.silence = true;
     analyze_parameters(&mut target, &silent_args, None).await;
 
+    // Snapshot request count before scanning
+    let req_count_before = crate::REQUEST_COUNT.load(std::sync::atomic::Ordering::Relaxed);
+
+    // Record discovered param count
+    progress.params_total.store(
+        target.reflection_params.len() as u32,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+
+    let param_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     crate::scanning::run_scanning(
         &target,
         Arc::new(args.clone()),
         results.clone(),
         None,
         None,
-        Arc::new(std::sync::atomic::AtomicUsize::new(0)),
-        None,
+        param_counter.clone(),
+        Some(cancel_flag.clone()),
     )
     .await;
 
+    // Final progress snapshot
+    let req_count_after = crate::REQUEST_COUNT.load(std::sync::atomic::Ordering::Relaxed);
+    progress.requests_sent.store(
+        req_count_after.saturating_sub(req_count_before),
+        std::sync::atomic::Ordering::Relaxed,
+    );
+    progress.params_tested.store(
+        param_counter.load(std::sync::atomic::Ordering::Relaxed) as u32,
+        std::sync::atomic::Ordering::Relaxed,
+    );
+
+    let was_cancelled = cancel_flag.load(std::sync::atomic::Ordering::Relaxed);
+
     let final_results = {
         let locked = results.lock().await;
+        progress.findings_so_far.store(
+            locked.len() as u64,
+            std::sync::atomic::Ordering::Relaxed,
+        );
         locked
             .iter()
             .map(|r| r.to_sanitized(include_request, include_response))
@@ -515,15 +573,22 @@ async fn run_scan_job(
     let callback_url = {
         let mut jobs = state.jobs.lock().await;
         let cb = if let Some(job) = jobs.get_mut(&job_id) {
-            job.status = JobStatus::Done;
             job.results = Some(final_results.clone());
+            if job.status != JobStatus::Cancelled {
+                job.status = if was_cancelled {
+                    JobStatus::Cancelled
+                } else {
+                    JobStatus::Done
+                };
+            }
             job.callback_url.clone()
         } else {
             None
         };
         cb
     };
-    log(&state, "JOB", &format!("done id={} url={}", job_id, url));
+    let status_label = if was_cancelled { "cancelled" } else { "done" };
+    log(&state, "JOB", &format!("{} id={} url={}", status_label, job_id, url));
 
     // Fire webhook callback if configured (only http/https to mitigate SSRF)
     if let Some(cb_url) = callback_url
@@ -601,6 +666,9 @@ async fn start_scan_handler(
                 include_request,
                 include_response,
                 callback_url: callback_url.clone(),
+                progress: JobProgress::default(),
+                cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                error_message: None,
             },
         );
     }
@@ -627,8 +695,8 @@ async fn start_scan_handler(
 
     let resp = ApiResponse::<serde_json::Value> {
         code: 200,
-        msg: id,
-        data: None,
+        msg: "ok".to_string(),
+        data: Some(serde_json::json!({ "scan_id": id })),
     };
     make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
 }
@@ -656,18 +724,38 @@ async fn get_result_handler(
 
     match job {
         Some(j) => {
+            let progress_data = if matches!(j.status, JobStatus::Running | JobStatus::Done | JobStatus::Cancelled) {
+                let params_total = j.progress.params_total.load(std::sync::atomic::Ordering::Relaxed);
+                let params_tested = j.progress.params_tested.load(std::sync::atomic::Ordering::Relaxed);
+                let estimated_completion_pct = if matches!(j.status, JobStatus::Done | JobStatus::Cancelled) {
+                    if j.status == JobStatus::Done { 100 } else if params_total > 0 {
+                        ((params_tested as f64 / params_total as f64) * 100.0) as u32
+                    } else { 0 }
+                } else if params_total > 0 {
+                    ((params_tested as f64 / params_total as f64) * 100.0).min(99.0) as u32
+                } else {
+                    0
+                };
+                Some(ProgressPayload {
+                    params_total,
+                    params_tested,
+                    requests_sent: j.progress.requests_sent.load(std::sync::atomic::Ordering::Relaxed),
+                    findings_so_far: j.progress.findings_so_far.load(std::sync::atomic::Ordering::Relaxed),
+                    estimated_completion_pct,
+                })
+            } else {
+                None
+            };
             let payload = ResultPayload {
                 status: j.status.clone(),
                 results: j.results.clone(),
+                error_message: j.error_message.clone(),
+                progress: progress_data,
             };
             log(&state, "RESULT", &format!("id={} status={}", id, j.status));
             let resp = ApiResponse {
                 code: 200,
-                msg: if j.status == JobStatus::Done {
-                    "ok".to_string()
-                } else {
-                    "running".to_string()
-                },
+                msg: "ok".to_string(),
                 data: Some(payload),
             };
             make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
@@ -798,6 +886,9 @@ async fn get_scan_handler(
                 include_request,
                 include_response,
                 callback_url,
+                progress: JobProgress::default(),
+                cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                error_message: None,
             },
         );
     }
@@ -823,8 +914,8 @@ async fn get_scan_handler(
 
     let resp = ApiResponse::<serde_json::Value> {
         code: 200,
-        msg: id_for_resp,
-        data: None,
+        msg: "ok".to_string(),
+        data: Some(serde_json::json!({ "scan_id": id_for_resp })),
     };
     make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
 }
@@ -836,6 +927,343 @@ async fn options_result_handler(
 ) -> impl IntoResponse {
     let cors = build_cors_headers(&state, &headers);
     (StatusCode::NO_CONTENT, cors)
+}
+
+// DELETE /scan/:id — cancel a scan
+async fn cancel_scan_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    if !check_api_key(&state, &headers) {
+        let resp = ApiResponse::<serde_json::Value> {
+            code: 401,
+            msg: "unauthorized".to_string(),
+            data: None,
+        };
+        return make_api_response(&state, &headers, &params, StatusCode::UNAUTHORIZED, &resp);
+    }
+
+    let mut jobs = state.jobs.lock().await;
+    match jobs.get_mut(&id) {
+        Some(job) => {
+            let previous_status = job.status.clone();
+            job.cancelled
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+            if matches!(job.status, JobStatus::Queued | JobStatus::Running) {
+                job.status = JobStatus::Cancelled;
+            }
+            log(&state, "JOB", &format!("cancelled id={}", id));
+            let resp = ApiResponse {
+                code: 200,
+                msg: "ok".to_string(),
+                data: Some(serde_json::json!({
+                    "scan_id": id,
+                    "cancelled": true,
+                    "previous_status": previous_status
+                })),
+            };
+            make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
+        }
+        None => {
+            let resp = ApiResponse::<serde_json::Value> {
+                code: 404,
+                msg: "not found".to_string(),
+                data: None,
+            };
+            make_api_response(&state, &headers, &params, StatusCode::NOT_FOUND, &resp)
+        }
+    }
+}
+
+// GET /scans — list all scans with status
+async fn list_scans_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    if !check_api_key(&state, &headers) {
+        let resp = ApiResponse::<serde_json::Value> {
+            code: 401,
+            msg: "unauthorized".to_string(),
+            data: None,
+        };
+        return make_api_response(&state, &headers, &params, StatusCode::UNAUTHORIZED, &resp);
+    }
+
+    let filter_status = params.get("status").map(|s| s.trim().to_lowercase());
+    let jobs = state.jobs.lock().await;
+    let entries: Vec<serde_json::Value> = jobs
+        .iter()
+        .filter(|(_, job)| {
+            if let Some(ref f) = filter_status {
+                job.status.to_string() == *f
+            } else {
+                true
+            }
+        })
+        .map(|(id, job)| {
+            serde_json::json!({
+                "scan_id": id,
+                "status": job.status,
+                "result_count": job.results.as_ref().map(|r| r.len()).unwrap_or(0)
+            })
+        })
+        .collect();
+
+    let resp = ApiResponse {
+        code: 200,
+        msg: "ok".to_string(),
+        data: Some(serde_json::json!({
+            "total": entries.len(),
+            "scans": entries
+        })),
+    };
+    make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
+}
+
+// POST /preflight — parameter discovery without attack payloads
+async fn preflight_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+    Json(req): Json<ScanRequest>,
+) -> impl IntoResponse {
+    if !check_api_key(&state, &headers) {
+        let resp = ApiResponse::<serde_json::Value> {
+            code: 401,
+            msg: "unauthorized".to_string(),
+            data: None,
+        };
+        return make_api_response(&state, &headers, &params, StatusCode::UNAUTHORIZED, &resp);
+    }
+
+    let target_url = req.url.trim().to_string();
+    if target_url.is_empty()
+        || !(target_url.starts_with("http://") || target_url.starts_with("https://"))
+    {
+        let resp = ApiResponse::<serde_json::Value> {
+            code: 400,
+            msg: "url must start with http:// or https://".to_string(),
+            data: None,
+        };
+        return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+    }
+
+    let opts = req.options.clone().unwrap_or_default();
+
+    // Run preflight synchronously in a blocking thread
+    let result = tokio::task::spawn_blocking(move || {
+        match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt.block_on(async {
+                // Reachability check
+                let timeout_secs = opts.timeout.unwrap_or(crate::cmd::scan::DEFAULT_TIMEOUT_SECS);
+                let reachable = {
+                    let client = reqwest::Client::builder()
+                        .timeout(std::time::Duration::from_secs(timeout_secs))
+                        .danger_accept_invalid_certs(true)
+                        .redirect(reqwest::redirect::Policy::none())
+                        .build();
+                    match client {
+                        Ok(c) => c.get(&target_url).send().await.is_ok(),
+                        Err(_) => false,
+                    }
+                };
+                if !reachable {
+                    return serde_json::json!({
+                        "target": target_url,
+                        "reachable": false,
+                        "error_code": "CONNECTION_FAILED",
+                        "params_discovered": 0,
+                        "estimated_total_requests": 0,
+                        "params": [],
+                    });
+                }
+
+                let mut target = match parse_target(&target_url) {
+                    Ok(mut t) => {
+                        t.method = opts.method.clone().unwrap_or_else(|| "GET".to_string());
+                        t.timeout = timeout_secs;
+                        t.user_agent = opts.user_agent.clone().or(Some("".to_string()));
+                        t.headers = opts
+                            .header
+                            .as_ref()
+                            .map(|h| {
+                                h.iter()
+                                    .filter_map(|s| s.split_once(":"))
+                                    .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        t.cookies = opts
+                            .cookie
+                            .as_ref()
+                            .map(|c| {
+                                c.split(';')
+                                    .filter_map(|p| p.trim().split_once('='))
+                                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        t.data = opts.data.clone();
+                        t
+                    }
+                    Err(_) => {
+                        return serde_json::json!({
+                            "target": target_url,
+                            "reachable": true,
+                            "error_code": "PARSE_FAILED",
+                            "params_discovered": 0,
+                            "estimated_total_requests": 0,
+                            "params": [],
+                        });
+                    }
+                };
+
+                let scan_args = ScanArgs {
+                    input_type: "url".to_string(),
+                    format: "json".to_string(),
+                    targets: vec![target_url.clone()],
+                    param: vec![],
+                    data: opts.data.clone(),
+                    headers: opts.header.clone().unwrap_or_default(),
+                    cookies: opts
+                        .cookie
+                        .as_ref()
+                        .map(|c| vec![c.clone()])
+                        .unwrap_or_default(),
+                    method: opts.method.clone().unwrap_or_else(|| "GET".to_string()),
+                    user_agent: opts.user_agent.clone(),
+                    cookie_from_raw: None,
+                    include_url: vec![],
+                    exclude_url: vec![],
+                    ignore_param: vec![],
+                    out_of_scope: vec![],
+                    out_of_scope_file: None,
+                    mining_dict_word: None,
+                    skip_mining: false,
+                    skip_mining_dict: false,
+                    skip_mining_dom: false,
+                    only_discovery: false,
+                    skip_discovery: false,
+                    skip_reflection_header: false,
+                    skip_reflection_cookie: false,
+                    skip_reflection_path: false,
+                    timeout: timeout_secs,
+                    delay: 0,
+                    proxy: None,
+                    follow_redirects: false,
+                    ignore_return: vec![],
+                    output: None,
+                    include_request: false,
+                    include_response: false,
+                    include_all: false,
+                    silence: true,
+                    dry_run: true,
+                    poc_type: "plain".to_string(),
+                    limit: None,
+                    limit_result_type: "all".to_string(),
+                    only_poc: vec![],
+                    no_color: true,
+                    workers: 10,
+                    max_concurrent_targets: 1,
+                    max_targets_per_host: 1,
+                    encoders: opts
+                        .encoders
+                        .clone()
+                        .unwrap_or_else(|| vec!["url".to_string(), "html".to_string()]),
+                    custom_blind_xss_payload: None,
+                    blind_callback_url: None,
+                    custom_payload: None,
+                    only_custom_payload: false,
+                    inject_marker: None,
+                    custom_alert_value: "1".to_string(),
+                    custom_alert_type: "none".to_string(),
+                    skip_xss_scanning: true,
+                    deep_scan: false,
+                    sxss: false,
+                    sxss_url: None,
+                    sxss_method: "GET".to_string(),
+                    skip_ast_analysis: true,
+                    hpp: false,
+                    waf_bypass: "auto".to_string(),
+                    skip_waf_probe: false,
+                    force_waf: None,
+                    waf_evasion: false,
+                    remote_payloads: vec![],
+                    remote_wordlists: vec![],
+                };
+
+                analyze_parameters(&mut target, &scan_args, None).await;
+
+                let enc_factor = {
+                    let encs = &scan_args.encoders;
+                    if encs.iter().any(|e| e == "none") {
+                        1usize
+                    } else {
+                        let mut f = 1usize;
+                        for e in ["url", "html", "2url", "3url", "4url", "base64"] {
+                            if encs.iter().any(|x| x == e) {
+                                f += 1;
+                            }
+                        }
+                        f
+                    }
+                };
+                let mut estimated_requests: usize = 0;
+                let discovered_params: Vec<serde_json::Value> = target
+                    .reflection_params
+                    .iter()
+                    .map(|p| {
+                        let payload_count = if let Some(ctx) = &p.injection_context {
+                            crate::scanning::xss_common::get_dynamic_payloads(ctx, &scan_args)
+                                .unwrap_or_else(|_| vec![])
+                                .len()
+                        } else {
+                            let html_len =
+                                crate::payload::get_dynamic_xss_html_payloads().len() * enc_factor;
+                            let js_len =
+                                crate::payload::XSS_JAVASCRIPT_PAYLOADS.len() * enc_factor;
+                            html_len + js_len
+                        };
+                        estimated_requests = estimated_requests.saturating_add(payload_count);
+                        serde_json::json!({
+                            "name": p.name,
+                            "location": format!("{:?}", p.location),
+                            "estimated_requests": payload_count,
+                        })
+                    })
+                    .collect();
+
+                serde_json::json!({
+                    "target": target_url,
+                    "reachable": true,
+                    "method": target.method,
+                    "params_discovered": discovered_params.len(),
+                    "estimated_total_requests": estimated_requests,
+                    "params": discovered_params,
+                })
+            }),
+            Err(e) => serde_json::json!({
+                "target": target_url,
+                "reachable": false,
+                "error": format!("runtime error: {}", e),
+            }),
+        }
+    })
+    .await
+    .unwrap_or_else(|_| serde_json::json!({"error": "preflight thread panicked"}));
+
+    let resp = ApiResponse {
+        code: 200,
+        msg: "ok".to_string(),
+        data: Some(result),
+    };
+    make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
 }
 
 pub async fn run_server(args: ServerArgs) {
@@ -912,9 +1340,12 @@ pub async fn run_server(args: ServerArgs) {
         .route("/scan", post(start_scan_handler))
         .route("/scan", get(get_scan_handler))
         .route("/scan", options(options_scan_handler))
+        .route("/scans", get(list_scans_handler))
+        .route("/preflight", post(preflight_handler))
         .route("/result/:id", get(get_result_handler))
         .route("/result/:id", options(options_result_handler))
         .route("/scan/:id", get(get_result_handler))
+        .route("/scan/:id", axum::routing::delete(cancel_scan_handler))
         .route("/scan/:id", options(options_result_handler))
         .with_state(state.clone());
 
@@ -1153,6 +1584,9 @@ mod tests {
                     include_request: false,
                     include_response: false,
                 callback_url: None,
+                progress: JobProgress::default(),
+                cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                error_message: None,
                 },
             );
         }
@@ -1275,6 +1709,9 @@ mod tests {
                     include_request: false,
                     include_response: false,
                 callback_url: None,
+                progress: JobProgress::default(),
+                cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                error_message: None,
                 },
             );
         }
@@ -1357,6 +1794,9 @@ mod tests {
                     include_request: false,
                     include_response: false,
                 callback_url: None,
+                progress: JobProgress::default(),
+                cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                error_message: None,
                 },
             );
         }
@@ -1434,6 +1874,9 @@ mod tests {
                     include_request: false,
                     include_response: false,
                 callback_url: None,
+                progress: JobProgress::default(),
+                cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                error_message: None,
                 },
             );
         }
@@ -1514,13 +1957,18 @@ mod tests {
 
         let body = response_body_string(resp).await;
         let parsed: serde_json::Value = serde_json::from_str(&body).expect("valid json response");
-        let id = parsed["msg"]
+        let id = parsed["data"]["scan_id"]
             .as_str()
             .expect("scan id should be present")
             .to_string();
         let jobs = state.jobs.lock().await;
         let job = jobs.get(&id).expect("job should be inserted");
-        assert_eq!(job.status, JobStatus::Queued);
+        // The spawned task may move from Queued to Running/Done/Error very quickly
+        assert!(
+            matches!(job.status, JobStatus::Queued | JobStatus::Running | JobStatus::Done | JobStatus::Error),
+            "job should have been created with a valid status, got: {:?}",
+            job.status
+        );
         assert!(job.include_request);
         assert!(job.include_response);
     }
@@ -1591,6 +2039,9 @@ mod tests {
                     include_request: false,
                     include_response: false,
                 callback_url: None,
+                progress: JobProgress::default(),
+                cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                error_message: None,
                 },
             );
         }
@@ -1601,7 +2052,8 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let body = response_body_string(resp).await;
         let parsed: serde_json::Value = serde_json::from_str(&body).expect("json body");
-        assert_eq!(parsed["msg"], "running");
+        assert_eq!(parsed["msg"], "ok");
+        assert_eq!(parsed["data"]["status"], "running");
     }
 
     #[tokio::test]
@@ -1637,7 +2089,7 @@ mod tests {
         assert!(body.starts_with("getCb("));
         let inner = body.trim_start_matches("getCb(").trim_end_matches(");");
         let parsed: serde_json::Value = serde_json::from_str(inner).expect("jsonp payload");
-        let id = parsed["msg"].as_str().expect("scan id").to_string();
+        let id = parsed["data"]["scan_id"].as_str().expect("scan id").to_string();
 
         let jobs = state.jobs.lock().await;
         let job = jobs.get(&id).expect("job inserted");
@@ -1661,6 +2113,9 @@ mod tests {
                     include_request: false,
                     include_response: false,
                 callback_url: None,
+                progress: JobProgress::default(),
+                cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                error_message: None,
                 },
             );
         }
@@ -1721,6 +2176,9 @@ mod tests {
                     include_request: false,
                     include_response: false,
                 callback_url: None,
+                progress: JobProgress::default(),
+                cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                error_message: None,
                 },
             );
         }
@@ -1754,7 +2212,7 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let body = response_body_string(resp).await;
         let parsed: serde_json::Value = serde_json::from_str(&body).expect("json body");
-        let id = parsed["msg"].as_str().expect("scan id").to_string();
+        let id = parsed["data"]["scan_id"].as_str().expect("scan id").to_string();
 
         let jobs = state.jobs.lock().await;
         let job = jobs.get(&id).expect("job inserted");
