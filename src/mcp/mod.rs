@@ -1,8 +1,11 @@
 //! Dalfox MCP (Model Context Protocol) integration
 //!
-//! Exposes two MCP tools over stdio when `dalfox mcp` is executed:
-//! 1. `scan_with_dalfox`  - Start an asynchronous XSS scan on a single target URL
-//! 2. `get_results_dalfox` - Fetch status/results of a previously started scan
+//! Exposes MCP tools over stdio when `dalfox mcp` is executed:
+//! 1. `scan_with_dalfox`     - Start an asynchronous XSS scan on a single target URL
+//! 2. `get_results_dalfox`   - Fetch status/results of a previously started scan (with polling hints)
+//! 3. `list_scans_dalfox`    - List all tracked scans with their statuses
+//! 4. `cancel_scan_dalfox`   - Cancel a queued or running scan
+//! 5. `preflight_dalfox`     - Analyze target without attack payloads (parameter discovery + impact estimate)
 //!
 //! Design goals (minimal blocking server):
 //! - In-memory job storage only (no persistence)
@@ -350,6 +353,56 @@ pub struct CancelScanDalfoxParams {
     pub scan_id: String,
 }
 
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct PreflightDalfoxParams {
+    /// Target URL to analyze. Must start with http:// or https://.
+    pub target: String,
+
+    /// Specific parameters to test. Supports location hints via "name:location" syntax.
+    #[serde(default)]
+    pub param: Vec<String>,
+
+    /// HTTP method to use. Default: GET
+    #[serde(default = "default_method")]
+    pub method: String,
+
+    /// Request body data for POST/PUT.
+    #[serde(default)]
+    pub data: Option<String>,
+
+    /// Custom HTTP headers. Each entry as "Name: Value".
+    #[serde(default)]
+    pub headers: Vec<String>,
+
+    /// Cookies to include. Each entry as "name=value".
+    #[serde(default)]
+    pub cookies: Vec<String>,
+
+    /// Custom User-Agent header string.
+    #[serde(default)]
+    pub user_agent: Option<String>,
+
+    /// HTTP request timeout in seconds. Default: 10
+    #[serde(default = "default_timeout")]
+    pub timeout: u64,
+
+    /// HTTP/SOCKS proxy URL.
+    #[serde(default)]
+    pub proxy: Option<String>,
+
+    /// Follow HTTP redirects. Default: false
+    #[serde(default)]
+    pub follow_redirects: bool,
+
+    /// Skip parameter mining. Default: false
+    #[serde(default)]
+    pub skip_mining: bool,
+
+    /// Skip parameter discovery. Default: false
+    #[serde(default)]
+    pub skip_discovery: bool,
+}
+
 /* ---------------------------
  * Tool Implementations
  * ---------------------------
@@ -482,6 +535,7 @@ severity, CWE, payload, and evidence."
             include_response: params.include_response,
             include_all: false,
             silence: true,
+            dry_run: false,
             poc_type: "plain".to_string(),
             limit: None,
             limit_result_type: "all".to_string(),
@@ -545,7 +599,11 @@ severity, CWE, payload, and evidence."
         description = "Poll scan status and retrieve results by scan_id. \
 Returns status (queued|running|done|error) and, when done, an array of findings. \
 Each finding includes: type (V=Verified, A=AST-detected, R=Reflected), \
-inject_type, method, param, payload, evidence, cwe, severity, and message_str. \
+type_description (human-readable explanation), inject_type, method, param, \
+payload, evidence, cwe, severity, and message_str. \
+When running or done, includes progress object with: params_total, params_tested, \
+requests_sent, findings_so_far, estimated_completion_pct (0-100), and \
+suggested_poll_interval_ms (recommended delay before next poll; 0 when done). \
 Call this repeatedly until status is 'done' or 'error'."
     )]
     async fn get_results_dalfox(
@@ -570,11 +628,42 @@ Call this repeatedly until status is 'done' or 'error'."
                 });
                 // Include progress info when scan is running (or done)
                 if matches!(job.status, JobStatus::Running | JobStatus::Done) {
+                    let params_total = job.progress.params_total.load(std::sync::atomic::Ordering::Relaxed);
+                    let params_tested = job.progress.params_tested.load(std::sync::atomic::Ordering::Relaxed);
+                    let requests_sent = job.progress.requests_sent.load(std::sync::atomic::Ordering::Relaxed);
+                    let findings_so_far = job.progress.findings_so_far.load(std::sync::atomic::Ordering::Relaxed);
+
+                    // Estimate completion percentage from params tested vs total
+                    let estimated_completion_pct: u32 = if job.status == JobStatus::Done {
+                        100
+                    } else if params_total > 0 {
+                        ((params_tested as f64 / params_total as f64) * 100.0).min(99.0) as u32
+                    } else {
+                        0
+                    };
+
+                    // Suggest poll interval based on progress:
+                    // - queued/early: poll every 2s
+                    // - mid-scan: poll every 3s
+                    // - near completion (>80%): poll every 1s
+                    // - done: no more polling needed
+                    let suggested_poll_interval_ms: u64 = if job.status == JobStatus::Done {
+                        0
+                    } else if estimated_completion_pct > 80 {
+                        1000
+                    } else if estimated_completion_pct > 10 {
+                        3000
+                    } else {
+                        2000
+                    };
+
                     out["progress"] = serde_json::json!({
-                        "params_total": job.progress.params_total.load(std::sync::atomic::Ordering::Relaxed),
-                        "params_tested": job.progress.params_tested.load(std::sync::atomic::Ordering::Relaxed),
-                        "requests_sent": job.progress.requests_sent.load(std::sync::atomic::Ordering::Relaxed),
-                        "findings_so_far": job.progress.findings_so_far.load(std::sync::atomic::Ordering::Relaxed),
+                        "params_total": params_total,
+                        "params_tested": params_tested,
+                        "requests_sent": requests_sent,
+                        "findings_so_far": findings_so_far,
+                        "estimated_completion_pct": estimated_completion_pct,
+                        "suggested_poll_interval_ms": suggested_poll_interval_ms,
                     });
                 }
                 Ok(CallToolResult::success(vec![Content::text(
@@ -629,6 +718,244 @@ Returns an array of {scan_id, status, result_count} objects."
         });
         Ok(CallToolResult::success(vec![Content::text(
             out.to_string(),
+        )]))
+    }
+
+    /// Preflight check: discover parameters and estimate scan impact without sending attack payloads.
+    #[tool(
+        name = "preflight_dalfox",
+        description = "Analyze a target URL without sending attack payloads. \
+Performs parameter discovery and mining, then returns: discovered parameters, \
+estimated request count, and target metadata. Use this before scan_with_dalfox \
+to understand the scan's impact (request volume, parameter count) and verify \
+the target is reachable. Returns results synchronously (no polling needed)."
+    )]
+    async fn preflight_dalfox(
+        &self,
+        Parameters(params): Parameters<PreflightDalfoxParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let target_url = params.target.trim().to_string();
+        if target_url.is_empty() {
+            return Err(ErrorData::invalid_params(
+                "missing required field 'target'",
+                None,
+            ));
+        }
+        if !(target_url.starts_with("http://") || target_url.starts_with("https://")) {
+            return Err(ErrorData::invalid_params(
+                "target must start with http:// or https://",
+                None,
+            ));
+        }
+
+        let mut target = match parse_target(&target_url) {
+            Ok(mut t) => {
+                t.method = params.method.clone();
+                t.timeout = if params.timeout > 0 && params.timeout < 300 {
+                    params.timeout
+                } else {
+                    10
+                };
+                t.proxy = params.proxy.clone();
+                t.follow_redirects = params.follow_redirects;
+                t.user_agent = params.user_agent.clone().or(Some("".to_string()));
+                t.headers = params
+                    .headers
+                    .iter()
+                    .filter_map(|h| h.split_once(":"))
+                    .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+                    .collect();
+                t.cookies = params
+                    .cookies
+                    .iter()
+                    .filter_map(|c| c.split_once('='))
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect();
+                t.data = params.data.clone();
+                t
+            }
+            Err(_) => {
+                return Err(ErrorData::invalid_params(
+                    "failed to parse target URL",
+                    None,
+                ));
+            }
+        };
+
+        // Build minimal ScanArgs for parameter analysis only
+        let scan_args = ScanArgs {
+            input_type: "url".to_string(),
+            format: "json".to_string(),
+            targets: vec![target_url.clone()],
+            param: params.param.clone(),
+            data: params.data.clone(),
+            headers: params.headers.clone(),
+            cookies: params.cookies.clone(),
+            method: params.method.clone(),
+            user_agent: params.user_agent.clone(),
+            cookie_from_raw: None,
+            include_url: vec![],
+            exclude_url: vec![],
+            ignore_param: vec![],
+            out_of_scope: vec![],
+            out_of_scope_file: None,
+            mining_dict_word: None,
+            skip_mining: params.skip_mining,
+            skip_mining_dict: params.skip_mining,
+            skip_mining_dom: params.skip_mining,
+            only_discovery: false,
+            skip_discovery: params.skip_discovery,
+            skip_reflection_header: false,
+            skip_reflection_cookie: false,
+            skip_reflection_path: false,
+            timeout: if params.timeout > 0 && params.timeout < 300 { params.timeout } else { 10 },
+            delay: 0,
+            proxy: params.proxy.clone(),
+            follow_redirects: params.follow_redirects,
+            ignore_return: vec![],
+            output: None,
+            include_request: false,
+            include_response: false,
+            include_all: false,
+            silence: true,
+            dry_run: true,
+            poc_type: "plain".to_string(),
+            limit: None,
+            limit_result_type: "all".to_string(),
+            only_poc: vec![],
+            no_color: false,
+            workers: 10,
+            max_concurrent_targets: 1,
+            max_targets_per_host: 1,
+            encoders: crate::cmd::scan::DEFAULT_ENCODERS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+            custom_blind_xss_payload: None,
+            blind_callback_url: None,
+            custom_payload: None,
+            only_custom_payload: false,
+            inject_marker: None,
+            custom_alert_value: "1".to_string(),
+            custom_alert_type: "none".to_string(),
+            skip_xss_scanning: true,
+            deep_scan: false,
+            sxss: false,
+            sxss_url: None,
+            sxss_method: "GET".to_string(),
+            skip_ast_analysis: true,
+            hpp: false,
+            waf_bypass: "auto".to_string(),
+            skip_waf_probe: false,
+            force_waf: None,
+            waf_evasion: false,
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
+        };
+
+        // Run parameter discovery in a separate thread (analyze_parameters is not Send)
+        let result = std::thread::spawn(move || {
+            match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => {
+                    rt.block_on(async {
+                        // Reachability check: send a lightweight GET to verify target is accessible
+                        let reachable = {
+                            let client = reqwest::Client::builder()
+                                .timeout(std::time::Duration::from_secs(scan_args.timeout))
+                                .danger_accept_invalid_certs(true)
+                                .redirect(if scan_args.follow_redirects {
+                                    reqwest::redirect::Policy::limited(5)
+                                } else {
+                                    reqwest::redirect::Policy::none()
+                                })
+                                .build();
+                            match client {
+                                Ok(c) => c.get(&target_url).send().await.is_ok(),
+                                Err(_) => false,
+                            }
+                        };
+
+                        if !reachable {
+                            return serde_json::json!({
+                                "target": target_url,
+                                "reachable": false,
+                                "error_code": "CONNECTION_FAILED",
+                                "params_discovered": 0,
+                                "estimated_total_requests": 0,
+                                "params": [],
+                            });
+                        }
+
+                        analyze_parameters(&mut target, &scan_args, None).await;
+
+                        // Estimate request count (encoder expansion factor)
+                        let enc_factor = if scan_args.encoders.iter().any(|e| e == "none") {
+                            1usize
+                        } else {
+                            let mut f = 1usize;
+                            for e in ["url", "html", "2url", "3url", "4url", "base64"] {
+                                if scan_args.encoders.iter().any(|x| x == e) {
+                                    f += 1;
+                                }
+                            }
+                            f
+                        };
+                        let mut estimated_requests: usize = 0;
+                        let discovered_params: Vec<serde_json::Value> = target
+                            .reflection_params
+                            .iter()
+                            .map(|p| {
+                                let payload_count = if let Some(ctx) = &p.injection_context {
+                                    crate::scanning::xss_common::get_dynamic_payloads(ctx, &scan_args)
+                                        .unwrap_or_else(|_| vec![])
+                                        .len()
+                                } else {
+                                    let html_len = crate::payload::get_dynamic_xss_html_payloads().len() * enc_factor;
+                                    let js_len = crate::payload::XSS_JAVASCRIPT_PAYLOADS.len() * enc_factor;
+                                    html_len + js_len
+                                };
+                                estimated_requests = estimated_requests.saturating_add(payload_count);
+                                serde_json::json!({
+                                    "name": p.name,
+                                    "location": format!("{:?}", p.location),
+                                    "estimated_requests": payload_count,
+                                })
+                            })
+                            .collect();
+
+                        serde_json::json!({
+                            "target": target_url,
+                            "reachable": true,
+                            "method": target.method,
+                            "params_discovered": discovered_params.len(),
+                            "estimated_total_requests": estimated_requests,
+                            "params": discovered_params,
+                        })
+                    })
+                }
+                Err(e) => {
+                    serde_json::json!({
+                        "target": target_url,
+                        "reachable": false,
+                        "error": format!("runtime error: {}", e),
+                    })
+                }
+            }
+        })
+        .join()
+        .unwrap_or_else(|_| {
+            serde_json::json!({
+                "target": "",
+                "reachable": false,
+                "error": "preflight thread panicked",
+            })
+        });
+
+        Ok(CallToolResult::success(vec![Content::text(
+            result.to_string(),
         )]))
     }
 
@@ -747,6 +1074,7 @@ mod tests {
             include_all: false,
             no_color: false,
             silence: true,
+            dry_run: false,
             poc_type: "plain".to_string(),
             limit: None,
             limit_result_type: "all".to_string(),
@@ -1069,5 +1397,155 @@ mod tests {
             .await
             .expect_err("should fail for unknown scan_id");
         assert!(err.message.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_preflight_rejects_empty_target() {
+        let mcp = DalfoxMcp::new();
+        let params = PreflightDalfoxParams {
+            target: "".to_string(),
+            param: vec![],
+            method: "GET".to_string(),
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            user_agent: None,
+            timeout: 10,
+            proxy: None,
+            follow_redirects: false,
+            skip_mining: false,
+            skip_discovery: false,
+        };
+        let err = mcp
+            .preflight_dalfox(Parameters(params))
+            .await
+            .expect_err("empty target must fail");
+        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert!(err.message.contains("missing required field"));
+    }
+
+    #[tokio::test]
+    async fn test_preflight_rejects_non_http_target() {
+        let mcp = DalfoxMcp::new();
+        let params = PreflightDalfoxParams {
+            target: "ftp://example.com".to_string(),
+            param: vec![],
+            method: "GET".to_string(),
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            user_agent: None,
+            timeout: 10,
+            proxy: None,
+            follow_redirects: false,
+            skip_mining: false,
+            skip_discovery: false,
+        };
+        let err = mcp
+            .preflight_dalfox(Parameters(params))
+            .await
+            .expect_err("non-http must fail");
+        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert!(err.message.contains("http:// or https://"));
+    }
+
+    #[tokio::test]
+    async fn test_preflight_unreachable_target_returns_reachable_false() {
+        let mcp = DalfoxMcp::new();
+        let params = PreflightDalfoxParams {
+            target: "http://127.0.0.1:1/?q=test".to_string(),
+            param: vec![],
+            method: "GET".to_string(),
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            user_agent: None,
+            timeout: 1,
+            proxy: None,
+            follow_redirects: false,
+            skip_mining: true,
+            skip_discovery: true,
+        };
+        let resp = mcp
+            .preflight_dalfox(Parameters(params))
+            .await
+            .expect("preflight should return success even for unreachable targets");
+        let payload = parse_result_json(&resp);
+        assert_eq!(payload["reachable"], false);
+        assert!(payload.get("error_code").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_get_results_progress_includes_polling_hints() {
+        let mcp = DalfoxMcp::new();
+        // Manually insert a running job with progress
+        {
+            let mut jobs = mcp.jobs.lock().await;
+            let progress = JobProgress::default();
+            progress.params_total.store(10, std::sync::atomic::Ordering::Relaxed);
+            progress.params_tested.store(5, std::sync::atomic::Ordering::Relaxed);
+            progress.requests_sent.store(100, std::sync::atomic::Ordering::Relaxed);
+            progress.findings_so_far.store(2, std::sync::atomic::Ordering::Relaxed);
+            jobs.insert(
+                "progress-test".to_string(),
+                Job {
+                    status: JobStatus::Running,
+                    results: None,
+                    include_request: false,
+                    include_response: false,
+                    progress,
+                },
+            );
+        }
+
+        let resp = mcp
+            .get_results_dalfox(Parameters(GetResultsDalfoxParams {
+                scan_id: "progress-test".to_string(),
+            }))
+            .await
+            .expect("get_results should succeed");
+        let payload = parse_result_json(&resp);
+
+        let progress = &payload["progress"];
+        assert_eq!(progress["params_total"], 10);
+        assert_eq!(progress["params_tested"], 5);
+        assert_eq!(progress["requests_sent"], 100);
+        assert_eq!(progress["findings_so_far"], 2);
+        // Polling hint fields must exist
+        assert_eq!(progress["estimated_completion_pct"], 50);
+        assert!(progress["suggested_poll_interval_ms"].as_u64().unwrap() > 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_results_done_shows_100_pct_and_zero_poll_interval() {
+        let mcp = DalfoxMcp::new();
+        {
+            let mut jobs = mcp.jobs.lock().await;
+            let progress = JobProgress::default();
+            progress.params_total.store(10, std::sync::atomic::Ordering::Relaxed);
+            progress.params_tested.store(10, std::sync::atomic::Ordering::Relaxed);
+            jobs.insert(
+                "done-progress-test".to_string(),
+                Job {
+                    status: JobStatus::Done,
+                    results: Some(vec![]),
+                    include_request: false,
+                    include_response: false,
+                    progress,
+                },
+            );
+        }
+
+        let resp = mcp
+            .get_results_dalfox(Parameters(GetResultsDalfoxParams {
+                scan_id: "done-progress-test".to_string(),
+            }))
+            .await
+            .expect("get_results should succeed");
+        let payload = parse_result_json(&resp);
+
+        let progress = &payload["progress"];
+        assert_eq!(progress["estimated_completion_pct"], 100);
+        assert_eq!(progress["suggested_poll_interval_ms"], 0);
     }
 }

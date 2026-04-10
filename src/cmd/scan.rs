@@ -245,6 +245,7 @@ mod tests {
             include_all: false,
             no_color: false,
             silence: true,
+            dry_run: false,
             poc_type: "plain".to_string(),
             limit: None,
             limit_result_type: "all".to_string(),
@@ -918,6 +919,11 @@ pub struct ScanArgs {
     /// Silence all logs except POC output to STDOUT
     #[arg(short = 'S', long)]
     pub silence: bool,
+
+    #[clap(help_heading = "OUTPUT")]
+    /// Dry-run mode: parse targets, run parameter discovery, and report what would be scanned without sending attack payloads. Outputs target count, discovered parameters, and estimated request count.
+    #[arg(long)]
+    pub dry_run: bool,
 
     #[clap(help_heading = "OUTPUT")]
     /// POC output type: plain, curl, httpie, http-request
@@ -1689,6 +1695,12 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     let results = Arc::new(Mutex::new(Vec::<Result>::new()));
     let findings_count = Arc::new(AtomicUsize::new(0));
 
+    // Per-target tracking for structured output (target_summary in JSON envelope)
+    // Collect all target URLs that will be scanned, then track status per target.
+    let all_target_urls: Vec<String> = parsed_targets.iter().map(|t| t.url.to_string()).collect();
+    // Track targets that were skipped during preflight (content-type mismatch etc.)
+    let skipped_targets: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+
     let multi_pb: Option<Arc<MultiProgress>> = None;
 
     // Group targets by host
@@ -1786,6 +1798,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             let multi_pb_outer = multi_pb.clone();
             let results_outer = results.clone();
             let findings_count_outer = findings_count.clone();
+            let skipped_targets_outer = skipped_targets.clone();
             local.run_until(async move {
                 let mut handles = vec![];
 
@@ -1798,6 +1811,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             let multi_pb_clone = multi_pb_outer.clone();
             let results_clone = results_outer.clone();
             let findings_count_clone = findings_count_outer.clone();
+            let skipped_targets_clone = skipped_targets_outer.clone();
 
             handles.push(tokio::task::spawn_local(async move {
                 // Bound concurrency across targets for preflight + analysis
@@ -1859,6 +1873,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                         }
                         if !is_allowed_content_type(&preflight.content_type) {
                             // Skip this target early
+                            skipped_targets_clone.lock().await.push(target.url.to_string());
                             return None;
                         }
                     }
@@ -2218,6 +2233,110 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         *group = processed;
     }
 
+    // --dry-run: report what would be scanned without sending attack payloads
+    if args.dry_run {
+        let mut dry_run_targets = Vec::new();
+        for group in host_groups.values() {
+            for target in group {
+                let param_count = target.reflection_params.len();
+                // Estimate request count per target using encoder expansion
+                let enc_factor = if args.encoders.iter().any(|e| e == "none") {
+                    1usize
+                } else {
+                    let mut f = 1usize;
+                    for e in ["url", "html", "2url", "3url", "4url", "base64"] {
+                        if args.encoders.iter().any(|x| x == e) {
+                            f += 1;
+                        }
+                    }
+                    f
+                };
+                let mut estimated_requests: usize = 0;
+                for p in &target.reflection_params {
+                    let payload_count = if let Some(ctx) = &p.injection_context {
+                        crate::scanning::xss_common::get_dynamic_payloads(ctx, args)
+                            .unwrap_or_else(|_| vec![])
+                            .len()
+                    } else {
+                        let html_len = crate::payload::get_dynamic_xss_html_payloads().len() * enc_factor;
+                        let js_len = crate::payload::XSS_JAVASCRIPT_PAYLOADS.len() * enc_factor;
+                        html_len + js_len
+                    };
+                    estimated_requests = estimated_requests.saturating_add(payload_count);
+                }
+
+                let params: Vec<serde_json::Value> = target
+                    .reflection_params
+                    .iter()
+                    .map(|p| {
+                        serde_json::json!({
+                            "name": p.name,
+                            "location": format!("{:?}", p.location),
+                        })
+                    })
+                    .collect();
+
+                dry_run_targets.push(serde_json::json!({
+                    "target": target.url.as_str(),
+                    "method": target.method,
+                    "params_discovered": param_count,
+                    "estimated_requests": estimated_requests,
+                    "params": params,
+                }));
+            }
+        }
+
+        let total_estimated: usize = dry_run_targets
+            .iter()
+            .filter_map(|t| t["estimated_requests"].as_u64())
+            .map(|n| n as usize)
+            .sum();
+        let total_params: usize = dry_run_targets
+            .iter()
+            .filter_map(|t| t["params_discovered"].as_u64())
+            .map(|n| n as usize)
+            .sum();
+        let skipped = skipped_targets.lock().await;
+
+        if args.format == "json" || args.format == "jsonl" {
+            let output = serde_json::json!({
+                "dry_run": true,
+                "meta": {
+                    "dalfox_version": env!("CARGO_PKG_VERSION"),
+                    "targets_input": args.targets.len(),
+                    "targets_scannable": dry_run_targets.len(),
+                    "targets_skipped": skipped.len(),
+                    "total_params_discovered": total_params,
+                    "total_estimated_requests": total_estimated,
+                },
+                "targets": dry_run_targets,
+            });
+            if args.format == "json" {
+                println!("{}", serde_json::to_string_pretty(&output).unwrap_or_default());
+            } else {
+                println!("{}", serde_json::to_string(&output).unwrap_or_default());
+            }
+        } else {
+            println!("Dry-run summary:");
+            println!("  Targets (input):     {}", args.targets.len());
+            println!("  Targets (scannable): {}", dry_run_targets.len());
+            println!("  Targets (skipped):   {}", skipped.len());
+            println!("  Params discovered:   {}", total_params);
+            println!("  Estimated requests:  {}", total_estimated);
+            println!();
+            for t in &dry_run_targets {
+                println!("  {} ({}):", t["target"].as_str().unwrap_or("?"), t["method"].as_str().unwrap_or("?"));
+                if let Some(params) = t["params"].as_array() {
+                    for p in params {
+                        println!("    - {} ({})", p["name"].as_str().unwrap_or("?"), p["location"].as_str().unwrap_or("?"));
+                    }
+                }
+                println!("    estimated_requests: {}", t["estimated_requests"]);
+            }
+        }
+        return ScanOutcome::Clean;
+    }
+
     // --only-discovery: print discovered params and exit early
     if args.only_discovery {
         for group in host_groups.values() {
@@ -2397,6 +2516,41 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     let display_results = &final_results[..display_results_len];
     let scan_elapsed = __dalfox_scan_start.elapsed();
     let total_requests = crate::REQUEST_COUNT.load(Ordering::Relaxed);
+
+    // Build per-target summary for structured output.
+    // Limitation: if multiple targets share the same path but differ only by query params
+    // (e.g., /search?q=a vs /search?id=b), findings may be attributed to both since we
+    // match on path prefix. This is acceptable because payloads mutate query strings,
+    // making exact URL matching unreliable. Single-target scans (including MCP) are unaffected.
+    let target_summary: Vec<serde_json::Value> = {
+        let skipped = skipped_targets.lock().await;
+        let mut summary = Vec::with_capacity(all_target_urls.len());
+        for url in &all_target_urls {
+            let prefix = url.split('?').next().unwrap_or(url);
+            let finding_count = display_results
+                .iter()
+                .filter(|r| r.data.starts_with(prefix))
+                .count();
+            let (status, error_code) = if skipped.contains(url) {
+                ("skipped", Some("CONTENT_TYPE_MISMATCH"))
+            } else if finding_count > 0 {
+                ("findings", None)
+            } else {
+                ("clean", None)
+            };
+            let mut entry = serde_json::json!({
+                "target": url,
+                "status": status,
+                "findings_count": finding_count,
+            });
+            if let Some(code) = error_code {
+                entry["error_code"] = serde_json::json!(code);
+            }
+            summary.push(entry);
+        }
+        summary
+    };
+
     let output_content = if args.format == "json" {
         let findings_json: Vec<serde_json::Value> = display_results
             .iter()
@@ -2409,6 +2563,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 "scan_duration_ms": scan_elapsed.as_millis() as u64,
                 "total_requests": total_requests,
                 "findings_count": display_results.len(),
+                "target_summary": target_summary,
             },
             "findings": findings_json
         });
@@ -2422,6 +2577,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 "scan_duration_ms": scan_elapsed.as_millis() as u64,
                 "total_requests": total_requests,
                 "findings_count": display_results.len(),
+                "target_summary": target_summary,
             }
         });
         let mut out = serde_json::to_string(&meta).unwrap_or_default();

@@ -16,6 +16,7 @@ fn base_scan_args() -> ScanArgs {
         include_all: false,
         no_color: false,
         silence: true,
+        dry_run: false,
         poc_type: "plain".to_string(),
         limit: None,
         limit_result_type: "all".to_string(),

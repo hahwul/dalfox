@@ -54,6 +54,7 @@ pub struct ScanConfig {
     pub include_response: Option<bool>,
     pub include_all: Option<bool>,
     pub silence: Option<bool>,
+    pub dry_run: Option<bool>,
     pub poc_type: Option<String>,
     pub limit: Option<usize>,
     pub limit_result_type: Option<String>,
@@ -150,6 +151,9 @@ impl Config {
             }
             if let Some(v) = scan.silence {
                 args.silence = v;
+            }
+            if let Some(v) = scan.dry_run {
+                args.dry_run = v;
             }
             if let Some(v) = &scan.poc_type {
                 args.poc_type = v.clone();
@@ -447,6 +451,11 @@ impl Config {
                 && !args.silence
             {
                 args.silence = v;
+            }
+            if let Some(v) = scan.dry_run
+                && !args.dry_run
+            {
+                args.dry_run = v;
             }
             if let Some(v) = &scan.poc_type
                 && args.poc_type == "plain"
@@ -922,6 +931,7 @@ mod tests {
             include_all: false,
             no_color: false,
             silence: false,
+            dry_run: false,
             poc_type: "plain".to_string(),
             limit: None,
             limit_result_type: "all".to_string(),
@@ -992,6 +1002,7 @@ mod tests {
             include_response: Some(true),
             include_all: Some(false),
             silence: Some(true),
+            dry_run: Some(false),
             poc_type: Some("curl".to_string()),
             limit: Some(42),
             limit_result_type: Some("v".to_string()),

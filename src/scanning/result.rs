@@ -39,6 +39,15 @@ impl FindingType {
             FindingType::Reflected => "Reflected",
         }
     }
+
+    /// Detailed description suitable for agents and structured output.
+    pub fn long_description(&self) -> &'static str {
+        match self {
+            FindingType::Verified => "Verified XSS - payload confirmed executed in parsed DOM",
+            FindingType::AstDetected => "AST-detected DOM XSS - identified via static JavaScript analysis, needs runtime confirmation",
+            FindingType::Reflected => "Reflected XSS - payload appears in HTTP response but DOM execution not confirmed",
+        }
+    }
 }
 
 impl fmt::Display for FindingType {
@@ -104,6 +113,7 @@ impl Result {
 pub struct SanitizedResult {
     #[serde(rename = "type")]
     pub result_type: FindingType,
+    pub type_description: String,
     pub inject_type: String,
     pub method: String,
     pub data: String,
@@ -123,6 +133,7 @@ pub struct SanitizedResult {
 impl Result {
     pub fn to_sanitized(&self, include_request: bool, include_response: bool) -> SanitizedResult {
         SanitizedResult {
+            type_description: self.result_type.long_description().to_string(),
             result_type: self.result_type.clone(),
             inject_type: self.inject_type.clone(),
             method: self.method.clone(),
@@ -155,6 +166,7 @@ impl Result {
     ) -> serde_json::Value {
         let mut obj = serde_json::json!({
             "type": self.result_type,
+            "type_description": self.result_type.long_description(),
             "inject_type": self.inject_type,
             "method": self.method,
             "data": self.data,
@@ -1006,10 +1018,16 @@ mod tests {
         let with_all = result.to_json_value(true, true);
         assert_eq!(with_all["request"], "GET / HTTP/1.1");
         assert_eq!(with_all["response"], "HTTP/1.1 200 OK");
+        assert_eq!(
+            with_all["type_description"],
+            "Verified XSS - payload confirmed executed in parsed DOM"
+        );
 
         let without_optional = result.to_json_value(false, false);
         assert!(without_optional.get("request").is_none());
         assert!(without_optional.get("response").is_none());
+        // type_description always present
+        assert!(without_optional.get("type_description").is_some());
     }
 
     #[test]

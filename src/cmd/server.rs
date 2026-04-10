@@ -345,6 +345,7 @@ async fn run_scan_job(
         include_response,
         include_all: false,
         silence: true,
+        dry_run: false,
         poc_type: "plain".to_string(),
         limit: None,
         limit_result_type: "all".to_string(),

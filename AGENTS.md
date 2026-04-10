@@ -30,7 +30,7 @@ Primary modules:
 - `src/parameter_analysis/`: discovery + mining + parameter filtering
 - `src/payload/`: canonical payloads, dynamic payload generation, remote providers
 - `src/cmd/server.rs`: async scan API server + CORS/JSONP/API-key logic
-- `src/mcp/mod.rs`: MCP stdio tool server (`scan_with_dalfox`, `get_results_dalfox`)
+- `src/mcp/mod.rs`: MCP stdio tool server (`scan_with_dalfox`, `get_results_dalfox`, `list_scans_dalfox`, `cancel_scan_dalfox`, `preflight_dalfox`)
 
 Top-level commands:
 - `scan`
@@ -62,6 +62,9 @@ Behavioral default:
 - Output formats currently include: `plain`, `json`, `jsonl`, `markdown`, `sarif`, `toml`.
 - Keep serialization behavior in `src/scanning/result.rs` aligned with routing in `src/cmd/scan.rs`.
 - `include_request` and `include_response` flags must remain opt-in.
+- JSON/JSONL envelope `meta` includes `target_summary` (per-target status/findings/error_code).
+- All findings include `type_description` alongside the single-letter `type` code.
+- `--dry-run` outputs a preflight summary instead of scan results.
 
 4. Respect concurrency boundaries.
 - Scan pipeline uses worker and semaphore limits (`workers`, `max_concurrent_targets`, `max_targets_per_host`).
