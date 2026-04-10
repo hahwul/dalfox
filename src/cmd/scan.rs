@@ -1203,6 +1203,101 @@ pub struct ScanArgs {
     pub targets: Vec<String>,
 }
 
+/// Options for constructing a preflight ScanArgs.
+pub struct PreflightOptions {
+    pub target: String,
+    pub param: Vec<String>,
+    pub method: String,
+    pub data: Option<String>,
+    pub headers: Vec<String>,
+    pub cookies: Vec<String>,
+    pub user_agent: Option<String>,
+    pub timeout: u64,
+    pub proxy: Option<String>,
+    pub follow_redirects: bool,
+    pub skip_mining: bool,
+    pub skip_discovery: bool,
+    pub encoders: Vec<String>,
+}
+
+impl ScanArgs {
+    /// Build a ScanArgs configured for preflight analysis only (no attack payloads).
+    /// Used by both MCP preflight_dalfox and REST API /preflight endpoint.
+    pub fn for_preflight(opts: PreflightOptions) -> Self {
+        let timeout = if opts.timeout > 0 && opts.timeout < 300 {
+            opts.timeout
+        } else {
+            DEFAULT_TIMEOUT_SECS
+        };
+        ScanArgs {
+            input_type: "url".to_string(),
+            format: "json".to_string(),
+            targets: vec![opts.target],
+            param: opts.param,
+            data: opts.data,
+            headers: opts.headers,
+            cookies: opts.cookies,
+            method: opts.method,
+            user_agent: opts.user_agent,
+            cookie_from_raw: None,
+            include_url: vec![],
+            exclude_url: vec![],
+            ignore_param: vec![],
+            out_of_scope: vec![],
+            out_of_scope_file: None,
+            mining_dict_word: None,
+            skip_mining: opts.skip_mining,
+            skip_mining_dict: opts.skip_mining,
+            skip_mining_dom: opts.skip_mining,
+            only_discovery: false,
+            skip_discovery: opts.skip_discovery,
+            skip_reflection_header: false,
+            skip_reflection_cookie: false,
+            skip_reflection_path: false,
+            timeout,
+            delay: 0,
+            proxy: opts.proxy,
+            follow_redirects: opts.follow_redirects,
+            ignore_return: vec![],
+            output: None,
+            include_request: false,
+            include_response: false,
+            include_all: false,
+            silence: true,
+            dry_run: true,
+            poc_type: "plain".to_string(),
+            limit: None,
+            limit_result_type: "all".to_string(),
+            only_poc: vec![],
+            no_color: true,
+            workers: 10,
+            max_concurrent_targets: 1,
+            max_targets_per_host: 1,
+            encoders: opts.encoders,
+            custom_blind_xss_payload: None,
+            blind_callback_url: None,
+            custom_payload: None,
+            only_custom_payload: false,
+            inject_marker: None,
+            custom_alert_value: "1".to_string(),
+            custom_alert_type: "none".to_string(),
+            skip_xss_scanning: true,
+            deep_scan: false,
+            sxss: false,
+            sxss_url: None,
+            sxss_method: "GET".to_string(),
+            skip_ast_analysis: true,
+            hpp: false,
+            waf_bypass: "auto".to_string(),
+            skip_waf_probe: false,
+            force_waf: None,
+            waf_evasion: false,
+            remote_payloads: vec![],
+            remote_wordlists: vec![],
+        }
+    }
+}
+
 /// Check if a domain matches an out-of-scope pattern.
 /// Supports simple wildcard: `*.example.com` matches `sub.example.com` but not `notexample.com`.
 fn domain_matches_pattern(host: &str, pattern: &str) -> bool {

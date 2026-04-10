@@ -1124,11 +1124,10 @@ async fn preflight_handler(
                     }
                 };
 
-                let scan_args = ScanArgs {
-                    input_type: "url".to_string(),
-                    format: "json".to_string(),
-                    targets: vec![target_url.clone()],
+                let scan_args = ScanArgs::for_preflight(crate::cmd::scan::PreflightOptions {
+                    target: target_url.clone(),
                     param: vec![],
+                    method: opts.method.clone().unwrap_or_else(|| "GET".to_string()),
                     data: opts.data.clone(),
                     headers: opts.header.clone().unwrap_or_default(),
                     cookies: opts
@@ -1136,67 +1135,17 @@ async fn preflight_handler(
                         .as_ref()
                         .map(|c| vec![c.clone()])
                         .unwrap_or_default(),
-                    method: opts.method.clone().unwrap_or_else(|| "GET".to_string()),
                     user_agent: opts.user_agent.clone(),
-                    cookie_from_raw: None,
-                    include_url: vec![],
-                    exclude_url: vec![],
-                    ignore_param: vec![],
-                    out_of_scope: vec![],
-                    out_of_scope_file: None,
-                    mining_dict_word: None,
-                    skip_mining: false,
-                    skip_mining_dict: false,
-                    skip_mining_dom: false,
-                    only_discovery: false,
-                    skip_discovery: false,
-                    skip_reflection_header: false,
-                    skip_reflection_cookie: false,
-                    skip_reflection_path: false,
                     timeout: timeout_secs,
-                    delay: 0,
                     proxy: None,
                     follow_redirects: false,
-                    ignore_return: vec![],
-                    output: None,
-                    include_request: false,
-                    include_response: false,
-                    include_all: false,
-                    silence: true,
-                    dry_run: true,
-                    poc_type: "plain".to_string(),
-                    limit: None,
-                    limit_result_type: "all".to_string(),
-                    only_poc: vec![],
-                    no_color: true,
-                    workers: 10,
-                    max_concurrent_targets: 1,
-                    max_targets_per_host: 1,
+                    skip_mining: false,
+                    skip_discovery: false,
                     encoders: opts
                         .encoders
                         .clone()
                         .unwrap_or_else(|| vec!["url".to_string(), "html".to_string()]),
-                    custom_blind_xss_payload: None,
-                    blind_callback_url: None,
-                    custom_payload: None,
-                    only_custom_payload: false,
-                    inject_marker: None,
-                    custom_alert_value: "1".to_string(),
-                    custom_alert_type: "none".to_string(),
-                    skip_xss_scanning: true,
-                    deep_scan: false,
-                    sxss: false,
-                    sxss_url: None,
-                    sxss_method: "GET".to_string(),
-                    skip_ast_analysis: true,
-                    hpp: false,
-                    waf_bypass: "auto".to_string(),
-                    skip_waf_probe: false,
-                    force_waf: None,
-                    waf_evasion: false,
-                    remote_payloads: vec![],
-                    remote_wordlists: vec![],
-                };
+                });
 
                 analyze_parameters(&mut target, &scan_args, None).await;
 
@@ -1341,7 +1290,9 @@ pub async fn run_server(args: ServerArgs) {
         .route("/scan", get(get_scan_handler))
         .route("/scan", options(options_scan_handler))
         .route("/scans", get(list_scans_handler))
+        .route("/scans", options(options_scan_handler))
         .route("/preflight", post(preflight_handler))
+        .route("/preflight", options(options_scan_handler))
         .route("/result/:id", get(get_result_handler))
         .route("/result/:id", options(options_result_handler))
         .route("/scan/:id", get(get_result_handler))
@@ -2260,5 +2211,225 @@ mod tests {
         .await;
 
         drop(guard_listener);
+    }
+
+    // ---- Tests for new endpoints: cancel, list, preflight ----
+
+    #[tokio::test]
+    async fn test_cancel_scan_handler_cancels_queued_job() {
+        let state = make_state(None, None, false, false, "cb");
+        let scan_id = "cancel-test-id".to_string();
+        {
+            let mut jobs = state.jobs.lock().await;
+            jobs.insert(
+                scan_id.clone(),
+                Job {
+                    status: JobStatus::Queued,
+                    results: None,
+                    include_request: false,
+                    include_response: false,
+                    callback_url: None,
+                    progress: JobProgress::default(),
+                    cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    error_message: None,
+                },
+            );
+        }
+
+        let resp = cancel_scan_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Path(scan_id.clone()),
+            Query(Map::new()),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = response_body_string(resp).await;
+        let parsed: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(parsed["data"]["cancelled"], true);
+        assert_eq!(parsed["data"]["previous_status"], "queued");
+
+        let jobs = state.jobs.lock().await;
+        let job = jobs.get(&scan_id).expect("job still exists");
+        assert_eq!(job.status, JobStatus::Cancelled);
+        assert!(job.cancelled.load(std::sync::atomic::Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn test_cancel_scan_handler_returns_404_for_unknown_id() {
+        let state = make_state(None, None, false, false, "cb");
+        let resp = cancel_scan_handler(
+            State(state),
+            HeaderMap::new(),
+            Path("nonexistent".to_string()),
+            Query(Map::new()),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_cancel_scan_handler_requires_auth() {
+        let state = make_state(Some("secret"), None, false, false, "cb");
+        let resp = cancel_scan_handler(
+            State(state),
+            HeaderMap::new(),
+            Path("any".to_string()),
+            Query(Map::new()),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_list_scans_handler_returns_all_jobs() {
+        let state = make_state(None, None, false, false, "cb");
+        {
+            let mut jobs = state.jobs.lock().await;
+            for (id, status) in [("a", JobStatus::Done), ("b", JobStatus::Running)] {
+                jobs.insert(
+                    id.to_string(),
+                    Job {
+                        status,
+                        results: None,
+                        include_request: false,
+                        include_response: false,
+                        callback_url: None,
+                        progress: JobProgress::default(),
+                        cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                        error_message: None,
+                    },
+                );
+            }
+        }
+
+        let resp = list_scans_handler(
+            State(state),
+            HeaderMap::new(),
+            Query(Map::new()),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = response_body_string(resp).await;
+        let parsed: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(parsed["data"]["total"], 2);
+        assert_eq!(parsed["data"]["scans"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_list_scans_handler_filters_by_status() {
+        let state = make_state(None, None, false, false, "cb");
+        {
+            let mut jobs = state.jobs.lock().await;
+            for (id, status) in [("a", JobStatus::Done), ("b", JobStatus::Running)] {
+                jobs.insert(
+                    id.to_string(),
+                    Job {
+                        status,
+                        results: None,
+                        include_request: false,
+                        include_response: false,
+                        callback_url: None,
+                        progress: JobProgress::default(),
+                        cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                        error_message: None,
+                    },
+                );
+            }
+        }
+
+        let mut params = Map::new();
+        params.insert("status".to_string(), "done".to_string());
+        let resp = list_scans_handler(
+            State(state),
+            HeaderMap::new(),
+            Query(params),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = response_body_string(resp).await;
+        let parsed: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(parsed["data"]["total"], 1);
+        assert_eq!(parsed["data"]["scans"][0]["status"], "done");
+    }
+
+    #[tokio::test]
+    async fn test_list_scans_handler_requires_auth() {
+        let state = make_state(Some("secret"), None, false, false, "cb");
+        let resp = list_scans_handler(
+            State(state),
+            HeaderMap::new(),
+            Query(Map::new()),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_preflight_handler_rejects_invalid_url() {
+        let state = make_state(None, None, false, false, "cb");
+        let resp = preflight_handler(
+            State(state),
+            HeaderMap::new(),
+            Query(Map::new()),
+            Json(ScanRequest {
+                url: "not-http".to_string(),
+                options: None,
+            }),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_preflight_handler_requires_auth() {
+        let state = make_state(Some("secret"), None, false, false, "cb");
+        let resp = preflight_handler(
+            State(state),
+            HeaderMap::new(),
+            Query(Map::new()),
+            Json(ScanRequest {
+                url: "http://example.com".to_string(),
+                options: None,
+            }),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_preflight_handler_unreachable_target() {
+        let state = make_state(None, None, false, false, "cb");
+        let resp = preflight_handler(
+            State(state),
+            HeaderMap::new(),
+            Query(Map::new()),
+            Json(ScanRequest {
+                url: "http://127.0.0.1:1/unreachable".to_string(),
+                options: Some(ScanOptions {
+                    timeout: Some(1),
+                    ..ScanOptions::default()
+                }),
+            }),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+
+        let body = response_body_string(resp).await;
+        let parsed: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(parsed["data"]["reachable"], false);
+        assert_eq!(parsed["data"]["error_code"], "CONNECTION_FAILED");
     }
 }
