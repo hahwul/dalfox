@@ -60,10 +60,12 @@ struct JobProgress {
 #[derive(Clone)]
 struct Job {
     status: JobStatus,
-    results: Option<Vec<SanitizedResult>>, // Present when done (or partial in future)
-    #[allow(dead_code)] // TODO: wire into SanitizedResult to include raw request data
+    results: Option<Vec<SanitizedResult>>,
+    /// Whether raw HTTP request text is included in findings (passed through via ScanArgs).
+    #[allow(dead_code)] // Used indirectly: value is passed to ScanArgs which controls to_sanitized()
     include_request: bool,
-    #[allow(dead_code)] // TODO: wire into SanitizedResult to include raw response data
+    /// Whether raw HTTP response body is included in findings (passed through via ScanArgs).
+    #[allow(dead_code)] // Used indirectly: value is passed to ScanArgs which controls to_sanitized()
     include_response: bool,
     progress: JobProgress,
     /// Cancellation flag: set to true to request early termination of a running scan.
