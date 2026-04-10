@@ -158,6 +158,12 @@ async fn main() {
         config::load_or_init()
     };
 
+    // Exit codes:
+    //   0 = success, no findings
+    //   1 = success, findings found
+    //   2 = input/configuration error (reserved for future use)
+    let has_findings;
+
     if let Some(command) = cli.command {
         match command {
             Commands::Scan(args) => {
@@ -169,20 +175,33 @@ async fn main() {
                     args.include_request = true;
                     args.include_response = true;
                 }
-                cmd::scan::run_scan(&args).await
+                has_findings = cmd::scan::run_scan(&args).await;
             }
-            Commands::Server(args) => cmd::server::run_server(args).await,
-            Commands::Payload(args) => cmd::payload::run_payload(args),
+            Commands::Server(args) => {
+                cmd::server::run_server(args).await;
+                has_findings = false;
+            }
+            Commands::Payload(args) => {
+                cmd::payload::run_payload(args);
+                has_findings = false;
+            }
             Commands::Mcp => {
                 // Run MCP stdio server (no banner already)
                 if let Err(e) = mcp::run_mcp_server().await {
                     eprintln!("MCP server error: {e}");
                 }
+                has_findings = false;
             }
 
-            Commands::Url(args) => cmd::url::run_url(args).await,
-            Commands::File(args) => cmd::file::run_file(args).await,
-            Commands::Pipe(args) => cmd::pipe::run_pipe(args).await,
+            Commands::Url(args) => {
+                has_findings = cmd::url::run_url(args).await;
+            }
+            Commands::File(args) => {
+                has_findings = cmd::file::run_file(args).await;
+            }
+            Commands::Pipe(args) => {
+                has_findings = cmd::pipe::run_pipe(args).await;
+            }
         }
     } else {
         // Default to scan
@@ -264,6 +283,10 @@ async fn main() {
         }
 
         utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
-        cmd::scan::run_scan(&args).await;
+        has_findings = cmd::scan::run_scan(&args).await;
+    }
+
+    if has_findings {
+        std::process::exit(1);
     }
 }

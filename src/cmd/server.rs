@@ -104,6 +104,7 @@ struct Job {
     include_request: bool,
     #[allow(dead_code)] // TODO: wire into SanitizedResult to include raw response data
     include_response: bool,
+    callback_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,6 +138,8 @@ struct ScanOptions {
     remote_wordlists: Option<Vec<String>>,
     include_request: Option<bool>,
     include_response: Option<bool>,
+    /// Webhook URL to POST scan results to upon completion.
+    callback_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -507,12 +510,52 @@ async fn run_scan_job(
             .collect::<Vec<_>>()
     };
 
-    let mut jobs = state.jobs.lock().await;
-    if let Some(job) = jobs.get_mut(&job_id) {
-        job.status = JobStatus::Done;
-        job.results = Some(final_results);
-    }
+    let callback_url = {
+        let mut jobs = state.jobs.lock().await;
+        let cb = if let Some(job) = jobs.get_mut(&job_id) {
+            job.status = JobStatus::Done;
+            job.results = Some(final_results.clone());
+            job.callback_url.clone()
+        } else {
+            None
+        };
+        cb
+    };
     log(&state, "JOB", &format!("done id={} url={}", job_id, url));
+
+    // Fire webhook callback if configured (only http/https to mitigate SSRF)
+    if let Some(cb_url) = callback_url
+        && (cb_url.starts_with("http://") || cb_url.starts_with("https://"))
+    {
+        let payload = serde_json::json!({
+            "scan_id": job_id,
+            "status": "done",
+            "url": url,
+            "results": final_results
+        });
+        let cb_result: Result<reqwest::Response, reqwest::Error> = reqwest::Client::new()
+            .post(&cb_url)
+            .json(&payload)
+            .timeout(std::time::Duration::from_secs(10))
+            .send()
+            .await;
+        match cb_result {
+            Ok(resp) => {
+                log(
+                    &state,
+                    "CALLBACK",
+                    &format!("POST {} -> {}", cb_url, resp.status()),
+                );
+            }
+            Err(e) => {
+                log(
+                    &state,
+                    "CALLBACK",
+                    &format!("POST {} failed: {}", cb_url, e),
+                );
+            }
+        }
+    }
 }
 
 async fn start_scan_handler(
@@ -543,6 +586,7 @@ async fn start_scan_handler(
     let opts = req.options.clone().unwrap_or_default();
     let include_request = opts.include_request.unwrap_or(false);
     let include_response = opts.include_response.unwrap_or(false);
+    let callback_url = opts.callback_url.clone();
 
     let id = make_scan_id(&req.url);
     {
@@ -554,6 +598,7 @@ async fn start_scan_handler(
                 results: None,
                 include_request,
                 include_response,
+                callback_url: callback_url.clone(),
             },
         );
     }
@@ -736,8 +781,10 @@ async fn get_scan_handler(
         }),
         include_request: Some(include_request),
         include_response: Some(include_response),
+        callback_url: params.get("callback_url").cloned(),
     };
 
+    let callback_url = opts.callback_url.clone();
     let id = make_scan_id(&url);
     {
         let mut jobs = state.jobs.lock().await;
@@ -748,6 +795,7 @@ async fn get_scan_handler(
                 results: None,
                 include_request,
                 include_response,
+                callback_url,
             },
         );
     }
@@ -1102,6 +1150,7 @@ mod tests {
                     results: None,
                     include_request: false,
                     include_response: false,
+                callback_url: None,
                 },
             );
         }
@@ -1223,6 +1272,7 @@ mod tests {
                     results: None,
                     include_request: false,
                     include_response: false,
+                callback_url: None,
                 },
             );
         }
@@ -1304,6 +1354,7 @@ mod tests {
                     results: None,
                     include_request: false,
                     include_response: false,
+                callback_url: None,
                 },
             );
         }
@@ -1380,6 +1431,7 @@ mod tests {
                     results: None,
                     include_request: false,
                     include_response: false,
+                callback_url: None,
                 },
             );
         }
@@ -1536,6 +1588,7 @@ mod tests {
                     results: None,
                     include_request: false,
                     include_response: false,
+                callback_url: None,
                 },
             );
         }
@@ -1605,6 +1658,7 @@ mod tests {
                     results: None,
                     include_request: false,
                     include_response: false,
+                callback_url: None,
                 },
             );
         }
@@ -1628,6 +1682,7 @@ mod tests {
             remote_wordlists: Some(vec!["unknown-provider".to_string()]),
             include_request: Some(false),
             include_response: Some(false),
+            callback_url: None,
         };
 
         let run = tokio::time::timeout(
@@ -1663,6 +1718,7 @@ mod tests {
                     results: Some(Vec::new()),
                     include_request: false,
                     include_response: false,
+                callback_url: None,
                 },
             );
         }

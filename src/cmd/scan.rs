@@ -1211,7 +1211,25 @@ fn domain_matches_pattern(host: &str, pattern: &str) -> bool {
     }
 }
 
-pub async fn run_scan(args: &ScanArgs) {
+/// Emit a structured error to stderr when format is json/jsonl, otherwise plain eprintln.
+fn emit_error(format: &str, code: &str, message: &str) {
+    if format == "json" || format == "jsonl" {
+        let err = serde_json::json!({
+            "error": true,
+            "code": code,
+            "message": message
+        });
+        if format == "json" {
+            eprintln!("{}", serde_json::to_string_pretty(&err).unwrap_or_default());
+        } else {
+            eprintln!("{}", serde_json::to_string(&err).unwrap_or_default());
+        }
+    } else {
+        eprintln!("Error: {}", message);
+    }
+}
+
+pub async fn run_scan(args: &ScanArgs) -> bool {
     // Compute no-color locally (safe for concurrent server-mode scans)
     let nc = args.no_color || std::env::var("NO_COLOR").is_ok();
     if nc {
@@ -1310,9 +1328,9 @@ pub async fn run_scan(args: &ScanArgs) {
                 "pipe".to_string()
             } else {
                 if !args.silence {
-                    eprintln!("Error: No targets specified");
+                    emit_error(&args.format, "NO_TARGETS", "No targets specified");
                 }
-                return;
+                return false;
             }
         } else {
             // Check if all targets look like raw HTTP requests or files containing them
@@ -1365,18 +1383,18 @@ pub async fn run_scan(args: &ScanArgs) {
             "file" => {
                 if args.targets.is_empty() {
                     if !args.silence {
-                        eprintln!("Error: No file specified for input-type=file");
+                        emit_error(&args.format, "NO_FILE", "No file specified for input-type=file");
                     }
-                    return;
+                    return false;
                 }
                 let file_path = &args.targets[0];
                 match fs::read_to_string(file_path) {
                     Ok(content) => content.lines().map(|s| s.to_string()).collect(),
                     Err(e) => {
                         if !args.silence {
-                            eprintln!("Error reading file {}: {}", file_path, e);
+                            emit_error(&args.format, "FILE_READ_ERROR", &format!("Error reading file {}: {}", file_path, e));
                         }
-                        return;
+                        return false;
                     }
                 }
             }
@@ -1396,9 +1414,9 @@ pub async fn run_scan(args: &ScanArgs) {
                         .collect(),
                     Err(e) => {
                         if !args.silence {
-                            eprintln!("Error reading from stdin: {}", e);
+                            emit_error(&args.format, "STDIN_ERROR", &format!("Error reading from stdin: {}", e));
                         }
-                        return;
+                        return false;
                     }
                 }
             }
@@ -1414,16 +1432,16 @@ pub async fn run_scan(args: &ScanArgs) {
                         input_type
                     );
                 }
-                return;
+                return false;
             }
         };
     }
 
     if target_strings.is_empty() {
         if !args.silence {
-            eprintln!("Error: No targets specified");
+            emit_error(&args.format, "NO_TARGETS", "No targets specified");
         }
-        return;
+        return false;
     }
 
     let mut parsed_targets = Vec::new();
@@ -1473,9 +1491,9 @@ pub async fn run_scan(args: &ScanArgs) {
                 }
                 Err(e) => {
                     if !args.silence {
-                        eprintln!("Error parsing raw HTTP request '{}': {}", s, e);
+                        emit_error(&args.format, "PARSE_ERROR", &format!("Error parsing raw HTTP request '{}': {}", s, e));
                     }
-                    return;
+                    return false;
                 }
             }
         } else {
@@ -1524,9 +1542,9 @@ pub async fn run_scan(args: &ScanArgs) {
                 }
                 Err(e) => {
                     if !args.silence {
-                        eprintln!("Error parsing target '{}': {}", s, e);
+                        emit_error(&args.format, "PARSE_ERROR", &format!("Error parsing target '{}': {}", s, e));
                     }
-                    return;
+                    return false;
                 }
             }
         }
@@ -1623,9 +1641,9 @@ pub async fn run_scan(args: &ScanArgs) {
 
     if parsed_targets.is_empty() {
         if !args.silence {
-            eprintln!("Error: No targets specified");
+            emit_error(&args.format, "NO_TARGETS", "No targets specified");
         }
-        return;
+        return false;
     }
 
     // Load cookies from raw HTTP request file if specified
@@ -2206,7 +2224,7 @@ pub async fn run_scan(args: &ScanArgs) {
                 }
             }
         }
-        return;
+        return false;
     }
 
     // Semaphore for limiting concurrent targets across all hosts
@@ -2365,19 +2383,45 @@ pub async fn run_scan(args: &ScanArgs) {
     let limit = args.limit.unwrap_or(usize::MAX);
     let display_results_len = std::cmp::min(final_results.len(), limit);
     let display_results = &final_results[..display_results_len];
+    let scan_elapsed = __dalfox_scan_start.elapsed();
+    let total_requests = crate::REQUEST_COUNT.load(Ordering::Relaxed);
     let output_content = if args.format == "json" {
-        crate::scanning::result::Result::results_to_json(
-            display_results,
-            args.include_request,
-            args.include_response,
-            true,
-        )
+        let findings_json: Vec<serde_json::Value> = display_results
+            .iter()
+            .map(|r| r.to_json_value(args.include_request, args.include_response))
+            .collect();
+        let wrapper = serde_json::json!({
+            "meta": {
+                "dalfox_version": env!("CARGO_PKG_VERSION"),
+                "targets": &args.targets,
+                "scan_duration_ms": scan_elapsed.as_millis() as u64,
+                "total_requests": total_requests,
+                "findings_count": display_results.len(),
+            },
+            "findings": findings_json
+        });
+        serde_json::to_string_pretty(&wrapper).unwrap_or_else(|_| "{}".to_string())
     } else if args.format == "jsonl" {
-        crate::scanning::result::Result::results_to_jsonl(
-            display_results,
-            args.include_request,
-            args.include_response,
-        )
+        // JSONL: first line is meta, then one finding per line
+        let meta = serde_json::json!({
+            "meta": {
+                "dalfox_version": env!("CARGO_PKG_VERSION"),
+                "targets": &args.targets,
+                "scan_duration_ms": scan_elapsed.as_millis() as u64,
+                "total_requests": total_requests,
+                "findings_count": display_results.len(),
+            }
+        });
+        let mut out = serde_json::to_string(&meta).unwrap_or_default();
+        out.push('\n');
+        for r in display_results {
+            let v = r.to_json_value(args.include_request, args.include_response);
+            if let Ok(s) = serde_json::to_string(&v) {
+                out.push_str(&s);
+                out.push('\n');
+            }
+        }
+        out
     } else if args.format == "markdown" {
         crate::scanning::result::Result::results_to_markdown(
             display_results,
@@ -2572,4 +2616,6 @@ pub async fn run_scan(args: &ScanArgs) {
             ));
         }
     }
+
+    !final_results.is_empty()
 }

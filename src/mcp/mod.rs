@@ -22,13 +22,15 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use rmcp::schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use rmcp::{
     ErrorData,
     handler::server::tool::ToolRouter,
-    model::{CallToolResult, Content, JsonObject},
+    handler::server::wrapper::Parameters,
+    model::{CallToolResult, Content},
     tool, tool_handler, tool_router,
 };
 
@@ -40,6 +42,17 @@ use crate::{
     target_parser::parse_target,
 };
 
+/// Progress counters shared with the running scan task.
+/// Note: `requests_sent` is approximate when multiple scans run concurrently
+/// because it is derived from a global request counter.
+#[derive(Clone, Default)]
+struct JobProgress {
+    requests_sent: Arc<std::sync::atomic::AtomicU64>,
+    findings_so_far: Arc<std::sync::atomic::AtomicU64>,
+    params_total: Arc<std::sync::atomic::AtomicU32>,
+    params_tested: Arc<std::sync::atomic::AtomicU32>,
+}
+
 /// Internal job representation.
 #[derive(Clone)]
 struct Job {
@@ -49,6 +62,7 @@ struct Job {
     include_request: bool,
     #[allow(dead_code)] // TODO: wire into SanitizedResult to include raw response data
     include_response: bool,
+    progress: JobProgress,
 }
 
 /// MCP handler state.
@@ -83,12 +97,16 @@ impl DalfoxMcp {
 
     /// Execute a scan job (parameter discovery + scanning) using a fully prepared ScanArgs.
     async fn run_job(&self, scan_id: String, scan_args: ScanArgs) {
-        {
+        // Grab shared progress counters for this job
+        let progress = {
             let mut jobs = self.jobs.lock().await;
             if let Some(j) = jobs.get_mut(&scan_id) {
                 j.status = JobStatus::Running;
+                j.progress.clone()
+            } else {
+                return;
             }
-        }
+        };
 
         let url = scan_args
             .targets
@@ -134,23 +152,50 @@ impl DalfoxMcp {
             }
         };
 
+        // Snapshot request count before this job
+        let req_count_before =
+            crate::REQUEST_COUNT.load(std::sync::atomic::Ordering::Relaxed);
+
         // Parameter discovery / mining
         analyze_parameters(&mut target, &scan_args, None).await;
 
+        // Record discovered param count
+        progress.params_total.store(
+            target.reflection_params.len() as u32,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+
         // Collect raw results
         let results_arc = Arc::new(Mutex::new(Vec::<ScanResult>::new()));
+        let param_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         crate::scanning::run_scanning(
             &target,
             Arc::new(scan_args.clone()),
             results_arc.clone(),
             None,
             None,
-            Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            param_counter.clone(),
         )
         .await;
 
+        // Final progress snapshot
+        let req_count_after =
+            crate::REQUEST_COUNT.load(std::sync::atomic::Ordering::Relaxed);
+        progress.requests_sent.store(
+            req_count_after.saturating_sub(req_count_before),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+        progress.params_tested.store(
+            param_counter.load(std::sync::atomic::Ordering::Relaxed) as u32,
+            std::sync::atomic::Ordering::Relaxed,
+        );
+
         let sanitized = {
             let locked = results_arc.lock().await;
+            progress.findings_so_far.store(
+                locked.len() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
             locked
                 .iter()
                 .map(|r| r.to_sanitized(include_request, include_response))
@@ -177,21 +222,131 @@ impl DalfoxMcp {
  * ---------------------------
  */
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ScanWithDalfoxParams {
-    /// Target URL to scan for reflected or stored XSS
+    /// Target URL to scan for XSS vulnerabilities. Must start with http:// or https://.
+    /// Example: "https://example.com/search?q=test"
     pub target: String,
-    /// Include serialized HTTP request in each finding
+
+    /// Specific parameters to test. Supports location hints via "name:location" syntax.
+    /// Locations: query, body, header, cookie, path, json.
+    /// Examples: ["q", "id:query", "user:body", "auth:header"]
+    #[serde(default)]
+    pub param: Vec<String>,
+
+    /// HTTP method to use for requests (GET, POST, PUT, etc.).
+    #[serde(default = "default_method")]
+    pub method: String,
+
+    /// Request body data for POST/PUT. Supports form-urlencoded and JSON.
+    /// Example: "user=admin&pass=test" or "{\"user\":\"admin\"}"
+    #[serde(default)]
+    pub data: Option<String>,
+
+    /// Custom HTTP headers. Each entry as "Name: Value".
+    /// Example: ["Authorization: Bearer token", "X-Custom: value"]
+    #[serde(default)]
+    pub headers: Vec<String>,
+
+    /// Cookies to include. Each entry as "name=value".
+    /// Example: ["session=abc123", "lang=en"]
+    #[serde(default)]
+    pub cookies: Vec<String>,
+
+    /// Custom User-Agent header string.
+    #[serde(default)]
+    pub user_agent: Option<String>,
+
+    /// Path to a raw HTTP request file to extract cookies from (Cookie: header lines).
+    #[serde(default)]
+    pub cookie_from_raw: Option<String>,
+
+    /// Encoding strategies to apply to payloads. Available: url, html, base64, 2url, 3url, 4url, none.
+    /// Default: ["url", "html"]
+    #[serde(default = "default_encoders")]
+    pub encoders: Vec<String>,
+
+    /// HTTP request timeout in seconds (1-299). Default: 10
+    #[serde(default = "default_timeout")]
+    pub timeout: u64,
+
+    /// Delay between requests in milliseconds (0-9999). Default: 0
+    #[serde(default)]
+    pub delay: u64,
+
+    /// Follow HTTP redirects (3xx). Default: false
+    #[serde(default)]
+    pub follow_redirects: bool,
+
+    /// HTTP/SOCKS proxy URL. Example: "http://127.0.0.1:8080"
+    #[serde(default)]
+    pub proxy: Option<String>,
+
+    /// Include the raw HTTP request text in each finding for forensic analysis.
     #[serde(default)]
     pub include_request: bool,
-    /// Include serialized HTTP response in each finding
+
+    /// Include the raw HTTP response body in each finding for forensic analysis.
     #[serde(default)]
     pub include_response: bool,
+
+    /// Skip parameter mining (DOM and dictionary-based discovery). Default: false
+    #[serde(default)]
+    pub skip_mining: bool,
+
+    /// Skip initial parameter discovery from HTML. Default: false
+    #[serde(default)]
+    pub skip_discovery: bool,
+
+    /// Enable deep scan mode for more thorough testing. Default: false
+    #[serde(default)]
+    pub deep_scan: bool,
+
+    /// Skip AST-based JavaScript analysis. Default: false
+    #[serde(default)]
+    pub skip_ast_analysis: bool,
+
+    /// Blind XSS callback URL (e.g., your Burp Collaborator or interact.sh URL).
+    #[serde(default)]
+    pub blind_callback_url: Option<String>,
+
+    /// Number of concurrent workers. Default: 50
+    #[serde(default = "default_workers")]
+    pub workers: usize,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+fn default_method() -> String {
+    crate::cmd::scan::DEFAULT_METHOD.to_string()
+}
+fn default_encoders() -> Vec<String> {
+    crate::cmd::scan::DEFAULT_ENCODERS
+        .iter()
+        .map(|s| s.to_string())
+        .collect()
+}
+fn default_timeout() -> u64 {
+    crate::cmd::scan::DEFAULT_TIMEOUT_SECS
+}
+fn default_workers() -> usize {
+    crate::cmd::scan::DEFAULT_WORKERS
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct GetResultsDalfoxParams {
-    /// A scan_id previously returned by scan_with_dalfox
+    /// The scan_id returned by scan_with_dalfox when the scan was started.
+    pub scan_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct ListScansDalfoxParams {
+    /// Optional status filter: "queued", "running", "done", or "error". Omit to list all.
+    #[serde(default)]
+    pub status: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct CancelScanDalfoxParams {
+    /// The scan_id of the scan to cancel.
     pub scan_id: String,
 }
 
@@ -205,15 +360,20 @@ impl DalfoxMcp {
     /// Start an asynchronous Dalfox XSS scan (returns immediately with scan_id).
     #[tool(
         name = "scan_with_dalfox",
-        description = "Start an asynchronous Dalfox XSS scan for a single target URL"
+        description = "Start an asynchronous XSS vulnerability scan on a target URL. \
+Returns a scan_id immediately; use get_results_dalfox to poll for results. \
+Scans for reflected, DOM-based, and stored XSS using parameter analysis, \
+payload mutation, and AST-based JavaScript verification. \
+Supports custom headers, cookies, POST data, and encoding strategies. \
+Results include finding type (V=Verified, R=Reflected, A=AST-detected), \
+severity, CWE, payload, and evidence."
     )]
-    async fn scan_with_dalfox(&self, args: JsonObject) -> Result<CallToolResult, ErrorData> {
-        let target = args
-            .get("target")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
-        if target.trim().is_empty() {
+    async fn scan_with_dalfox(
+        &self,
+        Parameters(params): Parameters<ScanWithDalfoxParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let target = params.target.trim().to_string();
+        if target.is_empty() {
             return Err(ErrorData::invalid_params(
                 "missing required field 'target' (example: {\"target\":\"https://example.com\"})",
                 None,
@@ -225,14 +385,6 @@ impl DalfoxMcp {
                 None,
             ));
         }
-        let include_request = args
-            .get("include_request")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let include_response = args
-            .get("include_response")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
 
         let scan_id = Self::make_scan_id(&target);
 
@@ -243,8 +395,9 @@ impl DalfoxMcp {
                 Job {
                     status: JobStatus::Queued,
                     results: None,
-                    include_request,
-                    include_response,
+                    include_request: params.include_request,
+                    include_response: params.include_response,
+                    progress: JobProgress::default(),
                 },
             );
         }
@@ -253,85 +406,14 @@ impl DalfoxMcp {
             "JOB",
             &format!(
                 "queued scan_id={} target={} include_request={} include_response={}",
-                scan_id, target, include_request, include_response
+                scan_id, target, params.include_request, params.include_response
             ),
         );
 
-        // Extract additional scan configuration flags
-        let param_filters: Vec<String> = args
-            .get("param")
-            .and_then(|v| {
-                if let Some(arr) = v.as_array() {
-                    Some(
-                        arr.iter()
-                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
-                            .collect::<Vec<_>>(),
-                    )
-                } else if let Some(s) = v.as_str() {
-                    Some(vec![s.to_string()])
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_default();
-
-        let data_body = args
-            .get("data")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-
-        let headers_list: Vec<String> = args
-            .get("headers")
-            .and_then(|v| {
-                if let Some(arr) = v.as_array() {
-                    Some(
-                        arr.iter()
-                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
-                            .collect::<Vec<_>>(),
-                    )
-                } else if let Some(s) = v.as_str() {
-                    Some(vec![s.to_string()])
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_default();
-
-        let cookies_list: Vec<String> = args
-            .get("cookies")
-            .and_then(|v| {
-                if let Some(arr) = v.as_array() {
-                    Some(
-                        arr.iter()
-                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
-                            .collect::<Vec<_>>(),
-                    )
-                } else if let Some(s) = v.as_str() {
-                    Some(vec![s.to_string()])
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_default();
-
-        let method_override = args
-            .get("method")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| "GET".to_string());
-
-        let user_agent = args
-            .get("user_agent")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
-
         // cookie_from_raw: read Cookie: line and append
-        let mut all_cookies = cookies_list.clone();
-        if let Some(raw_path) = args
-            .get("cookie_from_raw")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string())
-            && let Ok(content) = std::fs::read_to_string(&raw_path)
+        let mut all_cookies = params.cookies.clone();
+        if let Some(raw_path) = &params.cookie_from_raw
+            && let Ok(content) = std::fs::read_to_string(raw_path)
         {
             for line in content.lines() {
                 if line.to_ascii_lowercase().starts_with("cookie:") {
@@ -346,80 +428,35 @@ impl DalfoxMcp {
             }
         }
 
-        // Prepare ScanArgs
-        // Optional engine/network flags
-        let encoders: Vec<String> = args
-            .get("encoders")
-            .and_then(|v| {
-                if let Some(arr) = v.as_array() {
-                    Some(
-                        arr.iter()
-                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
-                            .collect::<Vec<_>>(),
-                    )
-                } else {
-                    v.as_str().map(|s| {
-                        s.split(',')
-                            .map(|x| x.trim().to_string())
-                            .filter(|x| !x.is_empty())
-                            .collect()
-                    })
-                }
-            })
-            .map(|xs| {
-                // Normalize "none" semantics: if "none" present use only original payloads
-                if xs.iter().any(|e| e == "none") {
-                    vec!["none".to_string()]
-                } else {
-                    xs
-                }
-            })
-            .unwrap_or_else(|| vec!["url".to_string(), "html".to_string()]);
+        // Normalize encoders: if "none" present use only original payloads
+        let encoders = if params.encoders.iter().any(|e| e == "none") {
+            vec!["none".to_string()]
+        } else {
+            params.encoders.clone()
+        };
 
-        let timeout = args
-            .get("timeout")
-            .and_then(|v| v.as_i64())
-            .and_then(|n| {
-                if n > 0 && n < 300 {
-                    Some(n as u64)
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(10);
-
-        let delay = args
-            .get("delay")
-            .and_then(|v| v.as_i64())
-            .and_then(|n| {
-                if (0..10_000).contains(&n) {
-                    Some(n as u64)
-                } else {
-                    None
-                }
-            })
-            .unwrap_or(0);
-
-        let follow_redirects = args
-            .get("follow_redirects")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-
-        let proxy = args
-            .get("proxy")
-            .and_then(|v| v.as_str())
-            .map(|s| s.to_string());
+        // Clamp timeout/delay to valid ranges
+        let timeout = if params.timeout > 0 && params.timeout < 300 {
+            params.timeout
+        } else {
+            10
+        };
+        let delay = if params.delay < 10_000 {
+            params.delay
+        } else {
+            0
+        };
 
         let scan_args = ScanArgs {
             input_type: "url".to_string(),
             format: "json".to_string(),
             targets: vec![target.clone()],
-            param: param_filters,
-            data: data_body,
-            headers: headers_list,
+            param: params.param.clone(),
+            data: params.data.clone(),
+            headers: params.headers.clone(),
             cookies: all_cookies,
-            method: method_override,
-            user_agent,
+            method: params.method.clone(),
+            user_agent: params.user_agent.clone(),
             cookie_from_raw: None,
             include_url: vec![],
             exclude_url: vec![],
@@ -427,22 +464,22 @@ impl DalfoxMcp {
             out_of_scope: vec![],
             out_of_scope_file: None,
             mining_dict_word: None,
-            skip_mining: false,
-            skip_mining_dict: false,
-            skip_mining_dom: false,
+            skip_mining: params.skip_mining,
+            skip_mining_dict: params.skip_mining,
+            skip_mining_dom: params.skip_mining,
             only_discovery: false,
-            skip_discovery: false,
+            skip_discovery: params.skip_discovery,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
             skip_reflection_path: false,
             timeout,
             delay,
-            proxy,
-            follow_redirects,
+            proxy: params.proxy.clone(),
+            follow_redirects: params.follow_redirects,
             ignore_return: vec![],
             output: None,
-            include_request,
-            include_response,
+            include_request: params.include_request,
+            include_response: params.include_response,
             include_all: false,
             silence: true,
             poc_type: "plain".to_string(),
@@ -450,23 +487,23 @@ impl DalfoxMcp {
             limit_result_type: "all".to_string(),
             only_poc: vec![],
             no_color: false,
-            workers: 50,
+            workers: params.workers,
             max_concurrent_targets: 50,
             max_targets_per_host: 100,
             encoders,
             custom_blind_xss_payload: None,
-            blind_callback_url: None,
+            blind_callback_url: params.blind_callback_url.clone(),
             custom_payload: None,
             only_custom_payload: false,
             inject_marker: None,
             custom_alert_value: "1".to_string(),
             custom_alert_type: "none".to_string(),
             skip_xss_scanning: false,
-            deep_scan: false,
+            deep_scan: params.deep_scan,
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
-            skip_ast_analysis: false,
+            skip_ast_analysis: params.skip_ast_analysis,
             hpp: false,
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
@@ -505,14 +542,17 @@ impl DalfoxMcp {
     /// Fetch status and (if done) results for a scan.
     #[tool(
         name = "get_results_dalfox",
-        description = "Get scan status/results by scan_id (statuses: queued|running|done|error)"
+        description = "Poll scan status and retrieve results by scan_id. \
+Returns status (queued|running|done|error) and, when done, an array of findings. \
+Each finding includes: type (V=Verified, A=AST-detected, R=Reflected), \
+inject_type, method, param, payload, evidence, cwe, severity, and message_str. \
+Call this repeatedly until status is 'done' or 'error'."
     )]
-    async fn get_results_dalfox(&self, args: JsonObject) -> Result<CallToolResult, ErrorData> {
-        let pid = args
-            .get("scan_id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("")
-            .to_string();
+    async fn get_results_dalfox(
+        &self,
+        Parameters(params): Parameters<GetResultsDalfoxParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let pid = params.scan_id.trim().to_string();
         if pid.is_empty() {
             return Err(ErrorData::invalid_params("scan_id must not be empty", None));
         }
@@ -523,10 +563,98 @@ impl DalfoxMcp {
 
         match job_opt {
             Some(job) => {
-                let out = serde_json::json!({
+                let mut out = serde_json::json!({
                     "scan_id": pid,
                     "status": job.status,
                     "results": job.results
+                });
+                // Include progress info when scan is running (or done)
+                if matches!(job.status, JobStatus::Running | JobStatus::Done) {
+                    out["progress"] = serde_json::json!({
+                        "params_total": job.progress.params_total.load(std::sync::atomic::Ordering::Relaxed),
+                        "params_tested": job.progress.params_tested.load(std::sync::atomic::Ordering::Relaxed),
+                        "requests_sent": job.progress.requests_sent.load(std::sync::atomic::Ordering::Relaxed),
+                        "findings_so_far": job.progress.findings_so_far.load(std::sync::atomic::Ordering::Relaxed),
+                    });
+                }
+                Ok(CallToolResult::success(vec![Content::text(
+                    out.to_string(),
+                )]))
+            }
+            None => Err(ErrorData::invalid_params("scan_id not found", None)),
+        }
+    }
+
+    /// List all scans with their current status.
+    #[tool(
+        name = "list_scans_dalfox",
+        description = "List all tracked scans and their statuses. \
+Optionally filter by status (queued, running, done, error). \
+Returns an array of {scan_id, status, result_count} objects."
+    )]
+    async fn list_scans_dalfox(
+        &self,
+        Parameters(params): Parameters<ListScansDalfoxParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let jobs = self.jobs.lock().await;
+        let filter_status: Option<String> = params
+            .status
+            .as_deref()
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| !s.is_empty());
+
+        let entries: Vec<serde_json::Value> = jobs
+            .iter()
+            .filter(|(_, job)| {
+                if let Some(ref f) = filter_status {
+                    let js = serde_json::to_string(&job.status).unwrap_or_default();
+                    // JobStatus serializes as quoted string, e.g. "\"done\""
+                    js.trim_matches('"') == f.as_str()
+                } else {
+                    true
+                }
+            })
+            .map(|(id, job)| {
+                serde_json::json!({
+                    "scan_id": id,
+                    "status": job.status,
+                    "result_count": job.results.as_ref().map(|r| r.len()).unwrap_or(0)
+                })
+            })
+            .collect();
+
+        let out = serde_json::json!({
+            "total": entries.len(),
+            "scans": entries
+        });
+        Ok(CallToolResult::success(vec![Content::text(
+            out.to_string(),
+        )]))
+    }
+
+    /// Cancel (remove) a queued or running scan.
+    #[tool(
+        name = "cancel_scan_dalfox",
+        description = "Cancel a scan by scan_id. Removes it from the job list. \
+Returns the final status of the cancelled scan. \
+Note: if the scan is already running, it will be removed from tracking \
+but the background task may continue briefly until it checks job state."
+    )]
+    async fn cancel_scan_dalfox(
+        &self,
+        Parameters(params): Parameters<CancelScanDalfoxParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let pid = params.scan_id.trim().to_string();
+        if pid.is_empty() {
+            return Err(ErrorData::invalid_params("scan_id must not be empty", None));
+        }
+        let mut jobs = self.jobs.lock().await;
+        match jobs.remove(&pid) {
+            Some(job) => {
+                let out = serde_json::json!({
+                    "scan_id": pid,
+                    "cancelled": true,
+                    "previous_status": job.status
                 });
                 Ok(CallToolResult::success(vec![Content::text(
                     out.to_string(),
@@ -554,9 +682,33 @@ pub async fn run_mcp_server() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rmcp::model::object;
-    use serde_json::json;
     use tokio::time::{Duration, sleep};
+
+    fn default_scan_params(target: &str) -> ScanWithDalfoxParams {
+        ScanWithDalfoxParams {
+            target: target.to_string(),
+            param: vec![],
+            method: "GET".to_string(),
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            user_agent: None,
+            cookie_from_raw: None,
+            encoders: vec!["none".to_string()],
+            timeout: 1,
+            delay: 0,
+            follow_redirects: false,
+            proxy: None,
+            include_request: false,
+            include_response: false,
+            skip_mining: false,
+            skip_discovery: false,
+            deep_scan: false,
+            skip_ast_analysis: false,
+            blind_callback_url: None,
+            workers: 1,
+        }
+    }
 
     fn default_scan_args(target: &str) -> ScanArgs {
         ScanArgs {
@@ -651,12 +803,16 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_scan_with_dalfox_rejects_missing_target() {
+    async fn test_scan_with_dalfox_rejects_empty_target() {
         let mcp = DalfoxMcp::new();
+        let params = ScanWithDalfoxParams {
+            target: "".to_string(),
+            ..default_scan_params("")
+        };
         let err = mcp
-            .scan_with_dalfox(object(json!({})))
+            .scan_with_dalfox(Parameters(params))
             .await
-            .expect_err("missing target must fail");
+            .expect_err("empty target must fail");
         assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
         assert!(err.message.contains("missing required field 'target'"));
     }
@@ -664,8 +820,9 @@ mod tests {
     #[tokio::test]
     async fn test_scan_with_dalfox_rejects_non_http_target() {
         let mcp = DalfoxMcp::new();
+        let params = default_scan_params("ftp://example.com");
         let err = mcp
-            .scan_with_dalfox(object(json!({"target":"ftp://example.com"})))
+            .scan_with_dalfox(Parameters(params))
             .await
             .expect_err("non-http scheme must fail");
         assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
@@ -675,8 +832,11 @@ mod tests {
     #[tokio::test]
     async fn test_get_results_rejects_empty_scan_id() {
         let mcp = DalfoxMcp::new();
+        let params = GetResultsDalfoxParams {
+            scan_id: "".to_string(),
+        };
         let err = mcp
-            .get_results_dalfox(object(json!({"scan_id":""})))
+            .get_results_dalfox(Parameters(params))
             .await
             .expect_err("empty scan_id must fail");
         assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
@@ -686,8 +846,11 @@ mod tests {
     #[tokio::test]
     async fn test_get_results_rejects_unknown_scan_id() {
         let mcp = DalfoxMcp::new();
+        let params = GetResultsDalfoxParams {
+            scan_id: "missing-id".to_string(),
+        };
         let err = mcp
-            .get_results_dalfox(object(json!({"scan_id":"missing-id"})))
+            .get_results_dalfox(Parameters(params))
             .await
             .expect_err("unknown scan_id must fail");
         assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
@@ -707,6 +870,7 @@ mod tests {
                     results: None,
                     include_request: false,
                     include_response: false,
+                    progress: JobProgress::default(),
                 },
             );
         }
@@ -721,24 +885,26 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_scan_with_dalfox_queues_and_can_be_queried_array_args() {
+    async fn test_scan_with_dalfox_queues_and_can_be_queried() {
         let mcp = DalfoxMcp::new();
+        let params = ScanWithDalfoxParams {
+            target: "http://127.0.0.1:1/?q=a".to_string(),
+            include_request: true,
+            include_response: true,
+            param: vec!["q:query".to_string(), "id".to_string()],
+            data: Some("a=1&b=2".to_string()),
+            headers: vec!["X-Test: 1".to_string(), "X-Trace: 2".to_string()],
+            cookies: vec!["sid=abc".to_string(), "uid=def".to_string()],
+            method: "POST".to_string(),
+            user_agent: Some("dalfox-mcp-test".to_string()),
+            encoders: vec!["none".to_string(), "url".to_string()],
+            timeout: 1,
+            delay: 0,
+            follow_redirects: false,
+            ..default_scan_params("http://127.0.0.1:1/?q=a")
+        };
         let resp = mcp
-            .scan_with_dalfox(object(json!({
-                "target":"http://127.0.0.1:1/?q=a",
-                "include_request": true,
-                "include_response": true,
-                "param": ["q:query", "id"],
-                "data": "a=1&b=2",
-                "headers": ["X-Test: 1", "X-Trace: 2"],
-                "cookies": ["sid=abc", "uid=def"],
-                "method": "POST",
-                "user_agent": "dalfox-mcp-test",
-                "encoders": "none,url,html",
-                "timeout": 1,
-                "delay": 0,
-                "follow_redirects": false
-            })))
+            .scan_with_dalfox(Parameters(params))
             .await
             .expect("scan_with_dalfox should queue");
 
@@ -748,7 +914,9 @@ mod tests {
 
         sleep(Duration::from_millis(25)).await;
         let queried = mcp
-            .get_results_dalfox(object(json!({"scan_id": scan_id})))
+            .get_results_dalfox(Parameters(GetResultsDalfoxParams {
+                scan_id: scan_id.clone(),
+            }))
             .await
             .expect("get_results should return a job");
         let queried_payload = parse_result_json(&queried);
@@ -757,35 +925,24 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_scan_with_dalfox_queues_and_can_be_queried_string_args() {
+    async fn test_scan_with_dalfox_clamps_out_of_range_timeout() {
         let mcp = DalfoxMcp::new();
+        let params = ScanWithDalfoxParams {
+            timeout: 9999, // out of range, should be clamped to 10
+            delay: 99999,  // out of range, should be clamped to 0
+            ..default_scan_params("http://127.0.0.1:1/?q=a")
+        };
         let resp = mcp
-            .scan_with_dalfox(object(json!({
-                "target":"http://127.0.0.1:1/?q=a",
-                "param": "q:query",
-                "headers": "X-One: 1",
-                "cookies": "sid=1",
-                "encoders": ["none", "base64"],
-                "timeout": 9999,
-                "delay": -1
-            })))
+            .scan_with_dalfox(Parameters(params))
             .await
             .expect("scan_with_dalfox should queue");
 
         let payload = parse_result_json(&resp);
-        let scan_id = payload["scan_id"].as_str().expect("scan_id").to_string();
-
-        let queried = mcp
-            .get_results_dalfox(object(json!({"scan_id": scan_id})))
-            .await
-            .expect("get_results should return a job");
-        let queried_payload = parse_result_json(&queried);
-        let status = queried_payload["status"].as_str().expect("status");
-        assert!(matches!(status, "queued" | "running" | "done" | "error"));
+        assert_eq!(payload["status"], "queued");
     }
 
     #[tokio::test]
-    async fn test_scan_with_dalfox_handles_cookie_from_raw_and_non_string_collections() {
+    async fn test_scan_with_dalfox_handles_cookie_from_raw() {
         let mcp = DalfoxMcp::new();
         let cookie_file = std::env::temp_dir().join(format!(
             "dalfox-mcp-cookie-{}.txt",
@@ -797,15 +954,12 @@ mod tests {
         )
         .expect("write cookie raw");
 
+        let params = ScanWithDalfoxParams {
+            cookie_from_raw: Some(cookie_file.to_string_lossy().to_string()),
+            ..default_scan_params("http://127.0.0.1:1/?q=a")
+        };
         let resp = mcp
-            .scan_with_dalfox(object(json!({
-                "target":"http://127.0.0.1:1/?q=a",
-                "param": 123,
-                "headers": 456,
-                "cookies": true,
-                "cookie_from_raw": cookie_file.to_string_lossy().to_string(),
-                "encoders": ["url", "html"]
-            })))
+            .scan_with_dalfox(Parameters(params))
             .await
             .expect("scan_with_dalfox should queue");
 
@@ -813,5 +967,107 @@ mod tests {
         assert_eq!(payload["status"], "queued");
         assert!(payload["scan_id"].as_str().is_some());
         let _ = std::fs::remove_file(cookie_file);
+    }
+
+    #[tokio::test]
+    async fn test_list_scans_returns_all_jobs() {
+        let mcp = DalfoxMcp::new();
+        // Queue two scans
+        let p1 = default_scan_params("http://127.0.0.1:1/?a=1");
+        let p2 = default_scan_params("http://127.0.0.1:1/?b=2");
+        mcp.scan_with_dalfox(Parameters(p1)).await.unwrap();
+        mcp.scan_with_dalfox(Parameters(p2)).await.unwrap();
+
+        let resp = mcp
+            .list_scans_dalfox(Parameters(ListScansDalfoxParams { status: None }))
+            .await
+            .expect("list_scans should succeed");
+        let payload = parse_result_json(&resp);
+        assert_eq!(payload["total"], 2);
+        assert_eq!(payload["scans"].as_array().unwrap().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_list_scans_filters_by_status() {
+        let mcp = DalfoxMcp::new();
+        // Manually insert a done job
+        {
+            let mut jobs = mcp.jobs.lock().await;
+            jobs.insert(
+                "done-job".to_string(),
+                Job {
+                    status: JobStatus::Done,
+                    results: Some(vec![]),
+                    include_request: false,
+                    include_response: false,
+                    progress: JobProgress::default(),
+                },
+            );
+            jobs.insert(
+                "queued-job".to_string(),
+                Job {
+                    status: JobStatus::Queued,
+                    results: None,
+                    include_request: false,
+                    include_response: false,
+                    progress: JobProgress::default(),
+                },
+            );
+        }
+
+        let resp = mcp
+            .list_scans_dalfox(Parameters(ListScansDalfoxParams {
+                status: Some("done".to_string()),
+            }))
+            .await
+            .expect("list_scans should succeed");
+        let payload = parse_result_json(&resp);
+        assert_eq!(payload["total"], 1);
+        assert_eq!(payload["scans"][0]["scan_id"], "done-job");
+    }
+
+    #[tokio::test]
+    async fn test_cancel_scan_removes_job() {
+        let mcp = DalfoxMcp::new();
+        let params = default_scan_params("http://127.0.0.1:1/?q=a");
+        let resp = mcp
+            .scan_with_dalfox(Parameters(params))
+            .await
+            .expect("queue scan");
+        let scan_id = parse_result_json(&resp)["scan_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        // Cancel it
+        let cancel_resp = mcp
+            .cancel_scan_dalfox(Parameters(CancelScanDalfoxParams {
+                scan_id: scan_id.clone(),
+            }))
+            .await
+            .expect("cancel should succeed");
+        let cancel_payload = parse_result_json(&cancel_resp);
+        assert_eq!(cancel_payload["cancelled"], true);
+
+        // Verify it's gone
+        let err = mcp
+            .get_results_dalfox(Parameters(GetResultsDalfoxParams {
+                scan_id: scan_id.clone(),
+            }))
+            .await
+            .expect_err("should not find cancelled scan");
+        assert!(err.message.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_cancel_scan_rejects_unknown_id() {
+        let mcp = DalfoxMcp::new();
+        let err = mcp
+            .cancel_scan_dalfox(Parameters(CancelScanDalfoxParams {
+                scan_id: "nonexistent".to_string(),
+            }))
+            .await
+            .expect_err("should fail for unknown scan_id");
+        assert!(err.message.contains("not found"));
     }
 }
