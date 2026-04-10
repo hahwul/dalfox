@@ -2454,6 +2454,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                             multi_pb_clone_inner,
                             overall_pb_clone,
                             findings_count_target,
+                            None,
                         )
                         .await;
                         if let Some((tx, done_rx)) = __scan_spinner {

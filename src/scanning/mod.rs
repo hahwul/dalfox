@@ -432,6 +432,7 @@ pub async fn run_scanning(
     multi_pb: Option<Arc<MultiProgress>>,
     overall_pb: Option<Arc<Mutex<indicatif::ProgressBar>>>,
     findings_count: Arc<AtomicUsize>,
+    cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
 ) {
     // Short-circuit scanning when skip_xss_scanning is enabled (e.g., in unit tests)
     if args.skip_xss_scanning {
@@ -558,6 +559,15 @@ pub async fn run_scanning(
 
     // === Stage 5 & 6: Reflection Check + DOM Verification (per payload) ===
     for (param_clone, reflection_payloads, dom_payloads) in param_jobs {
+        // Check cancellation before spawning next param task
+        if let Some(ref c) = cancel {
+            if c.load(Ordering::Relaxed) {
+                if let Some(ref pb) = pb {
+                    pb.finish_with_message(format!("Cancelled scanning {}", target.url));
+                }
+                break;
+            }
+        }
         let already_found = {
             let fp = found_params.read().await;
             fp.reflection.contains(&param_clone.name) || fp.dom.contains(&param_clone.name)
@@ -586,6 +596,7 @@ pub async fn run_scanning(
         let shared_client_clone = shared_client.clone();
         let findings_count_clone = findings_count.clone();
         let limit_result_type_clone = limit_result_type.clone();
+        let cancel_clone = cancel.clone();
 
         let handle = tokio::spawn(async move {
             let _permit = semaphore_clone.acquire().await.expect("semaphore closed unexpectedly");
@@ -683,6 +694,12 @@ pub async fn run_scanning(
 
             // Sequential testing for this param
             for reflection_payload in reflection_payloads {
+                // Check cancellation
+                if let Some(ref c) = cancel_clone {
+                    if c.load(Ordering::Relaxed) {
+                        break;
+                    }
+                }
                 // Early stop if global limit reached
                 if let Some(lim) = args_clone.limit
                     && findings_count_clone.load(Ordering::Relaxed) >= lim
@@ -793,6 +810,12 @@ pub async fn run_scanning(
 
             // DOM verification
             for dom_payload in dom_payloads {
+                // Check cancellation
+                if let Some(ref c) = cancel_clone {
+                    if c.load(Ordering::Relaxed) {
+                        break;
+                    }
+                }
                 // Early stop if global limit reached
                 if let Some(lim) = args_clone.limit
                     && findings_count_clone.load(Ordering::Relaxed) >= lim
@@ -1348,6 +1371,7 @@ mod tests {
             None,
             None,
             Arc::new(AtomicUsize::new(0)),
+            None,
         )
         .await;
 
@@ -1438,6 +1462,7 @@ mod tests {
             None,
             None,
             Arc::new(AtomicUsize::new(0)),
+            None,
         )
         .await;
 
@@ -1539,6 +1564,7 @@ mod tests {
             None,
             None,
             Arc::new(AtomicUsize::new(0)),
+            None,
         )
         .await;
     }
@@ -1623,6 +1649,7 @@ mod tests {
             None,
             None,
             Arc::new(AtomicUsize::new(0)),
+            None,
         )
         .await;
     }

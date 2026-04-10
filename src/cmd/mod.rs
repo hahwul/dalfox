@@ -16,6 +16,7 @@ pub enum JobStatus {
     Running,
     Done,
     Error,
+    Cancelled,
 }
 
 impl fmt::Display for JobStatus {
@@ -25,6 +26,7 @@ impl fmt::Display for JobStatus {
             Self::Running => write!(f, "running"),
             Self::Done => write!(f, "done"),
             Self::Error => write!(f, "error"),
+            Self::Cancelled => write!(f, "cancelled"),
         }
     }
 }

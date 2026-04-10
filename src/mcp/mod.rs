@@ -66,6 +66,8 @@ struct Job {
     #[allow(dead_code)] // TODO: wire into SanitizedResult to include raw response data
     include_response: bool,
     progress: JobProgress,
+    /// Cancellation flag: set to true to request early termination of a running scan.
+    cancelled: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// MCP handler state.
@@ -100,12 +102,12 @@ impl DalfoxMcp {
 
     /// Execute a scan job (parameter discovery + scanning) using a fully prepared ScanArgs.
     async fn run_job(&self, scan_id: String, scan_args: ScanArgs) {
-        // Grab shared progress counters for this job
-        let progress = {
+        // Grab shared progress counters and cancellation flag for this job
+        let (progress, cancel_flag) = {
             let mut jobs = self.jobs.lock().await;
             if let Some(j) = jobs.get_mut(&scan_id) {
                 j.status = JobStatus::Running;
-                j.progress.clone()
+                (j.progress.clone(), j.cancelled.clone())
             } else {
                 return;
             }
@@ -178,6 +180,7 @@ impl DalfoxMcp {
             None,
             None,
             param_counter.clone(),
+            Some(cancel_flag.clone()),
         )
         .await;
 
@@ -205,17 +208,25 @@ impl DalfoxMcp {
                 .collect::<Vec<_>>()
         };
 
+        // Check if cancelled during scanning
+        let was_cancelled = cancel_flag.load(std::sync::atomic::Ordering::Relaxed);
+
         {
             let mut jobs = self.jobs.lock().await;
             if let Some(j) = jobs.get_mut(&scan_id) {
-                j.status = JobStatus::Done;
+                // Store partial or complete results
                 j.results = Some(sanitized);
+                // Only update status if not already cancelled (cancel sets status immediately)
+                if j.status != JobStatus::Cancelled {
+                    j.status = JobStatus::Done;
+                }
             }
         }
 
+        let status_label = if was_cancelled { "cancelled" } else { "finished" };
         Self::log(
             "JOB",
-            &format!("scan finished scan_id={} url={}", scan_id, url),
+            &format!("scan {} scan_id={} url={}", status_label, scan_id, url),
         );
     }
 }
@@ -451,6 +462,7 @@ severity, CWE, payload, and evidence."
                     include_request: params.include_request,
                     include_response: params.include_response,
                     progress: JobProgress::default(),
+                    cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 },
             );
         }
@@ -626,16 +638,18 @@ Call this repeatedly until status is 'done' or 'error'."
                     "status": job.status,
                     "results": job.results
                 });
-                // Include progress info when scan is running (or done)
-                if matches!(job.status, JobStatus::Running | JobStatus::Done) {
+                // Include progress info when scan is running, done, or cancelled
+                if matches!(job.status, JobStatus::Running | JobStatus::Done | JobStatus::Cancelled) {
                     let params_total = job.progress.params_total.load(std::sync::atomic::Ordering::Relaxed);
                     let params_tested = job.progress.params_tested.load(std::sync::atomic::Ordering::Relaxed);
                     let requests_sent = job.progress.requests_sent.load(std::sync::atomic::Ordering::Relaxed);
                     let findings_so_far = job.progress.findings_so_far.load(std::sync::atomic::Ordering::Relaxed);
 
                     // Estimate completion percentage from params tested vs total
-                    let estimated_completion_pct: u32 = if job.status == JobStatus::Done {
-                        100
+                    let estimated_completion_pct: u32 = if matches!(job.status, JobStatus::Done | JobStatus::Cancelled) {
+                        if job.status == JobStatus::Done { 100 } else if params_total > 0 {
+                            ((params_tested as f64 / params_total as f64) * 100.0) as u32
+                        } else { 0 }
                     } else if params_total > 0 {
                         ((params_tested as f64 / params_total as f64) * 100.0).min(99.0) as u32
                     } else {
@@ -646,8 +660,8 @@ Call this repeatedly until status is 'done' or 'error'."
                     // - queued/early: poll every 2s
                     // - mid-scan: poll every 3s
                     // - near completion (>80%): poll every 1s
-                    // - done: no more polling needed
-                    let suggested_poll_interval_ms: u64 = if job.status == JobStatus::Done {
+                    // - done/cancelled: no more polling needed
+                    let suggested_poll_interval_ms: u64 = if matches!(job.status, JobStatus::Done | JobStatus::Cancelled) {
                         0
                     } else if estimated_completion_pct > 80 {
                         1000
@@ -678,7 +692,7 @@ Call this repeatedly until status is 'done' or 'error'."
     #[tool(
         name = "list_scans_dalfox",
         description = "List all tracked scans and their statuses. \
-Optionally filter by status (queued, running, done, error). \
+Optionally filter by status (queued, running, done, error, cancelled). \
 Returns an array of {scan_id, status, result_count} objects."
     )]
     async fn list_scans_dalfox(
@@ -959,13 +973,14 @@ the target is reachable. Returns results synchronously (no polling needed)."
         )]))
     }
 
-    /// Cancel (remove) a queued or running scan.
+    /// Cancel a queued or running scan.
     #[tool(
         name = "cancel_scan_dalfox",
-        description = "Cancel a scan by scan_id. Removes it from the job list. \
-Returns the final status of the cancelled scan. \
-Note: if the scan is already running, it will be removed from tracking \
-but the background task may continue briefly until it checks job state."
+        description = "Cancel a scan by scan_id. Signals the running scan to stop \
+and returns the previous status. For running scans, the background task will \
+stop at the next cancellation checkpoint (typically within seconds). \
+The job remains in the list with status 'cancelled' so partial results can \
+still be retrieved via get_results_dalfox."
     )]
     async fn cancel_scan_dalfox(
         &self,
@@ -976,12 +991,21 @@ but the background task may continue briefly until it checks job state."
             return Err(ErrorData::invalid_params("scan_id must not be empty", None));
         }
         let mut jobs = self.jobs.lock().await;
-        match jobs.remove(&pid) {
+        match jobs.get_mut(&pid) {
             Some(job) => {
+                let previous_status = job.status.clone();
+                // Signal cancellation to the running scan
+                job.cancelled.store(true, std::sync::atomic::Ordering::Relaxed);
+                // Mark as cancelled immediately for both queued and running scans.
+                // For running scans, the background task will exit at the next
+                // cancellation checkpoint and store partial results.
+                if matches!(job.status, JobStatus::Queued | JobStatus::Running) {
+                    job.status = JobStatus::Cancelled;
+                }
                 let out = serde_json::json!({
                     "scan_id": pid,
                     "cancelled": true,
-                    "previous_status": job.status
+                    "previous_status": previous_status
                 });
                 Ok(CallToolResult::success(vec![Content::text(
                     out.to_string(),
@@ -1199,6 +1223,7 @@ mod tests {
                     include_request: false,
                     include_response: false,
                     progress: JobProgress::default(),
+                    cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 },
             );
         }
@@ -1329,6 +1354,7 @@ mod tests {
                     include_request: false,
                     include_response: false,
                     progress: JobProgress::default(),
+                    cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 },
             );
             jobs.insert(
@@ -1339,6 +1365,7 @@ mod tests {
                     include_request: false,
                     include_response: false,
                     progress: JobProgress::default(),
+                    cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 },
             );
         }
@@ -1377,14 +1404,15 @@ mod tests {
         let cancel_payload = parse_result_json(&cancel_resp);
         assert_eq!(cancel_payload["cancelled"], true);
 
-        // Verify it's gone
-        let err = mcp
+        // Verify the job is still accessible but with cancelled status
+        let result = mcp
             .get_results_dalfox(Parameters(GetResultsDalfoxParams {
                 scan_id: scan_id.clone(),
             }))
             .await
-            .expect_err("should not find cancelled scan");
-        assert!(err.message.contains("not found"));
+            .expect("cancelled scan should still be retrievable");
+        let payload = parse_result_json(&result);
+        assert_eq!(payload["status"], "cancelled");
     }
 
     #[tokio::test]
@@ -1494,6 +1522,7 @@ mod tests {
                     include_request: false,
                     include_response: false,
                     progress,
+                    cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 },
             );
         }
@@ -1532,6 +1561,7 @@ mod tests {
                     include_request: false,
                     include_response: false,
                     progress,
+                    cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 },
             );
         }

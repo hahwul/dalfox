@@ -500,6 +500,7 @@ async fn run_scan_job(
         None,
         None,
         Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        None,
     )
     .await;
 
