@@ -71,8 +71,11 @@ Behavioral default:
 - Do not introduce unbounded async fan-out.
 
 5. Keep server and MCP behavior non-breaking.
-- Server jobs are in-memory, async, and status-based (`queued/running/done/error`).
+- Server jobs are in-memory, async, and status-based (`queued/running/done/error/cancelled`).
 - MCP is stdio/JSON-RPC; avoid stdout noise in MCP mode (banner/log behavior matters).
+- Both server and MCP support real cancellation via `AtomicBool` flags checked in scan loops.
+- Both include progress tracking (params_total/tested, requests_sent, findings_so_far).
+- Use shared error codes from `cmd::error_codes` for application-level errors.
 
 6. Remote resource initialization is process-cached.
 - Remote payload/wordlist fetches use OnceLock cache.
@@ -119,10 +122,16 @@ Behavioral default:
 - Server API behavior:
   - `src/cmd/server.rs` (auth, CORS, JSONP, scan options mapping)
   - keep callback validation strict for JSONP
+  - Endpoints: POST /scan, GET /scan, GET /scans, POST /preflight, DELETE /scan/:id, GET /result/:id
 
 - MCP tool behavior:
   - `src/mcp/mod.rs`
   - keep tool inputs minimal and deterministic
+  - Tools: scan_with_dalfox, get_results_dalfox, list_scans_dalfox, cancel_scan_dalfox, preflight_dalfox
+
+- New error code:
+  - Add constant to `src/cmd/mod.rs` `error_codes` module
+  - Use the constant in all three interfaces (CLI, server, MCP)
 
 ---
 
