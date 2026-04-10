@@ -68,6 +68,8 @@ struct Job {
     progress: JobProgress,
     /// Cancellation flag: set to true to request early termination of a running scan.
     cancelled: Arc<std::sync::atomic::AtomicBool>,
+    /// Error message stored when the scan fails (status == Error).
+    error_message: Option<String>,
 }
 
 /// MCP handler state.
@@ -148,10 +150,12 @@ impl DalfoxMcp {
                 t
             }
             Err(e) => {
-                Self::log("ERR", &format!("parse_target failed: {}", e));
+                let msg = format!("parse_target failed: {}", e);
+                Self::log("ERR", &msg);
                 let mut jobs = self.jobs.lock().await;
                 if let Some(j) = jobs.get_mut(&scan_id) {
                     j.status = JobStatus::Error;
+                    j.error_message = Some(msg);
                 }
                 return;
             }
@@ -463,6 +467,7 @@ severity, CWE, payload, and evidence."
                     include_response: params.include_response,
                     progress: JobProgress::default(),
                     cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    error_message: None,
                 },
             );
         }
@@ -609,14 +614,15 @@ severity, CWE, payload, and evidence."
     #[tool(
         name = "get_results_dalfox",
         description = "Poll scan status and retrieve results by scan_id. \
-Returns status (queued|running|done|error) and, when done, an array of findings. \
+Returns status (queued|running|done|error|cancelled) and, when done, an array of findings. \
 Each finding includes: type (V=Verified, A=AST-detected, R=Reflected), \
 type_description (human-readable explanation), inject_type, method, param, \
 payload, evidence, cwe, severity, and message_str. \
-When running or done, includes progress object with: params_total, params_tested, \
+When status is 'error', includes error_message explaining the failure reason. \
+When running, done, or cancelled, includes progress object with: params_total, params_tested, \
 requests_sent, findings_so_far, estimated_completion_pct (0-100), and \
-suggested_poll_interval_ms (recommended delay before next poll; 0 when done). \
-Call this repeatedly until status is 'done' or 'error'."
+suggested_poll_interval_ms (recommended delay before next poll; 0 when done/cancelled). \
+Call this repeatedly until status is 'done', 'error', or 'cancelled'."
     )]
     async fn get_results_dalfox(
         &self,
@@ -638,6 +644,10 @@ Call this repeatedly until status is 'done' or 'error'."
                     "status": job.status,
                     "results": job.results
                 });
+                // Include error message when scan failed
+                if let Some(ref err_msg) = job.error_message {
+                    out["error_message"] = serde_json::json!(err_msg);
+                }
                 // Include progress info when scan is running, done, or cancelled
                 if matches!(job.status, JobStatus::Running | JobStatus::Done | JobStatus::Cancelled) {
                     let params_total = job.progress.params_total.load(std::sync::atomic::Ordering::Relaxed);
@@ -1224,6 +1234,7 @@ mod tests {
                     include_response: false,
                     progress: JobProgress::default(),
                     cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    error_message: None,
                 },
             );
         }
@@ -1235,6 +1246,11 @@ mod tests {
         let jobs = mcp.jobs.lock().await;
         let job = jobs.get(&scan_id).expect("job exists");
         assert_eq!(job.status, JobStatus::Error);
+        assert!(job.error_message.is_some(), "error_message should be set on failure");
+        assert!(
+            job.error_message.as_ref().unwrap().contains("parse_target"),
+            "error_message should describe the failure"
+        );
     }
 
     #[tokio::test]
@@ -1355,6 +1371,7 @@ mod tests {
                     include_response: false,
                     progress: JobProgress::default(),
                     cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    error_message: None,
                 },
             );
             jobs.insert(
@@ -1366,6 +1383,7 @@ mod tests {
                     include_response: false,
                     progress: JobProgress::default(),
                     cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    error_message: None,
                 },
             );
         }
@@ -1523,6 +1541,7 @@ mod tests {
                     include_response: false,
                     progress,
                     cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    error_message: None,
                 },
             );
         }
@@ -1562,6 +1581,7 @@ mod tests {
                     include_response: false,
                     progress,
                     cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                    error_message: None,
                 },
             );
         }
