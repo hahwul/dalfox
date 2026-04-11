@@ -717,7 +717,7 @@ async fn start_scan_handler(
     let resp = ApiResponse::<serde_json::Value> {
         code: 200,
         msg: "ok".to_string(),
-        data: Some(serde_json::json!({ "scan_id": id })),
+        data: Some(serde_json::json!({ "scan_id": id, "target": req.url })),
     };
     make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
 }
@@ -983,7 +983,35 @@ async fn get_scan_handler(
     let resp = ApiResponse::<serde_json::Value> {
         code: 200,
         msg: "ok".to_string(),
-        data: Some(serde_json::json!({ "scan_id": id_for_resp })),
+        data: Some(serde_json::json!({ "scan_id": id_for_resp, "target": url })),
+    };
+    make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
+}
+
+// GET /health — server info and capability discovery
+async fn health_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> impl IntoResponse {
+    let resp = ApiResponse {
+        code: 200,
+        msg: "ok".to_string(),
+        data: Some(serde_json::json!({
+            "status": "ok",
+            "version": env!("CARGO_PKG_VERSION"),
+            "auth_required": state.api_key.is_some(),
+            "endpoints": [
+                {"method": "POST", "path": "/scan", "description": "Submit a new XSS scan"},
+                {"method": "GET",  "path": "/scan", "description": "Submit a scan via query params (JSONP-friendly)"},
+                {"method": "GET",  "path": "/scan/:id", "description": "Get scan status and results"},
+                {"method": "DELETE", "path": "/scan/:id", "description": "Cancel a scan"},
+                {"method": "GET",  "path": "/scans", "description": "List all scans"},
+                {"method": "GET",  "path": "/result/:id", "description": "Get scan status and results (alias)"},
+                {"method": "POST", "path": "/preflight", "description": "Parameter discovery without attack payloads"},
+                {"method": "GET",  "path": "/health", "description": "Server info and capability discovery"},
+            ],
+        })),
     };
     make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
 }
@@ -1028,6 +1056,7 @@ async fn cancel_scan_handler(
                 msg: "ok".to_string(),
                 data: Some(serde_json::json!({
                     "scan_id": id,
+                    "target": job.target_url,
                     "cancelled": true,
                     "previous_status": previous_status
                 })),
@@ -1367,6 +1396,8 @@ pub async fn run_server(args: ServerArgs) {
         .route("/scan/:id", get(get_result_handler))
         .route("/scan/:id", axum::routing::delete(cancel_scan_handler))
         .route("/scan/:id", options(options_result_handler))
+        .route("/health", get(health_handler))
+        .route("/health", options(options_scan_handler))
         .with_state(state.clone());
 
     log(

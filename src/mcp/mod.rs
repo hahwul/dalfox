@@ -433,12 +433,13 @@ impl DalfoxMcp {
     #[tool(
         name = "scan_with_dalfox",
         description = "Start an asynchronous XSS vulnerability scan on a target URL. \
-Returns a scan_id immediately; use get_results_dalfox to poll for results. \
+Returns immediately with {scan_id, target, status: \"queued\"}. \
+Use get_results_dalfox to poll for results until status is done/error/cancelled. \
 Scans for reflected, DOM-based, and stored XSS using parameter analysis, \
 payload mutation, and AST-based JavaScript verification. \
 Supports custom headers, cookies, POST data, and encoding strategies. \
-Results include finding type (V=Verified, R=Reflected, A=AST-detected), \
-severity, CWE, payload, and evidence."
+Final results (via get_results_dalfox) include finding type \
+(V=Verified, R=Reflected, A=AST-detected), severity, CWE, payload, and evidence."
     )]
     async fn scan_with_dalfox(
         &self,
@@ -453,7 +454,7 @@ severity, CWE, payload, and evidence."
         }
         if !(target.starts_with("http://") || target.starts_with("https://")) {
             return Err(ErrorData::invalid_params(
-                "target must start with http:// or https://",
+                "target must start with http:// or https:// (example: \"https://example.com/page?q=test\")",
                 None,
             ));
         }
@@ -608,6 +609,7 @@ severity, CWE, payload, and evidence."
 
         let out = serde_json::json!({
             "scan_id": scan_id,
+            "target": target,
             "status": JobStatus::Queued
         });
         Ok(CallToolResult::success(vec![Content::text(
@@ -619,14 +621,15 @@ severity, CWE, payload, and evidence."
     #[tool(
         name = "get_results_dalfox",
         description = "Poll scan status and retrieve results by scan_id. \
-Returns status (queued|running|done|error|cancelled) and, when done, an array of findings. \
-Each finding includes: type (V=Verified, A=AST-detected, R=Reflected), \
-type_description (human-readable explanation), inject_type, method, param, \
-payload, evidence, cwe, severity, and message_str. \
+Returns {scan_id, target, status, results, progress}. \
+Status is one of: queued, running, done, error, cancelled. \
+When done, results is an array of findings. Each finding includes: type \
+(V=Verified, A=AST-detected, R=Reflected), type_description, inject_type, \
+method, param, payload, evidence, cwe, severity, and message_str. \
 When status is 'error', includes error_message explaining the failure reason. \
-When running, done, or cancelled, includes progress object with: params_total, params_tested, \
-requests_sent, findings_so_far, estimated_completion_pct (0-100), and \
-suggested_poll_interval_ms (recommended delay before next poll; 0 when done/cancelled). \
+When running/done/cancelled, includes progress: {params_total, params_tested, \
+requests_sent, findings_so_far, estimated_completion_pct (0-100), \
+suggested_poll_interval_ms (recommended delay before next poll; 0 when done/cancelled)}. \
 Call this repeatedly until status is 'done', 'error', or 'cancelled'."
     )]
     async fn get_results_dalfox(
@@ -709,7 +712,8 @@ Call this repeatedly until status is 'done', 'error', or 'cancelled'."
         name = "list_scans_dalfox",
         description = "List all tracked scans and their statuses. \
 Optionally filter by status (queued, running, done, error, cancelled). \
-Returns an array of {scan_id, status, result_count} objects."
+Returns {total, scans} where each scan has: scan_id, target (original URL), \
+status, and result_count."
     )]
     async fn list_scans_dalfox(
         &self,
@@ -756,10 +760,11 @@ Returns an array of {scan_id, status, result_count} objects."
     #[tool(
         name = "preflight_dalfox",
         description = "Analyze a target URL without sending attack payloads. \
-Performs parameter discovery and mining, then returns: discovered parameters, \
-estimated request count, and target metadata. Use this before scan_with_dalfox \
-to understand the scan's impact (request volume, parameter count) and verify \
-the target is reachable. Returns results synchronously (no polling needed)."
+Performs parameter discovery and mining synchronously (no polling needed). \
+Returns {target, reachable (bool), method, params_discovered (count), \
+estimated_total_requests (int), params: [{name, location, estimated_requests}]}. \
+If unreachable, returns reachable=false with error_code. \
+Use before scan_with_dalfox to estimate scan impact and verify reachability."
     )]
     async fn preflight_dalfox(
         &self,
@@ -768,13 +773,13 @@ the target is reachable. Returns results synchronously (no polling needed)."
         let target_url = params.target.trim().to_string();
         if target_url.is_empty() {
             return Err(ErrorData::invalid_params(
-                "missing required field 'target'",
+                "missing required field 'target' (example: {\"target\":\"https://example.com\"})",
                 None,
             ));
         }
         if !(target_url.starts_with("http://") || target_url.starts_with("https://")) {
             return Err(ErrorData::invalid_params(
-                "target must start with http:// or https://",
+                "target must start with http:// or https:// (example: \"https://example.com/page?q=test\")",
                 None,
             ));
         }
@@ -807,7 +812,7 @@ the target is reachable. Returns results synchronously (no polling needed)."
             }
             Err(_) => {
                 return Err(ErrorData::invalid_params(
-                    "failed to parse target URL",
+                    "failed to parse target URL — must be a valid URL with scheme and host (example: \"https://example.com/path?q=test\")",
                     None,
                 ));
             }
@@ -942,9 +947,9 @@ the target is reachable. Returns results synchronously (no polling needed)."
     /// Cancel a queued or running scan.
     #[tool(
         name = "cancel_scan_dalfox",
-        description = "Cancel a scan by scan_id. Signals the running scan to stop \
-and returns the previous status. For running scans, the background task will \
-stop at the next cancellation checkpoint (typically within seconds). \
+        description = "Cancel a scan by scan_id. Returns {scan_id, target, cancelled: true, \
+previous_status}. For running scans, the background task stops at the next \
+cancellation checkpoint (typically within seconds). \
 The job remains in the list with status 'cancelled' so partial results can \
 still be retrieved via get_results_dalfox."
     )]
@@ -970,6 +975,7 @@ still be retrieved via get_results_dalfox."
                 }
                 let out = serde_json::json!({
                     "scan_id": pid,
+                    "target": job.target_url,
                     "cancelled": true,
                     "previous_status": previous_status
                 });
