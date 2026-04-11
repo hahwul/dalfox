@@ -72,6 +72,8 @@ struct Job {
     cancelled: Arc<std::sync::atomic::AtomicBool>,
     /// Error message stored when the scan fails (status == Error).
     error_message: Option<String>,
+    /// The original target URL submitted for scanning.
+    target_url: String,
 }
 
 /// MCP handler state.
@@ -470,6 +472,7 @@ severity, CWE, payload, and evidence."
                     progress: JobProgress::default(),
                     cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     error_message: None,
+                    target_url: target.clone(),
                 },
             );
         }
@@ -643,6 +646,7 @@ Call this repeatedly until status is 'done', 'error', or 'cancelled'."
             Some(job) => {
                 let mut out = serde_json::json!({
                     "scan_id": pid,
+                    "target": job.target_url,
                     "status": job.status,
                     "results": job.results
                 });
@@ -732,6 +736,7 @@ Returns an array of {scan_id, status, result_count} objects."
             .map(|(id, job)| {
                 serde_json::json!({
                     "scan_id": id,
+                    "target": job.target_url,
                     "status": job.status,
                     "result_count": job.results.as_ref().map(|r| r.len()).unwrap_or(0)
                 })
@@ -1186,6 +1191,7 @@ mod tests {
                     progress: JobProgress::default(),
                     cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     error_message: None,
+                    target_url: String::new(),
                 },
             );
         }
@@ -1323,6 +1329,7 @@ mod tests {
                     progress: JobProgress::default(),
                     cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     error_message: None,
+                    target_url: "https://example.com/done".to_string(),
                 },
             );
             jobs.insert(
@@ -1335,6 +1342,7 @@ mod tests {
                     progress: JobProgress::default(),
                     cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     error_message: None,
+                    target_url: "https://example.com/queued".to_string(),
                 },
             );
         }
@@ -1493,6 +1501,7 @@ mod tests {
                     progress,
                     cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     error_message: None,
+                    target_url: String::new(),
                 },
             );
         }
@@ -1533,6 +1542,7 @@ mod tests {
                     progress,
                     cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     error_message: None,
+                    target_url: String::new(),
                 },
             );
         }

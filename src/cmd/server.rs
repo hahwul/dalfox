@@ -117,6 +117,8 @@ struct Job {
     progress: JobProgress,
     cancelled: Arc<std::sync::atomic::AtomicBool>,
     error_message: Option<String>,
+    /// The original target URL submitted for scanning.
+    target_url: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -152,10 +154,26 @@ struct ScanOptions {
     include_response: Option<bool>,
     /// Webhook URL to POST scan results to upon completion.
     callback_url: Option<String>,
+    /// Specific parameters to test. Supports location hints via "name:location" syntax.
+    param: Option<Vec<String>>,
+    /// HTTP/SOCKS proxy URL.
+    proxy: Option<String>,
+    /// Follow HTTP redirects (3xx).
+    follow_redirects: Option<bool>,
+    /// Skip parameter mining (DOM and dictionary-based discovery).
+    skip_mining: Option<bool>,
+    /// Skip initial parameter discovery from HTML.
+    skip_discovery: Option<bool>,
+    /// Enable deep scan mode (test all payloads even after finding XSS).
+    deep_scan: Option<bool>,
+    /// Skip AST-based JavaScript analysis.
+    skip_ast_analysis: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize)]
 struct ResultPayload {
+    /// The original target URL submitted for scanning.
+    target: String,
     status: JobStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     results: Option<Vec<SanitizedResult>>,
@@ -172,6 +190,8 @@ struct ProgressPayload {
     requests_sent: u64,
     findings_so_far: u64,
     estimated_completion_pct: u32,
+    /// Recommended delay (ms) before next poll; 0 when done/cancelled.
+    suggested_poll_interval_ms: u64,
 }
 
 fn check_api_key(state: &AppState, headers: &HeaderMap) -> bool {
@@ -380,7 +400,7 @@ async fn run_scan_job(
         limit_result_type: "all".to_string(),
         only_poc: vec![],
 
-        param: vec![],
+        param: opts.param.clone().unwrap_or_default(),
         data: opts.data.clone(),
         headers: opts.header.clone().unwrap_or_default(),
         cookies: {
@@ -403,22 +423,22 @@ async fn run_scan_job(
         out_of_scope_file: None,
 
         only_discovery: false,
-        skip_discovery: false,
+        skip_discovery: opts.skip_discovery.unwrap_or(false),
         skip_reflection_header: false,
         skip_reflection_cookie: false,
         skip_reflection_path: false,
 
         mining_dict_word: None,
-        skip_mining: false,
-        skip_mining_dict: false,
-        skip_mining_dom: false,
+        skip_mining: opts.skip_mining.unwrap_or(false),
+        skip_mining_dict: opts.skip_mining.unwrap_or(false),
+        skip_mining_dom: opts.skip_mining.unwrap_or(false),
 
         timeout: opts
             .timeout
             .unwrap_or(crate::cmd::scan::DEFAULT_TIMEOUT_SECS),
         delay: opts.delay.unwrap_or(0),
-        proxy: None,
-        follow_redirects: false,
+        proxy: opts.proxy.clone(),
+        follow_redirects: opts.follow_redirects.unwrap_or(false),
         ignore_return: vec![],
 
         workers: opts.worker.unwrap_or(50),
@@ -439,11 +459,11 @@ async fn run_scan_job(
         custom_alert_type: "none".to_string(),
 
         skip_xss_scanning: false,
-        deep_scan: false,
+        deep_scan: opts.deep_scan.unwrap_or(false),
         sxss: false,
         sxss_url: None,
         sxss_method: "GET".to_string(),
-        skip_ast_analysis: false,
+        skip_ast_analysis: opts.skip_ast_analysis.unwrap_or(false),
         hpp: false,
         waf_bypass: "auto".to_string(),
         skip_waf_probe: false,
@@ -669,6 +689,7 @@ async fn start_scan_handler(
                 progress: JobProgress::default(),
                 cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 error_message: None,
+                target_url: req.url.clone(),
             },
         );
     }
@@ -736,17 +757,28 @@ async fn get_result_handler(
                 } else {
                     0
                 };
+                let suggested_poll_interval_ms: u64 = if matches!(j.status, JobStatus::Done | JobStatus::Cancelled) {
+                    0
+                } else if estimated_completion_pct > 80 {
+                    1000
+                } else if estimated_completion_pct > 10 {
+                    3000
+                } else {
+                    2000
+                };
                 Some(ProgressPayload {
                     params_total,
                     params_tested,
                     requests_sent: j.progress.requests_sent.load(std::sync::atomic::Ordering::Relaxed),
                     findings_so_far: j.progress.findings_so_far.load(std::sync::atomic::Ordering::Relaxed),
                     estimated_completion_pct,
+                    suggested_poll_interval_ms,
                 })
             } else {
                 None
             };
             let payload = ResultPayload {
+                target: j.target_url.clone(),
                 status: j.status.clone(),
                 results: j.results.clone(),
                 error_message: j.error_message.clone(),
@@ -846,6 +878,34 @@ async fn get_scan_handler(
         .map(|s| s == "true")
         .unwrap_or(false);
 
+    let param_list: Option<Vec<String>> = params.get("param").map(|s| {
+        s.split(',')
+            .map(|x| x.trim().to_string())
+            .filter(|x| !x.is_empty())
+            .collect()
+    });
+    let proxy = params.get("proxy").cloned();
+    let follow_redirects = params
+        .get("follow_redirects")
+        .map(|s| s == "true")
+        .unwrap_or(false);
+    let skip_mining = params
+        .get("skip_mining")
+        .map(|s| s == "true")
+        .unwrap_or(false);
+    let skip_discovery = params
+        .get("skip_discovery")
+        .map(|s| s == "true")
+        .unwrap_or(false);
+    let deep_scan = params
+        .get("deep_scan")
+        .map(|s| s == "true")
+        .unwrap_or(false);
+    let skip_ast_analysis = params
+        .get("skip_ast_analysis")
+        .map(|s| s == "true")
+        .unwrap_or(false);
+
     let opts = ScanOptions {
         cookie,
         worker,
@@ -872,6 +932,13 @@ async fn get_scan_handler(
         include_request: Some(include_request),
         include_response: Some(include_response),
         callback_url: params.get("callback_url").cloned(),
+        param: param_list,
+        proxy,
+        follow_redirects: Some(follow_redirects),
+        skip_mining: Some(skip_mining),
+        skip_discovery: Some(skip_discovery),
+        deep_scan: Some(deep_scan),
+        skip_ast_analysis: Some(skip_ast_analysis),
     };
 
     let callback_url = opts.callback_url.clone();
@@ -889,6 +956,7 @@ async fn get_scan_handler(
                 progress: JobProgress::default(),
                 cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 error_message: None,
+                target_url: url.clone(),
             },
         );
     }
@@ -1006,6 +1074,7 @@ async fn list_scans_handler(
         .map(|(id, job)| {
             serde_json::json!({
                 "scan_id": id,
+                "target": job.target_url,
                 "status": job.status,
                 "result_count": job.results.as_ref().map(|r| r.len()).unwrap_or(0)
             })
@@ -1538,6 +1607,7 @@ mod tests {
                 progress: JobProgress::default(),
                 cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 error_message: None,
+                target_url: String::new(),
                 },
             );
         }
@@ -1663,6 +1733,7 @@ mod tests {
                 progress: JobProgress::default(),
                 cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 error_message: None,
+                target_url: String::new(),
                 },
             );
         }
@@ -1748,6 +1819,7 @@ mod tests {
                 progress: JobProgress::default(),
                 cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 error_message: None,
+                target_url: String::new(),
                 },
             );
         }
@@ -1828,6 +1900,7 @@ mod tests {
                 progress: JobProgress::default(),
                 cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 error_message: None,
+                target_url: String::new(),
                 },
             );
         }
@@ -1993,6 +2066,7 @@ mod tests {
                 progress: JobProgress::default(),
                 cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 error_message: None,
+                target_url: String::new(),
                 },
             );
         }
@@ -2067,6 +2141,7 @@ mod tests {
                 progress: JobProgress::default(),
                 cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 error_message: None,
+                target_url: String::new(),
                 },
             );
         }
@@ -2091,6 +2166,13 @@ mod tests {
             include_request: Some(false),
             include_response: Some(false),
             callback_url: None,
+            param: None,
+            proxy: None,
+            follow_redirects: None,
+            skip_mining: None,
+            skip_discovery: None,
+            deep_scan: None,
+            skip_ast_analysis: None,
         };
 
         let run = tokio::time::timeout(
@@ -2130,6 +2212,7 @@ mod tests {
                 progress: JobProgress::default(),
                 cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 error_message: None,
+                target_url: String::new(),
                 },
             );
         }
@@ -2232,6 +2315,7 @@ mod tests {
                     progress: JobProgress::default(),
                     cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     error_message: None,
+                    target_url: String::new(),
                 },
             );
         }
@@ -2302,6 +2386,7 @@ mod tests {
                         progress: JobProgress::default(),
                         cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                         error_message: None,
+                        target_url: String::new(),
                     },
                 );
             }
@@ -2339,6 +2424,7 @@ mod tests {
                         progress: JobProgress::default(),
                         cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                         error_message: None,
+                        target_url: String::new(),
                     },
                 );
             }
