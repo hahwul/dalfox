@@ -64,9 +64,25 @@ async fn main() {
     let cli = Cli::parse();
     // Set global debug toggle for downstream modules
     DEBUG.store(cli.debug, std::sync::atomic::Ordering::Relaxed);
-    // Skip banner for MCP subcommand to keep stdout clean for JSON-RPC
+    // Skip banner for MCP subcommand (stdout is JSON-RPC) and for
+    // machine-readable output formats (json, jsonl, sarif, toml) to keep stdout parseable.
     let is_mcp = matches!(cli.command, Some(Commands::Mcp));
-    if !is_mcp {
+    let is_machine_format = {
+        let scan_format = match &cli.command {
+            Some(Commands::Scan(args)) => Some(args.format.as_str()),
+            _ => None,
+        };
+        // Also check raw args for the default-scan path (no subcommand)
+        let raw_format = __args
+            .windows(2)
+            .find(|w| w[0] == "--format" || w[0] == "-f")
+            .map(|w| w[1].as_str());
+        matches!(
+            scan_format.or(raw_format),
+            Some("json" | "jsonl" | "sarif" | "toml")
+        )
+    };
+    if !is_mcp && !is_machine_format {
         utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
     }
 
@@ -284,7 +300,9 @@ async fn main() {
             args.include_response = true;
         }
 
-        utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
+        if !is_machine_format {
+            utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
+        }
         outcome = cmd::scan::run_scan(&args).await;
     }
 
