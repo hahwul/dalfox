@@ -1,6 +1,6 @@
 module github.com/hahwul/dalfox/v2
 
-go 1.25.0
+go 1.25.5
 
 require (
 	github.com/PuerkitoBio/goquery v1.12.0
@@ -11,7 +11,7 @@ require (
 	github.com/hahwul/volt v1.0.7
 	github.com/labstack/echo/v4 v4.15.1
 	github.com/logrusorgru/aurora v2.0.3+incompatible
-	github.com/mark3labs/mcp-go v0.48.0
+	github.com/mark3labs/mcp-go v0.49.0
 	github.com/olekukonko/tablewriter v1.1.4
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/cobra v1.10.1
