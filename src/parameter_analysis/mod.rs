@@ -458,7 +458,18 @@ pub async fn active_probe_param(
                     } else {
                         None
                     };
-                    let body_text = resp.text().await.ok();
+                    let body_text = match resp.text().await {
+                        Ok(body) => Some(body),
+                        Err(e) => {
+                            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                                eprintln!(
+                                    "[DBG] discovery response body read failed: {}",
+                                    e
+                                );
+                            }
+                            None
+                        }
+                    };
                     // Combine redirect Location and body for reflection checking
                     let combined = match (&redirect_text, &body_text) {
                         (Some(loc), Some(body)) => format!("{}{}", loc, body),

@@ -592,7 +592,18 @@ async fn fetch_injection_response_with_client(
                 // so reflection detection can find it
                 return Some(location.to_string());
             }
-            resp.text().await.ok()
+            match resp.text().await {
+                Ok(body) => Some(body),
+                Err(e) => {
+                    if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                        eprintln!(
+                            "[DBG] reflection response body read failed (param={}): {}",
+                            param.name, e
+                        );
+                    }
+                    None
+                }
+            }
         } else {
             None
         }
