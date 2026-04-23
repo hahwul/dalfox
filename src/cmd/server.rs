@@ -113,6 +113,20 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
+/// Parse a lowercase status string back into `JobStatus`. Returns `None` for
+/// unknown values so callers can surface a precise error instead of silently
+/// matching nothing.
+fn parse_job_status(s: &str) -> Option<JobStatus> {
+    match s {
+        "queued" => Some(JobStatus::Queued),
+        "running" => Some(JobStatus::Running),
+        "done" => Some(JobStatus::Done),
+        "error" => Some(JobStatus::Error),
+        "cancelled" => Some(JobStatus::Cancelled),
+        _ => None,
+    }
+}
+
 /// Progress counters shared with a running scan task.
 #[derive(Clone, Default)]
 struct JobProgress {
@@ -1276,17 +1290,63 @@ async fn list_scans_handler(
 
     purge_expired_jobs(&state).await;
 
-    let filter_status = params.get("status").map(|s| s.trim().to_lowercase());
-    let jobs = state.jobs.lock().await;
-    let entries: Vec<serde_json::Value> = jobs
-        .iter()
-        .filter(|(_, job)| {
-            if let Some(ref f) = filter_status {
-                job.status.to_string() == *f
-            } else {
-                true
+    let filter_status: Option<JobStatus> = match params
+        .get("status")
+        .map(|s| s.trim().to_lowercase())
+        .filter(|s| !s.is_empty())
+    {
+        Some(ref s) => match parse_job_status(s) {
+            Some(js) => Some(js),
+            None => {
+                let resp = ApiResponse::<serde_json::Value> {
+                    code: 400,
+                    msg: format!(
+                        "invalid status filter '{}' — must be one of: queued, running, done, error, cancelled",
+                        s
+                    ),
+                    data: None,
+                };
+                return make_api_response(
+                    &state,
+                    &headers,
+                    &params,
+                    StatusCode::BAD_REQUEST,
+                    &resp,
+                );
             }
-        })
+        },
+        None => None,
+    };
+
+    // Optional pagination. offset defaults to 0, limit == 0 means return all.
+    let offset: usize = params
+        .get("offset")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    let limit: usize = params
+        .get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+
+    let jobs = state.jobs.lock().await;
+
+    // Collect matching entries with their sort key, then apply offset/limit
+    // deterministically by queued_at_ms descending (newest first).
+    let mut matching: Vec<(&String, &Job)> = jobs
+        .iter()
+        .filter(|(_, job)| filter_status.as_ref().is_none_or(|f| &job.status == f))
+        .collect();
+    matching.sort_by(|a, b| b.1.queued_at_ms.cmp(&a.1.queued_at_ms));
+
+    let total = matching.len();
+    let start = offset.min(total);
+    let end = if limit == 0 {
+        total
+    } else {
+        start.saturating_add(limit).min(total)
+    };
+    let entries: Vec<serde_json::Value> = matching[start..end]
+        .iter()
         .map(|(id, job)| {
             serde_json::json!({
                 "scan_id": id,
@@ -1305,8 +1365,14 @@ async fn list_scans_handler(
         code: 200,
         msg: "ok".to_string(),
         data: Some(serde_json::json!({
-            "total": entries.len(),
-            "scans": entries
+            "total": total,
+            "scans": entries,
+            "pagination": {
+                "offset": offset,
+                "limit": limit,
+                "returned": entries.len(),
+                "has_more": end < total,
+            }
         })),
     };
     make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
@@ -1614,16 +1680,24 @@ pub async fn run_server(args: ServerArgs) {
             if item == "*" {
                 allow_all_origins = true;
             } else if let Some(pat) = item.strip_prefix("regex:") {
-                if let Ok(re) = regex::Regex::new(pat) {
-                    allowed_origin_regexes.push(re);
+                match regex::Regex::new(pat) {
+                    Ok(re) => allowed_origin_regexes.push(re),
+                    Err(e) => eprintln!(
+                        "[WRN] ignoring invalid allowed-origins regex '{}': {}",
+                        pat, e
+                    ),
                 }
             } else if item.contains('*') {
                 // Convert simple wildcard to regex
                 let mut pattern = regex::escape(item);
                 pattern = pattern.replace("\\*", ".*");
                 let anchored = format!("^{}$", pattern);
-                if let Ok(re) = regex::Regex::new(&anchored) {
-                    allowed_origin_regexes.push(re);
+                match regex::Regex::new(&anchored) {
+                    Ok(re) => allowed_origin_regexes.push(re),
+                    Err(e) => eprintln!(
+                        "[WRN] ignoring invalid allowed-origins wildcard '{}': {}",
+                        item, e
+                    ),
                 }
             }
         }
@@ -2887,6 +2961,87 @@ mod tests {
 
         let jobs = state.jobs.lock().await;
         assert!(jobs.contains_key("running-purge"), "non-terminal job must not be purged");
+    }
+
+    #[test]
+    fn test_parse_job_status_round_trip() {
+        for status in [
+            JobStatus::Queued,
+            JobStatus::Running,
+            JobStatus::Done,
+            JobStatus::Error,
+            JobStatus::Cancelled,
+        ] {
+            let s = status.to_string();
+            assert_eq!(parse_job_status(&s), Some(status));
+        }
+        assert_eq!(parse_job_status("unknown"), None);
+    }
+
+    #[tokio::test]
+    async fn test_list_scans_handler_rejects_invalid_status_filter() {
+        let state = make_state(None, None, false, false, "cb");
+        let mut params = Map::new();
+        params.insert("status".to_string(), "bogus".to_string());
+        let resp = list_scans_handler(State(state), HeaderMap::new(), Query(params))
+            .await
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = response_body_string(resp).await;
+        assert!(body.contains("invalid status filter"));
+    }
+
+    #[tokio::test]
+    async fn test_list_scans_handler_pagination_slices_and_reports_has_more() {
+        let state = make_state(None, None, false, false, "cb");
+        {
+            let mut jobs = state.jobs.lock().await;
+            // Insert 5 jobs with increasing queued_at_ms so sort order is
+            // deterministic for this test.
+            for i in 0..5 {
+                let mut job = test_job(JobStatus::Done, None, &format!("http://t{}", i));
+                job.queued_at_ms = 1_000_000 + i as i64;
+                jobs.insert(format!("job-{}", i), job);
+            }
+        }
+
+        let mut params = Map::new();
+        params.insert("offset".to_string(), "1".to_string());
+        params.insert("limit".to_string(), "2".to_string());
+        let resp = list_scans_handler(State(state), HeaderMap::new(), Query(params))
+            .await
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = response_body_string(resp).await;
+        let parsed: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(parsed["data"]["total"], 5);
+        assert_eq!(parsed["data"]["scans"].as_array().unwrap().len(), 2);
+        let pag = &parsed["data"]["pagination"];
+        assert_eq!(pag["offset"], 1);
+        assert_eq!(pag["limit"], 2);
+        assert_eq!(pag["returned"], 2);
+        assert_eq!(pag["has_more"], true);
+    }
+
+    #[tokio::test]
+    async fn test_list_scans_handler_zero_limit_returns_all() {
+        let state = make_state(None, None, false, false, "cb");
+        {
+            let mut jobs = state.jobs.lock().await;
+            for i in 0..3 {
+                jobs.insert(
+                    format!("job-{}", i),
+                    test_job(JobStatus::Done, None, "http://example.com"),
+                );
+            }
+        }
+        let resp = list_scans_handler(State(state), HeaderMap::new(), Query(Map::new()))
+            .await
+            .into_response();
+        let body = response_body_string(resp).await;
+        let parsed: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(parsed["data"]["scans"].as_array().unwrap().len(), 3);
+        assert_eq!(parsed["data"]["pagination"]["has_more"], false);
     }
 
     #[tokio::test]
