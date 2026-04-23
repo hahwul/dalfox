@@ -112,6 +112,11 @@ impl DalfoxMcp {
         let (progress, cancel_flag) = {
             let mut jobs = self.jobs.lock().await;
             if let Some(j) = jobs.get_mut(&scan_id) {
+                if j.status == JobStatus::Cancelled
+                    || j.cancelled.load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    return;
+                }
                 j.status = JobStatus::Running;
                 (j.progress.clone(), j.cancelled.clone())
             } else {

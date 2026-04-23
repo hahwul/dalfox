@@ -157,7 +157,10 @@ async fn test_run_scan_writes_json_output_for_empty_results() {
     run_scan(&args).await;
 
     let content = std::fs::read_to_string(&output_path).expect("output should exist");
-    assert_eq!(content.trim(), "[]");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&content).expect("output should be valid JSON");
+    assert_eq!(parsed["findings"], serde_json::json!([]));
+    assert_eq!(parsed["meta"]["findings_count"], 0);
     let _ = std::fs::remove_file(&output_path);
 }
 

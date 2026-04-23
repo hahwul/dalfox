@@ -350,8 +350,8 @@ mod tests {
 
     #[test]
     fn test_denied_content_types() {
-        assert!(!is_allowed_content_type("text/plain"));
         assert!(!is_allowed_content_type("image/png"));
+        assert!(!is_allowed_content_type("application/octet-stream"));
     }
 
     #[test]

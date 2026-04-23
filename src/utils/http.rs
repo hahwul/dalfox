@@ -471,10 +471,15 @@ mod tests {
 
     #[test]
     fn test_is_xss_scannable_content_type_deny_list() {
-        assert!(!is_xss_scannable_content_type("text/plain"));
         assert!(!is_xss_scannable_content_type("image/png"));
         assert!(!is_xss_scannable_content_type("application/octet-stream"));
         assert!(!is_xss_scannable_content_type("invalid"));
+    }
+
+    #[test]
+    fn test_is_xss_scannable_content_type_text_plain_allowed() {
+        assert!(is_xss_scannable_content_type("text/plain"));
+        assert!(is_xss_scannable_content_type("text/plain; charset=utf-8"));
     }
 
     #[test]
