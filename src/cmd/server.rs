@@ -489,6 +489,7 @@ async fn run_scan_job(
         sxss: false,
         sxss_url: None,
         sxss_method: "GET".to_string(),
+        sxss_retries: 3,
         skip_ast_analysis: opts.skip_ast_analysis.unwrap_or(false),
         hpp: false,
         waf_bypass: "auto".to_string(),

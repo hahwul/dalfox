@@ -294,6 +294,7 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            sxss_retries: 3,
             skip_ast_analysis: false,
             hpp: false,
             waf_bypass: "auto".to_string(),
@@ -1168,6 +1169,12 @@ pub struct ScanArgs {
     pub sxss_method: String,
 
     #[clap(help_heading = "XSS SCANNING")]
+    /// Number of times to re-check the Stored XSS URL to handle slow
+    /// session/content propagation. Each retry waits 500ms * attempt_index.
+    #[arg(long, default_value_t = 3)]
+    pub sxss_retries: u32,
+
+    #[clap(help_heading = "XSS SCANNING")]
     /// Skip AST-based DOM XSS detection (analyzes JavaScript in responses)
     #[arg(long)]
     pub skip_ast_analysis: bool,
@@ -1286,6 +1293,7 @@ impl ScanArgs {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            sxss_retries: 3,
             skip_ast_analysis: true,
             hpp: false,
             waf_bypass: "auto".to_string(),

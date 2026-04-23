@@ -531,9 +531,10 @@ async fn fetch_injection_response_with_client(
     // For Stored XSS, check reflection on auto-resolved URLs with retry logic
     if args.sxss {
         let check_urls = resolve_sxss_check_urls(target, param, args);
+        let retries = args.sxss_retries.max(1) as u64;
         for sxss_url in &check_urls {
-            // Retry up to 3 times with delay to handle session propagation
-            for attempt in 0u64..3 {
+            // Retry with delay to handle session / content propagation
+            for attempt in 0u64..retries {
                 if attempt > 0 {
                     sleep(Duration::from_millis(500 * attempt)).await;
                 }
@@ -809,6 +810,7 @@ mod tests {
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
+            sxss_retries: 3,
             skip_ast_analysis: false,
             hpp: false,
             waf_bypass: "auto".to_string(),
