@@ -1,0 +1,50 @@
+{% include "header.html" %}
+  <div class="landing">
+    {{ content }}
+  </div>
+  <div class="search-overlay" id="searchOverlay" onclick="if(event.target===this)closeSearch()">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="Search documentation..." autocomplete="off">
+        <kbd onclick="closeSearch()">ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">hahwul</a></span>
+        <span style="color:var(--border-light)">·</span>
+        <span>Released under the MIT License</span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">Issues</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contribute</a>
+      </div>
+    </div>
+  </footer>
+  <script>
+    (function(){
+      var btn = document.querySelector('.hero-install-copy');
+      if (!btn) return;
+      btn.addEventListener('click', function(){
+        var code = document.querySelector('.hero-install code');
+        if (!code) return;
+        navigator.clipboard.writeText(code.textContent.trim()).then(function(){
+          btn.classList.add('copied');
+          var prev = btn.textContent;
+          btn.textContent = 'copied';
+          setTimeout(function(){ btn.classList.remove('copied'); btn.textContent = prev; }, 1500);
+        });
+      });
+    })();
+  </script>
+  {{ highlight_js }}
+  <script src="{{ base_url }}/js/search.js"></script>
+  {{ auto_includes_js }}
+</body>
+</html>

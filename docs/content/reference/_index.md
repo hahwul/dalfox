@@ -1,10 +1,10 @@
 +++
 title = "Reference"
-description = "Technical reference documentation"
-weight = 4
-sort_by = "weight"
-
-[extra]
 +++
 
-..
+Technical reference documentation for Hwaro.
+
+## Contents
+
+- **CLI Commands** - All available command-line commands
+- **Configuration** - Complete configuration options reference

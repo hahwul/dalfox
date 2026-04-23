@@ -1,0 +1,9 @@
+{% include "header.html" %}
+  <div class="docs-layout">
+    <main class="docs-main" style="margin-left:0;max-width:1000px">
+      <article class="docs-article">
+        <h1>{{ page.title | e }}</h1>
+        <p>Browse all terms in this taxonomy.</p>
+        {{ content }}
+      </article>
+{% include "footer.html" %}

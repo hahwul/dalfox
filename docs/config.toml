@@ -1,66 +1,353 @@
-# The URL the site will be built for
-base_url = "https://dalfox.hahwul.com"
+# =============================================================================
+# Site Configuration
+# =============================================================================
 
 title = "Dalfox"
-theme = "goyo"
-description = "Powerful open-source XSS scanner and utility focused on automation"
+description = "Powerful open-source XSS scanner and automation utility — reflected, stored, DOM-based with AST-level verification."
+base_url = "http://localhost:3000"
 
-# Whether to automatically compile all Sass files in the sass directory
-compile_sass = false
+# =============================================================================
+# Multilingual (Optional)
+# =============================================================================
+# Enable multilingual routing by defining languages and a default language.
+# Then add language variants using filename suffixes:
+# - content/about.md -> /about/
+# - content/about.ko.md -> /ko/about/
+# - content/about/index.ko.md -> /ko/about/
 
-# Whether to build a search index to be used later on by a JavaScript library
-build_search_index = true
+# default_language = "en"
+#
+# [languages.en]
+# language_name = "English"
+# weight = 1
+#
+# [languages.ko]
+# language_name = "한국어"
+# weight = 2
 
-[markdown]
-# Whether to do syntax highlighting
-# Theme can be customised by setting the `highlight_theme` variable to a theme supported by Zola
-highlight_code = true
-bottom_footnotes = true
-highlight_theme = "ayu-mirage"
+# =============================================================================
+# Plugins
+# =============================================================================
+# Configure content processors and extensions
 
-[extra]
-badge = "v3.0.0"
-default_thumbnail = "images/preview.jpg"
-footer_html = "<div style='display: flex; align-items: center; justify-content: center; gap: 16px; flex-wrap: wrap;'><a href='https://www.hahwul.com' target='_blank' rel='noopener noreferrer' style='display: inline-flex; align-items: center;'><img src='https://www.hahwul.com/images/logo-gray.png' alt='HAHWUL' style='height: 30px' /></a><span style='opacity: 0.6;'>•</span><span>Powered by <a href='https://www.getzola.org' class='font-medium text-base-content/70 hover:text-base-content transition-colors duration-200'>Zola</a> and <a href='https://github.com/hahwul/goyo' class='font-medium text-base-content/70 hover:text-base-content transition-colors duration-200'>Goyo</a></span></div>"
+[plugins]
+processors = ["markdown"]
 
-# lang_aliases = { en = "English", ko = "한국어" }
+# =============================================================================
+# Content Files
+# =============================================================================
+# Publish non-Markdown files from `content/` into the output directory.
+# Example: content/about/profile.jpg -> /about/profile.jpg
 
-nav = [
-    { name = "Documents", url = "/getting_started/installation", type = "url", icon = "fa-solid fa-book" },
-    { name = "GitHub", url = "https://github.com/hahwul/dalfox", type = "url", icon = "fa-brands fa-github" },
-    { name = "Links", type = "dropdown", icon = "fa-solid fa-link", members = [
-        { name = "Crates", url = "https://crates.io/crates/dalfox", type = "url", icon = "fa-solid fa-box" },
-        { name = "Creator Blog", url = "https://www.hahwul.com", type = "url", icon = "fa-solid fa-fire-flame-curved" },
-    ] },
+[content.files]
+allow_extensions = ["jpg", "jpeg", "png", "gif", "svg", "webp"]
+# disallow_extensions = ["psd"]
+# disallow_paths = ["private/**", "**/_*"]
+
+# =============================================================================
+# Syntax Highlighting
+# =============================================================================
+# Code block syntax highlighting using Highlight.js
+
+[highlight]
+enabled = true
+theme = "github-dark"    # Dark theme for syntax highlighting
+use_cdn = true            # Set to false to use local assets
+
+# =============================================================================
+# OpenGraph & Twitter Cards
+# =============================================================================
+# Default meta tags for social sharing
+# Page-level settings (front matter) override these defaults
+
+[og]
+default_image = "/images/og-default.png"   # Default image for social sharing
+type = "article"                           # OpenGraph type (website, article, etc.)
+twitter_card = "summary_large_image"       # Twitter card type (summary, summary_large_image)
+# twitter_site = "@yourusername"           # Twitter @username for the site
+# twitter_creator = "@authorusername"      # Twitter @username for content creator
+# fb_app_id = "your_fb_app_id"             # Facebook App ID (optional)
+
+# =============================================================================
+# Search Configuration
+# =============================================================================
+# Generates a search index for client-side search (e.g., Fuse.js)
+
+[search]
+enabled = true
+format = "fuse_json"
+fields = ["title", "content"]
+filename = "search.json"
+exclude = []              # Exclude paths or patterns from search index
+
+# =============================================================================
+# Pagination
+# =============================================================================
+# Enable pagination for section listing pages (e.g., /posts/, /blog/).
+# You can override per section in `_index.md` with:
+# - paginate = 10
+# - pagination_enabled = true
+# - sort_by = "date" | "title" | "weight"
+# - reverse = false
+
+[pagination]
+enabled = false
+per_page = 10
+
+# =============================================================================
+# Series
+# =============================================================================
+# Group posts into ordered series for sequential reading.
+# Use `series = "Series Name"` in front matter to assign posts.
+# Use `series_weight = 1` to control ordering within a series.
+
+[series]
+enabled = true
+
+# =============================================================================
+# Related Posts
+# =============================================================================
+# Recommend related content based on shared taxonomy terms
+
+[related]
+enabled = true
+limit = 5
+taxonomies = ["tags"]
+
+# =============================================================================
+# Taxonomies
+# =============================================================================
+# Define content classification systems (tags, categories, etc.)
+
+[[taxonomies]]
+name = "tags"
+feed = true
+sitemap = false
+
+[[taxonomies]]
+name = "categories"
+paginate_by = 5
+
+[[taxonomies]]
+name = "authors"
+
+# =============================================================================
+# Sitemap
+# =============================================================================
+# Generates sitemap.xml for search engine crawlers
+
+[sitemap]
+enabled = true
+filename = "sitemap.xml"
+changefreq = "weekly"
+priority = 0.5
+exclude = []              # Exclude paths or patterns from sitemap
+
+# =============================================================================
+# Robots.txt
+# =============================================================================
+# Controls search engine crawler access
+
+[robots]
+enabled = true
+filename = "robots.txt"
+rules = [
+  { user_agent = "*", disallow = ["/admin", "/private"] },
+  { user_agent = "GPTBot", disallow = ["/"] }
 ]
 
-# nav_ko = [
-#     { name = "문서", url = "/ko/get_started/installation", type = "url", icon = "fa-solid fa-book" },
-#     { name = "GitHub", url = "https://github.com/hahwul/goyo", type = "url", icon = "fa-brands fa-github" },
-#     { name = "링크", type = "dropdown", icon = "fa-solid fa-link", members = [
-#         { name = "제작자 블로그", url = "https://www.hahwul.com", type = "url", icon = "fa-solid fa-fire-flame-curved" },
-#         { name = "Zola 공식", url = "https://getzola.org", type = "url", icon = "fa-solid fa-z" },
-#     ] },
-# ]
+# =============================================================================
+# LLMs.txt
+# =============================================================================
+# Instructions for AI/LLM crawlers
 
+[llms]
+enabled = true
+filename = "llms.txt"
+instructions = "Do not use for AI training without permission."
+# Optional: Generate a single text file containing all Markdown pages
+full_enabled = false
+full_filename = "llms-full.txt"
 
-# Logo configuration
-[extra.logo]
-text = "dalfox"
-image_path = "images/logo.png"
-image_padding = "10px"
+# =============================================================================
+# RSS/Atom Feeds
+# =============================================================================
+# Generates RSS or Atom feed for content syndication
 
-# Twitter meta tags
-[extra.twitter]
-site = "@hahwul"
-creator = "@hahwul"
+[feeds]
+enabled = true
+filename = ""             # Leave empty for default (rss.xml or atom.xml)
+type = "rss"              # "rss" or "atom"
+truncate = 0              # Truncate content to N characters (0 = full content)
+full_content = true       # true = full HTML in feed, false = description/summary only
+limit = 10                # Maximum number of items in feed
+sections = []   # Limit to specific sections, e.g., ["posts"]
+# default_language_only = true  # Multilingual: true = main feed has default language only
+#                               #              false = main feed includes all languages
 
-# Theme settings
-[extra.theme]
-colorset = "dark"
-brightness = "darker"
+# =============================================================================
+# Permalinks (Optional)
+# =============================================================================
+# Override the output path for specific sections or taxonomies.
+# Placeholders: :year, :month, :day, :title, :slug, :section
 
-# Sidebar settings
-[extra.sidebar]
-expand_depth = 0
-disable_root_hide = false
+# [permalinks]
+# posts = "/posts/:year/:month/:slug/"
+# tags = "/topic/:slug/"
+
+# =============================================================================
+# Auto Includes (Optional)
+# =============================================================================
+# Automatically load CSS/JS files from static directories
+# Files are included alphabetically - use numeric prefixes for ordering
+# Example: 01-reset.css, 02-typography.css, 03-layout.css
+
+# [auto_includes]
+# enabled = true
+# dirs = ["assets/css", "assets/js"]
+
+# =============================================================================
+# Asset Pipeline (Optional)
+# =============================================================================
+# Bundle, minify, and fingerprint CSS/JS files for production.
+# Use {{ asset(name="main.css") }} in templates to resolve paths.
+
+# [assets]
+# enabled = true
+# minify = true
+# fingerprint = true
+# source_dir = "static"
+# output_dir = "assets"
+
+# [[assets.bundles]]
+# name = "main.css"
+# files = ["css/reset.css", "css/style.css"]
+
+# [[assets.bundles]]
+# name = "app.js"
+# files = ["js/util.js", "js/app.js"]
+
+# =============================================================================
+# Markdown Configuration (Optional)
+# =============================================================================
+# Configure markdown parser behavior
+
+[markdown]
+safe = false          # If true, raw HTML in markdown will be stripped (replaced by comments)
+lazy_loading = false  # If true, automatically add loading="lazy" to img tags
+emoji = false         # If true, convert emoji shortcodes (e.g. :smile:) to emoji characters
+
+# =============================================================================
+# Image Processing (Optional)
+# =============================================================================
+# Automatic image resizing and LQIP (Low-Quality Image Placeholder) generation.
+# Uses vendored stb libraries — no external tools required.
+#
+# Use resize_image() in templates:
+#   {% set img = resize_image(path="/images/hero.jpg", width=1024) %}
+#   <img src="{{ img.url }}"
+#        style="background-image: url({{ img.lqip }}); background-size: cover;"
+#        loading="lazy">
+
+# [image_processing]
+# enabled = true
+# widths = [320, 640, 1024, 1280]
+# quality = 85
+#
+# [image_processing.lqip]
+# enabled = true
+# width = 32             # Placeholder width in pixels (8-128)
+# quality = 20           # JPEG quality for placeholder (1-100, lower = smaller)
+
+# =============================================================================
+# Build Hooks (Optional)
+# =============================================================================
+# Run custom shell commands before/after build process
+
+# [build]
+# hooks.pre = ["npm install", "python scripts/preprocess.py"]
+# hooks.post = ["npm run minify", "./scripts/deploy.sh"]
+
+# =============================================================================
+# PWA (Progressive Web App) (Optional)
+# =============================================================================
+# Generate manifest.json and service worker for offline access and installability
+
+# [pwa]
+# enabled = true
+# name = "My Site"
+# short_name = "Site"
+# theme_color = "#ffffff"
+# background_color = "#ffffff"
+# display = "standalone"
+# start_url = "/"
+# icons = ["static/icon-192.png", "static/icon-512.png"]
+# offline_page = "/offline.html"
+# precache_urls = ["/", "/about/"]
+
+# =============================================================================
+# AMP (Accelerated Mobile Pages) (Optional)
+# =============================================================================
+# Generate AMP-compliant versions of content pages
+
+# [amp]
+# enabled = true
+# path_prefix = "amp"        # Output under /amp/ prefix
+# sections = ["posts"]       # Limit to specific sections (empty = all)
+
+# =============================================================================
+# Auto OG Images (Optional)
+# =============================================================================
+# Auto-generate Open Graph preview images for social sharing
+# Images are created for pages without a custom `image` in front matter
+
+# [og.auto_image]
+# enabled = true
+# background = "#1a1a2e"
+# text_color = "#ffffff"
+# accent_color = "#e94560"
+# font_size = 48
+# logo = "static/logo.png"
+# logo_position = "bottom-left"  # bottom-left, bottom-right, top-left, top-right
+# output_dir = "og-images"
+# show_title = true
+# style = "default"              # default, dots, grid, diagonal, gradient, waves, minimal
+# pattern_opacity = 0.15
+# pattern_scale = 1.0
+# background_image = ""          # Background image file path (embedded as base64)
+# overlay_opacity = 0.5
+# format = "svg"                 # svg or png
+
+# =============================================================================
+# Deployment (Optional)
+# =============================================================================
+# Configure deploy targets for `hwaro deploy`
+#
+# - Local filesystem sync: url = "file://./out"
+# - Remote/object stores: set `command` and use external tools (aws/gsutil/rsync/etc)
+#
+# Placeholders for `command`:
+#   {source} => source directory (default: public)
+#   {url}    => target url
+#   {target} => target name
+
+# [deployment]
+# target = "prod"
+# source_dir = "public"
+# confirm = false
+# dryRun = false
+# maxDeletes = 256      # safety limit (-1 disables)
+
+# [[deployment.targets]]
+# name = "prod"
+# url = "file://./out"
+
+# [[deployment.targets]]
+# name = "s3"
+# url = "s3://my-bucket"
+# command = "aws s3 sync {source}/ {url} --delete"
+
+# [[deployment.matchers]]
+# pattern = "^.+\.css$"
+# cacheControl = "max-age=31536000"
+# gzip = true

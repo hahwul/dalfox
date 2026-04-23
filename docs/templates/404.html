@@ -1,0 +1,13 @@
+{% include "header.html" %}
+  <main class="error-page">
+    <div>
+      <div class="error-code">404</div>
+      <p class="error-message">This page slipped past our payloads.</p>
+      <a href="{{ base_url }}/" class="btn btn-secondary">← Back to home</a>
+    </div>
+  </main>
+  <script src="{{ base_url }}/js/search.js"></script>
+{{ highlight_js }}
+{{ auto_includes_js }}
+</body>
+</html>

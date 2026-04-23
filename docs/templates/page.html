@@ -1,0 +1,47 @@
+{% include "header.html" %}
+  <div class="docs-layout">
+    <aside class="docs-sidebar">
+      <nav class="sidebar-nav">
+        <div class="sidebar-section">
+          <div class="sidebar-title">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+            Getting Started
+          </div>
+          <ul class="sidebar-links">
+            <li><a href="{{ base_url }}/getting-started/">Overview</a></li>
+            <li><a href="{{ base_url }}/getting-started/installation/">Installation</a></li>
+            <li><a href="{{ base_url }}/getting-started/quick-start/">Quick Start</a></li>
+            <li><a href="{{ base_url }}/getting-started/configuration/">Configuration</a></li>
+          </ul>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-title">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+            Guide
+          </div>
+          <ul class="sidebar-links">
+            <li><a href="{{ base_url }}/guide/">Overview</a></li>
+            <li><a href="{{ base_url }}/guide/content-management/">Content Management</a></li>
+            <li><a href="{{ base_url }}/guide/templates/">Templates</a></li>
+            <li><a href="{{ base_url }}/guide/shortcodes/">Shortcodes</a></li>
+          </ul>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-title">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+            Reference
+          </div>
+          <ul class="sidebar-links">
+            <li><a href="{{ base_url }}/reference/">Overview</a></li>
+            <li><a href="{{ base_url }}/reference/cli/">CLI Commands</a></li>
+            <li><a href="{{ base_url }}/reference/config/">Configuration</a></li>
+          </ul>
+        </div>
+      </nav>
+    </aside>
+    <main class="docs-main">
+      <article class="docs-article">
+        <h1>{{ page.title | e }}</h1>
+        {{ content }}
+      </article>
+{% include "footer.html" %}
