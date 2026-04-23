@@ -80,21 +80,24 @@ The `scan` subcommand is the default — `dalfox https://example.com/?q=1` works
 | Stored XSS (reflected on a different URL) | `dalfox scan https://target/submit --sxss --sxss-url https://target/view` |
 | File of URLs | `dalfox scan targets.txt` (auto-detects, or `-i file`) |
 | Pipe from stdin | `cat urls.txt \| dalfox scan -i pipe` |
-| Fast smoke test | `dalfox scan https://target/?q=1 --skip-mining --skip-discovery` |
-| Maximum coverage | `dalfox scan https://target/?q=1 --deep-scan --waf-bypass on` |
+| Fast smoke test (only the param you named) | `dalfox scan https://target/?q=1 -p q --skip-mining --skip-discovery` |
+| Fast smoke test (keep discovery, skip slow mining) | `dalfox scan https://target/?q=1 --skip-mining` |
+| Maximum coverage | `dalfox scan https://target/?q=1 --deep-scan --waf-bypass force` |
 | Machine-readable | `dalfox scan ... --format json -o result.json` (`jsonl`, `sarif`, `toml` also supported) |
 | Preflight only | `dalfox scan https://target/?q=1 --dry-run` |
+| Ignore noisy status codes | `dalfox scan https://target/ --ignore-return 302,403,404` |
 
 ### Useful flags
 
 - `--timeout 10` (default), `--delay 0` — add delay for rate-limited targets
-- `-w 50` workers (default) — lower for politeness, higher for speed
+- `--workers 50` (default) — lower for politeness, higher for speed; no short alias
 - `--silence` / `-S` suppresses banner and noisy progress
-- `--include-request` / `--include-response` — embed raw HTTP in JSON output (large)
-- `--limit N` caps total findings per scan
-- `--waf-bypass off | auto | on` — `auto` probes first, `on` forces evasion payloads
+- `--include-request` / `--include-response` — embed raw HTTP in JSON output (large); `--include-all` is the shortcut for both
+- `--limit N` caps total findings; pair with `--limit-result-type v` to only count verified findings
+- `--waf-bypass auto | force | off` — `auto` probes first then bypasses, `force` applies bypass without probing (pair with `--force-waf cloudflare` etc. to pin a WAF), `off` disables the feature
 - `--sxss-retries 3` — how many times to poll the sxss-url (default 3); raise for slow-propagating apps
 - `--cookie-from-raw raw_request.http` — lift cookies from a captured request file
+- `--ignore-return 302,403,404` — drop responses with these status codes before reflection analysis (comma-separated)
 
 Run `dalfox scan --help` for the full list.
 
@@ -103,9 +106,11 @@ Run `dalfox scan --help` for the full list.
 Every finding includes:
 
 - **type**: `V` (verified DOM execution — highest confidence), `A` (AST-detected in inline JS), `R` (reflected but execution not confirmed)
-- `param`, `payload`, `evidence`, `inject_type` (Query / Body / Header / Cookie / Path / JsonBody / MultipartBody)
-- `cwe` (usually `CWE-79`), `severity` (`high` for V/A, `medium` for R)
-- `message_str` — human summary
+- `param`, `payload`, `evidence`
+- `inject_type` — the *reflection context*, not the parameter location. Values: `inHTML`, `inJS`, `inATTR`, `inURL`, `inCSS`. For the parameter location (query / body / header / cookie / path / JSON) look at `data` (the probe URL) and `method`.
+- `cwe` (usually `CWE-79`), `severity` — `High` for V and DOM-verified A, `Medium` for in-JS reflections, `Info` for plain R
+- `message_id`, `message_str` — stable numeric id and human summary
+- `data` — the URL actually probed (payload appears URL-encoded when injected in the query string)
 
 When presenting to the user, lead with V findings, then A, then R. Group by parameter when there are many. Raw `payload` and `evidence` are already sanitized for display but still contain attack strings — surround with backticks in markdown.
 
@@ -114,9 +119,9 @@ When presenting to the user, lead with V findings, then A, then R. Group by para
 Default settings test a reasonable payload budget (~hundreds of requests per parameter). For big scans:
 
 - Preflight first (`--dry-run` or `preflight_dalfox`) to see `estimated_total_requests`.
-- `--skip-mining` drops DOM/dictionary param discovery (biggest request saving).
-- `--skip-discovery` skips the initial HTML parse pass (query params only).
-- `--deep-scan` roughly 3–5× cost.
+- `--skip-mining` drops DOM / dictionary / GF-pattern param discovery. Usually the biggest request saving. Query params in the URL and HTML form fields are still discovered.
+- `--skip-discovery` turns off **all** discovery. Only parameters passed via `-p` are tested — do **not** pair this with an unparameterized URL or the scan will report zero targets.
+- `--deep-scan` roughly 3–5× cost. Use sparingly.
 
 ## Failure modes to recognize
 
