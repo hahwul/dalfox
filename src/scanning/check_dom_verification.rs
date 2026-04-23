@@ -65,7 +65,18 @@ fn payload_uses_legacy_id_marker(payload: &str) -> bool {
         || payload.contains("id='dalfox'")
 }
 
-pub(crate) fn has_marker_evidence(payload: &str, text: &str) -> bool {
+/// Whether the payload carries at least one Dalfox marker that warrants a
+/// DOM-level selector lookup. When false, the caller can skip HTML parsing.
+fn payload_has_any_marker(payload: &str) -> bool {
+    let class_marker = crate::scanning::markers::class_marker();
+    let id_marker = crate::scanning::markers::id_marker();
+    payload.contains(class_marker)
+        || payload.contains(id_marker)
+        || payload_uses_legacy_class_marker(payload)
+        || payload_uses_legacy_id_marker(payload)
+}
+
+fn has_marker_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
     let class_marker = crate::scanning::markers::class_marker();
     let id_marker = crate::scanning::markers::id_marker();
 
@@ -74,12 +85,9 @@ pub(crate) fn has_marker_evidence(payload: &str, text: &str) -> bool {
     let has_id = payload.contains(id_marker);
     let has_legacy_id = payload_uses_legacy_id_marker(payload);
 
-    // Avoid promoting raw reflection to DOM-verified unless payload carries Dalfox marker(s).
     if !has_class && !has_legacy_class && !has_id && !has_legacy_id {
         return false;
     }
-
-    let document = scraper::Html::parse_document(text);
 
     let class_ok = if has_class || has_legacy_class {
         let mut found = false;
@@ -110,6 +118,14 @@ pub(crate) fn has_marker_evidence(payload: &str, text: &str) -> bool {
     class_ok && id_ok
 }
 
+pub(crate) fn has_marker_evidence(payload: &str, text: &str) -> bool {
+    if !payload_has_any_marker(payload) {
+        return false;
+    }
+    let document = scraper::Html::parse_document(text);
+    has_marker_evidence_in_doc(payload, &document)
+}
+
 /// Case-insensitive ASCII prefix check without allocating a lowercased copy.
 /// Only ASCII bytes are case-folded; non-ASCII bytes are compared as-is.
 /// Callers must ensure `prefix` is ASCII (e.g. protocol schemes like "javascript:").
@@ -131,21 +147,37 @@ fn is_dangerous_attr(name: &str) -> bool {
         .any(|&attr| name.eq_ignore_ascii_case(attr))
 }
 
-fn has_executable_url_attribute_evidence(payload: &str, text: &str) -> bool {
+fn has_executable_url_attribute_evidence_in_doc(
+    payload: &str,
+    document: &scraper::Html,
+) -> bool {
     if !payload_is_executable_url_protocol(payload) {
         return false;
     }
 
     let payload_trimmed = payload.trim();
-    let document = scraper::Html::parse_document(text);
     let selector = selectors::universal();
 
     document.select(selector).any(|node| {
         node.value().attrs().any(|(name, value)| {
-            is_dangerous_attr(name)
-                && value.trim().eq_ignore_ascii_case(payload_trimmed)
+            is_dangerous_attr(name) && value.trim().eq_ignore_ascii_case(payload_trimmed)
         })
     })
+}
+
+/// Run both DOM-evidence checks against a single parsed document. Used by
+/// `check_dom_verification` to avoid parsing the same response body twice.
+/// Short-circuits on the marker check when the payload carries one, which
+/// is the common case.
+pub(crate) fn has_dom_evidence(payload: &str, text: &str) -> bool {
+    let needs_markers = payload_has_any_marker(payload);
+    let needs_attrs = payload_is_executable_url_protocol(payload);
+    if !needs_markers && !needs_attrs {
+        return false;
+    }
+    let document = scraper::Html::parse_document(text);
+    (needs_markers && has_marker_evidence_in_doc(payload, &document))
+        || (needs_attrs && has_executable_url_attribute_evidence_in_doc(payload, &document))
 }
 
 pub async fn check_dom_verification(
@@ -362,8 +394,7 @@ async fn verify_sxss_dom(
                     && crate::utils::is_htmlish_content_type(ct)
                     && crate::scanning::check_reflection::classify_reflection(&text, payload)
                         .is_some()
-                    && (has_marker_evidence(payload, &text)
-                        || has_executable_url_attribute_evidence(payload, &text))
+                    && has_dom_evidence(payload, &text)
                 {
                     return (true, Some(text));
                 }
@@ -394,8 +425,7 @@ async fn verify_normal_dom(
     // as long as there is reflection + marker/executable-URL evidence in the response.
     if let Ok(text) = resp.text().await
         && crate::scanning::check_reflection::classify_reflection(&text, payload).is_some()
-        && (has_marker_evidence(payload, &text)
-            || has_executable_url_attribute_evidence(payload, &text))
+        && has_dom_evidence(payload, &text)
     {
         return (true, Some(text));
     }
@@ -986,7 +1016,29 @@ mod tests {
     fn test_has_executable_url_attribute_evidence_detects_iframe_src_protocol() {
         let payload = "javascript:alert(1)";
         let body = "<html><body><iframe src=\"javascript:alert(1)\"></iframe></body></html>";
-        assert!(has_executable_url_attribute_evidence(payload, body));
+        assert!(has_dom_evidence(payload, body));
+    }
+
+    #[test]
+    fn test_has_dom_evidence_skips_parse_for_irrelevant_payload() {
+        // Payload has neither Dalfox markers nor an executable URL protocol,
+        // so has_dom_evidence should short-circuit to false without parsing.
+        let payload = "plain alphanumeric";
+        let body = "<html><body>irrelevant</body></html>";
+        assert!(!has_dom_evidence(payload, body));
+    }
+
+    #[test]
+    fn test_has_dom_evidence_combines_marker_and_protocol_checks() {
+        // Marker-bearing payload passes via the marker branch even when the
+        // payload is not an executable URL protocol.
+        let class_marker = crate::scanning::markers::class_marker();
+        let payload = format!("<img class=\"{}\">", class_marker);
+        let body = format!(
+            "<html><body><img class=\"{}\"></body></html>",
+            class_marker
+        );
+        assert!(has_dom_evidence(&payload, &body));
     }
 
     #[tokio::test]

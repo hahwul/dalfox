@@ -579,10 +579,12 @@ async fn fetch_injection_response_with_client(
                 return None;
             }
             // Check for redirect context: if the response is a 3xx redirect,
-            // the Location header may contain the reflected payload.
+            // the Location header may contain the reflected payload in either
+            // its encoded or decoded form (some servers parse the query and
+            // rebuild the redirect URL, which decodes the payload on the way).
             if resp.status().is_redirection()
                 && let Some(location) = resp.headers().get("location").and_then(|v| v.to_str().ok())
-                && location.contains(&*encoded_payload)
+                && (location.contains(&*encoded_payload) || location.contains(payload))
             {
                 // Synthesize a response text that includes the Location value
                 // so reflection detection can find it
@@ -877,6 +879,18 @@ mod tests {
         Html(format!("<div>{}</div>", state.stored_payload))
     }
 
+    /// Returns 302 with Location containing the decoded `q` param. Simulates a
+    /// server that parses the query string and rebuilds the redirect URL.
+    async fn redirect_decoded_handler(
+        Query(params): Query<HashMap<String, String>>,
+    ) -> impl IntoResponse {
+        let q = params.get("q").cloned().unwrap_or_default();
+        (
+            StatusCode::FOUND,
+            [("location", format!("/final?next={}", q))],
+        )
+    }
+
     async fn start_mock_server(stored_payload: &str) -> SocketAddr {
         let app = Router::new()
             .route("/reflect/raw", get(raw_handler))
@@ -886,6 +900,7 @@ mod tests {
             .route("/reflect/none", get(none_handler))
             .route("/reflect/json", get(json_handler))
             .route("/sxss/stored", get(sxss_handler))
+            .route("/redirect/decoded", get(redirect_decoded_handler))
             .with_state(TestState {
                 stored_payload: stored_payload.to_string(),
             });
@@ -1187,6 +1202,22 @@ mod tests {
 
         let found = check_reflection(&target, &param, payload, &args).await;
         assert!(!found, "sxss mode without sxss_url should return false");
+    }
+
+    #[tokio::test]
+    async fn test_check_reflection_catches_decoded_payload_in_redirect_location() {
+        // Server URL-decodes the query and echoes the raw payload back into the
+        // Location header. The gate used to only match the encoded form, so
+        // this reflection was silently missed. It must now be caught.
+        let payload = "<svg/onload=alert(1)>";
+        let addr = start_mock_server("stored").await;
+        let target = make_target(addr, "/redirect/decoded");
+        let param = make_param();
+        let args = default_scan_args();
+        assert!(
+            check_reflection(&target, &param, payload, &args).await,
+            "reflection check must catch the raw payload appearing in Location"
+        );
     }
 
     #[tokio::test]

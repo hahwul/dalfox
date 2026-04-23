@@ -142,9 +142,18 @@ async fn send_blind_request(target: &Target, param_name: &str, payload: &str, pa
         request = request.body(b.clone());
     }
 
-    // Send the request, ignore response
+    // Send the request. We don't inspect the response (blind payloads report
+    // out-of-band), but surface transport errors at DEBUG so users can tell a
+    // delivery failure apart from a target that simply never calls back.
     crate::tick_request_count();
-    let _ = request.send().await;
+    if let Err(e) = request.send().await
+        && crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed)
+    {
+        eprintln!(
+            "[DBG] blind request failed param={} type={}: {}",
+            param_name, param_type, e
+        );
+    }
 
     if target.delay > 0 {
         sleep(Duration::from_millis(target.delay)).await;
