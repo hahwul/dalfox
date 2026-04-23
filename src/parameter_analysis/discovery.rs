@@ -1225,7 +1225,7 @@ mod tests {
     async fn start_discovery_mock_server() -> SocketAddr {
         let app = Router::new()
             .route("/", any(discovery_reflect_handler))
-            .route("/*rest", any(discovery_reflect_handler));
+            .route("/{*rest}", any(discovery_reflect_handler));
 
         let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .await

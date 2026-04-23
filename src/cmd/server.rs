@@ -1082,10 +1082,10 @@ async fn health_handler(
             "endpoints": [
                 {"method": "POST", "path": "/scan", "description": "Submit a new XSS scan"},
                 {"method": "GET",  "path": "/scan", "description": "Submit a scan via query params (JSONP-friendly)"},
-                {"method": "GET",  "path": "/scan/:id", "description": "Get scan status and results"},
-                {"method": "DELETE", "path": "/scan/:id", "description": "Cancel a scan"},
+                {"method": "GET",  "path": "/scan/{id}", "description": "Get scan status and results"},
+                {"method": "DELETE", "path": "/scan/{id}", "description": "Cancel a scan"},
                 {"method": "GET",  "path": "/scans", "description": "List all scans"},
-                {"method": "GET",  "path": "/result/:id", "description": "Get scan status and results (alias)"},
+                {"method": "GET",  "path": "/result/{id}", "description": "Get scan status and results (alias)"},
                 {"method": "POST", "path": "/preflight", "description": "Parameter discovery without attack payloads"},
                 {"method": "GET",  "path": "/health", "description": "Server info and capability discovery"},
             ],
@@ -1103,7 +1103,7 @@ async fn options_result_handler(
     (StatusCode::NO_CONTENT, cors)
 }
 
-// DELETE /scan/:id — cancel a scan
+// DELETE /scan/{id} — cancel a scan
 async fn cancel_scan_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1635,11 +1635,11 @@ pub async fn run_server(args: ServerArgs) {
         .route("/scans", options(options_scan_handler))
         .route("/preflight", post(preflight_handler))
         .route("/preflight", options(options_scan_handler))
-        .route("/result/:id", get(get_result_handler))
-        .route("/result/:id", options(options_result_handler))
-        .route("/scan/:id", get(get_result_handler))
-        .route("/scan/:id", axum::routing::delete(cancel_scan_handler))
-        .route("/scan/:id", options(options_result_handler))
+        .route("/result/{id}", get(get_result_handler))
+        .route("/result/{id}", options(options_result_handler))
+        .route("/scan/{id}", get(get_result_handler))
+        .route("/scan/{id}", axum::routing::delete(cancel_scan_handler))
+        .route("/scan/{id}", options(options_result_handler))
         .route("/health", get(health_handler))
         .route("/health", options(options_scan_handler))
         .with_state(state.clone());
@@ -1745,7 +1745,7 @@ mod tests {
     async fn start_target_server() -> SocketAddr {
         let app = Router::new()
             .route("/", any(target_ok_handler))
-            .route("/*rest", any(target_ok_handler));
+            .route("/{*rest}", any(target_ok_handler));
         let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .await
             .expect("bind target listener");
@@ -2136,8 +2136,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_scan_alternate_path_uses_same_handler_semantics() {
-        // This test validates that the result handler semantics (used by /result/:id)
-        // are suitable for /scan/:id as well (same handler wired).
+        // This test validates that the result handler semantics (used by /result/{id})
+        // are suitable for /scan/{id} as well (same handler wired).
         let state = make_state(Some("secret"), None, false, false, "callback");
 
         // Insert job
@@ -2150,7 +2150,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert("X-API-KEY", HeaderValue::from_static("secret"));
 
-        // Directly call the same handler that is wired to both /result/:id and /scan/:id
+        // Directly call the same handler that is wired to both /result/{id} and /scan/{id}
         let resp = super::get_result_handler(
             State(state.clone()),
             headers,
