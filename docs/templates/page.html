@@ -4,7 +4,7 @@
       <nav class="sidebar-nav">
         <div class="sidebar-section">
           <div class="sidebar-title">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
             Getting Started
           </div>
           <ul class="sidebar-links">
@@ -21,9 +21,23 @@
           </div>
           <ul class="sidebar-links">
             <li><a href="{{ base_url }}/guide/">Overview</a></li>
-            <li><a href="{{ base_url }}/guide/content-management/">Content Management</a></li>
-            <li><a href="{{ base_url }}/guide/templates/">Templates</a></li>
-            <li><a href="{{ base_url }}/guide/shortcodes/">Shortcodes</a></li>
+            <li><a href="{{ base_url }}/guide/scanning-modes/">Scanning Modes</a></li>
+            <li><a href="{{ base_url }}/guide/parameters/">Parameters &amp; Discovery</a></li>
+            <li><a href="{{ base_url }}/guide/payloads/">Payloads &amp; Encoding</a></li>
+            <li><a href="{{ base_url }}/guide/waf-bypass/">WAF Bypass</a></li>
+            <li><a href="{{ base_url }}/guide/stored-xss/">Stored XSS</a></li>
+            <li><a href="{{ base_url }}/guide/output/">Output &amp; Reports</a></li>
+          </ul>
+        </div>
+        <div class="sidebar-section">
+          <div class="sidebar-title">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+            Integrations
+          </div>
+          <ul class="sidebar-links">
+            <li><a href="{{ base_url }}/integrations/">Overview</a></li>
+            <li><a href="{{ base_url }}/integrations/server/">REST API Server</a></li>
+            <li><a href="{{ base_url }}/integrations/mcp/">MCP Server</a></li>
           </ul>
         </div>
         <div class="sidebar-section">
@@ -33,8 +47,9 @@
           </div>
           <ul class="sidebar-links">
             <li><a href="{{ base_url }}/reference/">Overview</a></li>
-            <li><a href="{{ base_url }}/reference/cli/">CLI Commands</a></li>
-            <li><a href="{{ base_url }}/reference/config/">Configuration</a></li>
+            <li><a href="{{ base_url }}/reference/cli/">CLI Reference</a></li>
+            <li><a href="{{ base_url }}/reference/config/">Config File</a></li>
+            <li><a href="{{ base_url }}/reference/environment/">Environment</a></li>
           </ul>
         </div>
       </nav>
