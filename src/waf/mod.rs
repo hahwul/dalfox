@@ -270,7 +270,7 @@ pub async fn fingerprint_with_probe(
     let rb = client.get(probe_url.clone());
     let rb = crate::utils::apply_headers_ua_cookies(rb, target, None);
 
-    crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    crate::tick_request_count();
 
     let resp = match rb.send().await {
         Ok(r) => r,

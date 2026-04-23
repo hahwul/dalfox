@@ -440,7 +440,7 @@ pub async fn active_probe_param(
             }
 
             let reflected_ok = if let Ok(resp) = {
-                crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                crate::tick_request_count();
                 request_builder.send().await
             } {
                 // Skip processing if the status code is in the ignore_return list
@@ -598,7 +598,7 @@ pub async fn active_probe_param(
                 _ => unreachable!(),
             };
             let request_builder = client.request(target.parse_method(), url);
-            crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            crate::tick_request_count();
             if let Ok(resp) = request_builder.send().await
                 && let Ok(text) = resp.text().await
                 && text.contains(&raw_marker)

@@ -77,3 +77,23 @@ pub static REQUEST_COUNT: AtomicU64 = AtomicU64::new(0);
 pub static WAF_BLOCK_COUNT: AtomicU64 = AtomicU64::new(0);
 pub static WAF_CONSECUTIVE_BLOCKS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 pub static NO_COLOR: AtomicBool = AtomicBool::new(false);
+
+tokio::task_local! {
+    /// Per-scan request counter, set by the MCP runner so concurrent scans
+    /// don't pollute each other's progress tallies. Callers use
+    /// `tick_request_count` which bumps both the global counter and this
+    /// task-local when it is bound.
+    pub static REQUEST_COUNT_JOB: std::sync::Arc<AtomicU64>;
+}
+
+/// Record a single outbound HTTP request. Always increments the process-wide
+/// `REQUEST_COUNT`; additionally increments the task-local `REQUEST_COUNT_JOB`
+/// counter when one is bound (see MCP `run_job`). Prefer this over calling
+/// `REQUEST_COUNT.fetch_add` directly so concurrent scans get accurate
+/// per-job numbers.
+#[inline]
+pub fn tick_request_count() {
+    REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let _ = REQUEST_COUNT_JOB
+        .try_with(|c| c.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+}

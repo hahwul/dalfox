@@ -47,8 +47,6 @@ use crate::{
 };
 
 /// Progress counters shared with the running scan task.
-/// Note: `requests_sent` is approximate when multiple scans run concurrently
-/// because it is derived from a global request counter.
 #[derive(Clone, Default)]
 struct JobProgress {
     requests_sent: Arc<std::sync::atomic::AtomicU64>,
@@ -314,38 +312,40 @@ impl DalfoxMcp {
             }
         };
 
-        // Snapshot request count before this job
-        let req_count_before =
-            crate::REQUEST_COUNT.load(std::sync::atomic::Ordering::Relaxed);
-
-        // Parameter discovery / mining
-        analyze_parameters(&mut target, &scan_args, None).await;
-
-        // Record discovered param count
-        progress.params_total.store(
-            target.reflection_params.len() as u32,
-            std::sync::atomic::Ordering::Relaxed,
-        );
-
-        // Collect raw results
+        // Per-job request counter. All scanning code paths call
+        // `crate::tick_request_count()` which increments both the global
+        // counter and this task-local one, so concurrent scans don't
+        // pollute each other's tallies.
+        let job_requests = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let results_arc = Arc::new(Mutex::new(Vec::<ScanResult>::new()));
         let param_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        crate::scanning::run_scanning(
-            &target,
-            Arc::new(scan_args.clone()),
-            results_arc.clone(),
-            None,
-            None,
-            param_counter.clone(),
-            Some(cancel_flag.clone()),
-        )
-        .await;
 
-        // Final progress snapshot
-        let req_count_after =
-            crate::REQUEST_COUNT.load(std::sync::atomic::Ordering::Relaxed);
+        crate::REQUEST_COUNT_JOB
+            .scope(job_requests.clone(), async {
+                // Parameter discovery / mining
+                analyze_parameters(&mut target, &scan_args, None).await;
+
+                // Record discovered param count
+                progress.params_total.store(
+                    target.reflection_params.len() as u32,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+
+                crate::scanning::run_scanning(
+                    &target,
+                    Arc::new(scan_args.clone()),
+                    results_arc.clone(),
+                    None,
+                    None,
+                    param_counter.clone(),
+                    Some(cancel_flag.clone()),
+                )
+                .await;
+            })
+            .await;
+
         progress.requests_sent.store(
-            req_count_after.saturating_sub(req_count_before),
+            job_requests.load(std::sync::atomic::Ordering::Relaxed),
             std::sync::atomic::Ordering::Relaxed,
         );
         progress.params_tested.store(
@@ -2004,6 +2004,36 @@ mod tests {
             .expect_err("unknown status filter must be rejected");
         assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
         assert!(err.message.contains("invalid status filter"));
+    }
+
+    #[tokio::test]
+    async fn test_tick_request_count_is_scoped_per_job() {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        let job_a = Arc::new(AtomicU64::new(0));
+        let job_b = Arc::new(AtomicU64::new(0));
+        let global_before = crate::REQUEST_COUNT.load(Ordering::Relaxed);
+
+        crate::REQUEST_COUNT_JOB
+            .scope(job_a.clone(), async {
+                crate::tick_request_count();
+                crate::tick_request_count();
+            })
+            .await;
+
+        crate::REQUEST_COUNT_JOB
+            .scope(job_b.clone(), async {
+                crate::tick_request_count();
+            })
+            .await;
+
+        assert_eq!(job_a.load(Ordering::Relaxed), 2, "job A counter isolated");
+        assert_eq!(job_b.load(Ordering::Relaxed), 1, "job B counter isolated");
+        assert_eq!(
+            crate::REQUEST_COUNT.load(Ordering::Relaxed) - global_before,
+            3,
+            "global counter sees both jobs"
+        );
     }
 
     #[test]

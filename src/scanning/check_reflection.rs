@@ -522,7 +522,7 @@ async fn fetch_injection_response_with_client(
 
     // Send the injection request (with rate-limit retry)
     let inject_resp = crate::utils::send_with_retry(inject_request, 3, 5000).await;
-    crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+    crate::tick_request_count();
 
     if target.delay > 0 {
         sleep(Duration::from_millis(target.delay)).await;
@@ -541,7 +541,7 @@ async fn fetch_injection_response_with_client(
                 let check_request =
                     crate::utils::build_request(client, target, method, sxss_url.clone(), None);
 
-                crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+                crate::tick_request_count();
                 if let Ok(resp) = check_request.send().await
                     && let Ok(text) = resp.text().await
                     && !text.is_empty()
@@ -678,7 +678,7 @@ pub async fn check_reflection_with_hpp_url(
     );
 
     let inject_resp = crate::utils::send_with_retry(inject_request, 3, 5000).await;
-    crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+    crate::tick_request_count();
 
     if target.delay > 0 {
         tokio::time::sleep(Duration::from_millis(target.delay)).await;

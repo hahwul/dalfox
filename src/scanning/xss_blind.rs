@@ -143,7 +143,7 @@ async fn send_blind_request(target: &Target, param_name: &str, payload: &str, pa
     }
 
     // Send the request, ignore response
-    crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    crate::tick_request_count();
     let _ = request.send().await;
 
     if target.delay > 0 {

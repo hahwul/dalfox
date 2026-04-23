@@ -22,7 +22,7 @@ use crate::payload::mining::GF_PATTERNS_PARAMS;
 use crate::target_parser::Target;
 use indicatif::ProgressBar;
 use scraper;
-use std::sync::{Arc, atomic::Ordering};
+use std::sync::Arc;
 
 use tokio::sync::{Mutex, Semaphore};
 use tokio::time::{Duration, sleep};
@@ -315,7 +315,7 @@ pub async fn probe_dictionary_params(
                     crate::utils::build_request(&client_clone, &target_clone, parsed_method, url, data.clone());
 
                 let resp = request.send().await;
-                crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+                crate::tick_request_count();
 
                 let mut discovered: Option<Param> = None;
                 if let Ok(r) = resp {
@@ -582,7 +582,7 @@ pub async fn probe_body_params(
                 let request = crate::utils::apply_header_overrides(base, &overrides);
 
                 let resp = request.send().await;
-                crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+                crate::tick_request_count();
 
                 let mut discovered: Option<Param> = None;
                 if let Ok(r) = resp
@@ -723,7 +723,7 @@ pub async fn probe_response_id_params(
     );
 
     let __resp = base_request.send().await;
-    crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+    crate::tick_request_count();
     if let Ok(resp) = __resp
         && !resp.status().is_server_error()
         && let Ok(text) = resp.text().await
@@ -789,7 +789,7 @@ pub async fn probe_response_id_params(
                 // Prepare optional discovered Param container for batched return
                 let mut discovered: Option<Param> = None;
                 let __resp = request.send().await;
-                crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+                crate::tick_request_count();
                 if let Ok(resp) = __resp {
                     // Skip 5xx error responses — debug pages often reflect params
                     if resp.status().is_server_error() {
@@ -1021,7 +1021,7 @@ pub async fn probe_json_body_params(
             let request = crate::utils::apply_header_overrides(base, &overrides);
 
             let resp = request.send().await;
-            crate::REQUEST_COUNT.fetch_add(1, Ordering::Relaxed);
+            crate::tick_request_count();
 
             let mut discovered: Option<Param> = None;
             if let Ok(r) = resp

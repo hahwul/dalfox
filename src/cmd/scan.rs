@@ -747,7 +747,7 @@ async fn preflight_content_type(
     if target.delay > 0 {
         tokio::time::sleep(Duration::from_millis(target.delay)).await;
     }
-    crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    crate::tick_request_count();
     let resp = request_builder.send().await.ok()?;
     let head_status = resp.status().as_u16();
     let head_headers = resp.headers().clone();
@@ -784,7 +784,7 @@ async fn preflight_content_type(
     // Always fetch a small body for CSP parsing and AST analysis
     let mut response_body: Option<String> = None;
     let get_req = crate::utils::build_preflight_request(&client, target, false, Some(8192));
-    crate::REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    crate::tick_request_count();
     if let Ok(get_resp) = get_req.send().await {
         let get_status = get_resp.status().as_u16();
         let get_headers = get_resp.headers().clone();
