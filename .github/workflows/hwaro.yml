@@ -1,0 +1,48 @@
+name: Hwaro on GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "docs/**"
+      - ".github/workflows/hwaro.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "docs/**"
+      - ".github/workflows/hwaro.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build only
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Build site
+        uses: hahwul/hwaro@main
+        with:
+          build_dir: "docs"
+          build_only: true
+
+  deploy:
+    name: Build and deploy
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Build and deploy to GitHub Pages
+        uses: hahwul/hwaro@main
+        with:
+          build_dir: "docs"
+          token: ${{ secrets.GITHUB_TOKEN }}
