@@ -567,34 +567,41 @@ async fn run_scan_job(
     // Per-job request counter. All scanning code paths call
     // `crate::tick_request_count()` which increments both the global counter
     // and this task-local, so concurrent scans don't pollute each other.
+    // The WAF consecutive-block counter gets the same per-job treatment so
+    // one scan's WAF backoff doesn't throttle unrelated scans.
     let job_requests = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let job_waf_consecutive = Arc::new(std::sync::atomic::AtomicU32::new(0));
     let param_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
     crate::REQUEST_COUNT_JOB
         .scope(job_requests.clone(), async {
-            if let Some(callback_url) = &args.blind_callback_url {
-                crate::scanning::blind_scanning(&target, callback_url).await;
-            }
+            crate::WAF_CONSECUTIVE_BLOCKS_JOB
+                .scope(job_waf_consecutive.clone(), async {
+                    if let Some(callback_url) = &args.blind_callback_url {
+                        crate::scanning::blind_scanning(&target, callback_url).await;
+                    }
 
-            let mut silent_args = args.clone();
-            silent_args.silence = true;
-            analyze_parameters(&mut target, &silent_args, None).await;
+                    let mut silent_args = args.clone();
+                    silent_args.silence = true;
+                    analyze_parameters(&mut target, &silent_args, None).await;
 
-            progress.params_total.store(
-                target.reflection_params.len() as u32,
-                std::sync::atomic::Ordering::Relaxed,
-            );
+                    progress.params_total.store(
+                        target.reflection_params.len() as u32,
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
 
-            crate::scanning::run_scanning(
-                &target,
-                Arc::new(args.clone()),
-                results.clone(),
-                None,
-                None,
-                param_counter.clone(),
-                Some(cancel_flag.clone()),
-            )
-            .await;
+                    crate::scanning::run_scanning(
+                        &target,
+                        Arc::new(args.clone()),
+                        results.clone(),
+                        None,
+                        None,
+                        param_counter.clone(),
+                        Some(cancel_flag.clone()),
+                    )
+                    .await;
+                })
+                .await;
         })
         .await;
 

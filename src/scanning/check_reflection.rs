@@ -20,7 +20,6 @@ use crate::target_parser::Target;
 use regex::Regex;
 use reqwest::Client;
 use std::sync::OnceLock;
-use std::sync::atomic::Ordering;
 use tokio::time::{Duration, sleep};
 
 /// Re-export for callers outside this module (e.g. DOM verification, active probing).
@@ -557,10 +556,12 @@ async fn fetch_injection_response_with_client(
         if let Ok(resp) = inject_resp {
             let status_code = resp.status().as_u16();
 
-            // Track WAF block status codes for adaptive throttling
+            // Track WAF block status codes for adaptive throttling. The
+            // consecutive counter is per-scan when bound (MCP / REST runners)
+            // so one scan's WAF blocks don't slow down unrelated concurrent
+            // scans; CLI falls back to the process-wide counter.
             if status_code == 403 || status_code == 406 || status_code == 429 || status_code == 503 {
-                crate::WAF_BLOCK_COUNT.fetch_add(1, Ordering::Relaxed);
-                let consecutive = crate::WAF_CONSECUTIVE_BLOCKS.fetch_add(1, Ordering::Relaxed) + 1;
+                let consecutive = crate::tick_waf_block();
                 // Apply adaptive backoff when consecutive blocks exceed threshold
                 if consecutive >= 3 {
                     let escalation = (consecutive - 3).min(4) as u64;
@@ -570,7 +571,7 @@ async fn fetch_injection_response_with_client(
                 }
             } else {
                 // Reset consecutive block counter on successful response
-                crate::WAF_CONSECUTIVE_BLOCKS.store(0, Ordering::Relaxed);
+                crate::reset_waf_consecutive();
             }
 
             // Skip processing if the status code is in the ignore_return list

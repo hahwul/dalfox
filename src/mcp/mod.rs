@@ -214,32 +214,39 @@ impl DalfoxMcp {
         // Per-job request counter. All scanning code paths call
         // `crate::tick_request_count()` which increments both the global
         // counter and this task-local one, so concurrent scans don't
-        // pollute each other's tallies.
+        // pollute each other's tallies. The WAF consecutive-block counter
+        // gets the same per-job treatment so one scan's WAF backoff doesn't
+        // throttle an unrelated scan.
         let job_requests = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let job_waf_consecutive = Arc::new(std::sync::atomic::AtomicU32::new(0));
         let results_arc = Arc::new(Mutex::new(Vec::<ScanResult>::new()));
         let param_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
 
         crate::REQUEST_COUNT_JOB
             .scope(job_requests.clone(), async {
-                // Parameter discovery / mining
-                analyze_parameters(&mut target, &scan_args, None).await;
+                crate::WAF_CONSECUTIVE_BLOCKS_JOB
+                    .scope(job_waf_consecutive.clone(), async {
+                        // Parameter discovery / mining
+                        analyze_parameters(&mut target, &scan_args, None).await;
 
-                // Record discovered param count
-                progress.params_total.store(
-                    target.reflection_params.len() as u32,
-                    std::sync::atomic::Ordering::Relaxed,
-                );
+                        // Record discovered param count
+                        progress.params_total.store(
+                            target.reflection_params.len() as u32,
+                            std::sync::atomic::Ordering::Relaxed,
+                        );
 
-                crate::scanning::run_scanning(
-                    &target,
-                    Arc::new(scan_args.clone()),
-                    results_arc.clone(),
-                    None,
-                    None,
-                    param_counter.clone(),
-                    Some(cancel_flag.clone()),
-                )
-                .await;
+                        crate::scanning::run_scanning(
+                            &target,
+                            Arc::new(scan_args.clone()),
+                            results_arc.clone(),
+                            None,
+                            None,
+                            param_counter.clone(),
+                            Some(cancel_flag.clone()),
+                        )
+                        .await;
+                    })
+                    .await;
             })
             .await;
 
@@ -1919,6 +1926,37 @@ mod tests {
             3,
             "global counter sees both jobs"
         );
+    }
+
+    #[tokio::test]
+    async fn test_tick_waf_block_is_scoped_per_job() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+
+        let job_a = Arc::new(AtomicU32::new(0));
+        let job_b = Arc::new(AtomicU32::new(0));
+
+        let a1 = crate::WAF_CONSECUTIVE_BLOCKS_JOB
+            .scope(job_a.clone(), async { crate::tick_waf_block() })
+            .await;
+        let a2 = crate::WAF_CONSECUTIVE_BLOCKS_JOB
+            .scope(job_a.clone(), async { crate::tick_waf_block() })
+            .await;
+        let b1 = crate::WAF_CONSECUTIVE_BLOCKS_JOB
+            .scope(job_b.clone(), async { crate::tick_waf_block() })
+            .await;
+
+        assert_eq!(a1, 1, "job A first block");
+        assert_eq!(a2, 2, "job A second block increments only its own counter");
+        assert_eq!(b1, 1, "job B block is isolated from A");
+        assert_eq!(job_a.load(Ordering::Relaxed), 2);
+        assert_eq!(job_b.load(Ordering::Relaxed), 1);
+
+        // reset_waf_consecutive under a scope clears only that scope
+        crate::WAF_CONSECUTIVE_BLOCKS_JOB
+            .scope(job_a.clone(), async { crate::reset_waf_consecutive() })
+            .await;
+        assert_eq!(job_a.load(Ordering::Relaxed), 0);
+        assert_eq!(job_b.load(Ordering::Relaxed), 1, "B untouched");
     }
 
     #[tokio::test]

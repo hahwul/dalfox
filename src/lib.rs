@@ -84,6 +84,11 @@ tokio::task_local! {
     /// `tick_request_count` which bumps both the global counter and this
     /// task-local when it is bound.
     pub static REQUEST_COUNT_JOB: std::sync::Arc<AtomicU64>;
+
+    /// Per-scan consecutive-WAF-block counter. Bound by MCP and REST runners
+    /// so concurrent scans don't trigger each other's adaptive backoff.
+    /// Callers use `tick_waf_block` / `reset_waf_consecutive`.
+    pub static WAF_CONSECUTIVE_BLOCKS_JOB: std::sync::Arc<std::sync::atomic::AtomicU32>;
 }
 
 /// Record a single outbound HTTP request. Always increments the process-wide
@@ -96,4 +101,35 @@ pub fn tick_request_count() {
     REQUEST_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let _ = REQUEST_COUNT_JOB
         .try_with(|c| c.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+}
+
+/// Record a WAF-block response (403/406/429/503 on an injection request).
+/// Returns the per-scan consecutive block count used for adaptive backoff.
+///
+/// - Always bumps the process-wide `WAF_BLOCK_COUNT` for CLI totals.
+/// - When a per-job task-local is bound, increments that and returns its new
+///   value, isolating concurrent scans. Otherwise falls back to the global
+///   `WAF_CONSECUTIVE_BLOCKS` atomic.
+#[inline]
+pub fn tick_waf_block() -> u32 {
+    WAF_BLOCK_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    match WAF_CONSECUTIVE_BLOCKS_JOB
+        .try_with(|c| c.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1)
+    {
+        Ok(v) => v,
+        Err(_) => {
+            WAF_CONSECUTIVE_BLOCKS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1
+        }
+    }
+}
+
+/// Reset the consecutive-WAF-block counter after a non-blocking response.
+/// Prefers the per-job counter when bound; falls back to the global one.
+#[inline]
+pub fn reset_waf_consecutive() {
+    match WAF_CONSECUTIVE_BLOCKS_JOB.try_with(|c| c.store(0, std::sync::atomic::Ordering::Relaxed))
+    {
+        Ok(_) => {}
+        Err(_) => WAF_CONSECUTIVE_BLOCKS.store(0, std::sync::atomic::Ordering::Relaxed),
+    }
 }
