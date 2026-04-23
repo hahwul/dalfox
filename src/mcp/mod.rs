@@ -771,10 +771,13 @@ Final results (via get_results_dalfox) include finding type \
             remote_wordlists: vec![],
         };
 
-        // Spawn scan in dedicated thread runtime
+        // Run the scan on tokio's managed blocking-threadpool. We still need a
+        // fresh current_thread runtime inside because analyze_parameters and
+        // the scraper-based HTML inspection hold !Send types across awaits;
+        // spawn_blocking at least reuses OS threads between scans.
         let handler = self.clone();
         let sid = scan_id.clone();
-        std::thread::spawn(move || {
+        tokio::task::spawn_blocking(move || {
             match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -1050,8 +1053,10 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
                 .collect(),
         });
 
-        // Run parameter discovery in a separate thread (analyze_parameters is not Send)
-        let result = std::thread::spawn(move || {
+        // Run parameter discovery on tokio's blocking threadpool (reused
+        // across calls) with a current_thread runtime inside, because
+        // analyze_parameters and the scraper-based HTML inspection are !Send.
+        let result = tokio::task::spawn_blocking(move || {
             match tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
@@ -1130,12 +1135,12 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
                 }
             }
         })
-        .join()
+        .await
         .unwrap_or_else(|_| {
             serde_json::json!({
                 "target": "",
                 "reachable": false,
-                "error": "preflight thread panicked",
+                "error": "preflight task panicked",
             })
         });
 
