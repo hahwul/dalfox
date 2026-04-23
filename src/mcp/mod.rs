@@ -72,6 +72,46 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
+/// Parse a lowercase status string back into `JobStatus`. Returns `None` for
+/// unknown values so callers can surface a precise error.
+fn parse_job_status(s: &str) -> Option<JobStatus> {
+    match s {
+        "queued" => Some(JobStatus::Queued),
+        "running" => Some(JobStatus::Running),
+        "done" => Some(JobStatus::Done),
+        "error" => Some(JobStatus::Error),
+        "cancelled" => Some(JobStatus::Cancelled),
+        _ => None,
+    }
+}
+
+/// Send a single request mirroring the configuration the real scan would use
+/// (method, headers, cookies, User-Agent, body, proxy, timeout, redirects).
+/// Returns true iff a response came back — content/status are not inspected.
+async fn send_reachability_probe(target: &crate::target_parser::Target) -> bool {
+    let client = target.build_client_or_default();
+    let mut req = client.request(target.parse_method(), target.url.clone());
+    for (k, v) in &target.headers {
+        req = req.header(k, v);
+    }
+    if !target.cookies.is_empty() {
+        let cookie_header = target
+            .cookies
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect::<Vec<_>>()
+            .join("; ");
+        req = req.header("Cookie", cookie_header);
+    }
+    if let Some(ua) = target.user_agent.as_deref().filter(|s| !s.is_empty()) {
+        req = req.header("User-Agent", ua);
+    }
+    if let Some(body) = &target.data {
+        req = req.body(body.clone());
+    }
+    req.send().await.is_ok()
+}
+
 /// Internal job representation.
 #[derive(Clone)]
 struct Job {
@@ -198,7 +238,7 @@ impl DalfoxMcp {
                 t.follow_redirects = scan_args.follow_redirects;
                 t.ignore_return = scan_args.ignore_return.clone();
                 t.workers = scan_args.workers;
-                t.user_agent = scan_args.user_agent.clone().or(Some("".to_string()));
+                t.user_agent = scan_args.user_agent.clone();
                 t.headers = scan_args
                     .headers
                     .iter()
@@ -810,24 +850,28 @@ status, and result_count."
     ) -> Result<CallToolResult, ErrorData> {
         self.purge_expired_jobs().await;
 
-        let jobs = self.jobs.lock().await;
-        let filter_status: Option<String> = params
+        let filter_status: Option<JobStatus> = match params
             .status
             .as_deref()
             .map(|s| s.trim().to_lowercase())
-            .filter(|s| !s.is_empty());
+            .filter(|s| !s.is_empty())
+        {
+            Some(ref s) => Some(parse_job_status(s).ok_or_else(|| {
+                ErrorData::invalid_params(
+                    format!(
+                        "invalid status filter '{}' — must be one of: queued, running, done, error, cancelled",
+                        s
+                    ),
+                    None,
+                )
+            })?),
+            None => None,
+        };
 
+        let jobs = self.jobs.lock().await;
         let entries: Vec<serde_json::Value> = jobs
             .iter()
-            .filter(|(_, job)| {
-                if let Some(ref f) = filter_status {
-                    let js = serde_json::to_string(&job.status).unwrap_or_default();
-                    // JobStatus serializes as quoted string, e.g. "\"done\""
-                    js.trim_matches('"') == f.as_str()
-                } else {
-                    true
-                }
-            })
+            .filter(|(_, job)| filter_status.as_ref().is_none_or(|f| &job.status == f))
             .map(|(id, job)| {
                 let mut entry = serde_json::json!({
                     "scan_id": id,
@@ -897,7 +941,7 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
                 t.timeout = params.timeout;
                 t.proxy = params.proxy.clone();
                 t.follow_redirects = params.follow_redirects;
-                t.user_agent = params.user_agent.clone().or(Some("".to_string()));
+                t.user_agent = params.user_agent.clone();
                 t.headers = params
                     .headers
                     .iter()
@@ -949,22 +993,10 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
             {
                 Ok(rt) => {
                     rt.block_on(async {
-                        // Reachability check: send a lightweight GET to verify target is accessible
-                        let reachable = {
-                            let client = reqwest::Client::builder()
-                                .timeout(std::time::Duration::from_secs(scan_args.timeout))
-                                .danger_accept_invalid_certs(true)
-                                .redirect(if scan_args.follow_redirects {
-                                    reqwest::redirect::Policy::limited(5)
-                                } else {
-                                    reqwest::redirect::Policy::none()
-                                })
-                                .build();
-                            match client {
-                                Ok(c) => c.get(&target_url).send().await.is_ok(),
-                                Err(_) => false,
-                            }
-                        };
+                        // Reachability check: send a probe via the target's fully-hydrated
+                        // HTTP stack so proxy, custom headers, cookies, User-Agent, method,
+                        // and body all match what the real scan would send.
+                        let reachable = send_reachability_probe(&target).await;
 
                         if !reachable {
                             return serde_json::json!({
@@ -1803,6 +1835,34 @@ mod tests {
             .await
             .expect_err("delete must fail for unknown id");
         assert!(err.message.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_list_scans_rejects_invalid_status_filter() {
+        let mcp = DalfoxMcp::new();
+        let err = mcp
+            .list_scans_dalfox(Parameters(ListScansDalfoxParams {
+                status: Some("bogus".to_string()),
+            }))
+            .await
+            .expect_err("unknown status filter must be rejected");
+        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert!(err.message.contains("invalid status filter"));
+    }
+
+    #[test]
+    fn test_parse_job_status_round_trip() {
+        for status in [
+            JobStatus::Queued,
+            JobStatus::Running,
+            JobStatus::Done,
+            JobStatus::Error,
+            JobStatus::Cancelled,
+        ] {
+            let s = status.to_string();
+            assert_eq!(parse_job_status(&s), Some(status));
+        }
+        assert_eq!(parse_job_status("unknown"), None);
     }
 
     #[tokio::test]
