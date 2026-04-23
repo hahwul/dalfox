@@ -418,7 +418,7 @@ name = "dalfox"
 version = "3.0.0-dev.1"
 dependencies = [
  "axum",
- "base64 0.21.7",
+ "base64 0.22.1",
  "chrono",
  "clap",
  "hex",
