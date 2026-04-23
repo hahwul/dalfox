@@ -1,4 +1,5 @@
 pub mod file;
+pub mod job;
 pub mod payload;
 pub mod pipe;
 pub mod scan;

@@ -40,34 +40,28 @@ use rmcp::{
 
 use crate::{
     cmd::JobStatus,
+    cmd::job::{
+        JOB_RETENTION_SECS, Job, MAX_DELAY_MS, MAX_TIMEOUT_SECS, now_ms, parse_job_status,
+        purge_expired_jobs as purge_jobs_map, send_reachability_probe,
+    },
     cmd::scan::ScanArgs,
     parameter_analysis::analyze_parameters,
     scanning::result::{Result as ScanResult, SanitizedResult},
     target_parser::parse_target,
 };
 
-/// Progress counters shared with the running scan task.
-#[derive(Clone, Default)]
-struct JobProgress {
-    requests_sent: Arc<std::sync::atomic::AtomicU64>,
-    findings_so_far: Arc<std::sync::atomic::AtomicU64>,
-    params_total: Arc<std::sync::atomic::AtomicU32>,
-    params_tested: Arc<std::sync::atomic::AtomicU32>,
-}
-
-/// How long terminal jobs (done/error/cancelled) are retained in memory before
-/// being auto-purged on the next tool call. Prevents unbounded growth in
-/// long-running MCP sessions.
-const JOB_RETENTION_SECS: i64 = 3600;
-
-/// Maximum HTTP request timeout accepted via MCP tool parameters (exclusive upper bound).
-const MAX_TIMEOUT_SECS: u64 = 299;
-/// Maximum delay-between-requests accepted via MCP tool parameters (exclusive upper bound).
-const MAX_DELAY_MS: u64 = 9999;
-
-/// Current unix time in milliseconds (UTC).
-fn now_ms() -> i64 {
-    chrono::Utc::now().timestamp_millis()
+/// Render timestamp/duration fields into the given JSON object.
+fn write_timestamps(job: &Job, out: &mut serde_json::Map<String, serde_json::Value>) {
+    out.insert("queued_at_ms".into(), serde_json::json!(job.queued_at_ms));
+    out.insert(
+        "started_at_ms".into(),
+        serde_json::json!(job.started_at_ms),
+    );
+    out.insert(
+        "finished_at_ms".into(),
+        serde_json::json!(job.finished_at_ms),
+    );
+    out.insert("duration_ms".into(), serde_json::json!(job.duration_ms()));
 }
 
 /// Apply (offset, limit) pagination to a result vector and return the sliced
@@ -114,97 +108,6 @@ fn paginate_results(
     (Some(slice), pagination)
 }
 
-/// Parse a lowercase status string back into `JobStatus`. Returns `None` for
-/// unknown values so callers can surface a precise error.
-fn parse_job_status(s: &str) -> Option<JobStatus> {
-    match s {
-        "queued" => Some(JobStatus::Queued),
-        "running" => Some(JobStatus::Running),
-        "done" => Some(JobStatus::Done),
-        "error" => Some(JobStatus::Error),
-        "cancelled" => Some(JobStatus::Cancelled),
-        _ => None,
-    }
-}
-
-/// Send a single request mirroring the configuration the real scan would use
-/// (method, headers, cookies, User-Agent, body, proxy, timeout, redirects).
-/// Returns true iff a response came back — content/status are not inspected.
-async fn send_reachability_probe(target: &crate::target_parser::Target) -> bool {
-    let client = target.build_client_or_default();
-    let mut req = client.request(target.parse_method(), target.url.clone());
-    for (k, v) in &target.headers {
-        req = req.header(k, v);
-    }
-    if !target.cookies.is_empty() {
-        let cookie_header = target
-            .cookies
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect::<Vec<_>>()
-            .join("; ");
-        req = req.header("Cookie", cookie_header);
-    }
-    if let Some(ua) = target.user_agent.as_deref().filter(|s| !s.is_empty()) {
-        req = req.header("User-Agent", ua);
-    }
-    if let Some(body) = &target.data {
-        req = req.body(body.clone());
-    }
-    req.send().await.is_ok()
-}
-
-/// Internal job representation.
-#[derive(Clone)]
-struct Job {
-    status: JobStatus,
-    /// Sanitized findings, wrapped in `Arc` so cloning the Job for outbound
-    /// responses is a pointer bump rather than a deep copy of potentially
-    /// large raw request/response bodies.
-    results: Option<Arc<Vec<SanitizedResult>>>,
-    progress: JobProgress,
-    /// Cancellation flag: set to true to request early termination of a running scan.
-    cancelled: Arc<std::sync::atomic::AtomicBool>,
-    /// Error message stored when the scan fails (status == Error).
-    error_message: Option<String>,
-    /// The original target URL submitted for scanning.
-    target_url: String,
-    /// Unix ms when scan was enqueued.
-    queued_at_ms: i64,
-    /// Unix ms when scan transitioned to Running.
-    started_at_ms: Option<i64>,
-    /// Unix ms when scan reached a terminal state (done/error/cancelled).
-    finished_at_ms: Option<i64>,
-}
-
-impl Job {
-    fn is_terminal(&self) -> bool {
-        matches!(
-            self.status,
-            JobStatus::Done | JobStatus::Error | JobStatus::Cancelled
-        )
-    }
-
-    /// Render timestamp/duration fields into the given object.
-    fn write_timestamps(&self, out: &mut serde_json::Map<String, serde_json::Value>) {
-        out.insert("queued_at_ms".into(), serde_json::json!(self.queued_at_ms));
-        out.insert(
-            "started_at_ms".into(),
-            serde_json::json!(self.started_at_ms),
-        );
-        out.insert(
-            "finished_at_ms".into(),
-            serde_json::json!(self.finished_at_ms),
-        );
-        let duration_ms = match (self.started_at_ms, self.finished_at_ms) {
-            (Some(s), Some(f)) => Some(f - s),
-            (Some(s), None) => Some(now_ms() - s),
-            _ => None,
-        };
-        out.insert("duration_ms".into(), serde_json::json!(duration_ms));
-    }
-}
-
 /// MCP handler state.
 #[derive(Clone)]
 pub struct DalfoxMcp {
@@ -235,15 +138,11 @@ impl DalfoxMcp {
         eprintln!("[{}] [{}] {}", ts, level, msg);
     }
 
-    /// Remove terminal jobs whose finished_at_ms is older than JOB_RETENTION_SECS.
-    /// Called at the entry of every tool handler to bound memory usage.
+    /// Thin wrapper that acquires the jobs lock before delegating to the
+    /// shared retention helper.
     async fn purge_expired_jobs(&self) {
-        let cutoff = now_ms() - JOB_RETENTION_SECS * 1000;
         let mut jobs = self.jobs.lock().await;
-        jobs.retain(|_, job| match job.finished_at_ms {
-            Some(finished) => finished >= cutoff,
-            None => true,
-        });
+        purge_jobs_map(&mut jobs, JOB_RETENTION_SECS);
     }
 
     /// Execute a scan job (parameter discovery + scanning) using a fully prepared ScanArgs.
@@ -655,20 +554,7 @@ Final results (via get_results_dalfox) include finding type \
 
         {
             let mut jobs = self.jobs.lock().await;
-            jobs.insert(
-                scan_id.clone(),
-                Job {
-                    status: JobStatus::Queued,
-                    results: None,
-                    progress: JobProgress::default(),
-                    cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                    error_message: None,
-                    target_url: target.clone(),
-                    queued_at_ms: now_ms(),
-                    started_at_ms: None,
-                    finished_at_ms: None,
-                },
-            );
+            jobs.insert(scan_id.clone(), Job::new_queued(target.clone()));
         }
 
         Self::log(
@@ -848,7 +734,7 @@ Call this repeatedly until status is 'done', 'error', or 'cancelled'."
                     "pagination": pagination,
                 });
                 if let Some(obj) = out.as_object_mut() {
-                    job.write_timestamps(obj);
+                    write_timestamps(&job, obj);
                 }
                 // Include error message when scan failed
                 if let Some(ref err_msg) = job.error_message {
@@ -948,7 +834,7 @@ status, and result_count."
                     "result_count": job.results.as_ref().map(|r| r.len()).unwrap_or(0)
                 });
                 if let Some(obj) = entry.as_object_mut() {
-                    job.write_timestamps(obj);
+                    write_timestamps(&job, obj);
                 }
                 entry
             })
@@ -1274,24 +1160,16 @@ mod tests {
 
     /// Build a synthetic Job for tests with the given status and optional results.
     fn test_job(status: JobStatus, results: Option<Vec<SanitizedResult>>) -> Job {
-        let results = results.map(Arc::new);
-        let now = now_ms();
-        let finished = matches!(
+        let mut job = Job::new_queued(String::new());
+        job.status = status.clone();
+        job.results = results.map(Arc::new);
+        if matches!(
             status,
             JobStatus::Done | JobStatus::Error | JobStatus::Cancelled
-        )
-        .then_some(now);
-        Job {
-            status,
-            results,
-            progress: JobProgress::default(),
-            cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            error_message: None,
-            target_url: String::new(),
-            queued_at_ms: now,
-            started_at_ms: None,
-            finished_at_ms: finished,
+        ) {
+            job.finished_at_ms = Some(now_ms());
         }
+        job
     }
 
     fn default_scan_params(target: &str) -> ScanWithDalfoxParams {
@@ -2039,21 +1917,6 @@ mod tests {
             3,
             "global counter sees both jobs"
         );
-    }
-
-    #[test]
-    fn test_parse_job_status_round_trip() {
-        for status in [
-            JobStatus::Queued,
-            JobStatus::Running,
-            JobStatus::Done,
-            JobStatus::Error,
-            JobStatus::Cancelled,
-        ] {
-            let s = status.to_string();
-            assert_eq!(parse_job_status(&s), Some(status));
-        }
-        assert_eq!(parse_job_status("unknown"), None);
     }
 
     #[tokio::test]

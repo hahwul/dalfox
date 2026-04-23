@@ -16,6 +16,10 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
 
 use crate::cmd::JobStatus;
+use crate::cmd::job::{
+    JOB_RETENTION_SECS, Job, JobProgress, MAX_DELAY_MS, MAX_TIMEOUT_SECS, MAX_WORKERS, now_ms,
+    parse_job_status, purge_expired_jobs as purge_jobs_map, send_reachability_probe,
+};
 use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::analyze_parameters;
 use crate::scanning::result::{Result as ScanResult, SanitizedResult};
@@ -96,84 +100,6 @@ struct AppState {
     callback_param_name: String,
 }
 
-/// How long terminal jobs (done/error/cancelled) are retained in memory before
-/// being auto-purged on the next request. Prevents unbounded growth in
-/// long-running server instances.
-const JOB_RETENTION_SECS: i64 = 3600;
-
-/// Maximum HTTP request timeout accepted via scan options (inclusive upper bound).
-const MAX_TIMEOUT_SECS: u64 = 299;
-/// Maximum delay-between-requests accepted via scan options (inclusive upper bound).
-const MAX_DELAY_MS: u64 = 9999;
-/// Maximum worker count accepted via scan options (inclusive upper bound).
-const MAX_WORKERS: usize = 500;
-
-/// Current unix time in milliseconds (UTC).
-fn now_ms() -> i64 {
-    chrono::Utc::now().timestamp_millis()
-}
-
-/// Parse a lowercase status string back into `JobStatus`. Returns `None` for
-/// unknown values so callers can surface a precise error instead of silently
-/// matching nothing.
-fn parse_job_status(s: &str) -> Option<JobStatus> {
-    match s {
-        "queued" => Some(JobStatus::Queued),
-        "running" => Some(JobStatus::Running),
-        "done" => Some(JobStatus::Done),
-        "error" => Some(JobStatus::Error),
-        "cancelled" => Some(JobStatus::Cancelled),
-        _ => None,
-    }
-}
-
-/// Progress counters shared with a running scan task.
-#[derive(Clone, Default)]
-struct JobProgress {
-    requests_sent: Arc<std::sync::atomic::AtomicU64>,
-    findings_so_far: Arc<std::sync::atomic::AtomicU64>,
-    params_total: Arc<std::sync::atomic::AtomicU32>,
-    params_tested: Arc<std::sync::atomic::AtomicU32>,
-}
-
-#[derive(Clone)]
-struct Job {
-    status: JobStatus,
-    /// Sanitized findings, wrapped in `Arc` so cloning the Job out of the
-    /// jobs map for response building is a pointer bump rather than a deep
-    /// copy of potentially large raw request/response bodies.
-    results: Option<Arc<Vec<SanitizedResult>>>,
-    callback_url: Option<String>,
-    progress: JobProgress,
-    cancelled: Arc<std::sync::atomic::AtomicBool>,
-    error_message: Option<String>,
-    /// The original target URL submitted for scanning.
-    target_url: String,
-    /// Unix ms when the scan was enqueued.
-    queued_at_ms: i64,
-    /// Unix ms when the scan transitioned to Running.
-    started_at_ms: Option<i64>,
-    /// Unix ms when the scan reached a terminal state (done/error/cancelled).
-    finished_at_ms: Option<i64>,
-}
-
-impl Job {
-    fn is_terminal(&self) -> bool {
-        matches!(
-            self.status,
-            JobStatus::Done | JobStatus::Error | JobStatus::Cancelled
-        )
-    }
-
-    fn duration_ms(&self) -> Option<i64> {
-        match (self.started_at_ms, self.finished_at_ms) {
-            (Some(s), Some(f)) => Some(f - s),
-            (Some(s), None) => Some(now_ms() - s),
-            _ => None,
-        }
-    }
-}
-
 /// Reject scan-option values that are outside the supported range so callers
 /// get a precise 400 instead of having the server silently substitute defaults.
 fn validate_scan_options(opts: &ScanOptions) -> Result<(), String> {
@@ -204,16 +130,11 @@ fn validate_scan_options(opts: &ScanOptions) -> Result<(), String> {
     Ok(())
 }
 
-/// Remove terminal jobs whose finished_at_ms is older than JOB_RETENTION_SECS.
-/// Called at the entry of every handler to bound memory usage in long-running
-/// server instances.
+/// Thin wrapper over `cmd::job::purge_expired_jobs` that acquires the jobs
+/// lock for the caller.
 async fn purge_expired_jobs(state: &AppState) {
-    let cutoff = now_ms() - JOB_RETENTION_SECS * 1000;
     let mut jobs = state.jobs.lock().await;
-    jobs.retain(|_, job| match job.finished_at_ms {
-        Some(finished) => finished >= cutoff,
-        None => true,
-    });
+    purge_jobs_map(&mut jobs, JOB_RETENTION_SECS);
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1389,33 +1310,6 @@ enum PreflightError {
     TaskPanicked,
 }
 
-/// Send one request mirroring the scan's HTTP configuration (method, headers,
-/// cookies, User-Agent, body, proxy, timeout, redirects). Returns true iff a
-/// response came back.
-async fn send_reachability_probe(target: &crate::target_parser::Target) -> bool {
-    let client = target.build_client_or_default();
-    let mut req = client.request(target.parse_method(), target.url.clone());
-    for (k, v) in &target.headers {
-        req = req.header(k, v);
-    }
-    if !target.cookies.is_empty() {
-        let cookie_header = target
-            .cookies
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect::<Vec<_>>()
-            .join("; ");
-        req = req.header("Cookie", cookie_header);
-    }
-    if let Some(ua) = target.user_agent.as_deref().filter(|s| !s.is_empty()) {
-        req = req.header("User-Agent", ua);
-    }
-    if let Some(body) = &target.data {
-        req = req.body(body.clone());
-    }
-    req.send().await.is_ok()
-}
-
 /// Build a hydrated Target from the preflight request options.
 fn hydrate_preflight_target(
     target_url: &str,
@@ -1805,24 +1699,16 @@ mod tests {
         results: Option<Vec<SanitizedResult>>,
         target_url: &str,
     ) -> Job {
-        let now = now_ms();
-        let finished = matches!(
+        let mut job = Job::new_queued(target_url.to_string());
+        job.status = status.clone();
+        job.results = results.map(Arc::new);
+        if matches!(
             status,
             JobStatus::Done | JobStatus::Error | JobStatus::Cancelled
-        )
-        .then_some(now);
-        Job {
-            status,
-            results: results.map(Arc::new),
-            callback_url: None,
-            progress: JobProgress::default(),
-            cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-            error_message: None,
-            target_url: target_url.to_string(),
-            queued_at_ms: now,
-            started_at_ms: None,
-            finished_at_ms: finished,
+        ) {
+            job.finished_at_ms = Some(now_ms());
         }
+        job
     }
 
     fn temp_log_path(name: &str) -> PathBuf {
@@ -2961,21 +2847,6 @@ mod tests {
 
         let jobs = state.jobs.lock().await;
         assert!(jobs.contains_key("running-purge"), "non-terminal job must not be purged");
-    }
-
-    #[test]
-    fn test_parse_job_status_round_trip() {
-        for status in [
-            JobStatus::Queued,
-            JobStatus::Running,
-            JobStatus::Done,
-            JobStatus::Error,
-            JobStatus::Cancelled,
-        ] {
-            let s = status.to_string();
-            assert_eq!(parse_job_status(&s), Some(status));
-        }
-        assert_eq!(parse_job_status("unknown"), None);
     }
 
     #[tokio::test]
