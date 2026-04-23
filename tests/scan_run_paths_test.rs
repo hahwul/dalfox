@@ -65,6 +65,7 @@ fn base_scan_args() -> ScanArgs {
         sxss: false,
         sxss_url: None,
         sxss_method: "GET".to_string(),
+        sxss_retries: 3,
         skip_ast_analysis: false,
         hpp: false,
         waf_bypass: "off".to_string(),
