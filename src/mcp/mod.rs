@@ -6,6 +6,7 @@
 //! 3. `list_scans_dalfox`    - List all tracked scans with their statuses
 //! 4. `cancel_scan_dalfox`   - Cancel a queued or running scan
 //! 5. `preflight_dalfox`     - Analyze target without attack payloads (parameter discovery + impact estimate)
+//! 6. `delete_scan_dalfox`   - Remove a tracked scan from memory
 //!
 //! Design goals (minimal blocking server):
 //! - In-memory job storage only (no persistence)
@@ -56,17 +57,26 @@ struct JobProgress {
     params_tested: Arc<std::sync::atomic::AtomicU32>,
 }
 
+/// How long terminal jobs (done/error/cancelled) are retained in memory before
+/// being auto-purged on the next tool call. Prevents unbounded growth in
+/// long-running MCP sessions.
+const JOB_RETENTION_SECS: i64 = 3600;
+
+/// Maximum HTTP request timeout accepted via MCP tool parameters (exclusive upper bound).
+const MAX_TIMEOUT_SECS: u64 = 299;
+/// Maximum delay-between-requests accepted via MCP tool parameters (exclusive upper bound).
+const MAX_DELAY_MS: u64 = 9999;
+
+/// Current unix time in milliseconds (UTC).
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
 /// Internal job representation.
 #[derive(Clone)]
 struct Job {
     status: JobStatus,
     results: Option<Vec<SanitizedResult>>,
-    /// Whether raw HTTP request text is included in findings (passed through via ScanArgs).
-    #[allow(dead_code)] // Used indirectly: value is passed to ScanArgs which controls to_sanitized()
-    include_request: bool,
-    /// Whether raw HTTP response body is included in findings (passed through via ScanArgs).
-    #[allow(dead_code)] // Used indirectly: value is passed to ScanArgs which controls to_sanitized()
-    include_response: bool,
     progress: JobProgress,
     /// Cancellation flag: set to true to request early termination of a running scan.
     cancelled: Arc<std::sync::atomic::AtomicBool>,
@@ -74,6 +84,40 @@ struct Job {
     error_message: Option<String>,
     /// The original target URL submitted for scanning.
     target_url: String,
+    /// Unix ms when scan was enqueued.
+    queued_at_ms: i64,
+    /// Unix ms when scan transitioned to Running.
+    started_at_ms: Option<i64>,
+    /// Unix ms when scan reached a terminal state (done/error/cancelled).
+    finished_at_ms: Option<i64>,
+}
+
+impl Job {
+    fn is_terminal(&self) -> bool {
+        matches!(
+            self.status,
+            JobStatus::Done | JobStatus::Error | JobStatus::Cancelled
+        )
+    }
+
+    /// Render timestamp/duration fields into the given object.
+    fn write_timestamps(&self, out: &mut serde_json::Map<String, serde_json::Value>) {
+        out.insert("queued_at_ms".into(), serde_json::json!(self.queued_at_ms));
+        out.insert(
+            "started_at_ms".into(),
+            serde_json::json!(self.started_at_ms),
+        );
+        out.insert(
+            "finished_at_ms".into(),
+            serde_json::json!(self.finished_at_ms),
+        );
+        let duration_ms = match (self.started_at_ms, self.finished_at_ms) {
+            (Some(s), Some(f)) => Some(f - s),
+            (Some(s), None) => Some(now_ms() - s),
+            _ => None,
+        };
+        out.insert("duration_ms".into(), serde_json::json!(duration_ms));
+    }
 }
 
 /// MCP handler state.
@@ -106,6 +150,17 @@ impl DalfoxMcp {
         eprintln!("[{}] [{}] {}", ts, level, msg);
     }
 
+    /// Remove terminal jobs whose finished_at_ms is older than JOB_RETENTION_SECS.
+    /// Called at the entry of every tool handler to bound memory usage.
+    async fn purge_expired_jobs(&self) {
+        let cutoff = now_ms() - JOB_RETENTION_SECS * 1000;
+        let mut jobs = self.jobs.lock().await;
+        jobs.retain(|_, job| match job.finished_at_ms {
+            Some(finished) => finished >= cutoff,
+            None => true,
+        });
+    }
+
     /// Execute a scan job (parameter discovery + scanning) using a fully prepared ScanArgs.
     async fn run_job(&self, scan_id: String, scan_args: ScanArgs) {
         // Grab shared progress counters and cancellation flag for this job
@@ -118,6 +173,7 @@ impl DalfoxMcp {
                     return;
                 }
                 j.status = JobStatus::Running;
+                j.started_at_ms = Some(now_ms());
                 (j.progress.clone(), j.cancelled.clone())
             } else {
                 return;
@@ -165,6 +221,7 @@ impl DalfoxMcp {
                 if let Some(j) = jobs.get_mut(&scan_id) {
                     j.status = JobStatus::Error;
                     j.error_message = Some(msg);
+                    j.finished_at_ms = Some(now_ms());
                 }
                 return;
             }
@@ -232,6 +289,11 @@ impl DalfoxMcp {
                 // Only update status if not already cancelled (cancel sets status immediately)
                 if j.status != JobStatus::Cancelled {
                     j.status = JobStatus::Done;
+                }
+                // finished_at_ms may already be set by cancel_scan_dalfox; preserve it
+                // so we record the moment the user asked to stop, not when the task noticed.
+                if j.finished_at_ms.is_none() {
+                    j.finished_at_ms = Some(now_ms());
                 }
             }
         }
@@ -378,6 +440,13 @@ pub struct CancelScanDalfoxParams {
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
+pub struct DeleteScanDalfoxParams {
+    /// The scan_id of the scan to delete from memory.
+    /// The scan must be in a terminal state (done, error, cancelled).
+    pub scan_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct PreflightDalfoxParams {
     /// Target URL to analyze. Must start with http:// or https://.
     pub target: String,
@@ -450,6 +519,8 @@ Final results (via get_results_dalfox) include finding type \
         &self,
         Parameters(params): Parameters<ScanWithDalfoxParams>,
     ) -> Result<CallToolResult, ErrorData> {
+        self.purge_expired_jobs().await;
+
         let target = params.target.trim().to_string();
         if target.is_empty() {
             return Err(ErrorData::invalid_params(
@@ -464,6 +535,25 @@ Final results (via get_results_dalfox) include finding type \
             ));
         }
 
+        if params.timeout == 0 || params.timeout > MAX_TIMEOUT_SECS {
+            return Err(ErrorData::invalid_params(
+                format!(
+                    "timeout must be between 1 and {} seconds (got {})",
+                    MAX_TIMEOUT_SECS, params.timeout
+                ),
+                None,
+            ));
+        }
+        if params.delay > MAX_DELAY_MS {
+            return Err(ErrorData::invalid_params(
+                format!(
+                    "delay must be between 0 and {} ms (got {})",
+                    MAX_DELAY_MS, params.delay
+                ),
+                None,
+            ));
+        }
+
         let scan_id = Self::make_scan_id(&target);
 
         {
@@ -473,12 +563,13 @@ Final results (via get_results_dalfox) include finding type \
                 Job {
                     status: JobStatus::Queued,
                     results: None,
-                    include_request: params.include_request,
-                    include_response: params.include_response,
                     progress: JobProgress::default(),
                     cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                     error_message: None,
                     target_url: target.clone(),
+                    queued_at_ms: now_ms(),
+                    started_at_ms: None,
+                    finished_at_ms: None,
                 },
             );
         }
@@ -516,18 +607,6 @@ Final results (via get_results_dalfox) include finding type \
             params.encoders.clone()
         };
 
-        // Clamp timeout/delay to valid ranges
-        let timeout = if params.timeout > 0 && params.timeout < 300 {
-            params.timeout
-        } else {
-            10
-        };
-        let delay = if params.delay < 10_000 {
-            params.delay
-        } else {
-            0
-        };
-
         let scan_args = ScanArgs {
             input_type: "url".to_string(),
             format: "json".to_string(),
@@ -553,8 +632,8 @@ Final results (via get_results_dalfox) include finding type \
             skip_reflection_header: false,
             skip_reflection_cookie: false,
             skip_reflection_path: false,
-            timeout,
-            delay,
+            timeout: params.timeout,
+            delay: params.delay,
             proxy: params.proxy.clone(),
             follow_redirects: params.follow_redirects,
             ignore_return: vec![],
@@ -641,6 +720,8 @@ Call this repeatedly until status is 'done', 'error', or 'cancelled'."
         &self,
         Parameters(params): Parameters<GetResultsDalfoxParams>,
     ) -> Result<CallToolResult, ErrorData> {
+        self.purge_expired_jobs().await;
+
         let pid = params.scan_id.trim().to_string();
         if pid.is_empty() {
             return Err(ErrorData::invalid_params("scan_id must not be empty", None));
@@ -658,6 +739,9 @@ Call this repeatedly until status is 'done', 'error', or 'cancelled'."
                     "status": job.status,
                     "results": job.results
                 });
+                if let Some(obj) = out.as_object_mut() {
+                    job.write_timestamps(obj);
+                }
                 // Include error message when scan failed
                 if let Some(ref err_msg) = job.error_message {
                     out["error_message"] = serde_json::json!(err_msg);
@@ -724,6 +808,8 @@ status, and result_count."
         &self,
         Parameters(params): Parameters<ListScansDalfoxParams>,
     ) -> Result<CallToolResult, ErrorData> {
+        self.purge_expired_jobs().await;
+
         let jobs = self.jobs.lock().await;
         let filter_status: Option<String> = params
             .status
@@ -743,12 +829,16 @@ status, and result_count."
                 }
             })
             .map(|(id, job)| {
-                serde_json::json!({
+                let mut entry = serde_json::json!({
                     "scan_id": id,
                     "target": job.target_url,
                     "status": job.status,
                     "result_count": job.results.as_ref().map(|r| r.len()).unwrap_or(0)
-                })
+                });
+                if let Some(obj) = entry.as_object_mut() {
+                    job.write_timestamps(obj);
+                }
+                entry
             })
             .collect();
 
@@ -775,6 +865,8 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
         &self,
         Parameters(params): Parameters<PreflightDalfoxParams>,
     ) -> Result<CallToolResult, ErrorData> {
+        self.purge_expired_jobs().await;
+
         let target_url = params.target.trim().to_string();
         if target_url.is_empty() {
             return Err(ErrorData::invalid_params(
@@ -789,14 +881,20 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
             ));
         }
 
+        if params.timeout == 0 || params.timeout > MAX_TIMEOUT_SECS {
+            return Err(ErrorData::invalid_params(
+                format!(
+                    "timeout must be between 1 and {} seconds (got {})",
+                    MAX_TIMEOUT_SECS, params.timeout
+                ),
+                None,
+            ));
+        }
+
         let mut target = match parse_target(&target_url) {
             Ok(mut t) => {
                 t.method = params.method.clone();
-                t.timeout = if params.timeout > 0 && params.timeout < 300 {
-                    params.timeout
-                } else {
-                    10
-                };
+                t.timeout = params.timeout;
                 t.proxy = params.proxy.clone();
                 t.follow_redirects = params.follow_redirects;
                 t.user_agent = params.user_agent.clone().or(Some("".to_string()));
@@ -962,6 +1060,8 @@ still be retrieved via get_results_dalfox."
         &self,
         Parameters(params): Parameters<CancelScanDalfoxParams>,
     ) -> Result<CallToolResult, ErrorData> {
+        self.purge_expired_jobs().await;
+
         let pid = params.scan_id.trim().to_string();
         if pid.is_empty() {
             return Err(ErrorData::invalid_params("scan_id must not be empty", None));
@@ -977,6 +1077,9 @@ still be retrieved via get_results_dalfox."
                 // cancellation checkpoint and store partial results.
                 if matches!(job.status, JobStatus::Queued | JobStatus::Running) {
                     job.status = JobStatus::Cancelled;
+                    if job.finished_at_ms.is_none() {
+                        job.finished_at_ms = Some(now_ms());
+                    }
                 }
                 let out = serde_json::json!({
                     "scan_id": pid,
@@ -990,6 +1093,52 @@ still be retrieved via get_results_dalfox."
             }
             None => Err(ErrorData::invalid_params("scan_id not found", None)),
         }
+    }
+
+    /// Delete a scan entry from the in-memory store.
+    #[tool(
+        name = "delete_scan_dalfox",
+        description = "Delete a scan by scan_id, permanently removing it from memory. \
+Only terminal scans (done, error, cancelled) can be deleted — a running or \
+queued scan must be cancelled first via cancel_scan_dalfox. \
+Returns {scan_id, deleted: true, previous_status}. \
+Terminal scans are also auto-purged after 1 hour."
+    )]
+    async fn delete_scan_dalfox(
+        &self,
+        Parameters(params): Parameters<DeleteScanDalfoxParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        self.purge_expired_jobs().await;
+
+        let pid = params.scan_id.trim().to_string();
+        if pid.is_empty() {
+            return Err(ErrorData::invalid_params("scan_id must not be empty", None));
+        }
+        let mut jobs = self.jobs.lock().await;
+        let previous_status = match jobs.get(&pid) {
+            Some(job) => {
+                if !job.is_terminal() {
+                    return Err(ErrorData::invalid_params(
+                        format!(
+                            "cannot delete scan in status '{}' — cancel it first via cancel_scan_dalfox",
+                            job.status
+                        ),
+                        None,
+                    ));
+                }
+                job.status.clone()
+            }
+            None => return Err(ErrorData::invalid_params("scan_id not found", None)),
+        };
+        jobs.remove(&pid);
+        let out = serde_json::json!({
+            "scan_id": pid,
+            "deleted": true,
+            "previous_status": previous_status,
+        });
+        Ok(CallToolResult::success(vec![Content::text(
+            out.to_string(),
+        )]))
     }
 }
 
@@ -1011,6 +1160,27 @@ pub async fn run_mcp_server() -> Result<(), Box<dyn std::error::Error>> {
 mod tests {
     use super::*;
     use tokio::time::{Duration, sleep};
+
+    /// Build a synthetic Job for tests with the given status and optional results.
+    fn test_job(status: JobStatus, results: Option<Vec<SanitizedResult>>) -> Job {
+        let now = now_ms();
+        let finished = matches!(
+            status,
+            JobStatus::Done | JobStatus::Error | JobStatus::Cancelled
+        )
+        .then_some(now);
+        Job {
+            status,
+            results,
+            progress: JobProgress::default(),
+            cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            error_message: None,
+            target_url: String::new(),
+            queued_at_ms: now,
+            started_at_ms: None,
+            finished_at_ms: finished,
+        }
+    }
 
     fn default_scan_params(target: &str) -> ScanWithDalfoxParams {
         ScanWithDalfoxParams {
@@ -1192,19 +1362,7 @@ mod tests {
         let scan_id = "job-parse-fail".to_string();
         {
             let mut jobs = mcp.jobs.lock().await;
-            jobs.insert(
-                scan_id.clone(),
-                Job {
-                    status: JobStatus::Queued,
-                    results: None,
-                    include_request: false,
-                    include_response: false,
-                    progress: JobProgress::default(),
-                    cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                    error_message: None,
-                    target_url: String::new(),
-                },
-            );
+            jobs.insert(scan_id.clone(), test_job(JobStatus::Queued, None));
         }
 
         let mut args = default_scan_args("http://example.com");
@@ -1262,20 +1420,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_scan_with_dalfox_clamps_out_of_range_timeout() {
+    async fn test_scan_with_dalfox_rejects_out_of_range_timeout() {
         let mcp = DalfoxMcp::new();
         let params = ScanWithDalfoxParams {
-            timeout: 9999, // out of range, should be clamped to 10
-            delay: 99999,  // out of range, should be clamped to 0
+            timeout: 9999,
             ..default_scan_params("http://127.0.0.1:1/?q=a")
         };
-        let resp = mcp
+        let err = mcp
             .scan_with_dalfox(Parameters(params))
             .await
-            .expect("scan_with_dalfox should queue");
+            .expect_err("out-of-range timeout must be rejected");
+        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert!(err.message.contains("timeout must be between"));
+    }
 
-        let payload = parse_result_json(&resp);
-        assert_eq!(payload["status"], "queued");
+    #[tokio::test]
+    async fn test_scan_with_dalfox_rejects_zero_timeout() {
+        let mcp = DalfoxMcp::new();
+        let params = ScanWithDalfoxParams {
+            timeout: 0,
+            ..default_scan_params("http://127.0.0.1:1/?q=a")
+        };
+        let err = mcp
+            .scan_with_dalfox(Parameters(params))
+            .await
+            .expect_err("zero timeout must be rejected");
+        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+    }
+
+    #[tokio::test]
+    async fn test_scan_with_dalfox_rejects_out_of_range_delay() {
+        let mcp = DalfoxMcp::new();
+        let params = ScanWithDalfoxParams {
+            delay: 99_999,
+            ..default_scan_params("http://127.0.0.1:1/?q=a")
+        };
+        let err = mcp
+            .scan_with_dalfox(Parameters(params))
+            .await
+            .expect_err("out-of-range delay must be rejected");
+        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert!(err.message.contains("delay must be between"));
     }
 
     #[tokio::test]
@@ -1330,32 +1515,12 @@ mod tests {
         // Manually insert a done job
         {
             let mut jobs = mcp.jobs.lock().await;
-            jobs.insert(
-                "done-job".to_string(),
-                Job {
-                    status: JobStatus::Done,
-                    results: Some(vec![]),
-                    include_request: false,
-                    include_response: false,
-                    progress: JobProgress::default(),
-                    cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                    error_message: None,
-                    target_url: "https://example.com/done".to_string(),
-                },
-            );
-            jobs.insert(
-                "queued-job".to_string(),
-                Job {
-                    status: JobStatus::Queued,
-                    results: None,
-                    include_request: false,
-                    include_response: false,
-                    progress: JobProgress::default(),
-                    cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                    error_message: None,
-                    target_url: "https://example.com/queued".to_string(),
-                },
-            );
+            let mut done = test_job(JobStatus::Done, Some(vec![]));
+            done.target_url = "https://example.com/done".to_string();
+            jobs.insert("done-job".to_string(), done);
+            let mut queued = test_job(JobStatus::Queued, None);
+            queued.target_url = "https://example.com/queued".to_string();
+            jobs.insert("queued-job".to_string(), queued);
         }
 
         let resp = mcp
@@ -1497,24 +1662,12 @@ mod tests {
         // Manually insert a running job with progress
         {
             let mut jobs = mcp.jobs.lock().await;
-            let progress = JobProgress::default();
-            progress.params_total.store(10, std::sync::atomic::Ordering::Relaxed);
-            progress.params_tested.store(5, std::sync::atomic::Ordering::Relaxed);
-            progress.requests_sent.store(100, std::sync::atomic::Ordering::Relaxed);
-            progress.findings_so_far.store(2, std::sync::atomic::Ordering::Relaxed);
-            jobs.insert(
-                "progress-test".to_string(),
-                Job {
-                    status: JobStatus::Running,
-                    results: None,
-                    include_request: false,
-                    include_response: false,
-                    progress,
-                    cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                    error_message: None,
-                    target_url: String::new(),
-                },
-            );
+            let job = test_job(JobStatus::Running, None);
+            job.progress.params_total.store(10, std::sync::atomic::Ordering::Relaxed);
+            job.progress.params_tested.store(5, std::sync::atomic::Ordering::Relaxed);
+            job.progress.requests_sent.store(100, std::sync::atomic::Ordering::Relaxed);
+            job.progress.findings_so_far.store(2, std::sync::atomic::Ordering::Relaxed);
+            jobs.insert("progress-test".to_string(), job);
         }
 
         let resp = mcp
@@ -1540,22 +1693,10 @@ mod tests {
         let mcp = DalfoxMcp::new();
         {
             let mut jobs = mcp.jobs.lock().await;
-            let progress = JobProgress::default();
-            progress.params_total.store(10, std::sync::atomic::Ordering::Relaxed);
-            progress.params_tested.store(10, std::sync::atomic::Ordering::Relaxed);
-            jobs.insert(
-                "done-progress-test".to_string(),
-                Job {
-                    status: JobStatus::Done,
-                    results: Some(vec![]),
-                    include_request: false,
-                    include_response: false,
-                    progress,
-                    cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                    error_message: None,
-                    target_url: String::new(),
-                },
-            );
+            let job = test_job(JobStatus::Done, Some(vec![]));
+            job.progress.params_total.store(10, std::sync::atomic::Ordering::Relaxed);
+            job.progress.params_tested.store(10, std::sync::atomic::Ordering::Relaxed);
+            jobs.insert("done-progress-test".to_string(), job);
         }
 
         let resp = mcp
@@ -1569,5 +1710,123 @@ mod tests {
         let progress = &payload["progress"];
         assert_eq!(progress["estimated_completion_pct"], 100);
         assert_eq!(progress["suggested_poll_interval_ms"], 0);
+    }
+
+    #[tokio::test]
+    async fn test_get_results_includes_timestamps() {
+        let mcp = DalfoxMcp::new();
+        {
+            let mut jobs = mcp.jobs.lock().await;
+            let mut job = test_job(JobStatus::Done, Some(vec![]));
+            job.started_at_ms = Some(job.queued_at_ms + 5);
+            job.finished_at_ms = Some(job.queued_at_ms + 50);
+            jobs.insert("ts-job".to_string(), job);
+        }
+        let resp = mcp
+            .get_results_dalfox(Parameters(GetResultsDalfoxParams {
+                scan_id: "ts-job".to_string(),
+            }))
+            .await
+            .expect("get_results should succeed");
+        let payload = parse_result_json(&resp);
+        assert!(payload["queued_at_ms"].as_i64().is_some());
+        assert!(payload["started_at_ms"].as_i64().is_some());
+        assert!(payload["finished_at_ms"].as_i64().is_some());
+        assert_eq!(payload["duration_ms"], 45);
+    }
+
+    #[tokio::test]
+    async fn test_list_scans_includes_timestamps() {
+        let mcp = DalfoxMcp::new();
+        {
+            let mut jobs = mcp.jobs.lock().await;
+            jobs.insert("ts-list".to_string(), test_job(JobStatus::Done, Some(vec![])));
+        }
+        let resp = mcp
+            .list_scans_dalfox(Parameters(ListScansDalfoxParams { status: None }))
+            .await
+            .expect("list_scans should succeed");
+        let payload = parse_result_json(&resp);
+        let entry = &payload["scans"][0];
+        assert!(entry["queued_at_ms"].as_i64().is_some());
+        assert!(entry["finished_at_ms"].as_i64().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_delete_scan_removes_terminal_job() {
+        let mcp = DalfoxMcp::new();
+        {
+            let mut jobs = mcp.jobs.lock().await;
+            jobs.insert("done-del".to_string(), test_job(JobStatus::Done, Some(vec![])));
+        }
+        let resp = mcp
+            .delete_scan_dalfox(Parameters(DeleteScanDalfoxParams {
+                scan_id: "done-del".to_string(),
+            }))
+            .await
+            .expect("delete should succeed for terminal job");
+        let payload = parse_result_json(&resp);
+        assert_eq!(payload["deleted"], true);
+        assert_eq!(payload["previous_status"], "done");
+
+        let jobs = mcp.jobs.lock().await;
+        assert!(!jobs.contains_key("done-del"));
+    }
+
+    #[tokio::test]
+    async fn test_delete_scan_rejects_running_job() {
+        let mcp = DalfoxMcp::new();
+        {
+            let mut jobs = mcp.jobs.lock().await;
+            jobs.insert("run-del".to_string(), test_job(JobStatus::Running, None));
+        }
+        let err = mcp
+            .delete_scan_dalfox(Parameters(DeleteScanDalfoxParams {
+                scan_id: "run-del".to_string(),
+            }))
+            .await
+            .expect_err("delete must reject non-terminal jobs");
+        assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+        assert!(err.message.contains("cancel it first"));
+
+        let jobs = mcp.jobs.lock().await;
+        assert!(jobs.contains_key("run-del"));
+    }
+
+    #[tokio::test]
+    async fn test_delete_scan_rejects_unknown_id() {
+        let mcp = DalfoxMcp::new();
+        let err = mcp
+            .delete_scan_dalfox(Parameters(DeleteScanDalfoxParams {
+                scan_id: "nonexistent".to_string(),
+            }))
+            .await
+            .expect_err("delete must fail for unknown id");
+        assert!(err.message.contains("not found"));
+    }
+
+    #[tokio::test]
+    async fn test_purge_expired_jobs_removes_old_terminal_jobs() {
+        let mcp = DalfoxMcp::new();
+        {
+            let mut jobs = mcp.jobs.lock().await;
+            // Old terminal job — outside retention window
+            let mut old = test_job(JobStatus::Done, Some(vec![]));
+            old.finished_at_ms = Some(now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
+            jobs.insert("old".to_string(), old);
+            // Recent terminal job — within retention window
+            let mut fresh = test_job(JobStatus::Done, Some(vec![]));
+            fresh.finished_at_ms = Some(now_ms());
+            jobs.insert("fresh".to_string(), fresh);
+            // Active job — must never be purged
+            jobs.insert("active".to_string(), test_job(JobStatus::Running, None));
+        }
+
+        mcp.purge_expired_jobs().await;
+
+        let jobs = mcp.jobs.lock().await;
+        assert!(!jobs.contains_key("old"), "old terminal job should be purged");
+        assert!(jobs.contains_key("fresh"), "fresh terminal job must remain");
+        assert!(jobs.contains_key("active"), "active job must never be purged");
     }
 }
