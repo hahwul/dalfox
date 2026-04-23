@@ -72,6 +72,50 @@ fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()
 }
 
+/// Apply (offset, limit) pagination to a result vector and return the sliced
+/// payload plus a descriptor the client can use to request the next page.
+///
+/// - `offset` past the end yields an empty slice (not an error).
+/// - `limit == 0` means "return everything from offset onward".
+/// - When `results` is `None` (scan hasn't completed), returns `(None, …)`
+///   with `total=0` so the client can distinguish "no findings yet" from
+///   "zero findings".
+fn paginate_results(
+    results: Option<&Vec<SanitizedResult>>,
+    offset: usize,
+    limit: usize,
+) -> (Option<Vec<SanitizedResult>>, serde_json::Value) {
+    let Some(all) = results else {
+        return (
+            None,
+            serde_json::json!({
+                "total": 0,
+                "offset": offset,
+                "limit": limit,
+                "returned": 0,
+                "has_more": false,
+            }),
+        );
+    };
+    let total = all.len();
+    let start = offset.min(total);
+    let end = if limit == 0 {
+        total
+    } else {
+        start.saturating_add(limit).min(total)
+    };
+    let slice = all[start..end].to_vec();
+    let returned = slice.len();
+    let pagination = serde_json::json!({
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "returned": returned,
+        "has_more": end < total,
+    });
+    (Some(slice), pagination)
+}
+
 /// Parse a lowercase status string back into `JobStatus`. Returns `None` for
 /// unknown values so callers can surface a precise error.
 fn parse_job_status(s: &str) -> Option<JobStatus> {
@@ -116,7 +160,10 @@ async fn send_reachability_probe(target: &crate::target_parser::Target) -> bool 
 #[derive(Clone)]
 struct Job {
     status: JobStatus,
-    results: Option<Vec<SanitizedResult>>,
+    /// Sanitized findings, wrapped in `Arc` so cloning the Job for outbound
+    /// responses is a pointer bump rather than a deep copy of potentially
+    /// large raw request/response bodies.
+    results: Option<Arc<Vec<SanitizedResult>>>,
     progress: JobProgress,
     /// Cancellation flag: set to true to request early termination of a running scan.
     cancelled: Arc<std::sync::atomic::AtomicBool>,
@@ -325,7 +372,7 @@ impl DalfoxMcp {
             let mut jobs = self.jobs.lock().await;
             if let Some(j) = jobs.get_mut(&scan_id) {
                 // Store partial or complete results
-                j.results = Some(sanitized);
+                j.results = Some(Arc::new(sanitized));
                 // Only update status if not already cancelled (cancel sets status immediately)
                 if j.status != JobStatus::Cancelled {
                     j.status = JobStatus::Done;
@@ -464,6 +511,16 @@ fn default_workers() -> usize {
 pub struct GetResultsDalfoxParams {
     /// The scan_id returned by scan_with_dalfox when the scan was started.
     pub scan_id: String,
+
+    /// Zero-based index of the first finding to return. Default: 0.
+    /// Use with `limit` to page through large result sets.
+    #[serde(default)]
+    pub offset: usize,
+
+    /// Maximum number of findings to return in this response. Omit or set
+    /// to 0 to return all findings from `offset` onward.
+    #[serde(default)]
+    pub limit: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -745,11 +802,13 @@ Final results (via get_results_dalfox) include finding type \
     #[tool(
         name = "get_results_dalfox",
         description = "Poll scan status and retrieve results by scan_id. \
-Returns {scan_id, target, status, results, progress}. \
+Returns {scan_id, target, status, results, pagination, progress}. \
 Status is one of: queued, running, done, error, cancelled. \
 When done, results is an array of findings. Each finding includes: type \
 (V=Verified, A=AST-detected, R=Reflected), type_description, inject_type, \
 method, param, payload, evidence, cwe, severity, and message_str. \
+Use the optional `offset` and `limit` parameters to page through large \
+result sets; pagination describes {total, offset, limit, returned, has_more}. \
 When status is 'error', includes error_message explaining the failure reason. \
 When running/done/cancelled, includes progress: {params_total, params_tested, \
 requests_sent, findings_so_far, estimated_completion_pct (0-100), \
@@ -773,11 +832,17 @@ Call this repeatedly until status is 'done', 'error', or 'cancelled'."
 
         match job_opt {
             Some(job) => {
+                let (results_slice, pagination) = paginate_results(
+                    job.results.as_deref(),
+                    params.offset,
+                    params.limit,
+                );
                 let mut out = serde_json::json!({
                     "scan_id": pid,
                     "target": job.target_url,
                     "status": job.status,
-                    "results": job.results
+                    "results": results_slice,
+                    "pagination": pagination,
                 });
                 if let Some(obj) = out.as_object_mut() {
                     job.write_timestamps(obj);
@@ -1193,8 +1258,18 @@ mod tests {
     use super::*;
     use tokio::time::{Duration, sleep};
 
+    /// Build GetResultsDalfoxParams with default pagination.
+    fn get_params(scan_id: &str) -> GetResultsDalfoxParams {
+        GetResultsDalfoxParams {
+            scan_id: scan_id.to_string(),
+            offset: 0,
+            limit: 0,
+        }
+    }
+
     /// Build a synthetic Job for tests with the given status and optional results.
     fn test_job(status: JobStatus, results: Option<Vec<SanitizedResult>>) -> Job {
+        let results = results.map(Arc::new);
         let now = now_ms();
         let finished = matches!(
             status,
@@ -1363,9 +1438,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_results_rejects_empty_scan_id() {
         let mcp = DalfoxMcp::new();
-        let params = GetResultsDalfoxParams {
-            scan_id: "".to_string(),
-        };
+        let params = get_params("");
         let err = mcp
             .get_results_dalfox(Parameters(params))
             .await
@@ -1377,9 +1450,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_results_rejects_unknown_scan_id() {
         let mcp = DalfoxMcp::new();
-        let params = GetResultsDalfoxParams {
-            scan_id: "missing-id".to_string(),
-        };
+        let params = get_params("missing-id");
         let err = mcp
             .get_results_dalfox(Parameters(params))
             .await
@@ -1441,9 +1512,7 @@ mod tests {
 
         sleep(Duration::from_millis(25)).await;
         let queried = mcp
-            .get_results_dalfox(Parameters(GetResultsDalfoxParams {
-                scan_id: scan_id.clone(),
-            }))
+            .get_results_dalfox(Parameters(get_params(&scan_id)))
             .await
             .expect("get_results should return a job");
         let queried_payload = parse_result_json(&queried);
@@ -1591,9 +1660,7 @@ mod tests {
 
         // Verify the job is still accessible but with cancelled status
         let result = mcp
-            .get_results_dalfox(Parameters(GetResultsDalfoxParams {
-                scan_id: scan_id.clone(),
-            }))
+            .get_results_dalfox(Parameters(get_params(&scan_id)))
             .await
             .expect("cancelled scan should still be retrievable");
         let payload = parse_result_json(&result);
@@ -1703,9 +1770,7 @@ mod tests {
         }
 
         let resp = mcp
-            .get_results_dalfox(Parameters(GetResultsDalfoxParams {
-                scan_id: "progress-test".to_string(),
-            }))
+            .get_results_dalfox(Parameters(get_params("progress-test")))
             .await
             .expect("get_results should succeed");
         let payload = parse_result_json(&resp);
@@ -1732,9 +1797,7 @@ mod tests {
         }
 
         let resp = mcp
-            .get_results_dalfox(Parameters(GetResultsDalfoxParams {
-                scan_id: "done-progress-test".to_string(),
-            }))
+            .get_results_dalfox(Parameters(get_params("done-progress-test")))
             .await
             .expect("get_results should succeed");
         let payload = parse_result_json(&resp);
@@ -1755,9 +1818,7 @@ mod tests {
             jobs.insert("ts-job".to_string(), job);
         }
         let resp = mcp
-            .get_results_dalfox(Parameters(GetResultsDalfoxParams {
-                scan_id: "ts-job".to_string(),
-            }))
+            .get_results_dalfox(Parameters(get_params("ts-job")))
             .await
             .expect("get_results should succeed");
         let payload = parse_result_json(&resp);
@@ -1835,6 +1896,101 @@ mod tests {
             .await
             .expect_err("delete must fail for unknown id");
         assert!(err.message.contains("not found"));
+    }
+
+    fn dummy_finding(id: u32) -> SanitizedResult {
+        SanitizedResult {
+            result_type: crate::scanning::result::FindingType::Reflected,
+            type_description: "test".to_string(),
+            inject_type: "test".to_string(),
+            method: "GET".to_string(),
+            data: String::new(),
+            param: format!("p{}", id),
+            payload: String::new(),
+            evidence: String::new(),
+            cwe: "CWE-79".to_string(),
+            severity: "medium".to_string(),
+            message_id: id,
+            message_str: format!("finding-{}", id),
+            request: None,
+            response: None,
+        }
+    }
+
+    #[test]
+    fn test_paginate_results_first_page() {
+        let findings: Vec<SanitizedResult> = (0..5).map(dummy_finding).collect();
+        let (slice, pagination) = paginate_results(Some(&findings), 0, 2);
+        let slice = slice.expect("slice");
+        assert_eq!(slice.len(), 2);
+        assert_eq!(slice[0].message_id, 0);
+        assert_eq!(pagination["total"], 5);
+        assert_eq!(pagination["returned"], 2);
+        assert_eq!(pagination["has_more"], true);
+    }
+
+    #[test]
+    fn test_paginate_results_last_page() {
+        let findings: Vec<SanitizedResult> = (0..5).map(dummy_finding).collect();
+        let (slice, pagination) = paginate_results(Some(&findings), 4, 2);
+        let slice = slice.expect("slice");
+        assert_eq!(slice.len(), 1);
+        assert_eq!(slice[0].message_id, 4);
+        assert_eq!(pagination["returned"], 1);
+        assert_eq!(pagination["has_more"], false);
+    }
+
+    #[test]
+    fn test_paginate_results_offset_past_end_is_empty() {
+        let findings: Vec<SanitizedResult> = (0..3).map(dummy_finding).collect();
+        let (slice, pagination) = paginate_results(Some(&findings), 99, 10);
+        assert!(slice.expect("slice").is_empty());
+        assert_eq!(pagination["returned"], 0);
+        assert_eq!(pagination["has_more"], false);
+    }
+
+    #[test]
+    fn test_paginate_results_zero_limit_means_all_from_offset() {
+        let findings: Vec<SanitizedResult> = (0..5).map(dummy_finding).collect();
+        let (slice, pagination) = paginate_results(Some(&findings), 2, 0);
+        assert_eq!(slice.expect("slice").len(), 3);
+        assert_eq!(pagination["has_more"], false);
+    }
+
+    #[test]
+    fn test_paginate_results_none_results_preserves_null() {
+        let (slice, pagination) = paginate_results(None, 0, 10);
+        assert!(slice.is_none());
+        assert_eq!(pagination["total"], 0);
+        assert_eq!(pagination["has_more"], false);
+    }
+
+    #[tokio::test]
+    async fn test_get_results_pagination_end_to_end() {
+        let mcp = DalfoxMcp::new();
+        let findings: Vec<SanitizedResult> = (0..5).map(dummy_finding).collect();
+        {
+            let mut jobs = mcp.jobs.lock().await;
+            jobs.insert(
+                "pag".to_string(),
+                test_job(JobStatus::Done, Some(findings)),
+            );
+        }
+        let resp = mcp
+            .get_results_dalfox(Parameters(GetResultsDalfoxParams {
+                scan_id: "pag".to_string(),
+                offset: 1,
+                limit: 2,
+            }))
+            .await
+            .expect("get_results should succeed");
+        let payload = parse_result_json(&resp);
+        assert_eq!(payload["results"].as_array().unwrap().len(), 2);
+        assert_eq!(payload["pagination"]["total"], 5);
+        assert_eq!(payload["pagination"]["offset"], 1);
+        assert_eq!(payload["pagination"]["limit"], 2);
+        assert_eq!(payload["pagination"]["returned"], 2);
+        assert_eq!(payload["pagination"]["has_more"], true);
     }
 
     #[tokio::test]
