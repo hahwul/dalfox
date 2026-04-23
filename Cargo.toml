@@ -20,7 +20,7 @@ base64 = "0.22"
 chrono = "0.4"
 toml = "0.8"
 axum = "0.7"
-sha2 = "0.10"
+sha2 = "0.11"
 hex = "0.4"
 regex = "1"
 rmcp = { version = "0.8.0", features = ["server", "macros"] }
