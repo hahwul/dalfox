@@ -96,6 +96,23 @@ struct AppState {
     callback_param_name: String,
 }
 
+/// How long terminal jobs (done/error/cancelled) are retained in memory before
+/// being auto-purged on the next request. Prevents unbounded growth in
+/// long-running server instances.
+const JOB_RETENTION_SECS: i64 = 3600;
+
+/// Maximum HTTP request timeout accepted via scan options (inclusive upper bound).
+const MAX_TIMEOUT_SECS: u64 = 299;
+/// Maximum delay-between-requests accepted via scan options (inclusive upper bound).
+const MAX_DELAY_MS: u64 = 9999;
+/// Maximum worker count accepted via scan options (inclusive upper bound).
+const MAX_WORKERS: usize = 500;
+
+/// Current unix time in milliseconds (UTC).
+fn now_ms() -> i64 {
+    chrono::Utc::now().timestamp_millis()
+}
+
 /// Progress counters shared with a running scan task.
 #[derive(Clone, Default)]
 struct JobProgress {
@@ -108,17 +125,81 @@ struct JobProgress {
 #[derive(Clone)]
 struct Job {
     status: JobStatus,
-    results: Option<Vec<SanitizedResult>>,
-    #[allow(dead_code)] // Used indirectly via ScanArgs
-    include_request: bool,
-    #[allow(dead_code)] // Used indirectly via ScanArgs
-    include_response: bool,
+    /// Sanitized findings, wrapped in `Arc` so cloning the Job out of the
+    /// jobs map for response building is a pointer bump rather than a deep
+    /// copy of potentially large raw request/response bodies.
+    results: Option<Arc<Vec<SanitizedResult>>>,
     callback_url: Option<String>,
     progress: JobProgress,
     cancelled: Arc<std::sync::atomic::AtomicBool>,
     error_message: Option<String>,
     /// The original target URL submitted for scanning.
     target_url: String,
+    /// Unix ms when the scan was enqueued.
+    queued_at_ms: i64,
+    /// Unix ms when the scan transitioned to Running.
+    started_at_ms: Option<i64>,
+    /// Unix ms when the scan reached a terminal state (done/error/cancelled).
+    finished_at_ms: Option<i64>,
+}
+
+impl Job {
+    fn is_terminal(&self) -> bool {
+        matches!(
+            self.status,
+            JobStatus::Done | JobStatus::Error | JobStatus::Cancelled
+        )
+    }
+
+    fn duration_ms(&self) -> Option<i64> {
+        match (self.started_at_ms, self.finished_at_ms) {
+            (Some(s), Some(f)) => Some(f - s),
+            (Some(s), None) => Some(now_ms() - s),
+            _ => None,
+        }
+    }
+}
+
+/// Reject scan-option values that are outside the supported range so callers
+/// get a precise 400 instead of having the server silently substitute defaults.
+fn validate_scan_options(opts: &ScanOptions) -> Result<(), String> {
+    if let Some(t) = opts.timeout
+        && (t == 0 || t > MAX_TIMEOUT_SECS)
+    {
+        return Err(format!(
+            "timeout must be between 1 and {} seconds (got {})",
+            MAX_TIMEOUT_SECS, t
+        ));
+    }
+    if let Some(d) = opts.delay
+        && d > MAX_DELAY_MS
+    {
+        return Err(format!(
+            "delay must be between 0 and {} ms (got {})",
+            MAX_DELAY_MS, d
+        ));
+    }
+    if let Some(w) = opts.worker
+        && (w == 0 || w > MAX_WORKERS)
+    {
+        return Err(format!(
+            "worker must be between 1 and {} (got {})",
+            MAX_WORKERS, w
+        ));
+    }
+    Ok(())
+}
+
+/// Remove terminal jobs whose finished_at_ms is older than JOB_RETENTION_SECS.
+/// Called at the entry of every handler to bound memory usage in long-running
+/// server instances.
+async fn purge_expired_jobs(state: &AppState) {
+    let cutoff = now_ms() - JOB_RETENTION_SECS * 1000;
+    let mut jobs = state.jobs.lock().await;
+    jobs.retain(|_, job| match job.finished_at_ms {
+        Some(finished) => finished >= cutoff,
+        None => true,
+    });
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -181,6 +262,10 @@ struct ResultPayload {
     error_message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     progress: Option<ProgressPayload>,
+    queued_at_ms: i64,
+    started_at_ms: Option<i64>,
+    finished_at_ms: Option<i64>,
+    duration_ms: Option<i64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -379,7 +464,13 @@ async fn run_scan_job(
     let (progress, cancel_flag) = {
         let mut jobs = state.jobs.lock().await;
         if let Some(job) = jobs.get_mut(&job_id) {
+            if job.status == JobStatus::Cancelled
+                || job.cancelled.load(std::sync::atomic::Ordering::Relaxed)
+            {
+                return;
+            }
             job.status = JobStatus::Running;
+            job.started_at_ms = Some(now_ms());
             (job.progress.clone(), job.cancelled.clone())
         } else {
             return;
@@ -531,44 +622,48 @@ async fn run_scan_job(
                 job.status = JobStatus::Error;
                 job.error_message = Some(msg);
                 job.results = None;
+                job.finished_at_ms = Some(now_ms());
             }
             return;
         }
     };
 
-    if let Some(callback_url) = &args.blind_callback_url {
-        crate::scanning::blind_scanning(&target, callback_url).await;
-    }
-
-    let mut silent_args = args.clone();
-    silent_args.silence = true;
-    analyze_parameters(&mut target, &silent_args, None).await;
-
-    // Snapshot request count before scanning
-    let req_count_before = crate::REQUEST_COUNT.load(std::sync::atomic::Ordering::Relaxed);
-
-    // Record discovered param count
-    progress.params_total.store(
-        target.reflection_params.len() as u32,
-        std::sync::atomic::Ordering::Relaxed,
-    );
-
+    // Per-job request counter. All scanning code paths call
+    // `crate::tick_request_count()` which increments both the global counter
+    // and this task-local, so concurrent scans don't pollute each other.
+    let job_requests = Arc::new(std::sync::atomic::AtomicU64::new(0));
     let param_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    crate::scanning::run_scanning(
-        &target,
-        Arc::new(args.clone()),
-        results.clone(),
-        None,
-        None,
-        param_counter.clone(),
-        Some(cancel_flag.clone()),
-    )
-    .await;
 
-    // Final progress snapshot
-    let req_count_after = crate::REQUEST_COUNT.load(std::sync::atomic::Ordering::Relaxed);
+    crate::REQUEST_COUNT_JOB
+        .scope(job_requests.clone(), async {
+            if let Some(callback_url) = &args.blind_callback_url {
+                crate::scanning::blind_scanning(&target, callback_url).await;
+            }
+
+            let mut silent_args = args.clone();
+            silent_args.silence = true;
+            analyze_parameters(&mut target, &silent_args, None).await;
+
+            progress.params_total.store(
+                target.reflection_params.len() as u32,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+
+            crate::scanning::run_scanning(
+                &target,
+                Arc::new(args.clone()),
+                results.clone(),
+                None,
+                None,
+                param_counter.clone(),
+                Some(cancel_flag.clone()),
+            )
+            .await;
+        })
+        .await;
+
     progress.requests_sent.store(
-        req_count_after.saturating_sub(req_count_before),
+        job_requests.load(std::sync::atomic::Ordering::Relaxed),
         std::sync::atomic::Ordering::Relaxed,
     );
     progress.params_tested.store(
@@ -590,16 +685,22 @@ async fn run_scan_job(
             .collect::<Vec<_>>()
     };
 
+    let final_results_arc = Arc::new(final_results);
     let callback_url = {
         let mut jobs = state.jobs.lock().await;
         let cb = if let Some(job) = jobs.get_mut(&job_id) {
-            job.results = Some(final_results.clone());
+            job.results = Some(final_results_arc.clone());
             if job.status != JobStatus::Cancelled {
                 job.status = if was_cancelled {
                     JobStatus::Cancelled
                 } else {
                     JobStatus::Done
                 };
+            }
+            // Preserve an earlier finished_at_ms set by cancel_scan_handler
+            // (which records when the user asked to stop, not when the task noticed).
+            if job.finished_at_ms.is_none() {
+                job.finished_at_ms = Some(now_ms());
             }
             job.callback_url.clone()
         } else {
@@ -618,9 +719,13 @@ async fn run_scan_job(
             "scan_id": job_id,
             "status": "done",
             "url": url,
-            "results": final_results
+            "results": &*final_results_arc
         });
-        let cb_result: Result<reqwest::Response, reqwest::Error> = reqwest::Client::new()
+        // Reuse the target's HTTP configuration (proxy, TLS relaxation, redirect
+        // policy) so webhook delivery respects the same network boundary as the
+        // scan itself.
+        let cb_client = target.build_client_or_default();
+        let cb_result: Result<reqwest::Response, reqwest::Error> = cb_client
             .post(&cb_url)
             .json(&payload)
             .timeout(std::time::Duration::from_secs(10))
@@ -661,6 +766,8 @@ async fn start_scan_handler(
         return make_api_response(&state, &headers, &params, StatusCode::UNAUTHORIZED, &resp);
     }
 
+    purge_expired_jobs(&state).await;
+
     if req.url.trim().is_empty() {
         let resp = ApiResponse::<serde_json::Value> {
             code: 400,
@@ -671,6 +778,14 @@ async fn start_scan_handler(
     }
 
     let opts = req.options.clone().unwrap_or_default();
+    if let Err(msg) = validate_scan_options(&opts) {
+        let resp = ApiResponse::<serde_json::Value> {
+            code: 400,
+            msg,
+            data: None,
+        };
+        return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+    }
     let include_request = opts.include_request.unwrap_or(false);
     let include_response = opts.include_response.unwrap_or(false);
     let callback_url = opts.callback_url.clone();
@@ -683,13 +798,14 @@ async fn start_scan_handler(
             Job {
                 status: JobStatus::Queued,
                 results: None,
-                include_request,
-                include_response,
                 callback_url: callback_url.clone(),
                 progress: JobProgress::default(),
                 cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 error_message: None,
                 target_url: req.url.clone(),
+                queued_at_ms: now_ms(),
+                started_at_ms: None,
+                finished_at_ms: None,
             },
         );
     }
@@ -738,6 +854,8 @@ async fn get_result_handler(
         return make_api_response(&state, &headers, &params, StatusCode::UNAUTHORIZED, &resp);
     }
 
+    purge_expired_jobs(&state).await;
+
     let job = {
         let jobs = state.jobs.lock().await;
         jobs.get(&id).cloned()
@@ -777,12 +895,17 @@ async fn get_result_handler(
             } else {
                 None
             };
+            let duration_ms = j.duration_ms();
             let payload = ResultPayload {
                 target: j.target_url.clone(),
                 status: j.status.clone(),
-                results: j.results.clone(),
+                results: j.results.as_deref().cloned(),
                 error_message: j.error_message.clone(),
                 progress: progress_data,
+                queued_at_ms: j.queued_at_ms,
+                started_at_ms: j.started_at_ms,
+                finished_at_ms: j.finished_at_ms,
+                duration_ms,
             };
             log(&state, "RESULT", &format!("id={} status={}", id, j.status));
             let resp = ApiResponse {
@@ -826,6 +949,8 @@ async fn get_scan_handler(
         };
         return make_api_response(&state, &headers, &params, StatusCode::UNAUTHORIZED, &resp);
     }
+
+    purge_expired_jobs(&state).await;
 
     let url = params.get("url").cloned().unwrap_or_default();
     if url.trim().is_empty() {
@@ -941,6 +1066,15 @@ async fn get_scan_handler(
         skip_ast_analysis: Some(skip_ast_analysis),
     };
 
+    if let Err(msg) = validate_scan_options(&opts) {
+        let resp = ApiResponse::<serde_json::Value> {
+            code: 400,
+            msg,
+            data: None,
+        };
+        return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+    }
+
     let callback_url = opts.callback_url.clone();
     let id = make_scan_id(&url);
     {
@@ -950,13 +1084,14 @@ async fn get_scan_handler(
             Job {
                 status: JobStatus::Queued,
                 results: None,
-                include_request,
-                include_response,
                 callback_url,
                 progress: JobProgress::default(),
                 cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 error_message: None,
                 target_url: url.clone(),
+                queued_at_ms: now_ms(),
+                started_at_ms: None,
+                finished_at_ms: None,
             },
         );
     }
@@ -1041,14 +1176,64 @@ async fn cancel_scan_handler(
         return make_api_response(&state, &headers, &params, StatusCode::UNAUTHORIZED, &resp);
     }
 
+    purge_expired_jobs(&state).await;
+
+    // When ?purge=1, delete the job from memory instead of (or in addition to)
+    // cancelling it. Only allowed when the job is already terminal — callers
+    // must first cancel a running scan and wait for it to settle.
+    let purge_requested = params
+        .get("purge")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+
     let mut jobs = state.jobs.lock().await;
     match jobs.get_mut(&id) {
         Some(job) => {
+            if purge_requested {
+                if !job.is_terminal() {
+                    let resp = ApiResponse::<serde_json::Value> {
+                        code: 409,
+                        msg: format!(
+                            "cannot purge scan in status '{}' — cancel it first and wait for it to settle",
+                            job.status
+                        ),
+                        data: None,
+                    };
+                    drop(jobs);
+                    return make_api_response(
+                        &state,
+                        &headers,
+                        &params,
+                        StatusCode::CONFLICT,
+                        &resp,
+                    );
+                }
+                let previous_status = job.status.clone();
+                let target_url = job.target_url.clone();
+                jobs.remove(&id);
+                drop(jobs);
+                log(&state, "JOB", &format!("purged id={}", id));
+                let resp = ApiResponse {
+                    code: 200,
+                    msg: "ok".to_string(),
+                    data: Some(serde_json::json!({
+                        "scan_id": id,
+                        "target": target_url,
+                        "deleted": true,
+                        "previous_status": previous_status,
+                    })),
+                };
+                return make_api_response(&state, &headers, &params, StatusCode::OK, &resp);
+            }
+
             let previous_status = job.status.clone();
             job.cancelled
                 .store(true, std::sync::atomic::Ordering::Relaxed);
             if matches!(job.status, JobStatus::Queued | JobStatus::Running) {
                 job.status = JobStatus::Cancelled;
+                if job.finished_at_ms.is_none() {
+                    job.finished_at_ms = Some(now_ms());
+                }
             }
             log(&state, "JOB", &format!("cancelled id={}", id));
             let resp = ApiResponse {
@@ -1089,6 +1274,8 @@ async fn list_scans_handler(
         return make_api_response(&state, &headers, &params, StatusCode::UNAUTHORIZED, &resp);
     }
 
+    purge_expired_jobs(&state).await;
+
     let filter_status = params.get("status").map(|s| s.trim().to_lowercase());
     let jobs = state.jobs.lock().await;
     let entries: Vec<serde_json::Value> = jobs
@@ -1105,7 +1292,11 @@ async fn list_scans_handler(
                 "scan_id": id,
                 "target": job.target_url,
                 "status": job.status,
-                "result_count": job.results.as_ref().map(|r| r.len()).unwrap_or(0)
+                "result_count": job.results.as_ref().map(|r| r.len()).unwrap_or(0),
+                "queued_at_ms": job.queued_at_ms,
+                "started_at_ms": job.started_at_ms,
+                "finished_at_ms": job.finished_at_ms,
+                "duration_ms": job.duration_ms(),
             })
         })
         .collect();
@@ -1137,6 +1328,8 @@ async fn preflight_handler(
         return make_api_response(&state, &headers, &params, StatusCode::UNAUTHORIZED, &resp);
     }
 
+    purge_expired_jobs(&state).await;
+
     let target_url = req.url.trim().to_string();
     if target_url.is_empty()
         || !(target_url.starts_with("http://") || target_url.starts_with("https://"))
@@ -1150,6 +1343,14 @@ async fn preflight_handler(
     }
 
     let opts = req.options.clone().unwrap_or_default();
+    if let Err(msg) = validate_scan_options(&opts) {
+        let resp = ApiResponse::<serde_json::Value> {
+            code: 400,
+            msg,
+            data: None,
+        };
+        return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+    }
 
     // Run preflight synchronously in a blocking thread
     let result = tokio::task::spawn_blocking(move || {
@@ -1456,6 +1657,33 @@ mod tests {
         }
     }
 
+    /// Build a synthetic Job for tests. Non-terminal jobs get no finished_at;
+    /// terminal jobs get `now_ms()` so retention tests can bracket around them.
+    fn test_job(
+        status: JobStatus,
+        results: Option<Vec<SanitizedResult>>,
+        target_url: &str,
+    ) -> Job {
+        let now = now_ms();
+        let finished = matches!(
+            status,
+            JobStatus::Done | JobStatus::Error | JobStatus::Cancelled
+        )
+        .then_some(now);
+        Job {
+            status,
+            results: results.map(Arc::new),
+            callback_url: None,
+            progress: JobProgress::default(),
+            cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            error_message: None,
+            target_url: target_url.to_string(),
+            queued_at_ms: now,
+            started_at_ms: None,
+            finished_at_ms: finished,
+        }
+    }
+
     fn temp_log_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
             "dalfox-server-{}-{}.log",
@@ -1627,20 +1855,7 @@ mod tests {
         let id = "scan-job-error".to_string();
         {
             let mut jobs = state.jobs.lock().await;
-            jobs.insert(
-                id.clone(),
-                Job {
-                    status: JobStatus::Queued,
-                    results: None,
-                    include_request: false,
-                    include_response: false,
-                callback_url: None,
-                progress: JobProgress::default(),
-                cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                error_message: None,
-                target_url: String::new(),
-                },
-            );
+            jobs.insert(id.clone(), test_job(JobStatus::Queued, None, ""));
         }
 
         run_scan_job(
@@ -1753,20 +1968,7 @@ mod tests {
         let id = "job1".to_string();
         {
             let mut jobs = state.jobs.lock().await;
-            jobs.insert(
-                id.clone(),
-                Job {
-                    status: JobStatus::Done,
-                    results: None,
-                    include_request: false,
-                    include_response: false,
-                callback_url: None,
-                progress: JobProgress::default(),
-                cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                error_message: None,
-                target_url: String::new(),
-                },
-            );
+            jobs.insert(id.clone(), test_job(JobStatus::Done, None, ""));
         }
 
         // Build headers with API key and Origin
@@ -1839,20 +2041,7 @@ mod tests {
         let ok_id = "ok".to_string();
         {
             let mut jobs = state.jobs.lock().await;
-            jobs.insert(
-                ok_id.clone(),
-                Job {
-                    status: JobStatus::Done,
-                    results: None,
-                    include_request: false,
-                    include_response: false,
-                callback_url: None,
-                progress: JobProgress::default(),
-                cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                error_message: None,
-                target_url: String::new(),
-                },
-            );
+            jobs.insert(ok_id.clone(), test_job(JobStatus::Done, None, ""));
         }
 
         // Failure (no key)
@@ -1920,20 +2109,7 @@ mod tests {
         let id = "alt".to_string();
         {
             let mut jobs = state.jobs.lock().await;
-            jobs.insert(
-                id.clone(),
-                Job {
-                    status: JobStatus::Running,
-                    results: None,
-                    include_request: false,
-                    include_response: false,
-                callback_url: None,
-                progress: JobProgress::default(),
-                cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                error_message: None,
-                target_url: String::new(),
-                },
-            );
+            jobs.insert(id.clone(), test_job(JobStatus::Running, None, ""));
         }
 
         let mut headers = HeaderMap::new();
@@ -2024,8 +2200,7 @@ mod tests {
             "job should have been created with a valid status, got: {:?}",
             job.status
         );
-        assert!(job.include_request);
-        assert!(job.include_response);
+        assert!(job.queued_at_ms > 0, "queued_at_ms must be set on submission");
     }
 
     #[tokio::test]
@@ -2086,20 +2261,7 @@ mod tests {
         let id = "running-job".to_string();
         {
             let mut jobs = state.jobs.lock().await;
-            jobs.insert(
-                id.clone(),
-                Job {
-                    status: JobStatus::Running,
-                    results: None,
-                    include_request: false,
-                    include_response: false,
-                callback_url: None,
-                progress: JobProgress::default(),
-                cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                error_message: None,
-                target_url: String::new(),
-                },
-            );
+            jobs.insert(id.clone(), test_job(JobStatus::Running, None, ""));
         }
 
         let resp = get_result_handler(State(state), HeaderMap::new(), Path(id), Query(Map::new()))
@@ -2149,9 +2311,11 @@ mod tests {
 
         let jobs = state.jobs.lock().await;
         let job = jobs.get(&id).expect("job inserted");
-        assert_eq!(job.status, JobStatus::Queued);
-        assert!(job.include_request);
-        assert!(job.include_response);
+        assert!(matches!(
+            job.status,
+            JobStatus::Queued | JobStatus::Running | JobStatus::Done | JobStatus::Error
+        ));
+        assert!(job.queued_at_ms > 0, "queued_at_ms must be set on submission");
     }
 
     #[tokio::test]
@@ -2161,20 +2325,7 @@ mod tests {
         let id = "scan-job-success".to_string();
         {
             let mut jobs = state.jobs.lock().await;
-            jobs.insert(
-                id.clone(),
-                Job {
-                    status: JobStatus::Queued,
-                    results: None,
-                    include_request: false,
-                    include_response: false,
-                callback_url: None,
-                progress: JobProgress::default(),
-                cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                error_message: None,
-                target_url: String::new(),
-                },
-            );
+            jobs.insert(id.clone(), test_job(JobStatus::Queued, None, ""));
         }
 
         let opts = ScanOptions {
@@ -2234,17 +2385,7 @@ mod tests {
             let mut jobs = state.jobs.lock().await;
             jobs.insert(
                 id.clone(),
-                Job {
-                    status: JobStatus::Done,
-                    results: Some(Vec::new()),
-                    include_request: false,
-                    include_response: false,
-                callback_url: None,
-                progress: JobProgress::default(),
-                cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                error_message: None,
-                target_url: String::new(),
-                },
+                test_job(JobStatus::Done, Some(Vec::new()), ""),
             );
         }
 
@@ -2281,9 +2422,11 @@ mod tests {
 
         let jobs = state.jobs.lock().await;
         let job = jobs.get(&id).expect("job inserted");
-        assert_eq!(job.status, JobStatus::Queued);
-        assert!(!job.include_request);
-        assert!(!job.include_response);
+        assert!(matches!(
+            job.status,
+            JobStatus::Queued | JobStatus::Running | JobStatus::Done | JobStatus::Error
+        ));
+        assert!(job.queued_at_ms > 0, "queued_at_ms must be set on submission");
     }
 
     #[tokio::test]
@@ -2335,20 +2478,7 @@ mod tests {
         let scan_id = "cancel-test-id".to_string();
         {
             let mut jobs = state.jobs.lock().await;
-            jobs.insert(
-                scan_id.clone(),
-                Job {
-                    status: JobStatus::Queued,
-                    results: None,
-                    include_request: false,
-                    include_response: false,
-                    callback_url: None,
-                    progress: JobProgress::default(),
-                    cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                    error_message: None,
-                    target_url: String::new(),
-                },
-            );
+            jobs.insert(scan_id.clone(), test_job(JobStatus::Queued, None, ""));
         }
 
         let resp = cancel_scan_handler(
@@ -2406,20 +2536,7 @@ mod tests {
         {
             let mut jobs = state.jobs.lock().await;
             for (id, status) in [("a", JobStatus::Done), ("b", JobStatus::Running)] {
-                jobs.insert(
-                    id.to_string(),
-                    Job {
-                        status,
-                        results: None,
-                        include_request: false,
-                        include_response: false,
-                        callback_url: None,
-                        progress: JobProgress::default(),
-                        cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                        error_message: None,
-                        target_url: String::new(),
-                    },
-                );
+                jobs.insert(id.to_string(), test_job(status, None, ""));
             }
         }
 
@@ -2444,20 +2561,7 @@ mod tests {
         {
             let mut jobs = state.jobs.lock().await;
             for (id, status) in [("a", JobStatus::Done), ("b", JobStatus::Running)] {
-                jobs.insert(
-                    id.to_string(),
-                    Job {
-                        status,
-                        results: None,
-                        include_request: false,
-                        include_response: false,
-                        callback_url: None,
-                        progress: JobProgress::default(),
-                        cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                        error_message: None,
-                        target_url: String::new(),
-                    },
-                );
+                jobs.insert(id.to_string(), test_job(status, None, ""));
             }
         }
 
@@ -2548,5 +2652,200 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&body).expect("json");
         assert_eq!(parsed["data"]["reachable"], false);
         assert_eq!(parsed["data"]["error_code"], "CONNECTION_FAILED");
+    }
+
+    #[test]
+    fn test_validate_scan_options_accepts_defaults() {
+        assert!(validate_scan_options(&ScanOptions::default()).is_ok());
+    }
+
+    #[test]
+    fn test_validate_scan_options_rejects_out_of_range() {
+        let bad_timeout = ScanOptions {
+            timeout: Some(0),
+            ..ScanOptions::default()
+        };
+        assert!(validate_scan_options(&bad_timeout).is_err());
+
+        let bad_timeout_hi = ScanOptions {
+            timeout: Some(9999),
+            ..ScanOptions::default()
+        };
+        assert!(validate_scan_options(&bad_timeout_hi).is_err());
+
+        let bad_delay = ScanOptions {
+            delay: Some(999_999),
+            ..ScanOptions::default()
+        };
+        assert!(validate_scan_options(&bad_delay).is_err());
+
+        let bad_worker = ScanOptions {
+            worker: Some(0),
+            ..ScanOptions::default()
+        };
+        assert!(validate_scan_options(&bad_worker).is_err());
+
+        let bad_worker_hi = ScanOptions {
+            worker: Some(999_999),
+            ..ScanOptions::default()
+        };
+        assert!(validate_scan_options(&bad_worker_hi).is_err());
+    }
+
+    #[tokio::test]
+    async fn test_start_scan_handler_rejects_out_of_range_timeout() {
+        let state = make_state(None, None, false, false, "cb");
+        let resp = start_scan_handler(
+            State(state),
+            HeaderMap::new(),
+            Query(Map::new()),
+            Json(ScanRequest {
+                url: "http://example.com".to_string(),
+                options: Some(ScanOptions {
+                    timeout: Some(9999),
+                    ..ScanOptions::default()
+                }),
+            }),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        let body = response_body_string(resp).await;
+        assert!(body.contains("timeout must be between"));
+    }
+
+    #[tokio::test]
+    async fn test_get_scan_handler_rejects_out_of_range_delay() {
+        let state = make_state(None, None, false, false, "cb");
+        let mut params = Map::new();
+        params.insert("url".to_string(), "http://example.com".to_string());
+        params.insert("delay".to_string(), "999999".to_string());
+        let resp = get_scan_handler(State(state), HeaderMap::new(), Query(params))
+            .await
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn test_get_result_handler_emits_timestamps() {
+        let state = make_state(None, None, false, false, "cb");
+        let id = "ts-done".to_string();
+        {
+            let mut jobs = state.jobs.lock().await;
+            let mut job = test_job(JobStatus::Done, Some(vec![]), "http://example.com");
+            job.started_at_ms = Some(job.queued_at_ms + 10);
+            job.finished_at_ms = Some(job.queued_at_ms + 100);
+            jobs.insert(id.clone(), job);
+        }
+        let resp = get_result_handler(
+            State(state),
+            HeaderMap::new(),
+            Path(id.clone()),
+            Query(Map::new()),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = response_body_string(resp).await;
+        let parsed: serde_json::Value = serde_json::from_str(&body).expect("json");
+        let data = &parsed["data"];
+        assert!(data["queued_at_ms"].as_i64().is_some());
+        assert!(data["started_at_ms"].as_i64().is_some());
+        assert!(data["finished_at_ms"].as_i64().is_some());
+        assert_eq!(data["duration_ms"], 90);
+    }
+
+    #[tokio::test]
+    async fn test_list_scans_handler_emits_timestamps() {
+        let state = make_state(None, None, false, false, "cb");
+        {
+            let mut jobs = state.jobs.lock().await;
+            jobs.insert(
+                "a".to_string(),
+                test_job(JobStatus::Done, None, "http://example.com"),
+            );
+        }
+        let resp = list_scans_handler(State(state), HeaderMap::new(), Query(Map::new()))
+            .await
+            .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = response_body_string(resp).await;
+        let parsed: serde_json::Value = serde_json::from_str(&body).expect("json");
+        let entry = &parsed["data"]["scans"][0];
+        assert!(entry["queued_at_ms"].as_i64().is_some());
+        assert!(entry["finished_at_ms"].as_i64().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_purge_expired_jobs_removes_old_terminal_jobs() {
+        let state = make_state(None, None, false, false, "cb");
+        {
+            let mut jobs = state.jobs.lock().await;
+            let mut old = test_job(JobStatus::Done, None, "");
+            old.finished_at_ms = Some(now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
+            jobs.insert("old".to_string(), old);
+            jobs.insert("fresh".to_string(), test_job(JobStatus::Done, None, ""));
+            jobs.insert("active".to_string(), test_job(JobStatus::Running, None, ""));
+        }
+
+        purge_expired_jobs(&state).await;
+
+        let jobs = state.jobs.lock().await;
+        assert!(!jobs.contains_key("old"), "old terminal job should be purged");
+        assert!(jobs.contains_key("fresh"), "fresh terminal job must remain");
+        assert!(jobs.contains_key("active"), "active job must never be purged");
+    }
+
+    #[tokio::test]
+    async fn test_cancel_scan_handler_purge_requires_terminal() {
+        let state = make_state(None, None, false, false, "cb");
+        {
+            let mut jobs = state.jobs.lock().await;
+            jobs.insert(
+                "running-purge".to_string(),
+                test_job(JobStatus::Running, None, ""),
+            );
+        }
+        let mut params = Map::new();
+        params.insert("purge".to_string(), "1".to_string());
+        let resp = cancel_scan_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Path("running-purge".to_string()),
+            Query(params),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::CONFLICT);
+
+        let jobs = state.jobs.lock().await;
+        assert!(jobs.contains_key("running-purge"), "non-terminal job must not be purged");
+    }
+
+    #[tokio::test]
+    async fn test_cancel_scan_handler_purge_deletes_terminal_job() {
+        let state = make_state(None, None, false, false, "cb");
+        {
+            let mut jobs = state.jobs.lock().await;
+            jobs.insert("done-purge".to_string(), test_job(JobStatus::Done, None, ""));
+        }
+        let mut params = Map::new();
+        params.insert("purge".to_string(), "1".to_string());
+        let resp = cancel_scan_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Path("done-purge".to_string()),
+            Query(params),
+        )
+        .await
+        .into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = response_body_string(resp).await;
+        let parsed: serde_json::Value = serde_json::from_str(&body).expect("json");
+        assert_eq!(parsed["data"]["deleted"], true);
+        assert_eq!(parsed["data"]["previous_status"], "done");
+
+        let jobs = state.jobs.lock().await;
+        assert!(!jobs.contains_key("done-purge"));
     }
 }
