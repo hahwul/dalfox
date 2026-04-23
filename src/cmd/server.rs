@@ -1312,6 +1312,80 @@ async fn list_scans_handler(
     make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
 }
 
+/// Internal error surface for the preflight pipeline. Produces the right
+/// HTTP status code for each failure class instead of always returning 200.
+enum PreflightError {
+    /// User-supplied URL could not be parsed after the prefix check.
+    BadUrl(String),
+    /// Server failed to build the inner tokio runtime — infrastructure issue.
+    RuntimeUnavailable(String),
+    /// The blocking task panicked — infrastructure issue.
+    TaskPanicked,
+}
+
+/// Send one request mirroring the scan's HTTP configuration (method, headers,
+/// cookies, User-Agent, body, proxy, timeout, redirects). Returns true iff a
+/// response came back.
+async fn send_reachability_probe(target: &crate::target_parser::Target) -> bool {
+    let client = target.build_client_or_default();
+    let mut req = client.request(target.parse_method(), target.url.clone());
+    for (k, v) in &target.headers {
+        req = req.header(k, v);
+    }
+    if !target.cookies.is_empty() {
+        let cookie_header = target
+            .cookies
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect::<Vec<_>>()
+            .join("; ");
+        req = req.header("Cookie", cookie_header);
+    }
+    if let Some(ua) = target.user_agent.as_deref().filter(|s| !s.is_empty()) {
+        req = req.header("User-Agent", ua);
+    }
+    if let Some(body) = &target.data {
+        req = req.body(body.clone());
+    }
+    req.send().await.is_ok()
+}
+
+/// Build a hydrated Target from the preflight request options.
+fn hydrate_preflight_target(
+    target_url: &str,
+    opts: &ScanOptions,
+    timeout_secs: u64,
+) -> Result<crate::target_parser::Target, String> {
+    let mut t = parse_target(target_url).map_err(|e| format!("parse_target failed: {}", e))?;
+    t.method = opts.method.clone().unwrap_or_else(|| "GET".to_string());
+    t.timeout = timeout_secs;
+    t.user_agent = opts.user_agent.clone();
+    t.proxy = opts.proxy.clone();
+    t.follow_redirects = opts.follow_redirects.unwrap_or(false);
+    t.headers = opts
+        .header
+        .as_ref()
+        .map(|h| {
+            h.iter()
+                .filter_map(|s| s.split_once(":"))
+                .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    t.cookies = opts
+        .cookie
+        .as_ref()
+        .map(|c| {
+            c.split(';')
+                .filter_map(|p| p.trim().split_once('='))
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    t.data = opts.data.clone();
+    Ok(t)
+}
+
 // POST /preflight — parameter discovery without attack payloads
 async fn preflight_handler(
     State(state): State<AppState>,
@@ -1352,76 +1426,33 @@ async fn preflight_handler(
         return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
     }
 
-    // Run preflight synchronously in a blocking thread
-    let result = tokio::task::spawn_blocking(move || {
-        match tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-        {
-            Ok(rt) => rt.block_on(async {
-                // Reachability check
-                let timeout_secs = opts.timeout.unwrap_or(crate::cmd::scan::DEFAULT_TIMEOUT_SECS);
-                let reachable = {
-                    let client = reqwest::Client::builder()
-                        .timeout(std::time::Duration::from_secs(timeout_secs))
-                        .danger_accept_invalid_certs(true)
-                        .redirect(reqwest::redirect::Policy::none())
-                        .build();
-                    match client {
-                        Ok(c) => c.get(&target_url).send().await.is_ok(),
-                        Err(_) => false,
-                    }
-                };
-                if !reachable {
-                    return serde_json::json!({
+    let timeout_secs = opts.timeout.unwrap_or(crate::cmd::scan::DEFAULT_TIMEOUT_SECS);
+
+    // Run the analysis on tokio's blocking pool (reused across calls) with a
+    // current_thread runtime inside because analyze_parameters and scraper-
+    // backed HTML inspection are !Send.
+    let outcome: Result<serde_json::Value, PreflightError> =
+        tokio::task::spawn_blocking(move || {
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| PreflightError::RuntimeUnavailable(e.to_string()))?;
+            rt.block_on(async {
+                let mut target = hydrate_preflight_target(&target_url, &opts, timeout_secs)
+                    .map_err(PreflightError::BadUrl)?;
+
+                // Reachability probe via the target's HTTP stack so proxy,
+                // headers, User-Agent, and method match what a real scan sends.
+                if !send_reachability_probe(&target).await {
+                    return Ok(serde_json::json!({
                         "target": target_url,
                         "reachable": false,
                         "error_code": crate::cmd::error_codes::CONNECTION_FAILED,
                         "params_discovered": 0,
                         "estimated_total_requests": 0,
                         "params": [],
-                    });
+                    }));
                 }
-
-                let mut target = match parse_target(&target_url) {
-                    Ok(mut t) => {
-                        t.method = opts.method.clone().unwrap_or_else(|| "GET".to_string());
-                        t.timeout = timeout_secs;
-                        t.user_agent = opts.user_agent.clone().or(Some("".to_string()));
-                        t.headers = opts
-                            .header
-                            .as_ref()
-                            .map(|h| {
-                                h.iter()
-                                    .filter_map(|s| s.split_once(":"))
-                                    .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-                        t.cookies = opts
-                            .cookie
-                            .as_ref()
-                            .map(|c| {
-                                c.split(';')
-                                    .filter_map(|p| p.trim().split_once('='))
-                                    .map(|(k, v)| (k.to_string(), v.to_string()))
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-                        t.data = opts.data.clone();
-                        t
-                    }
-                    Err(_) => {
-                        return serde_json::json!({
-                            "target": target_url,
-                            "reachable": true,
-                            "error_code": crate::cmd::error_codes::PARSE_ERROR,
-                            "params_discovered": 0,
-                            "estimated_total_requests": 0,
-                            "params": [],
-                        });
-                    }
-                };
 
                 let scan_args = ScanArgs::for_preflight(crate::cmd::scan::PreflightOptions {
                     target: target_url.clone(),
@@ -1436,10 +1467,10 @@ async fn preflight_handler(
                         .unwrap_or_default(),
                     user_agent: opts.user_agent.clone(),
                     timeout: timeout_secs,
-                    proxy: None,
-                    follow_redirects: false,
-                    skip_mining: false,
-                    skip_discovery: false,
+                    proxy: opts.proxy.clone(),
+                    follow_redirects: opts.follow_redirects.unwrap_or(false),
+                    skip_mining: opts.skip_mining.unwrap_or(false),
+                    skip_discovery: opts.skip_discovery.unwrap_or(false),
                     encoders: opts
                         .encoders
                         .clone()
@@ -1487,31 +1518,67 @@ async fn preflight_handler(
                     })
                     .collect();
 
-                serde_json::json!({
+                Ok(serde_json::json!({
                     "target": target_url,
                     "reachable": true,
                     "method": target.method,
                     "params_discovered": discovered_params.len(),
                     "estimated_total_requests": estimated_requests,
                     "params": discovered_params,
-                })
-            }),
-            Err(e) => serde_json::json!({
-                "target": target_url,
-                "reachable": false,
-                "error": format!("runtime error: {}", e),
-            }),
-        }
-    })
-    .await
-    .unwrap_or_else(|_| serde_json::json!({"error": "preflight thread panicked"}));
+                }))
+            })
+        })
+        .await
+        .unwrap_or(Err(PreflightError::TaskPanicked));
 
-    let resp = ApiResponse {
-        code: 200,
-        msg: "ok".to_string(),
-        data: Some(result),
-    };
-    make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
+    match outcome {
+        Ok(body) => {
+            let resp = ApiResponse {
+                code: 200,
+                msg: "ok".to_string(),
+                data: Some(body),
+            };
+            make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
+        }
+        Err(PreflightError::BadUrl(msg)) => {
+            let resp = ApiResponse::<serde_json::Value> {
+                code: 400,
+                msg: format!("invalid target URL: {}", msg),
+                data: None,
+            };
+            make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp)
+        }
+        Err(PreflightError::RuntimeUnavailable(msg)) => {
+            log(&state, "ERR", &format!("preflight runtime build failed: {}", msg));
+            let resp = ApiResponse::<serde_json::Value> {
+                code: 500,
+                msg: "preflight runtime unavailable".to_string(),
+                data: None,
+            };
+            make_api_response(
+                &state,
+                &headers,
+                &params,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &resp,
+            )
+        }
+        Err(PreflightError::TaskPanicked) => {
+            log(&state, "ERR", "preflight task panicked");
+            let resp = ApiResponse::<serde_json::Value> {
+                code: 500,
+                msg: "preflight task panicked".to_string(),
+                data: None,
+            };
+            make_api_response(
+                &state,
+                &headers,
+                &params,
+                StatusCode::INTERNAL_SERVER_ERROR,
+                &resp,
+            )
+        }
+    }
 }
 
 pub async fn run_server(args: ServerArgs) {
