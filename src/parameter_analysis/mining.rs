@@ -728,19 +728,24 @@ pub async fn probe_response_id_params(
         && !resp.status().is_server_error()
         && let Ok(text) = resp.text().await
     {
-        let document = scraper::Html::parse_document(&text);
-
-        // Collect unique ids and names
-        let mut params_to_check = std::collections::HashSet::new();
-        let selector = selectors::input_with_id_or_name();
-        for element in document.select(selector) {
-            if let Some(id) = element.value().attr("id") {
-                params_to_check.insert(id.to_string());
+        // Scope the scraper::Html (which is !Send) strictly to the owning
+        // block so the compiler can prove it never crosses any of the
+        // subsequent .await points. Extract owned String data, then drop
+        // the document before hitting the async code below.
+        let params_to_check: std::collections::HashSet<String> = {
+            let document = scraper::Html::parse_document(&text);
+            let selector = selectors::input_with_id_or_name();
+            let mut set = std::collections::HashSet::new();
+            for element in document.select(selector) {
+                if let Some(id) = element.value().attr("id") {
+                    set.insert(id.to_string());
+                }
+                if let Some(name) = element.value().attr("name") {
+                    set.insert(name.to_string());
+                }
             }
-            if let Some(name) = element.value().attr("name") {
-                params_to_check.insert(name.to_string());
-            }
-        }
+            set
+        };
 
         if let Some(ref pb) = pb {
             pb.set_length(params_to_check.len() as u64);

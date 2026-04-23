@@ -710,43 +710,72 @@ pub async fn check_form_discovery(
         Err(_) => return,
     };
 
-    // Parse forms
-    let document = scraper::Html::parse_document(&html);
-    let form_sel = selectors::form();
-    let input_sel = selectors::input_textarea_select();
+    // Fully-owned form descriptor extracted from the HTML. Keeping these as
+    // Send-safe `String` / `Url` lets the scraper document get dropped before
+    // the async probing loop below, which is a prerequisite for ever moving
+    // this function off the current_thread runtime.
+    struct FormInfo {
+        url: url::Url,
+        is_post: bool,
+        is_multipart: bool,
+        fields: Vec<(String, String)>,
+    }
+
+    // Parse forms in a tight scope so `scraper::Html` (which is !Send) never
+    // escapes. Collect into `Vec<FormInfo>` before touching any await.
+    let forms: Vec<FormInfo> = {
+        let document = scraper::Html::parse_document(&html);
+        let form_sel = selectors::form();
+        let input_sel = selectors::input_textarea_select();
+
+        let mut out = Vec::new();
+        for form in document.select(form_sel) {
+            let form_method = form.value().attr("method").unwrap_or("get");
+            let is_post = form_method.eq_ignore_ascii_case("post");
+            let enctype = form.value().attr("enctype").unwrap_or("");
+            let is_multipart = enctype.eq_ignore_ascii_case("multipart/form-data");
+
+            let action = form.value().attr("action").unwrap_or("");
+            let form_url = if action.is_empty() || action == "#" {
+                target.url.clone()
+            } else if let Ok(resolved) = target.url.join(action) {
+                resolved
+            } else {
+                continue;
+            };
+
+            let mut fields: Vec<(String, String)> = Vec::new();
+            for input in form.select(input_sel) {
+                let name = input.value().attr("name").unwrap_or("").to_string();
+                if name.is_empty() {
+                    continue;
+                }
+                let value = input.value().attr("value").unwrap_or("").to_string();
+                fields.push((name, value));
+            }
+            if fields.is_empty() {
+                continue;
+            }
+
+            out.push(FormInfo {
+                url: form_url,
+                is_post,
+                is_multipart,
+                fields,
+            });
+        }
+        out
+    };
 
     let mut batch: Vec<Param> = Vec::new();
 
-    for form in document.select(form_sel) {
-        let form_method = form.value().attr("method").unwrap_or("get");
-        let is_post = form_method.eq_ignore_ascii_case("post");
-        let enctype = form.value().attr("enctype").unwrap_or("");
-        let is_multipart = enctype.eq_ignore_ascii_case("multipart/form-data");
-
-        // Resolve form action URL
-        let action = form.value().attr("action").unwrap_or("");
-        let form_url = if action.is_empty() || action == "#" {
-            target.url.clone()
-        } else if let Ok(resolved) = target.url.join(action) {
-            resolved
-        } else {
-            continue;
-        };
-
-        // Collect form fields
-        let mut fields: Vec<(String, String)> = Vec::new();
-        for input in form.select(input_sel) {
-            let name = input.value().attr("name").unwrap_or("").to_string();
-            if name.is_empty() {
-                continue;
-            }
-            let value = input.value().attr("value").unwrap_or("").to_string();
-            fields.push((name, value));
-        }
-        if fields.is_empty() {
-            continue;
-        }
-
+    for FormInfo {
+        url: form_url,
+        is_post,
+        is_multipart,
+        fields,
+    } in forms
+    {
         if is_post && is_multipart {
             // Multipart form: test each field via multipart/form-data POST
             for (field_idx, (field_name, field_value)) in fields.iter().enumerate() {
