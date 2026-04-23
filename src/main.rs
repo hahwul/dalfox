@@ -56,7 +56,7 @@ enum Commands {
 async fn main() {
     // Determine color policy from TTY and print banner early for help
     let __args: Vec<String> = std::env::args().collect();
-    let color_enabled = atty::is(atty::Stream::Stdout);
+    let color_enabled = std::io::IsTerminal::is_terminal(&std::io::stdout());
     if __args.iter().any(|a| a == "-h" || a == "--help") {
         utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
     }

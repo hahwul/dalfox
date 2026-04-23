@@ -1445,7 +1445,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     let input_type = if args.input_type == "auto" {
         if args.targets.is_empty() {
             // If no positional targets and STDIN is piped, treat as pipe mode
-            if !atty::is(atty::Stream::Stdin) {
+            if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
                 "pipe".to_string()
             } else {
                 if !args.silence {
