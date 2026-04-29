@@ -232,7 +232,7 @@ func processParams(target string, paramsQue chan string, results chan model.Para
 			var code string
 			rl.Block(tempURL.Host)
 			resbody, resp, _, vrs, err := SendReq(tempURL, "Dalfox", options)
-			if err == nil {
+			if err == nil && resp != nil {
 				wafCheck, wafN := checkWAF(resp.Header, resbody)
 				if wafCheck {
 					options.WAF = true
@@ -269,6 +269,7 @@ func processParams(target string, paramsQue chan string, results chan model.Para
 					ReflectedCode:  code,
 				}
 				var wg sync.WaitGroup
+				var charsMu sync.Mutex
 				chars := payload.GetSpecialChar()
 				for _, c := range chars {
 					wg.Add(1)
@@ -286,7 +287,9 @@ func processParams(target string, paramsQue chan string, results chan model.Para
 							rl.Block(tempURL.Host)
 							_, _, _, vrs, _ := SendReq(turl, "dalfox"+char, options)
 							if vrs {
+								charsMu.Lock()
 								paramResult.Chars = append(paramResult.Chars, char)
+								charsMu.Unlock()
 							}
 						}
 					}()
