@@ -143,7 +143,121 @@ fn is_in_safe_context_decoded(html: &str, payload: &str) -> bool {
     {
         return true;
     }
+    // Inert reflection inside <script> blocks: the payload is reflected only
+    // inside script source where HTML entities don't decode and the AST shows
+    // the reflection produces no sink call — therefore not exploitable.
+    if is_payload_inert_in_scripts(html, payload) {
+        return true;
+    }
     false
+}
+
+/// True when a path-segment parameter's "reflection" should be ignored because
+/// it came from a non-2xx response. Error pages frequently echo the requested
+/// URL/path verbatim, producing reflections that don't represent real
+/// injection points.
+fn should_suppress_path_reflection(location: &Location, status_code: u16) -> bool {
+    matches!(location, Location::Path) && !(200..300).contains(&status_code)
+}
+
+/// Find every `<script>...</script>` byte range in `html`. Used by the
+/// safe-context heuristic for entity-encoded reflections.
+fn script_block_ranges(html: &str) -> Vec<(usize, usize)> {
+    let bytes = html.as_bytes();
+    let open = b"<script";
+    let close = b"</script>";
+    let mut ranges = Vec::new();
+    let mut search = 0;
+    while let Some(start) = find_ascii_case_insensitive(bytes, open, search) {
+        // Find the end of the opening tag '>'
+        let Some(rel) = html[start..].find('>') else {
+            break;
+        };
+        let content_start = start + rel + 1;
+        match find_ascii_case_insensitive(bytes, close, content_start) {
+            Some(end) => {
+                ranges.push((content_start, end));
+                search = end + close.len();
+            }
+            None => {
+                ranges.push((content_start, html.len()));
+                break;
+            }
+        }
+    }
+    ranges
+}
+
+/// Helper: every occurrence of `needle` in `haystack` falls inside one of the
+/// supplied byte ranges.
+fn all_occurrences_in_ranges(haystack: &str, needle: &str, ranges: &[(usize, usize)]) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    let needle_len = needle.len();
+    let mut search = 0;
+    let mut found_any = false;
+    while let Some(rel) = haystack[search..].find(needle) {
+        let abs = search + rel;
+        let in_range = ranges
+            .iter()
+            .any(|&(s, e)| abs >= s && abs + needle_len <= e);
+        if !in_range {
+            return false;
+        }
+        found_any = true;
+        search = abs + 1;
+    }
+    found_any
+}
+
+/// True when the payload is reflected only inside `<script>...</script>` blocks
+/// (either as raw bytes or via HTML-entity encoding such as `&lt;` for `<`)
+/// AND the parsed JS introduces no sink call within the payload's byte range.
+/// Such reflections render as inert JavaScript text (e.g. `var x = '&#x27;…'`
+/// or `var x = "&lt;img onerror=alert(1)>"`) and are not exploitable, so they
+/// should not be reported as Reflected.
+fn is_payload_inert_in_scripts(html: &str, payload: &str) -> bool {
+    if payload.is_empty() {
+        return false;
+    }
+    let ranges = script_block_ranges(html);
+    if ranges.is_empty() {
+        return false;
+    }
+
+    // Path A: payload appears verbatim. Confirm every raw occurrence lies
+    // inside a `<script>` block.
+    let raw_only_in_scripts =
+        html.contains(payload) && all_occurrences_in_ranges(html, payload, &ranges);
+
+    // Path B: payload appears only after entity-decoding script content (the
+    // server HTML-encoded part of the payload before reflecting). Inside a
+    // `<script>` block the JS engine does not decode HTML entities, so the
+    // reflection remains text only.
+    let mut script_decoded = String::new();
+    for &(s, e) in &ranges {
+        script_decoded.push_str(&decode_html_entities(&html[s..e]));
+        script_decoded.push('\n');
+    }
+    let mut non_script = String::new();
+    let mut prev = 0;
+    for &(s, e) in &ranges {
+        non_script.push_str(&html[prev..s]);
+        prev = e;
+    }
+    non_script.push_str(&html[prev..]);
+    let non_script_decoded = decode_html_entities(&non_script);
+    let decoded_only_in_scripts =
+        script_decoded.contains(payload) && !non_script_decoded.contains(payload);
+
+    if !raw_only_in_scripts && !decoded_only_in_scripts {
+        return false;
+    }
+
+    // Confirm the AST sees no sink call introduced by this payload's raw
+    // bytes — otherwise the reflection IS exploitable and must keep R/V.
+    !crate::scanning::js_context_verify::has_js_context_evidence(payload, html)
 }
 
 static ENTITY_REGEX: OnceLock<Regex> = OnceLock::new();
@@ -578,6 +692,18 @@ async fn fetch_injection_response_with_client(
             if !args.ignore_return.is_empty()
                 && args.ignore_return.contains(&status_code)
             {
+                return None;
+            }
+            // Suppress path-segment "reflections" on non-2xx responses: error
+            // pages routinely echo the requested URL back, which produces noisy
+            // false-positive R findings rather than real injection points.
+            if should_suppress_path_reflection(&param.location, status_code) {
+                if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!(
+                        "[DBG] suppressing path-injection reflection on non-2xx status (param={}, status={})",
+                        param.name, status_code
+                    );
+                }
                 return None;
             }
             // Check for redirect context: if the response is a 3xx redirect,
@@ -1329,5 +1455,142 @@ mod tests {
             !is_in_safe_context(&html, payload),
             "textarea breakout payload should NOT be considered safe"
         );
+    }
+
+    // --- Inert-in-script-block heuristic ---
+
+    #[test]
+    fn test_inert_in_scripts_entity_encoded_payload_in_js_string() {
+        // Mirrors brutelogic c5/c6: server reflects the entity-encoded payload
+        // verbatim inside a JS string literal — not exploitable in JS context.
+        let payload = "&#x0027;-alert(1)-&#x0027;";
+        let html = format!("<script>var c5 = '{}';</script>", payload);
+        assert!(
+            is_payload_inert_in_scripts(&html, payload),
+            "entity-encoded payload reflected only inside a JS string should be inert"
+        );
+        assert!(
+            is_in_safe_context_decoded(&html, payload),
+            "should classify as safe so the reflection is not reported"
+        );
+    }
+
+    #[test]
+    fn test_inert_in_scripts_does_not_suppress_real_js_breakout() {
+        // c2-style real exploit: payload introduces an `alert(1)` call inside
+        // the JS — this MUST NOT be suppressed.
+        let payload = "\"-alert(1)-\"";
+        let html = format!("<script>var c2 = \"{}\";</script>", payload);
+        assert!(
+            !is_payload_inert_in_scripts(&html, payload),
+            "exploitable JS-context payload must not be classified inert"
+        );
+    }
+
+    #[test]
+    fn test_inert_in_scripts_requires_all_occurrences_inside_script() {
+        let payload = "&#x0027;ZZZ&#x0027;";
+        let html = format!(
+            "<div>{}</div><script>var x = '{}';</script>",
+            payload, payload
+        );
+        assert!(
+            !is_payload_inert_in_scripts(&html, payload),
+            "if the payload is also reflected outside a script block it is not inert"
+        );
+    }
+
+    #[test]
+    fn test_inert_in_scripts_no_script_block_in_response() {
+        let payload = "&#x0027;ZZZ&#x0027;";
+        let html = format!("<div>{}</div>", payload);
+        assert!(
+            !is_payload_inert_in_scripts(&html, payload),
+            "without any script block this heuristic should not apply"
+        );
+    }
+
+    #[test]
+    fn test_inert_in_scripts_handles_entity_encoded_html_payload_in_js_string() {
+        // Mirrors brutelogic c6 with the marker payload: server HTML-encodes
+        // `<` to `&lt;` and reflects inside a JS string. Browser does not
+        // decode entities inside <script>, so the payload is just text.
+        let payload = "<img src=x onerror=alert(1) class=dlxtest>";
+        let html =
+            "<script>var c6 = \"&lt;img src=x onerror=alert(1) class=dlxtest>\";</script>";
+        assert!(
+            is_payload_inert_in_scripts(html, payload),
+            "entity-encoded HTML payload reflected only inside JS string should be inert"
+        );
+    }
+
+    #[test]
+    fn test_inert_in_scripts_handles_apos_encoded_quote_in_js_string() {
+        // Mirrors brutelogic c1: the server HTML-encodes the `'` chars of
+        // `'-alert(1)-'` to `&apos;` before reflecting into a JS string.
+        // Inside <script> entities never decode, so the reflection is text.
+        let payload = "'-alert(1)-'";
+        let html = "<script>var c1 = '&apos;-alert(1)-&apos;';</script>";
+        assert!(
+            is_payload_inert_in_scripts(html, payload),
+            "apos-encoded JS-context payload reflected inside JS string should be inert"
+        );
+        assert!(
+            is_in_safe_context_decoded(html, payload),
+            "should classify safe so the R finding is suppressed"
+        );
+    }
+
+    #[test]
+    fn test_inert_in_scripts_full_brutelogic_response() {
+        // Full real-world response capture: c1 reflection inside a multi-block
+        // script context with form inputs and HTML comments. Should be inert.
+        let payload = "'-alert(1)-'";
+        let html = r#"<!DOCTYPE html>
+<head>
+<!-- XSS in 11 URL parameters (a, b1, b2, b3, b4, b5, b6, c1, c2, c3, c4, c5 and c6) + URL itself -->
+<title>XSS Test Page</title>
+</head>
+<body>
+<form>
+<input type="text" name="b1" value="">
+<input type="text" name="b2" value=''>
+</form>
+<script>
+	var c1 = '&apos;-alert(1)-&apos;';
+	var c2 = "1";
+	var c3 = '1';
+	var c4 = "1";
+	var c5 = '1';
+	var c6 = "1";
+</script>
+</body>"#;
+        assert!(!html.contains(payload), "payload should not appear raw");
+        assert!(
+            is_payload_inert_in_scripts(html, payload),
+            "full-page response should still classify the apos-encoded reflection as inert"
+        );
+    }
+
+    // --- Path-injection status-code filter ---
+
+    #[test]
+    fn test_suppress_path_reflection_on_404() {
+        assert!(should_suppress_path_reflection(&Location::Path, 404));
+        assert!(should_suppress_path_reflection(&Location::Path, 500));
+        assert!(should_suppress_path_reflection(&Location::Path, 301));
+    }
+
+    #[test]
+    fn test_keep_path_reflection_on_2xx() {
+        assert!(!should_suppress_path_reflection(&Location::Path, 200));
+        assert!(!should_suppress_path_reflection(&Location::Path, 204));
+    }
+
+    #[test]
+    fn test_non_path_locations_are_unaffected() {
+        assert!(!should_suppress_path_reflection(&Location::Query, 404));
+        assert!(!should_suppress_path_reflection(&Location::Header, 500));
+        assert!(!should_suppress_path_reflection(&Location::Body, 404));
     }
 }

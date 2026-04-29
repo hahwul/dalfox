@@ -165,19 +165,34 @@ fn has_executable_url_attribute_evidence_in_doc(
     })
 }
 
-/// Run both DOM-evidence checks against a single parsed document. Used by
+/// Run all DOM-evidence checks against a single parsed document. Used by
 /// `check_dom_verification` to avoid parsing the same response body twice.
 /// Short-circuits on the marker check when the payload carries one, which
 /// is the common case.
+///
+/// Three evidence paths:
+/// - DOM marker (class/id) found via CSS selector — the standard HTML/attr case
+/// - Executable URL protocol reflected into a dangerous attribute — `javascript:`/`data:`
+/// - JS-context sink call expression introduced into a `<script>` block
+///   (e.g. `var x = "<INJECT>"` where the injection produces a real `alert(...)`)
 pub(crate) fn has_dom_evidence(payload: &str, text: &str) -> bool {
     let needs_markers = payload_has_any_marker(payload);
     let needs_attrs = payload_is_executable_url_protocol(payload);
-    if !needs_markers && !needs_attrs {
+    let needs_js =
+        crate::scanning::js_context_verify::payload_carries_js_sink(payload);
+    if !needs_markers && !needs_attrs && !needs_js {
         return false;
     }
-    let document = scraper::Html::parse_document(text);
-    (needs_markers && has_marker_evidence_in_doc(payload, &document))
-        || (needs_attrs && has_executable_url_attribute_evidence_in_doc(payload, &document))
+    if needs_markers || needs_attrs {
+        let document = scraper::Html::parse_document(text);
+        if needs_markers && has_marker_evidence_in_doc(payload, &document) {
+            return true;
+        }
+        if needs_attrs && has_executable_url_attribute_evidence_in_doc(payload, &document) {
+            return true;
+        }
+    }
+    needs_js && crate::scanning::js_context_verify::has_js_context_evidence(payload, text)
 }
 
 pub async fn check_dom_verification(
@@ -1041,6 +1056,25 @@ mod tests {
             class_marker
         );
         assert!(has_dom_evidence(&payload, &body));
+    }
+
+    #[test]
+    fn test_has_dom_evidence_via_js_context_breakout() {
+        // Mirrors brutelogic c3 / c4: payload introduces a real alert call
+        // inside a JS string-context reflection. No marker, no executable URL,
+        // but the JS-context AST verifier should accept it.
+        let payload = "\"-alert(1)-\"";
+        let body = format!("<html><body><script>var c2 = \"{}\";</script></body></html>", payload);
+        assert!(has_dom_evidence(payload, &body));
+    }
+
+    #[test]
+    fn test_has_dom_evidence_rejects_inert_js_string_payload() {
+        // A payload that just becomes plain string text inside a JS literal
+        // has no exploit potential — must not be treated as evidence.
+        let payload = "\"hello\"";
+        let body = format!("<html><body><script>var x = \"{}\";</script></body></html>", payload);
+        assert!(!has_dom_evidence(payload, &body));
     }
 
     #[tokio::test]

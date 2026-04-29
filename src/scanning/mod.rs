@@ -19,6 +19,7 @@ pub mod ast_dom_analysis;
 pub mod ast_integration;
 pub mod check_dom_verification;
 pub mod check_reflection;
+pub mod js_context_verify;
 pub mod light_verify;
 pub mod markers;
 pub mod result;
@@ -775,25 +776,67 @@ pub async fn run_scanning(
 
                         let reflection_note = reflection_kind_note(kind);
 
-                        // Record reflected XSS finding (fallback path)
+                        // JS-context static V upgrade: if the payload introduced
+                        // an executable sink call inside a <script> block, treat
+                        // the finding as DOM-verified. Saves one HTTP request
+                        // since we re-use the reflection response body.
+                        let js_verified = reflection_response_text
+                            .as_deref()
+                            .map(|body| {
+                                crate::scanning::js_context_verify::has_js_context_evidence(
+                                    &reflection_payload,
+                                    body,
+                                )
+                            })
+                            .unwrap_or(false);
+
+                        let (finding_type, severity, summary, poc_msg) = if js_verified {
+                            // Mark dom_found so we skip redundant DOM verification
+                            {
+                                let mut found = found_params_clone.write().await;
+                                found.dom.insert(param_clone.name.clone());
+                            }
+                            dom_found_locally = true;
+                            (
+                                FindingType::Verified,
+                                "High".to_string(),
+                                format!(
+                                    "DOM verification successful for param {} (JS-context AST)",
+                                    param_clone.name
+                                ),
+                                format!(
+                                    "Triggered XSS Payload (JS-context sink call): {}={}",
+                                    param_clone.name, reflection_payload
+                                ),
+                            )
+                        } else {
+                            (
+                                FindingType::Reflected,
+                                "Info".to_string(),
+                                format!(
+                                    "Reflected XSS detected for param {} ({})",
+                                    param_clone.name, reflection_note
+                                ),
+                                format!(
+                                    "[R] Triggered XSS Payload ({}): {}={}",
+                                    reflection_note, param_clone.name, reflection_payload
+                                ),
+                            )
+                        };
+
+                        // Record reflected/verified XSS finding (fallback path)
                         let mut result = crate::scanning::result::Result::new(
-                            FindingType::Reflected,
+                            finding_type,
                             "inHTML".to_string(),
                             target_clone.method.clone(),
                             result_url,
                             param_clone.name.clone(),
                             reflection_payload.clone(),
-                            format!(
-                                "Reflected XSS detected for param {} ({})",
-                                param_clone.name, reflection_note
-                            ),
+                            summary,
                             "CWE-79".to_string(),
-                            "Info".to_string(),
+                            severity,
                             606,
-                            format!(
-                                "[R] Triggered XSS Payload ({}): {}={}",
-                                reflection_note, param_clone.name, reflection_payload
-                            ),
+                            poc_msg,
                         );
                         result.request = Some(build_request_text(
                             &target_clone,
