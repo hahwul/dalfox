@@ -226,15 +226,7 @@ fn is_payload_inert_in_scripts(html: &str, payload: &str) -> bool {
         return false;
     }
 
-    // Path A: payload appears verbatim. Confirm every raw occurrence lies
-    // inside a `<script>` block.
-    let raw_only_in_scripts =
-        html.contains(payload) && all_occurrences_in_ranges(html, payload, &ranges);
-
-    // Path B: payload appears only after entity-decoding script content (the
-    // server HTML-encoded part of the payload before reflecting). Inside a
-    // `<script>` block the JS engine does not decode HTML entities, so the
-    // reflection remains text only.
+    // Pre-compute decoded views of script-block content vs everything else.
     let mut script_decoded = String::new();
     for &(s, e) in &ranges {
         script_decoded.push_str(&decode_html_entities(&html[s..e]));
@@ -248,16 +240,41 @@ fn is_payload_inert_in_scripts(html: &str, payload: &str) -> bool {
     }
     non_script.push_str(&html[prev..]);
     let non_script_decoded = decode_html_entities(&non_script);
-    let decoded_only_in_scripts =
-        script_decoded.contains(payload) && !non_script_decoded.contains(payload);
 
-    if !raw_only_in_scripts && !decoded_only_in_scripts {
+    // Build the candidate "what to look for" set: the raw payload and its
+    // URL-decoded form. Encoder policy frequently produces URL-encoded
+    // payloads (`%27-alert%281%29-%27`) which the server decodes once before
+    // reflecting — the literal needle in the response is the decoded form.
+    let mut candidates: Vec<String> = vec![payload.to_string()];
+    if let Ok(url_dec) = urlencoding::decode(payload) {
+        let url_dec_owned: String = url_dec.into_owned();
+        if url_dec_owned != payload {
+            candidates.push(url_dec_owned);
+        }
+    }
+
+    let mut matched = false;
+    for cand in &candidates {
+        // Path A: candidate appears verbatim — all raw occurrences inside scripts.
+        let raw_only_in_scripts =
+            html.contains(cand.as_str()) && all_occurrences_in_ranges(html, cand, &ranges);
+        // Path B: candidate appears only after HTML-entity decoding.
+        let decoded_only_in_scripts =
+            script_decoded.contains(cand.as_str()) && !non_script_decoded.contains(cand.as_str());
+        if raw_only_in_scripts || decoded_only_in_scripts {
+            matched = true;
+            break;
+        }
+    }
+    if !matched {
         return false;
     }
 
-    // Confirm the AST sees no sink call introduced by this payload's raw
-    // bytes — otherwise the reflection IS exploitable and must keep R/V.
-    !crate::scanning::js_context_verify::has_js_context_evidence(payload, html)
+    // Confirm the AST sees no sink call introduced by any candidate form of
+    // the payload — otherwise the reflection IS exploitable and must keep R/V.
+    !candidates
+        .iter()
+        .any(|cand| crate::scanning::js_context_verify::has_js_context_evidence(cand, html))
 }
 
 static ENTITY_REGEX: OnceLock<Regex> = OnceLock::new();
@@ -989,6 +1006,19 @@ mod tests {
         Html(format!("<div>{}</div>", html_named_encode_all(&q)))
     }
 
+    /// Mirrors brutelogic c1: reflects the param into a JS string literal
+    /// after HTML-encoding `'` and `<`. Browser does not decode entities
+    /// inside `<script>` so the reflection is inert.
+    async fn js_string_apos_handler(
+        Query(params): Query<HashMap<String, String>>,
+    ) -> Html<String> {
+        let q = params.get("q").cloned().unwrap_or_default();
+        Html(format!(
+            "<html><body><script>var c1 = '{}';</script></body></html>",
+            html_named_encode_all(&q)
+        ))
+    }
+
     async fn url_encoded_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
         let q = params.get("q").cloned().unwrap_or_default();
         Html(format!("<div>{}</div>", urlencoding::encode(&q)))
@@ -1035,6 +1065,7 @@ mod tests {
         let app = Router::new()
             .route("/reflect/raw", get(raw_handler))
             .route("/reflect/html-entity", get(html_entity_handler))
+            .route("/reflect/js-string-apos", get(js_string_apos_handler))
             .route("/reflect/url-encoded", get(url_encoded_handler))
             .route("/reflect/form-url-encoded", get(form_urlencoded_handler))
             .route("/reflect/none", get(none_handler))
@@ -1244,6 +1275,30 @@ mod tests {
 
         let found = check_reflection(&target, &param, payload, &args).await;
         assert!(found, "entity-encoded reflection should be detected");
+    }
+
+    #[tokio::test]
+    async fn test_check_reflection_suppresses_inert_js_string_apos_reflection() {
+        // brutelogic c1 fixture: payload `'-alert(1)-'` reflected as
+        // `var c1 = '&apos;-alert(1)-&apos;';` inside <script>. Inside a
+        // script block HTML entities never decode, so this is inert text
+        // and must not produce an R finding.
+        let payload = "'-alert(1)-'";
+        let addr = start_mock_server("stored").await;
+        let target = make_target(addr, "/reflect/js-string-apos");
+        let param = make_param();
+        let args = default_scan_args();
+
+        let (kind, body) =
+            check_reflection_with_response(&target, &param, payload, &args).await;
+        assert_eq!(
+            kind, None,
+            "apos-encoded JS-string reflection should be classified inert (no R)"
+        );
+        assert!(
+            body.unwrap_or_default().contains("&apos;"),
+            "fixture should reflect the encoded form"
+        );
     }
 
     #[tokio::test]
@@ -1538,6 +1593,33 @@ mod tests {
         assert!(
             is_in_safe_context_decoded(html, payload),
             "should classify safe so the R finding is suppressed"
+        );
+    }
+
+    #[test]
+    fn test_inert_in_scripts_handles_url_encoded_payload_variant() {
+        // Encoder policy often produces a URL-encoded variant of the original
+        // payload; the server then URL-decodes once and reflects the decoded
+        // form. The suppression heuristic must inspect that decoded form, not
+        // the URL-encoded payload string verbatim.
+        let payload = "%27-alert%281%29-%27"; // URL-encoded `'-alert(1)-'`
+        let html = "<script>var c1 = '&apos;-alert(1)-&apos;';</script>";
+        assert!(!html.contains(payload), "URL-encoded form should not appear");
+        assert!(
+            is_payload_inert_in_scripts(html, payload),
+            "URL-encoded JS-context payload reflected as decoded text inside JS string should be inert"
+        );
+    }
+
+    #[test]
+    fn test_inert_in_scripts_url_encoded_does_not_suppress_real_breakout() {
+        // URL-encoded form of `"-alert(1)-"` decodes to a real exploitable
+        // breakout. Must NOT be suppressed.
+        let payload = "%22-alert%281%29-%22";
+        let html = "<script>var c2 = \"\"-alert(1)-\"\";</script>";
+        assert!(
+            !is_payload_inert_in_scripts(html, payload),
+            "exploitable breakout via URL-decoded form must keep its finding"
         );
     }
 
