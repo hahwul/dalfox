@@ -165,30 +165,114 @@ fn has_executable_url_attribute_evidence_in_doc(
     })
 }
 
+/// True when the payload introduced (a) an HTML element with an event-handler
+/// attribute whose value contains a JavaScript sink call, OR (b) a `<script>`
+/// element whose body is the payload-carried sink call. The "introduced by the
+/// payload" check is enforced by requiring the parsed attribute value /
+/// script body to appear verbatim inside the original payload string —
+/// otherwise the matched element belonged to the original page.
+///
+/// Catches realistic XSS payloads that don't embed a Dalfox marker, e.g.
+/// `<svg/onload=alert(1)>`, `<img src=x onerror=alert(1)>`,
+/// `<script>alert(1)</script>` from custom payload lists.
+fn has_html_structural_evidence_in_doc(
+    payload: &str,
+    document: &scraper::Html,
+) -> bool {
+    if !payload.contains('<') {
+        return false;
+    }
+    if !crate::scanning::js_context_verify::payload_carries_js_sink(payload) {
+        return false;
+    }
+
+    let selector = selectors::universal();
+    for node in document.select(selector) {
+        let value = node.value();
+        let tag = value.name();
+
+        // (a) Event-handler attribute introduced by the payload.
+        for (attr_name, attr_value) in value.attrs() {
+            if attr_name.len() < 3 || !attr_name.as_bytes()[..2].eq_ignore_ascii_case(b"on") {
+                continue;
+            }
+            let trimmed = attr_value.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if !crate::scanning::js_context_verify::payload_carries_js_sink(trimmed) {
+                continue;
+            }
+            if payload.contains(trimmed) {
+                return true;
+            }
+        }
+
+        // (b) <script> element whose text body came from the payload.
+        if tag.eq_ignore_ascii_case("script") {
+            let text: String = node.text().collect();
+            let trimmed = text.trim();
+            if !trimmed.is_empty()
+                && crate::scanning::js_context_verify::payload_carries_js_sink(trimmed)
+                && payload.contains(trimmed)
+            {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Run all DOM-evidence checks against a single parsed document. Used by
 /// `check_dom_verification` to avoid parsing the same response body twice.
 /// Short-circuits on the marker check when the payload carries one, which
 /// is the common case.
 ///
-/// Three evidence paths:
+/// Four evidence paths:
 /// - DOM marker (class/id) found via CSS selector — the standard HTML/attr case
 /// - Executable URL protocol reflected into a dangerous attribute — `javascript:`/`data:`
-/// - JS-context sink call expression introduced into a `<script>` block
+/// - HTML structural: parsed element with `on*` handler containing a sink call,
+///   OR `<script>` body containing a sink call, where the value/body appears
+///   verbatim in the payload (so it was introduced by the injection)
+/// - JS-context sink call expression introduced into an existing `<script>` block
 ///   (e.g. `var x = "<INJECT>"` where the injection produces a real `alert(...)`)
+/// Cheap response-body heuristic: returns false for bodies that look like
+/// raw JSON/array payloads where browsers do not render the response as HTML.
+/// Used to gate the HTML structural-evidence check, which would otherwise
+/// false-positive on JSON responses that scraper happily parses as HTML.
+fn body_looks_html_renderable(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let first = trimmed.as_bytes()[0];
+    // JSON object / array — would be rendered as text by browsers, not HTML.
+    if first == b'{' || first == b'[' {
+        return false;
+    }
+    true
+}
+
 pub(crate) fn has_dom_evidence(payload: &str, text: &str) -> bool {
     let needs_markers = payload_has_any_marker(payload);
     let needs_attrs = payload_is_executable_url_protocol(payload);
+    let needs_html_struct = payload.contains('<')
+        && crate::scanning::js_context_verify::payload_carries_js_sink(payload)
+        && body_looks_html_renderable(text);
     let needs_js =
         crate::scanning::js_context_verify::payload_carries_js_sink(payload);
-    if !needs_markers && !needs_attrs && !needs_js {
+    if !needs_markers && !needs_attrs && !needs_html_struct && !needs_js {
         return false;
     }
-    if needs_markers || needs_attrs {
+    if needs_markers || needs_attrs || needs_html_struct {
         let document = scraper::Html::parse_document(text);
         if needs_markers && has_marker_evidence_in_doc(payload, &document) {
             return true;
         }
         if needs_attrs && has_executable_url_attribute_evidence_in_doc(payload, &document) {
+            return true;
+        }
+        if needs_html_struct && has_html_structural_evidence_in_doc(payload, &document) {
             return true;
         }
     }
@@ -1075,6 +1159,70 @@ mod tests {
         let payload = "\"hello\"";
         let body = format!("<html><body><script>var x = \"{}\";</script></body></html>", payload);
         assert!(!has_dom_evidence(payload, &body));
+    }
+
+    #[test]
+    fn test_has_dom_evidence_html_struct_svg_onload() {
+        // No Dalfox marker in the payload but the parsed DOM contains a real
+        // svg element with onload="alert(1)" introduced by the injection.
+        let payload = "<svg/onload=alert(1)>";
+        let body = format!("<html><body>hello {}</body></html>", payload);
+        assert!(has_dom_evidence(payload, &body));
+    }
+
+    #[test]
+    fn test_has_dom_evidence_html_struct_img_onerror() {
+        let payload = "<img src=x onerror=prompt(1)>";
+        let body = format!("<html><body>{}</body></html>", payload);
+        assert!(has_dom_evidence(payload, &body));
+    }
+
+    #[test]
+    fn test_has_dom_evidence_html_struct_script_body() {
+        let payload = "<script>alert(1)</script>";
+        let body = format!("<html><body>{}</body></html>", payload);
+        assert!(has_dom_evidence(payload, &body));
+    }
+
+    #[test]
+    fn test_has_dom_evidence_html_struct_ignores_pre_existing_handler() {
+        // The page already had <body onload="alert(1)">. The payload doesn't
+        // contain that attribute string, so the structural check must NOT
+        // claim evidence.
+        let payload = "harmless";
+        let body = "<html><body onload=\"alert(1)\">harmless</body></html>";
+        assert!(!has_dom_evidence(payload, body));
+    }
+
+    #[test]
+    fn test_has_dom_evidence_html_struct_requires_sink_call() {
+        // Payload reflects as a real element with an event handler, but the
+        // handler value doesn't reference any sink — not actionable XSS.
+        let payload = "<div onmouseover=foo()>";
+        let body = format!("<html><body>{}</body></html>", payload);
+        assert!(!has_dom_evidence(payload, &body));
+    }
+
+    #[test]
+    fn test_has_dom_evidence_html_struct_ignores_text_only_reflection() {
+        // Server entity-encoded `<` so the payload renders as text, not as
+        // a parsed element. scraper produces no svg element — no evidence.
+        let payload = "<svg/onload=alert(1)>";
+        let body = "<html><body>hello &lt;svg/onload=alert(1)&gt;</body></html>";
+        assert!(!has_dom_evidence(payload, body));
+    }
+
+    #[test]
+    fn test_has_dom_evidence_html_struct_skipped_for_json_body() {
+        // Browsers don't render application/json as HTML, so even though
+        // scraper happily parses `{"echo":"<script>alert(1)</script>"}` and
+        // finds a script element, this is not exploitable in real conditions.
+        let payload = "<script>alert(1)</script>";
+        let body = "{\"echo\":\"<script>alert(1)</script>\"}";
+        assert!(
+            !has_dom_evidence(payload, body),
+            "JSON-shaped body should not yield structural HTML evidence"
+        );
     }
 
     #[tokio::test]
