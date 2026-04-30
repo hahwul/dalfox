@@ -176,6 +176,18 @@ async fn vuln_js_raw(Query(p): Query<HashMap<String, String>>) -> impl IntoRespo
     ))
 }
 
+/// JSONP-style fixture: reflects the param as the callable identifier in a
+/// pure-JS body served as application/javascript. `?q=alert(1);foo` becomes
+/// `alert(1);foo({"data":1})` which executes the alert in the browser.
+async fn vuln_jsonp_callback(Query(p): Query<HashMap<String, String>>) -> impl IntoResponse {
+    let q = p.get("q").cloned().unwrap_or_default();
+    (
+        axum::http::StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "application/javascript")],
+        format!("{q}({{\"data\":1}})"),
+    )
+}
+
 /// Mirrors brutelogic c1 / c5: HTML-entity-encodes `'` and `<` of the param
 /// and reflects inside a single-quoted JS string. Not exploitable: entities
 /// don't decode inside `<script>`. Used to verify R suppression.
@@ -355,6 +367,7 @@ async fn start_test_server() -> SocketAddr {
         .route("/js/raw", get(vuln_js_raw))
         .route("/js/inline-event", get(vuln_inline_event))
         .route("/safe/js-apos-encoded", get(safe_js_apos_encoded))
+        .route("/jsonp", get(vuln_jsonp_callback))
         // Reflected: CSS
         .route("/css/style", get(vuln_css_style))
         .route("/css/inline", get(vuln_css_inline))
@@ -666,6 +679,22 @@ async fn test_js_single_quote_string_upgrades_to_verified() {
         &findings,
         "V",
         "JS single-quoted string should produce a Verified finding via JS-context AST",
+    );
+}
+
+#[tokio::test]
+async fn test_jsonp_callback_endpoint_yields_verified() {
+    // application/javascript response with payload reflected as the callable
+    // identifier — JSONP-style XSS. JS-context AST fallback should produce V.
+    let addr = start_test_server().await;
+    let mut args = base_scan_args();
+    args.targets = vec![format!("http://{addr}/jsonp?q=test")];
+    let findings = run_scan_and_collect(args).await;
+    assert_detected(&findings, "JSONP callback");
+    assert_has_type(
+        &findings,
+        "V",
+        "JSONP callback reflection should produce V via JS-context fallback",
     );
 }
 
