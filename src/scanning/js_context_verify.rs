@@ -40,17 +40,34 @@ const JS_SINK_NAMES: &[&str] = &[
     "insertAdjacentHTML",
 ];
 
-/// Properties whose assignment from injected content is itself an XSS sink:
-/// the browser parses the value as HTML (`innerHTML`, `outerHTML`, `srcdoc`)
-/// and runs any embedded event handlers, regardless of whether the value is
-/// statically a string literal.
-const ASSIGNMENT_SINK_PROPERTIES: &[&str] = &["innerHTML", "outerHTML", "srcdoc"];
+/// Properties whose assignment from injected content is itself an XSS sink
+/// regardless of the right-hand value: the browser always parses the value
+/// as HTML and runs any embedded event handlers.
+const ASSIGNMENT_SINK_PROPERTIES_HTML: &[&str] = &["innerHTML", "outerHTML", "srcdoc"];
+
+/// Navigation properties whose assignment is only a sink when the right-hand
+/// value is a `javascript:` URL literal. Without this guard the heuristic
+/// would falsely flag harmless redirects like `el.href = '/about'`.
+const ASSIGNMENT_SINK_PROPERTIES_NAV: &[&str] = &["location", "href"];
+
+/// Bare identifiers whose assignment behaves as `window.<id> = …` in the
+/// browser. Same `javascript:` guard applies as for navigation properties.
+const ASSIGNMENT_SINK_IDENTIFIERS_NAV: &[&str] = &["location"];
 
 /// Quick filter: does the payload look like it carries a JavaScript sink that
 /// could fire when reflected into a script context?
 pub(crate) fn payload_carries_js_sink(payload: &str) -> bool {
     JS_SINK_NAMES.iter().any(|s| payload.contains(s))
-        || ASSIGNMENT_SINK_PROPERTIES.iter().any(|s| payload.contains(s))
+        || ASSIGNMENT_SINK_PROPERTIES_HTML
+            .iter()
+            .any(|s| payload.contains(s))
+        || (payload.contains("javascript:")
+            && (ASSIGNMENT_SINK_PROPERTIES_NAV
+                .iter()
+                .any(|s| payload.contains(s))
+                || ASSIGNMENT_SINK_IDENTIFIERS_NAV
+                    .iter()
+                    .any(|s| payload.contains(s))))
 }
 
 fn script_block_re() -> &'static Regex {
@@ -142,19 +159,58 @@ fn callee_is_js_sink(call: &CallExpression<'_>) -> bool {
     callee_identifier_is_sink(&call.callee)
 }
 
-/// Whether an `AssignmentExpression` left-hand side targets a property whose
-/// assignment is itself an XSS sink (e.g. `el.innerHTML = …`).
-fn assignment_target_is_sink(target: &AssignmentTarget<'_>) -> bool {
-    match target {
+/// True when an AssignmentExpression's right-hand side is a string literal
+/// that begins with `javascript:` (case-insensitive). Used to gate the
+/// navigation-sink rule so harmless redirects like `el.href = '/about'` are
+/// not flagged.
+fn rhs_is_javascript_url(right: &Expression<'_>) -> bool {
+    match right {
+        Expression::StringLiteral(lit) => {
+            let trimmed = lit.value.trim_start();
+            trimmed.len() >= "javascript:".len()
+                && trimmed.as_bytes()[..11].eq_ignore_ascii_case(b"javascript:")
+        }
+        Expression::ParenthesizedExpression(p) => rhs_is_javascript_url(&p.expression),
+        Expression::BinaryExpression(b) => {
+            // Loose check: any concatenation chain producing a string starting
+            // with `javascript:` like `'jav' + 'ascript:' + …`.
+            // Conservative — only check left operand's literal prefix.
+            rhs_is_javascript_url(&b.left)
+        }
+        _ => false,
+    }
+}
+
+/// Whether an `AssignmentExpression` is itself an XSS sink. Combines the
+/// HTML-parsing properties (always sink) with the navigation properties
+/// (sink only when the right-hand value is a `javascript:` URL).
+fn assignment_is_sink(assign: &AssignmentExpression<'_>) -> bool {
+    match &assign.left {
+        AssignmentTarget::AssignmentTargetIdentifier(id) => {
+            ASSIGNMENT_SINK_IDENTIFIERS_NAV.contains(&id.name.as_str())
+                && rhs_is_javascript_url(&assign.right)
+        }
         AssignmentTarget::StaticMemberExpression(m) => {
-            ASSIGNMENT_SINK_PROPERTIES.contains(&m.property.name.as_str())
+            let name = m.property.name.as_str();
+            if ASSIGNMENT_SINK_PROPERTIES_HTML.contains(&name) {
+                return true;
+            }
+            if ASSIGNMENT_SINK_PROPERTIES_NAV.contains(&name) {
+                return rhs_is_javascript_url(&assign.right);
+            }
+            false
         }
         AssignmentTarget::ComputedMemberExpression(m) => {
             if let Expression::StringLiteral(lit) = &m.expression {
-                ASSIGNMENT_SINK_PROPERTIES.contains(&lit.value.as_str())
-            } else {
-                false
+                let name = lit.value.as_str();
+                if ASSIGNMENT_SINK_PROPERTIES_HTML.contains(&name) {
+                    return true;
+                }
+                if ASSIGNMENT_SINK_PROPERTIES_NAV.contains(&name) {
+                    return rhs_is_javascript_url(&assign.right);
+                }
             }
+            false
         }
         _ => false,
     }
@@ -340,7 +396,7 @@ fn gather_sink_spans_in_expression(expr: &Expression<'_>, out: &mut Vec<(u32, u3
             }
         }
         Expression::AssignmentExpression(a) => {
-            if assignment_target_is_sink(&a.left) {
+            if assignment_is_sink(a) {
                 push_span(out, a.span());
             }
             gather_sink_spans_in_expression(&a.right, out);
@@ -602,6 +658,41 @@ mod tests {
         let payload = "\";frame.srcdoc='<img onerror=alert(1)>';\"";
         let html = format!("<script>var x = \"{}\";</script>", payload);
         assert!(has_js_context_evidence(payload, &html));
+    }
+
+    #[test]
+    fn detects_bare_location_assignment_payload() {
+        // `location = '…'` is shorthand for window.location and triggers
+        // navigation. With a `javascript:` URL it executes inline.
+        let payload = "\";location='javascript:alert(1)';\"";
+        let html = format!("<script>var x = \"{}\";</script>", payload);
+        assert!(has_js_context_evidence(payload, &html));
+    }
+
+    #[test]
+    fn detects_location_href_assignment_payload() {
+        let payload = "\";location.href='javascript:alert(1)';\"";
+        let html = format!("<script>var x = \"{}\";</script>", payload);
+        assert!(has_js_context_evidence(payload, &html));
+    }
+
+    #[test]
+    fn detects_window_location_member_assignment_payload() {
+        let payload = "\";window.location='javascript:alert(1)';\"";
+        let html = format!("<script>var x = \"{}\";</script>", payload);
+        assert!(has_js_context_evidence(payload, &html));
+    }
+
+    #[test]
+    fn does_not_flag_navigation_assignment_with_safe_url() {
+        // location.href = '/about' is a normal redirect, not XSS — must not
+        // trigger the navigation-sink rule.
+        let payload = "\";location.href='/about';\"";
+        let html = format!("<script>var x = \"{}\";</script>", payload);
+        assert!(
+            !has_js_context_evidence(payload, &html),
+            "navigation to a relative URL should not be flagged"
+        );
     }
 
     #[test]
