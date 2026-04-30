@@ -176,6 +176,23 @@ async fn vuln_js_raw(Query(p): Query<HashMap<String, String>>) -> impl IntoRespo
     ))
 }
 
+/// Mirrors brutelogic c1 / c5: HTML-entity-encodes `'` and `<` of the param
+/// and reflects inside a single-quoted JS string. Not exploitable: entities
+/// don't decode inside `<script>`. Used to verify R suppression.
+async fn safe_js_apos_encoded(Query(p): Query<HashMap<String, String>>) -> impl IntoResponse {
+    let q = p.get("q").cloned().unwrap_or_default();
+    let encoded = q
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('\'', "&apos;")
+        .replace('"', "&quot;");
+    Html(format!(
+        r#"<!DOCTYPE html><html><body>
+<script>var c1 = '{encoded}'; console.log(c1);</script></body></html>"#
+    ))
+}
+
 /// Reflection in an inline event handler via HTML attribute
 async fn vuln_inline_event(Query(p): Query<HashMap<String, String>>) -> impl IntoResponse {
     let q = p.get("q").cloned().unwrap_or_default();
@@ -337,6 +354,7 @@ async fn start_test_server() -> SocketAddr {
         .route("/js/template", get(vuln_js_template))
         .route("/js/raw", get(vuln_js_raw))
         .route("/js/inline-event", get(vuln_inline_event))
+        .route("/safe/js-apos-encoded", get(safe_js_apos_encoded))
         // Reflected: CSS
         .route("/css/style", get(vuln_css_style))
         .route("/css/inline", get(vuln_css_inline))
@@ -435,6 +453,19 @@ fn assert_not_detected(findings: &[serde_json::Value], context: &str) {
         findings.is_empty(),
         "[{context}] expected no findings but got: {:?}",
         findings
+    );
+}
+
+/// Assert at least one finding of the given short type ("V", "R", "A").
+fn assert_has_type(findings: &[serde_json::Value], expected: &str, context: &str) {
+    let any = findings.iter().any(|f| f["type"].as_str() == Some(expected));
+    assert!(
+        any,
+        "[{context}] expected at least one '{expected}' finding, got: {:?}",
+        findings
+            .iter()
+            .map(|f| f["type"].as_str().unwrap_or(""))
+            .collect::<Vec<_>>()
     );
 }
 
@@ -605,6 +636,51 @@ async fn test_reflected_inline_event_js() {
     assert_detected(
         &run_scan_and_collect(args).await,
         "inline onclick handler JS string",
+    );
+}
+
+#[tokio::test]
+async fn test_js_double_quote_string_upgrades_to_verified() {
+    // The JS-context AST verifier should upgrade a R finding to V when the
+    // injected breakout produces a real sink call inside the script body.
+    let addr = start_test_server().await;
+    let mut args = base_scan_args();
+    args.targets = vec![format!("http://{addr}/js/dq?q=test")];
+    let findings = run_scan_and_collect(args).await;
+    assert_detected(&findings, "JS double-quoted string");
+    assert_has_type(
+        &findings,
+        "V",
+        "JS double-quoted string should produce a Verified finding via JS-context AST",
+    );
+}
+
+#[tokio::test]
+async fn test_js_single_quote_string_upgrades_to_verified() {
+    let addr = start_test_server().await;
+    let mut args = base_scan_args();
+    args.targets = vec![format!("http://{addr}/js/sq?q=test")];
+    let findings = run_scan_and_collect(args).await;
+    assert_detected(&findings, "JS single-quoted string");
+    assert_has_type(
+        &findings,
+        "V",
+        "JS single-quoted string should produce a Verified finding via JS-context AST",
+    );
+}
+
+#[tokio::test]
+async fn test_inert_js_apos_encoded_reflection_is_not_reported() {
+    // Mirrors brutelogic c1 / c5: server HTML-encodes `'` and `<` before
+    // reflecting into a JS string. Inside <script> entities don't decode,
+    // so the reflection is text only and must NOT yield any finding.
+    let addr = start_test_server().await;
+    let mut args = base_scan_args();
+    args.targets = vec![format!("http://{addr}/safe/js-apos-encoded?q=test")];
+    let findings = run_scan_and_collect(args).await;
+    assert_not_detected(
+        &findings,
+        "entity-encoded JS-string reflection should be classified inert",
     );
 }
 
