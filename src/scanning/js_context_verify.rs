@@ -40,10 +40,17 @@ const JS_SINK_NAMES: &[&str] = &[
     "insertAdjacentHTML",
 ];
 
+/// Properties whose assignment from injected content is itself an XSS sink:
+/// the browser parses the value as HTML (`innerHTML`, `outerHTML`, `srcdoc`)
+/// and runs any embedded event handlers, regardless of whether the value is
+/// statically a string literal.
+const ASSIGNMENT_SINK_PROPERTIES: &[&str] = &["innerHTML", "outerHTML", "srcdoc"];
+
 /// Quick filter: does the payload look like it carries a JavaScript sink that
 /// could fire when reflected into a script context?
 pub(crate) fn payload_carries_js_sink(payload: &str) -> bool {
     JS_SINK_NAMES.iter().any(|s| payload.contains(s))
+        || ASSIGNMENT_SINK_PROPERTIES.iter().any(|s| payload.contains(s))
 }
 
 fn script_block_re() -> &'static Regex {
@@ -133,6 +140,24 @@ fn script_block_has_sink_call_in_range(
 
 fn callee_is_js_sink(call: &CallExpression<'_>) -> bool {
     callee_identifier_is_sink(&call.callee)
+}
+
+/// Whether an `AssignmentExpression` left-hand side targets a property whose
+/// assignment is itself an XSS sink (e.g. `el.innerHTML = …`).
+fn assignment_target_is_sink(target: &AssignmentTarget<'_>) -> bool {
+    match target {
+        AssignmentTarget::StaticMemberExpression(m) => {
+            ASSIGNMENT_SINK_PROPERTIES.contains(&m.property.name.as_str())
+        }
+        AssignmentTarget::ComputedMemberExpression(m) => {
+            if let Expression::StringLiteral(lit) = &m.expression {
+                ASSIGNMENT_SINK_PROPERTIES.contains(&lit.value.as_str())
+            } else {
+                false
+            }
+        }
+        _ => false,
+    }
 }
 
 fn callee_identifier_is_sink(callee: &Expression<'_>) -> bool {
@@ -314,7 +339,12 @@ fn gather_sink_spans_in_expression(expr: &Expression<'_>, out: &mut Vec<(u32, u3
                 }
             }
         }
-        Expression::AssignmentExpression(a) => gather_sink_spans_in_expression(&a.right, out),
+        Expression::AssignmentExpression(a) => {
+            if assignment_target_is_sink(&a.left) {
+                push_span(out, a.span());
+            }
+            gather_sink_spans_in_expression(&a.right, out);
+        }
         Expression::SequenceExpression(s) => {
             for e in &s.expressions {
                 gather_sink_spans_in_expression(e, out);
@@ -551,6 +581,40 @@ mod tests {
         let payload = "\";document.write(1);\"";
         let html = format!("<script>var x = \"{}\";</script>", payload);
         assert!(has_js_context_evidence(payload, &html));
+    }
+
+    #[test]
+    fn detects_inner_html_assignment_payload() {
+        let payload = "\";document.body.innerHTML='<img onerror=alert(1)>';\"";
+        let html = format!("<script>var x = \"{}\";</script>", payload);
+        assert!(has_js_context_evidence(payload, &html));
+    }
+
+    #[test]
+    fn detects_outer_html_computed_assignment_payload() {
+        let payload = "\";el[\"outerHTML\"]='X';\"";
+        let html = format!("<script>var x = \"{}\";</script>", payload);
+        assert!(has_js_context_evidence(payload, &html));
+    }
+
+    #[test]
+    fn detects_srcdoc_assignment_payload() {
+        let payload = "\";frame.srcdoc='<img onerror=alert(1)>';\"";
+        let html = format!("<script>var x = \"{}\";</script>", payload);
+        assert!(has_js_context_evidence(payload, &html));
+    }
+
+    #[test]
+    fn does_not_flag_assignment_to_innocuous_property() {
+        // Assigning to .textContent is safe (no HTML parse, no execution).
+        // The payload contains "alert" via quick-filter but the AST should
+        // produce no sink spans inside the payload's range.
+        let payload = "\";el.textContent='alert(1)';\"";
+        let html = format!("<script>var x = \"{}\";</script>", payload);
+        assert!(
+            !has_js_context_evidence(payload, &html),
+            "textContent is not an HTML-parsing sink"
+        );
     }
 
     #[test]
