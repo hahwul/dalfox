@@ -1048,9 +1048,49 @@ pub async fn run_scanning(
         }
     }
 
+    // Collapse R findings that are already proven by a V finding on the same
+    // (param, inject_type). Multiple per-param payload variants typically
+    // surface the same logical issue twice — keep the strongest evidence and
+    // drop the weaker R duplicates. AST-detected and per-payload V findings
+    // are preserved.
+    {
+        let mut guard = results.lock().await;
+        let before = guard.len();
+        let original = std::mem::take(&mut *guard);
+        let collapsed = collapse_redundant_reflected(original);
+        let after = collapsed.len();
+        *guard = collapsed;
+        if after < before {
+            findings_count.fetch_sub(before - after, Ordering::Relaxed);
+        }
+    }
+
     if let Some(pb) = pb {
         pb.finish_with_message(format!("Completed scanning {}", target.url));
     }
+}
+
+/// Drop Reflected findings that are already covered by a Verified finding on
+/// the same `(param, inject_type)`. Verified and AST findings are preserved.
+fn collapse_redundant_reflected(
+    results: Vec<crate::scanning::result::Result>,
+) -> Vec<crate::scanning::result::Result> {
+    use std::collections::HashSet;
+    let verified_keys: HashSet<(String, String)> = results
+        .iter()
+        .filter(|r| r.result_type == FindingType::Verified)
+        .map(|r| (r.param.clone(), r.inject_type.clone()))
+        .collect();
+    if verified_keys.is_empty() {
+        return results;
+    }
+    results
+        .into_iter()
+        .filter(|r| {
+            !(r.result_type == FindingType::Reflected
+                && verified_keys.contains(&(r.param.clone(), r.inject_type.clone())))
+        })
+        .collect()
 }
 
 pub use xss_blind::blind_scanning;
@@ -1097,6 +1137,71 @@ mod tests {
         let results: Vec<crate::scanning::result::Result> = vec![];
         assert_eq!(count_matching_results(&results, "ALL"), 0);
         assert_eq!(count_matching_results(&results, "V"), 0);
+    }
+
+    fn make_typed_param_result(
+        ft: FindingType,
+        param: &str,
+        inject: &str,
+    ) -> crate::scanning::result::Result {
+        crate::scanning::result::Result::new(
+            ft,
+            inject.to_string(),
+            "GET".to_string(),
+            "https://example.com/?x=1".to_string(),
+            param.to_string(),
+            "PAY".to_string(),
+            String::new(),
+            "CWE-79".to_string(),
+            "Info".to_string(),
+            606,
+            String::new(),
+        )
+    }
+
+    #[test]
+    fn test_collapse_drops_r_when_v_exists_for_same_param_and_inject_type() {
+        let results = vec![
+            make_typed_param_result(FindingType::Reflected, "q", "inHTML"),
+            make_typed_param_result(FindingType::Verified, "q", "inHTML"),
+            make_typed_param_result(FindingType::Reflected, "q", "inHTML"),
+        ];
+        let after = collapse_redundant_reflected(results);
+        assert_eq!(after.len(), 1);
+        assert_eq!(after[0].result_type, FindingType::Verified);
+    }
+
+    #[test]
+    fn test_collapse_keeps_r_when_no_v_for_that_param() {
+        let results = vec![
+            make_typed_param_result(FindingType::Reflected, "q", "inHTML"),
+            make_typed_param_result(FindingType::Reflected, "q", "inHTML"),
+        ];
+        let after = collapse_redundant_reflected(results);
+        assert_eq!(after.len(), 2, "no V to cover, keep R findings");
+    }
+
+    #[test]
+    fn test_collapse_keeps_r_for_different_param_or_inject_type() {
+        let results = vec![
+            make_typed_param_result(FindingType::Verified, "q", "inHTML"),
+            make_typed_param_result(FindingType::Reflected, "q", "inHTML-HPP"),
+            make_typed_param_result(FindingType::Reflected, "other", "inHTML"),
+        ];
+        let after = collapse_redundant_reflected(results);
+        assert_eq!(after.len(), 3, "different inject_type or param must be kept");
+    }
+
+    #[test]
+    fn test_collapse_preserves_ast_findings() {
+        let results = vec![
+            make_typed_param_result(FindingType::Verified, "q", "inHTML"),
+            make_typed_param_result(FindingType::AstDetected, "q", "inHTML"),
+            make_typed_param_result(FindingType::Reflected, "q", "inHTML"),
+        ];
+        let after = collapse_redundant_reflected(results);
+        assert_eq!(after.len(), 2);
+        assert!(after.iter().any(|r| r.result_type == FindingType::AstDetected));
     }
 
     // Mock function for XSS scanning tests (similar to parameter analysis mocks)
