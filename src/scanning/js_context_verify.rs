@@ -22,6 +22,10 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
 
+/// Identifier or member-property names whose call we treat as an XSS sink.
+/// Includes the obvious dialog/eval/timer family plus the DOM mutation sinks
+/// most commonly reached through reflected JavaScript injection
+/// (`document.write`, `el.insertAdjacentHTML`).
 const JS_SINK_NAMES: &[&str] = &[
     "alert",
     "prompt",
@@ -31,6 +35,9 @@ const JS_SINK_NAMES: &[&str] = &[
     "setTimeout",
     "setInterval",
     "Function",
+    "write",
+    "writeln",
+    "insertAdjacentHTML",
 ];
 
 /// Quick filter: does the payload look like it carries a JavaScript sink that
@@ -135,13 +142,34 @@ fn callee_identifier_is_sink(callee: &Expression<'_>) -> bool {
             JS_SINK_NAMES.contains(&member.property.name.as_str())
         }
         Expression::ComputedMemberExpression(member) => {
+            // foo["alert"](1) — string-keyed dynamic dispatch
             if let Expression::StringLiteral(lit) = &member.expression {
-                JS_SINK_NAMES.contains(&lit.value.as_str())
-            } else {
-                false
+                if JS_SINK_NAMES.contains(&lit.value.as_str()) {
+                    return true;
+                }
             }
+            // [alert][0](1) — array-then-index bypass: object is an
+            // ArrayExpression whose first element is a sink identifier and
+            // the indexer is the literal numeric 0.
+            if let Expression::ArrayExpression(arr) = &member.object
+                && let Expression::NumericLiteral(num) = &member.expression
+                && num.value == 0.0
+                && let Some(first) = arr.elements.first()
+                && let Some(first_expr) = first.as_expression()
+                && callee_identifier_is_sink(first_expr)
+            {
+                return true;
+            }
+            false
         }
         Expression::ParenthesizedExpression(p) => callee_identifier_is_sink(&p.expression),
+        // (0,alert)(1) / (_,alert)(1) — comma-operator bypass: only the last
+        // expression in the sequence determines the call target.
+        Expression::SequenceExpression(seq) => seq
+            .expressions
+            .last()
+            .map(callee_identifier_is_sink)
+            .unwrap_or(false),
         _ => false,
     }
 }
@@ -488,6 +516,41 @@ mod tests {
         let second = cached_sink_spans(block).expect("parses cleanly (cache hit)");
         assert_eq!(first, second);
         assert!(!first.is_empty(), "should record at least one sink span");
+    }
+
+    #[test]
+    fn detects_comma_operator_bypass() {
+        let payload = "\";(0,alert)(1);\"";
+        let html = format!("<script>var x = \"{}\";</script>", payload);
+        assert!(has_js_context_evidence(payload, &html));
+    }
+
+    #[test]
+    fn detects_underscore_comma_bypass() {
+        let payload = "\";(_,alert)(1);\"";
+        let html = format!("<script>var x = \"{}\";</script>", payload);
+        assert!(has_js_context_evidence(payload, &html));
+    }
+
+    #[test]
+    fn detects_array_index_bypass() {
+        let payload = "\";[alert][0](1);\"";
+        let html = format!("<script>var x = \"{}\";</script>", payload);
+        assert!(has_js_context_evidence(payload, &html));
+    }
+
+    #[test]
+    fn detects_string_keyed_dispatch_bypass() {
+        let payload = "\";window[\"alert\"](1);\"";
+        let html = format!("<script>var x = \"{}\";</script>", payload);
+        assert!(has_js_context_evidence(payload, &html));
+    }
+
+    #[test]
+    fn detects_document_write_payload() {
+        let payload = "\";document.write(1);\"";
+        let html = format!("<script>var x = \"{}\";</script>", payload);
+        assert!(has_js_context_evidence(payload, &html));
     }
 
     #[test]
