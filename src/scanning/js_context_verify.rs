@@ -17,7 +17,10 @@ use oxc_ast::ast::*;
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType};
 use regex::Regex;
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+use std::sync::{Mutex, OnceLock};
 
 const JS_SINK_NAMES: &[&str] = &[
     "alert",
@@ -50,34 +53,75 @@ fn script_blocks(html: &str) -> impl Iterator<Item = &str> {
         .filter_map(|cap| cap.get(1).map(|m| m.as_str()))
 }
 
-/// Returns true when a sink CallExpression's span lies fully within the
-/// `[payload_start, payload_end)` byte range inside `script_src`. A strict
-/// containment check ensures the injection — not the original page script —
-/// produced the sink call.
+/// Soft cap on cached entries. Beyond this we drop a quarter of the cache
+/// (cheap FIFO-ish eviction) to keep memory bounded for long-running scans
+/// hitting many distinct `<script>` blocks.
+const SINK_CACHE_CAPACITY: usize = 1024;
+
+fn sink_cache() -> &'static Mutex<HashMap<u64, Option<Vec<(u32, u32)>>>> {
+    static CACHE: OnceLock<Mutex<HashMap<u64, Option<Vec<(u32, u32)>>>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn hash_block(script_src: &str) -> u64 {
+    let mut h = DefaultHasher::new();
+    script_src.hash(&mut h);
+    h.finish()
+}
+
+/// Parse `script_src` once and collect every sink-call span. Returns `None`
+/// when the source has parser errors (treated as inert — injected JS that
+/// breaks parsing won't execute).
+fn collect_sink_spans(script_src: &str) -> Option<Vec<(u32, u32)>> {
+    let allocator = Allocator::default();
+    let ret = Parser::new(&allocator, script_src, SourceType::default()).parse();
+    if !ret.errors.is_empty() {
+        return None;
+    }
+    let mut spans: Vec<(u32, u32)> = Vec::new();
+    for stmt in &ret.program.body {
+        gather_sink_spans_in_statement(stmt, &mut spans);
+    }
+    Some(spans)
+}
+
+/// Cached `collect_sink_spans`. The same `<script>` body often appears across
+/// many per-payload responses (page boilerplate, inline framework setup); each
+/// distinct block is parsed at most once across the whole process.
+fn cached_sink_spans(script_src: &str) -> Option<Vec<(u32, u32)>> {
+    let key = hash_block(script_src);
+    {
+        let cache = sink_cache().lock().expect("sink cache poisoned");
+        if let Some(v) = cache.get(&key) {
+            return v.clone();
+        }
+    }
+    let result = collect_sink_spans(script_src);
+    let mut cache = sink_cache().lock().expect("sink cache poisoned");
+    if cache.len() >= SINK_CACHE_CAPACITY {
+        let drop_n = cache.len() / 4;
+        let to_drop: Vec<u64> = cache.keys().take(drop_n).copied().collect();
+        for k in to_drop {
+            cache.remove(&k);
+        }
+    }
+    cache.insert(key, result.clone());
+    result
+}
+
+/// Returns true when a cached sink-call span lies fully within the
+/// `[payload_start, payload_end)` byte range inside `script_src`.
 fn script_block_has_sink_call_in_range(
     script_src: &str,
     payload_start: u32,
     payload_end: u32,
 ) -> bool {
-    let allocator = Allocator::default();
-    let ret = Parser::new(&allocator, script_src, SourceType::default()).parse();
-    if !ret.errors.is_empty() {
-        // Syntax errors after injection ⇒ not exploitable as parsed JS.
+    let Some(spans) = cached_sink_spans(script_src) else {
         return false;
-    }
-
-    let mut found = false;
-    for stmt in &ret.program.body {
-        walk_statement(stmt, payload_start, payload_end, &mut found);
-        if found {
-            break;
-        }
-    }
-    found
-}
-
-fn span_within(s: oxc_span::Span, start: u32, end: u32) -> bool {
-    s.start >= start && s.end <= end
+    };
+    spans
+        .iter()
+        .any(|&(s, e)| s >= payload_start && e <= payload_end)
 }
 
 fn callee_is_js_sink(call: &CallExpression<'_>) -> bool {
@@ -102,40 +146,30 @@ fn callee_identifier_is_sink(callee: &Expression<'_>) -> bool {
     }
 }
 
-/// Recursive walker focused on locating sink CallExpression nodes whose span
-/// lies inside the payload's reflected byte range.
-fn walk_statement(stmt: &Statement<'_>, ps: u32, pe: u32, found: &mut bool) {
-    if *found {
-        return;
-    }
+/// Walk the AST once and accumulate every sink CallExpression / NewExpression
+/// / TaggedTemplateExpression span. Range filtering happens at lookup time
+/// against the cached span list, so the heavy parse runs at most once per
+/// distinct script body.
+fn gather_sink_spans_in_statement(stmt: &Statement<'_>, out: &mut Vec<(u32, u32)>) {
     match stmt {
-        Statement::ExpressionStatement(es) => walk_expr(&es.expression, ps, pe, found),
+        Statement::ExpressionStatement(es) => gather_sink_spans_in_expression(&es.expression, out),
         Statement::VariableDeclaration(decl) => {
             for d in &decl.declarations {
                 if let Some(init) = &d.init {
-                    walk_expr(init, ps, pe, found);
-                    if *found {
-                        return;
-                    }
+                    gather_sink_spans_in_expression(init, out);
                 }
             }
         }
         Statement::BlockStatement(b) => {
             for s in &b.body {
-                walk_statement(s, ps, pe, found);
-                if *found {
-                    return;
-                }
+                gather_sink_spans_in_statement(s, out);
             }
         }
         Statement::IfStatement(s) => {
-            walk_expr(&s.test, ps, pe, found);
-            if *found {
-                return;
-            }
-            walk_statement(&s.consequent, ps, pe, found);
+            gather_sink_spans_in_expression(&s.test, out);
+            gather_sink_spans_in_statement(&s.consequent, out);
             if let Some(alt) = &s.alternate {
-                walk_statement(alt, ps, pe, found);
+                gather_sink_spans_in_statement(alt, out);
             }
         }
         Statement::ForStatement(s) => {
@@ -144,241 +178,187 @@ fn walk_statement(stmt: &Statement<'_>, ps: u32, pe: u32, found: &mut bool) {
                     ForStatementInit::VariableDeclaration(decl) => {
                         for d in &decl.declarations {
                             if let Some(e) = &d.init {
-                                walk_expr(e, ps, pe, found);
+                                gather_sink_spans_in_expression(e, out);
                             }
                         }
                     }
                     expr => {
                         if let Some(e) = expr.as_expression() {
-                            walk_expr(e, ps, pe, found);
+                            gather_sink_spans_in_expression(e, out);
                         }
                     }
                 }
             }
             if let Some(t) = &s.test {
-                walk_expr(t, ps, pe, found);
+                gather_sink_spans_in_expression(t, out);
             }
             if let Some(u) = &s.update {
-                walk_expr(u, ps, pe, found);
+                gather_sink_spans_in_expression(u, out);
             }
-            walk_statement(&s.body, ps, pe, found);
+            gather_sink_spans_in_statement(&s.body, out);
         }
         Statement::WhileStatement(s) => {
-            walk_expr(&s.test, ps, pe, found);
-            if !*found {
-                walk_statement(&s.body, ps, pe, found);
-            }
+            gather_sink_spans_in_expression(&s.test, out);
+            gather_sink_spans_in_statement(&s.body, out);
         }
         Statement::DoWhileStatement(s) => {
-            walk_statement(&s.body, ps, pe, found);
-            if !*found {
-                walk_expr(&s.test, ps, pe, found);
-            }
+            gather_sink_spans_in_statement(&s.body, out);
+            gather_sink_spans_in_expression(&s.test, out);
         }
         Statement::ReturnStatement(s) => {
             if let Some(arg) = &s.argument {
-                walk_expr(arg, ps, pe, found);
+                gather_sink_spans_in_expression(arg, out);
             }
         }
         Statement::FunctionDeclaration(f) => {
             if let Some(body) = &f.body {
                 for s in &body.statements {
-                    walk_statement(s, ps, pe, found);
-                    if *found {
-                        return;
-                    }
+                    gather_sink_spans_in_statement(s, out);
                 }
             }
         }
         Statement::TryStatement(t) => {
             for s in &t.block.body {
-                walk_statement(s, ps, pe, found);
-                if *found {
-                    return;
-                }
+                gather_sink_spans_in_statement(s, out);
             }
             if let Some(handler) = &t.handler {
                 for s in &handler.body.body {
-                    walk_statement(s, ps, pe, found);
-                    if *found {
-                        return;
-                    }
+                    gather_sink_spans_in_statement(s, out);
                 }
             }
             if let Some(finalizer) = &t.finalizer {
                 for s in &finalizer.body {
-                    walk_statement(s, ps, pe, found);
-                    if *found {
-                        return;
-                    }
+                    gather_sink_spans_in_statement(s, out);
                 }
             }
         }
         Statement::SwitchStatement(s) => {
-            walk_expr(&s.discriminant, ps, pe, found);
+            gather_sink_spans_in_expression(&s.discriminant, out);
             for case in &s.cases {
                 if let Some(t) = &case.test {
-                    walk_expr(t, ps, pe, found);
+                    gather_sink_spans_in_expression(t, out);
                 }
                 for s in &case.consequent {
-                    walk_statement(s, ps, pe, found);
-                    if *found {
-                        return;
-                    }
+                    gather_sink_spans_in_statement(s, out);
                 }
             }
         }
-        Statement::LabeledStatement(s) => walk_statement(&s.body, ps, pe, found),
-        Statement::ThrowStatement(s) => walk_expr(&s.argument, ps, pe, found),
+        Statement::LabeledStatement(s) => gather_sink_spans_in_statement(&s.body, out),
+        Statement::ThrowStatement(s) => gather_sink_spans_in_expression(&s.argument, out),
         _ => {}
     }
 }
 
-fn walk_expr(expr: &Expression<'_>, ps: u32, pe: u32, found: &mut bool) {
-    if *found {
-        return;
-    }
+fn push_span(out: &mut Vec<(u32, u32)>, span: oxc_span::Span) {
+    out.push((span.start, span.end));
+}
+
+fn gather_sink_spans_in_expression(expr: &Expression<'_>, out: &mut Vec<(u32, u32)>) {
     match expr {
         Expression::CallExpression(call) => {
-            if callee_is_js_sink(call) && span_within(call.span(), ps, pe) {
-                *found = true;
-                return;
+            if callee_is_js_sink(call) {
+                push_span(out, call.span());
             }
-            walk_expr(&call.callee, ps, pe, found);
+            gather_sink_spans_in_expression(&call.callee, out);
             for arg in &call.arguments {
                 if let Some(e) = arg.as_expression() {
-                    walk_expr(e, ps, pe, found);
-                    if *found {
-                        return;
-                    }
+                    gather_sink_spans_in_expression(e, out);
                 }
             }
         }
         Expression::TaggedTemplateExpression(t) => {
-            // alert`1`, prompt`1`, confirm`1`
-            if callee_identifier_is_sink(&t.tag) && span_within(t.span(), ps, pe) {
-                *found = true;
-                return;
+            if callee_identifier_is_sink(&t.tag) {
+                push_span(out, t.span());
             }
-            walk_expr(&t.tag, ps, pe, found);
+            gather_sink_spans_in_expression(&t.tag, out);
             for e in &t.quasi.expressions {
-                walk_expr(e, ps, pe, found);
-                if *found {
-                    return;
-                }
+                gather_sink_spans_in_expression(e, out);
             }
         }
         Expression::NewExpression(ne) => {
-            if callee_identifier_is_sink(&ne.callee) && span_within(ne.span(), ps, pe) {
-                *found = true;
-                return;
+            if callee_identifier_is_sink(&ne.callee) {
+                push_span(out, ne.span());
             }
-            walk_expr(&ne.callee, ps, pe, found);
+            gather_sink_spans_in_expression(&ne.callee, out);
             for arg in &ne.arguments {
                 if let Some(e) = arg.as_expression() {
-                    walk_expr(e, ps, pe, found);
-                    if *found {
-                        return;
-                    }
+                    gather_sink_spans_in_expression(e, out);
                 }
             }
         }
-        Expression::AssignmentExpression(a) => walk_expr(&a.right, ps, pe, found),
+        Expression::AssignmentExpression(a) => gather_sink_spans_in_expression(&a.right, out),
         Expression::SequenceExpression(s) => {
             for e in &s.expressions {
-                walk_expr(e, ps, pe, found);
-                if *found {
-                    return;
-                }
+                gather_sink_spans_in_expression(e, out);
             }
         }
         Expression::BinaryExpression(b) => {
-            walk_expr(&b.left, ps, pe, found);
-            walk_expr(&b.right, ps, pe, found);
+            gather_sink_spans_in_expression(&b.left, out);
+            gather_sink_spans_in_expression(&b.right, out);
         }
         Expression::LogicalExpression(l) => {
-            walk_expr(&l.left, ps, pe, found);
-            walk_expr(&l.right, ps, pe, found);
+            gather_sink_spans_in_expression(&l.left, out);
+            gather_sink_spans_in_expression(&l.right, out);
         }
         Expression::ConditionalExpression(c) => {
-            walk_expr(&c.test, ps, pe, found);
-            walk_expr(&c.consequent, ps, pe, found);
-            walk_expr(&c.alternate, ps, pe, found);
+            gather_sink_spans_in_expression(&c.test, out);
+            gather_sink_spans_in_expression(&c.consequent, out);
+            gather_sink_spans_in_expression(&c.alternate, out);
         }
-        Expression::UnaryExpression(u) => walk_expr(&u.argument, ps, pe, found),
+        Expression::UnaryExpression(u) => gather_sink_spans_in_expression(&u.argument, out),
         Expression::UpdateExpression(_) => {}
-        Expression::ParenthesizedExpression(p) => walk_expr(&p.expression, ps, pe, found),
+        Expression::ParenthesizedExpression(p) => {
+            gather_sink_spans_in_expression(&p.expression, out)
+        }
         Expression::ArrayExpression(a) => {
             for el in &a.elements {
                 if let Some(e) = el.as_expression() {
-                    walk_expr(e, ps, pe, found);
-                    if *found {
-                        return;
-                    }
+                    gather_sink_spans_in_expression(e, out);
                 }
             }
         }
         Expression::ObjectExpression(o) => {
             for prop in &o.properties {
                 if let ObjectPropertyKind::ObjectProperty(p) = prop {
-                    walk_expr(&p.value, ps, pe, found);
-                    if *found {
-                        return;
-                    }
+                    gather_sink_spans_in_expression(&p.value, out);
                 }
             }
         }
         Expression::TemplateLiteral(t) => {
             for e in &t.expressions {
-                walk_expr(e, ps, pe, found);
-                if *found {
-                    return;
-                }
+                gather_sink_spans_in_expression(e, out);
             }
         }
         Expression::ArrowFunctionExpression(f) => {
             for s in &f.body.statements {
-                walk_statement(s, ps, pe, found);
-                if *found {
-                    return;
-                }
+                gather_sink_spans_in_statement(s, out);
             }
         }
         Expression::FunctionExpression(f) => {
             if let Some(body) = &f.body {
                 for s in &body.statements {
-                    walk_statement(s, ps, pe, found);
-                    if *found {
-                        return;
-                    }
+                    gather_sink_spans_in_statement(s, out);
                 }
             }
         }
-        Expression::StaticMemberExpression(m) => walk_expr(&m.object, ps, pe, found),
+        Expression::StaticMemberExpression(m) => gather_sink_spans_in_expression(&m.object, out),
         Expression::ComputedMemberExpression(m) => {
-            walk_expr(&m.object, ps, pe, found);
-            if !*found {
-                walk_expr(&m.expression, ps, pe, found);
-            }
+            gather_sink_spans_in_expression(&m.object, out);
+            gather_sink_spans_in_expression(&m.expression, out);
         }
-        Expression::ChainExpression(c) => match &c.expression {
-            ChainElement::CallExpression(call) => {
-                if callee_is_js_sink(call) && span_within(call.span(), ps, pe) {
-                    *found = true;
-                    return;
+        Expression::ChainExpression(c) => {
+            if let ChainElement::CallExpression(call) = &c.expression {
+                if callee_is_js_sink(call) {
+                    push_span(out, call.span());
                 }
-                walk_expr(&call.callee, ps, pe, found);
+                gather_sink_spans_in_expression(&call.callee, out);
                 for arg in &call.arguments {
                     if let Some(e) = arg.as_expression() {
-                        walk_expr(e, ps, pe, found);
-                        if *found {
-                            return;
-                        }
+                        gather_sink_spans_in_expression(e, out);
                     }
                 }
             }
-            _ => {}
-        },
+        }
         _ => {}
     }
 }
@@ -497,5 +477,25 @@ mod tests {
         assert!(!payload_carries_js_sink("<svg/onload=foo>"));
         assert!(payload_carries_js_sink("\"-alert(1)-\""));
         assert!(payload_carries_js_sink("prompt`1`"));
+    }
+
+    #[test]
+    fn cached_sink_spans_returns_same_result_for_identical_blocks() {
+        // Two distinct calls on the same script source must yield the same
+        // span set; the second call should hit the cache rather than re-parse.
+        let block = "var c2 = \"\"-alert(1)-\"\"; var x = 5; window.foo = 1;";
+        let first = cached_sink_spans(block).expect("parses cleanly");
+        let second = cached_sink_spans(block).expect("parses cleanly (cache hit)");
+        assert_eq!(first, second);
+        assert!(!first.is_empty(), "should record at least one sink span");
+    }
+
+    #[test]
+    fn cached_sink_spans_distinct_for_different_blocks() {
+        let a = "var c1 = ''-alert(1)-'';";
+        let b = "var c2 = \"-prompt(1)-\";";
+        let sa = cached_sink_spans(a).expect("a parses");
+        let sb = cached_sink_spans(b).expect("b parses");
+        assert_ne!(sa, sb);
     }
 }
