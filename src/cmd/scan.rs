@@ -735,11 +735,47 @@ struct PreflightResult {
     tech_result: crate::scanning::tech_detect::TechDetectionResult,
 }
 
+/// Compact, user-facing summary of a reqwest network failure. Keeps the
+/// preflight banner single-line (e.g. "TLS timeout", "connection refused",
+/// "DNS error") instead of dumping the full reqwest::Error chain.
+fn describe_reqwest_failure(err: &reqwest::Error) -> &'static str {
+    if err.is_timeout() {
+        "timeout"
+    } else if err.is_connect() {
+        "connection failed"
+    } else if err.is_request() {
+        "request error"
+    } else if err.is_redirect() {
+        "redirect loop"
+    } else if err.is_status() {
+        "bad status"
+    } else if err.is_body() {
+        "body read failed"
+    } else if err.is_decode() {
+        "decode error"
+    } else if err.is_builder() {
+        "request build error"
+    } else {
+        "network error"
+    }
+}
+
 async fn preflight_content_type(
     target: &crate::target_parser::Target,
     args: &ScanArgs,
 ) -> Option<PreflightResult> {
-    let client = target.build_client().ok()?;
+    let client = match target.build_client() {
+        Ok(c) => c,
+        Err(e) => {
+            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!(
+                    "[DBG] preflight: failed to build HTTP client for {}: {}",
+                    target.url, e
+                );
+            }
+            return None;
+        }
+    };
 
     // Prefer HEAD for fast Content-Type detection
     // build_preflight_request already applies headers, UA, and cookies consistently
@@ -749,7 +785,30 @@ async fn preflight_content_type(
         tokio::time::sleep(Duration::from_millis(target.delay)).await;
     }
     crate::tick_request_count();
-    let resp = request_builder.send().await.ok()?;
+    let resp = match request_builder.send().await {
+        Ok(r) => r,
+        Err(e) => {
+            // Surface a single-line diagnostic for hard reachability failures
+            // (TLS timeouts, connection refused, DNS, etc.) so users can
+            // distinguish a quiet scan from an unreachable target. Suppressed
+            // when --silence is on; the debug channel always carries it.
+            let reason = describe_reqwest_failure(&e);
+            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!(
+                    "[DBG] preflight unreachable: {} ({})",
+                    target.url, reason
+                );
+            }
+            if !args.silence {
+                let ts = chrono::Local::now().format("%-I:%M%p").to_string();
+                eprintln!(
+                    "\x1b[90m{}\x1b[0m \x1b[31mUNREACHABLE\x1b[0m {} ({})",
+                    ts, target.url, reason
+                );
+            }
+            return None;
+        }
+    };
     let head_status = resp.status().as_u16();
     let head_headers = resp.headers().clone();
     let ct_opt = head_headers
