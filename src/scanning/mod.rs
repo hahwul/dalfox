@@ -914,6 +914,19 @@ pub async fn run_scanning(
                             &dom_payload,
                         );
 
+                        // Determine which evidence path proved exploitability
+                        // so the V finding's message reflects the route.
+                        let evidence_label = response_text
+                            .as_deref()
+                            .and_then(|body| {
+                                crate::scanning::check_dom_verification::classify_dom_evidence(
+                                    &dom_payload,
+                                    body,
+                                )
+                            })
+                            .map(|k| k.label())
+                            .unwrap_or("DOM evidence");
+
                         let mut result = crate::scanning::result::Result::new(
                             FindingType::Verified, // DOM-verified => Vulnerability
                             "inHTML".to_string(),
@@ -921,13 +934,16 @@ pub async fn run_scanning(
                             result_url,
                             param_clone.name.clone(),
                             dom_payload.clone(),
-                            format!("DOM verification successful for param {}", param_clone.name),
+                            format!(
+                                "DOM verification successful for param {} ({})",
+                                param_clone.name, evidence_label
+                            ),
                             "CWE-79".to_string(),
                             "High".to_string(),
                             606,
                             format!(
-                                "Triggered XSS Payload (found DOM Object): {}={}",
-                                param_clone.name, dom_payload
+                                "Triggered XSS Payload ({}): {}={}",
+                                evidence_label, param_clone.name, dom_payload
                             ),
                         );
                         result.request = Some(build_request_text(

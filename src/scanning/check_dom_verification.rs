@@ -253,7 +253,40 @@ fn body_looks_html_renderable(text: &str) -> bool {
     true
 }
 
-pub(crate) fn has_dom_evidence(payload: &str, text: &str) -> bool {
+/// Which evidence path proved the payload exploitable. Returned by
+/// `classify_dom_evidence` so callers can surface a human-friendly hint
+/// in the V finding (e.g. "JS-context AST" vs "DOM marker").
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DomEvidenceKind {
+    /// Dalfox marker class/id observed in the parsed DOM.
+    Marker,
+    /// Executable URL protocol (`javascript:` / `data:`) reflected into a
+    /// dangerous attribute (href, src, action, etc.).
+    ExecutableUrl,
+    /// Parsed HTML element introduced by the payload carries an event-handler
+    /// attribute (or `<script>` body) containing a JS sink call.
+    HtmlStructural,
+    /// JS-context: payload reflected inside `<script>` produced a sink
+    /// CallExpression / AssignmentExpression covered by the payload's range.
+    JsContext,
+}
+
+impl DomEvidenceKind {
+    /// Short label suitable for inclusion in V finding messages.
+    pub(crate) fn label(&self) -> &'static str {
+        match self {
+            DomEvidenceKind::Marker => "DOM marker",
+            DomEvidenceKind::ExecutableUrl => "javascript: URL in attribute",
+            DomEvidenceKind::HtmlStructural => "HTML element with sink",
+            DomEvidenceKind::JsContext => "JS-context AST",
+        }
+    }
+}
+
+/// Returns the evidence kind that confirms the payload is exploitable, or
+/// `None` if no evidence was found. Probes paths in this order: DOM marker,
+/// executable URL attribute, HTML structural, JS-context AST.
+pub(crate) fn classify_dom_evidence(payload: &str, text: &str) -> Option<DomEvidenceKind> {
     let needs_markers = payload_has_any_marker(payload);
     let needs_attrs = payload_is_executable_url_protocol(payload);
     let needs_html_struct = payload.contains('<')
@@ -262,21 +295,29 @@ pub(crate) fn has_dom_evidence(payload: &str, text: &str) -> bool {
     let needs_js =
         crate::scanning::js_context_verify::payload_carries_js_sink(payload);
     if !needs_markers && !needs_attrs && !needs_html_struct && !needs_js {
-        return false;
+        return None;
     }
     if needs_markers || needs_attrs || needs_html_struct {
         let document = scraper::Html::parse_document(text);
         if needs_markers && has_marker_evidence_in_doc(payload, &document) {
-            return true;
+            return Some(DomEvidenceKind::Marker);
         }
         if needs_attrs && has_executable_url_attribute_evidence_in_doc(payload, &document) {
-            return true;
+            return Some(DomEvidenceKind::ExecutableUrl);
         }
         if needs_html_struct && has_html_structural_evidence_in_doc(payload, &document) {
-            return true;
+            return Some(DomEvidenceKind::HtmlStructural);
         }
     }
-    needs_js && crate::scanning::js_context_verify::has_js_context_evidence(payload, text)
+    if needs_js && crate::scanning::js_context_verify::has_js_context_evidence(payload, text) {
+        return Some(DomEvidenceKind::JsContext);
+    }
+    None
+}
+
+/// Backward-compat boolean view used by callers that don't need the kind.
+pub(crate) fn has_dom_evidence(payload: &str, text: &str) -> bool {
+    classify_dom_evidence(payload, text).is_some()
 }
 
 pub async fn check_dom_verification(
@@ -1210,6 +1251,57 @@ mod tests {
         let payload = "<svg/onload=alert(1)>";
         let body = "<html><body>hello &lt;svg/onload=alert(1)&gt;</body></html>";
         assert!(!has_dom_evidence(payload, body));
+    }
+
+    #[test]
+    fn test_classify_dom_evidence_returns_marker() {
+        let class_marker = crate::scanning::markers::class_marker();
+        let payload = format!("<img class=\"{}\">", class_marker);
+        let body = format!(
+            "<html><body><img class=\"{}\"></body></html>",
+            class_marker
+        );
+        assert_eq!(
+            classify_dom_evidence(&payload, &body),
+            Some(DomEvidenceKind::Marker)
+        );
+    }
+
+    #[test]
+    fn test_classify_dom_evidence_returns_html_structural() {
+        let payload = "<svg/onload=alert(1)>";
+        let body = format!("<html><body>{}</body></html>", payload);
+        assert_eq!(
+            classify_dom_evidence(payload, &body),
+            Some(DomEvidenceKind::HtmlStructural)
+        );
+    }
+
+    #[test]
+    fn test_classify_dom_evidence_returns_js_context() {
+        let payload = "\"-alert(1)-\"";
+        let body = format!("<html><body><script>var c2 = \"{}\";</script></body></html>", payload);
+        assert_eq!(
+            classify_dom_evidence(payload, &body),
+            Some(DomEvidenceKind::JsContext)
+        );
+    }
+
+    #[test]
+    fn test_classify_dom_evidence_returns_executable_url() {
+        let payload = "javascript:alert(1)";
+        let body = format!("<html><body><a href=\"{}\">x</a></body></html>", payload);
+        assert_eq!(
+            classify_dom_evidence(payload, &body),
+            Some(DomEvidenceKind::ExecutableUrl)
+        );
+    }
+
+    #[test]
+    fn test_classify_dom_evidence_returns_none_for_inert() {
+        let payload = "harmless";
+        let body = "<html><body>harmless</body></html>";
+        assert_eq!(classify_dom_evidence(payload, body), None);
     }
 
     #[test]
