@@ -723,6 +723,28 @@ async fn fetch_injection_response_with_client(
                 }
                 return None;
             }
+            // Suppress path-segment "reflections" served as non-HTML content
+            // types (application/javascript, application/json, etc.). Browsers
+            // render those bodies as data, not HTML, so a literal payload in
+            // the response is not exploitable XSS. Only Path location is
+            // affected — query/header/etc. may legitimately produce JSONP
+            // sinks worth reporting.
+            if matches!(param.location, Location::Path) {
+                let ct = resp
+                    .headers()
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("");
+                if !ct.is_empty() && !crate::utils::is_htmlish_content_type(ct) {
+                    if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                        eprintln!(
+                            "[DBG] suppressing path-injection reflection on non-HTML content-type (param={}, content-type={})",
+                            param.name, ct
+                        );
+                    }
+                    return None;
+                }
+            }
             // Check for redirect context: if the response is a 3xx redirect,
             // the Location header may contain the reflected payload in either
             // its encoded or decoded form (some servers parse the query and
@@ -1674,5 +1696,42 @@ mod tests {
         assert!(!should_suppress_path_reflection(&Location::Query, 404));
         assert!(!should_suppress_path_reflection(&Location::Header, 500));
         assert!(!should_suppress_path_reflection(&Location::Body, 404));
+    }
+
+    #[tokio::test]
+    async fn test_path_reflection_suppressed_on_non_html_content_type() {
+        // Mirrors brutelogic: path-injected URL returns 200 application/javascript
+        // with the payload echoed in the JS body. Not exploitable as XSS — should
+        // be filtered.
+        async fn js_handler() -> impl IntoResponse {
+            (
+                StatusCode::OK,
+                [("content-type", "application/javascript")],
+                "// echo: <script>alert(1)</script>\nvar x = 1;",
+            )
+        }
+        let app = Router::new().route("/path/echo", get(js_handler));
+        let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.expect("serve");
+        });
+        sleep(Duration::from_millis(20)).await;
+
+        let target = parse_target(&format!("http://{}/path/echo", addr)).expect("target");
+        let mut param = make_param();
+        param.name = "path_segment_0".to_string();
+        param.location = Location::Path;
+        let args = default_scan_args();
+
+        let (kind, _body) =
+            check_reflection_with_response(&target, &param, "<script>alert(1)</script>", &args)
+                .await;
+        assert_eq!(
+            kind, None,
+            "path-injection reflection on application/javascript should be suppressed"
+        );
     }
 }
