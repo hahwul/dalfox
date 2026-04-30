@@ -485,16 +485,35 @@ fn locate_payload(script_src: &str, payload: &str) -> Option<(u32, u32)> {
     Some((start as u32, end as u32))
 }
 
+/// Maximum body size (bytes) for which we attempt full-body JS parsing as a
+/// JSONP-context fallback. Large transpiled bundles are skipped to keep
+/// per-payload overhead bounded.
+const JSONP_PARSE_MAX_BYTES: usize = 64 * 1024;
+
 /// Public entry point: returns true when the payload, reflected inside any
 /// `<script>` block of `html`, parses cleanly and produces a JS sink call
 /// whose span sits inside the payload range.
+///
+/// Falls back to parsing the entire body as JavaScript when the response
+/// contains no `<script>` blocks — this handles JSONP / pure-JS responses
+/// where the payload is reflected as the callable identifier (e.g.
+/// `callback=alert(1);foo` reflected as `alert(1);foo({…})`).
 pub(crate) fn has_js_context_evidence(payload: &str, html: &str) -> bool {
     if !payload_carries_js_sink(payload) {
         return false;
     }
+    let mut saw_block = false;
     for block in script_blocks(html) {
+        saw_block = true;
         if let Some((ps, pe)) = locate_payload(block, payload)
             && script_block_has_sink_call_in_range(block, ps, pe)
+        {
+            return true;
+        }
+    }
+    if !saw_block && html.len() <= JSONP_PARSE_MAX_BYTES {
+        if let Some((ps, pe)) = locate_payload(html, payload)
+            && script_block_has_sink_call_in_range(html, ps, pe)
         {
             return true;
         }
@@ -681,6 +700,39 @@ mod tests {
         let payload = "\";window.location='javascript:alert(1)';\"";
         let html = format!("<script>var x = \"{}\";</script>", payload);
         assert!(has_js_context_evidence(payload, &html));
+    }
+
+    #[test]
+    fn detects_jsonp_callback_alert_payload() {
+        // Pure-JS body (e.g. JSONP response). Payload becomes the callable
+        // identifier in `alert(1);foo({…})` — alert executes immediately.
+        let payload = "alert(1);foo";
+        let body = format!("{payload}({{\"data\":\"x\"}})");
+        assert!(
+            has_js_context_evidence(payload, &body),
+            "JSONP-style body with reflected callee should yield JS evidence"
+        );
+    }
+
+    #[test]
+    fn jsonp_fallback_skipped_when_script_block_present() {
+        // A real `<script>` block is present, so the JSONP fallback shouldn't
+        // run. Prevents accidental escalation when an HTML page has
+        // pre-existing `alert(1)` outside any reflected payload range.
+        let payload = "harmless";
+        let body = "<html><body><script>alert(1)</script></body></html>";
+        assert!(
+            !has_js_context_evidence(payload, body),
+            "fallback must not run when script blocks exist"
+        );
+    }
+
+    #[test]
+    fn jsonp_fallback_respects_payload_range() {
+        let payload = "harmless";
+        let body = "alert(1);foo({\"data\":1})";
+        // The payload `harmless` is not reflected at all → no evidence.
+        assert!(!has_js_context_evidence(payload, body));
     }
 
     #[test]
