@@ -28,7 +28,7 @@ schemars = { version = "1", features = ["derive"] }
 oxc_parser = "0.97.0"
 oxc_ast = "0.97.0"
 oxc_allocator = "0.97.0"
-oxc_span = "0.97.0"
+oxc_span = "0.129.0"
 
 [profile.release]
 lto = true
