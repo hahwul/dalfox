@@ -154,6 +154,7 @@ func Test_sanitizeAPIScanOptions(t *testing.T) {
 		CustomPayloadFile:         "/etc/hostname",
 		CustomBlindXSSPayloadFile: "/etc/passwd",
 		HarFilePath:               "/tmp/dalfox.har",
+		MiningWordlist:            "/etc/passwd",
 		// Fields that should be preserved.
 		Method: "POST",
 		Data:   "q=1",
@@ -169,6 +170,7 @@ func Test_sanitizeAPIScanOptions(t *testing.T) {
 	assert.Empty(t, o.CustomPayloadFile, "CustomPayloadFile must be stripped")
 	assert.Empty(t, o.CustomBlindXSSPayloadFile, "CustomBlindXSSPayloadFile must be stripped")
 	assert.Empty(t, o.HarFilePath, "HarFilePath must be stripped")
+	assert.Empty(t, o.MiningWordlist, "MiningWordlist must be stripped")
 	// Non-dangerous fields untouched.
 	assert.Equal(t, "POST", o.Method)
 	assert.Equal(t, "q=1", o.Data)

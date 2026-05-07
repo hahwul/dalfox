@@ -184,6 +184,10 @@ func sanitizeAPIScanOptions(o *model.Options) {
 	o.CustomPayloadFile = ""
 	o.CustomBlindXSSPayloadFile = ""
 	o.HarFilePath = ""
+	// MiningWordlist (mining-dict-word) is also a server-side file path read
+	// by voltFile.ReadLinesOrLiteral; lines become probed parameter names and
+	// are exfiltrated through scan traffic — same class as CustomPayloadFile.
+	o.MiningWordlist = ""
 }
 
 func postScanHandler(c echo.Context, scans *[]string, options *model.Options) error {

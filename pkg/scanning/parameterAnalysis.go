@@ -441,10 +441,12 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	// `results` channel above — that channel is already closed, so any send
 	// from processParams would panic and crash the whole process (in server
 	// mode this is a remote DoS — see GHSA-2g4x-fq3j-cgq4). Allocate a fresh
-	// channel and consumer for this stage.
+	// channel and consumer for this stage, and wait for the consumer to drain
+	// before returning so callers see a fully-populated `params` map.
 	var wggg sync.WaitGroup
 	paramsDataQue := make(chan string, concurrency)
 	resultsData := make(chan model.ParamResult, concurrency)
+	resultsDataDone := make(chan struct{})
 
 	go func() {
 		for result := range resultsData {
@@ -452,6 +454,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 			params[result.Name] = result
 			mutex.Unlock()
 		}
+		close(resultsDataDone)
 	}()
 
 	for j := 0; j < concurrency; j++ {
@@ -477,6 +480,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	close(paramsDataQue)
 	wggg.Wait()
 	close(resultsData)
+	<-resultsDataDone
 	if miningDictCount != 0 {
 		printing.DalLog("INFO", "Found "+strconv.Itoa(miningDictCount)+" testing points in dictionary-based parameter mining", options)
 	}
