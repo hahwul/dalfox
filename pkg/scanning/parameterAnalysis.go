@@ -437,12 +437,27 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	wgg.Wait()
 	close(results)
 
+	// Second stage processes POST-body parameters. It must NOT reuse the
+	// `results` channel above — that channel is already closed, so any send
+	// from processParams would panic and crash the whole process (in server
+	// mode this is a remote DoS — see GHSA-2g4x-fq3j-cgq4). Allocate a fresh
+	// channel and consumer for this stage.
 	var wggg sync.WaitGroup
 	paramsDataQue := make(chan string, concurrency)
+	resultsData := make(chan model.ParamResult, concurrency)
+
+	go func() {
+		for result := range resultsData {
+			mutex.Lock()
+			params[result.Name] = result
+			mutex.Unlock()
+		}
+	}()
+
 	for j := 0; j < concurrency; j++ {
 		wggg.Add(1)
 		go func() {
-			processParams(target, paramsDataQue, results, options, rl, miningCheckerLine, pLog)
+			processParams(target, paramsDataQue, resultsData, options, rl, miningCheckerLine, pLog)
 			wggg.Done()
 		}()
 	}
@@ -461,6 +476,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 
 	close(paramsDataQue)
 	wggg.Wait()
+	close(resultsData)
 	if miningDictCount != 0 {
 		printing.DalLog("INFO", "Found "+strconv.Itoa(miningDictCount)+" testing points in dictionary-based parameter mining", options)
 	}

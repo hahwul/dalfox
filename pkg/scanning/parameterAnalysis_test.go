@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -315,4 +316,52 @@ func TestParameterAnalysis(t *testing.T) {
 	if param, exists := results["test"]; !exists || !param.Reflected {
 		t.Errorf("ParameterAnalysis() failed to identify reflected parameter")
 	}
+}
+
+// Regression for GHSA-2g4x-fq3j-cgq4: the second worker stage (POST-body
+// parameters, populated when options.Data != "") used to write to a `results`
+// channel that the first stage had already closed. As soon as a POST-body
+// parameter was reflected, processParams would `results <- ...` on the closed
+// channel, panic, and crash the dalfox process — remotely triggerable in
+// server mode. The fix gives the second stage its own results channel; this
+// test exercises that path and asserts it returns without panic.
+func TestParameterAnalysis_PostBodyParamsDoNotPanic(t *testing.T) {
+	// Reflection detection in processParams probes with the literal
+	// "Dalfox"; the server must echo that string for any submitted param so
+	// the second stage's vrs check succeeds and processParams attempts the
+	// channel write that used to panic.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = r.ParseForm()
+		w.Write([]byte("<html><body>Reflected: Dalfox</body></html>"))
+	}))
+	defer ts.Close()
+
+	origDalLog := dalLogFunc
+	dalLogFunc = mockDalLog
+	defer func() { dalLogFunc = origDalLog }()
+
+	// Tiny custom wordlist keeps the second stage to a single iteration; the
+	// channel-write panic is order-of-operations, not iteration-count
+	// dependent, so one entry is enough to trigger it.
+	wl := t.TempDir() + "/wl.txt"
+	if err := os.WriteFile(wl, []byte("q\n"), 0600); err != nil {
+		t.Fatalf("write wordlist: %v", err)
+	}
+	options := model.Options{
+		Timeout:        10,
+		Concurrence:    2,
+		Mining:         true,    // mining populates dp via setP when Data != ""
+		Data:           "q=aaa", // any non-empty Data routes wordlist entries into dp
+		MiningWordlist: wl,
+		UniqParam:      []string{"q"}, // restrict both stages to a single param
+	}
+	rl := newRateLimiter(time.Duration(0))
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("ParameterAnalysis panicked with POST-body params: %v", r)
+		}
+	}()
+
+	_ = ParameterAnalysis(ts.URL+"?q=aaa", options, rl)
 }
