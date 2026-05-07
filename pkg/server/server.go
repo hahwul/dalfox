@@ -170,6 +170,26 @@ func scanHandler(c echo.Context, scans *[]string, options *model.Options) error 
 	return respondJSONorJSONP(c, status, res, options)
 }
 
+// sanitizeAPIScanOptions strips fields that would let an API caller drive
+// host-side filesystem or shell execution. These options are only safe for
+// local CLI users; in REST/MCP mode the caller is the request body, so we
+// refuse to honor them regardless of authentication state.
+//
+// See GHSA-v25v-m36w-jp4h, GHSA-8hf9-3q64-q2qf, GHSA-35wr-x7v6-9fv2.
+func sanitizeAPIScanOptions(o *model.Options) {
+	o.FoundAction = ""
+	o.FoundActionShell = ""
+	o.OutputFile = ""
+	o.OutputAll = false
+	o.CustomPayloadFile = ""
+	o.CustomBlindXSSPayloadFile = ""
+	o.HarFilePath = ""
+	// MiningWordlist (mining-dict-word) is also a server-side file path read
+	// by voltFile.ReadLinesOrLiteral; lines become probed parameter names and
+	// are exfiltrated through scan traffic — same class as CustomPayloadFile.
+	o.MiningWordlist = ""
+}
+
 func postScanHandler(c echo.Context, scans *[]string, options *model.Options) error {
 	rq := new(Req)
 	if err := c.Bind(rq); err != nil {
@@ -179,6 +199,7 @@ func postScanHandler(c echo.Context, scans *[]string, options *model.Options) er
 		}
 		return respondJSONorJSONP(c, http.StatusInternalServerError, res, options)
 	}
+	sanitizeAPIScanOptions(&rq.Options)
 	sid := utils.GenerateRandomToken(rq.URL)
 	res := &Res{
 		Code: http.StatusOK,

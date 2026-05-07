@@ -396,6 +396,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	}
 	paramsQue := make(chan string, concurrency)
 	results := make(chan model.ParamResult, concurrency)
+	resultsDone := make(chan struct{})
 	miningDictCount := 0
 	mutex := &sync.Mutex{}
 
@@ -405,6 +406,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 			params[result.Name] = result
 			mutex.Unlock()
 		}
+		close(resultsDone)
 	}()
 
 	for i := 0; i < concurrency; i++ {
@@ -436,13 +438,32 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	close(paramsQue)
 	wgg.Wait()
 	close(results)
+	<-resultsDone
 
+	// Second stage processes POST-body parameters. It must NOT reuse the
+	// `results` channel above — that channel is already closed, so any send
+	// from processParams would panic and crash the whole process (in server
+	// mode this is a remote DoS — see GHSA-2g4x-fq3j-cgq4). Allocate a fresh
+	// channel and consumer for this stage, and wait for the consumer to drain
+	// before returning so callers see a fully-populated `params` map.
 	var wggg sync.WaitGroup
 	paramsDataQue := make(chan string, concurrency)
+	resultsData := make(chan model.ParamResult, concurrency)
+	resultsDataDone := make(chan struct{})
+
+	go func() {
+		for result := range resultsData {
+			mutex.Lock()
+			params[result.Name] = result
+			mutex.Unlock()
+		}
+		close(resultsDataDone)
+	}()
+
 	for j := 0; j < concurrency; j++ {
 		wggg.Add(1)
 		go func() {
-			processParams(target, paramsDataQue, results, options, rl, miningCheckerLine, pLog)
+			processParams(target, paramsDataQue, resultsData, options, rl, miningCheckerLine, pLog)
 			wggg.Done()
 		}()
 	}
@@ -461,6 +482,8 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 
 	close(paramsDataQue)
 	wggg.Wait()
+	close(resultsData)
+	<-resultsDataDone
 	if miningDictCount != 0 {
 		printing.DalLog("INFO", "Found "+strconv.Itoa(miningDictCount)+" testing points in dictionary-based parameter mining", options)
 	}

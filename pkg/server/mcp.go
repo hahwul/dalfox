@@ -184,6 +184,12 @@ func RunMCPServer(options model.Options) {
 			rqOptions.FindingDOM = false
 		}
 
+		// Defence-in-depth: even though the MCP handler only fills a fixed
+		// allowlist of fields, run the same scrub the REST handler uses so
+		// any future field additions don't silently re-expose host-side
+		// filesystem or shell execution to API callers.
+		sanitizeAPIScanOptions(&rqOptions)
+
 		// Create a goroutine to run the scan
 		go func() {
 			// Set up the target

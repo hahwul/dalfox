@@ -141,6 +141,72 @@ func Test_healthHandler(t *testing.T) {
 	}
 }
 
+// Regression for GHSA-v25v-m36w-jp4h, GHSA-8hf9-3q64-q2qf, GHSA-35wr-x7v6-9fv2:
+// API-supplied options must not be able to drive host-side filesystem or shell
+// execution. sanitizeAPIScanOptions is the chokepoint that strips them before
+// they reach ScanFromAPI / Initialize.
+func Test_sanitizeAPIScanOptions(t *testing.T) {
+	o := model.Options{
+		FoundAction:               "echo owned > /tmp/x",
+		FoundActionShell:          "bash",
+		OutputFile:                "/tmp/dalfox.log",
+		OutputAll:                 true,
+		CustomPayloadFile:         "/etc/hostname",
+		CustomBlindXSSPayloadFile: "/etc/passwd",
+		HarFilePath:               "/tmp/dalfox.har",
+		MiningWordlist:            "/etc/passwd",
+		// Fields that should be preserved.
+		Method: "POST",
+		Data:   "q=1",
+		Debug:  true,
+	}
+
+	sanitizeAPIScanOptions(&o)
+
+	assert.Empty(t, o.FoundAction, "FoundAction must be stripped")
+	assert.Empty(t, o.FoundActionShell, "FoundActionShell must be stripped")
+	assert.Empty(t, o.OutputFile, "OutputFile must be stripped")
+	assert.False(t, o.OutputAll, "OutputAll must be cleared")
+	assert.Empty(t, o.CustomPayloadFile, "CustomPayloadFile must be stripped")
+	assert.Empty(t, o.CustomBlindXSSPayloadFile, "CustomBlindXSSPayloadFile must be stripped")
+	assert.Empty(t, o.HarFilePath, "HarFilePath must be stripped")
+	assert.Empty(t, o.MiningWordlist, "MiningWordlist must be stripped")
+	// Non-dangerous fields untouched.
+	assert.Equal(t, "POST", o.Method)
+	assert.Equal(t, "q=1", o.Data)
+	assert.True(t, o.Debug)
+}
+
+func Test_postScanHandler_stripsDangerousOptions(t *testing.T) {
+	e := echo.New()
+	rq := Req{
+		URL: "http://127.0.0.1:1", // unreachable; goroutine scan will fail fast
+		Options: model.Options{
+			FoundAction:       "echo owned",
+			FoundActionShell:  "bash",
+			OutputFile:        "/tmp/should_not_be_written",
+			CustomPayloadFile: "/etc/hostname",
+			HarFilePath:       "/tmp/should_not_exist.har",
+		},
+	}
+	body, _ := json.Marshal(rq)
+	req := httptest.NewRequest(http.MethodPost, "/scan", bytes.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	scans := []string{}
+	options := model.Options{Scan: map[string]model.Scan{}}
+
+	if assert.NoError(t, postScanHandler(c, &scans, &options)) {
+		assert.Equal(t, http.StatusOK, rec.Code)
+	}
+	// rq is bound and copied inside the handler, so we can't observe the
+	// stripped struct directly here. The unit test above pins the helper;
+	// this test pins that the handler accepts and returns 200 even when the
+	// caller submits all-dangerous options, i.e. no path validation regresses.
+}
+
 func Test_postScanHandler(t *testing.T) {
 	e := echo.New()
 	rq := Req{
