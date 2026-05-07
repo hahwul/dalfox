@@ -396,6 +396,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	}
 	paramsQue := make(chan string, concurrency)
 	results := make(chan model.ParamResult, concurrency)
+	resultsDone := make(chan struct{})
 	miningDictCount := 0
 	mutex := &sync.Mutex{}
 
@@ -405,6 +406,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 			params[result.Name] = result
 			mutex.Unlock()
 		}
+		close(resultsDone)
 	}()
 
 	for i := 0; i < concurrency; i++ {
@@ -436,6 +438,7 @@ func ParameterAnalysis(target string, options model.Options, rl *rateLimiter) ma
 	close(paramsQue)
 	wgg.Wait()
 	close(results)
+	<-resultsDone
 
 	// Second stage processes POST-body parameters. It must NOT reuse the
 	// `results` channel above — that channel is already closed, so any send
