@@ -1,8 +1,9 @@
 use super::{
-    DEFAULT_DELAY_MS, DEFAULT_ENCODERS, DEFAULT_MAX_CONCURRENT_TARGETS,
-    DEFAULT_MAX_TARGETS_PER_HOST, DEFAULT_METHOD, DEFAULT_TIMEOUT_SECS, DEFAULT_WORKERS, ScanArgs,
-    build_ast_dom_message, dedupe_ast_results, extract_context, generate_poc,
-    is_allowed_content_type, preflight_content_type,
+    CLI_MAX_DELAY_MS, CLI_MAX_TIMEOUT_SECS, CLI_MAX_WORKERS, DEFAULT_DELAY_MS, DEFAULT_ENCODERS,
+    DEFAULT_MAX_CONCURRENT_TARGETS, DEFAULT_MAX_TARGETS_PER_HOST, DEFAULT_METHOD,
+    DEFAULT_TIMEOUT_SECS, DEFAULT_WORKERS, ScanArgs, build_ast_dom_message, dedupe_ast_results,
+    extract_context, generate_poc, is_allowed_content_type, preflight_content_type,
+    validate_numeric_args,
 };
 use crate::scanning::result::{FindingType, Result as ScanResult};
 use crate::target_parser::parse_target;
@@ -112,6 +113,64 @@ async fn spawn_preflight_server(
     });
 
     (format!("http://{}/", addr), handle)
+}
+
+#[test]
+fn validate_numeric_args_accepts_defaults() {
+    let args = default_scan_args();
+    assert!(validate_numeric_args(&args).is_ok());
+}
+
+#[test]
+fn validate_numeric_args_rejects_zero_workers() {
+    let mut args = default_scan_args();
+    args.workers = 0;
+    let err = validate_numeric_args(&args).unwrap_err();
+    assert!(err.1.contains("workers"));
+}
+
+#[test]
+fn validate_numeric_args_rejects_workers_over_cap() {
+    let mut args = default_scan_args();
+    args.workers = CLI_MAX_WORKERS + 1;
+    assert!(validate_numeric_args(&args).is_err());
+}
+
+#[test]
+fn validate_numeric_args_rejects_zero_timeout() {
+    let mut args = default_scan_args();
+    args.timeout = 0;
+    let err = validate_numeric_args(&args).unwrap_err();
+    assert!(err.1.contains("timeout"));
+}
+
+#[test]
+fn validate_numeric_args_rejects_timeout_over_cap() {
+    let mut args = default_scan_args();
+    args.timeout = CLI_MAX_TIMEOUT_SECS + 1;
+    assert!(validate_numeric_args(&args).is_err());
+}
+
+#[test]
+fn validate_numeric_args_rejects_delay_over_cap() {
+    let mut args = default_scan_args();
+    args.delay = CLI_MAX_DELAY_MS + 1;
+    assert!(validate_numeric_args(&args).is_err());
+}
+
+#[test]
+fn validate_numeric_args_rejects_zero_concurrent_targets() {
+    let mut args = default_scan_args();
+    args.max_concurrent_targets = 0;
+    assert!(validate_numeric_args(&args).is_err());
+}
+
+#[test]
+fn validate_numeric_args_rejects_zero_targets_per_host() {
+    let mut args = default_scan_args();
+    args.max_targets_per_host = 0;
+    let err = validate_numeric_args(&args).unwrap_err();
+    assert!(err.1.contains("max-targets-per-host"));
 }
 
 #[test]

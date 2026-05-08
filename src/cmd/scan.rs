@@ -34,6 +34,13 @@ pub const DEFAULT_DELAY_MS: u64 = 0;
 pub const DEFAULT_WORKERS: usize = 50;
 pub const DEFAULT_MAX_CONCURRENT_TARGETS: usize = 50;
 pub const DEFAULT_MAX_TARGETS_PER_HOST: usize = 100;
+// Sanity caps for CLI scan args. The server uses tighter caps in
+// crate::cmd::job; CLI users may legitimately want longer timeouts for
+// slow targets but values past these almost always indicate a typo or a
+// stale config file with stray zeros.
+pub const CLI_MAX_TIMEOUT_SECS: u64 = 3600;
+pub const CLI_MAX_DELAY_MS: u64 = 60_000;
+pub const CLI_MAX_WORKERS: usize = 500;
 // Default HTTP method (used by CLI and target parsing)
 pub const DEFAULT_METHOD: &str = "GET";
 
@@ -906,6 +913,72 @@ pub enum ScanOutcome {
     Error,
 }
 
+/// Range-check numeric scan args before launching any network work.
+///
+/// The original failure mode was a config file or CLI flag carrying a
+/// nonsense value (e.g. `workers: 0`, `max_targets_per_host: 0`,
+/// `timeout: 9999999`) that produced cryptic mid-scan failures —
+/// truncating the entire target group, deadlocking on a 0-permit
+/// semaphore, or hanging on an absurd timeout — long after the user
+/// had already invested time in mining/discovery.
+///
+/// Returns `Err((error_code, message))` when invalid; the caller emits
+/// the structured error and exits.
+fn validate_numeric_args(args: &ScanArgs) -> std::result::Result<(), (&'static str, String)> {
+    if args.workers == 0 {
+        return Err((
+            crate::cmd::error_codes::INVALID_INPUT_TYPE,
+            "--workers must be at least 1".to_string(),
+        ));
+    }
+    if args.workers > CLI_MAX_WORKERS {
+        return Err((
+            crate::cmd::error_codes::INVALID_INPUT_TYPE,
+            format!(
+                "--workers must be at most {} (got {})",
+                CLI_MAX_WORKERS, args.workers
+            ),
+        ));
+    }
+    if args.timeout == 0 {
+        return Err((
+            crate::cmd::error_codes::INVALID_INPUT_TYPE,
+            "--timeout must be at least 1 second".to_string(),
+        ));
+    }
+    if args.timeout > CLI_MAX_TIMEOUT_SECS {
+        return Err((
+            crate::cmd::error_codes::INVALID_INPUT_TYPE,
+            format!(
+                "--timeout must be at most {} seconds (got {})",
+                CLI_MAX_TIMEOUT_SECS, args.timeout
+            ),
+        ));
+    }
+    if args.delay > CLI_MAX_DELAY_MS {
+        return Err((
+            crate::cmd::error_codes::INVALID_INPUT_TYPE,
+            format!(
+                "--delay must be at most {} ms (got {})",
+                CLI_MAX_DELAY_MS, args.delay
+            ),
+        ));
+    }
+    if args.max_concurrent_targets == 0 {
+        return Err((
+            crate::cmd::error_codes::INVALID_INPUT_TYPE,
+            "--max-concurrent-targets must be at least 1".to_string(),
+        ));
+    }
+    if args.max_targets_per_host == 0 {
+        return Err((
+            crate::cmd::error_codes::INVALID_INPUT_TYPE,
+            "--max-targets-per-host must be at least 1".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 /// Emit a structured error to stderr when format is json/jsonl, otherwise plain eprintln.
 fn emit_error(format: &str, code: &str, message: &str) {
     if format == "json" || format == "jsonl" {
@@ -1004,6 +1077,16 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     if GLOBAL_ENCODERS.get().is_none() {
         let _ = GLOBAL_ENCODERS.set(args.encoders.clone());
     }
+    // Validate numeric args up front so misconfigurations (workers: 0,
+    // max_targets_per_host: 0, absurd timeouts) fail fast with a clear
+    // message instead of producing cryptic mid-scan failures.
+    if let Err((code, msg)) = validate_numeric_args(args) {
+        if !args.silence {
+            emit_error(&args.format, code, &msg);
+        }
+        return ScanOutcome::Error;
+    }
+
     // Validate --custom-payload up front. Without this check, a missing or
     // unreadable file silently produces zero custom payloads mid-scan. With
     // --only-custom-payload that's catastrophic (no payloads at all, scan
