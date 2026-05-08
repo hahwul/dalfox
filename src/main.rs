@@ -290,6 +290,7 @@ async fn main() {
             skip_waf_probe: false,
             force_waf: None,
             waf_evasion: false,
+            waf_min_confidence: 0.0,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };

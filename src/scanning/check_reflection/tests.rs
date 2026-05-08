@@ -99,6 +99,7 @@ fn default_scan_args() -> crate::cmd::scan::ScanArgs {
         skip_waf_probe: false,
         force_waf: None,
         waf_evasion: false,
+        waf_min_confidence: 0.0,
         remote_payloads: vec![],
         remote_wordlists: vec![],
     }

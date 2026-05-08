@@ -265,6 +265,7 @@ fn default_scan_args() -> crate::cmd::scan::ScanArgs {
         skip_waf_probe: false,
         force_waf: None,
         waf_evasion: false,
+        waf_min_confidence: 0.0,
         remote_payloads: vec![],
         remote_wordlists: vec![],
     }
@@ -499,6 +500,7 @@ async fn test_xss_scanning_get_query() {
         skip_waf_probe: false,
         force_waf: None,
         waf_evasion: false,
+        waf_min_confidence: 0.0,
         remote_payloads: vec![],
         remote_wordlists: vec![],
     };
@@ -591,6 +593,7 @@ async fn test_xss_scanning_post_body() {
         skip_waf_probe: false,
         force_waf: None,
         waf_evasion: false,
+        waf_min_confidence: 0.0,
         remote_payloads: vec![],
         remote_wordlists: vec![],
     };
@@ -695,6 +698,7 @@ async fn test_run_scanning_with_reflection_params() {
         skip_waf_probe: false,
         force_waf: None,
         waf_evasion: false,
+        waf_min_confidence: 0.0,
         remote_payloads: vec![],
         remote_wordlists: vec![],
     };
@@ -783,6 +787,7 @@ async fn test_run_scanning_empty_params() {
         skip_waf_probe: false,
         force_waf: None,
         waf_evasion: false,
+        waf_min_confidence: 0.0,
         remote_payloads: vec![],
         remote_wordlists: vec![],
     };

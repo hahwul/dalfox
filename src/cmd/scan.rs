@@ -432,6 +432,16 @@ async fn preflight_content_type(
         };
     }
 
+    // Drop fingerprints below the user-configured minimum confidence.
+    // Default 0.0 keeps every match; users tighten this to suppress
+    // weak signals (0.3 "Request blocked", 0.5 "Server: Google
+    // Frontend", etc.) that often false-positive on benign origins.
+    if args.waf_min_confidence > 0.0 {
+        waf_result
+            .detected
+            .retain(|fp| fp.confidence >= args.waf_min_confidence);
+    }
+
     ct_opt.map(|ct| PreflightResult {
         content_type: ct,
         csp_header,
@@ -787,6 +797,14 @@ pub struct ScanArgs {
     #[arg(long)]
     pub waf_evasion: bool,
 
+    #[clap(help_heading = "WAF")]
+    /// Discard WAF fingerprints below this confidence (0.0–1.0). Use to
+    /// suppress weak detections like "Request blocked" (0.3) or
+    /// "Server: Google Frontend" (0.5) that often false-positive.
+    /// Default 0.0 keeps every match.
+    #[arg(long, default_value_t = 0.0)]
+    pub waf_min_confidence: f32,
+
     #[clap(help_heading = "TARGETS")]
     /// Targets (URLs or file paths)
     #[arg(value_name = "TARGET")]
@@ -883,6 +901,7 @@ impl ScanArgs {
             skip_waf_probe: false,
             force_waf: None,
             waf_evasion: false,
+            waf_min_confidence: 0.0,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         }
@@ -974,6 +993,15 @@ fn validate_numeric_args(args: &ScanArgs) -> std::result::Result<(), (&'static s
         return Err((
             crate::cmd::error_codes::INVALID_INPUT_TYPE,
             "--max-targets-per-host must be at least 1".to_string(),
+        ));
+    }
+    if !(0.0..=1.0).contains(&args.waf_min_confidence) || args.waf_min_confidence.is_nan() {
+        return Err((
+            crate::cmd::error_codes::INVALID_INPUT_TYPE,
+            format!(
+                "--waf-min-confidence must be in 0.0..=1.0 (got {})",
+                args.waf_min_confidence
+            ),
         ));
     }
     Ok(())

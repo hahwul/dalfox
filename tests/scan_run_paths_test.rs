@@ -76,6 +76,7 @@ fn base_scan_args() -> ScanArgs {
         skip_waf_probe: true,
         force_waf: None,
         waf_evasion: false,
+        waf_min_confidence: 0.0,
         targets: vec![],
     }
 }
@@ -270,6 +271,93 @@ async fn test_run_scan_emits_waf_block_in_target_summary() {
     assert!(bypass["requests_sent"].is_number());
     assert!(bypass["requests_blocked"].is_number());
     let _ = std::fs::remove_file(&output_path);
+}
+
+/// `via: varnish` is a low-confidence (0.5) Fastly fingerprint —
+/// useful for testing the --waf-min-confidence cutoff because it sits
+/// right in the middle of the 0..1 range. Higher thresholds (e.g.
+/// 0.7) should drop it; lower or unset should keep it.
+async fn spawn_low_confidence_via_varnish_server() -> (String, tokio::task::JoinHandle<()>) {
+    let app = Router::new().route(
+        "/",
+        get(|| async {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                "content-type",
+                HeaderValue::from_static("text/html; charset=utf-8"),
+            );
+            headers.insert(
+                HeaderName::from_static("via"),
+                HeaderValue::from_static("1.1 varnish"),
+            );
+            (headers, "<html><body>ok</body></html>".to_string())
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let handle = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (format!("http://{}/", addr), handle)
+}
+
+#[tokio::test]
+async fn test_run_scan_filters_waf_below_min_confidence() {
+    // Scenario A: threshold 0.0 (default) → low-confidence "via: varnish"
+    // (0.5) survives.
+    let (url_a, handle_a) = spawn_low_confidence_via_varnish_server().await;
+    let output_a = unique_temp_path("scan-waf-conf-a.json");
+    let mut args_a = base_scan_args();
+    args_a.targets = vec![format!("{}?q=1", url_a)];
+    args_a.output = Some(output_a.to_string_lossy().to_string());
+    args_a.format = "json".to_string();
+    args_a.waf_bypass = "auto".to_string();
+    args_a.skip_waf_probe = true;
+    args_a.skip_mining = true;
+    args_a.skip_mining_dict = true;
+    args_a.skip_mining_dom = true;
+    args_a.skip_xss_scanning = true;
+    args_a.silence = true;
+    args_a.waf_min_confidence = 0.0;
+    run_scan(&args_a).await;
+    handle_a.abort();
+    let parsed_a: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&output_a).expect("file")).expect("json");
+    assert!(
+        parsed_a["meta"]["target_summary"][0]["waf"]["detected"]
+            .as_array()
+            .map(|d| !d.is_empty())
+            .unwrap_or(false),
+        "with default threshold 0.0, the 0.5-confidence Fastly hint should remain"
+    );
+    let _ = std::fs::remove_file(&output_a);
+
+    // Scenario B: threshold 0.7 → 0.5-confidence detection drops; the
+    // entry has no "waf" field at all (lean output convention when
+    // nothing remained after filtering).
+    let (url_b, handle_b) = spawn_low_confidence_via_varnish_server().await;
+    let output_b = unique_temp_path("scan-waf-conf-b.json");
+    let mut args_b = base_scan_args();
+    args_b.targets = vec![format!("{}?q=1", url_b)];
+    args_b.output = Some(output_b.to_string_lossy().to_string());
+    args_b.format = "json".to_string();
+    args_b.waf_bypass = "auto".to_string();
+    args_b.skip_waf_probe = true;
+    args_b.skip_mining = true;
+    args_b.skip_mining_dict = true;
+    args_b.skip_mining_dom = true;
+    args_b.skip_xss_scanning = true;
+    args_b.silence = true;
+    args_b.waf_min_confidence = 0.7;
+    run_scan(&args_b).await;
+    handle_b.abort();
+    let parsed_b: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&output_b).expect("file")).expect("json");
+    assert!(
+        parsed_b["meta"]["target_summary"][0]["waf"].is_null(),
+        "with threshold 0.7, the only weak fingerprint should drop and waf should be omitted"
+    );
+    let _ = std::fs::remove_file(&output_b);
 }
 
 #[tokio::test]

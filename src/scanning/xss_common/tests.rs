@@ -206,6 +206,7 @@ fn test_get_dynamic_payloads_basic() {
         skip_waf_probe: false,
         force_waf: None,
         waf_evasion: false,
+        waf_min_confidence: 0.0,
         remote_payloads: vec![],
         remote_wordlists: vec![],
     };
@@ -300,6 +301,7 @@ fn test_get_dynamic_payloads_only_custom() {
         skip_waf_probe: false,
         force_waf: None,
         waf_evasion: false,
+        waf_min_confidence: 0.0,
         remote_payloads: vec![],
         remote_wordlists: vec![],
     };
@@ -377,6 +379,7 @@ fn test_get_dynamic_payloads_no_encoders() {
         skip_waf_probe: false,
         force_waf: None,
         waf_evasion: false,
+        waf_min_confidence: 0.0,
         remote_payloads: vec![],
         remote_wordlists: vec![],
     };

@@ -90,6 +90,7 @@ fn test_analyze_parameters_with_mock_mining() {
         skip_waf_probe: false,
         force_waf: None,
         waf_evasion: false,
+        waf_min_confidence: 0.0,
         remote_payloads: vec![],
         remote_wordlists: vec![],
     };
@@ -175,6 +176,7 @@ fn test_analyze_parameters_skip_mining() {
         skip_waf_probe: false,
         force_waf: None,
         waf_evasion: false,
+        waf_min_confidence: 0.0,
         remote_payloads: vec![],
         remote_wordlists: vec![],
     };
@@ -252,6 +254,7 @@ fn test_probe_body_params_mock() {
         skip_waf_probe: false,
         force_waf: None,
         waf_evasion: false,
+        waf_min_confidence: 0.0,
         remote_payloads: vec![],
         remote_wordlists: vec![],
     };
@@ -395,6 +398,7 @@ fn test_cookie_from_raw() {
         skip_waf_probe: false,
         force_waf: None,
         waf_evasion: false,
+        waf_min_confidence: 0.0,
         remote_payloads: vec![],
         remote_wordlists: vec![],
     };
@@ -493,6 +497,7 @@ fn test_cookie_from_raw_no_file() {
         skip_waf_probe: false,
         force_waf: None,
         waf_evasion: false,
+        waf_min_confidence: 0.0,
         remote_payloads: vec![],
         remote_wordlists: vec![],
     };
@@ -803,6 +808,7 @@ fn default_scan_args() -> ScanArgs {
         skip_waf_probe: false,
         force_waf: None,
         waf_evasion: false,
+        waf_min_confidence: 0.0,
         remote_payloads: vec![],
         remote_wordlists: vec![],
     }

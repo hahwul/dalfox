@@ -73,6 +73,7 @@ pub fn create_test_scan_args() -> ScanArgs {
         skip_waf_probe: true,
         force_waf: None,
         waf_evasion: false,
+        waf_min_confidence: 0.0,
         remote_payloads: vec![],
         remote_wordlists: vec![],
     }

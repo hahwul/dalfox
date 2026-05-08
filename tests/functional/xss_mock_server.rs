@@ -1089,6 +1089,7 @@ async fn run_scan_test(
         skip_waf_probe: true,
         force_waf: None,
         waf_evasion: false,
+        waf_min_confidence: 0.0,
         remote_payloads: vec![],
         remote_wordlists: vec![],
     };
@@ -1205,6 +1206,7 @@ async fn run_discovery_once(opts: DiscoveryOpts) -> bool {
         skip_waf_probe: true,
         force_waf: None,
         waf_evasion: false,
+        waf_min_confidence: 0.0,
         remote_payloads: vec![],
         remote_wordlists: vec![],
     };

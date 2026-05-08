@@ -119,6 +119,7 @@ pub struct ScanConfig {
     pub skip_waf_probe: Option<bool>,
     pub force_waf: Option<String>,
     pub waf_evasion: Option<bool>,
+    pub waf_min_confidence: Option<f32>,
     // LOGGING/DEBUG
     pub debug: Option<bool>,
 }
@@ -743,6 +744,15 @@ impl Config {
                 && !args.waf_evasion
             {
                 args.waf_evasion = v;
+            }
+            // Only override when the CLI was left at the default (0.0)
+            // — same precedence pattern as the other numeric overrides
+            // so users who pass --waf-min-confidence on the command
+            // line keep authority over what the config file says.
+            if let Some(v) = scan.waf_min_confidence
+                && args.waf_min_confidence == 0.0
+            {
+                args.waf_min_confidence = v;
             }
         }
     }

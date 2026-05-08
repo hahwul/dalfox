@@ -653,6 +653,7 @@ Final results (via get_results_dalfox) include finding type \
             skip_waf_probe: false,
             force_waf: None,
             waf_evasion: false,
+            waf_min_confidence: 0.0,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };

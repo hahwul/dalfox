@@ -70,6 +70,7 @@ fn default_scan_args() -> crate::cmd::scan::ScanArgs {
         skip_waf_probe: false,
         force_waf: None,
         waf_evasion: false,
+        waf_min_confidence: 0.0,
         targets: vec![],
     }
 }
@@ -139,6 +140,7 @@ fn full_scan_config() -> ScanConfig {
         skip_waf_probe: Some(false),
         force_waf: None,
         waf_evasion: Some(true),
+        waf_min_confidence: Some(0.7),
         debug: Some(true),
     }
 }

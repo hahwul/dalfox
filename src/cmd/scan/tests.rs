@@ -78,6 +78,7 @@ fn default_scan_args() -> ScanArgs {
         skip_waf_probe: false,
         force_waf: None,
         waf_evasion: false,
+        waf_min_confidence: 0.0,
         targets: vec![],
     }
 }
@@ -171,6 +172,30 @@ fn validate_numeric_args_rejects_zero_targets_per_host() {
     args.max_targets_per_host = 0;
     let err = validate_numeric_args(&args).unwrap_err();
     assert!(err.1.contains("max-targets-per-host"));
+}
+
+#[test]
+fn validate_numeric_args_accepts_waf_min_confidence_bounds() {
+    for v in [0.0_f32, 0.5, 1.0] {
+        let mut args = default_scan_args();
+        args.waf_min_confidence = v;
+        assert!(
+            validate_numeric_args(&args).is_ok(),
+            "{} should validate",
+            v
+        );
+    }
+}
+
+#[test]
+fn validate_numeric_args_rejects_waf_min_confidence_out_of_range() {
+    let mut args = default_scan_args();
+    args.waf_min_confidence = -0.1;
+    assert!(validate_numeric_args(&args).is_err());
+    args.waf_min_confidence = 1.5;
+    assert!(validate_numeric_args(&args).is_err());
+    args.waf_min_confidence = f32::NAN;
+    assert!(validate_numeric_args(&args).is_err());
 }
 
 #[test]
