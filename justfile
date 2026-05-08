@@ -1,5 +1,6 @@
 alias b := build
 alias d := dev
+alias ds := docs-serve
 alias t := test
 alias vc := version-check
 alias vu := version-update
@@ -22,6 +23,16 @@ dev:
 [group('build')]
 nix-update:
     nix flake update
+
+# Serve docs site locally.
+[group('documents')]
+docs-serve:
+    hwaro serve -i docs --base-url="http://localhost:3000"
+
+# Install docs dependencies (macOS).
+[group('documents')]
+docs-dependencies:
+    brew install hahwul/hwaro/hwaro
 
 #[group('development')]
 #fix:
