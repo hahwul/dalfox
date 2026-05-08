@@ -2279,18 +2279,44 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     let total_requests = crate::REQUEST_COUNT.load(Ordering::Relaxed);
 
     // Build per-target summary for structured output.
-    // Limitation: if multiple targets share the same path but differ only by query params
-    // (e.g., /search?q=a vs /search?id=b), findings may be attributed to both since we
-    // match on path prefix. This is acceptable because payloads mutate query strings,
-    // making exact URL matching unreliable. Single-target scans (including MCP) are unaffected.
+    //
+    // Matching strategy:
+    //   1. Exact path-prefix (URL up to but not including '?'). Covers query/
+    //      header/cookie/body injection targets — payload mutations only touch
+    //      the query string, so the path stays stable.
+    //   2. Fallback parent-path prefix for targets without a '?'. A path-
+    //      injection finding's URL is `<base>/<encoded-payload>`, which does
+    //      NOT start with the original `<base>/<seed>` — match through the
+    //      last '/' so the finding is correctly attributed to its target.
+    //
+    // Limitation: if multiple targets share the same path but differ only by
+    // query params (e.g., /search?q=a vs /search?id=b), findings may be
+    // attributed to both. Same caveat applies to the parent-path fallback if
+    // two path-injection targets share the same parent (e.g., /api/v1/foo
+    // and /api/v1/bar). Single-target scans (including MCP) are unaffected.
     let target_summary: Vec<serde_json::Value> = {
         let skipped = skipped_targets.lock().await;
         let mut summary = Vec::with_capacity(all_target_urls.len());
         for url in &all_target_urls {
             let prefix = url.split('?').next().unwrap_or(url);
+            // Parent-path prefix used when the URL has no query string. Matches
+            // path-injection findings whose data is `<parent>/<payload>`.
+            let parent_prefix: Option<&str> = if url.contains('?') {
+                None
+            } else {
+                prefix.rfind('/').map(|i| &prefix[..=i])
+            };
             let finding_count = display_results
                 .iter()
-                .filter(|r| r.data.starts_with(prefix))
+                .filter(|r| {
+                    if r.data.starts_with(prefix) {
+                        return true;
+                    }
+                    if let Some(pp) = parent_prefix {
+                        return r.data.starts_with(pp);
+                    }
+                    false
+                })
                 .count();
             let (status, error_code) = if let Some(code) = skipped.get(url) {
                 ("skipped", Some(*code))
