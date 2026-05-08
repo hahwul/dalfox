@@ -1,3 +1,6 @@
+use axum::Router;
+use axum::http::{HeaderMap, HeaderName, HeaderValue};
+use axum::routing::get;
 use dalfox::cmd::scan::{
     DEFAULT_DELAY_MS, DEFAULT_ENCODERS, DEFAULT_MAX_CONCURRENT_TARGETS,
     DEFAULT_MAX_TARGETS_PER_HOST, DEFAULT_METHOD, DEFAULT_TIMEOUT_SECS, DEFAULT_WORKERS, ScanArgs,
@@ -5,6 +8,7 @@ use dalfox::cmd::scan::{
 };
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::net::TcpListener;
 
 fn base_scan_args() -> ScanArgs {
     ScanArgs {
@@ -175,6 +179,136 @@ async fn test_run_scan_handles_output_write_error() {
 
     run_scan(&args).await;
     let _ = std::fs::remove_dir_all(&output_dir);
+}
+
+/// Spin up a local server that returns a fixed Cloudflare-like header set
+/// so the WAF fingerprinter triggers without us needing real CF
+/// infrastructure. Returns the base URL and the JoinHandle (caller aborts).
+async fn spawn_cloudflare_lookalike() -> (String, tokio::task::JoinHandle<()>) {
+    let app = Router::new().route(
+        "/",
+        get(|| async {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                "content-type",
+                HeaderValue::from_static("text/html; charset=utf-8"),
+            );
+            headers.insert(
+                HeaderName::from_static("server"),
+                HeaderValue::from_static("cloudflare"),
+            );
+            headers.insert(
+                HeaderName::from_static("cf-ray"),
+                HeaderValue::from_static("1234abc-NRT"),
+            );
+            (
+                headers,
+                "<html><body><p>welcome</p></body></html>".to_string(),
+            )
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let handle = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    (format!("http://{}/", addr), handle)
+}
+
+#[tokio::test]
+async fn test_run_scan_emits_waf_block_in_target_summary() {
+    let (url, handle) = spawn_cloudflare_lookalike().await;
+    let output_path = unique_temp_path("scan-waf-output.json");
+    let mut args = base_scan_args();
+    args.targets = vec![format!("{}?q=1", url)];
+    args.output = Some(output_path.to_string_lossy().to_string());
+    args.format = "json".to_string();
+    // Auto-detect on, but skip the active probe — we only want the
+    // header-based detection to trigger, not extra requests.
+    args.waf_bypass = "auto".to_string();
+    args.skip_waf_probe = true;
+    // Keep the run lean; we're only verifying preflight metadata, not
+    // payload behavior.
+    args.skip_mining = true;
+    args.skip_mining_dict = true;
+    args.skip_mining_dom = true;
+    args.skip_xss_scanning = true;
+    args.silence = true;
+
+    run_scan(&args).await;
+    handle.abort();
+
+    let content = std::fs::read_to_string(&output_path).expect("output should exist");
+    let parsed: serde_json::Value = serde_json::from_str(&content).expect("valid JSON");
+    let summary = &parsed["meta"]["target_summary"][0];
+    let waf = &summary["waf"];
+    assert!(
+        waf.is_object(),
+        "expected target_summary[0].waf to be an object, got: {}",
+        summary
+    );
+    let detected = waf["detected"].as_array().expect("detected is array");
+    assert!(!detected.is_empty(), "at least one WAF should be detected");
+    assert_eq!(
+        detected[0]["type"], "Cloudflare",
+        "header-based fingerprint should pick Cloudflare"
+    );
+    let bypass = &waf["bypass"];
+    assert!(
+        bypass.is_object(),
+        "bypass strategy should be present when waf_bypass=auto"
+    );
+    assert!(bypass["encoders"].is_array());
+    assert!(bypass["mutation_count"].is_number());
+    let _ = std::fs::remove_file(&output_path);
+}
+
+#[tokio::test]
+async fn test_run_scan_omits_waf_block_when_no_waf_detected() {
+    // Plain server with no WAF-like headers: target_summary entry must
+    // NOT contain a `waf` field, keeping the common-case output lean.
+    let app = Router::new().route(
+        "/",
+        get(|| async {
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                "content-type",
+                HeaderValue::from_static("text/html; charset=utf-8"),
+            );
+            (headers, "<html><body>ok</body></html>".to_string())
+        }),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let handle = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let output_path = unique_temp_path("scan-nowaf-output.json");
+    let mut args = base_scan_args();
+    args.targets = vec![format!("http://{}/?q=1", addr)];
+    args.output = Some(output_path.to_string_lossy().to_string());
+    args.format = "json".to_string();
+    args.waf_bypass = "auto".to_string();
+    args.skip_waf_probe = true;
+    args.skip_mining = true;
+    args.skip_mining_dict = true;
+    args.skip_mining_dom = true;
+    args.skip_xss_scanning = true;
+    args.silence = true;
+
+    run_scan(&args).await;
+    handle.abort();
+
+    let content = std::fs::read_to_string(&output_path).expect("output should exist");
+    let parsed: serde_json::Value = serde_json::from_str(&content).expect("valid JSON");
+    let summary = &parsed["meta"]["target_summary"][0];
+    assert!(
+        summary["waf"].is_null(),
+        "no WAF detected → waf field should be absent, got: {}",
+        summary
+    );
+    let _ = std::fs::remove_file(&output_path);
 }
 
 #[tokio::test]

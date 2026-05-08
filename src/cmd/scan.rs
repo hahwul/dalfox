@@ -1560,6 +1560,12 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // truncation, etc.) instead of silently marking them clean.
     let skipped_targets: Arc<Mutex<HashMap<String, &'static str>>> =
         Arc::new(Mutex::new(HashMap::new()));
+    // Per-target preflight metadata serialized once during preflight, read at
+    // target_summary build time. Populated from `target.waf_info` and the
+    // applied bypass strategy. JSON/JSONL consumers can't otherwise see what
+    // WAF was detected — that information only reached the plain-mode log.
+    let target_meta: Arc<Mutex<HashMap<String, serde_json::Value>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 
     let multi_pb: Option<Arc<MultiProgress>> = None;
 
@@ -1681,6 +1687,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             let results_outer = results.clone();
             let findings_count_outer = findings_count.clone();
             let skipped_targets_outer = skipped_targets.clone();
+            let target_meta_outer = target_meta.clone();
             local.run_until(async move {
                 let mut handles = vec![];
 
@@ -1694,6 +1701,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             let results_clone = results_outer.clone();
             let findings_count_clone = findings_count_outer.clone();
             let skipped_targets_clone = skipped_targets_outer.clone();
+            let target_meta_clone = target_meta_outer.clone();
 
             handles.push(tokio::task::spawn_local(async move {
                 // Bound concurrency across targets for preflight + analysis
@@ -1735,6 +1743,42 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                         // Store WAF detection result on target
                         if !preflight.waf_result.is_empty() {
                             target.waf_info = Some(preflight.waf_result);
+
+                            // Snapshot WAF + applied bypass for target_summary
+                            // (JSON/JSONL output). Plain mode logs the same
+                            // info to the console below; JSON consumers
+                            // would otherwise have no visibility.
+                            if let Some(ref waf_info) = target.waf_info {
+                                let detected_json: Vec<serde_json::Value> = waf_info
+                                    .detected
+                                    .iter()
+                                    .map(|fp| {
+                                        serde_json::json!({
+                                            "type": fp.waf_type.to_string(),
+                                            "confidence": fp.confidence,
+                                            "evidence": fp.evidence,
+                                        })
+                                    })
+                                    .collect();
+                                let mut meta_json = serde_json::json!({
+                                    "detected": detected_json,
+                                });
+                                if args_clone.waf_bypass != "off" {
+                                    let waf_types: Vec<&crate::waf::WafType> =
+                                        waf_info.waf_types();
+                                    let strategy =
+                                        crate::waf::bypass::merge_strategies(&waf_types);
+                                    meta_json["bypass"] = serde_json::json!({
+                                        "encoders": strategy.extra_encoders,
+                                        "mutation_count": strategy.mutations.len(),
+                                        "extra_delay_hint_ms": strategy.extra_delay_hint_ms,
+                                    });
+                                }
+                                target_meta_clone
+                                    .lock()
+                                    .await
+                                    .insert(target.url.to_string(), meta_json);
+                            }
 
                             // WAF evasion: auto-throttle when WAF detected
                             if args_clone.waf_evasion {
@@ -2439,6 +2483,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // are unaffected.
     let target_summary: Vec<serde_json::Value> = {
         let skipped = skipped_targets.lock().await;
+        let meta = target_meta.lock().await;
         let mut summary = Vec::with_capacity(all_target_urls.len());
         for url in &all_target_urls {
             let finding_count = display_results
@@ -2459,6 +2504,12 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             });
             if let Some(code) = error_code {
                 entry["error_code"] = serde_json::json!(code);
+            }
+            // Attach preflight metadata (WAF + applied bypass) when present.
+            // Omitted entirely for targets where no WAF was detected, to
+            // keep the common-case output lean.
+            if let Some(m) = meta.get(url) {
+                entry["waf"] = m.clone();
             }
             summary.push(entry);
         }
