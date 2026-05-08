@@ -394,7 +394,7 @@ dependencies = [
 
 [[package]]
 name = "dalfox"
-version = "3.0.0-dev.1"
+version = "3.0.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
