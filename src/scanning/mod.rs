@@ -1092,10 +1092,13 @@ fn collapse_redundant_reflected(
     results: Vec<crate::scanning::result::Result>,
 ) -> Vec<crate::scanning::result::Result> {
     use std::collections::HashSet;
-    let verified_keys: HashSet<(String, String)> = results
+    fn target_key(data: &str) -> String {
+        data.split('?').next().unwrap_or(data).to_string()
+    }
+    let verified_keys: HashSet<(String, String, String)> = results
         .iter()
         .filter(|r| r.result_type == FindingType::Verified)
-        .map(|r| (r.param.clone(), r.inject_type.clone()))
+        .map(|r| (target_key(&r.data), r.param.clone(), r.inject_type.clone()))
         .collect();
     if verified_keys.is_empty() {
         return results;
@@ -1104,7 +1107,11 @@ fn collapse_redundant_reflected(
         .into_iter()
         .filter(|r| {
             !(r.result_type == FindingType::Reflected
-                && verified_keys.contains(&(r.param.clone(), r.inject_type.clone())))
+                && verified_keys.contains(&(
+                    target_key(&r.data),
+                    r.param.clone(),
+                    r.inject_type.clone(),
+                )))
         })
         .collect()
 }
