@@ -214,6 +214,60 @@ fn test_every_waf_has_strategy() {
 }
 
 #[test]
+fn test_unknown_403_uses_default_strategy() {
+    // Generic 403 carries no hint about which dimension to lean on;
+    // bypass should fall through to the conservative mutation kit.
+    let s = get_bypass_strategy(&WafType::Unknown("HTTP 403".to_string()));
+    assert!(s.extra_encoders.contains(&"unicode".to_string()));
+    assert!(s.mutations.contains(&MutationType::HtmlCommentSplit));
+    assert_eq!(s.extra_delay_hint_ms, 0);
+}
+
+#[test]
+fn test_unknown_429_emphasizes_delay() {
+    // 429/503 means the edge is rate-limiting; piling on mutations just
+    // keeps tripping the limiter. Strategy must lean on delay instead.
+    let s = get_bypass_strategy(&WafType::Unknown("HTTP 429".to_string()));
+    assert!(
+        s.extra_delay_hint_ms >= 1000,
+        "rate-limit blocks need a real delay hint"
+    );
+    assert!(s.mutations.len() <= 2, "keep mutation pressure low for 429");
+}
+
+#[test]
+fn test_unknown_503_emphasizes_delay() {
+    let s = get_bypass_strategy(&WafType::Unknown("HTTP 503".to_string()));
+    assert!(s.extra_delay_hint_ms >= 1000);
+}
+
+#[test]
+fn test_unknown_406_emphasizes_encoders() {
+    // 406 is content-type/encoding-driven — mutation alone does not
+    // change wire encoding, so the strategy must broaden encoders.
+    let s = get_bypass_strategy(&WafType::Unknown("HTTP 406".to_string()));
+    let multi_url_count = s
+        .extra_encoders
+        .iter()
+        .filter(|e| e.ends_with("url") || e.as_str() == "url")
+        .count();
+    assert!(
+        multi_url_count >= 2,
+        "406 strategy should stack multiple url encoders, got {:?}",
+        s.extra_encoders
+    );
+}
+
+#[test]
+fn test_unknown_arbitrary_hint_falls_through_to_default() {
+    // Forced-unknown via `--force-waf custom-vendor-x` lands here. It
+    // must not blow up and must get a non-empty strategy.
+    let s = get_bypass_strategy(&WafType::Unknown("custom-vendor-x".to_string()));
+    assert!(!s.extra_encoders.is_empty());
+    assert!(!s.mutations.is_empty());
+}
+
+#[test]
 fn test_owasp_crs_strategy() {
     let strategy = get_bypass_strategy(&WafType::OwaspCrs);
     // CRS strategy should include all CRS-targeting mutations

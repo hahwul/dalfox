@@ -204,16 +204,63 @@ pub fn get_bypass_strategy(waf: &WafType) -> BypassStrategy {
             ],
             extra_delay_hint_ms: 0,
         },
-        WafType::Unknown(_) => BypassStrategy {
-            extra_encoders: vec!["2url".into(), "unicode".into(), "zwsp".into()],
+        WafType::Unknown(hint) => unknown_strategy_for(hint),
+    }
+}
+
+/// Pick a bypass strategy for `WafType::Unknown(hint)` based on what the
+/// detector inferred about the block. Two hint shapes reach here today:
+///
+///   - `"HTTP <code>"` from `fingerprint_with_probe` when a provocation
+///     payload elicited a 403/406/429/503 but no header/body fingerprint
+///     matched. The status code carries useful intent: 429/503 means the
+///     edge is rate-limiting, 406 is content-type/encoding-driven, 403 is
+///     a generic block.
+///   - Arbitrary `--force-waf <name>` when the user supplied a name we
+///     don't recognize. Falls through to the conservative default.
+fn unknown_strategy_for(hint: &str) -> BypassStrategy {
+    let lower = hint.to_ascii_lowercase();
+    if lower.contains("429") || lower.contains("503") {
+        // Rate-limit / overload block. Keep mutation count low so we
+        // don't keep tripping the limiter; lean on a delay hint so the
+        // scan-level throttle has something to reach for.
+        return BypassStrategy {
+            extra_encoders: vec!["unicode".into(), "2url".into()],
+            mutations: vec![MutationType::CaseAlternation],
+            extra_delay_hint_ms: 1500,
+        };
+    }
+    if lower.contains("406") {
+        // Content-type / encoding-driven block. Heavier encoder mix
+        // (mutations alone won't change the wire encoding the WAF cares
+        // about); skip mutations that don't shift bytes meaningfully.
+        return BypassStrategy {
+            extra_encoders: vec![
+                "unicode".into(),
+                "2url".into(),
+                "3url".into(),
+                "4url".into(),
+            ],
             mutations: vec![
+                MutationType::MixedHtmlEntities,
+                MutationType::UnicodeJsEscape,
                 MutationType::HtmlCommentSplit,
-                MutationType::BacktickParens,
-                MutationType::CaseAlternation,
-                MutationType::WhitespaceMutation,
             ],
             extra_delay_hint_ms: 0,
-        },
+        };
+    }
+    // Generic 403 / forced-unknown: conservative default that exercises
+    // the most common WAF weaknesses without committing to a specific
+    // vendor's behavior.
+    BypassStrategy {
+        extra_encoders: vec!["2url".into(), "unicode".into(), "zwsp".into()],
+        mutations: vec![
+            MutationType::HtmlCommentSplit,
+            MutationType::BacktickParens,
+            MutationType::CaseAlternation,
+            MutationType::WhitespaceMutation,
+        ],
+        extra_delay_hint_ms: 0,
     }
 }
 
