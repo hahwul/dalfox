@@ -273,30 +273,55 @@ async fn preflight_content_type(
 
     // Prefer HEAD for fast Content-Type detection
     // build_preflight_request already applies headers, UA, and cookies consistently
-    let request_builder = crate::utils::build_preflight_request(&client, target, true, Some(8192));
     if target.delay > 0 {
         tokio::time::sleep(Duration::from_millis(target.delay)).await;
     }
-    crate::tick_request_count();
-    let resp = match request_builder.send().await {
-        Ok(r) => r,
-        Err(e) => {
-            // Surface a single-line diagnostic for hard reachability failures
-            // (TLS timeouts, connection refused, DNS, etc.) so users can
-            // distinguish a quiet scan from an unreachable target. Suppressed
-            // when --silence is on; the debug channel always carries it.
-            let reason = describe_reqwest_failure(&e);
-            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                eprintln!("[DBG] preflight unreachable: {} ({})", target.url, reason);
+    // Retry once on transient connect/timeout errors. At high worker counts
+    // ECONNREFUSED can spuriously fire even against healthy servers as the OS
+    // throttles new connection establishment; a single short backoff usually
+    // recovers without losing the target. Non-connect errors (status / body /
+    // decode) fail fast — retry can't help.
+    const PREFLIGHT_MAX_ATTEMPTS: u32 = 2;
+    const PREFLIGHT_RETRY_BACKOFF_MS: u64 = 200;
+    let mut attempt = 0u32;
+    let resp = loop {
+        attempt += 1;
+        let request_builder =
+            crate::utils::build_preflight_request(&client, target, true, Some(8192));
+        crate::tick_request_count();
+        match request_builder.send().await {
+            Ok(r) => break r,
+            Err(e) => {
+                let transient = e.is_connect() || e.is_timeout();
+                if transient && attempt < PREFLIGHT_MAX_ATTEMPTS {
+                    if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                        eprintln!(
+                            "[DBG] preflight transient {} (attempt {}): {} — retrying",
+                            describe_reqwest_failure(&e),
+                            attempt,
+                            target.url
+                        );
+                    }
+                    tokio::time::sleep(Duration::from_millis(PREFLIGHT_RETRY_BACKOFF_MS)).await;
+                    continue;
+                }
+                // Surface a single-line diagnostic for hard reachability failures
+                // (TLS timeouts, connection refused, DNS, etc.) so users can
+                // distinguish a quiet scan from an unreachable target. Suppressed
+                // when --silence is on; the debug channel always carries it.
+                let reason = describe_reqwest_failure(&e);
+                if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!("[DBG] preflight unreachable: {} ({})", target.url, reason);
+                }
+                if !args.silence {
+                    let ts = chrono::Local::now().format("%-I:%M%p").to_string();
+                    eprintln!(
+                        "\x1b[90m{}\x1b[0m \x1b[31mUNREACHABLE\x1b[0m {} ({})",
+                        ts, target.url, reason
+                    );
+                }
+                return None;
             }
-            if !args.silence {
-                let ts = chrono::Local::now().format("%-I:%M%p").to_string();
-                eprintln!(
-                    "\x1b[90m{}\x1b[0m \x1b[31mUNREACHABLE\x1b[0m {} ({})",
-                    ts, target.url, reason
-                );
-            }
-            return None;
         }
     };
     let head_status = resp.status().as_u16();
