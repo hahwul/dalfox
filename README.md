@@ -3,10 +3,9 @@
   <img src="docs/static/images/logo.png" alt="dalfox" width="400px;">
 </div>
 <p align="center">
+  <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md"><img src="https://img.shields.io/badge/CONTRIBUTIONS-WELCOME-30365e?style=for-the-badge&labelColor=%2330365e&color=%2330365e"></a>
   <a href="https://github.com/hahwul/dalfox/releases/latest"><img src="https://img.shields.io/github/v/release/hahwul/dalfox?style=for-the-badge&logoColor=%2330365e&label=dalfox&labelColor=%2330365e&color=%2330365e"></a>
   <a href="https://www.rust-lang.org"><img src="https://img.shields.io/badge/Rust-30365e?style=for-the-badge&logo=rust&logoColor=white&labelColor=%2330365e"></a>
-  <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md"><img src="https://img.shields.io/badge/contributions-welcome-brightgreen.svg?style=for-the-badge&labelColor=%2330365e&color=%2330365e"></a>
-  <a href="https://x.com/intent/follow?screen_name=hahwul"><img src="https://img.shields.io/badge/%40hahwul-30365e?style=for-the-badge&logo=x&logoColor=white&labelColor=%2330365e"></a>
 </p>
 
 > **Looking for the Go (v2.x) version?** Dalfox v3 is a complete rewrite in Rust. The Go codebase is preserved on the [`v2` branch](https://github.com/hahwul/dalfox/tree/v2) and continues to receive security backports. See [SECURITY.md](./SECURITY.md) for the support policy.
