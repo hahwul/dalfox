@@ -2305,43 +2305,23 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
 
     // Build per-target summary for structured output.
     //
-    // Matching strategy:
-    //   1. Exact path-prefix (URL up to but not including '?'). Covers query/
-    //      header/cookie/body injection targets — payload mutations only touch
-    //      the query string, so the path stays stable.
-    //   2. Fallback parent-path prefix for targets without a '?'. A path-
-    //      injection finding's URL is `<base>/<encoded-payload>`, which does
-    //      NOT start with the original `<base>/<seed>` — match through the
-    //      last '/' so the finding is correctly attributed to its target.
+    // Attribution uses `finding_belongs_to_target`, the same helper that
+    // `collapse_redundant_reflected` uses for per-target dedup. The two
+    // MUST agree — if they disagree, a finding can be dropped by dedup but
+    // attributed to a different target than where it was actually produced.
     //
-    // Limitation: if multiple targets share the same path but differ only by
-    // query params (e.g., /search?q=a vs /search?id=b), findings may be
-    // attributed to both. Same caveat applies to the parent-path fallback if
-    // two path-injection targets share the same parent (e.g., /api/v1/foo
-    // and /api/v1/bar). Single-target scans (including MCP) are unaffected.
+    // Limitation: targets that share a path-without-query
+    // (e.g. `/search?q=a` and `/search?id=b`) or a parent path for
+    // path-injection (e.g. `/api/v1/foo` and `/api/v1/bar`) can both match
+    // a single finding. This mirrors prior behavior. Single-target scans
+    // are unaffected.
     let target_summary: Vec<serde_json::Value> = {
         let skipped = skipped_targets.lock().await;
         let mut summary = Vec::with_capacity(all_target_urls.len());
         for url in &all_target_urls {
-            let prefix = url.split('?').next().unwrap_or(url);
-            // Parent-path prefix used when the URL has no query string. Matches
-            // path-injection findings whose data is `<parent>/<payload>`.
-            let parent_prefix: Option<&str> = if url.contains('?') {
-                None
-            } else {
-                prefix.rfind('/').map(|i| &prefix[..=i])
-            };
             let finding_count = display_results
                 .iter()
-                .filter(|r| {
-                    if r.data.starts_with(prefix) {
-                        return true;
-                    }
-                    if let Some(pp) = parent_prefix {
-                        return r.data.starts_with(pp);
-                    }
-                    false
-                })
+                .filter(|r| crate::utils::finding_belongs_to_target(url, &r.data))
                 .count();
             let (status, error_code) = if let Some(code) = skipped.get(url) {
                 ("skipped", Some(*code))

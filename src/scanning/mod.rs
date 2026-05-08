@@ -1064,16 +1064,19 @@ pub async fn run_scanning(
         }
     }
 
-    // Collapse R findings that are already proven by a V finding on the same
-    // (param, inject_type). Multiple per-param payload variants typically
-    // surface the same logical issue twice — keep the strongest evidence and
-    // drop the weaker R duplicates. AST-detected and per-payload V findings
-    // are preserved.
+    // Collapse this target's R findings that are already proven by one of
+    // its own V findings on the same (param, inject_type). Multiple per-
+    // param payload variants typically surface the same logical issue
+    // twice — keep the strongest evidence and drop weaker R duplicates.
+    // AST-detected and per-payload V findings are preserved, and the
+    // collapse is scoped to the current target so other targets' findings
+    // are never affected.
     {
         let mut guard = results.lock().await;
         let before = guard.len();
         let original = std::mem::take(&mut *guard);
-        let collapsed = collapse_redundant_reflected(original);
+        let target_url_str = target.url.to_string();
+        let collapsed = collapse_redundant_reflected(original, &target_url_str);
         let after = collapsed.len();
         *guard = collapsed;
         if after < before {
@@ -1086,19 +1089,25 @@ pub async fn run_scanning(
     }
 }
 
-/// Drop Reflected findings that are already covered by a Verified finding on
-/// the same `(param, inject_type)`. Verified and AST findings are preserved.
+/// Drop Reflected findings on the *current target* that are already covered
+/// by a Verified finding on the same `(param, inject_type)` for that same
+/// target. Verified and AST findings are preserved.
+///
+/// Scope is critical: this runs at the end of each target's scan against
+/// the shared cross-target results vector. Without scoping, a V finding on
+/// one target would silently drop every later R finding on different
+/// targets that share the same reflection shape (param + inject_type) —
+/// which on benchmarks like xssmaze is the common case.
 fn collapse_redundant_reflected(
     results: Vec<crate::scanning::result::Result>,
+    target_url: &str,
 ) -> Vec<crate::scanning::result::Result> {
     use std::collections::HashSet;
-    fn target_key(data: &str) -> String {
-        data.split('?').next().unwrap_or(data).to_string()
-    }
-    let verified_keys: HashSet<(String, String, String)> = results
+    let belongs = |data: &str| crate::utils::finding_belongs_to_target(target_url, data);
+    let verified_keys: HashSet<(String, String)> = results
         .iter()
-        .filter(|r| r.result_type == FindingType::Verified)
-        .map(|r| (target_key(&r.data), r.param.clone(), r.inject_type.clone()))
+        .filter(|r| r.result_type == FindingType::Verified && belongs(&r.data))
+        .map(|r| (r.param.clone(), r.inject_type.clone()))
         .collect();
     if verified_keys.is_empty() {
         return results;
@@ -1107,11 +1116,8 @@ fn collapse_redundant_reflected(
         .into_iter()
         .filter(|r| {
             !(r.result_type == FindingType::Reflected
-                && verified_keys.contains(&(
-                    target_key(&r.data),
-                    r.param.clone(),
-                    r.inject_type.clone(),
-                )))
+                && belongs(&r.data)
+                && verified_keys.contains(&(r.param.clone(), r.inject_type.clone())))
         })
         .collect()
 }

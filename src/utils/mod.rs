@@ -23,6 +23,48 @@ pub use http::{
 // Re-export remote payload/wordlist getters at `crate::utils::*`
 pub use crate::payload::get_remote_payloads;
 
+/// Decide whether a finding URL was produced by scanning a given target URL.
+///
+/// Used both by `collapse_redundant_reflected` (dedup) and the
+/// `target_summary` attribution in CLI output, so the two stay in sync.
+/// A naive `starts_with(target_url)` fails because payload variants can
+/// shape the finding URL in three different ways:
+///
+///   - **Query/cookie/header/body injection**: payload mutates the query
+///     string only — finding URL has the same path as the target, possibly
+///     a different query.
+///   - **Path injection**: payload replaces a path segment — finding URL
+///     has the same parent path as the target but a different last segment.
+///   - **No-mutation injection** (header/cookie/body without query in the
+///     target): finding URL is byte-identical to the target.
+///
+/// We try each strategy in order. Trade-off: two targets that share the
+/// same path-without-query (e.g. `/search?q=a` vs `/search?id=b`) or the
+/// same parent path for path injection (e.g. `/api/v1/foo` vs
+/// `/api/v1/bar`) will both match a single finding. This mirrors the
+/// pre-existing prefix-match behavior; single-target scans are unaffected.
+pub fn finding_belongs_to_target(target_url: &str, finding_url: &str) -> bool {
+    if target_url == finding_url {
+        return true;
+    }
+    let t_path = target_url.split('?').next().unwrap_or(target_url);
+    let f_path = finding_url.split('?').next().unwrap_or(finding_url);
+    if t_path == f_path {
+        return true;
+    }
+    // Path-injection fallback: only when the target has no query string,
+    // since query targets keep their path stable.
+    if !target_url.contains('?')
+        && let Some(i) = t_path.rfind('/')
+    {
+        let parent = &t_path[..=i];
+        if f_path.starts_with(parent) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Initialize remote resources based on CLI flags. Safe to call multiple times.
 /// This default variant uses no proxy and default timeout. To customize, use
 /// `init_remote_resources_with_options`.

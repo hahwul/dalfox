@@ -53,11 +53,20 @@ fn make_typed_param_result(
     param: &str,
     inject: &str,
 ) -> crate::scanning::result::Result {
+    make_typed_param_result_for(ft, param, inject, "https://example.com/?x=1")
+}
+
+fn make_typed_param_result_for(
+    ft: FindingType,
+    param: &str,
+    inject: &str,
+    data: &str,
+) -> crate::scanning::result::Result {
     crate::scanning::result::Result::new(
         ft,
         inject.to_string(),
         "GET".to_string(),
-        "https://example.com/?x=1".to_string(),
+        data.to_string(),
         param.to_string(),
         "PAY".to_string(),
         String::new(),
@@ -75,7 +84,7 @@ fn test_collapse_drops_r_when_v_exists_for_same_param_and_inject_type() {
         make_typed_param_result(FindingType::Verified, "q", "inHTML"),
         make_typed_param_result(FindingType::Reflected, "q", "inHTML"),
     ];
-    let after = collapse_redundant_reflected(results);
+    let after = collapse_redundant_reflected(results, "https://example.com/?x=1");
     assert_eq!(after.len(), 1);
     assert_eq!(after[0].result_type, FindingType::Verified);
 }
@@ -86,7 +95,7 @@ fn test_collapse_keeps_r_when_no_v_for_that_param() {
         make_typed_param_result(FindingType::Reflected, "q", "inHTML"),
         make_typed_param_result(FindingType::Reflected, "q", "inHTML"),
     ];
-    let after = collapse_redundant_reflected(results);
+    let after = collapse_redundant_reflected(results, "https://example.com/?x=1");
     assert_eq!(after.len(), 2, "no V to cover, keep R findings");
 }
 
@@ -97,12 +106,65 @@ fn test_collapse_keeps_r_for_different_param_or_inject_type() {
         make_typed_param_result(FindingType::Reflected, "q", "inHTML-HPP"),
         make_typed_param_result(FindingType::Reflected, "other", "inHTML"),
     ];
-    let after = collapse_redundant_reflected(results);
+    let after = collapse_redundant_reflected(results, "https://example.com/?x=1");
     assert_eq!(
         after.len(),
         3,
         "different inject_type or param must be kept"
     );
+}
+
+#[test]
+fn test_collapse_does_not_drop_r_from_other_targets() {
+    // V on target A must not drop R on target B even when (param, inject)
+    // shape matches — this was the regression that caused mass false-clean
+    // in batch scans of e.g. xssmaze.
+    let results = vec![
+        make_typed_param_result_for(
+            FindingType::Verified,
+            "q",
+            "inHTML",
+            "http://a.example/?q=1",
+        ),
+        make_typed_param_result_for(
+            FindingType::Reflected,
+            "q",
+            "inHTML",
+            "http://b.example/?q=1",
+        ),
+    ];
+    // Run collapse for target A — must keep B's R.
+    let after = collapse_redundant_reflected(results, "http://a.example/?q=1");
+    assert_eq!(after.len(), 2);
+    assert!(
+        after
+            .iter()
+            .any(|r| r.data.starts_with("http://b.example") && r.result_type == FindingType::Reflected)
+    );
+}
+
+#[test]
+fn test_collapse_drops_r_within_path_injection_target() {
+    // Same path-injection target — different payload encoded into the
+    // last segment. R must collapse against V.
+    let target = "http://a.example/path/level1/seed";
+    let results = vec![
+        make_typed_param_result_for(
+            FindingType::Verified,
+            "p",
+            "inHTML",
+            "http://a.example/path/level1/%3Cimg%3E",
+        ),
+        make_typed_param_result_for(
+            FindingType::Reflected,
+            "p",
+            "inHTML",
+            "http://a.example/path/level1/%3Csvg%3E",
+        ),
+    ];
+    let after = collapse_redundant_reflected(results, target);
+    assert_eq!(after.len(), 1);
+    assert_eq!(after[0].result_type, FindingType::Verified);
 }
 
 #[test]
@@ -112,7 +174,7 @@ fn test_collapse_preserves_ast_findings() {
         make_typed_param_result(FindingType::AstDetected, "q", "inHTML"),
         make_typed_param_result(FindingType::Reflected, "q", "inHTML"),
     ];
-    let after = collapse_redundant_reflected(results);
+    let after = collapse_redundant_reflected(results, "https://example.com/?x=1");
     assert_eq!(after.len(), 2);
     assert!(
         after
