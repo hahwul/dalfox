@@ -87,6 +87,74 @@ fn test_merge_strategies() {
 }
 
 #[test]
+fn test_merge_strategies_empty_returns_default() {
+    let merged = merge_strategies(&[]);
+    assert!(merged.extra_encoders.is_empty());
+    assert!(merged.mutations.is_empty());
+    assert_eq!(merged.extra_delay_hint_ms, 0);
+}
+
+#[test]
+fn test_merge_strategies_single_waf_matches_get_strategy() {
+    let direct = get_bypass_strategy(&WafType::Cloudflare);
+    let merged = merge_strategies(&[&WafType::Cloudflare]);
+    assert_eq!(merged.extra_encoders, direct.extra_encoders);
+    assert_eq!(merged.mutations, direct.mutations);
+    assert_eq!(merged.extra_delay_hint_ms, direct.extra_delay_hint_ms);
+}
+
+#[test]
+fn test_merge_strategies_takes_max_delay_hint() {
+    // Cloudflare hints 100ms, AwsWaf hints 0ms — combined should be 100.
+    let merged = merge_strategies(&[&WafType::AwsWaf, &WafType::Cloudflare]);
+    assert_eq!(merged.extra_delay_hint_ms, 100);
+
+    // Order shouldn't matter.
+    let merged_rev = merge_strategies(&[&WafType::Cloudflare, &WafType::AwsWaf]);
+    assert_eq!(merged_rev.extra_delay_hint_ms, 100);
+}
+
+#[test]
+fn test_merge_strategies_dedups_mutations() {
+    // Both Cloudflare and Akamai use HtmlCommentSplit + CaseAlternation +
+    // BacktickParens; the merged set must list each once.
+    let merged = merge_strategies(&[&WafType::Cloudflare, &WafType::Akamai]);
+    let mut seen = std::collections::HashSet::new();
+    assert!(merged.mutations.iter().all(|m| seen.insert(m)));
+}
+
+#[test]
+fn test_merge_strategies_three_wafs_accumulates_unique_mutations() {
+    // Stacking three WAFs should still produce a flat, deduped list and
+    // never less coverage than any single strategy.
+    let cf = get_bypass_strategy(&WafType::Cloudflare).mutations;
+    let merged = merge_strategies(&[
+        &WafType::Cloudflare,
+        &WafType::ModSecurity,
+        &WafType::OwaspCrs,
+    ]);
+    for m in cf {
+        assert!(
+            merged.mutations.contains(&m),
+            "Cloudflare mutation {:?} should survive the merge",
+            m
+        );
+    }
+    let mut seen = std::collections::HashSet::new();
+    assert!(merged.mutations.iter().all(|m| seen.insert(m)));
+}
+
+#[test]
+fn test_merge_strategies_unknown_waf_with_known_dedups() {
+    let merged =
+        merge_strategies(&[&WafType::Unknown("hint".to_string()), &WafType::Cloudflare]);
+    let mut seen = std::collections::HashSet::new();
+    assert!(merged.mutations.iter().all(|m| seen.insert(m)));
+    let mut seen_e = std::collections::HashSet::new();
+    assert!(merged.extra_encoders.iter().all(|e| seen_e.insert(e)));
+}
+
+#[test]
 fn test_apply_mutations_limit() {
     let payloads = vec!["<script>alert(1)</script>".to_string()];
     let mutations = vec![

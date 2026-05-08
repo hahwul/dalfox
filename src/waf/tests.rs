@@ -91,6 +91,116 @@ fn test_merge_results_takes_max_confidence() {
     merge_results(&mut a, b);
     assert_eq!(a.detected.len(), 1);
     assert!(a.detected[0].confidence >= 0.9);
+    // The higher-confidence finding's evidence should take over: this is
+    // what users see in `target_summary.waf.detected[]`.
+    assert_eq!(a.detected[0].evidence, "probe");
+}
+
+#[test]
+fn test_merge_results_into_empty_a() {
+    let mut a = WafDetectionResult::default();
+    let b = WafDetectionResult {
+        detected: vec![WafFingerprint {
+            waf_type: WafType::AwsWaf,
+            confidence: 0.7,
+            evidence: "x-amzn-waf-action".to_string(),
+        }],
+    };
+    merge_results(&mut a, b);
+    assert_eq!(a.detected.len(), 1);
+    assert_eq!(a.detected[0].waf_type, WafType::AwsWaf);
+}
+
+#[test]
+fn test_merge_results_empty_b_is_noop() {
+    let mut a = WafDetectionResult {
+        detected: vec![WafFingerprint {
+            waf_type: WafType::Cloudflare,
+            confidence: 0.7,
+            evidence: "cf-ray".to_string(),
+        }],
+    };
+    merge_results(&mut a, WafDetectionResult::default());
+    assert_eq!(a.detected.len(), 1);
+    assert_eq!(a.detected[0].waf_type, WafType::Cloudflare);
+}
+
+#[test]
+fn test_merge_results_keeps_distinct_wafs() {
+    let mut a = WafDetectionResult {
+        detected: vec![WafFingerprint {
+            waf_type: WafType::Cloudflare,
+            confidence: 0.6,
+            evidence: "cf-ray".to_string(),
+        }],
+    };
+    let b = WafDetectionResult {
+        detected: vec![WafFingerprint {
+            waf_type: WafType::ModSecurity,
+            confidence: 0.8,
+            evidence: "ModSecurity body".to_string(),
+        }],
+    };
+    merge_results(&mut a, b);
+    assert_eq!(a.detected.len(), 2);
+    let types: Vec<&WafType> = a.detected.iter().map(|fp| &fp.waf_type).collect();
+    assert!(types.contains(&&WafType::Cloudflare));
+    assert!(types.contains(&&WafType::ModSecurity));
+}
+
+#[test]
+fn test_merge_results_sorts_by_confidence_desc() {
+    let mut a = WafDetectionResult {
+        detected: vec![WafFingerprint {
+            waf_type: WafType::Cloudflare,
+            confidence: 0.4,
+            evidence: "weak".to_string(),
+        }],
+    };
+    let b = WafDetectionResult {
+        detected: vec![
+            WafFingerprint {
+                waf_type: WafType::Imperva,
+                confidence: 0.95,
+                evidence: "strong".to_string(),
+            },
+            WafFingerprint {
+                waf_type: WafType::ModSecurity,
+                confidence: 0.7,
+                evidence: "medium".to_string(),
+            },
+        ],
+    };
+    merge_results(&mut a, b);
+    // primary() and the first slot must agree, and ordering is by
+    // descending confidence so the strongest signal is reported first.
+    let primary = a.primary().unwrap();
+    assert_eq!(primary.waf_type, WafType::Imperva);
+    assert_eq!(a.detected[0].waf_type, WafType::Imperva);
+    assert!(a.detected[0].confidence >= a.detected[1].confidence);
+    assert!(a.detected[1].confidence >= a.detected[2].confidence);
+}
+
+#[test]
+fn test_merge_results_keeps_existing_evidence_when_lower_conf_arrives() {
+    let mut a = WafDetectionResult {
+        detected: vec![WafFingerprint {
+            waf_type: WafType::Cloudflare,
+            confidence: 0.9,
+            evidence: "probe".to_string(),
+        }],
+    };
+    let b = WafDetectionResult {
+        detected: vec![WafFingerprint {
+            waf_type: WafType::Cloudflare,
+            confidence: 0.5,
+            evidence: "weak header".to_string(),
+        }],
+    };
+    merge_results(&mut a, b);
+    assert_eq!(a.detected.len(), 1);
+    assert_eq!(a.detected[0].confidence, 0.9);
+    assert_eq!(a.detected[0].evidence, "probe");
 }
 
 #[test]
