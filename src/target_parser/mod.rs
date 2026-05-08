@@ -24,10 +24,13 @@ fn client_cache() -> &'static Mutex<HashMap<ClientCacheKey, Client>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Test-only helper: clear the cache between tests. Not part of the
-/// public API.
 #[cfg(test)]
-pub fn _reset_client_cache_for_tests() {
+fn client_cache_len_for_tests() -> usize {
+    client_cache().lock().map(|g| g.len()).unwrap_or(0)
+}
+
+#[cfg(test)]
+fn reset_client_cache_for_tests() {
     if let Ok(mut guard) = client_cache().lock() {
         guard.clear();
     }
@@ -308,6 +311,40 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Cache returns the same Client on the second call with an equal key,
+    /// and a fresh entry for a different key. Tests run serially via
+    /// `--test-threads=1` is not assumed; we reset before/after to avoid
+    /// cross-test pollution.
+    #[test]
+    fn test_client_cache_reuses_for_same_key() {
+        reset_client_cache_for_tests();
+        let mut t = parse_target("http://example.com").unwrap();
+        t.timeout = 7;
+        t.follow_redirects = false;
+        t.proxy = None;
+        let _ = t.build_client().unwrap();
+        let len_after_first = client_cache_len_for_tests();
+        let _ = t.build_client().unwrap();
+        let len_after_second = client_cache_len_for_tests();
+        assert_eq!(len_after_first, len_after_second, "same key must reuse");
+        assert!(len_after_first >= 1);
+        reset_client_cache_for_tests();
+    }
+
+    #[test]
+    fn test_client_cache_separates_distinct_keys() {
+        reset_client_cache_for_tests();
+        let mut a = parse_target("http://example.com").unwrap();
+        a.timeout = 7;
+        let mut b = parse_target("http://example.com").unwrap();
+        b.timeout = 13; // different key
+        let _ = a.build_client().unwrap();
+        let _ = b.build_client().unwrap();
+        let _ = a.build_client().unwrap();
+        assert_eq!(client_cache_len_for_tests(), 2);
+        reset_client_cache_for_tests();
+    }
 
     #[test]
     fn test_parse_target_with_scheme() {
