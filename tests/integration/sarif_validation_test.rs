@@ -271,10 +271,19 @@ fn test_sarif_partial_fingerprints() {
         fingerprints.is_object(),
         "partialFingerprints should be an object"
     );
+    // The catalog message_id is preserved under a clearly non-fingerprint
+    // name (humans inspect it; SARIF consumers ignore it for dedup).
     assert_eq!(
-        fingerprints["messageId"], "12345",
-        "messageId should be included"
+        fingerprints["dalfoxMessageId"], "12345",
+        "dalfoxMessageId should carry the catalog id"
     );
+    // The dedup-driving fingerprint is the stable vulnerability identity
+    // (target + param + inject_type + cwe), 16-char lowercase hex.
+    let vuln_id = fingerprints["vulnIdentity/v1"]
+        .as_str()
+        .expect("vulnIdentity/v1 should be a string");
+    assert_eq!(vuln_id.len(), 16, "fingerprint must be 16 hex chars");
+    assert!(vuln_id.chars().all(|c| c.is_ascii_hexdigit()));
 }
 
 #[test]

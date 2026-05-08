@@ -400,6 +400,18 @@ impl Result {
                     properties["response"] = json!(resp);
                 }
 
+                // Stable, vulnerability-identity fingerprint so SARIF
+                // consumers (e.g. GitHub code scanning) can dedupe the
+                // same finding across rescans. Previously this was the
+                // catalog `message_id`, which is hardcoded per finding
+                // type (e.g. 606 for every reflected XSS) and therefore
+                // useless for dedup.
+                let stable_fp = crate::utils::stable_finding_fingerprint(
+                    &r.data,
+                    &r.param,
+                    &r.inject_type,
+                    &r.cwe,
+                );
                 json!({
                     "ruleId": format!("dalfox/{}", r.cwe.to_lowercase()),
                     "ruleIndex": 0,
@@ -420,7 +432,15 @@ impl Result {
                         }
                     }],
                     "partialFingerprints": {
-                        "messageId": r.message_id.to_string()
+                        // SARIF spec: keys are arbitrary identifiers, values
+                        // are stable hashes. v1 versions the scheme so we can
+                        // evolve the input tuple later without re-mapping
+                        // historical findings.
+                        "vulnIdentity/v1": stable_fp,
+                        // Preserve the catalog id under a clearly non-
+                        // fingerprint name — useful for human triage but
+                        // not used by consumers for dedup.
+                        "dalfoxMessageId": r.message_id.to_string(),
                     },
                     "properties": properties
                 })

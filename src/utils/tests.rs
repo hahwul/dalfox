@@ -1,4 +1,45 @@
-use super::{finding_belongs_to_target, init_remote_resources, init_remote_resources_with_options};
+use super::{
+    finding_belongs_to_target, init_remote_resources, init_remote_resources_with_options,
+    stable_finding_fingerprint,
+};
+
+#[test]
+fn fingerprint_is_deterministic() {
+    let a = stable_finding_fingerprint("http://h/s?q=a", "q", "inHTML", "CWE-79");
+    let b = stable_finding_fingerprint("http://h/s?q=a", "q", "inHTML", "CWE-79");
+    assert_eq!(a, b);
+    assert_eq!(a.len(), 16, "fingerprint must be 16 hex chars");
+    assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+}
+
+#[test]
+fn fingerprint_invariant_to_query_value() {
+    // Same target identity (path stable, query value differs across payload
+    // variants) must hash to the same fingerprint — this is the property
+    // that makes SARIF consumers dedupe re-runs.
+    let a = stable_finding_fingerprint("http://h/s?q=a", "q", "inHTML", "CWE-79");
+    let b = stable_finding_fingerprint("http://h/s?q=%3Csvg%3E", "q", "inHTML", "CWE-79");
+    assert_eq!(a, b);
+}
+
+#[test]
+fn fingerprint_invariant_to_path_segment_payload() {
+    // Path-injection variants must collapse to the same identity.
+    let a = stable_finding_fingerprint("http://h/p/level1/seed", "p", "inHTML", "CWE-79");
+    let b = stable_finding_fingerprint("http://h/p/level1/%3Cimg%3E", "p", "inHTML", "CWE-79");
+    assert_eq!(a, b);
+}
+
+#[test]
+fn fingerprint_separates_distinct_targets() {
+    let q = stable_finding_fingerprint("http://h/a?q=x", "q", "inHTML", "CWE-79");
+    let other_path = stable_finding_fingerprint("http://h/b?q=x", "q", "inHTML", "CWE-79");
+    let other_param = stable_finding_fingerprint("http://h/a?q=x", "id", "inHTML", "CWE-79");
+    let other_inject = stable_finding_fingerprint("http://h/a?q=x", "q", "inJS", "CWE-79");
+    assert_ne!(q, other_path);
+    assert_ne!(q, other_param);
+    assert_ne!(q, other_inject);
+}
 
 #[test]
 fn finding_belongs_query_target_same_path() {

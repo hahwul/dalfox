@@ -376,6 +376,76 @@ fn test_results_to_sarif_basic() {
     assert!(sarif.contains("\"method\": \"GET\""));
     assert!(sarif.contains("\"param\": \"q\""));
     assert!(sarif.contains("\"severity\": \"High\""));
+    // Stable fingerprint key present and a 16-char hex value, not the
+    // catalog message_id.
+    assert!(sarif.contains("\"vulnIdentity/v1\""));
+    assert!(!sarif.contains("\"messageId\": \"606\""));
+}
+
+/// SARIF consumers (e.g. GitHub code scanning) dedupe re-runs by matching
+/// `partialFingerprints`. Two findings produced by different payload
+/// variants for the same vulnerability identity (target + param +
+/// inject_type + cwe) must therefore share a fingerprint.
+#[test]
+fn test_results_to_sarif_fingerprint_stable_across_payload_variants() {
+    let mk = |payload: &str, data: &str| {
+        Result::new(
+            FindingType::Reflected,
+            "inHTML".to_string(),
+            "GET".to_string(),
+            data.to_string(),
+            "q".to_string(),
+            payload.to_string(),
+            "".to_string(),
+            "CWE-79".to_string(),
+            "Info".to_string(),
+            606,
+            "X".to_string(),
+        )
+    };
+    let a = mk("<svg/onload=alert(1)>", "https://h/s?q=%3Csvg%3E");
+    let b = mk("<img src=x onerror=alert(1)>", "https://h/s?q=%3Cimg%3E");
+    let sarif_a = Result::results_to_sarif(&[a], false, false);
+    let sarif_b = Result::results_to_sarif(&[b], false, false);
+    let extract_fp = |s: &str| -> String {
+        let key = "\"vulnIdentity/v1\": \"";
+        let i = s.find(key).expect("fingerprint key present");
+        let rest = &s[i + key.len()..];
+        let end = rest.find('"').expect("closing quote");
+        rest[..end].to_string()
+    };
+    assert_eq!(extract_fp(&sarif_a), extract_fp(&sarif_b));
+}
+
+/// Distinct vulnerabilities must have distinct fingerprints — otherwise
+/// SARIF consumers would collapse independent findings.
+#[test]
+fn test_results_to_sarif_fingerprint_distinct_for_different_targets() {
+    let mk = |data: &str, param: &str| {
+        Result::new(
+            FindingType::Verified,
+            "inHTML".to_string(),
+            "GET".to_string(),
+            data.to_string(),
+            param.to_string(),
+            "p".to_string(),
+            "".to_string(),
+            "CWE-79".to_string(),
+            "High".to_string(),
+            606,
+            "X".to_string(),
+        )
+    };
+    let a = Result::results_to_sarif(&[mk("https://h/a?q=x", "q")], false, false);
+    let b = Result::results_to_sarif(&[mk("https://h/b?q=x", "q")], false, false);
+    let extract_fp = |s: &str| -> String {
+        let key = "\"vulnIdentity/v1\": \"";
+        let i = s.find(key).expect("fingerprint key present");
+        let rest = &s[i + key.len()..];
+        let end = rest.find('"').expect("closing quote");
+        rest[..end].to_string()
+    };
+    assert_ne!(extract_fp(&a), extract_fp(&b));
 }
 
 #[test]

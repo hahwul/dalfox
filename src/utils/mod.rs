@@ -23,6 +23,57 @@ pub use http::{
 // Re-export remote payload/wordlist getters at `crate::utils::*`
 pub use crate::payload::get_remote_payloads;
 
+/// Stable per-finding identity fingerprint for SARIF `partialFingerprints`
+/// and any other dedup consumer that compares results across scan runs.
+///
+/// Built from the *vulnerability* identity, not the *payload variant*: two
+/// payloads that surface the same logical issue (e.g. an `R` and a `V` for
+/// the same parameter and injection context) hash to the same fingerprint.
+/// Re-running the scan against an unchanged target yields the same value
+/// — that's the property SARIF consumers rely on to dedupe re-scans.
+///
+/// Inputs are joined into a single string before hashing so a future
+/// reordering of fields can't silently change the output for existing
+/// findings.
+///
+/// Returns a 16-char lowercase hex string (truncated SHA-256). 64 bits
+/// is plenty of collision resistance for finding identity within a run,
+/// and it keeps SARIF output compact.
+pub fn stable_finding_fingerprint(
+    target_url: &str,
+    param: &str,
+    inject_type: &str,
+    cwe: &str,
+) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(format!(
+        "v1|{}|{}|{}|{}",
+        target_identity_key_owned(target_url),
+        param,
+        inject_type,
+        cwe
+    ));
+    let digest = hasher.finalize();
+    let hex_full = hex::encode(digest);
+    hex_full[..16].to_string()
+}
+
+/// Owned version of the identity key used by `finding_belongs_to_target`,
+/// suitable for hashing. Mirrors that helper's logic: strip query if
+/// present, else key by parent path. Lives next to the matching helper
+/// so the two stay in sync.
+fn target_identity_key_owned(url: &str) -> String {
+    let no_query = url.split('?').next().unwrap_or(url);
+    if url.contains('?') {
+        return no_query.to_string();
+    }
+    match no_query.rfind('/') {
+        Some(i) => no_query[..=i].to_string(),
+        None => no_query.to_string(),
+    }
+}
+
 /// Decide whether a finding URL was produced by scanning a given target URL.
 ///
 /// Used both by `collapse_redundant_reflected` (dedup) and the
