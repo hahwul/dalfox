@@ -15,12 +15,13 @@ Dalfox is a powerful open-source tool that focuses on automation, making it idea
 
 ## Key features
 
-* Modes: `URL`, `SXSS`, `Pipe`, `File`, `Server`, `Payload`
+* Subcommands: `scan` (URL / file / pipe / raw-HTTP, auto-detected), `server`, `payload`, `mcp`
 * Discovery: Parameter analysis, static analysis, BAV testing, parameter mining
-* XSS Scanning: Reflected, Stored, DOM-based, with optimization and DOM/AST verification
+* XSS Scanning: Reflected, Stored (SXSS), DOM-based, with optimization and DOM/AST verification
+* WAF: Fingerprinting with confidence scoring, bypass tracking, and tunable `--waf-min-confidence`
 * HTTP Options: Custom headers, cookies, methods, proxy, and more
-* Output: JSON/JSONL/Plain/Markdown/SARIF formats, silence mode, detailed reports
-* Extensibility: REST API, custom payloads, remote wordlists
+* Output: JSON/JSONL/Plain/Markdown/SARIF/TOML formats, silence mode, detailed reports
+* Extensibility: REST API, MCP stdio server, custom payloads, remote wordlists
 
 And the various options required for the testing :D
 
