@@ -1,13 +1,14 @@
 # Bumps the dalfox version across every file that hardcodes it
-# (Cargo.toml, Cargo.lock, flake.nix, snap/snapcraft.yaml). Prompts for
-# the new version interactively and prints a per-file checkmark.
+# (Cargo.toml, Cargo.lock, flake.nix, snap/snapcraft.yaml, aur/PKGBUILD).
+# Prompts for the new version interactively and prints a per-file checkmark.
 #
 # Pre-release suffixes are allowed (e.g. 3.0.0-dev.1, 3.1.0-rc.1).
 
-CARGO_TOML = "Cargo.toml"
-CARGO_LOCK = "Cargo.lock"
-FLAKE_NIX  = "flake.nix"
-SNAP_YAML  = "snap/snapcraft.yaml"
+CARGO_TOML   = "Cargo.toml"
+CARGO_LOCK   = "Cargo.lock"
+FLAKE_NIX    = "flake.nix"
+SNAP_YAML    = "snap/snapcraft.yaml"
+AUR_PKGBUILD = "aur/PKGBUILD"
 
 # Read helpers (mirror version_check.cr).
 
@@ -41,6 +42,14 @@ def snap_version : String?
   content = File.read(SNAP_YAML)
   match = content.match(/^version:\s*['"]?v?([^'"\s]+)['"]?\s*$/m)
   match ? match[1] : nil
+rescue
+  nil
+end
+
+def aur_version : String?
+  content = File.read(AUR_PKGBUILD)
+  match = content.match(/^pkgver=([^\s]+)/m)
+  match ? match[1].gsub('_', '-') : nil
 rescue
   nil
 end
@@ -100,6 +109,21 @@ rescue ex
   false
 end
 
+# AUR pkgver disallows hyphens; rewrite `-` as `_` so dev/rc tags remain
+# valid for `makepkg --printsrcinfo`. Also resets pkgrel=1 on bump.
+def update_aur(new_version : String) : Bool
+  content = File.read(AUR_PKGBUILD)
+  aur_ver = new_version.gsub('-', '_')
+  updated = content.sub(/^pkgver=.*/m, "pkgver=#{aur_ver}")
+                   .sub(/^pkgrel=.*/m, "pkgrel=1")
+  return false if updated == content
+  File.write(AUR_PKGBUILD, updated)
+  true
+rescue ex
+  puts "  error: #{ex.message}"
+  false
+end
+
 # Loose semver — allow numeric pre-release suffix (`-dev.1`, `-rc.2`,
 # `-alpha`).
 def valid_version?(version : String) : Bool
@@ -112,15 +136,17 @@ cargo_v = cargo_toml_version
 lock_v  = cargo_lock_version
 flake_v = flake_version
 snap_v  = snap_version
+aur_v   = aur_version
 
 puts "Current versions:"
 puts "  #{CARGO_TOML.ljust(22)} #{cargo_v || "Not found"}"
 puts "  #{CARGO_LOCK.ljust(22)} #{lock_v || "Not found"}"
 puts "  #{FLAKE_NIX.ljust(22)} #{flake_v || "Not found"}"
 puts "  #{SNAP_YAML.ljust(22)} #{snap_v || "Not found"}"
+puts "  #{AUR_PKGBUILD.ljust(22)} #{aur_v || "Not found"}"
 puts
 
-versions = [cargo_v, lock_v, flake_v, snap_v].compact
+versions = [cargo_v, lock_v, flake_v, snap_v, aur_v].compact
 unique = versions.uniq
 
 if unique.size > 1
@@ -128,7 +154,7 @@ if unique.size > 1
   puts
 end
 
-current = cargo_v || lock_v || flake_v || snap_v || "unknown"
+current = cargo_v || lock_v || flake_v || snap_v || aur_v || "unknown"
 puts "Current: #{current}"
 print "New version (Enter to cancel): "
 input = gets
@@ -160,6 +186,7 @@ total = 0
   {CARGO_LOCK, ->{ update_cargo_lock(new_version) }, !lock_v.nil?},
   {FLAKE_NIX, ->{ update_flake(new_version) }, !flake_v.nil?},
   {SNAP_YAML, ->{ update_snap(new_version) }, !snap_v.nil?},
+  {AUR_PKGBUILD, ->{ update_aur(new_version) }, !aur_v.nil?},
 ].each do |tuple|
   path, fn, present = tuple
   next unless present

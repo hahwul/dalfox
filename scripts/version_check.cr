@@ -1,11 +1,12 @@
 # Reports the version string declared in each file dalfox keeps in lockstep
-# (Cargo.toml, Cargo.lock, flake.nix, snap/snapcraft.yaml). Exits non-zero
-# when they disagree so it can gate a release.
+# (Cargo.toml, Cargo.lock, flake.nix, snap/snapcraft.yaml, aur/PKGBUILD).
+# Exits non-zero when they disagree so it can gate a release.
 
-CARGO_TOML = "Cargo.toml"
-CARGO_LOCK = "Cargo.lock"
-FLAKE_NIX  = "flake.nix"
-SNAP_YAML  = "snap/snapcraft.yaml"
+CARGO_TOML  = "Cargo.toml"
+CARGO_LOCK  = "Cargo.lock"
+FLAKE_NIX   = "flake.nix"
+SNAP_YAML   = "snap/snapcraft.yaml"
+AUR_PKGBUILD = "aur/PKGBUILD"
 
 # Cargo.toml: top-level `version = "X"` inside [package].
 def cargo_toml_version : String?
@@ -46,18 +47,31 @@ rescue
   nil
 end
 
+# aur/PKGBUILD: `pkgver=X`. AUR forbids hyphens in pkgver, so pre-release
+# versions are stored with `_` (e.g. 3.0.0_dev.1); normalize back to `-`
+# so it compares equal to the other files.
+def aur_version : String?
+  content = File.read(AUR_PKGBUILD)
+  match = content.match(/^pkgver=([^\s]+)/m)
+  match ? match[1].gsub('_', '-') : nil
+rescue
+  nil
+end
+
 cargo_v = cargo_toml_version
 lock_v  = cargo_lock_version
 flake_v = flake_version
 snap_v  = snap_version
+aur_v   = aur_version
 
 puts "#{CARGO_TOML.ljust(22)} #{cargo_v || "Not found"}"
 puts "#{CARGO_LOCK.ljust(22)} #{lock_v || "Not found"}"
 puts "#{FLAKE_NIX.ljust(22)} #{flake_v || "Not found"}"
 puts "#{SNAP_YAML.ljust(22)} #{snap_v || "Not found"}"
+puts "#{AUR_PKGBUILD.ljust(22)} #{aur_v || "Not found"}"
 puts
 
-versions = [cargo_v, lock_v, flake_v, snap_v].compact
+versions = [cargo_v, lock_v, flake_v, snap_v, aur_v].compact
 
 if versions.empty?
   puts "No versions found!"
