@@ -24,6 +24,71 @@ fn test_whitespace_mutation() {
     );
 }
 
+/// Tags that weren't in the original literal table now get mutated
+/// too. Prior implementation no-op'd on these and lost a bypass
+/// opportunity whenever a payload used a less-common tag.
+#[test]
+fn test_whitespace_mutation_covers_new_tags() {
+    assert_eq!(
+        whitespace_mutation("<form action=x onfocus=alert(1)>"),
+        "<form\taction=x onfocus=alert(1)>"
+    );
+    assert_eq!(
+        whitespace_mutation("<button onclick=alert(1)>"),
+        "<button\tonclick=alert(1)>"
+    );
+}
+
+#[test]
+fn test_html_comment_split_covers_new_tags() {
+    // Long tag (>=6 letters) — split after 3rd letter to mirror the
+    // original 11-tag list's behavior on `<script` and `<iframe`.
+    assert_eq!(
+        html_comment_split("<details open>"),
+        "<det<!---->ails open>"
+    );
+    // Short tag (<6 letters) — split after 2nd letter.
+    assert_eq!(html_comment_split("<form>"), "<fo<!---->rm>");
+}
+
+#[test]
+fn test_slash_separator_covers_new_tags() {
+    assert_eq!(
+        slash_separator("<form action=x>"),
+        "<form/action=x>"
+    );
+}
+
+#[test]
+fn test_exotic_whitespace_covers_new_tags() {
+    let r = exotic_whitespace("<button onclick=alert(1)>");
+    assert!(r.contains('\x0B') || r.contains('\x0C'));
+    assert!(!r.contains("<button on"));
+}
+
+#[test]
+fn test_unicode_js_escape_covers_new_keywords() {
+    assert!(
+        unicode_js_escape("location.href = 'evil'").starts_with("\\u006c")
+            || unicode_js_escape("location.href = 'evil'").starts_with("\\u006C"),
+        "location should pick up unicode escape on first letter"
+    );
+    assert!(
+        unicode_js_escape("setTimeout(x,1)").starts_with("\\u0073")
+            || unicode_js_escape("setTimeout(x,1)").starts_with("\\u0053"),
+        "setTimeout should pick up unicode escape"
+    );
+}
+
+#[test]
+fn test_js_comment_split_covers_new_sinks() {
+    // setTimeout / Function / fetch were not in the original literal
+    // list — they now get mutated when present.
+    assert!(js_comment_split("setTimeout(x,1)").contains("/**/"));
+    assert!(js_comment_split("Function('x')()").contains("/**/"));
+    assert!(js_comment_split("fetch('/x')").contains("/**/"));
+}
+
 #[test]
 fn test_js_comment_split() {
     assert_eq!(js_comment_split("alert(1)"), "al/**/ert(1)");

