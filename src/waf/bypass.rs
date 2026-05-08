@@ -368,7 +368,7 @@ pub fn merge_strategies(waf_types: &[&WafType]) -> BypassStrategy {
         // Merge mutations (deduplicate via HashSet)
         for mutation in strategy.mutations {
             if !seen_mutations.contains(&mutation) {
-                seen_mutations.insert(mutation.clone());
+                seen_mutations.insert(mutation);
                 combined.mutations.push(mutation);
             }
         }

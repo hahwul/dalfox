@@ -1598,9 +1598,8 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // scanning loop and read at target_summary build time. The Arc is
     // shared with `target.mutation_stats`; both increment the same
     // counters via the MutationStats methods.
-    let target_mutation_stats: Arc<
-        Mutex<HashMap<String, Arc<crate::waf::bypass::MutationStats>>>,
-    > = Arc::new(Mutex::new(HashMap::new()));
+    let target_mutation_stats: Arc<Mutex<HashMap<String, Arc<crate::waf::bypass::MutationStats>>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 
     let multi_pb: Option<Arc<MultiProgress>> = None;
 

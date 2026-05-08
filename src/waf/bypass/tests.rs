@@ -53,10 +53,7 @@ fn test_html_comment_split_covers_new_tags() {
 
 #[test]
 fn test_slash_separator_covers_new_tags() {
-    assert_eq!(
-        slash_separator("<form action=x>"),
-        "<form/action=x>"
-    );
+    assert_eq!(slash_separator("<form action=x>"), "<form/action=x>");
 }
 
 #[test]
@@ -211,8 +208,7 @@ fn test_merge_strategies_three_wafs_accumulates_unique_mutations() {
 
 #[test]
 fn test_merge_strategies_unknown_waf_with_known_dedups() {
-    let merged =
-        merge_strategies(&[&WafType::Unknown("hint".to_string()), &WafType::Cloudflare]);
+    let merged = merge_strategies(&[&WafType::Unknown("hint".to_string()), &WafType::Cloudflare]);
     let mut seen = std::collections::HashSet::new();
     assert!(merged.mutations.iter().all(|m| seen.insert(m)));
     let mut seen_e = std::collections::HashSet::new();
@@ -311,10 +307,7 @@ fn apply_mutations_tagged_marks_origin() {
     // The base payload has no origin; each derived variant carries
     // its mutation type so callers can attribute outcomes.
     let payloads = vec!["<svg onload=alert(1)>".to_string()];
-    let mutations = vec![
-        MutationType::HtmlCommentSplit,
-        MutationType::SlashSeparator,
-    ];
+    let mutations = vec![MutationType::HtmlCommentSplit, MutationType::SlashSeparator];
     let tagged = apply_mutations_tagged(&payloads, &mutations, 5);
     let bases = tagged.iter().filter(|(_, o)| o.is_none()).count();
     assert!(bases >= 1, "original payload must be tagged with None");

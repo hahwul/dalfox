@@ -139,7 +139,8 @@ fn test_collapse_does_not_drop_r_from_other_targets() {
     assert!(
         after
             .iter()
-            .any(|r| r.data.starts_with("http://b.example") && r.result_type == FindingType::Reflected)
+            .any(|r| r.data.starts_with("http://b.example")
+                && r.result_type == FindingType::Reflected)
     );
 }
 
