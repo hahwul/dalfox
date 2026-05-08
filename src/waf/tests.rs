@@ -66,8 +66,7 @@ async fn probe_post_handler(
     (StatusCode::OK, "ok")
 }
 
-async fn spawn_probe_recorder()
--> (String, StdArc<ProbeRecorder>, tokio::task::JoinHandle<()>) {
+async fn spawn_probe_recorder() -> (String, StdArc<ProbeRecorder>, tokio::task::JoinHandle<()>) {
     let state = StdArc::new(ProbeRecorder::default());
     let app = Router::new()
         .route("/r", get(probe_get_handler).post(probe_post_handler))

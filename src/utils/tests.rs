@@ -81,10 +81,7 @@ fn finding_belongs_header_inject_no_query_exact_match() {
 fn finding_belongs_path_injection_rejects_sibling_path() {
     let target = "http://h/path/level1/a";
     // Different parent path — must not match.
-    assert!(!finding_belongs_to_target(
-        target,
-        "http://h/path/level2/a"
-    ));
+    assert!(!finding_belongs_to_target(target, "http://h/path/level2/a"));
     assert!(!finding_belongs_to_target(target, "http://h/other/x"));
 }
 
@@ -95,7 +92,6 @@ fn finding_belongs_query_target_does_not_borrow_path_parent_fallback() {
     let target = "http://h/a/b?q=x";
     assert!(!finding_belongs_to_target(target, "http://h/a/c?q=x"));
 }
-
 
 #[tokio::test]
 async fn test_init_remote_resources_noop_when_no_providers() {
