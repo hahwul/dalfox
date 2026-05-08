@@ -31,6 +31,14 @@ use crate::common::create_test_scan_args;
 /// Monotonic counter for unique temp file names across parallel tests.
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+/// Serializes every call to `scan::run_scan` in this binary. `run_scan`
+/// resets the process-wide `REQUEST_COUNT` atomic at startup
+/// (`src/cmd/scan.rs`), so any two overlapping scans race on that reset
+/// — a `run_scan_and_count` assertion would observe `count = 0` if a
+/// neighbouring `run_scan_and_collect` re-entered `run_scan` between
+/// its store/load. See issue #939 (reproduced on Ubuntu CI).
+static SCAN_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 // ===========================================================================
 // Vulnerable endpoint handlers
 // ===========================================================================
@@ -558,6 +566,7 @@ async fn run_scan_and_collect(mut args: ScanArgs) -> Vec<serde_json::Value> {
     let out_path = std::env::temp_dir().join(format!("dalfox_scan_verify_{id}.json"));
     args.output = Some(out_path.to_string_lossy().to_string());
 
+    let _guard = SCAN_LOCK.lock().await;
     scan::run_scan(&args).await;
 
     let content = match std::fs::read_to_string(&out_path) {
@@ -584,6 +593,7 @@ async fn run_scan_and_count(mut args: ScanArgs) -> (Vec<serde_json::Value>, u64)
     let out_path = std::env::temp_dir().join(format!("dalfox_scan_count_{id}.json"));
     args.output = Some(out_path.to_string_lossy().to_string());
 
+    let _guard = SCAN_LOCK.lock().await;
     dalfox::REQUEST_COUNT.store(0, AtomicOrdering::Relaxed);
     scan::run_scan(&args).await;
     let count = dalfox::REQUEST_COUNT.load(AtomicOrdering::Relaxed);
@@ -1125,7 +1135,6 @@ const PARTIAL_REFLECTION_BASELINE_REQUESTS: u64 = 20;
 /// and the `text.contains(open_marker())` check would miss reflection.
 /// The bracketed sandwich probe survives as `inner+close` (SuffixOnly),
 /// so discovery still records the param and the scan proceeds.
-#[ignore = "flaky on Ubuntu CI; see issue #939"]
 #[tokio::test]
 async fn test_partial_reflection_prefix_strip() {
     let addr = start_test_server().await;
@@ -1143,7 +1152,6 @@ async fn test_partial_reflection_prefix_strip() {
 
 /// Mirror of the above: trailing 4 chars stripped. The bracketed probe
 /// survives as `open+inner` (PrefixOnly).
-#[ignore = "flaky on Ubuntu CI; see issue #939"]
 #[tokio::test]
 async fn test_partial_reflection_suffix_strip() {
     let addr = start_test_server().await;
@@ -1163,7 +1171,6 @@ async fn test_partial_reflection_suffix_strip() {
 /// random hex segments survive concatenated. `inner_marker()` is
 /// `dlxmid<8hex>`, whose 8-hex tail survives as a contiguous run and
 /// is detected by `classify_probe_reflection`'s InnerOnly branch.
-#[ignore = "flaky on Ubuntu CI; see issue #939"]
 #[tokio::test]
 async fn test_partial_reflection_hex_extract() {
     let addr = start_test_server().await;
