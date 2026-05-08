@@ -1,7 +1,37 @@
 use crate::parameter_analysis::Param;
 use reqwest::{Client, redirect::Policy};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use url::Url;
+
+/// Cache key capturing the inputs that affect Client construction:
+/// timeout, optional proxy URL, and follow-redirects policy. The
+/// scheme/host are NOT part of the key because reqwest::Client manages
+/// per-host connection pools internally — one Client safely serves any
+/// number of hosts.
+type ClientCacheKey = (u64, Option<String>, bool);
+
+/// Process-wide cache of reqwest::Clients keyed by ClientCacheKey. Each
+/// cached entry is cheap to clone (reqwest::Client is internally Arc'd).
+/// This collapses what was previously one fresh Client per call site
+/// (10+ sites, called per-target and per-payload) into a small fixed
+/// number of pooled clients, which prevents the connection storm that
+/// otherwise turned localhost requests into spurious ECONNREFUSED at
+/// high worker counts.
+fn client_cache() -> &'static Mutex<HashMap<ClientCacheKey, Client>> {
+    static CACHE: OnceLock<Mutex<HashMap<ClientCacheKey, Client>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Test-only helper: clear the cache between tests. Not part of the
+/// public API.
+#[cfg(test)]
+pub fn _reset_client_cache_for_tests() {
+    if let Ok(mut guard) = client_cache().lock() {
+        guard.clear();
+    }
+}
 
 #[derive(Debug, Clone)]
 pub struct Target {
@@ -30,8 +60,18 @@ impl Target {
         self.method.parse().unwrap_or(reqwest::Method::GET)
     }
 
+    /// Cache key derived from the Target fields that affect Client construction.
+    fn client_cache_key(&self) -> ClientCacheKey {
+        (self.timeout, self.proxy.clone(), self.follow_redirects)
+    }
+
     /// Build a reqwest Client, falling back to a default Client on error.
     /// Logs a warning in debug mode if the build fails.
+    ///
+    /// Returns a clone of a cached Client when one already exists for the
+    /// (timeout, proxy, follow_redirects) tuple, so call sites that previously
+    /// allocated a fresh Client per invocation (parameter mining, reflection
+    /// checks, blind callbacks, etc.) now share a pooled connection set.
     pub fn build_client_or_default(&self) -> Client {
         self.build_client().unwrap_or_else(|e| {
             if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
@@ -42,6 +82,18 @@ impl Target {
     }
 
     pub fn build_client(&self) -> Result<Client, Box<dyn std::error::Error>> {
+        let key = self.client_cache_key();
+        // Fast path: return a cached Client if one matches the key.
+        if let Ok(guard) = client_cache().lock()
+            && let Some(c) = guard.get(&key)
+        {
+            return Ok(c.clone());
+        }
+
+        // Slow path: build a fresh Client and insert into cache. We don't hold
+        // the lock during build to avoid serializing concurrent first-touches
+        // for distinct keys; the small race that may build the same key twice
+        // is harmless (the loser's value is dropped on insert).
         let mut client_builder = Client::builder()
             .timeout(Duration::from_secs(self.timeout))
             .danger_accept_invalid_certs(true); // Insecure mode for scanner
@@ -58,7 +110,11 @@ impl Target {
             client_builder = client_builder.redirect(Policy::none());
         }
 
-        Ok(client_builder.build()?)
+        let client = client_builder.build()?;
+        if let Ok(mut guard) = client_cache().lock() {
+            guard.insert(key, client.clone());
+        }
+        Ok(client)
     }
 }
 
