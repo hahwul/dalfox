@@ -25,12 +25,17 @@ Scope:
 Primary modules:
 - `src/main.rs`: CLI entrypoint, global flags, config load/init, subcommand dispatch
 - `src/cmd/scan.rs`: scan CLI args, orchestration, preflight checks, output routing
+- `src/cmd/mod.rs`: shared `error_codes` constants + `JobStatus` enum (used by server + MCP)
 - `src/config.rs`: config schema + precedence (`apply_to_scan_args_if_default`)
-- `src/scanning/`: reflection/DOM checks, payload execution pipeline, result models
+- `src/scanning/`: reflection/DOM checks, AST integration, payload execution pipeline, result models
 - `src/parameter_analysis/`: discovery + mining + parameter filtering
 - `src/payload/`: canonical payloads, dynamic payload generation, remote providers
+- `src/encoding/`: payload encoding pipeline (`apply_encoders_to_payloads`) + pre-encoding detection
+- `src/target_parser/`: URL/file/raw-HTTP target normalization
+- `src/waf/`: WAF fingerprinting + bypass strategies
+- `src/utils/`: shared CLI helpers (banner, color, logging)
 - `src/cmd/server.rs`: async scan API server + CORS/JSONP/API-key logic
-- `src/mcp/mod.rs`: MCP stdio tool server (`scan_with_dalfox`, `get_results_dalfox`, `list_scans_dalfox`, `cancel_scan_dalfox`, `preflight_dalfox`)
+- `src/mcp/mod.rs`: MCP stdio tool server (`scan_with_dalfox`, `get_results_dalfox`, `list_scans_dalfox`, `cancel_scan_dalfox`, `delete_scan_dalfox`, `preflight_dalfox`)
 
 Top-level commands:
 - `scan`
@@ -41,6 +46,12 @@ Top-level commands:
 
 Behavioral default:
 - No subcommand => defaults to `scan` in `src/main.rs`.
+- Banner is suppressed automatically for `mcp` and for machine-readable formats (`json`, `jsonl`, `sarif`, `toml`) so stdout stays parseable.
+
+CLI exit codes (`ScanOutcome` in `src/cmd/scan.rs`):
+- `0` Clean — scan finished, no findings
+- `1` Findings — scan finished, one or more findings
+- `2` Error — input/configuration/runtime error
 
 ---
 
@@ -61,10 +72,11 @@ Behavioral default:
 3. Preserve output contract.
 - Output formats currently include: `plain`, `json`, `jsonl`, `markdown`, `sarif`, `toml`.
 - Keep serialization behavior in `src/scanning/result.rs` aligned with routing in `src/cmd/scan.rs`.
-- `include_request` and `include_response` flags must remain opt-in.
+- `include_request` and `include_response` flags must remain opt-in. `--include-all` is a convenience that sets both (resolved in `src/main.rs` before `run_scan`).
 - JSON/JSONL envelope `meta` includes `target_summary` (per-target status/findings/error_code).
 - All findings include `type_description` alongside the single-letter `type` code.
 - `--dry-run` outputs a preflight summary instead of scan results.
+- POC output type (`--poc-type`): `plain`, `curl`, `httpie`, `http-request`.
 
 4. Respect concurrency boundaries.
 - Scan pipeline uses worker and semaphore limits (`workers`, `max_concurrent_targets`, `max_targets_per_host`).
@@ -122,16 +134,26 @@ Behavioral default:
 - Server API behavior:
   - `src/cmd/server.rs` (auth, CORS, JSONP, scan options mapping)
   - keep callback validation strict for JSONP
-  - Endpoints: POST /scan, GET /scan, GET /scans, POST /preflight, DELETE /scan/:id, GET /result/:id
+  - Endpoints (axum path syntax `{id}`):
+    - `POST /scan` — submit a scan
+    - `GET /scan` — submit via query params (JSONP-friendly)
+    - `GET /scan/{id}` — status + results
+    - `DELETE /scan/{id}` — cancel
+    - `GET /scans` — list jobs
+    - `GET /result/{id}` — alias of `GET /scan/{id}`
+    - `POST /preflight` — parameter discovery only
+    - `GET /health` — health check
 
 - MCP tool behavior:
   - `src/mcp/mod.rs`
   - keep tool inputs minimal and deterministic
-  - Tools: scan_with_dalfox, get_results_dalfox, list_scans_dalfox, cancel_scan_dalfox, preflight_dalfox
+  - Tools: `scan_with_dalfox`, `get_results_dalfox`, `list_scans_dalfox`, `cancel_scan_dalfox`, `delete_scan_dalfox`, `preflight_dalfox`
+  - `cancel_*` flips the cancellation flag (job ends in `cancelled`); `delete_*` removes the job record entirely.
 
 - New error code:
   - Add constant to `src/cmd/mod.rs` `error_codes` module
   - Use the constant in all three interfaces (CLI, server, MCP)
+  - Existing codes: `NO_TARGETS`, `NO_FILE`, `INVALID_INPUT_TYPE`, `PARSE_ERROR`, `FILE_READ_ERROR`, `STDIN_ERROR`, `CONNECTION_FAILED`, `CONTENT_TYPE_MISMATCH`
 
 ---
 
@@ -146,15 +168,18 @@ Broader validation:
 
 Targeted suites:
 - unit + module-level tests in `src/**` (`#[cfg(test)]`)
-- integration tests: `tests/integration/`
-- functional mock-server tests: `tests/functional/`
-- e2e smoke: `tests/e2e/cli_smoke_test.rs`
+- crate-level unit tests: `tests/unit/` (encoding, target_parser, utils)
+- integration tests: `tests/integration/` (markdown/sarif output, scanner pipeline)
+- functional mock-server tests: `tests/functional/` (driven by `tests/functional/mock_cases/`)
+- e2e smoke: `tests/e2e/cli_smoke_test.rs`, `tests/e2e/config_path_smoke_test.rs`
+- standalone harnesses: `tests/remote_payload_builder_test.rs`, `tests/remote_wordlist_builder_test.rs`, `tests/request_count_probe.rs`, `tests/scan_run_paths_test.rs`
 
 Handy task aliases (from `justfile`):
-- `just test`
-- `just test_all`
-- `just dev`
-- `just build`
+- `just test` (alias `just t`) — `cargo test`
+- `just test_all` — `cargo test -- --include-ignored`
+- `just dev` (alias `just d`) — debug build
+- `just build` (alias `just b`) — release build
+- `just version-check` / `just version-update` — keep version in lockstep across `Cargo.toml`, `Cargo.lock`, `flake.nix`, snap
 
 When behavior changes, add or update tests near the touched module plus one higher-level test when the change crosses module boundaries.
 
