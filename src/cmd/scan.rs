@@ -1408,7 +1408,11 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // Collect all target URLs that will be scanned, then track status per target.
     let all_target_urls: Vec<String> = parsed_targets.iter().map(|t| t.url.to_string()).collect();
     // Track targets that were skipped during preflight (content-type mismatch etc.)
-    let skipped_targets: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+    // Map of skipped target URL -> error code explaining why it was skipped.
+    // Used by target_summary to surface skips (content-type mismatch, per-host
+    // truncation, etc.) instead of silently marking them clean.
+    let skipped_targets: Arc<Mutex<HashMap<String, &'static str>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 
     let multi_pb: Option<Arc<MultiProgress>> = None;
 
@@ -1483,8 +1487,30 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
 
     // Analyze parameters for each target concurrently (bounded) instead of sequentially
     for group in host_groups.values_mut() {
-        // Limit targets per host
+        // Limit targets per host. Targets above the cap aren't silently dropped
+        // — record them in skipped_targets so target_summary surfaces the skip
+        // with the TRUNCATED_PER_HOST_CAP error code instead of "clean".
         if group.len() > args.max_targets_per_host {
+            let dropped: Vec<String> = group
+                .iter()
+                .skip(args.max_targets_per_host)
+                .map(|t| t.url.to_string())
+                .collect();
+            if !dropped.is_empty() {
+                if !args.silence {
+                    let ts = chrono::Local::now().format("%-I:%M%p").to_string();
+                    eprintln!(
+                        "\x1b[90m{}\x1b[0m \x1b[33mWARN\x1b[0m max-targets-per-host cap ({}) reached; {} target(s) skipped",
+                        ts,
+                        args.max_targets_per_host,
+                        dropped.len()
+                    );
+                }
+                let mut guard = skipped_targets.lock().await;
+                for url in dropped {
+                    guard.insert(url, crate::cmd::error_codes::TRUNCATED_PER_HOST_CAP);
+                }
+            }
             group.truncate(args.max_targets_per_host);
         }
 
@@ -1582,7 +1608,10 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                         }
                         if !is_allowed_content_type(&preflight.content_type) {
                             // Skip this target early
-                            skipped_targets_clone.lock().await.push(target.url.to_string());
+                            skipped_targets_clone.lock().await.insert(
+                                target.url.to_string(),
+                                crate::cmd::error_codes::CONTENT_TYPE_MISMATCH,
+                            );
                             return None;
                         }
                     }
@@ -2263,11 +2292,8 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 .iter()
                 .filter(|r| r.data.starts_with(prefix))
                 .count();
-            let (status, error_code) = if skipped.contains(url) {
-                (
-                    "skipped",
-                    Some(crate::cmd::error_codes::CONTENT_TYPE_MISMATCH),
-                )
+            let (status, error_code) = if let Some(code) = skipped.get(url) {
+                ("skipped", Some(*code))
             } else if finding_count > 0 {
                 ("findings", None)
             } else {

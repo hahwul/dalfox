@@ -28,6 +28,7 @@ pub mod error_codes {
 
     // Scan filtering
     pub const CONTENT_TYPE_MISMATCH: &str = "CONTENT_TYPE_MISMATCH";
+    pub const TRUNCATED_PER_HOST_CAP: &str = "TRUNCATED_PER_HOST_CAP";
 }
 
 /// Status of an asynchronous scan job (used by both REST server and MCP).
