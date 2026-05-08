@@ -221,5 +221,9 @@ template = "landing"
       <a href="./reference/cli/" class="btn btn-secondary">CLI Reference</a>
       <a href="https://github.com/hahwul/dalfox" class="btn btn-ghost" target="_blank" rel="noopener">GitHub →</a>
     </div>
+    <p class="contributors-label">Thanks to our contributors</p>
+    <div class="contributors-image">
+      <img src="https://github.com/hahwul/dalfox/raw/main/docs/static/images/CONTRIBUTORS.svg" alt="Contributors" loading="lazy">
+    </div>
   </div>
 </section>

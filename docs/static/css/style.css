@@ -791,6 +791,29 @@ nav.pagination a:hover {
     padding: 2.5rem 2rem;
     background: var(--bg-sidebar);
 }
+.footer-mark {
+    text-align: center;
+}
+.footer-mark a {
+    display: inline-block;
+    line-height: 0;
+}
+.hahwul-img {
+    width: 80px;
+    height: auto;
+    filter: grayscale(100%) brightness(0.5);
+    transition: filter 0.3s ease;
+}
+.hahwul-img:hover {
+    filter: grayscale(0%) brightness(1.1);
+}
+.footer-love {
+    margin-top: 0.85rem;
+    color: var(--text-muted);
+    font-family: "Bradley Hand", "Snell Roundhand", "Apple Chancery", cursive;
+    font-size: 0.95rem;
+    letter-spacing: 0.02em;
+}
 /* Docs pages: the sidebar is `position: fixed` and 268px wide, so a
    root-level footer is hidden underneath it. Offset the footer (and only
    the footer) on pages that actually have the docs layout. The mobile
@@ -837,7 +860,6 @@ body:has(.docs-layout) .site-footer {
 .footer-links a:hover {
     color: var(--text-primary);
 }
-
 /* ==========================================================================
    Landing page
    ========================================================================== */
@@ -1487,6 +1509,23 @@ body:has(.docs-layout) .site-footer {
     justify-content: center;
     gap: 0.75rem;
     flex-wrap: wrap;
+}
+.contributors-label {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-muted);
+    margin: 2.5rem 0 1rem;
+}
+.contributors-image {
+    max-width: 760px;
+    margin: 0 auto;
+}
+.contributors-image img {
+    max-width: 100%;
+    border-radius: 6px;
 }
 
 /* ==========================================================================
