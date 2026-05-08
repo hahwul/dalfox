@@ -235,33 +235,57 @@ pub fn fingerprint_from_response(
     result
 }
 
-/// Fingerprint WAFs using a provocation probe: send a blatantly malicious payload
-/// and analyze the blocking response. This costs one extra request.
+/// Fingerprint WAFs using a provocation probe: send a blatantly malicious
+/// payload and analyze the blocking response. This costs one extra request.
+///
+/// The probe **mirrors the target's request shape** — same method, same
+/// body, same auth context — so it triggers the same WAF rules that
+/// actual scan requests would. Sending a GET probe to a POST-only
+/// endpoint historically caused two failure modes: (1) a 405 from the
+/// origin getting misread as `WafType::Unknown(HTTP 405)`, and (2)
+/// missing WAFs that only inspect POST bodies. Auth (headers, UA,
+/// cookies) is preserved via `apply_headers_ua_cookies`.
 pub async fn fingerprint_with_probe(
     target: &crate::target_parser::Target,
     client: &reqwest::Client,
 ) -> WafDetectionResult {
-    // Send a request with an obvious XSS payload in a dummy parameter
+    // Append the provocation marker to the URL query. Keeping the
+    // existing query intact means routing/host-header checks behave
+    // the same as a normal request to this target.
     let mut probe_url = target.url.clone();
     probe_url
         .query_pairs_mut()
         .append_pair("dalfox_waf_probe", "<script>alert(1)</script>");
 
-    let rb = client.get(probe_url.clone());
-    let rb = crate::utils::apply_headers_ua_cookies(rb, target, None);
+    // Use the target's method and (for body-bearing methods) original
+    // body so the probe shape matches the actual scan traffic. The
+    // payload sits in the query for both shapes — WAFs typically
+    // inspect the URL regardless of method, and putting the probe in
+    // the body would risk corrupting structured payloads (JSON, XML).
+    let method = target.parse_method();
+    let body = target.data.clone();
+    let rb = crate::utils::build_request(client, target, method, probe_url, body);
 
     crate::tick_request_count();
 
     let resp = match rb.send().await {
         Ok(r) => r,
-        Err(_) => return WafDetectionResult::default(),
+        Err(e) => {
+            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!(
+                    "[DBG] waf probe network error for {}: {}",
+                    target.url, e
+                );
+            }
+            return WafDetectionResult::default();
+        }
     };
 
     let status = resp.status().as_u16();
     let headers = resp.headers().clone();
-    let body = resp.text().await.ok();
+    let body_text = resp.text().await.ok();
 
-    let mut result = fingerprint_from_response(&headers, body.as_deref(), status);
+    let mut result = fingerprint_from_response(&headers, body_text.as_deref(), status);
 
     // If we got a blocking status code but no WAF was identified, mark as Unknown
     if result.is_empty() && (status == 403 || status == 406 || status == 429 || status == 503) {
