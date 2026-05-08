@@ -39,7 +39,7 @@ claude mcp add dalfox -- dalfox mcp
 
 ## Available tools
 
-Five tools are exposed. All are async and non-blocking — submit a scan, poll for results, then move on.
+Six tools are exposed. All are async and non-blocking — submit a scan, poll for results, then move on.
 
 ### `scan_with_dalfox`
 
@@ -131,6 +131,16 @@ Abort a queued or running scan:
 ```json
 { "scan_id": "9f2c…" }
 ```
+
+### `delete_scan_dalfox`
+
+Permanently remove a tracked scan from memory. Only terminal scans (`done`, `error`, `cancelled`) can be deleted — running or queued scans must be cancelled first. Terminal scans are also auto-purged after 1 hour.
+
+```json
+{ "scan_id": "9f2c…" }
+```
+
+Returns `{scan_id, deleted: true, previous_status}`.
 
 ### `preflight_dalfox`
 

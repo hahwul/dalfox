@@ -80,6 +80,17 @@ When a WAF is detected, `--waf-evasion` automatically slows Dalfox to `workers=1
 dalfox https://target.app --waf-evasion
 ```
 
+### Filter weak fingerprints
+
+Each fingerprint carries a confidence score (0.0–1.0). Generic markers like `Request blocked` (0.3) or `Server: Google Frontend` (0.5) sometimes false-positive on benign origins. Use `--waf-min-confidence` to discard anything below the threshold:
+
+```bash
+# Keep only confident matches (drops 0.3/0.5 noise)
+dalfox https://target.app --waf-min-confidence 0.7
+```
+
+Default is `0.0` (keep every match). Raise it when you suspect noisy passive detection is steering Dalfox into the wrong evasion strategy.
+
 ## Mutation tactics (under the hood)
 
 Different WAFs fall to different tricks. A small sample:

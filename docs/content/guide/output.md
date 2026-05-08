@@ -105,6 +105,30 @@ NO_COLOR=1 dalfox https://target.app
 
 Dalfox also auto-disables colour when output is redirected to a file or a non-TTY.
 
+## TOML
+
+Same data shape as JSON, written as TOML — easier to skim by eye while still parsing cleanly. Findings render as a `[[results]]` array of tables:
+
+```toml
+[[results]]
+type = "V"
+type_description = "Verified"
+inject_type = "inHTML"
+method = "GET"
+url = "https://target.app/search?q=test"
+param = "q"
+payload = "<svg/onload=alert(1)>"
+evidence = "payload reflected and DOM element verified"
+cwe = "CWE-79"
+severity = "High"
+message_id = 606
+message_str = "XSS found"
+```
+
+```bash
+dalfox https://target.app -f toml -o report.toml
+```
+
 ## SARIF → GitHub code scanning
 
 ```bash

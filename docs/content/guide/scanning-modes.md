@@ -6,6 +6,8 @@ weight = 1
 
 Dalfox accepts targets in several shapes. Every mode shares the same discovery, payload, and verification engine — they differ only in how you feed URLs in and where results go.
 
+Under the hood there are four subcommands: `scan` (the scanner), `server` (long-lived REST API), `payload` (payload utilities), and `mcp` (Model Context Protocol stdio server). Everything below labelled "URL / File / Pipe / Raw HTTP / SXSS" is a *shape of input* that the `scan` subcommand handles via `--input-type`; they are not independent subcommands.
+
 ## Auto (default)
 
 Just give Dalfox a URL. It figures out the rest.
@@ -32,7 +34,9 @@ Scan a list of URLs, one per line:
 # urls.txt
 # https://target.app/search?q=1
 # https://target.app/profile?id=2
-dalfox file urls.txt
+dalfox scan urls.txt
+# or, explicit:
+dalfox scan --input-type file urls.txt
 ```
 
 Comments (`#`) and blank lines are ignored. Each URL runs through the full pipeline.
@@ -42,9 +46,9 @@ Comments (`#`) and blank lines are ignored. Each URL runs through the full pipel
 Read from `stdin` — the common case when chaining recon tools:
 
 ```bash
-cat urls.txt | dalfox
-waybackurls example.com | gf xss | dalfox
-hakrawler -url https://target.app | dalfox
+cat urls.txt | dalfox scan
+waybackurls example.com | gf xss | dalfox scan
+hakrawler -url https://target.app | dalfox scan
 ```
 
 Dalfox buffers the input, deduplicates, and scans every line as a target.
@@ -64,7 +68,7 @@ The file is a standard raw HTTP request (method + path + headers + blank line + 
 Test the classic "inject on form A, payload appears on page B" pattern:
 
 ```bash
-dalfox https://target.app/post-comment \
+dalfox scan https://target.app/post-comment \
   --sxss \
   --sxss-url https://target.app/comments
 ```
@@ -89,7 +93,7 @@ Expose Dalfox as a [Model Context Protocol](https://modelcontextprotocol.io) ser
 dalfox mcp
 ```
 
-The tools (`scan_with_dalfox`, `get_results_dalfox`, `list_scans_dalfox`, `cancel_scan_dalfox`, `preflight_dalfox`) are described in [MCP Server](../../integrations/mcp/).
+The tools (`scan_with_dalfox`, `get_results_dalfox`, `list_scans_dalfox`, `cancel_scan_dalfox`, `delete_scan_dalfox`, `preflight_dalfox`) are described in [MCP Server](../../integrations/mcp/).
 
 ## Payload mode (utility)
 

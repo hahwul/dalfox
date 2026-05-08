@@ -99,6 +99,7 @@ waf_bypass = "auto"
 skip_waf_probe = false
 # force_waf = "cloudflare"
 waf_evasion = false
+waf_min_confidence = 0.0
 
 # LOGGING
 debug = false
@@ -207,6 +208,7 @@ debug = false
 | `skip_waf_probe` | bool | `false` | Skip active fingerprinting |
 | `force_waf` | string | — | WAF name when `waf_bypass = "force"` |
 | `waf_evasion` | bool | `false` | Auto-throttle on WAF detection |
+| `waf_min_confidence` | float | `0.0` | Drop fingerprints below this confidence (0.0–1.0) |
 
 ### Logging
 

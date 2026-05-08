@@ -157,6 +157,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--skip-waf-probe` | false | Skip active WAF fingerprinting |
 | `--force-waf` | — | WAF name when `--waf-bypass force` |
 | `--waf-evasion` | false | Auto-throttle (`workers=1`, `delay=3000`) on WAF detection |
+| `--waf-min-confidence` | `0.0` | Drop fingerprints below this confidence (0.0–1.0). Suppresses weak matches like generic `Request blocked` (0.3) or `Server: Google Frontend` (0.5) |
 
 ---
 

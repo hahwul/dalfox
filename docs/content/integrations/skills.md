@@ -4,7 +4,9 @@ description = "Drop-in `SKILL.md` for Claude Code, Cursor, OpenCode, Codex, and 
 weight = 3
 +++
 
-Dalfox ships a [**SKILL.md**](https://github.com/hahwul/dalfox/blob/main/skills/dalfox/SKILL.md) that teaches any skill-aware agent how to drive Dalfox correctly — authorization gate first, MCP over CLI, preflight before heavy scans, `V > A > R` finding prioritization. Point your agent at it and the model stops guessing flags.
+Dalfox ships a **SKILL.md** that teaches any skill-aware agent how to drive Dalfox correctly — authorization gate first, MCP over CLI, preflight before heavy scans, `V > A > R` finding prioritization. Point your agent at it and the model stops guessing flags.
+
+The file lives at [`skills/dalfox/SKILL.md`](https://github.com/hahwul/dalfox/blob/main/skills/dalfox/SKILL.md) in the repository, so once you've cloned Dalfox you already have it locally.
 
 ## Install with `npx skills`
 
