@@ -1,0 +1,388 @@
+# WAF detection rules. Loaded once at startup via include_str!() so the
+# binary stays single-file. Keep waf_type strings in sync with the
+# WafType enum in src/waf/mod.rs — unknown values fall through to the
+# generic "Unknown" with the original string preserved as the hint.
+#
+# Header rules
+#   header           — header name (case-insensitive lookup)
+#   value_contains   — optional case-insensitive substring on the value;
+#                      omit to match on header presence alone
+#   waf_type         — name of the WafType enum variant
+#   confidence       — 0.0–1.0; max wins per WAF type during merge
+#   evidence_label   — short description shown in target_summary
+
+# ── Header rules ────────────────────────────────────────────────────────
+
+# Cloudflare
+[[header]]
+header = "cf-ray"
+waf_type = "Cloudflare"
+confidence = 0.9
+evidence_label = "cf-ray header"
+
+[[header]]
+header = "cf-cache-status"
+waf_type = "Cloudflare"
+confidence = 0.7
+evidence_label = "cf-cache-status header"
+
+[[header]]
+header = "server"
+value_contains = "cloudflare"
+waf_type = "Cloudflare"
+confidence = 0.95
+evidence_label = "Server: cloudflare"
+
+# AWS WAF / CloudFront
+[[header]]
+header = "x-amzn-requestid"
+waf_type = "AwsWaf"
+confidence = 0.6
+evidence_label = "x-amzn-requestid header"
+
+[[header]]
+header = "x-amz-cf-id"
+waf_type = "AwsWaf"
+confidence = 0.7
+evidence_label = "x-amz-cf-id header (CloudFront)"
+
+[[header]]
+header = "x-amzn-waf-action"
+waf_type = "AwsWaf"
+confidence = 0.95
+evidence_label = "x-amzn-waf-action header"
+
+# Akamai
+[[header]]
+header = "x-akamai-transformed"
+waf_type = "Akamai"
+confidence = 0.85
+evidence_label = "x-akamai-transformed header"
+
+[[header]]
+header = "server"
+value_contains = "akamaighost"
+waf_type = "Akamai"
+confidence = 0.9
+evidence_label = "Server: AkamaiGHost"
+
+[[header]]
+header = "x-akamai-session-info"
+waf_type = "Akamai"
+confidence = 0.8
+evidence_label = "x-akamai-session-info header"
+
+# Imperva / Incapsula
+[[header]]
+header = "x-cdn"
+value_contains = "imperva"
+waf_type = "Imperva"
+confidence = 0.9
+evidence_label = "X-CDN: Imperva"
+
+[[header]]
+header = "x-iinfo"
+waf_type = "Imperva"
+confidence = 0.8
+evidence_label = "x-iinfo header"
+
+[[header]]
+header = "x-cdn-forward"
+waf_type = "Imperva"
+confidence = 0.6
+evidence_label = "x-cdn-forward header"
+
+# ModSecurity
+[[header]]
+header = "server"
+value_contains = "mod_security"
+waf_type = "ModSecurity"
+confidence = 0.95
+evidence_label = "Server: mod_security"
+
+[[header]]
+header = "server"
+value_contains = "modsecurity"
+waf_type = "ModSecurity"
+confidence = 0.95
+evidence_label = "Server: ModSecurity"
+
+# Sucuri
+[[header]]
+header = "x-sucuri-id"
+waf_type = "Sucuri"
+confidence = 0.95
+evidence_label = "x-sucuri-id header"
+
+[[header]]
+header = "x-sucuri-cache"
+waf_type = "Sucuri"
+confidence = 0.8
+evidence_label = "x-sucuri-cache header"
+
+[[header]]
+header = "server"
+value_contains = "sucuri"
+waf_type = "Sucuri"
+confidence = 0.9
+evidence_label = "Server: Sucuri"
+
+# F5 BIG-IP
+[[header]]
+header = "server"
+value_contains = "bigip"
+waf_type = "F5BigIp"
+confidence = 0.9
+evidence_label = "Server: BigIP"
+
+[[header]]
+header = "x-wa-info"
+waf_type = "F5BigIp"
+confidence = 0.7
+evidence_label = "x-wa-info header"
+
+# Barracuda
+[[header]]
+header = "server"
+value_contains = "barracuda"
+waf_type = "Barracuda"
+confidence = 0.9
+evidence_label = "Server: Barracuda"
+
+[[header]]
+header = "barra_counter_session"
+waf_type = "Barracuda"
+confidence = 0.85
+evidence_label = "barra_counter_session cookie header"
+
+# FortiWeb
+[[header]]
+header = "x-fw-server"
+waf_type = "FortiWeb"
+confidence = 0.85
+evidence_label = "x-fw-server header"
+
+[[header]]
+header = "server"
+value_contains = "fortiweb"
+waf_type = "FortiWeb"
+confidence = 0.9
+evidence_label = "Server: FortiWeb"
+
+# Azure WAF
+[[header]]
+header = "x-azure-ref"
+waf_type = "AzureWaf"
+confidence = 0.7
+evidence_label = "x-azure-ref header"
+
+[[header]]
+header = "x-ms-forbidden-ip"
+waf_type = "AzureWaf"
+confidence = 0.85
+evidence_label = "x-ms-forbidden-ip header"
+
+# Google Cloud Armor
+[[header]]
+header = "server"
+value_contains = "google frontend"
+waf_type = "CloudArmor"
+confidence = 0.5
+evidence_label = "Server: Google Frontend"
+
+[[header]]
+header = "x-goog-request-info"
+waf_type = "CloudArmor"
+confidence = 0.6
+evidence_label = "x-goog-request-info header"
+
+# Fastly
+[[header]]
+header = "x-fastly-request-id"
+waf_type = "Fastly"
+confidence = 0.8
+evidence_label = "x-fastly-request-id header"
+
+[[header]]
+header = "via"
+value_contains = "varnish"
+waf_type = "Fastly"
+confidence = 0.5
+evidence_label = "Via: varnish (possibly Fastly)"
+
+
+# ── Body rules ──────────────────────────────────────────────────────────
+
+# Cloudflare
+[[body]]
+pattern = "attention required! | cloudflare"
+waf_type = "Cloudflare"
+confidence = 0.9
+evidence_label = "Cloudflare block page"
+
+[[body]]
+pattern = "cloudflare ray id"
+waf_type = "Cloudflare"
+confidence = 0.85
+evidence_label = "Cloudflare Ray ID in body"
+
+# Imperva
+[[body]]
+pattern = "incapsula incident id"
+waf_type = "Imperva"
+confidence = 0.95
+evidence_label = "Incapsula incident ID in body"
+
+[[body]]
+pattern = "powered by incapsula"
+waf_type = "Imperva"
+confidence = 0.9
+evidence_label = "Powered by Incapsula"
+
+# ModSecurity
+[[body]]
+pattern = "modsecurity"
+waf_type = "ModSecurity"
+confidence = 0.85
+evidence_label = "ModSecurity in body"
+
+[[body]]
+pattern = "mod_security"
+waf_type = "ModSecurity"
+confidence = 0.85
+evidence_label = "mod_security in body"
+
+[[body]]
+pattern = "not acceptable!"
+waf_type = "ModSecurity"
+confidence = 0.4
+evidence_label = "Not Acceptable error (possible ModSecurity)"
+
+# OWASP CRS (often runs on ModSecurity but has distinctive patterns)
+[[body]]
+pattern = "owasp_crs"
+waf_type = "OwaspCrs"
+confidence = 0.95
+evidence_label = "OWASP CRS rule ID in body"
+
+[[body]]
+pattern = "owasp crs"
+waf_type = "OwaspCrs"
+confidence = 0.9
+evidence_label = "OWASP CRS mention in body"
+
+[[body]]
+pattern = "coreruleset"
+waf_type = "OwaspCrs"
+confidence = 0.9
+evidence_label = "CoreRuleSet reference in body"
+
+[[body]]
+pattern = "core rule set"
+waf_type = "OwaspCrs"
+confidence = 0.85
+evidence_label = "Core Rule Set reference in body"
+
+[[body]]
+pattern = 'id "941'
+waf_type = "OwaspCrs"
+confidence = 0.95
+evidence_label = "CRS XSS rule ID 941xxx in body"
+
+[[body]]
+pattern = 'id "942'
+waf_type = "OwaspCrs"
+confidence = 0.9
+evidence_label = "CRS SQLi rule ID 942xxx in body"
+
+[[body]]
+pattern = 'id "949'
+waf_type = "OwaspCrs"
+confidence = 0.9
+evidence_label = "CRS blocking rule ID 949xxx in body"
+
+[[body]]
+pattern = 'id "980'
+waf_type = "OwaspCrs"
+confidence = 0.85
+evidence_label = "CRS correlation rule ID 980xxx in body"
+
+# Sucuri
+[[body]]
+pattern = "access denied - sucuri website firewall"
+waf_type = "Sucuri"
+confidence = 0.95
+evidence_label = "Sucuri block page"
+
+[[body]]
+pattern = "sucuri cloudproxy"
+waf_type = "Sucuri"
+confidence = 0.9
+evidence_label = "Sucuri CloudProxy in body"
+
+# Wordfence
+[[body]]
+pattern = "generated by wordfence"
+waf_type = "Wordfence"
+confidence = 0.95
+evidence_label = "Wordfence block page"
+
+[[body]]
+pattern = "wordfence"
+waf_type = "Wordfence"
+confidence = 0.6
+evidence_label = "Wordfence mention in body"
+
+# AWS WAF
+[[body]]
+pattern = "request blocked"
+waf_type = "AwsWaf"
+confidence = 0.3
+evidence_label = "Request blocked (possible AWS WAF)"
+
+# F5 BIG-IP ASM
+[[body]]
+pattern = "the requested url was rejected"
+waf_type = "F5BigIp"
+confidence = 0.7
+evidence_label = "F5 ASM block page"
+
+[[body]]
+pattern = "support id:"
+waf_type = "F5BigIp"
+confidence = 0.5
+evidence_label = "F5 support ID in body"
+
+# Barracuda
+[[body]]
+pattern = "barracuda web application firewall"
+waf_type = "Barracuda"
+confidence = 0.95
+evidence_label = "Barracuda WAF block page"
+
+# FortiWeb
+[[body]]
+pattern = "fortiweb"
+waf_type = "FortiWeb"
+confidence = 0.7
+evidence_label = "FortiWeb in body"
+
+[[body]]
+pattern = "fortigate"
+waf_type = "FortiWeb"
+confidence = 0.5
+evidence_label = "FortiGate in body"
+
+# Azure WAF
+[[body]]
+pattern = "azure front door"
+waf_type = "AzureWaf"
+confidence = 0.6
+evidence_label = "Azure Front Door in body"
+
+# Google Cloud Armor
+[[body]]
+pattern = "google cloud armor"
+waf_type = "CloudArmor"
+confidence = 0.9
+evidence_label = "Google Cloud Armor in body"

@@ -1,6 +1,46 @@
 use super::*;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 
+/// `rules.toml` is the canonical source of detection patterns. A
+/// malformed edit would surface as a startup panic via the OnceLock
+/// init; this test guards against silent loss of coverage by
+/// asserting the load succeeds and we still have at least one rule
+/// per known WAF family.
+#[test]
+fn rules_toml_loads_and_covers_all_waf_families() {
+    let r = super::rules();
+    assert!(!r.headers.is_empty(), "expected header rules to load");
+    assert!(!r.bodies.is_empty(), "expected body rules to load");
+    let waf_names: std::collections::HashSet<&str> = r
+        .headers
+        .iter()
+        .map(|h| h.waf_type.as_str())
+        .chain(r.bodies.iter().map(|b| b.waf_type.as_str()))
+        .collect();
+    for expected in [
+        "Cloudflare",
+        "AwsWaf",
+        "Akamai",
+        "Imperva",
+        "ModSecurity",
+        "OwaspCrs",
+        "Sucuri",
+        "F5BigIp",
+        "Barracuda",
+        "FortiWeb",
+        "AzureWaf",
+        "CloudArmor",
+        "Fastly",
+        "Wordfence",
+    ] {
+        assert!(
+            waf_names.contains(expected),
+            "rules.toml is missing coverage for {}",
+            expected
+        );
+    }
+}
+
 fn make_headers(pairs: &[(&str, &str)]) -> HeaderMap {
     let mut map = HeaderMap::new();
     for (k, v) in pairs {
