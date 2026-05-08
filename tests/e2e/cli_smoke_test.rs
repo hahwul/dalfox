@@ -98,6 +98,41 @@ fn test_invalid_subcommand_exits_with_error() {
 }
 
 #[test]
+fn test_only_custom_payload_with_missing_file_emits_structured_error() {
+    // With --only-custom-payload, a missing file is fatal: scanning would
+    // otherwise silently use zero payloads and report clean. The error
+    // must surface via the structured emit_error path so consumers see a
+    // FILE_READ_ERROR code and not just an empty result.
+    let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args([
+            "scan",
+            "https://127.0.0.1:1",
+            "--custom-payload",
+            "/tmp/dalfox-does-not-exist-1.txt",
+            "--only-custom-payload",
+            "--format",
+            "jsonl",
+            "--silence",
+        ])
+        .output()
+        .expect("failed to execute dalfox");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let combined = format!("{}\n{}", stdout, stderr);
+    assert!(
+        combined.contains("FILE_READ_ERROR"),
+        "expected FILE_READ_ERROR in output, got:\nstdout: {}\nstderr: {}",
+        stdout,
+        stderr
+    );
+    assert!(
+        combined.contains("/tmp/dalfox-does-not-exist-1.txt"),
+        "expected the path to appear in the error message"
+    );
+}
+
+#[test]
 fn test_hidden_pipe_subcommand_reads_stdin_and_exits() {
     let mut child = Command::new(env!("CARGO_BIN_EXE_dalfox"))
         .args(["pipe", "--format", "json", "-S"])

@@ -1004,6 +1004,45 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     if GLOBAL_ENCODERS.get().is_none() {
         let _ = GLOBAL_ENCODERS.set(args.encoders.clone());
     }
+    // Validate --custom-payload up front. Without this check, a missing or
+    // unreadable file silently produces zero custom payloads mid-scan. With
+    // --only-custom-payload that's catastrophic (no payloads at all, scan
+    // reports clean), so fail fast. In additive mode it just degrades
+    // detection, so warn and continue.
+    if let Some(path) = &args.custom_payload {
+        match fs::metadata(path) {
+            Ok(m) if !m.is_file() => {
+                if args.only_custom_payload {
+                    emit_error(
+                        &args.format,
+                        crate::cmd::error_codes::FILE_READ_ERROR,
+                        &format!("--custom-payload is not a regular file: {}", path),
+                    );
+                    return ScanOutcome::Error;
+                }
+                log_warn(&format!(
+                    "--custom-payload is not a regular file ({}) — built-in payloads only",
+                    path
+                ));
+            }
+            Err(e) => {
+                if args.only_custom_payload {
+                    emit_error(
+                        &args.format,
+                        crate::cmd::error_codes::FILE_READ_ERROR,
+                        &format!("--custom-payload not readable ({}): {}", path, e),
+                    );
+                    return ScanOutcome::Error;
+                }
+                log_warn(&format!(
+                    "--custom-payload not readable ({}: {}) — built-in payloads only",
+                    path, e
+                ));
+            }
+            Ok(_) => {}
+        }
+    }
+
     // Initialize remote payloads/wordlists if requested (honor timeout/proxy)
     if (!args.remote_payloads.is_empty() || !args.remote_wordlists.is_empty())
         && let Err(e) = crate::utils::init_remote_resources_with_options(
