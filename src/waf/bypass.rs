@@ -6,7 +6,10 @@
 use super::WafType;
 
 /// Types of payload mutations that can be applied for WAF bypass.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+///
+/// `Display` produces a stable PascalCase name suitable for JSON keys
+/// in `target_summary.waf.bypass.mutations_applied[]`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum MutationType {
     /// Insert HTML comments inside tag names: `<scr<!---->ipt>`
     HtmlCommentSplit,
@@ -37,6 +40,87 @@ pub enum MutationType {
     /// Exotic whitespace chars (vertical tab 0x0B, form feed 0x0C) between tag and attrs.
     /// Bypasses CRS 941320 tag handler regex that only checks \\s (space/tab/newline).
     ExoticWhitespace,
+}
+
+impl std::fmt::Display for MutationType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = match self {
+            MutationType::HtmlCommentSplit => "HtmlCommentSplit",
+            MutationType::WhitespaceMutation => "WhitespaceMutation",
+            MutationType::JsCommentSplit => "JsCommentSplit",
+            MutationType::BacktickParens => "BacktickParens",
+            MutationType::ConstructorChain => "ConstructorChain",
+            MutationType::UnicodeJsEscape => "UnicodeJsEscape",
+            MutationType::MixedHtmlEntities => "MixedHtmlEntities",
+            MutationType::CaseAlternation => "CaseAlternation",
+            MutationType::SlashSeparator => "SlashSeparator",
+            MutationType::HtmlEntityParens => "HtmlEntityParens",
+            MutationType::SvgAnimateExec => "SvgAnimateExec",
+            MutationType::ExoticWhitespace => "ExoticWhitespace",
+        };
+        f.write_str(name)
+    }
+}
+
+/// Per-target effectiveness telemetry for the WAF bypass pass.
+///
+/// `variants_generated` records, per `MutationType`, how many distinct
+/// payload variants the mutation contributed *for this target*
+/// (post-dedup, pre-encoder). It's a "did the mutation even apply"
+/// signal — a value of 0 means the strategy declared the mutation but
+/// the target's payload set didn't shape-match any of it.
+///
+/// `bypass_requests` is the total HTTP request count sent under the
+/// active bypass strategy, and `bypass_blocks` is the subset that
+/// returned a WAF block status (403/406/429/503). The ratio gives a
+/// rough "did the bypass help" signal that surfaces alongside the
+/// detected WAF in `target_summary.waf.bypass`.
+#[derive(Debug, Default)]
+pub struct MutationStats {
+    pub variants_generated: std::sync::Mutex<std::collections::HashMap<MutationType, u64>>,
+    pub bypass_requests: std::sync::atomic::AtomicU64,
+    pub bypass_blocks: std::sync::atomic::AtomicU64,
+}
+
+impl MutationStats {
+    pub fn record_variant(&self, m: MutationType) {
+        if let Ok(mut g) = self.variants_generated.lock() {
+            *g.entry(m).or_insert(0) += 1;
+        }
+    }
+    pub fn record_request(&self, blocked: bool) {
+        self.bypass_requests
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        if blocked {
+            self.bypass_blocks
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+    pub fn snapshot(&self) -> MutationStatsSnapshot {
+        let variants = self
+            .variants_generated
+            .lock()
+            .ok()
+            .map(|g| g.clone())
+            .unwrap_or_default();
+        MutationStatsSnapshot {
+            variants,
+            bypass_requests: self
+                .bypass_requests
+                .load(std::sync::atomic::Ordering::Relaxed),
+            bypass_blocks: self
+                .bypass_blocks
+                .load(std::sync::atomic::Ordering::Relaxed),
+        }
+    }
+}
+
+/// Plain-data view of `MutationStats` suitable for JSON serialization.
+#[derive(Debug, Default, Clone)]
+pub struct MutationStatsSnapshot {
+    pub variants: std::collections::HashMap<MutationType, u64>,
+    pub bypass_requests: u64,
+    pub bypass_blocks: u64,
 }
 
 /// A bypass strategy composed of extra encoders and payload mutations.
@@ -308,14 +392,30 @@ pub fn apply_mutations(
     mutations: &[MutationType],
     max_variants_per_payload: usize,
 ) -> Vec<String> {
-    let mut out =
-        Vec::with_capacity(payloads.len() * (1 + max_variants_per_payload.min(mutations.len())));
-    let mut seen = std::collections::HashSet::with_capacity(out.capacity());
+    apply_mutations_tagged(payloads, mutations, max_variants_per_payload)
+        .into_iter()
+        .map(|(p, _)| p)
+        .collect()
+}
+
+/// Like `apply_mutations` but also returns each output's origin: `None`
+/// for the unmodified base payload, `Some(MutationType)` for variants.
+///
+/// Callers that want to attribute scan outcomes to specific mutations
+/// (effectiveness telemetry) consume this; callers that just need the
+/// payload list use the shorter `apply_mutations`.
+pub fn apply_mutations_tagged(
+    payloads: &[String],
+    mutations: &[MutationType],
+    max_variants_per_payload: usize,
+) -> Vec<(String, Option<MutationType>)> {
+    let cap = payloads.len() * (1 + max_variants_per_payload.min(mutations.len()));
+    let mut out: Vec<(String, Option<MutationType>)> = Vec::with_capacity(cap);
+    let mut seen = std::collections::HashSet::with_capacity(cap);
 
     for payload in payloads {
-        if !seen.contains(payload.as_str()) {
-            seen.insert(payload.clone());
-            out.push(payload.clone());
+        if seen.insert(payload.clone()) {
+            out.push((payload.clone(), None));
         }
 
         let mut variant_count = 0;
@@ -324,9 +424,8 @@ pub fn apply_mutations(
                 break;
             }
             let variant = apply_single_mutation(payload, mutation);
-            if variant != *payload && !seen.contains(variant.as_str()) {
-                seen.insert(variant.clone());
-                out.push(variant);
+            if variant != *payload && seen.insert(variant.clone()) {
+                out.push((variant, Some(*mutation)));
                 variant_count += 1;
             }
         }

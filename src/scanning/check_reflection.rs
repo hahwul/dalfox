@@ -707,8 +707,11 @@ async fn fetch_injection_response_with_client(
             // consecutive counter is per-scan when bound (MCP / REST runners)
             // so one scan's WAF blocks don't slow down unrelated concurrent
             // scans; CLI falls back to the process-wide counter.
-            if status_code == 403 || status_code == 406 || status_code == 429 || status_code == 503
-            {
+            let is_waf_block = status_code == 403
+                || status_code == 406
+                || status_code == 429
+                || status_code == 503;
+            if is_waf_block {
                 let consecutive = crate::tick_waf_block();
                 // Apply adaptive backoff when consecutive blocks exceed threshold
                 if consecutive >= 3 {
@@ -720,6 +723,12 @@ async fn fetch_injection_response_with_client(
             } else {
                 // Reset consecutive block counter on successful response
                 crate::reset_waf_consecutive();
+            }
+            // Per-target bypass effectiveness telemetry. Only counts when
+            // bypass is active for the target (target.mutation_stats is
+            // populated during preflight when WAF detected and bypass on).
+            if let Some(ref stats) = target.mutation_stats {
+                stats.record_request(is_waf_block);
             }
 
             // Skip processing if the status code is in the ignore_return list

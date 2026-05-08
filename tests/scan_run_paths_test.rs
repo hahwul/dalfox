@@ -260,6 +260,15 @@ async fn test_run_scan_emits_waf_block_in_target_summary() {
     );
     assert!(bypass["encoders"].is_array());
     assert!(bypass["mutation_count"].is_number());
+    // Effectiveness telemetry shows up alongside the strategy. With
+    // skip_xss_scanning=true no requests fire so counts are zero, but
+    // the keys must be present so consumers can rely on the shape.
+    assert!(
+        bypass["mutations_applied"].is_array(),
+        "mutations_applied[] should always be present when bypass ran"
+    );
+    assert!(bypass["requests_sent"].is_number());
+    assert!(bypass["requests_blocked"].is_number());
     let _ = std::fs::remove_file(&output_path);
 }
 

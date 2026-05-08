@@ -279,6 +279,58 @@ fn test_every_waf_has_strategy() {
 }
 
 #[test]
+fn mutation_stats_records_variants_per_type() {
+    let stats = MutationStats::default();
+    stats.record_variant(MutationType::HtmlCommentSplit);
+    stats.record_variant(MutationType::HtmlCommentSplit);
+    stats.record_variant(MutationType::JsCommentSplit);
+    let snap = stats.snapshot();
+    assert_eq!(
+        snap.variants.get(&MutationType::HtmlCommentSplit).copied(),
+        Some(2)
+    );
+    assert_eq!(
+        snap.variants.get(&MutationType::JsCommentSplit).copied(),
+        Some(1)
+    );
+}
+
+#[test]
+fn mutation_stats_record_request_counts_blocks() {
+    let stats = MutationStats::default();
+    stats.record_request(false);
+    stats.record_request(false);
+    stats.record_request(true);
+    let snap = stats.snapshot();
+    assert_eq!(snap.bypass_requests, 3);
+    assert_eq!(snap.bypass_blocks, 1);
+}
+
+#[test]
+fn apply_mutations_tagged_marks_origin() {
+    // The base payload has no origin; each derived variant carries
+    // its mutation type so callers can attribute outcomes.
+    let payloads = vec!["<svg onload=alert(1)>".to_string()];
+    let mutations = vec![
+        MutationType::HtmlCommentSplit,
+        MutationType::SlashSeparator,
+    ];
+    let tagged = apply_mutations_tagged(&payloads, &mutations, 5);
+    let bases = tagged.iter().filter(|(_, o)| o.is_none()).count();
+    assert!(bases >= 1, "original payload must be tagged with None");
+    let html = tagged
+        .iter()
+        .filter(|(_, o)| matches!(o, Some(MutationType::HtmlCommentSplit)))
+        .count();
+    let slash = tagged
+        .iter()
+        .filter(|(_, o)| matches!(o, Some(MutationType::SlashSeparator)))
+        .count();
+    assert_eq!(html, 1, "html_comment_split should produce one variant");
+    assert_eq!(slash, 1, "slash_separator should produce one variant");
+}
+
+#[test]
 fn test_unknown_403_uses_default_strategy() {
     // Generic 403 carries no hint about which dimension to lean on;
     // bypass should fall through to the conservative mutation kit.

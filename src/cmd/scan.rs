@@ -1566,6 +1566,13 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // WAF was detected — that information only reached the plain-mode log.
     let target_meta: Arc<Mutex<HashMap<String, serde_json::Value>>> =
         Arc::new(Mutex::new(HashMap::new()));
+    // Side map of WAF-bypass effectiveness counters, alive across the
+    // scanning loop and read at target_summary build time. The Arc is
+    // shared with `target.mutation_stats`; both increment the same
+    // counters via the MutationStats methods.
+    let target_mutation_stats: Arc<
+        Mutex<HashMap<String, Arc<crate::waf::bypass::MutationStats>>>,
+    > = Arc::new(Mutex::new(HashMap::new()));
 
     let multi_pb: Option<Arc<MultiProgress>> = None;
 
@@ -1688,6 +1695,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             let findings_count_outer = findings_count.clone();
             let skipped_targets_outer = skipped_targets.clone();
             let target_meta_outer = target_meta.clone();
+            let target_mutation_stats_outer = target_mutation_stats.clone();
             local.run_until(async move {
                 let mut handles = vec![];
 
@@ -1702,6 +1710,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             let findings_count_clone = findings_count_outer.clone();
             let skipped_targets_clone = skipped_targets_outer.clone();
             let target_meta_clone = target_meta_outer.clone();
+            let target_mutation_stats_clone = target_mutation_stats_outer.clone();
 
             handles.push(tokio::task::spawn_local(async move {
                 // Bound concurrency across targets for preflight + analysis
@@ -1743,6 +1752,21 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                         // Store WAF detection result on target
                         if !preflight.waf_result.is_empty() {
                             target.waf_info = Some(preflight.waf_result);
+                            // Allocate per-target effectiveness counters when
+                            // bypass is going to run; the scanning loop and
+                            // check_reflection both update this Arc, and the
+                            // target_mutation_stats side-map keeps it alive
+                            // until target_summary is built.
+                            if args_clone.waf_bypass != "off" {
+                                let stats = std::sync::Arc::new(
+                                    crate::waf::bypass::MutationStats::default(),
+                                );
+                                target.mutation_stats = Some(stats.clone());
+                                target_mutation_stats_clone
+                                    .lock()
+                                    .await
+                                    .insert(target.url.to_string(), stats);
+                            }
 
                             // Snapshot WAF + applied bypass for target_summary
                             // (JSON/JSONL output). Plain mode logs the same
@@ -2484,6 +2508,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     let target_summary: Vec<serde_json::Value> = {
         let skipped = skipped_targets.lock().await;
         let meta = target_meta.lock().await;
+        let stats_map = target_mutation_stats.lock().await;
         let mut summary = Vec::with_capacity(all_target_urls.len());
         for url in &all_target_urls {
             let finding_count = display_results
@@ -2509,7 +2534,46 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             // Omitted entirely for targets where no WAF was detected, to
             // keep the common-case output lean.
             if let Some(m) = meta.get(url) {
-                entry["waf"] = m.clone();
+                let mut waf_entry = m.clone();
+                // Fold per-target effectiveness telemetry into bypass{}.
+                // Only present when bypass actually ran (target had stats).
+                if let Some(stats) = stats_map.get(url) {
+                    let snap = stats.snapshot();
+                    let mut applied: Vec<serde_json::Value> = snap
+                        .variants
+                        .iter()
+                        .map(|(m, n)| {
+                            serde_json::json!({
+                                "type": m.to_string(),
+                                "variants_generated": n,
+                            })
+                        })
+                        .collect();
+                    // Stable order so re-runs diff cleanly in CI.
+                    applied.sort_by(|a, b| {
+                        a["type"]
+                            .as_str()
+                            .unwrap_or("")
+                            .cmp(b["type"].as_str().unwrap_or(""))
+                    });
+                    if let Some(bypass) = waf_entry.get_mut("bypass")
+                        && let Some(obj) = bypass.as_object_mut()
+                    {
+                        obj.insert(
+                            "mutations_applied".to_string(),
+                            serde_json::Value::Array(applied),
+                        );
+                        obj.insert(
+                            "requests_sent".to_string(),
+                            serde_json::json!(snap.bypass_requests),
+                        );
+                        obj.insert(
+                            "requests_blocked".to_string(),
+                            serde_json::json!(snap.bypass_blocks),
+                        );
+                    }
+                }
+                entry["waf"] = waf_entry;
             }
             summary.push(entry);
         }

@@ -491,18 +491,41 @@ pub async fn run_scanning(
 
         // Apply WAF bypass mutations and extra encoders if WAF was detected
         if let Some(ref strategy) = waf_strategy {
-            // Apply mutations (capped per base payload to prevent explosion)
+            // Apply mutations (capped per base payload to prevent explosion).
+            // Use the tagged variant so we can attribute each generated
+            // variant to its mutation type — record_variant feeds the
+            // per-target effectiveness counter that surfaces in
+            // target_summary.waf.bypass.mutations_applied[].
             if !strategy.mutations.is_empty() {
-                reflection_payloads = crate::waf::bypass::apply_mutations(
+                let stats = target.mutation_stats.as_ref();
+                let tagged_reflect = crate::waf::bypass::apply_mutations_tagged(
                     &reflection_payloads,
                     &strategy.mutations,
                     MAX_WAF_MUTATION_VARIANTS_PER_PAYLOAD,
                 );
-                dom_payloads = crate::waf::bypass::apply_mutations(
+                reflection_payloads = tagged_reflect
+                    .into_iter()
+                    .map(|(p, origin)| {
+                        if let (Some(stats), Some(m)) = (stats, origin) {
+                            stats.record_variant(m);
+                        }
+                        p
+                    })
+                    .collect();
+                let tagged_dom = crate::waf::bypass::apply_mutations_tagged(
                     &dom_payloads,
                     &strategy.mutations,
                     MAX_WAF_MUTATION_VARIANTS_PER_PAYLOAD,
                 );
+                dom_payloads = tagged_dom
+                    .into_iter()
+                    .map(|(p, origin)| {
+                        if let (Some(stats), Some(m)) = (stats, origin) {
+                            stats.record_variant(m);
+                        }
+                        p
+                    })
+                    .collect();
             }
 
             // Apply extra WAF bypass encoders to payloads

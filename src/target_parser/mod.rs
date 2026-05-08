@@ -1,7 +1,7 @@
 use crate::parameter_analysis::Param;
 use reqwest::{Client, redirect::Policy};
 use std::collections::HashMap;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use url::Url;
 
@@ -54,6 +54,10 @@ pub struct Target {
     pub waf_info: Option<crate::waf::WafDetectionResult>,
     pub csp_analysis: Option<crate::payload::xss_csp_bypass::CspAnalysis>,
     pub tech_info: Option<crate::scanning::tech_detect::TechDetectionResult>,
+    /// Per-target WAF-bypass telemetry. Populated during preflight when a
+    /// WAF is detected and bypass is enabled; left `None` otherwise so
+    /// the no-WAF path pays no overhead.
+    pub mutation_stats: Option<Arc<crate::waf::bypass::MutationStats>>,
 }
 
 impl Target {
@@ -145,6 +149,7 @@ pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
         waf_info: None,
         csp_analysis: None,
         tech_info: None,
+        mutation_stats: None,
     })
 }
 
@@ -305,6 +310,7 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
         waf_info: None,
         csp_analysis: None,
         tech_info: None,
+        mutation_stats: None,
     })
 }
 
