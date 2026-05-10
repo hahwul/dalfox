@@ -97,7 +97,7 @@ jobs:
             shasum -a 256 "$ASSET" > "$ASSET.sha256"
           fi
       - name: Upload release archive
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: |-
             ${{ env.ASSET }}
