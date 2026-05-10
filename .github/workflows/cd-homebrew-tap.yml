@@ -9,7 +9,7 @@ jobs:
     name: homebrew-releaser
     steps:
       - name: Release dalfox to Homebrew tap
-        uses: Justintime50/homebrew-releaser@v1
+        uses: Justintime50/homebrew-releaser@v3
         with:
           homebrew_owner: hahwul
           homebrew_tap: homebrew-dalfox
