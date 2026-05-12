@@ -555,17 +555,25 @@ async fn verify_sxss_dom(
 }
 
 /// Verify DOM evidence from a normal (non-stored) injection response.
+///
+/// Special-case for 3xx responses: browsers do not render the response body
+/// of a redirect — only the `Location:` header drives navigation. So body
+/// content can never become an exploitable DOM in a redirect, and any apparent
+/// "DOM evidence" inside it is structurally a false positive. We still inspect
+/// `Location:` (an executable-URL protocol there is a real sink) but skip
+/// body-based DOM verification entirely.
 async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> (bool, Option<String>) {
     let status = resp.status();
     let headers = resp.headers().clone();
 
-    // Check redirect Location header for executable URL protocols (e.g. javascript:alert(1))
-    if status.is_redirection()
-        && let Some(location) = headers.get(reqwest::header::LOCATION)
-        && let Ok(loc_str) = location.to_str()
-        && let Some(result) = check_redirect_location(loc_str, payload)
-    {
-        return result;
+    if status.is_redirection() {
+        if let Some(location) = headers.get(reqwest::header::LOCATION)
+            && let Ok(loc_str) = location.to_str()
+            && let Some(result) = check_redirect_location(loc_str, payload)
+        {
+            return result;
+        }
+        return (false, None);
     }
 
     // Both HTML and non-HTML (JSONP, JSON with HTML) content types are accepted
@@ -581,6 +589,24 @@ async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> (bool, Opt
 }
 
 /// Check if a redirect Location header contains evidence of payload injection.
+/// Inspect a redirect's `Location:` header for evidence that the payload
+/// itself drives the navigation.
+///
+/// Only one case is treated as DOM-verified: the payload is an executable URL
+/// scheme (`javascript:`, `data:text/html`, `vbscript:`) **and** the response
+/// is redirecting the browser to that exact URL. Browsers honour these schemes
+/// in `Location:` (some still navigate the URL bar to it), so the payload
+/// reaches a real execution sink.
+///
+/// A bare reflection of the payload *inside* a redirect target URL (typically
+/// inside a `?next=…`-style query parameter) is **not** verified evidence —
+/// it merely forwards the attacker-controlled bytes to the next endpoint,
+/// which may or may not turn into a sink there. Surfacing that as a verified
+/// finding is a frequent false positive when one redirect re-encodes the
+/// incoming query into the new URL's query (double-URL-encoded reflections
+/// like `%252527…%252527` end up matching the payload's URL-decoded variant
+/// without ever escaping into HTML). Such reflections are still captured by
+/// the reflection-finding path, which is the appropriate severity tier.
 fn check_redirect_location(loc_str: &str, payload: &str) -> Option<(bool, Option<String>)> {
     let loc_trimmed = loc_str.trim();
     let payload_trimmed = payload.trim();
@@ -591,10 +617,6 @@ fn check_redirect_location(loc_str: &str, payload: &str) -> Option<(bool, Option
             "<html><body><a href=\"{}\">redirect</a></body></html>",
             loc_str
         );
-        return Some((true, Some(synthetic_body)));
-    }
-    if crate::scanning::check_reflection::classify_reflection(loc_str, payload).is_some() {
-        let synthetic_body = format!("<html><body>Redirect to: {}</body></html>", loc_str);
         return Some((true, Some(synthetic_body)));
     }
     None
