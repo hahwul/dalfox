@@ -301,8 +301,7 @@ fn test_is_payload_reflected_html_encoded_in_unsafe_context() {
     // decoded by the JS parser but the source still passes through it, so
     // the reflection is kept as an HtmlEntityDecoded finding for review.
     let payload = "<script>alert(1)</script>";
-    let resp =
-        "<script>var x = '&#x3c;script&#x3e;alert(1)&#x3c;/script&#x3e;';</script>";
+    let resp = "<script>var x = '&#x3c;script&#x3e;alert(1)&#x3c;/script&#x3e;';</script>";
     assert_eq!(
         classify_reflection(resp, payload),
         Some(ReflectionKind::HtmlEntityDecoded)

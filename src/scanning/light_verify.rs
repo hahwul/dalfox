@@ -141,7 +141,11 @@ pub async fn verify_dom_xss_light_with_client(
         // header inspection is handled by `check_dom_verification`'s
         // `check_redirect_location` and does not belong here.
         if resp.status().is_redirection() {
-            return (false, None, Some("3xx response — DOM verify skipped".to_string()));
+            return (
+                false,
+                None,
+                Some("3xx response — DOM verify skipped".to_string()),
+            );
         }
         // Extract needed header values without cloning the entire HeaderMap
         let ct = resp

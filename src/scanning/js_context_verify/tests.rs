@@ -125,10 +125,7 @@ fn cached_parsed_spans_returns_same_result_for_identical_blocks() {
     let first = cached_parsed_spans(block).expect("parses cleanly");
     let second = cached_parsed_spans(block).expect("parses cleanly (cache hit)");
     assert_eq!(first, second);
-    assert!(
-        !first.0.is_empty(),
-        "should record at least one sink span"
-    );
+    assert!(!first.0.is_empty(), "should record at least one sink span");
 }
 
 #[test]

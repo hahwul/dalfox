@@ -400,8 +400,9 @@ fn html_entity_reflection_in_unsafe_context(html: &str, variants: &[String]) -> 
     static STYLE_RE: OnceLock<Regex> = OnceLock::new();
     static EVENT_HANDLER_RE: OnceLock<Regex> = OnceLock::new();
 
-    let script_re = SCRIPT_RE
-        .get_or_init(|| Regex::new(r"(?is)<script\b[^>]*>(.*?)</script\s*>").expect("script regex"));
+    let script_re = SCRIPT_RE.get_or_init(|| {
+        Regex::new(r"(?is)<script\b[^>]*>(.*?)</script\s*>").expect("script regex")
+    });
     let style_re = STYLE_RE
         .get_or_init(|| Regex::new(r"(?is)<style\b[^>]*>(.*?)</style\s*>").expect("style regex"));
     let event_re = EVENT_HANDLER_RE.get_or_init(|| {

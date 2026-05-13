@@ -188,9 +188,7 @@ async fn url_attribute_handler(Query(params): Query<HashMap<String, String>>) ->
 /// a `javascript:` URL in `img@src` (it's a resource fetch, not a
 /// navigation), so DOM verification must not promote this to Verified
 /// purely on the basis that the scheme reached the attribute value.
-async fn url_attribute_img_handler(
-    Query(params): Query<HashMap<String, String>>,
-) -> Html<String> {
+async fn url_attribute_img_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
     let q = params.get("q").cloned().unwrap_or_default();
     Html(format!("<img src=\"{}\">", q))
 }
