@@ -110,7 +110,7 @@ fn hash_block(script_src: &str) -> u64 {
 /// Parse `script_src` once and collect every sink-call span and every
 /// string-literal span. Returns `None` when the source has parser errors
 /// (treated as inert — injected JS that breaks parsing won't execute).
-fn collect_parsed_spans(script_src: &str) -> Option<(Vec<(u32, u32)>, Vec<(u32, u32)>)> {
+fn collect_parsed_spans(script_src: &str) -> ParsedSpans {
     let allocator = Allocator::default();
     let ret = Parser::new(&allocator, script_src, SourceType::default()).parse();
     if !ret.errors.is_empty() {
