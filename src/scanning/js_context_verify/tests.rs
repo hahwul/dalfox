@@ -55,6 +55,39 @@ fn rejects_when_payload_breaks_syntax() {
 }
 
 #[test]
+fn rejects_payload_kept_inside_outer_string_literal() {
+    // The payload string `'-alert(1)-'` lands intact inside a double-quoted
+    // string literal — single quotes do not close a double-quoted string,
+    // so `alert(1)` parses as content of the outer string, not as a call.
+    // Without the string-literal containment guard the sink-span check
+    // would still fire (the AST sink span happens to overlap the payload
+    // range only because the source bytes line up), even though the
+    // surrounding string keeps it inert.
+    let payload = "'-alert(1)-'";
+    let html = format!(
+        "<script>var x = decodeURIComponent(\"prefix {} suffix\");</script>",
+        payload
+    );
+    assert!(
+        !has_js_context_evidence(payload, &html),
+        "payload kept entirely inside a string literal must not be verified"
+    );
+}
+
+#[test]
+fn detects_payload_that_breaks_out_of_outer_string_literal() {
+    // Reflection into the middle of a single-argument string slot. The
+    // payload's outer quotes merge with the surrounding quotes to form
+    // two empty strings on either side of `-alert(1)-`, producing a real
+    // `alert(1)` CallExpression *outside* any string literal. Without the
+    // payload, the slot would just be `foo("")` — a harmless empty call.
+    // The containment guard must allow this case through.
+    let payload = "\"-alert(1)-\"";
+    let html = format!("<script>foo(\"{}\");</script>", payload);
+    assert!(has_js_context_evidence(payload, &html));
+}
+
+#[test]
 fn ignores_pre_existing_alert_outside_payload_range() {
     let payload = "\"-foo-\"";
     let html = format!("<script>alert(1); var x = \"{}\";</script>", payload);
@@ -85,14 +118,14 @@ fn payload_quick_filter_rejects_non_sink_payload() {
 }
 
 #[test]
-fn cached_sink_spans_returns_same_result_for_identical_blocks() {
+fn cached_parsed_spans_returns_same_result_for_identical_blocks() {
     // Two distinct calls on the same script source must yield the same
     // span set; the second call should hit the cache rather than re-parse.
     let block = "var c2 = \"\"-alert(1)-\"\"; var x = 5; window.foo = 1;";
-    let first = cached_sink_spans(block).expect("parses cleanly");
-    let second = cached_sink_spans(block).expect("parses cleanly (cache hit)");
+    let first = cached_parsed_spans(block).expect("parses cleanly");
+    let second = cached_parsed_spans(block).expect("parses cleanly (cache hit)");
     assert_eq!(first, second);
-    assert!(!first.is_empty(), "should record at least one sink span");
+    assert!(!first.0.is_empty(), "should record at least one sink span");
 }
 
 #[test]
@@ -233,10 +266,10 @@ fn does_not_flag_assignment_to_innocuous_property() {
 }
 
 #[test]
-fn cached_sink_spans_distinct_for_different_blocks() {
+fn cached_parsed_spans_distinct_for_different_blocks() {
     let a = "var c1 = ''-alert(1)-'';";
     let b = "var c2 = \"-prompt(1)-\";";
-    let sa = cached_sink_spans(a).expect("a parses");
-    let sb = cached_sink_spans(b).expect("b parses");
+    let sa = cached_parsed_spans(a).expect("a parses");
+    let sb = cached_parsed_spans(b).expect("b parses");
     assert_ne!(sa, sb);
 }

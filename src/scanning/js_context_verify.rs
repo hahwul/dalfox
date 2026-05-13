@@ -89,10 +89,12 @@ fn script_blocks(html: &str) -> impl Iterator<Item = &str> {
 /// hitting many distinct `<script>` blocks.
 const SINK_CACHE_CAPACITY: usize = 1024;
 
-/// Sink-call spans for a parsed `<script>` body, or `None` when the body
-/// failed to parse (and is therefore treated as inert).
-type SinkSpans = Option<Vec<(u32, u32)>>;
-type SinkCache = Mutex<HashMap<u64, SinkSpans>>;
+/// Parsed-spans bundle for a `<script>` body, or `None` when the body
+/// failed to parse (and is therefore treated as inert). The first vector
+/// holds sink-call spans, the second holds string-literal spans (used to
+/// gate sink hits that sit *inside* a string).
+type ParsedSpans = Option<(Vec<(u32, u32)>, Vec<(u32, u32)>)>;
+type SinkCache = Mutex<HashMap<u64, ParsedSpans>>;
 
 fn sink_cache() -> &'static SinkCache {
     static CACHE: OnceLock<SinkCache> = OnceLock::new();
@@ -105,26 +107,28 @@ fn hash_block(script_src: &str) -> u64 {
     h.finish()
 }
 
-/// Parse `script_src` once and collect every sink-call span. Returns `None`
-/// when the source has parser errors (treated as inert — injected JS that
-/// breaks parsing won't execute).
-fn collect_sink_spans(script_src: &str) -> Option<Vec<(u32, u32)>> {
+/// Parse `script_src` once and collect every sink-call span and every
+/// string-literal span. Returns `None` when the source has parser errors
+/// (treated as inert — injected JS that breaks parsing won't execute).
+fn collect_parsed_spans(script_src: &str) -> ParsedSpans {
     let allocator = Allocator::default();
     let ret = Parser::new(&allocator, script_src, SourceType::default()).parse();
     if !ret.errors.is_empty() {
         return None;
     }
-    let mut spans: Vec<(u32, u32)> = Vec::new();
+    let mut sinks: Vec<(u32, u32)> = Vec::new();
+    let mut strings: Vec<(u32, u32)> = Vec::new();
     for stmt in &ret.program.body {
-        gather_sink_spans_in_statement(stmt, &mut spans);
+        gather_sink_spans_in_statement(stmt, &mut sinks, &mut strings);
     }
-    Some(spans)
+    Some((sinks, strings))
 }
 
-/// Cached `collect_sink_spans`. The same `<script>` body often appears across
-/// many per-payload responses (page boilerplate, inline framework setup); each
-/// distinct block is parsed at most once across the whole process.
-fn cached_sink_spans(script_src: &str) -> Option<Vec<(u32, u32)>> {
+/// Cached `collect_parsed_spans`. The same `<script>` body often appears
+/// across many per-payload responses (page boilerplate, inline framework
+/// setup); each distinct block is parsed at most once across the whole
+/// process.
+fn cached_parsed_spans(script_src: &str) -> ParsedSpans {
     let key = hash_block(script_src);
     {
         let cache = sink_cache().lock().expect("sink cache poisoned");
@@ -132,7 +136,7 @@ fn cached_sink_spans(script_src: &str) -> Option<Vec<(u32, u32)>> {
             return v.clone();
         }
     }
-    let result = collect_sink_spans(script_src);
+    let result = collect_parsed_spans(script_src);
     let mut cache = sink_cache().lock().expect("sink cache poisoned");
     if cache.len() >= SINK_CACHE_CAPACITY {
         let drop_n = cache.len() / 4;
@@ -145,17 +149,38 @@ fn cached_sink_spans(script_src: &str) -> Option<Vec<(u32, u32)>> {
     result
 }
 
-/// Returns true when a cached sink-call span lies fully within the
-/// `[payload_start, payload_end)` byte range inside `script_src`.
+/// Returns true when the payload range introduced a real sink call into
+/// the parsed script. Two guards:
+///
+/// - String-literal containment: if the payload range sits *strictly*
+///   inside any string literal (i.e. the payload did not consume the
+///   opening or closing quote), the reflection never broke out of the
+///   string. Any sink-call token inside is just string content the JS
+///   engine will not evaluate. Without this guard, a reflection like
+///   `decodeURIComponent("…'-alert(1)-'…")` — where the payload is a
+///   literal `'-alert(1)-'` inside a *double-quoted* string — would be
+///   verified, because the payload bytes happen to overlap a sink span
+///   that lives inside the surrounding string literal.
+/// - Sink containment: a sink-call span lies fully within the payload's
+///   byte range, meaning the payload itself produced the call.
 fn script_block_has_sink_call_in_range(
     script_src: &str,
     payload_start: u32,
     payload_end: u32,
 ) -> bool {
-    let Some(spans) = cached_sink_spans(script_src) else {
+    let Some((sinks, strings)) = cached_parsed_spans(script_src) else {
         return false;
     };
-    spans
+    // Strict containment: payload range must sit *between* the quotes,
+    // not touch them — otherwise the payload broke the string and the
+    // surrounding literal is no longer a literal.
+    if strings
+        .iter()
+        .any(|&(s, e)| payload_start > s && payload_end < e)
+    {
+        return false;
+    }
+    sinks
         .iter()
         .any(|&(s, e)| s >= payload_start && e <= payload_end)
 }
@@ -261,29 +286,35 @@ fn callee_identifier_is_sink(callee: &Expression<'_>) -> bool {
 }
 
 /// Walk the AST once and accumulate every sink CallExpression / NewExpression
-/// / TaggedTemplateExpression span. Range filtering happens at lookup time
-/// against the cached span list, so the heavy parse runs at most once per
-/// distinct script body.
-fn gather_sink_spans_in_statement(stmt: &Statement<'_>, out: &mut Vec<(u32, u32)>) {
+/// / TaggedTemplateExpression span and every StringLiteral span. Range filtering
+/// happens at lookup time against the cached span list, so the heavy parse runs
+/// at most once per distinct script body.
+fn gather_sink_spans_in_statement(
+    stmt: &Statement<'_>,
+    out: &mut Vec<(u32, u32)>,
+    strings: &mut Vec<(u32, u32)>,
+) {
     match stmt {
-        Statement::ExpressionStatement(es) => gather_sink_spans_in_expression(&es.expression, out),
+        Statement::ExpressionStatement(es) => {
+            gather_sink_spans_in_expression(&es.expression, out, strings)
+        }
         Statement::VariableDeclaration(decl) => {
             for d in &decl.declarations {
                 if let Some(init) = &d.init {
-                    gather_sink_spans_in_expression(init, out);
+                    gather_sink_spans_in_expression(init, out, strings);
                 }
             }
         }
         Statement::BlockStatement(b) => {
             for s in &b.body {
-                gather_sink_spans_in_statement(s, out);
+                gather_sink_spans_in_statement(s, out, strings);
             }
         }
         Statement::IfStatement(s) => {
-            gather_sink_spans_in_expression(&s.test, out);
-            gather_sink_spans_in_statement(&s.consequent, out);
+            gather_sink_spans_in_expression(&s.test, out, strings);
+            gather_sink_spans_in_statement(&s.consequent, out, strings);
             if let Some(alt) = &s.alternate {
-                gather_sink_spans_in_statement(alt, out);
+                gather_sink_spans_in_statement(alt, out, strings);
             }
         }
         Statement::ForStatement(s) => {
@@ -292,73 +323,73 @@ fn gather_sink_spans_in_statement(stmt: &Statement<'_>, out: &mut Vec<(u32, u32)
                     ForStatementInit::VariableDeclaration(decl) => {
                         for d in &decl.declarations {
                             if let Some(e) = &d.init {
-                                gather_sink_spans_in_expression(e, out);
+                                gather_sink_spans_in_expression(e, out, strings);
                             }
                         }
                     }
                     expr => {
                         if let Some(e) = expr.as_expression() {
-                            gather_sink_spans_in_expression(e, out);
+                            gather_sink_spans_in_expression(e, out, strings);
                         }
                     }
                 }
             }
             if let Some(t) = &s.test {
-                gather_sink_spans_in_expression(t, out);
+                gather_sink_spans_in_expression(t, out, strings);
             }
             if let Some(u) = &s.update {
-                gather_sink_spans_in_expression(u, out);
+                gather_sink_spans_in_expression(u, out, strings);
             }
-            gather_sink_spans_in_statement(&s.body, out);
+            gather_sink_spans_in_statement(&s.body, out, strings);
         }
         Statement::WhileStatement(s) => {
-            gather_sink_spans_in_expression(&s.test, out);
-            gather_sink_spans_in_statement(&s.body, out);
+            gather_sink_spans_in_expression(&s.test, out, strings);
+            gather_sink_spans_in_statement(&s.body, out, strings);
         }
         Statement::DoWhileStatement(s) => {
-            gather_sink_spans_in_statement(&s.body, out);
-            gather_sink_spans_in_expression(&s.test, out);
+            gather_sink_spans_in_statement(&s.body, out, strings);
+            gather_sink_spans_in_expression(&s.test, out, strings);
         }
         Statement::ReturnStatement(s) => {
             if let Some(arg) = &s.argument {
-                gather_sink_spans_in_expression(arg, out);
+                gather_sink_spans_in_expression(arg, out, strings);
             }
         }
         Statement::FunctionDeclaration(f) => {
             if let Some(body) = &f.body {
                 for s in &body.statements {
-                    gather_sink_spans_in_statement(s, out);
+                    gather_sink_spans_in_statement(s, out, strings);
                 }
             }
         }
         Statement::TryStatement(t) => {
             for s in &t.block.body {
-                gather_sink_spans_in_statement(s, out);
+                gather_sink_spans_in_statement(s, out, strings);
             }
             if let Some(handler) = &t.handler {
                 for s in &handler.body.body {
-                    gather_sink_spans_in_statement(s, out);
+                    gather_sink_spans_in_statement(s, out, strings);
                 }
             }
             if let Some(finalizer) = &t.finalizer {
                 for s in &finalizer.body {
-                    gather_sink_spans_in_statement(s, out);
+                    gather_sink_spans_in_statement(s, out, strings);
                 }
             }
         }
         Statement::SwitchStatement(s) => {
-            gather_sink_spans_in_expression(&s.discriminant, out);
+            gather_sink_spans_in_expression(&s.discriminant, out, strings);
             for case in &s.cases {
                 if let Some(t) = &case.test {
-                    gather_sink_spans_in_expression(t, out);
+                    gather_sink_spans_in_expression(t, out, strings);
                 }
                 for s in &case.consequent {
-                    gather_sink_spans_in_statement(s, out);
+                    gather_sink_spans_in_statement(s, out, strings);
                 }
             }
         }
-        Statement::LabeledStatement(s) => gather_sink_spans_in_statement(&s.body, out),
-        Statement::ThrowStatement(s) => gather_sink_spans_in_expression(&s.argument, out),
+        Statement::LabeledStatement(s) => gather_sink_spans_in_statement(&s.body, out, strings),
+        Statement::ThrowStatement(s) => gather_sink_spans_in_expression(&s.argument, out, strings),
         _ => {}
     }
 }
@@ -367,16 +398,28 @@ fn push_span(out: &mut Vec<(u32, u32)>, span: oxc_span::Span) {
     out.push((span.start, span.end));
 }
 
-fn gather_sink_spans_in_expression(expr: &Expression<'_>, out: &mut Vec<(u32, u32)>) {
+fn gather_sink_spans_in_expression(
+    expr: &Expression<'_>,
+    out: &mut Vec<(u32, u32)>,
+    strings: &mut Vec<(u32, u32)>,
+) {
+    // String literals are leaves — record their full source span (quotes
+    // included, as produced by the oxc parser) so the lookup stage can
+    // tell when a payload landed strictly inside a string and never
+    // escaped its delimiters.
+    if let Expression::StringLiteral(lit) = expr {
+        push_span(strings, lit.span);
+        return;
+    }
     match expr {
         Expression::CallExpression(call) => {
             if callee_is_js_sink(call) {
                 push_span(out, call.span());
             }
-            gather_sink_spans_in_expression(&call.callee, out);
+            gather_sink_spans_in_expression(&call.callee, out, strings);
             for arg in &call.arguments {
                 if let Some(e) = arg.as_expression() {
-                    gather_sink_spans_in_expression(e, out);
+                    gather_sink_spans_in_expression(e, out, strings);
                 }
             }
         }
@@ -384,19 +427,19 @@ fn gather_sink_spans_in_expression(expr: &Expression<'_>, out: &mut Vec<(u32, u3
             if callee_identifier_is_sink(&t.tag) {
                 push_span(out, t.span());
             }
-            gather_sink_spans_in_expression(&t.tag, out);
+            gather_sink_spans_in_expression(&t.tag, out, strings);
             for e in &t.quasi.expressions {
-                gather_sink_spans_in_expression(e, out);
+                gather_sink_spans_in_expression(e, out, strings);
             }
         }
         Expression::NewExpression(ne) => {
             if callee_identifier_is_sink(&ne.callee) {
                 push_span(out, ne.span());
             }
-            gather_sink_spans_in_expression(&ne.callee, out);
+            gather_sink_spans_in_expression(&ne.callee, out, strings);
             for arg in &ne.arguments {
                 if let Some(e) = arg.as_expression() {
-                    gather_sink_spans_in_expression(e, out);
+                    gather_sink_spans_in_expression(e, out, strings);
                 }
             }
         }
@@ -404,76 +447,80 @@ fn gather_sink_spans_in_expression(expr: &Expression<'_>, out: &mut Vec<(u32, u3
             if assignment_is_sink(a) {
                 push_span(out, a.span());
             }
-            gather_sink_spans_in_expression(&a.right, out);
+            gather_sink_spans_in_expression(&a.right, out, strings);
         }
         Expression::SequenceExpression(s) => {
             for e in &s.expressions {
-                gather_sink_spans_in_expression(e, out);
+                gather_sink_spans_in_expression(e, out, strings);
             }
         }
         Expression::BinaryExpression(b) => {
-            gather_sink_spans_in_expression(&b.left, out);
-            gather_sink_spans_in_expression(&b.right, out);
+            gather_sink_spans_in_expression(&b.left, out, strings);
+            gather_sink_spans_in_expression(&b.right, out, strings);
         }
         Expression::LogicalExpression(l) => {
-            gather_sink_spans_in_expression(&l.left, out);
-            gather_sink_spans_in_expression(&l.right, out);
+            gather_sink_spans_in_expression(&l.left, out, strings);
+            gather_sink_spans_in_expression(&l.right, out, strings);
         }
         Expression::ConditionalExpression(c) => {
-            gather_sink_spans_in_expression(&c.test, out);
-            gather_sink_spans_in_expression(&c.consequent, out);
-            gather_sink_spans_in_expression(&c.alternate, out);
+            gather_sink_spans_in_expression(&c.test, out, strings);
+            gather_sink_spans_in_expression(&c.consequent, out, strings);
+            gather_sink_spans_in_expression(&c.alternate, out, strings);
         }
-        Expression::UnaryExpression(u) => gather_sink_spans_in_expression(&u.argument, out),
+        Expression::UnaryExpression(u) => {
+            gather_sink_spans_in_expression(&u.argument, out, strings)
+        }
         Expression::UpdateExpression(_) => {}
         Expression::ParenthesizedExpression(p) => {
-            gather_sink_spans_in_expression(&p.expression, out)
+            gather_sink_spans_in_expression(&p.expression, out, strings)
         }
         Expression::ArrayExpression(a) => {
             for el in &a.elements {
                 if let Some(e) = el.as_expression() {
-                    gather_sink_spans_in_expression(e, out);
+                    gather_sink_spans_in_expression(e, out, strings);
                 }
             }
         }
         Expression::ObjectExpression(o) => {
             for prop in &o.properties {
                 if let ObjectPropertyKind::ObjectProperty(p) = prop {
-                    gather_sink_spans_in_expression(&p.value, out);
+                    gather_sink_spans_in_expression(&p.value, out, strings);
                 }
             }
         }
         Expression::TemplateLiteral(t) => {
             for e in &t.expressions {
-                gather_sink_spans_in_expression(e, out);
+                gather_sink_spans_in_expression(e, out, strings);
             }
         }
         Expression::ArrowFunctionExpression(f) => {
             for s in &f.body.statements {
-                gather_sink_spans_in_statement(s, out);
+                gather_sink_spans_in_statement(s, out, strings);
             }
         }
         Expression::FunctionExpression(f) => {
             if let Some(body) = &f.body {
                 for s in &body.statements {
-                    gather_sink_spans_in_statement(s, out);
+                    gather_sink_spans_in_statement(s, out, strings);
                 }
             }
         }
-        Expression::StaticMemberExpression(m) => gather_sink_spans_in_expression(&m.object, out),
+        Expression::StaticMemberExpression(m) => {
+            gather_sink_spans_in_expression(&m.object, out, strings)
+        }
         Expression::ComputedMemberExpression(m) => {
-            gather_sink_spans_in_expression(&m.object, out);
-            gather_sink_spans_in_expression(&m.expression, out);
+            gather_sink_spans_in_expression(&m.object, out, strings);
+            gather_sink_spans_in_expression(&m.expression, out, strings);
         }
         Expression::ChainExpression(c) => {
             if let ChainElement::CallExpression(call) = &c.expression {
                 if callee_is_js_sink(call) {
                     push_span(out, call.span());
                 }
-                gather_sink_spans_in_expression(&call.callee, out);
+                gather_sink_spans_in_expression(&call.callee, out, strings);
                 for arg in &call.arguments {
                     if let Some(e) = arg.as_expression() {
-                        gather_sink_spans_in_expression(e, out);
+                        gather_sink_spans_in_expression(e, out, strings);
                     }
                 }
             }

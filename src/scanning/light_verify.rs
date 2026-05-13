@@ -135,6 +135,18 @@ pub async fn verify_dom_xss_light_with_client(
 
     let mut note: Option<String> = None;
     if let Ok(resp) = request.send().await {
+        // Browsers do not render the body of a 3xx response, so any apparent
+        // reflection/marker evidence inside that body cannot be exploited.
+        // Skip body-based verification entirely on redirects — `Location`
+        // header inspection is handled by `check_dom_verification`'s
+        // `check_redirect_location` and does not belong here.
+        if resp.status().is_redirection() {
+            return (
+                false,
+                None,
+                Some("3xx response — DOM verify skipped".to_string()),
+            );
+        }
         // Extract needed header values without cloning the entire HeaderMap
         let ct = resp
             .headers()

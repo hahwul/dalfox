@@ -184,6 +184,32 @@ async fn url_attribute_handler(Query(params): Query<HashMap<String, String>>) ->
     Html(format!("<iframe src=\"{}\"></iframe>", q))
 }
 
+/// Reflects the payload into `<img src=…>`. Modern browsers do not execute
+/// a `javascript:` URL in `img@src` (it's a resource fetch, not a
+/// navigation), so DOM verification must not promote this to Verified
+/// purely on the basis that the scheme reached the attribute value.
+async fn url_attribute_img_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
+    let q = params.get("q").cloned().unwrap_or_default();
+    Html(format!("<img src=\"{}\">", q))
+}
+
+/// Returns a 307 whose body echoes the payload verbatim. Browsers never render
+/// the body of a 3xx response, so this is the canonical "DOM evidence inside a
+/// redirect body" false-positive case — verification must not fire here.
+async fn redirect_body_echo_handler(
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let q = params.get("q").cloned().unwrap_or_default();
+    (
+        StatusCode::TEMPORARY_REDIRECT,
+        [
+            ("content-type", "text/html"),
+            ("location", "/dom/no-payload"),
+        ],
+        format!("<html><body><div>{}</div></body></html>", q),
+    )
+}
+
 async fn sxss_html_handler(State(state): State<TestState>) -> Html<String> {
     Html(format!("<div>{}</div>", state.stored_payload))
 }
@@ -201,6 +227,8 @@ async fn start_mock_server(stored_payload: &str) -> SocketAddr {
         .route("/dom/html", get(html_handler))
         .route("/dom/decoded", get(decoded_payload_handler))
         .route("/dom/url-attribute", get(url_attribute_handler))
+        .route("/dom/url-attribute-img", get(url_attribute_img_handler))
+        .route("/dom/redirect-body", get(redirect_body_echo_handler))
         .route("/dom/xhtml", get(xhtml_handler))
         .route("/dom/json", get(json_handler))
         .route("/dom/no-payload", get(html_without_payload_handler))
@@ -740,4 +768,44 @@ async fn test_check_dom_verification_accepts_decoded_payload_variant_with_marker
         body.unwrap_or_default()
             .contains(crate::scanning::markers::class_marker())
     );
+}
+
+#[tokio::test]
+async fn test_check_dom_verification_rejects_javascript_url_in_img_src() {
+    // `<img src="javascript:alert(1)">` is structurally not exploitable —
+    // browsers refuse the scheme on img@src. Verification must not fire.
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/dom/url-attribute-img");
+    let param = make_param();
+    let args = default_scan_args();
+
+    let (found, _body) =
+        check_dom_verification(&target, &param, "javascript:alert(1)", &args).await;
+    assert!(
+        !found,
+        "javascript: scheme reflected into img@src must not be a verified finding"
+    );
+}
+
+#[tokio::test]
+async fn test_check_dom_verification_skips_body_on_redirect_response() {
+    // A 307 whose body echoes the payload — body has marker, looks like
+    // text/html, would satisfy DOM evidence if naively parsed. Browsers
+    // never render a 3xx body, so verification must short-circuit on the
+    // redirect status without consulting the body.
+    let payload = format!(
+        "<img src=x onerror=alert(1) class={}>",
+        crate::scanning::markers::class_marker()
+    );
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/dom/redirect-body");
+    let param = make_param();
+    let args = default_scan_args();
+
+    let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
+    assert!(
+        !found,
+        "DOM evidence in a 3xx response body must not be treated as verified"
+    );
+    assert!(body.is_none(), "no body should be returned for redirects");
 }
