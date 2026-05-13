@@ -1601,7 +1601,18 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     let target_mutation_stats: Arc<Mutex<HashMap<String, Arc<crate::waf::bypass::MutationStats>>>> =
         Arc::new(Mutex::new(HashMap::new()));
 
-    let multi_pb: Option<Arc<MultiProgress>> = None;
+    // Enable the indicatif progress UI (per-target bar + per-host overall bar)
+    // when running interactive plain output. Indicatif writes to stderr, so
+    // JSON/JSONL stdout stays clean; gating on stderr-tty avoids dumping
+    // control codes into pipes/logfiles.
+    let multi_pb: Option<Arc<MultiProgress>> = if args.format == "plain"
+        && !args.silence
+        && std::io::IsTerminal::is_terminal(&std::io::stderr())
+    {
+        Some(Arc::new(MultiProgress::new()))
+    } else {
+        None
+    };
 
     // Group targets by host
     let mut host_groups: std::collections::HashMap<String, Vec<Target>> =
@@ -1920,9 +1931,11 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                     }
                 }
 
-                // Silence parameter analysis logs and progress; show spinner for single-target runs
+                // Silence parameter analysis logs and progress; show spinner for single-target runs.
+                // When multi_pb_clone is active, analyze_parameters renders its own indicatif
+                // spinner via that MultiProgress — skip the stdout spinner so we don't double up.
                 let current = analyze_idx_clone.fetch_add(1, Ordering::Relaxed) + 1;
-                let __analyze_spinner = if total_targets_copy == 1 {
+                let __analyze_spinner = if total_targets_copy == 1 && multi_pb_clone.is_none() {
                     start_spinner(
                         !args_clone.silence,
                         if total_targets_copy > 1 {
@@ -2380,11 +2393,14 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         let scan_idx = scan_idx.clone();
         let overall_done_clone = overall_done.clone();
         let group_handle = tokio::spawn(async move {
-            // Calculate total overall tasks for this group
+            // Calculate total overall tasks for this group. Must mirror what
+            // run_scanning actually increments — one tick per reflection
+            // payload, one per DOM payload — otherwise the overall bar rolls
+            // past 100% (the previous reflection-only count was the cause).
             let mut total_overall_tasks = 0u64;
             for target in &group {
                 for param in &target.reflection_params {
-                    let payloads = if let Some(context) = &param.injection_context {
+                    let reflection_payloads = if let Some(context) = &param.injection_context {
                         crate::scanning::xss_common::get_dynamic_payloads(context, &args_arc)
                             .unwrap_or_else(|_| vec![])
                     } else {
@@ -2394,7 +2410,10 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                         )
                         .unwrap_or_else(|_| vec![])
                     };
-                    total_overall_tasks += payloads.len() as u64;
+                    let dom_payloads = crate::scanning::get_dom_payloads(param, &args_arc)
+                        .unwrap_or_else(|_| vec![]);
+                    total_overall_tasks +=
+                        reflection_payloads.len() as u64 + dom_payloads.len() as u64;
                 }
             }
 
@@ -2404,10 +2423,11 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 let pb = mp.add(indicatif::ProgressBar::new(total_overall_tasks));
                 pb.set_style(
                     indicatif::ProgressStyle::default_bar()
-                        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} Overall scanning")
+                        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} ({per_sec}, ETA {eta}) Overall scanning")
                         .expect("valid progress bar template")
                         .progress_chars("#>-"),
                 );
+                pb.enable_steady_tick(Duration::from_millis(120));
                 Some(Arc::new(Mutex::new(pb)))
             } else {
                 None
@@ -2432,10 +2452,15 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 let total_targets_copy = total_targets;
                 let findings_count_target = findings_count_group.clone();
 
+                let multi_pb_active = multi_pb_clone_inner.is_some();
                 let target_handle = tokio::spawn(async move {
                     if !args_clone.skip_xss_scanning && !args_clone.only_discovery {
                         let __scan_spinner = {
-                            let enabled = !args_clone.silence && total_targets_copy == 1;
+                            // When the indicatif bar is active, run_scanning renders a
+                            // per-target progress bar with rate/ETA — suppress the stdout
+                            // spinner so we don't show two competing scan indicators.
+                            let enabled =
+                                !args_clone.silence && total_targets_copy == 1 && !multi_pb_active;
                             let current = scan_idx_clone.fetch_add(1, Ordering::Relaxed) + 1;
                             start_spinner(
                                 enabled,
