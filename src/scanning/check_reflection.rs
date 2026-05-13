@@ -389,6 +389,62 @@ fn payload_variants(payload: &str) -> Vec<String> {
     variants
 }
 
+/// Returns true when at least one occurrence of a payload variant (raw or
+/// HTML-entity-decoded form) sits inside a context where HTML entity
+/// escaping is *not* sufficient to neutralize the injection — namely
+/// `<script>` / `<style>` raw-text content or an HTML event-handler
+/// attribute (`on*=…`). When this returns `false`, the entity-escaped
+/// reflection is safe by construction and can be suppressed.
+fn html_entity_reflection_in_unsafe_context(html: &str, variants: &[String]) -> bool {
+    static SCRIPT_RE: OnceLock<Regex> = OnceLock::new();
+    static STYLE_RE: OnceLock<Regex> = OnceLock::new();
+    static EVENT_HANDLER_RE: OnceLock<Regex> = OnceLock::new();
+
+    let script_re = SCRIPT_RE
+        .get_or_init(|| Regex::new(r"(?is)<script\b[^>]*>(.*?)</script\s*>").expect("script regex"));
+    let style_re = STYLE_RE
+        .get_or_init(|| Regex::new(r"(?is)<style\b[^>]*>(.*?)</style\s*>").expect("style regex"));
+    let event_re = EVENT_HANDLER_RE.get_or_init(|| {
+        Regex::new(r#"(?is)\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)"#)
+            .expect("event handler regex")
+    });
+
+    let check_body = |body: &str| -> bool {
+        let decoded = decode_html_entities(body);
+        variants
+            .iter()
+            .any(|v| body.contains(v) || decoded.contains(v))
+    };
+
+    for cap in script_re.captures_iter(html) {
+        if let Some(body) = cap.get(1)
+            && check_body(body.as_str())
+        {
+            return true;
+        }
+    }
+    for cap in style_re.captures_iter(html) {
+        if let Some(body) = cap.get(1)
+            && check_body(body.as_str())
+        {
+            return true;
+        }
+    }
+    for cap in event_re.captures_iter(html) {
+        if let Some(val) = cap.get(1) {
+            let raw = val.as_str();
+            let inner = match raw.as_bytes() {
+                [b'"', .., b'"'] | [b'\'', .., b'\''] => &raw[1..raw.len() - 1],
+                _ => raw,
+            };
+            if check_body(inner) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 /// Determine if payload is reflected in any normalization variant.
 pub(crate) fn classify_reflection(resp_text: &str, payload: &str) -> Option<ReflectionKind> {
     // Direct match first (fast path — avoids payload_variants allocation)
@@ -399,12 +455,54 @@ pub(crate) fn classify_reflection(resp_text: &str, payload: &str) -> Option<Refl
     // Only build variant list when the fast path misses
     let payload_variants = payload_variants(payload);
 
-    let html_dec = decode_html_entities(resp_text);
+    // Non-raw payload variant present directly in the raw response — the
+    // server applied URL or HTML-entity decoding before reflecting. Without
+    // this fast path the entity-decoded check below would wrongly classify
+    // a server-side URL-decoded reflection (response holds the raw form)
+    // as `HtmlEntityDecoded` and then suppress it as safe escape, hiding a
+    // genuine reflection. `skip(1)` skips the original payload (already
+    // handled by the raw-match fast path above).
     if payload_variants
         .iter()
-        .any(|candidate| html_dec.contains(candidate))
+        .skip(1)
+        .any(|variant| resp_text.contains(variant))
     {
-        return Some(ReflectionKind::HtmlEntityDecoded);
+        return Some(ReflectionKind::UrlDecoded);
+    }
+
+    let html_dec = decode_html_entities(resp_text);
+    // Only treat as an entity-decoded reflection when the response actually
+    // changed under entity decoding. The previous predicate (variant present
+    // in `html_dec`) is true even when no entities were decoded — in which
+    // case `html_dec == resp_text` and the match is really a raw match.
+    if html_dec != resp_text
+        && payload_variants
+            .iter()
+            .any(|candidate| html_dec.contains(candidate))
+    {
+        // The payload only appears after HTML-entity decoding — the server
+        // applied entity escaping to the reflection. In ordinary HTML body
+        // / attribute-value context, the browser will keep the entities as
+        // literal characters and the payload cannot escape into executable
+        // code. We demote (return `None`) for those reflections so they no
+        // longer surface as R Info findings, mirroring the established rule
+        // that a properly escaped reflection is not a vulnerability.
+        //
+        // We keep the finding when the entity-encoded reflection lands in a
+        // context where escaping is *not* sufficient:
+        // - inside `<script>` / `<style>` raw-text content (JS/CSS parsers
+        //   do not decode HTML entities, but the source still passes
+        //   through the parser and the entities can interact with parsing
+        //   in surprising ways — keep as a signal for manual review),
+        // - inside an HTML event-handler attribute value (`on*=…`) where
+        //   the browser decodes the entities while building the value
+        //   *before* handing it to the JS parser.
+        if html_entity_reflection_in_unsafe_context(resp_text, &payload_variants) {
+            return Some(ReflectionKind::HtmlEntityDecoded);
+        }
+        // Fall through: check URL-decoded variants — an entity-escape on
+        // one occurrence does not rule out a different reflection point
+        // reached via URL decoding alone.
     }
 
     // Check URL decoded version of raw

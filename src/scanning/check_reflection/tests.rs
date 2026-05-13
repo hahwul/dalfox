@@ -296,9 +296,50 @@ fn test_classify_reflection_prefers_raw_match() {
 }
 
 #[test]
-fn test_is_payload_reflected_html_encoded() {
+fn test_is_payload_reflected_html_encoded_in_unsafe_context() {
+    // Entity-encoded reflection nested inside <script> — entities are not
+    // decoded by the JS parser but the source still passes through it, so
+    // the reflection is kept as an HtmlEntityDecoded finding for review.
     let payload = "<script>alert(1)</script>";
-    let resp = "prefix &#x3c;script&#x3e;alert(1)&#x3c;/script&#x3e; suffix";
+    let resp =
+        "<script>var x = '&#x3c;script&#x3e;alert(1)&#x3c;/script&#x3e;';</script>";
+    assert_eq!(
+        classify_reflection(resp, payload),
+        Some(ReflectionKind::HtmlEntityDecoded)
+    );
+}
+
+#[test]
+fn test_is_payload_reflected_html_encoded_in_safe_context_demoted() {
+    // Same payload, but reflected into HTML body — the browser keeps the
+    // entities as literal characters, the reflection is not exploitable,
+    // and classification must demote to `None` (no R Info noise).
+    let payload = "<script>alert(1)</script>";
+    let resp = "<div>prefix &#x3c;script&#x3e;alert(1)&#x3c;/script&#x3e; suffix</div>";
+    assert_eq!(classify_reflection(resp, payload), None);
+}
+
+#[test]
+fn test_is_payload_reflected_html_encoded_in_attribute_value_demoted() {
+    // Realistic shape of an Open Graph meta-tag reflecting the query string
+    // back with HTML-entity escaping. Both `&quot;` and `&lt;`/`&gt;` are
+    // present — the attribute value cannot be broken out of, so the
+    // reflection must demote.
+    let payload = "\">'><IMG src=x onerror=alert(1)>\"";
+    let resp = concat!(
+        "<meta property=\"og:url\" ",
+        "content=\"https://example.com/?s=&quot;&gt;&#39;&gt;&lt;IMG src=x onerror=alert(1)&gt;&quot;\">"
+    );
+    assert_eq!(classify_reflection(resp, payload), None);
+}
+
+#[test]
+fn test_is_payload_reflected_html_encoded_in_event_handler_kept() {
+    // The browser decodes entities inside an `on*=…` attribute value before
+    // handing the result to the JS parser, so entity escaping is not
+    // sufficient there — the reflection must remain visible.
+    let payload = "alert(1)";
+    let resp = "<button onclick=\"&#x61;lert&#40;1&#41;\">x</button>";
     assert_eq!(
         classify_reflection(resp, payload),
         Some(ReflectionKind::HtmlEntityDecoded)
@@ -369,8 +410,12 @@ fn test_is_payload_reflected_negative() {
 
 #[test]
 fn test_is_payload_reflected_html_named_uppercase() {
+    // Uppercase named entities must still decode for classification. Placed
+    // inside `<style>` so the unsafe-context gate keeps the reflection
+    // visible — body-context placement would be demoted (covered by the
+    // safe-context test above).
     let payload = "<svg onload=alert(1)>";
-    let resp = "prefix &LT;svg onload=alert(1)&GT; suffix";
+    let resp = "<style>body::before{content:'&LT;svg onload=alert(1)&GT;'}</style>";
     assert_eq!(
         classify_reflection(resp, payload),
         Some(ReflectionKind::HtmlEntityDecoded)
@@ -390,7 +435,11 @@ async fn test_check_reflection_detects_raw_response() {
 }
 
 #[tokio::test]
-async fn test_check_reflection_detects_html_entity_response() {
+async fn test_check_reflection_demotes_html_entity_response_in_safe_context() {
+    // The mock handler entity-encodes the payload and reflects it into a
+    // plain `<div>` — a safe HTML body context. Entity escaping makes the
+    // reflection inert, so classification must demote to `None` and
+    // `check_reflection` must report no reflection found.
     let payload = "<img src=x onerror=alert(1)>";
     let addr = start_mock_server("stored").await;
     let target = make_target(addr, "/reflect/html-entity");
@@ -398,7 +447,10 @@ async fn test_check_reflection_detects_html_entity_response() {
     let args = default_scan_args();
 
     let found = check_reflection(&target, &param, payload, &args).await;
-    assert!(found, "entity-encoded reflection should be detected");
+    assert!(
+        !found,
+        "entity-encoded reflection inside a safe body context should be demoted"
+    );
 }
 
 #[tokio::test]
@@ -466,7 +518,11 @@ async fn test_check_reflection_returns_false_when_not_reflected() {
 }
 
 #[tokio::test]
-async fn test_check_reflection_with_response_reports_kind_and_body() {
+async fn test_check_reflection_with_response_demotes_safe_html_entity_reflection() {
+    // The handler entity-encodes the payload into HTML body — a safe
+    // context. Classification must return `None` while the actual response
+    // body is still returned (callers may need it for AST analysis even
+    // when the reflection itself is not exploitable).
     let payload = "<script>alert(1)</script>";
     let addr = start_mock_server("stored").await;
     let target = make_target(addr, "/reflect/html-entity");
@@ -474,8 +530,14 @@ async fn test_check_reflection_with_response_reports_kind_and_body() {
     let args = default_scan_args();
 
     let (kind, body) = check_reflection_with_response(&target, &param, payload, &args).await;
-    assert_eq!(kind, Some(ReflectionKind::HtmlEntityDecoded));
-    assert!(body.unwrap_or_default().contains("&lt;script&gt;"));
+    assert_eq!(
+        kind, None,
+        "safe-context entity reflection must not produce a reflection kind"
+    );
+    assert!(
+        body.unwrap_or_default().contains("&lt;script&gt;"),
+        "response body should still be propagated to callers"
+    );
 }
 
 #[tokio::test]
