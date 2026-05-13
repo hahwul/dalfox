@@ -152,10 +152,45 @@ fn payload_is_executable_url_protocol(payload: &str) -> bool {
         || starts_with_ascii_ci(trimmed, "vbscript:")
 }
 
-fn is_dangerous_attr(name: &str) -> bool {
-    ["href", "src", "data", "action", "formaction", "xlink:href"]
-        .iter()
-        .any(|&attr| name.eq_ignore_ascii_case(attr))
+/// Decide whether an `(element, attribute)` pair is a real navigation /
+/// embedding sink for an executable URL scheme (`javascript:`, `data:`,
+/// `vbscript:`).
+///
+/// The previous attribute-only check treated every `src=` / `href=` as
+/// equally dangerous, which over-counts attributes whose URL value the
+/// browser refuses to honour as an executable scheme. The most common
+/// regression is `<img src="javascript:…">`: modern browsers ignore the
+/// scheme on `img@src` (the request is a fetch for an image resource, not
+/// a navigation), so verifying that case produces a High-severity finding
+/// that is structurally not exploitable.
+///
+/// The whitelist below names only attributes a browser will actually
+/// dereference as a top-level navigation, frame load, form submit, or
+/// resource fetch where `javascript:` runs as code:
+///
+/// - `a/@href`, `area/@href`, `base/@href`, `link/@href` — navigation
+/// - `iframe/@src`, `embed/@src`, `frame/@src` — frame load
+/// - `iframe/@srcdoc` — HTML embedded in iframe
+/// - `object/@data` — plugin / embed
+/// - `form/@action`, `input/@formaction`, `button/@formaction` — submit
+/// - `xlink:href` on SVG `<a>` / `<use>` — SVG navigation / external load
+///
+/// Attributes deliberately omitted: `img/@src`, `audio/@src`, `video/@src`,
+/// `source/@src`, `script/@src`, `track/@src` (all of which fetch a
+/// resource rather than execute the URL as code).
+fn is_executable_url_attribute(element_tag: &str, attr_name: &str) -> bool {
+    let attr = attr_name.to_ascii_lowercase();
+    let tag = element_tag.to_ascii_lowercase();
+    match attr.as_str() {
+        "href" => matches!(tag.as_str(), "a" | "area" | "base" | "link"),
+        "src" => matches!(tag.as_str(), "iframe" | "embed" | "frame"),
+        "srcdoc" => tag == "iframe",
+        "data" => tag == "object",
+        "action" => tag == "form",
+        "formaction" => matches!(tag.as_str(), "input" | "button"),
+        "xlink:href" => matches!(tag.as_str(), "a" | "use"),
+        _ => false,
+    }
 }
 
 fn has_executable_url_attribute_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
@@ -167,8 +202,10 @@ fn has_executable_url_attribute_evidence_in_doc(payload: &str, document: &scrape
     let selector = selectors::universal();
 
     document.select(selector).any(|node| {
+        let tag = node.value().name();
         node.value().attrs().any(|(name, value)| {
-            is_dangerous_attr(name) && value.trim().eq_ignore_ascii_case(payload_trimmed)
+            is_executable_url_attribute(tag, name)
+                && value.trim().eq_ignore_ascii_case(payload_trimmed)
         })
     })
 }
