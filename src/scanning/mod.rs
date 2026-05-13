@@ -39,6 +39,7 @@ use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, Semaphore};
 
 /// Maximum number of WAF mutation variants generated per base payload.
@@ -136,7 +137,7 @@ fn get_js_breakout_payloads() -> Vec<String> {
     payloads
 }
 
-fn get_dom_payloads(
+pub(crate) fn get_dom_payloads(
     param: &Param,
     args: &ScanArgs,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
@@ -541,7 +542,11 @@ pub async fn run_scanning(
             }
         }
 
-        total_tasks += reflection_payloads.len() as u64 * (1 + dom_payloads.len() as u64);
+        // One pb.inc(1) per reflection payload (line ~770) plus one per DOM
+        // payload (lines ~904 / ~988). The previous `len * (1 + len)` formula
+        // overcounted by orders of magnitude, which made `{eta}` meaningless
+        // (it would project hours for a sub-minute scan).
+        total_tasks += reflection_payloads.len() as u64 + dom_payloads.len() as u64;
         param_jobs.push((param.clone(), reflection_payloads, dom_payloads));
     }
 
@@ -550,11 +555,12 @@ pub async fn run_scanning(
         pb.set_style(
             ProgressStyle::default_bar()
                 .template(
-                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} {msg}",
+                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} ({per_sec}, ETA {eta}) {msg}",
                 )
                 .expect("valid progress bar template")
                 .progress_chars("#>-"),
         );
+        pb.enable_steady_tick(Duration::from_millis(120));
         pb.set_message(format!("Scanning {}", target.url));
         Some(pb)
     } else {

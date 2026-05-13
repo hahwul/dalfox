@@ -734,7 +734,8 @@ pub async fn analyze_parameters(
     }
     target.reflection_params = probed;
 
-    // Logging parameter analysis (stderr)
+    // Logging parameter analysis (stderr). When an indicatif spinner is active,
+    // route through `pb.println` so the redraw doesn't shred each log line.
     if !args.silence {
         for p in &target.reflection_params {
             let valid = p
@@ -747,10 +748,15 @@ pub async fn analyze_parameters(
                 .as_ref()
                 .map(|v| v.iter().collect::<String>())
                 .unwrap_or_else(|| "-".to_string());
-            eprintln!(
+            let line = format!(
                 "[param-analysis] name={} type={:?} reflected=true context={:?} valid_specials=\"{}\" invalid_specials=\"{}\"",
                 p.name, p.location, p.injection_context, valid, invalid
             );
+            if let Some(ref pb) = pb {
+                pb.println(line);
+            } else {
+                eprintln!("{}", line);
+            }
         }
     }
 
