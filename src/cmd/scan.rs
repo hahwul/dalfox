@@ -2386,6 +2386,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             tokio::sync::mpsc::unbounded_channel::<crate::scanning::result::Result>();
         let multi_pb_for_printer = multi_pb.clone();
         let poc_type = args.poc_type.clone();
+        let printer_nc = nc;
         let handle = tokio::spawn(async move {
             let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
             while let Some(result) = rx.recv().await {
@@ -2404,17 +2405,21 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 }
                 let poc_line = generate_poc(&result, &poc_type);
                 let trimmed = poc_line.trim_end();
-                let colored = match result.result_type {
-                    FindingType::Verified => format!("\x1b[31m{}\x1b[0m", trimmed),
-                    FindingType::Reflected => format!("\x1b[33m{}\x1b[0m", trimmed),
-                    FindingType::AstDetected => format!("\x1b[35m{}\x1b[0m", trimmed),
+                let line = if printer_nc {
+                    trimmed.to_string()
+                } else {
+                    match result.result_type {
+                        FindingType::Verified => format!("\x1b[31m{}\x1b[0m", trimmed),
+                        FindingType::Reflected => format!("\x1b[33m{}\x1b[0m", trimmed),
+                        FindingType::AstDetected => format!("\x1b[35m{}\x1b[0m", trimmed),
+                    }
                 };
                 // Route through MultiProgress when present so the line is
                 // emitted above the spinner bars without garbling them.
                 if let Some(ref mp) = multi_pb_for_printer {
-                    let _ = mp.println(&colored);
+                    let _ = mp.println(&line);
                 } else {
-                    println!("{}", colored);
+                    println!("{}", line);
                 }
             }
         });

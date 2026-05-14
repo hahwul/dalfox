@@ -627,9 +627,13 @@ pub async fn run_scanning(
             // Stream every new finding through the channel (if provided) before it's
             // batched into the shared results — so the CLI can print POC lines while
             // the scan is still running instead of waiting for the end-of-scan flush.
+            // The printer only needs metadata (type/url/param/payload), so drop the
+            // (potentially large) HTTP response body from the clone we send.
             let stream_finding = |r: &crate::scanning::result::Result| {
                 if let Some(tx) = finding_tx_clone.as_ref() {
-                    let _ = tx.send(r.clone());
+                    let mut light = r.clone();
+                    light.response = None;
+                    let _ = tx.send(light);
                 }
             };
             let mut local_ast_seen: HashSet<String> = HashSet::new();
