@@ -415,6 +415,7 @@ fn ast_source_uses_browser_url_surface(source: &str) -> bool {
         || source.contains("event.oldValue")
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_scanning(
     target: &Target,
     args: Arc<ScanArgs>,
