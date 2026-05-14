@@ -53,3 +53,75 @@ impl fmt::Display for JobStatus {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn job_status_display_matches_lowercase_variant_name() {
+        assert_eq!(JobStatus::Queued.to_string(), "queued");
+        assert_eq!(JobStatus::Running.to_string(), "running");
+        assert_eq!(JobStatus::Done.to_string(), "done");
+        assert_eq!(JobStatus::Error.to_string(), "error");
+        assert_eq!(JobStatus::Cancelled.to_string(), "cancelled");
+    }
+
+    /// The Display impl and the `#[serde(rename_all = "lowercase")]`
+    /// representation must agree — REST and MCP clients parse the JSON
+    /// form, and CLI logs print the Display form. Drift between them
+    /// would silently break consumers that compare the two strings.
+    #[test]
+    fn job_status_serde_matches_display() {
+        let variants = [
+            JobStatus::Queued,
+            JobStatus::Running,
+            JobStatus::Done,
+            JobStatus::Error,
+            JobStatus::Cancelled,
+        ];
+        for v in variants {
+            let json = serde_json::to_string(&v).unwrap();
+            // serde_json wraps the variant name in quotes.
+            assert_eq!(json, format!("\"{}\"", v));
+            let round: JobStatus = serde_json::from_str(&json).unwrap();
+            assert_eq!(round, v);
+        }
+    }
+
+    #[test]
+    fn job_status_deserializes_from_lowercase_string() {
+        let s: JobStatus = serde_json::from_str("\"queued\"").unwrap();
+        assert_eq!(s, JobStatus::Queued);
+        let s: JobStatus = serde_json::from_str("\"cancelled\"").unwrap();
+        assert_eq!(s, JobStatus::Cancelled);
+    }
+
+    #[test]
+    fn job_status_rejects_unknown_variant() {
+        assert!(serde_json::from_str::<JobStatus>("\"finished\"").is_err());
+    }
+
+    /// Error code string values are part of the wire contract (JSON
+    /// output reaches CLI scripts, REST clients, and MCP). Lock the
+    /// exact strings so an accidental rename causes a test failure
+    /// rather than a silent break.
+    #[test]
+    fn error_code_constants_have_stable_string_values() {
+        assert_eq!(error_codes::NO_TARGETS, "NO_TARGETS");
+        assert_eq!(error_codes::NO_FILE, "NO_FILE");
+        assert_eq!(error_codes::INVALID_INPUT_TYPE, "INVALID_INPUT_TYPE");
+        assert_eq!(error_codes::PARSE_ERROR, "PARSE_ERROR");
+        assert_eq!(error_codes::FILE_READ_ERROR, "FILE_READ_ERROR");
+        assert_eq!(error_codes::STDIN_ERROR, "STDIN_ERROR");
+        assert_eq!(error_codes::CONNECTION_FAILED, "CONNECTION_FAILED");
+        assert_eq!(
+            error_codes::CONTENT_TYPE_MISMATCH,
+            "CONTENT_TYPE_MISMATCH"
+        );
+        assert_eq!(
+            error_codes::TRUNCATED_PER_HOST_CAP,
+            "TRUNCATED_PER_HOST_CAP"
+        );
+    }
+}
