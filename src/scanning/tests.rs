@@ -517,6 +517,7 @@ async fn test_xss_scanning_get_query() {
         None,
         Arc::new(AtomicUsize::new(0)),
         None,
+        None,
     )
     .await;
 
@@ -609,6 +610,7 @@ async fn test_xss_scanning_post_body() {
         None,
         None,
         Arc::new(AtomicUsize::new(0)),
+        None,
         None,
     )
     .await;
@@ -716,6 +718,7 @@ async fn test_run_scanning_with_reflection_params() {
         None,
         Arc::new(AtomicUsize::new(0)),
         None,
+        None,
     )
     .await;
 }
@@ -802,6 +805,7 @@ async fn test_run_scanning_empty_params() {
         None,
         None,
         Arc::new(AtomicUsize::new(0)),
+        None,
         None,
     )
     .await;

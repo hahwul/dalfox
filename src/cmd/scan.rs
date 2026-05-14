@@ -2376,6 +2376,53 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // Semaphore for limiting concurrent targets across all hosts
     let global_semaphore = Arc::new(tokio::sync::Semaphore::new(args.max_concurrent_targets));
 
+    // Streaming finding output: print each [POC] line as soon as it is found
+    // instead of waiting for the end-of-scan flush. Only enabled for the
+    // plain text format — JSON/SARIF/TOML output is built once at the end
+    // and would break if we wrote ad-hoc lines into its stream.
+    let stream_findings_enabled = args.format == "plain";
+    let (finding_tx, finding_printer_handle) = if stream_findings_enabled {
+        let (tx, mut rx) =
+            tokio::sync::mpsc::unbounded_channel::<crate::scanning::result::Result>();
+        let multi_pb_for_printer = multi_pb.clone();
+        let poc_type = args.poc_type.clone();
+        let handle = tokio::spawn(async move {
+            let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+            while let Some(result) = rx.recv().await {
+                // Deduplicate on (type, url, param, payload) so the same
+                // finding emitted along two code paths (e.g. JS-context V
+                // upgrade and DOM verification) only prints once.
+                let key = format!(
+                    "{}|{}|{}|{}",
+                    result.result_type.short(),
+                    result.data,
+                    result.param,
+                    result.payload,
+                );
+                if !seen.insert(key) {
+                    continue;
+                }
+                let poc_line = generate_poc(&result, &poc_type);
+                let trimmed = poc_line.trim_end();
+                let colored = match result.result_type {
+                    FindingType::Verified => format!("\x1b[31m{}\x1b[0m", trimmed),
+                    FindingType::Reflected => format!("\x1b[33m{}\x1b[0m", trimmed),
+                    FindingType::AstDetected => format!("\x1b[35m{}\x1b[0m", trimmed),
+                };
+                // Route through MultiProgress when present so the line is
+                // emitted above the spinner bars without garbling them.
+                if let Some(ref mp) = multi_pb_for_printer {
+                    let _ = mp.println(&colored);
+                } else {
+                    println!("{}", colored);
+                }
+            }
+        });
+        (Some(tx), Some(handle))
+    } else {
+        (None, None)
+    };
+
     let mut group_handles = vec![];
 
     for (host, group) in host_groups {
@@ -2389,6 +2436,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         let args_arc = Arc::new(args.clone());
         let results_clone = results.clone();
         let findings_count_group = findings_count.clone();
+        let finding_tx_group = finding_tx.clone();
 
         let scan_idx = scan_idx.clone();
         let overall_done_clone = overall_done.clone();
@@ -2451,6 +2499,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 let scan_idx_clone = scan_idx.clone();
                 let total_targets_copy = total_targets;
                 let findings_count_target = findings_count_group.clone();
+                let finding_tx_target = finding_tx_group.clone();
 
                 let multi_pb_active = multi_pb_clone_inner.is_some();
                 let target_handle = tokio::spawn(async move {
@@ -2482,6 +2531,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                             overall_pb_clone,
                             findings_count_target,
                             None,
+                            finding_tx_target,
                         )
                         .await;
                         if let Some((tx, done_rx)) = __scan_spinner {
@@ -2517,6 +2567,15 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         {
             break;
         }
+    }
+
+    // Close the streaming channel by dropping the last live sender, then
+    // wait for the printer task to drain any in-flight findings. Without
+    // this, the printer would either leak (if we forgot to drop tx) or
+    // race with end-of-scan output.
+    drop(finding_tx);
+    if let Some(handle) = finding_printer_handle {
+        let _ = handle.await;
     }
 
     if args.format == "plain" && !args.silence && total_targets > 1 {

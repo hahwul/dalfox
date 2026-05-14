@@ -599,6 +599,7 @@ async fn run_scan_job(
                         None,
                         param_counter.clone(),
                         Some(cancel_flag.clone()),
+                        None,
                     )
                     .await;
                 })
