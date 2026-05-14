@@ -242,6 +242,7 @@ impl DalfoxMcp {
                             None,
                             param_counter.clone(),
                             Some(cancel_flag.clone()),
+                            None,
                         )
                         .await;
                     })

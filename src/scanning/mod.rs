@@ -415,6 +415,7 @@ fn ast_source_uses_browser_url_surface(source: &str) -> bool {
         || source.contains("event.oldValue")
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn run_scanning(
     target: &Target,
     args: Arc<ScanArgs>,
@@ -423,6 +424,7 @@ pub async fn run_scanning(
     overall_pb: Option<Arc<Mutex<indicatif::ProgressBar>>>,
     findings_count: Arc<AtomicUsize>,
     cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+    finding_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::scanning::result::Result>>,
 ) {
     // Short-circuit scanning when skip_xss_scanning is enabled (e.g., in unit tests)
     if args.skip_xss_scanning {
@@ -614,6 +616,7 @@ pub async fn run_scanning(
         let findings_count_clone = findings_count.clone();
         let limit_result_type_clone = limit_result_type.clone();
         let cancel_clone = cancel.clone();
+        let finding_tx_clone = finding_tx.clone();
 
         let handle = tokio::spawn(async move {
             let _permit = semaphore_clone
@@ -622,6 +625,18 @@ pub async fn run_scanning(
                 .expect("semaphore closed unexpectedly");
             // Batch local results to reduce mutex contention
             let mut local_results: Vec<crate::scanning::result::Result> = Vec::new();
+            // Stream every new finding through the channel (if provided) before it's
+            // batched into the shared results — so the CLI can print POC lines while
+            // the scan is still running instead of waiting for the end-of-scan flush.
+            // The printer only needs metadata (type/url/param/payload), so drop the
+            // (potentially large) HTTP response body from the clone we send.
+            let stream_finding = |r: &crate::scanning::result::Result| {
+                if let Some(tx) = finding_tx_clone.as_ref() {
+                    let mut light = r.clone();
+                    light.response = None;
+                    let _ = tx.send(light);
+                }
+            };
             let mut local_ast_seen: HashSet<String> = HashSet::new();
             let mut ast_analysis_done = false;
             let mut reflection_found_locally = false;
@@ -677,6 +692,9 @@ pub async fn run_scanning(
                     &mut local_ast_seen,
                 )
                 .await;
+                for f in &ast_findings {
+                    stream_finding(f);
+                }
                 local_results.extend(ast_findings);
             }
 
@@ -769,6 +787,9 @@ pub async fn run_scanning(
                         &mut local_ast_seen,
                     )
                     .await;
+                    for f in &ast_findings {
+                        stream_finding(f);
+                    }
                     local_results.extend(ast_findings);
                 }
 
@@ -871,6 +892,7 @@ pub async fn run_scanning(
                         ));
                         result.response = reflection_response_text;
 
+                        stream_finding(&result);
                         // Defer pushing to shared results (batched)
                         local_results.push(result);
                     }
@@ -983,6 +1005,7 @@ pub async fn run_scanning(
                         ));
                         result.response = response_text;
 
+                        stream_finding(&result);
                         // Defer pushing to shared results (batched)
                         local_results.push(result);
                         break;
@@ -1058,6 +1081,7 @@ pub async fn run_scanning(
                                     ),
                                 );
                                 result.response = response_text;
+                                stream_finding(&result);
                                 local_results.push(result);
                                 break 'hpp_outer; // One HPP finding per param is enough
                             }
