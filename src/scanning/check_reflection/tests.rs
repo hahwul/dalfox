@@ -569,11 +569,75 @@ async fn test_check_reflection_sxss_uses_secondary_url() {
     assert!(found, "sxss mode should verify reflection via sxss_url");
 }
 
+/// Regression: in SXSS mode the retrieval loop used to return the first
+/// non-empty body without verifying the payload was in it. When the highest-
+/// priority candidate (form_origin_url) returns an unrelated page (login
+/// redirect, empty list, etc.) the loop exited before trying form_action_url
+/// or target.url — even when those URLs contained the stored payload. Each
+/// candidate body must now be classified before we give up.
+#[tokio::test]
+async fn test_check_reflection_sxss_skips_junk_url_and_finds_later_candidate() {
+    let payload = "STORED_XSS_PAYLOAD";
+    let addr = start_mock_server(payload).await;
+    // Injection target points at /reflect/none, but the stored payload only
+    // surfaces at /sxss/stored. form_origin_url points at a junk URL
+    // (/reflect/none returns "<div>not reflected</div>") and form_action_url
+    // is the real retrieval URL. The fix must continue past the junk URL.
+    let target = make_target(addr, "/reflect/none");
+    let mut param = make_param();
+    param.form_origin_url = Some(format!("http://{}:{}/reflect/none", addr.ip(), addr.port()));
+    param.form_action_url = Some(format!("http://{}:{}/sxss/stored", addr.ip(), addr.port()));
+    let mut args = default_scan_args();
+    args.sxss = true;
+    args.sxss_url = None;
+    // Single retry per candidate keeps the test fast.
+    args.sxss_retries = 1;
+
+    let found = check_reflection(&target, &param, payload, &args).await;
+    assert!(
+        found,
+        "sxss retrieval must continue past a candidate URL whose body lacks the payload"
+    );
+}
+
+/// Inline-stored sink: the write-response body itself renders the stored
+/// value (think POST /comments returning the rendered /comments page).
+/// None of the retrieval URLs surface the payload, but the inject response
+/// does — the SXSS path must catch this via the inject-body fallback.
+#[tokio::test]
+async fn test_check_reflection_sxss_falls_back_to_inject_response_body() {
+    let payload = "STORED_XSS_PAYLOAD";
+    let addr = start_mock_server("ignored").await;
+    // target.url is /reflect/raw, which echoes the q param back in its
+    // body. The inject GET to /reflect/raw?q=PAYLOAD therefore returns a
+    // body containing the payload. The SXSS retrieval candidates all fail
+    // to surface it (the original target.url uses q=seed, form_origin_url
+    // points at /reflect/none).
+    let target = make_target(addr, "/reflect/raw");
+    let mut param = make_param();
+    param.form_origin_url = Some(format!("http://{}:{}/reflect/none", addr.ip(), addr.port()));
+    let mut args = default_scan_args();
+    args.sxss = true;
+    args.sxss_url = None;
+    args.sxss_retries = 1;
+
+    let found = check_reflection(&target, &param, payload, &args).await;
+    assert!(
+        found,
+        "sxss must fall back to the inject-response body when retrieval URLs miss the payload"
+    );
+}
+
 #[tokio::test]
 async fn test_check_reflection_sxss_without_url_returns_false() {
     let payload = "STORED_XSS_PAYLOAD";
     let addr = start_mock_server(payload).await;
-    let target = make_target(addr, "/reflect/raw");
+    // Point target at a handler that does NOT echo the query param, so
+    // neither the retrieval fallback (GET target.url) nor the inject-body
+    // fallback surface the payload. This isolates the "no SXSS signal
+    // anywhere" case — distinct from the inline-stored-sink fallback test
+    // above, which deliberately uses /reflect/raw to exercise the fallback.
+    let target = make_target(addr, "/reflect/none");
     let param = make_param();
     let mut args = default_scan_args();
     args.sxss = true;

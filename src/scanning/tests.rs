@@ -19,6 +19,15 @@ fn make_result(ft: FindingType) -> crate::scanning::result::Result {
 }
 
 #[test]
+fn test_inject_type_label_for_sxss() {
+    // Pins the public JSON contract — downstream tooling parses
+    // `inject_type` to distinguish stored from reflected findings.
+    // Changes to these strings break consumers; bump intentionally.
+    assert_eq!(super::inject_type_label_for(false), "inHTML");
+    assert_eq!(super::inject_type_label_for(true), "sxss-inHTML");
+}
+
+#[test]
 fn test_count_matching_results_all() {
     let results = vec![
         make_result(FindingType::Verified),
