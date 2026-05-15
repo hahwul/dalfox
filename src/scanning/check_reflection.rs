@@ -881,7 +881,22 @@ async fn fetch_injection_response_with_client(
     // returned a non-empty body, return that body. Callers downstream will
     // run classify_reflection again and conclude "no reflection" — same
     // outcome as before, but only after every URL had a fair chance.
+    //
+    // Inline-stored sinks: many stored sinks (comment boxes, profile
+    // updaters, message composers) render the payload directly into the
+    // write-response body — i.e. the same response we already have in hand
+    // from the injection request. If retrieval URLs don't surface the
+    // payload, classify the inject body before giving up.
     if args.sxss {
+        // Eagerly consume the injection response body so we can use it as
+        // an inline-rendered fallback. We drop status/headers because the
+        // retrieval-URL path doesn't gate on them either, and we want
+        // consistent SXSS evidence semantics.
+        let inject_body: Option<String> = match inject_resp {
+            Ok(resp) => resp.text().await.ok().filter(|t| !t.is_empty()),
+            Err(_) => None,
+        };
+
         let check_urls = resolve_sxss_check_urls(target, param, args);
         let retries = args.sxss_retries.max(1) as u64;
         let mut fallback_body: Option<String> = None;
@@ -909,7 +924,16 @@ async fn fetch_injection_response_with_client(
                 }
             }
         }
-        fallback_body
+        // Inline-stored sink fallback: the inject response body itself often
+        // renders the stored value (e.g. POST /comments returns the rendered
+        // /comments page). Without this check we'd miss the entire class
+        // of sinks where the write-response is the rendered view.
+        if let Some(body) = inject_body.as_ref()
+            && classify_reflection(body, payload).is_some()
+        {
+            return inject_body;
+        }
+        fallback_body.or(inject_body)
     } else {
         // Normal reflection check
         if let Ok(resp) = inject_resp {
