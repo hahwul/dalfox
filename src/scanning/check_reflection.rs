@@ -577,26 +577,69 @@ fn marker_case_fold_reflected(resp_text: &str, payload: &str) -> bool {
     let id_marker = crate::scanning::markers::id_marker();
     let candidates: [&str; 3] = [class_marker, id_marker, "dalfox"];
 
-    let mut payload_carries_any = false;
+    // Cheap reject — fast-fail before touching response bytes when the
+    // payload carries no marker at all. classify_reflection runs once
+    // per payload variant per response, so the hot-path cost of this
+    // fallback must stay near a few substring scans on payload itself.
+    let mut carried: [&str; 3] = [""; 3];
+    let mut carried_len = 0usize;
     for marker in &candidates {
         if payload.contains(*marker) {
-            payload_carries_any = true;
-            // Same-case marker already in response — let the standard
-            // reflection / marker-evidence paths handle it and avoid
-            // re-classifying as case-folded.
-            if resp_text.contains(*marker) {
-                return false;
-            }
+            carried[carried_len] = *marker;
+            carried_len += 1;
         }
     }
-    if !payload_carries_any {
+    if carried_len == 0 {
         return false;
     }
 
-    let lower_resp = resp_text.to_ascii_lowercase();
-    candidates
+    // Same-case marker already in response — let the standard
+    // reflection / marker-evidence paths handle it and avoid
+    // re-classifying as case-folded.
+    for marker in carried[..carried_len].iter() {
+        if resp_text.contains(*marker) {
+            return false;
+        }
+    }
+
+    // Case-insensitive substring search over response bytes without
+    // allocating a lowercased copy. Markers are short (~11 bytes), so
+    // O(n*m) is fine here while avoiding the per-call String alloc
+    // that the naive `to_ascii_lowercase().contains(...)` shape costs
+    // on every redundant fallback invocation.
+    carried[..carried_len]
         .iter()
-        .any(|m| payload.contains(*m) && lower_resp.contains(*m))
+        .any(|m| ascii_ci_contains(resp_text, m))
+}
+
+/// True iff `needle` appears in `haystack` under ASCII case-fold,
+/// without allocating a lowercased copy of either string.
+fn ascii_ci_contains(haystack: &str, needle: &str) -> bool {
+    let h = haystack.as_bytes();
+    let n = needle.as_bytes();
+    if n.is_empty() {
+        return true;
+    }
+    if n.len() > h.len() {
+        return false;
+    }
+    let first = n[0].to_ascii_lowercase();
+    let end = h.len() - n.len();
+    let mut i = 0;
+    'outer: while i <= end {
+        if h[i].to_ascii_lowercase() != first {
+            i += 1;
+            continue;
+        }
+        for j in 1..n.len() {
+            if !h[i + j].eq_ignore_ascii_case(&n[j]) {
+                i += 1;
+                continue 'outer;
+            }
+        }
+        return true;
+    }
+    false
 }
 
 /// Resolve SXSS check URLs with priority:
