@@ -115,10 +115,7 @@ mod tests {
         assert_eq!(error_codes::FILE_READ_ERROR, "FILE_READ_ERROR");
         assert_eq!(error_codes::STDIN_ERROR, "STDIN_ERROR");
         assert_eq!(error_codes::CONNECTION_FAILED, "CONNECTION_FAILED");
-        assert_eq!(
-            error_codes::CONTENT_TYPE_MISMATCH,
-            "CONTENT_TYPE_MISMATCH"
-        );
+        assert_eq!(error_codes::CONTENT_TYPE_MISMATCH, "CONTENT_TYPE_MISMATCH");
         assert_eq!(
             error_codes::TRUNCATED_PER_HOST_CAP,
             "TRUNCATED_PER_HOST_CAP"
