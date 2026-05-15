@@ -876,9 +876,19 @@ async fn fetch_injection_response_with_client(
                 && let Some(location) = resp.headers().get("location").and_then(|v| v.to_str().ok())
                 && (location.contains(&*encoded_payload) || location.contains(payload))
             {
-                // Synthesize a response text that includes the Location value
-                // so reflection detection can find it
-                return Some(location.to_string());
+                // Wrap the Location value in a minimal HTML container so the
+                // downstream reflection check still finds the payload via
+                // substring match, but the JS-context AST verifier cannot
+                // parse the synthesized text as JavaScript and wrongly
+                // upgrade the finding to V. Without the wrapper, a literal
+                // `Location: javascript:alert(1)` becomes a freestanding
+                // expression statement that the oxc parser accepts, which
+                // triggered V on redirects that no browser ever follows
+                // (browsers refuse `javascript:` / `data:` schemes in 3xx
+                // `Location:` headers). The wrapper starts with `<html>`,
+                // which fails JS parsing cleanly, so reflection-finding
+                // R is preserved while the false V upgrade is blocked.
+                return Some(format!("<html><body>{}</body></html>", location));
             }
             match resp.text().await {
                 Ok(body) => Some(body),

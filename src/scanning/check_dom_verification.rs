@@ -625,37 +625,24 @@ async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> (bool, Opt
     (false, None)
 }
 
-/// Check if a redirect Location header contains evidence of payload injection.
 /// Inspect a redirect's `Location:` header for evidence that the payload
 /// itself drives the navigation.
 ///
-/// Only one case is treated as DOM-verified: the payload is an executable URL
-/// scheme (`javascript:`, `data:text/html`, `vbscript:`) **and** the response
-/// is redirecting the browser to that exact URL. Browsers honour these schemes
-/// in `Location:` (some still navigate the URL bar to it), so the payload
-/// reaches a real execution sink.
+/// Returns `None` in every case today: modern browsers (Chrome, Firefox,
+/// Safari, all Chromium derivatives) refuse to navigate to `javascript:`,
+/// `data:text/html`, and `vbscript:` URLs supplied via a 3xx `Location:`
+/// header — the redirect is silently dropped without executing the URL.
+/// Treating such a redirect as DOM-verified produced High-severity findings
+/// that no real browser actually fires (observed on xssmaze
+/// `/redirect/level{1..4}`), so the V upgrade is removed.
 ///
 /// A bare reflection of the payload *inside* a redirect target URL (typically
-/// inside a `?next=…`-style query parameter) is **not** verified evidence —
+/// inside a `?next=…`-style query parameter) is also not verified evidence:
 /// it merely forwards the attacker-controlled bytes to the next endpoint,
-/// which may or may not turn into a sink there. Surfacing that as a verified
-/// finding is a frequent false positive when one redirect re-encodes the
-/// incoming query into the new URL's query (double-URL-encoded reflections
-/// like `%252527…%252527` end up matching the payload's URL-decoded variant
-/// without ever escaping into HTML). Such reflections are still captured by
-/// the reflection-finding path, which is the appropriate severity tier.
-fn check_redirect_location(loc_str: &str, payload: &str) -> Option<(bool, Option<String>)> {
-    let loc_trimmed = loc_str.trim();
-    let payload_trimmed = payload.trim();
-    if payload_is_executable_url_protocol(payload)
-        && starts_with_ascii_ci(loc_trimmed, payload_trimmed)
-    {
-        let synthetic_body = format!(
-            "<html><body><a href=\"{}\">redirect</a></body></html>",
-            loc_str
-        );
-        return Some((true, Some(synthetic_body)));
-    }
+/// which may or may not turn into a sink there. The reflection-finding path
+/// still surfaces these as R when the body contains the payload, which is
+/// the appropriate severity tier.
+fn check_redirect_location(_loc_str: &str, _payload: &str) -> Option<(bool, Option<String>)> {
     None
 }
 
