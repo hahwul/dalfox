@@ -831,37 +831,55 @@ pub async fn run_scanning(
 
                         let reflection_note = reflection_kind_note(kind);
 
-                        // JS-context static V upgrade: if the payload introduced
-                        // an executable sink call inside a <script> block, treat
-                        // the finding as DOM-verified. Saves one HTTP request
-                        // since we re-use the reflection response body.
-                        let js_verified = reflection_response_text
+                        // Static V upgrade: re-use the reflection response body
+                        // to look for browser-executable DOM evidence. Saves one
+                        // HTTP request relative to running a separate
+                        // `check_dom_verification` request. The four evidence
+                        // kinds (marker, executable URL in dangerous attribute,
+                        // HTML element with sink handler, JS-context sink call)
+                        // are the same set DOM verification ultimately uses, so
+                        // the static path is consistent with the dedicated path.
+                        //
+                        // Without this broader check, multi-site reflections where
+                        // the reflection-phase payload already contains the
+                        // structurally exploitable bytes (e.g. xssmaze
+                        // /realworld/level1 reflecting `<svg onload=alert(1)>`
+                        // raw into <h2>, and xssmaze /hpp/level1 where the
+                        // first-value reflection renders the unfiltered payload)
+                        // surfaced as R-only despite being trivially V — the
+                        // adaptive DOM payload generator drops HTML-tag payloads
+                        // when angles are reported "invalid" at one of the
+                        // reflection sites, and the prior `has_js_context_evidence`
+                        // check only covered the `<script>`-block case.
+                        let dom_evidence_kind = reflection_response_text
                             .as_deref()
-                            .map(|body| {
-                                crate::scanning::js_context_verify::has_js_context_evidence(
+                            .and_then(|body| {
+                                crate::scanning::check_dom_verification::classify_dom_evidence(
                                     &reflection_payload,
                                     body,
                                 )
-                            })
-                            .unwrap_or(false);
+                            });
 
-                        let (finding_type, severity, summary, poc_msg) = if js_verified {
+                        let (finding_type, severity, summary, poc_msg) = if let Some(kind) =
+                            dom_evidence_kind
+                        {
                             // Mark dom_found so we skip redundant DOM verification
                             {
                                 let mut found = found_params_clone.write().await;
                                 found.dom.insert(param_clone.name.clone());
                             }
                             dom_found_locally = true;
+                            let evidence_label = kind.label();
                             (
                                 FindingType::Verified,
                                 "High".to_string(),
                                 format!(
-                                    "DOM verification successful for param {} (JS-context AST)",
-                                    param_clone.name
+                                    "DOM verification successful for param {} ({})",
+                                    param_clone.name, evidence_label
                                 ),
                                 format!(
-                                    "Triggered XSS Payload (JS-context sink call): {}={}",
-                                    param_clone.name, reflection_payload
+                                    "Triggered XSS Payload ({}): {}={}",
+                                    evidence_label, param_clone.name, reflection_payload
                                 ),
                             )
                         } else {
