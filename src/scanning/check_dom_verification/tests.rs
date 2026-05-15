@@ -115,6 +115,11 @@ async fn html_handler(Query(params): Query<HashMap<String, String>>) -> Html<Str
     Html(format!("<div>{}</div>", q))
 }
 
+async fn html_uppercase_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
+    let q = params.get("q").cloned().unwrap_or_default();
+    Html(format!("<div>{}</div>", q.to_uppercase()))
+}
+
 async fn xhtml_handler(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
     let q = params.get("q").cloned().unwrap_or_default();
     (
@@ -225,6 +230,7 @@ async fn sxss_json_handler(State(state): State<TestState>) -> impl IntoResponse 
 async fn start_mock_server(stored_payload: &str) -> SocketAddr {
     let app = Router::new()
         .route("/dom/html", get(html_handler))
+        .route("/dom/html-upper", get(html_uppercase_handler))
         .route("/dom/decoded", get(decoded_payload_handler))
         .route("/dom/url-attribute", get(url_attribute_handler))
         .route("/dom/url-attribute-img", get(url_attribute_img_handler))
@@ -280,6 +286,34 @@ async fn test_check_dom_verification_detects_html_reflection() {
     let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
     assert!(found, "text/html responses with payload should be detected");
     assert!(body.unwrap_or_default().contains(&payload));
+}
+
+// Server uppercases every reflected byte; the marker survives as a
+// case-folded class value. The standard CSS class selector is case-
+// sensitive so it misses the match, but the case-insensitive
+// attribute walk added to `has_marker_evidence_in_doc` recovers V.
+#[tokio::test]
+async fn test_check_dom_verification_marker_survives_case_fold() {
+    let payload = format!(
+        "<img src=x onerror=alert(1) class={}>",
+        crate::scanning::markers::class_marker()
+    );
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/dom/html-upper");
+    let param = make_param();
+    let args = default_scan_args();
+
+    let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
+    assert!(
+        found,
+        "uppercased marker class should still satisfy DOM evidence via case-insensitive scan"
+    );
+    let body = body.unwrap_or_default();
+    let marker = crate::scanning::markers::class_marker();
+    assert!(
+        body.to_ascii_lowercase().contains(marker),
+        "marker should appear in the body under ASCII case fold"
+    );
 }
 
 #[tokio::test]

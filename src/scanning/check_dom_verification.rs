@@ -76,6 +76,38 @@ fn payload_has_any_marker(payload: &str) -> bool {
         || payload_uses_legacy_id_marker(payload)
 }
 
+/// Returns `true` when at least one element's whitespace-separated class
+/// list contains `marker` under ASCII case-fold comparison. The standard
+/// CSS class selector path used elsewhere is case-sensitive (HTML5 class
+/// attributes are case-sensitive when matched as CSS selectors), so this
+/// scan is the only way to surface marker evidence on servers that
+/// case-fold the entire reflected input.
+fn any_element_has_class_ascii_ci(document: &scraper::Html, marker: &str) -> bool {
+    let selector = super::selectors::universal();
+    document.select(selector).any(|node| {
+        node.value()
+            .attr("class")
+            .map(|cls| {
+                cls.split_ascii_whitespace()
+                    .any(|c| c.eq_ignore_ascii_case(marker))
+            })
+            .unwrap_or(false)
+    })
+}
+
+/// Like `any_element_has_class_ascii_ci`, but compares the element's `id`
+/// attribute as a whole token. HTML id values are not whitespace-separated
+/// lists, so the comparison is over the trimmed attribute value.
+fn any_element_has_id_ascii_ci(document: &scraper::Html, marker: &str) -> bool {
+    let selector = super::selectors::universal();
+    document.select(selector).any(|node| {
+        node.value()
+            .attr("id")
+            .map(|id| id.trim().eq_ignore_ascii_case(marker))
+            .unwrap_or(false)
+    })
+}
+
 fn has_marker_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
     let class_marker = crate::scanning::markers::class_marker();
     let id_marker = crate::scanning::markers::id_marker();
@@ -96,12 +128,23 @@ fn has_marker_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
                 .select(cached_class_marker_selector())
                 .next()
                 .is_some();
+            if !found {
+                // Case-folded fallback for servers that uppercase/lowercase
+                // reflected input. Markers are 11-char `dlx<hex>` strings
+                // with no realistic ASCII case-fold collisions, so a
+                // case-insensitive class-list match is still a unique
+                // "came from our payload" signal.
+                found = any_element_has_class_ascii_ci(document, class_marker);
+            }
         }
         if !found && has_legacy_class {
             found = document
                 .select(cached_legacy_class_selector())
                 .next()
                 .is_some();
+            if !found {
+                found = any_element_has_class_ascii_ci(document, "dalfox");
+            }
         }
         found
     } else {
@@ -115,12 +158,18 @@ fn has_marker_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
                 .select(cached_id_marker_selector())
                 .next()
                 .is_some();
+            if !found {
+                found = any_element_has_id_ascii_ci(document, id_marker);
+            }
         }
         if !found && has_legacy_id {
             found = document
                 .select(cached_legacy_id_selector())
                 .next()
                 .is_some();
+            if !found {
+                found = any_element_has_id_ascii_ci(document, "dalfox");
+            }
         }
         found
     } else {
@@ -625,37 +674,24 @@ async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> (bool, Opt
     (false, None)
 }
 
-/// Check if a redirect Location header contains evidence of payload injection.
 /// Inspect a redirect's `Location:` header for evidence that the payload
 /// itself drives the navigation.
 ///
-/// Only one case is treated as DOM-verified: the payload is an executable URL
-/// scheme (`javascript:`, `data:text/html`, `vbscript:`) **and** the response
-/// is redirecting the browser to that exact URL. Browsers honour these schemes
-/// in `Location:` (some still navigate the URL bar to it), so the payload
-/// reaches a real execution sink.
+/// Returns `None` in every case today: modern browsers (Chrome, Firefox,
+/// Safari, all Chromium derivatives) refuse to navigate to `javascript:`,
+/// `data:text/html`, and `vbscript:` URLs supplied via a 3xx `Location:`
+/// header — the redirect is silently dropped without executing the URL.
+/// Treating such a redirect as DOM-verified produced High-severity findings
+/// that no real browser actually fires (observed on xssmaze
+/// `/redirect/level{1..4}`), so the V upgrade is removed.
 ///
 /// A bare reflection of the payload *inside* a redirect target URL (typically
-/// inside a `?next=…`-style query parameter) is **not** verified evidence —
+/// inside a `?next=…`-style query parameter) is also not verified evidence:
 /// it merely forwards the attacker-controlled bytes to the next endpoint,
-/// which may or may not turn into a sink there. Surfacing that as a verified
-/// finding is a frequent false positive when one redirect re-encodes the
-/// incoming query into the new URL's query (double-URL-encoded reflections
-/// like `%252527…%252527` end up matching the payload's URL-decoded variant
-/// without ever escaping into HTML). Such reflections are still captured by
-/// the reflection-finding path, which is the appropriate severity tier.
-fn check_redirect_location(loc_str: &str, payload: &str) -> Option<(bool, Option<String>)> {
-    let loc_trimmed = loc_str.trim();
-    let payload_trimmed = payload.trim();
-    if payload_is_executable_url_protocol(payload)
-        && starts_with_ascii_ci(loc_trimmed, payload_trimmed)
-    {
-        let synthetic_body = format!(
-            "<html><body><a href=\"{}\">redirect</a></body></html>",
-            loc_str
-        );
-        return Some((true, Some(synthetic_body)));
-    }
+/// which may or may not turn into a sink there. The reflection-finding path
+/// still surfaces these as R when the body contains the payload, which is
+/// the appropriate severity tier.
+fn check_redirect_location(_loc_str: &str, _payload: &str) -> Option<(bool, Option<String>)> {
     None
 }
 
