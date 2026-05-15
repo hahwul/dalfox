@@ -871,10 +871,17 @@ pub async fn run_scanning(
                             )
                         };
 
-                        // Record reflected/verified XSS finding (fallback path)
+                        // Record reflected/verified XSS finding (fallback path).
+                        // In SXSS mode, prefix inject_type so downstream output
+                        // (JSON, markdown, plain) makes the stored route visible.
+                        let inject_type_label = if args_clone.sxss {
+                            "sxss-inHTML".to_string()
+                        } else {
+                            "inHTML".to_string()
+                        };
                         let mut result = crate::scanning::result::Result::new(
                             finding_type,
-                            "inHTML".to_string(),
+                            inject_type_label,
                             target_clone.method.clone(),
                             result_url,
                             param_clone.name.clone(),
@@ -979,9 +986,14 @@ pub async fn run_scanning(
                             .map(|k| k.label())
                             .unwrap_or("DOM evidence");
 
+                        let dom_inject_type_label = if args_clone.sxss {
+                            "sxss-inHTML".to_string()
+                        } else {
+                            "inHTML".to_string()
+                        };
                         let mut result = crate::scanning::result::Result::new(
                             FindingType::Verified, // DOM-verified => Vulnerability
-                            "inHTML".to_string(),
+                            dom_inject_type_label,
                             target_clone.method.clone(),
                             result_url,
                             param_clone.name.clone(),

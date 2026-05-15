@@ -870,10 +870,21 @@ async fn fetch_injection_response_with_client(
         sleep(Duration::from_millis(target.delay)).await;
     }
 
-    // For Stored XSS, check reflection on auto-resolved URLs with retry logic
+    // For Stored XSS, check reflection on auto-resolved URLs with retry logic.
+    //
+    // We MUST verify the payload actually reflects in each candidate body
+    // before returning it — otherwise the first non-empty page (a login
+    // form, an empty list, a session-expired page) short-circuits the loop
+    // and the real retrieval URL is never tried, producing a false negative.
+    //
+    // Fallback: if no candidate URL contains the payload but at least one
+    // returned a non-empty body, return that body. Callers downstream will
+    // run classify_reflection again and conclude "no reflection" — same
+    // outcome as before, but only after every URL had a fair chance.
     if args.sxss {
         let check_urls = resolve_sxss_check_urls(target, param, args);
         let retries = args.sxss_retries.max(1) as u64;
+        let mut fallback_body: Option<String> = None;
         for sxss_url in &check_urls {
             // Retry with delay to handle session / content propagation
             for attempt in 0u64..retries {
@@ -889,11 +900,16 @@ async fn fetch_injection_response_with_client(
                     && let Ok(text) = resp.text().await
                     && !text.is_empty()
                 {
-                    return Some(text);
+                    if classify_reflection(&text, payload).is_some() {
+                        return Some(text);
+                    }
+                    if fallback_body.is_none() {
+                        fallback_body = Some(text);
+                    }
                 }
             }
         }
-        None
+        fallback_body
     } else {
         // Normal reflection check
         if let Ok(resp) = inject_resp {
