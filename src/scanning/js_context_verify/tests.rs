@@ -273,3 +273,18 @@ fn cached_parsed_spans_distinct_for_different_blocks() {
     let sb = cached_parsed_spans(b).expect("b parses");
     assert_ne!(sa, sb);
 }
+
+#[test]
+fn redirect_location_wrapper_does_not_trigger_js_context() {
+    // Regression for xssmaze /redirect/level1: when a 3xx Location header
+    // is wrapped as `<html><body>javascript:alert(1)</body></html>` so it
+    // reaches the reflection path, the JS-context AST verifier must NOT
+    // upgrade to V. Browsers never execute the Location's URL scheme on
+    // a 3xx redirect, so any V upgrade here is a false positive.
+    let payload = "javascript:alert(1)";
+    let body = format!("<html><body>{}</body></html>", payload);
+    assert!(
+        !has_js_context_evidence(payload, &body),
+        "wrapped Location body must not produce JS-context evidence"
+    );
+}

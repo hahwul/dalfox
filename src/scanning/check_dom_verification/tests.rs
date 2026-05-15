@@ -744,6 +744,47 @@ fn test_classify_dom_evidence_returns_executable_url() {
 }
 
 #[test]
+fn test_classify_dom_evidence_realworld_marker_in_comment_and_body() {
+    // xssmaze /realworld/level1 reflects the query twice: once with angles
+    // stripped inside an HTML comment, and once raw inside `<h2>`. With
+    // the standard marker-bearing payload, the marker should be found in
+    // the parsed DOM. Pinning this regression: dalfox previously reported
+    // only R against this shape (3045 R-only on deep-scan).
+    let class_marker = crate::scanning::markers::class_marker();
+    let payload = format!("<svg/onload=alert(1) class={}>", class_marker);
+    let body = format!(
+        "<!-- search: svg/onload=alert(1) class={} --><h2>Results for: {}</h2>",
+        class_marker, payload
+    );
+    assert!(
+        has_dom_evidence(&payload, &body),
+        "marker carried on a <svg> inside <h2> must be detected as DOM evidence; \
+         current behavior on /realworld/level1 was 'R only'"
+    );
+}
+
+#[test]
+fn test_classify_dom_evidence_comment_breakout() {
+    // xssmaze /realworld/level1 shape: payload reflects raw inside a
+    // following <h2>, and via a comment-breakout sequence
+    // (--><payload><!--) the comment is closed mid-page. After parsing,
+    // the introduced <svg onload=…> element should fire structural
+    // evidence. Pinning this here flagged the gap where dalfox surfaced
+    // only R despite the payload trivially producing a sink element.
+    let payload = "--><svg/onload=alert(1)><!--";
+    let body = format!(
+        "<!-- search: {} --><h2>Results for: {}</h2>",
+        payload, payload
+    );
+    assert_eq!(
+        classify_dom_evidence(payload, &body),
+        Some(DomEvidenceKind::HtmlStructural),
+        "comment-breakout payload that introduces <svg onload=alert(1)> \
+         must classify as structural HTML evidence"
+    );
+}
+
+#[test]
 fn test_classify_dom_evidence_returns_none_for_inert() {
     let payload = "harmless";
     let body = "<html><body>harmless</body></html>";
@@ -842,4 +883,61 @@ async fn test_check_dom_verification_skips_body_on_redirect_response() {
         "DOM evidence in a 3xx response body must not be treated as verified"
     );
     assert!(body.is_none(), "no body should be returned for redirects");
+}
+
+#[test]
+fn test_is_executable_url_attribute_pin_whitelist() {
+    // Pin the (element, attribute) pairs that browsers actually dereference
+    // as code. xssmaze /mediacontext exercises src reflections on every media
+    // element; verification must NOT promote those to V, while the genuine
+    // navigation/frame-load/submit pairs must keep doing so. Any change to
+    // the whitelist surfaces here instead of silently flipping behavior.
+
+    // Should be exec URL contexts (V allowed):
+    for (tag, attr) in [
+        ("a", "href"),
+        ("area", "href"),
+        ("base", "href"),
+        ("link", "href"),
+        ("iframe", "src"),
+        ("embed", "src"),
+        ("frame", "src"),
+        ("iframe", "srcdoc"),
+        ("object", "data"),
+        ("form", "action"),
+        ("input", "formaction"),
+        ("button", "formaction"),
+        ("a", "xlink:href"),
+        ("use", "xlink:href"),
+        // Case insensitivity guarantee
+        ("A", "HREF"),
+        ("IFRAME", "Src"),
+    ] {
+        assert!(
+            is_executable_url_attribute(tag, attr),
+            "{tag}@{attr} must be a verified-V exec URL context"
+        );
+    }
+
+    // Resource-fetch / inert pairs (V forbidden — only R should fire):
+    for (tag, attr) in [
+        ("img", "src"),
+        ("audio", "src"),
+        ("video", "src"),
+        ("source", "src"),
+        ("script", "src"),
+        ("track", "src"),
+        // Other innocuous combinations
+        ("img", "alt"),
+        ("a", "target"),
+        ("div", "data-href"),
+        ("link", "rel"),
+        ("meta", "content"),
+        ("iframe", "name"),
+    ] {
+        assert!(
+            !is_executable_url_attribute(tag, attr),
+            "{tag}@{attr} must NOT be treated as exec URL context"
+        );
+    }
 }

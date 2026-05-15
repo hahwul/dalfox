@@ -2,6 +2,81 @@ use super::*;
 use crate::parameter_analysis::{InjectionContext, Location, Param};
 use crate::target_parser::parse_target;
 
+/// ScanArgs preset for run_scanning integration tests below. Keeps
+/// `skip_xss_scanning` toggleable per-test so the empty/short-circuit
+/// tests can still opt out of real HTTP traffic while the
+/// `realworld_level1_shape_v_upgrade` test exercises the full pipeline.
+fn integration_scan_args(skip_xss: bool) -> crate::cmd::scan::ScanArgs {
+    crate::cmd::scan::ScanArgs {
+        input_type: "auto".to_string(),
+        format: "json".to_string(),
+        targets: vec![],
+        param: vec![],
+        data: None,
+        headers: vec![],
+        cookies: vec![],
+        method: "GET".to_string(),
+        user_agent: None,
+        cookie_from_raw: None,
+        include_url: vec![],
+        exclude_url: vec![],
+        ignore_param: vec![],
+        out_of_scope: vec![],
+        out_of_scope_file: None,
+        mining_dict_word: None,
+        skip_mining: true,
+        skip_mining_dict: true,
+        skip_mining_dom: true,
+        only_discovery: false,
+        skip_discovery: true,
+        skip_reflection_header: true,
+        skip_reflection_cookie: true,
+        skip_reflection_path: true,
+        timeout: 5,
+        delay: 0,
+        proxy: None,
+        follow_redirects: false,
+        ignore_return: vec![],
+        output: None,
+        include_request: false,
+        include_response: false,
+        include_all: false,
+        no_color: true,
+        silence: true,
+        dry_run: false,
+        poc_type: "plain".to_string(),
+        limit: None,
+        limit_result_type: "all".to_string(),
+        only_poc: vec![],
+        workers: 4,
+        max_concurrent_targets: 4,
+        max_targets_per_host: 8,
+        encoders: vec!["url".to_string()],
+        custom_blind_xss_payload: None,
+        blind_callback_url: None,
+        custom_payload: None,
+        only_custom_payload: false,
+        inject_marker: None,
+        custom_alert_value: "1".to_string(),
+        custom_alert_type: "none".to_string(),
+        skip_xss_scanning: skip_xss,
+        deep_scan: false,
+        sxss: false,
+        sxss_url: None,
+        sxss_method: "GET".to_string(),
+        sxss_retries: 1,
+        skip_ast_analysis: true,
+        hpp: false,
+        waf_bypass: "off".to_string(),
+        skip_waf_probe: true,
+        force_waf: None,
+        waf_evasion: false,
+        waf_min_confidence: 0.0,
+        remote_payloads: vec![],
+        remote_wordlists: vec![],
+    }
+}
+
 fn make_result(ft: FindingType) -> crate::scanning::result::Result {
     crate::scanning::result::Result::new(
         ft,
@@ -730,6 +805,107 @@ async fn test_run_scanning_with_reflection_params() {
         None,
     )
     .await;
+}
+
+/// End-to-end test for the static V upgrade broadened in #960. Runs
+/// `run_scanning` against a mock that mimics the xssmaze `/realworld/level1`
+/// shape — reflects the query twice, once with angles stripped inside an
+/// HTML comment, once raw inside `<h2>`. Before the fix the static V
+/// upgrade only checked `has_js_context_evidence`, so this shape produced
+/// R findings only (3045 R-only on deep-scan). After the fix the
+/// reflection-phase response itself carries `<svg/onload=alert(1)>` and
+/// `classify_dom_evidence` returns `HtmlStructural`, so a Verified
+/// finding must appear.
+#[tokio::test]
+async fn test_run_scanning_realworld_level1_shape_promotes_to_verified() {
+    use axum::{Router, extract::Query, response::Html, routing::get};
+    use std::collections::HashMap;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use tokio::time::{Duration, sleep};
+
+    async fn realworld_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
+        // Mirror xssmaze /realworld/level1: strip < and > inside the comment,
+        // reflect raw inside <h2>. Filters::strip_angles equivalent.
+        let q = params.get("query").cloned().unwrap_or_default();
+        let safe: String = q.chars().filter(|c| *c != '<' && *c != '>').collect();
+        Html(format!(
+            "<!-- search: {} --><h2>Results for: {}</h2>",
+            safe, q
+        ))
+    }
+
+    let app = Router::new().route("/", get(realworld_handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let url = format!("http://{}/?query=a", addr);
+    let mut target = parse_target(&url).expect("parse_target");
+    // Skip discovery entirely (it would re-probe and may classify <> as
+    // invalid given the comment-side stripping). The test exercises the
+    // V-upgrade path with a pre-populated reflection param.
+    target.reflection_params.push(Param {
+        name: "query".to_string(),
+        value: "a".to_string(),
+        location: Location::Query,
+        injection_context: Some(InjectionContext::Html(None)),
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+    });
+
+    let args = Arc::new(integration_scan_args(false));
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        args,
+        results.clone(),
+        None,
+        None,
+        Arc::new(AtomicUsize::new(0)),
+        None,
+        None,
+    )
+    .await;
+
+    let guard = results.lock().await;
+    let verified: Vec<_> = guard
+        .iter()
+        .filter(|r| matches!(r.result_type, FindingType::Verified) && r.param == "query")
+        .collect();
+    assert!(
+        !verified.is_empty(),
+        "the realworld/level1 shape must produce at least one Verified finding on `query`; \
+         got {} total results: {:?}",
+        guard.len(),
+        guard
+            .iter()
+            .map(|r| (&r.result_type, &r.param))
+            .collect::<Vec<_>>()
+    );
+    // The evidence label should reflect the actual DOM evidence kind that
+    // fired, not the hard-coded "JS-context AST" string the prior code
+    // emitted unconditionally. The comment-breakout shape produces
+    // `HtmlStructural` → label "HTML element with sink"; other shapes
+    // may surface marker / executable-URL / JS-context.
+    let labels: Vec<_> = verified.iter().map(|r| r.evidence.as_str()).collect();
+    assert!(
+        labels.iter().any(|m| m.contains("HTML element with sink")
+            || m.contains("DOM marker")
+            || m.contains("javascript: URL in attribute")
+            || m.contains("JS-context AST")),
+        "V finding must carry a DomEvidenceKind label from classify_dom_evidence; got {:?}",
+        labels
+    );
 }
 
 #[tokio::test]
