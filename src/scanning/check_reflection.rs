@@ -542,7 +542,61 @@ pub(crate) fn classify_reflection(resp_text: &str, payload: &str) -> Option<Refl
         return Some(ReflectionKind::HtmlThenUrlDecoded);
     }
 
+    // Case-folded marker fallback: when none of the byte-exact variants
+    // match, but the payload carries a Dalfox marker that survived the
+    // round-trip under ASCII case-folding (e.g. a server that uppercases
+    // everything before reflecting), treat the response as a reflection.
+    //
+    // The dynamic markers are `dlx` + 8 random hex digits — case-folded
+    // they remain unique to this scan, so finding the marker in the
+    // lowercased response is a strong "this came from our payload" signal.
+    // Without this fallback, endpoints like xssmaze `obfuscation/level2`
+    // (`query.upcase`) and `casemanip/level3` (alpha case swap) escape
+    // every reflection check above and produce zero findings.
+    if marker_case_fold_reflected(resp_text, payload) {
+        return Some(ReflectionKind::Raw);
+    }
+
     None
+}
+
+/// True when the payload embeds a Dalfox marker (class/id, dynamic or
+/// legacy) and that marker appears in `resp_text` only after ASCII
+/// case-folding. Used as a last-chance reflection signal for servers
+/// that uppercase / lowercase every reflected byte (xssmaze
+/// `obfuscation/level2`, `casemanip/level3`) where every other variant
+/// check still produces a byte-exact mismatch.
+///
+/// The fallback intentionally returns `false` whenever any carried
+/// marker is already present in `resp_text` under exact case: the
+/// standard reflection-variant paths above will have already fired (or
+/// can be reached by callers via `has_marker_evidence`) and we should
+/// not double-classify the same response as a case-folded reflection.
+fn marker_case_fold_reflected(resp_text: &str, payload: &str) -> bool {
+    let class_marker = crate::scanning::markers::class_marker();
+    let id_marker = crate::scanning::markers::id_marker();
+    let candidates: [&str; 3] = [class_marker, id_marker, "dalfox"];
+
+    let mut payload_carries_any = false;
+    for marker in &candidates {
+        if payload.contains(*marker) {
+            payload_carries_any = true;
+            // Same-case marker already in response — let the standard
+            // reflection / marker-evidence paths handle it and avoid
+            // re-classifying as case-folded.
+            if resp_text.contains(*marker) {
+                return false;
+            }
+        }
+    }
+    if !payload_carries_any {
+        return false;
+    }
+
+    let lower_resp = resp_text.to_ascii_lowercase();
+    candidates
+        .iter()
+        .any(|m| payload.contains(*m) && lower_resp.contains(*m))
 }
 
 /// Resolve SXSS check URLs with priority:

@@ -76,6 +76,38 @@ fn payload_has_any_marker(payload: &str) -> bool {
         || payload_uses_legacy_id_marker(payload)
 }
 
+/// Returns `true` when at least one element's whitespace-separated class
+/// list contains `marker` under ASCII case-fold comparison. The standard
+/// CSS class selector path used elsewhere is case-sensitive (HTML5 class
+/// attributes are case-sensitive when matched as CSS selectors), so this
+/// scan is the only way to surface marker evidence on servers that
+/// case-fold the entire reflected input.
+fn any_element_has_class_ascii_ci(document: &scraper::Html, marker: &str) -> bool {
+    let selector = super::selectors::universal();
+    document.select(selector).any(|node| {
+        node.value()
+            .attr("class")
+            .map(|cls| {
+                cls.split_ascii_whitespace()
+                    .any(|c| c.eq_ignore_ascii_case(marker))
+            })
+            .unwrap_or(false)
+    })
+}
+
+/// Like `any_element_has_class_ascii_ci`, but compares the element's `id`
+/// attribute as a whole token. HTML id values are not whitespace-separated
+/// lists, so the comparison is over the trimmed attribute value.
+fn any_element_has_id_ascii_ci(document: &scraper::Html, marker: &str) -> bool {
+    let selector = super::selectors::universal();
+    document.select(selector).any(|node| {
+        node.value()
+            .attr("id")
+            .map(|id| id.trim().eq_ignore_ascii_case(marker))
+            .unwrap_or(false)
+    })
+}
+
 fn has_marker_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
     let class_marker = crate::scanning::markers::class_marker();
     let id_marker = crate::scanning::markers::id_marker();
@@ -96,12 +128,23 @@ fn has_marker_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
                 .select(cached_class_marker_selector())
                 .next()
                 .is_some();
+            if !found {
+                // Case-folded fallback for servers that uppercase/lowercase
+                // reflected input. Markers are 11-char `dlx<hex>` strings
+                // with no realistic ASCII case-fold collisions, so a
+                // case-insensitive class-list match is still a unique
+                // "came from our payload" signal.
+                found = any_element_has_class_ascii_ci(document, class_marker);
+            }
         }
         if !found && has_legacy_class {
             found = document
                 .select(cached_legacy_class_selector())
                 .next()
                 .is_some();
+            if !found {
+                found = any_element_has_class_ascii_ci(document, "dalfox");
+            }
         }
         found
     } else {
@@ -115,12 +158,18 @@ fn has_marker_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
                 .select(cached_id_marker_selector())
                 .next()
                 .is_some();
+            if !found {
+                found = any_element_has_id_ascii_ci(document, id_marker);
+            }
         }
         if !found && has_legacy_id {
             found = document
                 .select(cached_legacy_id_selector())
                 .next()
                 .is_some();
+            if !found {
+                found = any_element_has_id_ascii_ci(document, "dalfox");
+            }
         }
         found
     } else {
