@@ -887,7 +887,10 @@ async fn test_run_scanning_realworld_level1_shape_promotes_to_verified() {
         "the realworld/level1 shape must produce at least one Verified finding on `query`; \
          got {} total results: {:?}",
         guard.len(),
-        guard.iter().map(|r| (&r.result_type, &r.param)).collect::<Vec<_>>()
+        guard
+            .iter()
+            .map(|r| (&r.result_type, &r.param))
+            .collect::<Vec<_>>()
     );
     // The evidence label should reflect the actual DOM evidence kind that
     // fired, not the hard-coded "JS-context AST" string the prior code

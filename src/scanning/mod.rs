@@ -851,51 +851,49 @@ pub async fn run_scanning(
                         // when angles are reported "invalid" at one of the
                         // reflection sites, and the prior `has_js_context_evidence`
                         // check only covered the `<script>`-block case.
-                        let dom_evidence_kind = reflection_response_text
-                            .as_deref()
-                            .and_then(|body| {
+                        let dom_evidence_kind =
+                            reflection_response_text.as_deref().and_then(|body| {
                                 crate::scanning::check_dom_verification::classify_dom_evidence(
                                     &reflection_payload,
                                     body,
                                 )
                             });
 
-                        let (finding_type, severity, summary, poc_msg) = if let Some(kind) =
-                            dom_evidence_kind
-                        {
-                            // Mark dom_found so we skip redundant DOM verification
-                            {
-                                let mut found = found_params_clone.write().await;
-                                found.dom.insert(param_clone.name.clone());
-                            }
-                            dom_found_locally = true;
-                            let evidence_label = kind.label();
-                            (
-                                FindingType::Verified,
-                                "High".to_string(),
-                                format!(
-                                    "DOM verification successful for param {} ({})",
-                                    param_clone.name, evidence_label
-                                ),
-                                format!(
-                                    "Triggered XSS Payload ({}): {}={}",
-                                    evidence_label, param_clone.name, reflection_payload
-                                ),
-                            )
-                        } else {
-                            (
-                                FindingType::Reflected,
-                                "Info".to_string(),
-                                format!(
-                                    "Reflected XSS detected for param {} ({})",
-                                    param_clone.name, reflection_note
-                                ),
-                                format!(
-                                    "[R] Triggered XSS Payload ({}): {}={}",
-                                    reflection_note, param_clone.name, reflection_payload
-                                ),
-                            )
-                        };
+                        let (finding_type, severity, summary, poc_msg) =
+                            if let Some(kind) = dom_evidence_kind {
+                                // Mark dom_found so we skip redundant DOM verification
+                                {
+                                    let mut found = found_params_clone.write().await;
+                                    found.dom.insert(param_clone.name.clone());
+                                }
+                                dom_found_locally = true;
+                                let evidence_label = kind.label();
+                                (
+                                    FindingType::Verified,
+                                    "High".to_string(),
+                                    format!(
+                                        "DOM verification successful for param {} ({})",
+                                        param_clone.name, evidence_label
+                                    ),
+                                    format!(
+                                        "Triggered XSS Payload ({}): {}={}",
+                                        evidence_label, param_clone.name, reflection_payload
+                                    ),
+                                )
+                            } else {
+                                (
+                                    FindingType::Reflected,
+                                    "Info".to_string(),
+                                    format!(
+                                        "Reflected XSS detected for param {} ({})",
+                                        param_clone.name, reflection_note
+                                    ),
+                                    format!(
+                                        "[R] Triggered XSS Payload ({}): {}={}",
+                                        reflection_note, param_clone.name, reflection_payload
+                                    ),
+                                )
+                            };
 
                         // Record reflected/verified XSS finding (fallback path).
                         // In SXSS mode, prefix inject_type so downstream output
