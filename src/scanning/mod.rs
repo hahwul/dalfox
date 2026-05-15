@@ -68,6 +68,14 @@ struct FoundParams {
     dom: HashSet<String>,
 }
 
+/// Label written to `Result.inject_type` for findings produced by the scan
+/// loop. Findings under `--sxss` are prefixed so JSON / markdown / plain
+/// reports distinguish stored from reflected results — downstream tooling
+/// parses this field, so the contract is pinned by `tests::test_inject_type_label_for_sxss`.
+fn inject_type_label_for(sxss: bool) -> &'static str {
+    if sxss { "sxss-inHTML" } else { "inHTML" }
+}
+
 fn reflection_kind_note(kind: crate::scanning::check_reflection::ReflectionKind) -> &'static str {
     match kind {
         crate::scanning::check_reflection::ReflectionKind::Raw => "reflected",
@@ -874,14 +882,9 @@ pub async fn run_scanning(
                         // Record reflected/verified XSS finding (fallback path).
                         // In SXSS mode, prefix inject_type so downstream output
                         // (JSON, markdown, plain) makes the stored route visible.
-                        let inject_type_label = if args_clone.sxss {
-                            "sxss-inHTML".to_string()
-                        } else {
-                            "inHTML".to_string()
-                        };
                         let mut result = crate::scanning::result::Result::new(
                             finding_type,
-                            inject_type_label,
+                            inject_type_label_for(args_clone.sxss).to_string(),
                             target_clone.method.clone(),
                             result_url,
                             param_clone.name.clone(),
@@ -986,14 +989,9 @@ pub async fn run_scanning(
                             .map(|k| k.label())
                             .unwrap_or("DOM evidence");
 
-                        let dom_inject_type_label = if args_clone.sxss {
-                            "sxss-inHTML".to_string()
-                        } else {
-                            "inHTML".to_string()
-                        };
                         let mut result = crate::scanning::result::Result::new(
                             FindingType::Verified, // DOM-verified => Vulnerability
-                            dom_inject_type_label,
+                            inject_type_label_for(args_clone.sxss).to_string(),
                             target_clone.method.clone(),
                             result_url,
                             param_clone.name.clone(),
