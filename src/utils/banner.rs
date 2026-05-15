@@ -75,3 +75,43 @@ pub fn print_banner_once(version: &str, color: bool) {
         print_banner(version, color);
     });
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_banner_contains_version_and_tagline() {
+        let s = render_banner("9.9.9", false);
+        assert!(s.contains("Dalfox v9.9.9"));
+        assert!(s.contains("Powerful open-source XSS scanner"));
+        assert!(s.contains("and utility focused on automation."));
+    }
+
+    #[test]
+    fn render_banner_without_color_has_no_ansi_escapes() {
+        let s = render_banner(env!("CARGO_PKG_VERSION"), false);
+        assert!(
+            !s.contains('\x1b'),
+            "color=false must not emit ANSI escape codes"
+        );
+    }
+
+    #[test]
+    fn render_banner_with_color_emits_ansi_escapes() {
+        let s = render_banner("1.2.3", true);
+        // cyan around the version and dim around the tagline lines
+        assert!(s.contains("\x1b[36m"), "expected cyan ANSI sequence");
+        assert!(s.contains("\x1b[90m"), "expected dim ANSI sequence");
+        assert!(s.contains("\x1b[0m"), "expected reset ANSI sequence");
+    }
+
+    #[test]
+    fn render_banner_starts_and_ends_with_blank_lines() {
+        // Banner brackets itself with whitespace so it doesn't collide with
+        // surrounding CLI output.
+        let s = render_banner("0.0.0", false);
+        assert!(s.starts_with('\n'));
+        assert!(s.ends_with("\n\n"));
+    }
+}
