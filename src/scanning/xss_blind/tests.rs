@@ -4,8 +4,8 @@ use axum::{
     body::{Body, to_bytes},
     extract::State,
     http::{Request, StatusCode},
-    response::IntoResponse,
-    routing::any,
+    response::{Html, IntoResponse},
+    routing::{any, get},
 };
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
@@ -158,6 +158,123 @@ async fn test_send_blind_request_unknown_param_type_falls_back_to_default_path()
     let records = state.lock().await.clone();
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].uri, "/");
+}
+
+async fn start_form_server(html: &'static str) -> (SocketAddr, CaptureState) {
+    let state: CaptureState = Arc::new(Mutex::new(Vec::new()));
+    let app = Router::new()
+        .route("/", get(move || async move { Html(html) }))
+        .route("/submit", any(capture_handler))
+        .route("/other", any(capture_handler))
+        .with_state(state.clone());
+
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind listener");
+    let addr = listener.local_addr().expect("listener addr");
+
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    sleep(Duration::from_millis(30)).await;
+    (addr, state)
+}
+
+#[tokio::test]
+async fn test_blind_scan_forms_posts_payload_for_same_origin_post_form() {
+    static HTML: &str = r#"<html><body>
+        <form method="POST" action="/submit">
+            <input name="user" value="alice">
+            <input name="msg" value="hi">
+        </form>
+    </body></html>"#;
+    let (addr, state) = start_form_server(HTML).await;
+    let target = make_target(addr, "/");
+
+    blind_scan_forms(&target, "https://cb.example").await;
+
+    let records = state.lock().await.clone();
+    // Two text fields -> two POSTs, one with payload in `user`, one in `msg`.
+    assert_eq!(records.len(), 2);
+    assert!(records.iter().all(|r| r.method == "POST"));
+    assert!(records.iter().all(|r| r.uri == "/submit"));
+    assert!(records.iter().all(|r| {
+        r.headers
+            .get("content-type")
+            .map(|v| v.contains("application/x-www-form-urlencoded"))
+            .unwrap_or(false)
+    }));
+    // Each request carries the callback URL somewhere in the body.
+    assert!(records.iter().all(|r| r.body.contains("cb.example")
+        || r.body.contains("cb.example".replace(".", "%2E").as_str())));
+    // Payload should land in each field exactly once across the two requests.
+    let user_hits = records
+        .iter()
+        .filter(|r| {
+            let user_part = r.body.split('&').find(|p| p.starts_with("user="));
+            user_part.map(|p| p.contains("cb.example")).unwrap_or(false)
+        })
+        .count();
+    let msg_hits = records
+        .iter()
+        .filter(|r| {
+            let msg_part = r.body.split('&').find(|p| p.starts_with("msg="));
+            msg_part.map(|p| p.contains("cb.example")).unwrap_or(false)
+        })
+        .count();
+    assert_eq!(user_hits, 1);
+    assert_eq!(msg_hits, 1);
+}
+
+#[tokio::test]
+async fn test_blind_scan_forms_skips_get_forms() {
+    static HTML: &str = r#"<html><body>
+        <form method="GET" action="/submit">
+            <input name="q" value="seed">
+        </form>
+    </body></html>"#;
+    let (addr, state) = start_form_server(HTML).await;
+    let target = make_target(addr, "/");
+
+    blind_scan_forms(&target, "https://cb.example").await;
+
+    let records = state.lock().await.clone();
+    // No POSTs should hit /submit; the only request is the initial GET / for HTML.
+    assert!(records.iter().all(|r| r.uri != "/submit"));
+}
+
+#[tokio::test]
+async fn test_blind_scan_forms_skips_cross_origin_action() {
+    static HTML: &str = r#"<html><body>
+        <form method="POST" action="https://evil.example/x">
+            <input name="user" value="alice">
+        </form>
+    </body></html>"#;
+    let (addr, state) = start_form_server(HTML).await;
+    let target = make_target(addr, "/");
+
+    blind_scan_forms(&target, "https://cb.example").await;
+
+    let records = state.lock().await.clone();
+    // Cross-origin action should be skipped; nothing posted to /submit.
+    assert!(records.iter().all(|r| r.method != "POST"));
+}
+
+#[tokio::test]
+async fn test_blind_scan_forms_skips_multipart() {
+    static HTML: &str = r#"<html><body>
+        <form method="POST" action="/submit" enctype="multipart/form-data">
+            <input name="file" value="">
+        </form>
+    </body></html>"#;
+    let (addr, state) = start_form_server(HTML).await;
+    let target = make_target(addr, "/");
+
+    blind_scan_forms(&target, "https://cb.example").await;
+
+    let records = state.lock().await.clone();
+    assert!(records.iter().all(|r| r.method != "POST"));
 }
 
 #[tokio::test]

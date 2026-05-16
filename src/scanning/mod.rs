@@ -1201,7 +1201,7 @@ fn collapse_redundant_reflected(
         .collect()
 }
 
-pub use xss_blind::blind_scanning;
+pub use xss_blind::{blind_scan_forms, blind_scanning};
 
 #[cfg(test)]
 mod tests;
