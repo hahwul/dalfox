@@ -158,7 +158,10 @@ async fn send_blind_request(target: &Target, param_name: &str, payload: &str, pa
 }
 
 /// Discover HTML `<form>` elements on the target page and submit the Blind XSS
-/// payload to each same-origin POST form, one request per text-like field.
+/// payload to each same-origin POST form, one request per injectable text-like
+/// field. Non-text inputs (hidden, file, submit, button, image, reset,
+/// checkbox, radio) and `<select>` keep their original value so CSRF tokens
+/// and similar state survive the injection.
 ///
 /// GET forms are skipped because their fields overlap with the existing
 /// query-param blind injection in [`blind_scanning`]. Cross-origin form
@@ -175,26 +178,20 @@ pub async fn blind_scan_forms(target: &Target, callback_url: &str) {
     let payload = template.replace("{}", callback_url);
 
     let client = target.build_client_or_default();
+    let cookie_header = build_cookie_header(&target.cookies);
 
-    // Fetch the target HTML to extract forms.
-    let mut fetch = client.request(target.parse_method(), target.url.clone());
+    // Always GET the form-bearing page. Reusing target.method would POST to
+    // the form handler instead of fetching the landing page that renders the
+    // form, mirroring discovery::probe_html_forms.
+    let mut fetch = client.get(target.url.clone());
     for (k, v) in &target.headers {
         fetch = fetch.header(k, v);
     }
     if let Some(ua) = &target.user_agent {
         fetch = fetch.header("User-Agent", ua);
     }
-    if !target.cookies.is_empty() {
-        let cookie_header = target
-            .cookies
-            .iter()
-            .map(|(k, v)| format!("{}={}", k, v))
-            .collect::<Vec<_>>()
-            .join("; ");
-        fetch = fetch.header("Cookie", cookie_header);
-    }
-    if let Some(data) = &target.data {
-        fetch = fetch.body(data.clone());
+    if let Some(ref h) = cookie_header {
+        fetch = fetch.header("Cookie", h);
     }
     crate::tick_request_count();
     let html = match fetch.send().await {
@@ -207,9 +204,14 @@ pub async fn blind_scan_forms(target: &Target, callback_url: &str) {
 
     // Parse forms in a tight scope so `scraper::Html` (which is !Send) never
     // escapes across an await boundary.
+    struct FormField {
+        name: String,
+        value: String,
+        injectable: bool,
+    }
     struct FormInfo {
         action: url::Url,
-        fields: Vec<(String, String)>,
+        fields: Vec<FormField>,
     }
     let forms: Vec<FormInfo> = {
         let document = scraper::Html::parse_document(&html);
@@ -241,16 +243,21 @@ pub async fn blind_scan_forms(target: &Target, callback_url: &str) {
                 continue;
             }
 
-            let mut fields: Vec<(String, String)> = Vec::new();
+            let mut fields: Vec<FormField> = Vec::new();
             for input in form.select(input_sel) {
                 let name = input.value().attr("name").unwrap_or("").to_string();
                 if name.is_empty() {
                     continue;
                 }
                 let value = input.value().attr("value").unwrap_or("").to_string();
-                fields.push((name, value));
+                let injectable = is_injectable_input(&input);
+                fields.push(FormField {
+                    name,
+                    value,
+                    injectable,
+                });
             }
-            if fields.is_empty() {
+            if !fields.iter().any(|f| f.injectable) {
                 continue;
             }
 
@@ -263,13 +270,17 @@ pub async fn blind_scan_forms(target: &Target, callback_url: &str) {
     };
 
     for FormInfo { action, fields } in forms {
-        for (field_idx, _) in fields.iter().enumerate() {
+        for field_idx in 0..fields.len() {
+            if !fields[field_idx].injectable {
+                continue;
+            }
             let body = fields
                 .iter()
                 .enumerate()
-                .map(|(i, (n, v))| {
-                    let value = if i == field_idx { &payload } else { v };
-                    let enc_n = form_urlencoded::byte_serialize(n.as_bytes()).collect::<String>();
+                .map(|(i, f)| {
+                    let value = if i == field_idx { &payload } else { &f.value };
+                    let enc_n =
+                        form_urlencoded::byte_serialize(f.name.as_bytes()).collect::<String>();
                     let enc_v =
                         form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>();
                     format!("{}={}", enc_n, enc_v)
@@ -277,23 +288,22 @@ pub async fn blind_scan_forms(target: &Target, callback_url: &str) {
                 .collect::<Vec<_>>()
                 .join("&");
 
-            let mut request = client
-                .post(action.clone())
-                .header("Content-Type", "application/x-www-form-urlencoded");
+            let mut request = client.post(action.clone());
             for (k, v) in &target.headers {
+                // Skip Content-Type from caller-supplied headers so we don't
+                // emit a second value that conflicts with the urlencoded body.
+                if k.eq_ignore_ascii_case("content-type") {
+                    continue;
+                }
                 request = request.header(k, v);
             }
+            // Set Content-Type last to guarantee it wins.
+            request = request.header("Content-Type", "application/x-www-form-urlencoded");
             if let Some(ua) = &target.user_agent {
                 request = request.header("User-Agent", ua);
             }
-            if !target.cookies.is_empty() {
-                let cookie_header = target
-                    .cookies
-                    .iter()
-                    .map(|(k, v)| format!("{}={}", k, v))
-                    .collect::<Vec<_>>()
-                    .join("; ");
-                request = request.header("Cookie", cookie_header);
+            if let Some(ref h) = cookie_header {
+                request = request.header("Cookie", h);
             }
             request = request.body(body);
 
@@ -312,6 +322,44 @@ pub async fn blind_scan_forms(target: &Target, callback_url: &str) {
             }
         }
     }
+}
+
+/// Build a `Cookie:` header value once, returning None if the target has no
+/// cookies configured.
+fn build_cookie_header(cookies: &[(String, String)]) -> Option<String> {
+    if cookies.is_empty() {
+        return None;
+    }
+    Some(
+        cookies
+            .iter()
+            .map(|(k, v)| format!("{}={}", k, v))
+            .collect::<Vec<_>>()
+            .join("; "),
+    )
+}
+
+/// Returns true when an `input`/`textarea`/`select` node accepts free-form
+/// user-controlled text, so substituting the Blind XSS payload there makes
+/// sense. Non-text-bearing inputs (hidden, file, submit, button, image,
+/// reset, checkbox, radio) and `<select>` keep their original value so CSRF
+/// tokens and option choices survive.
+fn is_injectable_input(el: &scraper::element_ref::ElementRef<'_>) -> bool {
+    let tag = el.value().name();
+    if tag.eq_ignore_ascii_case("textarea") {
+        return true;
+    }
+    if !tag.eq_ignore_ascii_case("input") {
+        // `<select>` and anything else: not free-form text.
+        return false;
+    }
+    // <input> defaults to type="text" when the attribute is missing or
+    // unrecognized. Treat the well-known text-bearing types as injectable.
+    let ty = el.value().attr("type").unwrap_or("text");
+    matches!(
+        ty.to_ascii_lowercase().as_str(),
+        "text" | "search" | "url" | "email" | "tel" | "password" | "number"
+    )
 }
 
 /// Same-origin check: scheme + host + port must match.

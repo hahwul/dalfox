@@ -206,8 +206,9 @@ async fn test_blind_scan_forms_posts_payload_for_same_origin_post_form() {
             .unwrap_or(false)
     }));
     // Each request carries the callback URL somewhere in the body.
-    assert!(records.iter().all(|r| r.body.contains("cb.example")
-        || r.body.contains("cb.example".replace(".", "%2E").as_str())));
+    // form_urlencoded::byte_serialize leaves '.' alone, so the literal host
+    // string is what we expect to see on the wire.
+    assert!(records.iter().all(|r| r.body.contains("cb.example")));
     // Payload should land in each field exactly once across the two requests.
     let user_hits = records
         .iter()
@@ -240,8 +241,9 @@ async fn test_blind_scan_forms_skips_get_forms() {
     blind_scan_forms(&target, "https://cb.example").await;
 
     let records = state.lock().await.clone();
-    // No POSTs should hit /submit; the only request is the initial GET / for HTML.
-    assert!(records.iter().all(|r| r.uri != "/submit"));
+    // The form-bearing GET / is handled by a static Html route (not captured).
+    // No requests should ever reach the capture handler for a GET form.
+    assert!(records.is_empty(), "unexpected requests: {:?}", records);
 }
 
 #[tokio::test]
@@ -259,6 +261,101 @@ async fn test_blind_scan_forms_skips_cross_origin_action() {
     let records = state.lock().await.clone();
     // Cross-origin action should be skipped; nothing posted to /submit.
     assert!(records.iter().all(|r| r.method != "POST"));
+}
+
+#[tokio::test]
+async fn test_blind_scan_forms_preserves_hidden_csrf_and_skips_hidden_rotation() {
+    static HTML: &str = r#"<html><body>
+        <form method="POST" action="/submit">
+            <input type="hidden" name="_csrf" value="tok123">
+            <input name="user" value="alice">
+        </form>
+    </body></html>"#;
+    let (addr, state) = start_form_server(HTML).await;
+    let target = make_target(addr, "/");
+
+    blind_scan_forms(&target, "https://cb.example").await;
+
+    let records = state.lock().await.clone();
+    // Exactly one POST: the `user` field rotates in, the hidden _csrf is not
+    // rotated (so it never receives the payload), but its original value is
+    // preserved in every emitted body.
+    assert_eq!(records.len(), 1);
+    let req = &records[0];
+    assert_eq!(req.method, "POST");
+    // CSRF token survives intact.
+    assert!(
+        req.body.contains("_csrf=tok123"),
+        "csrf token missing: {}",
+        req.body
+    );
+    // Payload landed in `user` and not in `_csrf`.
+    let csrf_part = req.body.split('&').find(|p| p.starts_with("_csrf="));
+    let user_part = req.body.split('&').find(|p| p.starts_with("user="));
+    assert!(
+        csrf_part
+            .map(|p| !p.contains("cb.example"))
+            .unwrap_or(false)
+    );
+    assert!(user_part.map(|p| p.contains("cb.example")).unwrap_or(false));
+}
+
+#[tokio::test]
+async fn test_blind_scan_forms_uses_get_to_fetch_even_when_target_is_post() {
+    static HTML: &str = r#"<html><body>
+        <form method="POST" action="/submit">
+            <input name="user" value="alice">
+        </form>
+    </body></html>"#;
+    let (addr, state) = start_form_server(HTML).await;
+    // Configure the target as POST with body data; the fetch step must still
+    // GET the form-bearing page rather than echoing the target's method.
+    let mut target = make_target(addr, "/");
+    target.method = "POST".to_string();
+    target.data = Some("seed=1".to_string());
+
+    blind_scan_forms(&target, "https://cb.example").await;
+
+    let records = state.lock().await.clone();
+    // The only request we capture is the form POST to /submit.
+    // (The HTML GET to "/" is served by the static Html handler.)
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].method, "POST");
+    assert_eq!(records[0].uri, "/submit");
+}
+
+#[tokio::test]
+async fn test_blind_scan_forms_overrides_caller_content_type() {
+    static HTML: &str = r#"<html><body>
+        <form method="POST" action="/submit">
+            <input name="user" value="alice">
+        </form>
+    </body></html>"#;
+    let (addr, state) = start_form_server(HTML).await;
+    let mut target = make_target(addr, "/");
+    // Caller-supplied Content-Type would otherwise be appended alongside our
+    // urlencoded type. Verify it does NOT make it onto the form POST.
+    target.headers = vec![("Content-Type".to_string(), "application/json".to_string())];
+
+    blind_scan_forms(&target, "https://cb.example").await;
+
+    let records = state.lock().await.clone();
+    assert_eq!(records.len(), 1);
+    let ct = records[0]
+        .headers
+        .get("content-type")
+        .cloned()
+        .unwrap_or_default();
+    assert!(
+        ct.contains("application/x-www-form-urlencoded"),
+        "content-type missing urlencoded: {}",
+        ct
+    );
+    assert!(
+        !ct.contains("application/json"),
+        "caller content-type leaked: {}",
+        ct
+    );
 }
 
 #[tokio::test]
