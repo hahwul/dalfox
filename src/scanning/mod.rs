@@ -76,6 +76,29 @@ fn inject_type_label_for(sxss: bool) -> &'static str {
     if sxss { "sxss-inHTML" } else { "inHTML" }
 }
 
+/// True when the payload that produced the finding looks like a
+/// client-side template interpolation. `{{` / `}}` is sufficient on its
+/// own — Mustache, Handlebars, AngularJS, Vue and Ember all share that
+/// delimiter. Used to refine `inject_type` to `*-CSTI` so plain / JSON
+/// output makes the framework-injection finding distinguishable from a
+/// generic HTML reflection.
+fn is_template_shaped_payload(payload: &str) -> bool {
+    payload.contains("{{") && payload.contains("}}")
+}
+
+/// Refine the base `inject_type` label with a `-CSTI` suffix when the
+/// payload is template-shaped. Mirrors the SXSS prefixing convention
+/// (`sxss-inHTML-CSTI`) so downstream parsers don't have to special-case
+/// ordering.
+fn inject_type_for_payload(sxss: bool, payload: &str) -> String {
+    let base = inject_type_label_for(sxss);
+    if is_template_shaped_payload(payload) {
+        format!("{}-CSTI", base)
+    } else {
+        base.to_string()
+    }
+}
+
 fn reflection_kind_note(kind: crate::scanning::check_reflection::ReflectionKind) -> &'static str {
     match kind {
         crate::scanning::check_reflection::ReflectionKind::Raw => "reflected",
@@ -911,9 +934,12 @@ pub async fn run_scanning(
                         // Record reflected/verified XSS finding (fallback path).
                         // In SXSS mode, prefix inject_type so downstream output
                         // (JSON, markdown, plain) makes the stored route visible.
+                        // Template-shaped payloads (`{{…}}`) further refine the
+                        // label to `*-CSTI` so users can tell client-side
+                        // template injection apart from generic HTML reflection.
                         let mut result = crate::scanning::result::Result::new(
                             finding_type,
-                            inject_type_label_for(args_clone.sxss).to_string(),
+                            inject_type_for_payload(args_clone.sxss, &reflection_payload),
                             target_clone.method.clone(),
                             result_url,
                             param_clone.name.clone(),
@@ -1021,7 +1047,7 @@ pub async fn run_scanning(
 
                         let mut result = crate::scanning::result::Result::new(
                             FindingType::Verified, // DOM-verified => Vulnerability
-                            inject_type_label_for(args_clone.sxss).to_string(),
+                            inject_type_for_payload(args_clone.sxss, &dom_payload),
                             target_clone.method.clone(),
                             result_url,
                             param_clone.name.clone(),

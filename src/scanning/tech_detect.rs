@@ -361,9 +361,48 @@ pub fn detect_technologies(headers: &HeaderMap, body: Option<&str>) -> TechDetec
                 );
             }
         }
+
+        // Fallback heuristic for client-side template injection (CSTI):
+        // when no specific template framework (Angular, Vue, Handlebars,
+        // Ember) has been identified yet, a literal `{{identifier}}`
+        // interpolation surviving into the response body is a strong
+        // signal that *some* client-side template engine is active —
+        // typically a minified Angular/Vue bundle whose ng-app /
+        // angular.js / vue.js banner has been tree-shaken away. Tagging
+        // the target as Angular here lets the existing
+        // `get_tech_specific_payloads` path fire AngularJS-flavored
+        // template-escape payloads (which double as Vue 2 sandbox
+        // escapes), recovering CSTI true positives we otherwise miss.
+        let no_template_framework_detected = !result.has(&TechType::Angular)
+            && !result.has(&TechType::Vue)
+            && !result.has(&TechType::Handlebars)
+            && !result.has(&TechType::Ember);
+        if no_template_framework_detected && has_interpolation_brackets(body_text) {
+            merge_detection(
+                &mut result,
+                TechDetection {
+                    tech: TechType::Angular,
+                    evidence: "interpolation `{{…}}` literal in body".to_string(),
+                },
+            );
+        }
     }
 
     result
+}
+
+/// True when the response body contains at least one `{{identifier}}`
+/// interpolation. Conservative: requires an identifier-shaped token
+/// (`a-zA-Z_$` start, optionally followed by `\w` / `.` / `[…]` chain)
+/// between the braces so we don't trip on prose like `{{ }}` or
+/// `{{ TODO }}` placeholders rendered as plain text.
+fn has_interpolation_brackets(body: &str) -> bool {
+    static RE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let re = RE.get_or_init(|| {
+        regex::Regex::new(r"\{\{\s*[a-zA-Z_$][\w.\[\]]*\s*\}\}")
+            .expect("interpolation regex is well-formed")
+    });
+    re.is_match(body)
 }
 
 /// Merge detection, deduplicate by tech type.

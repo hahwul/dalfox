@@ -104,6 +104,49 @@ fn test_inject_type_label_for_sxss() {
 }
 
 #[test]
+fn test_is_template_shaped_payload_detects_double_braces() {
+    assert!(super::is_template_shaped_payload(
+        "{{constructor.constructor('alert(1)')()}} <span class=x>"
+    ));
+    assert!(super::is_template_shaped_payload(
+        "{{this.constructor.constructor('alert(1)')()}}"
+    ));
+}
+
+#[test]
+fn test_is_template_shaped_payload_ignores_single_brace_or_html() {
+    assert!(!super::is_template_shaped_payload("<svg/onload=alert(1)>"));
+    assert!(!super::is_template_shaped_payload("{not-a-template}"));
+    assert!(!super::is_template_shaped_payload("{{ unclosed"));
+    assert!(!super::is_template_shaped_payload("unopened }}"));
+}
+
+#[test]
+fn test_inject_type_for_payload_adds_csti_suffix() {
+    // Template-shaped payloads get the `-CSTI` suffix so downstream
+    // reporters distinguish client-side template injection findings
+    // from generic HTML reflections.
+    assert_eq!(
+        super::inject_type_for_payload(false, "{{constructor.constructor('alert(1)')()}}"),
+        "inHTML-CSTI"
+    );
+    assert_eq!(
+        super::inject_type_for_payload(true, "{{constructor.constructor('alert(1)')()}}"),
+        "sxss-inHTML-CSTI"
+    );
+    // Non-template payloads keep the legacy label so existing
+    // consumers don't have to relearn the format.
+    assert_eq!(
+        super::inject_type_for_payload(false, "<svg/onload=alert(1)>"),
+        "inHTML"
+    );
+    assert_eq!(
+        super::inject_type_for_payload(true, "<svg/onload=alert(1)>"),
+        "sxss-inHTML"
+    );
+}
+
+#[test]
 fn test_count_matching_results_all() {
     let results = vec![
         make_result(FindingType::Verified),
