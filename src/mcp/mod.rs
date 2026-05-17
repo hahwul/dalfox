@@ -643,6 +643,7 @@ Final results (via get_results_dalfox) include finding type \
             custom_alert_value: "1".to_string(),
             custom_alert_type: "none".to_string(),
             skip_xss_scanning: false,
+            max_payloads_per_param: 0,
             deep_scan: params.deep_scan,
             sxss: false,
             sxss_url: None,

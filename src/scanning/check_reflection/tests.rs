@@ -88,6 +88,7 @@ fn default_scan_args() -> crate::cmd::scan::ScanArgs {
         custom_alert_value: "1".to_string(),
         custom_alert_type: "none".to_string(),
         skip_xss_scanning: false,
+        max_payloads_per_param: 0,
         deep_scan: false,
         sxss: false,
         sxss_url: None,
@@ -763,6 +764,41 @@ fn test_safe_context_textarea_breakout() {
     );
 }
 
+// Regression: full-width unicode payloads (e.g. `＜svg…＞` produced by the
+// `unicode` bypass encoder) must not panic the slice loop when reflected.
+// Each full-width char is 3 bytes in UTF-8, so an `abs_pos + 1` advance would
+// previously land inside a multi-byte codepoint and panic `html[idx..]`.
+#[test]
+fn test_safe_context_fullwidth_payload_no_panic() {
+    let payload = "＜ｓｖｇ／ｏｎｌｏａｄ＝ａｌｅｒｔ（１）＞";
+    let html = format!(
+        "<html><body><textarea>{}</textarea></body></html>",
+        payload
+    );
+    // Inside <textarea>, so it is in a safe context — and must not panic.
+    assert!(is_in_safe_context(&html, payload));
+}
+
+#[test]
+fn test_safe_context_fullwidth_payload_outside_textarea() {
+    let payload = "＜ｓｖｇ／ｏｎｌｏａｄ＝ａｌｅｒｔ（１）＞";
+    let html = format!("<html><body><div>{}</div></body></html>", payload);
+    // Outside any safe tag — must report unsafe without panicking.
+    assert!(!is_in_safe_context(&html, payload));
+}
+
+#[test]
+fn test_safe_context_fullwidth_payload_in_title() {
+    // Matches the firing range `/reflected/parameter/title` case that triggered
+    // the original panic at byte 23 ("inside ＜ bytes 22..25").
+    let payload = "＜ｓｖｇ／ｏｎｌｏａｄ＝ａｌｅｒｔ（１）＞";
+    let html = format!(
+        "<html>\n  <head><title>{}</title>\n  </head>\n  <body></body>\n</html>",
+        payload
+    );
+    assert!(is_in_safe_context(&html, payload));
+}
+
 // --- Inert-in-script-block heuristic ---
 
 #[test]
@@ -927,6 +963,153 @@ fn test_non_path_locations_are_unaffected() {
     assert!(!should_suppress_path_reflection(&Location::Query, 404));
     assert!(!should_suppress_path_reflection(&Location::Header, 500));
     assert!(!should_suppress_path_reflection(&Location::Body, 404));
+}
+
+// --- Body-aware path reflection (4xx/5xx exploitable XSS preservation) ---
+
+#[test]
+fn test_url_attr_only_classifier_recognizes_anchor_href() {
+    // `<a href="/foo/MARKER/bar">` — pure URL echo, no exploit surface.
+    let html = "<html><a href=\"/users/MARKER/posts\">profile</a></html>";
+    assert!(marker_reflects_in_url_attr_only(html, "MARKER"));
+}
+
+#[test]
+fn test_url_attr_only_classifier_recognizes_canonical_link() {
+    let html = "<head><link rel=\"canonical\" href=\"/p/MARKER\"></head>";
+    assert!(marker_reflects_in_url_attr_only(html, "MARKER"));
+}
+
+#[test]
+fn test_url_attr_only_classifier_rejects_text_content() {
+    // Firing-range 404 pattern: URI rendered inside `<td>` — exploitable.
+    let html = "<html><body><tr><td>/no/MARKER/route</td></tr></body></html>";
+    assert!(
+        !marker_reflects_in_url_attr_only(html, "MARKER"),
+        "text-content reflection must NOT be classified as url-echo"
+    );
+}
+
+#[test]
+fn test_url_attr_only_classifier_rejects_non_url_attr() {
+    // `value="MARKER"` is exploitable (attribute-value injection).
+    let html = "<input type=\"text\" value=\"MARKER\">";
+    assert!(
+        !marker_reflects_in_url_attr_only(html, "MARKER"),
+        "non-URL attribute reflection must NOT be classified as url-echo"
+    );
+}
+
+#[test]
+fn test_url_attr_only_classifier_mixed_occurrences_keep_finding() {
+    // Marker appears in both a href AND in `<td>`. Single text-content
+    // occurrence is enough to keep the finding — be conservative.
+    let html = "<a href=\"/x/MARKER\">hi</a><td>/x/MARKER</td>";
+    assert!(!marker_reflects_in_url_attr_only(html, "MARKER"));
+}
+
+#[test]
+fn test_url_attr_only_classifier_handles_single_quoted_attr() {
+    let html = "<a href='/foo/MARKER'>x</a>";
+    assert!(marker_reflects_in_url_attr_only(html, "MARKER"));
+}
+
+#[test]
+fn test_url_attr_only_classifier_handles_unquoted_attr() {
+    let html = "<a href=/foo/MARKER>x</a>";
+    assert!(marker_reflects_in_url_attr_only(html, "MARKER"));
+}
+
+#[test]
+fn test_url_attr_only_returns_false_when_no_match() {
+    let html = "<html>no marker here</html>";
+    assert!(!marker_reflects_in_url_attr_only(html, "MARKER"));
+}
+
+#[test]
+fn test_should_suppress_with_body_keeps_exploitable_404() {
+    // 404 page echoing URI inside `<td>` — should NOT be suppressed even
+    // on 4xx. Regression for the firing-range / App Engine error template
+    // pattern.
+    let body = "<html><body><tr><td>/no/PAY/route</td></tr></body></html>";
+    assert!(!should_suppress_path_reflection_with_body(
+        &Location::Path,
+        404,
+        body,
+        "PAY",
+    ));
+}
+
+#[test]
+fn test_should_suppress_with_body_drops_url_echo_404() {
+    // Generic 404 page that just echoes the path inside `<a href>` —
+    // unexploitable URL echo, drop it.
+    let body =
+        "<html><body><p>Not found. Did you mean <a href=\"/old/PAY\">this</a>?</p></body></html>";
+    assert!(should_suppress_path_reflection_with_body(
+        &Location::Path,
+        404,
+        body,
+        "PAY",
+    ));
+}
+
+#[test]
+fn test_should_suppress_with_body_2xx_never_suppresses() {
+    // 2xx always survives regardless of where the reflection lands; the
+    // V/R upgrade pipeline decides correctness from there.
+    let body = "<a href=\"/foo/PAY\">link</a>";
+    assert!(!should_suppress_path_reflection_with_body(
+        &Location::Path,
+        200,
+        body,
+        "PAY",
+    ));
+}
+
+#[test]
+fn test_should_suppress_with_body_non_path_never_suppresses() {
+    let body = "<a href=\"/foo/PAY\">link</a>";
+    assert!(!should_suppress_path_reflection_with_body(
+        &Location::Query,
+        404,
+        body,
+        "PAY",
+    ));
+}
+
+#[test]
+fn test_should_suppress_with_body_drops_percent_encoded_only_echo() {
+    // Firing-range / App Engine 404: server URL-encodes the echoed path
+    // (`%3Csvg…%3E`). The upstream reflection detector still finds the
+    // payload via URL-decoded matching, but the browser would render the
+    // percent escapes as literal text — no `<` tag is parsed, no XSS.
+    // Suppress to avoid the false positive even though status is 4xx.
+    let body =
+        "<html><body><tr><th>URI:</th><td>/foo/%3Csvg/onload=alert(1)%3E/bar</td></tr></body></html>";
+    let raw_payload = "<svg/onload=alert(1)>";
+    assert!(
+        !body.contains(raw_payload),
+        "test fixture must contain only the percent-encoded form"
+    );
+    assert!(should_suppress_path_reflection_with_body(
+        &Location::Path,
+        404,
+        body,
+        raw_payload,
+    ));
+}
+
+#[test]
+fn test_should_suppress_with_body_empty_body_falls_back_to_strict() {
+    // No body to classify — preserve the legacy conservative behaviour so
+    // we don't surface findings from responses we can't actually inspect.
+    assert!(should_suppress_path_reflection_with_body(
+        &Location::Path,
+        404,
+        "",
+        "PAY",
+    ));
 }
 
 #[tokio::test]

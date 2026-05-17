@@ -79,6 +79,7 @@ fn test_analyze_parameters_with_mock_mining() {
         custom_alert_type: "none".to_string(),
 
         skip_xss_scanning: false,
+        max_payloads_per_param: 0,
         deep_scan: false,
         sxss: false,
         sxss_url: None,
@@ -165,6 +166,7 @@ fn test_analyze_parameters_skip_mining() {
         custom_alert_type: "none".to_string(),
 
         skip_xss_scanning: false,
+        max_payloads_per_param: 0,
         deep_scan: false,
         sxss: false,
         sxss_url: None,
@@ -243,6 +245,7 @@ fn test_probe_body_params_mock() {
         custom_alert_type: "none".to_string(),
 
         skip_xss_scanning: false,
+        max_payloads_per_param: 0,
         deep_scan: false,
         sxss: false,
         sxss_url: None,
@@ -387,6 +390,7 @@ fn test_cookie_from_raw() {
         custom_alert_type: "none".to_string(),
 
         skip_xss_scanning: false,
+        max_payloads_per_param: 0,
         deep_scan: false,
         sxss: false,
         sxss_url: None,
@@ -486,6 +490,7 @@ fn test_cookie_from_raw_no_file() {
         custom_alert_type: "none".to_string(),
 
         skip_xss_scanning: false,
+        max_payloads_per_param: 0,
         deep_scan: false,
         sxss: false,
         sxss_url: None,
@@ -797,6 +802,7 @@ fn default_scan_args() -> ScanArgs {
         custom_alert_value: "1".to_string(),
         custom_alert_type: "none".to_string(),
         skip_xss_scanning: false,
+        max_payloads_per_param: 0,
         deep_scan: false,
         sxss: false,
         sxss_url: None,

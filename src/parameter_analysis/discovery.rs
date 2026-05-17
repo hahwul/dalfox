@@ -659,24 +659,49 @@ pub async fn check_path_discovery(
 
             crate::tick_request_count();
             let mut discovered: Option<Param> = None;
-            if let Ok(resp) = request.send().await
-                && let Ok(text) = resp.text().await
-                && crate::scanning::markers::classify_probe_reflection(&text).detected()
-            {
-                let (valid, invalid) = classify_special_chars(&text);
-                discovered = Some(Param {
-                    name: param_name,
-                    value: original_value,
-                    location: crate::parameter_analysis::Location::Path,
-                    injection_context: Some(detect_injection_context(&text)),
-                    valid_specials: Some(valid),
-                    invalid_specials: Some(invalid),
-                    pre_encoding: None,
-                    pre_encoding_pipeline: None,
-                    wire_name: None,
-                    form_action_url: None,
-                    form_origin_url: None,
-                });
+            if let Ok(resp) = request.send().await {
+                // Pair discovery with the scan-time `should_suppress_path_*`
+                // policy so we don't pay payload-set requests for path
+                // segments the scanner would later throw away. Concretely:
+                //   * 2xx                              → always honor
+                //   * 3xx                              → drop (Location-only
+                //                                       echo, not a rendered
+                //                                       HTML sink)
+                //   * 4xx/5xx + marker only in URL attrs → drop (canonical
+                //                                       link / `<a href>`
+                //                                       echo noise)
+                //   * 4xx/5xx + marker outside URL attrs → keep
+                //                                       (genuine error-page
+                //                                       XSS — e.g. a 404
+                //                                       template that emits
+                //                                       `<td>{uri}</td>`).
+                let status = resp.status().as_u16();
+                if !(300..400).contains(&status)
+                    && let Ok(text) = resp.text().await
+                    && crate::scanning::markers::classify_probe_reflection(&text).detected()
+                {
+                    let exploitable_context = (200..300).contains(&status)
+                        || !crate::scanning::check_reflection::marker_reflects_in_url_attr_only(
+                            &text,
+                            crate::scanning::markers::bracketed_marker(),
+                        );
+                    if exploitable_context {
+                        let (valid, invalid) = classify_special_chars(&text);
+                        discovered = Some(Param {
+                            name: param_name,
+                            value: original_value,
+                            location: crate::parameter_analysis::Location::Path,
+                            injection_context: Some(detect_injection_context(&text)),
+                            valid_specials: Some(valid),
+                            invalid_specials: Some(invalid),
+                            pre_encoding: None,
+                            pre_encoding_pipeline: None,
+                            wire_name: None,
+                            form_action_url: None,
+                            form_origin_url: None,
+                        });
+                    }
+                }
             }
             if delay > 0 {
                 sleep(Duration::from_millis(delay)).await;

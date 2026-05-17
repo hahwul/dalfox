@@ -34,6 +34,13 @@ pub const DEFAULT_DELAY_MS: u64 = 0;
 pub const DEFAULT_WORKERS: usize = 50;
 pub const DEFAULT_MAX_CONCURRENT_TARGETS: usize = 50;
 pub const DEFAULT_MAX_TARGETS_PER_HOST: usize = 100;
+/// Floor for WAF fingerprint confidence. Weak signals like
+/// `Server: Google Frontend` (0.15 — every Google-hosted property has it) or
+/// generic "Request blocked" body markers (0.3) are filtered out by default.
+/// Real WAF signatures (Cloudflare's `cf-ray` at 0.9, AWS WAF
+/// `x-amzn-waf-action` at 0.95, etc.) sail through. Set
+/// `--waf-min-confidence 0.0` to keep every match.
+pub const DEFAULT_WAF_MIN_CONFIDENCE: f32 = 0.3;
 // Sanity caps for CLI scan args. The server uses tighter caps in
 // crate::cmd::job; CLI users may legitimately want longer timeouts for
 // slow targets but values past these almost always indicate a typo or a
@@ -61,6 +68,35 @@ fn build_ast_dom_message(
     } else {
         format!("{description} (검증 필요) [경량 확인: 파라미터 없음]")
     }
+}
+
+/// Short label used in the plain POC line so a reader can tell at a glance
+/// whether the param lived in the URL, an HTTP header (or cookie jar),
+/// the body, or the URL fragment. The `Cookie` header gets its own tag
+/// since users typically copy/paste cookie strings rather than raw headers.
+fn poc_location_tag(location: &str, param: &str) -> Option<&'static str> {
+    match location {
+        // Header location with the literal `Cookie` name folds to a cookie POC.
+        "Header" if param.eq_ignore_ascii_case("cookie") => Some("cookie"),
+        "Header" => Some("hdr"),
+        "Body" | "JsonBody" | "MultipartBody" => Some("body"),
+        "Path" => Some("path"),
+        "Fragment" => Some("frag"),
+        // Query is the historical default — omit the tag to keep the
+        // existing plain output stable for the common case.
+        "" | "Query" => None,
+        _ => None,
+    }
+}
+
+/// Returns true when the wire location is something the POC URL alone
+/// can express. Header / Cookie / Body / JsonBody / MultipartBody all
+/// require side channels (header, cookie jar, body) so we must NOT
+/// synthesize a `?param=payload` query — that historically produced
+/// misleading POC URLs like `http://target/?X-Custom-Header=<svg…>` for
+/// findings that actually came from header injection.
+fn poc_location_in_url(location: &str) -> bool {
+    matches!(location, "" | "Query" | "Path" | "Fragment")
 }
 
 fn generate_poc(result: &crate::scanning::result::Result, poc_type: &str) -> String {
@@ -102,6 +138,8 @@ fn generate_poc(result: &crate::scanning::result::Result, poc_type: &str) -> Str
         selective_path_encode(payload)
     }
 
+    let url_can_carry_payload = poc_location_in_url(&result.location);
+
     let attack_url = {
         let mut url = result.data.clone();
         if result.param.starts_with("path_segment_") {
@@ -125,7 +163,12 @@ fn generate_poc(result: &crate::scanning::result::Result, poc_type: &str) -> Str
             }
         } else if url.contains('?') {
             // Query mutation already embedded
-        } else if !url.contains(&result.payload) {
+        } else if !url.contains(&result.payload) && url_can_carry_payload {
+            // Synthesize `?param=payload` ONLY when the param actually
+            // travels on the URL. For Header/Cookie/Body locations the
+            // payload is delivered via a side channel, so injecting it
+            // into the query would produce a POC that doesn't reproduce
+            // the finding.
             let sep = if url.contains('?') { '&' } else { '?' };
             url = format!(
                 "{}{}{}={}",
@@ -138,13 +181,19 @@ fn generate_poc(result: &crate::scanning::result::Result, poc_type: &str) -> Str
         url
     };
 
+    // Short location hint surfaced in plain POC (e.g. `[GET][hdr]`).
+    let loc_segment = match poc_location_tag(&result.location, &result.param) {
+        Some(tag) => format!("[{}]", tag),
+        None => String::new(),
+    };
+
     match poc_type {
         "plain" => format!(
-            "[POC][{}][{}][{}] {}\n",
-            result.result_type, result.method, result.inject_type, attack_url
+            "[POC][{}][{}]{}[{}] {}\n",
+            result.result_type, result.method, loc_segment, result.inject_type, attack_url
         ),
-        "curl" => format!("curl -X {} \"{}\"\n", result.method, attack_url),
-        "httpie" => format!("http {} \"{}\"\n", result.method.to_lowercase(), attack_url),
+        "curl" => render_curl_poc(result, &attack_url),
+        "httpie" => render_httpie_poc(result, &attack_url),
         "http-request" => {
             if let Some(request) = &result.request {
                 format!("{}\n", request)
@@ -153,9 +202,73 @@ fn generate_poc(result: &crate::scanning::result::Result, poc_type: &str) -> Str
             }
         }
         _ => format!(
-            "[POC][{}][{}][{}] {}\n",
-            result.result_type, result.method, result.inject_type, attack_url
+            "[POC][{}][{}]{}[{}] {}\n",
+            result.result_type, result.method, loc_segment, result.inject_type, attack_url
         ),
+    }
+}
+
+/// Render a runnable `curl` invocation that reproduces the finding.
+/// For header / cookie / body locations we emit the matching side-channel
+/// flag so copy-pasting actually exercises the same wire request — a plain
+/// URL would silently lose the payload.
+fn render_curl_poc(result: &crate::scanning::result::Result, attack_url: &str) -> String {
+    let method = result.method.to_uppercase();
+    let escaped = |s: &str| s.replace('\\', "\\\\").replace('"', "\\\"");
+    match result.location.as_str() {
+        "Header" if result.param.eq_ignore_ascii_case("cookie") => format!(
+            "curl -X {} -b \"{}={}\" \"{}\"\n",
+            method,
+            result.param,
+            escaped(&result.payload),
+            attack_url
+        ),
+        "Header" => format!(
+            "curl -X {} -H \"{}: {}\" \"{}\"\n",
+            method,
+            result.param,
+            escaped(&result.payload),
+            attack_url
+        ),
+        "Body" | "MultipartBody" => format!(
+            "curl -X {} --data \"{}={}\" \"{}\"\n",
+            method,
+            result.param,
+            escaped(&result.payload),
+            attack_url
+        ),
+        "JsonBody" => format!(
+            "curl -X {} -H \"Content-Type: application/json\" --data \"{{\\\"{}\\\":\\\"{}\\\"}}\" \"{}\"\n",
+            method,
+            result.param,
+            escaped(&result.payload),
+            attack_url
+        ),
+        _ => format!("curl -X {} \"{}\"\n", method, attack_url),
+    }
+}
+
+/// `httpie` mirror of [`render_curl_poc`].
+fn render_httpie_poc(result: &crate::scanning::result::Result, attack_url: &str) -> String {
+    let method = result.method.to_lowercase();
+    match result.location.as_str() {
+        "Header" if result.param.eq_ignore_ascii_case("cookie") => format!(
+            "http {} \"{}\" \"Cookie:{}={}\"\n",
+            method, attack_url, result.param, result.payload
+        ),
+        "Header" => format!(
+            "http {} \"{}\" \"{}:{}\"\n",
+            method, attack_url, result.param, result.payload
+        ),
+        "Body" | "MultipartBody" => format!(
+            "http -f {} \"{}\" \"{}={}\"\n",
+            method, attack_url, result.param, result.payload
+        ),
+        "JsonBody" => format!(
+            "http {} \"{}\" \"{}={}\"\n",
+            method, attack_url, result.param, result.payload
+        ),
+        _ => format!("http {} \"{}\"\n", method, attack_url),
     }
 }
 
@@ -322,9 +435,11 @@ async fn preflight_content_type(
                 }
                 if !args.silence {
                     let ts = chrono::Local::now().format("%-I:%M%p").to_string();
-                    eprintln!(
+                    crate::ceprintln!(
                         "\x1b[90m{}\x1b[0m \x1b[31mUNREACHABLE\x1b[0m {} ({})",
-                        ts, target.url, reason
+                        ts,
+                        target.url,
+                        reason
                     );
                 }
                 return None;
@@ -741,6 +856,14 @@ pub struct ScanArgs {
     pub skip_xss_scanning: bool,
 
     #[clap(help_heading = "XSS SCANNING")]
+    /// Cap the number of payloads tested per parameter (reflection set and DOM-verification
+    /// set are each capped independently). 0 = no cap (default). Useful on large attack
+    /// surfaces where dynamic payloads + encoders + WAF-bypass mutations would otherwise
+    /// generate thousands of requests per parameter.
+    #[arg(long, default_value_t = 0)]
+    pub max_payloads_per_param: usize,
+
+    #[clap(help_heading = "XSS SCANNING")]
     /// Perform deep scanning - test all payloads even after finding XSS
     #[arg(long)]
     pub deep_scan: bool,
@@ -798,11 +921,13 @@ pub struct ScanArgs {
     pub waf_evasion: bool,
 
     #[clap(help_heading = "WAF")]
-    /// Discard WAF fingerprints below this confidence (0.0–1.0). Use to
-    /// suppress weak detections like "Request blocked" (0.3) or
-    /// "Server: Google Frontend" (0.5) that often false-positive.
-    /// Default 0.0 keeps every match.
-    #[arg(long, default_value_t = 0.0)]
+    /// Discard WAF fingerprints below this confidence (0.0–1.0). Default
+    /// (0.3) filters weak signals like `Server: Google Frontend` (0.15 —
+    /// emitted by every Google-hosted property regardless of Cloud Armor)
+    /// and generic "Request blocked" body markers. Real WAF signatures
+    /// (Cloudflare 0.9+, AWS WAF 0.95) are kept. Pass `--waf-min-confidence 0.0`
+    /// to keep every match.
+    #[arg(long, default_value_t = crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE)]
     pub waf_min_confidence: f32,
 
     #[clap(help_heading = "TARGETS")]
@@ -890,6 +1015,7 @@ impl ScanArgs {
             custom_alert_value: "1".to_string(),
             custom_alert_type: "none".to_string(),
             skip_xss_scanning: true,
+            max_payloads_per_param: 0,
             deep_scan: false,
             sxss: false,
             sxss_url: None,
@@ -1039,49 +1165,48 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     }
     let __dalfox_scan_start = std::time::Instant::now();
     crate::REQUEST_COUNT.store(0, Ordering::Relaxed);
+    // cprintln strips ANSI when --no-color / NO_COLOR is in effect. Callers
+    // sometimes embed colored fragments inside `msg` (e.g. `XSS found
+    // \x1b[33m{}\x1b[0m XSS`) — strip handles those too.
     let log_info = move |msg: &str| {
         if args.format == "plain" && !args.silence {
             let ts = chrono::Local::now().format("%-I:%M%p").to_string();
-            if nc {
-                println!("{} INF {}", ts, msg);
-            } else {
-                println!("\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m {}", ts, msg);
-            }
+            crate::cprintln!("\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m {}", ts, msg);
         }
     };
     let log_warn = move |msg: &str| {
         if args.format == "plain" && !args.silence {
             let ts = chrono::Local::now().format("%-I:%M%p").to_string();
-            if nc {
-                println!("{} WRN {}", ts, msg);
-            } else {
-                println!("\x1b[90m{}\x1b[0m \x1b[33mWRN\x1b[0m {}", ts, msg);
-            }
+            crate::cprintln!("\x1b[90m{}\x1b[0m \x1b[33mWRN\x1b[0m {}", ts, msg);
         }
     };
     let log_dbg = move |msg: &str| {
         if crate::DEBUG.load(Ordering::Relaxed) {
             let ts = chrono::Local::now().format("%-I:%M%p").to_string();
-            if nc {
-                println!("{} DBG {}", ts, msg);
-            } else {
-                println!("\x1b[90m{}\x1b[0m \x1b[35mDBG\x1b[0m {}", ts, msg);
-            }
+            crate::cprintln!("\x1b[90m{}\x1b[0m \x1b[35mDBG\x1b[0m {}", ts, msg);
         }
     };
-    // Ephemeral animated spinner for progress (returns (stop_tx, done_rx))
-    let start_spinner =
-        |enabled: bool, label: String| -> Option<(oneshot::Sender<()>, oneshot::Receiver<()>)> {
-            if !enabled {
-                return None;
-            }
+    // Ephemeral animated spinner for progress (returns (stop_tx, done_rx)).
+    // Suppressed when:
+    //   - caller passes `enabled = false`
+    //   - `--silence` / `-S` is set (no chatter)
+    //   - output isn't a TTY (piping/CI — cursor redraws look like garbage)
+    // The carriage-return + erase-line redraw pattern is only useful on
+    // a real terminal; in a log file it leaves `\r⠋ preflight: ...\r⠙` strings.
+    let spinner_allowed = crate::utils::term::stdout_is_tty() && !args.silence;
+    let start_spinner = move |enabled: bool,
+                              label: String|
+          -> Option<(oneshot::Sender<()>, oneshot::Receiver<()>)> {
+        if !enabled || !spinner_allowed {
+            return None;
+        }
             let (tx, mut rx) = oneshot::channel::<()>();
             let (done_tx, done_rx) = oneshot::channel::<()>();
             tokio::spawn(async move {
                 let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
                 let mut i = 0usize;
                 loop {
-                    print!(
+                    crate::cprint!(
                         "\r\x1b[38;5;247m{} {}\x1b[0m",
                         frames[i % frames.len()],
                         label
@@ -1090,7 +1215,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                     tokio::select! {
                         _ = tokio::time::sleep(Duration::from_millis(80)) => {},
                         _ = &mut rx => {
-                            print!("\r\x1b[2K\r");
+                            crate::cprint!("\r\x1b[2K\r");
                             let _ = io::stdout().flush();
                             let _ = done_tx.send(());
                             break;
@@ -1628,8 +1753,13 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     let scan_idx = Arc::new(AtomicUsize::new(0));
     let overall_done = Arc::new(AtomicUsize::new(0));
 
-    // Start global overall progress ticker when multiple targets; runs across preflight, analysis, and scanning
-    let overall_ticker = if args.format == "plain" && !args.silence && total_targets > 1 {
+    // Start global overall progress ticker when multiple targets; runs across preflight, analysis, and scanning.
+    // Suppressed when stdout isn't a TTY — cursor-redraw frames look like garbage in logs.
+    let overall_ticker = if args.format == "plain"
+        && !args.silence
+        && total_targets > 1
+        && crate::utils::term::stdout_is_tty()
+    {
         let findings_count_clone = findings_count.clone();
         let overall_done_clone = overall_done.clone();
         let total_targets_copy = total_targets;
@@ -1642,7 +1772,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 let done = overall_done_clone.load(Ordering::Relaxed);
                 let percent = (done * 100) / std::cmp::max(1, total_targets_copy);
                 let findings = findings_count_clone.load(Ordering::Relaxed);
-                print!(
+                crate::cprint!(
                     "\r\x1b[38;5;247m{} overall: targets={}  done={}  progress={}%  findings={}\x1b[0m",
                     frames[i % frames.len()],
                     total_targets_copy,
@@ -1655,7 +1785,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                     _ = tokio::time::sleep(Duration::from_millis(120)) => {},
                     _ = &mut rx => {
                         // clear the line and exit
-                        print!("\r\x1b[2K\r");
+                        crate::cprint!("\r\x1b[2K\r");
                         let _ = io::stdout().flush();
                         let _ = done_tx.send(());
                         break;
@@ -1698,7 +1828,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             if !dropped.is_empty() {
                 if !args.silence {
                     let ts = chrono::Local::now().format("%-I:%M%p").to_string();
-                    eprintln!(
+                    crate::ceprintln!(
                         "\x1b[90m{}\x1b[0m \x1b[33mWARN\x1b[0m max-targets-per-host cap ({}) reached; {} target(s) skipped",
                         ts,
                         args.max_targets_per_host,
@@ -1849,7 +1979,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                                 target.delay = 3000;
                                 if !args_clone.silence {
                                     let ts = chrono::Local::now().format("%-I:%M%p").to_string();
-                                    println!(
+                                    crate::cprintln!(
                                         "\x1b[90m{}\x1b[0m \x1b[33mWAF\x1b[0m evasion activated: workers=1, delay=3000ms",
                                         ts
                                     );
@@ -1878,26 +2008,26 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                             target.url.as_ref(),
                         ));
                         let ts = chrono::Local::now().format("%-I:%M%p").to_string();
-                        println!(
+                        crate::cprintln!(
                             "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m {} start scan to {}",
                             ts, sid, target.url
                         );
                     } else {
                         let ts = chrono::Local::now().format("%-I:%M%p").to_string();
-                        println!(
+                        crate::cprintln!(
                             "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m start scan to {}",
                             ts, target.url
                         );
                         if __preflight_csp_present {
-                            println!("\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m CSP: enabled", ts);
+                            crate::cprintln!("\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m CSP: enabled", ts);
                             if let Some((hn, hv)) = &__preflight_csp_header {
-                                println!("  \x1b[90m└──\x1b[0m \x1b[38;5;247m{}:\x1b[0m \x1b[38;5;247m{}\x1b[0m", hn, hv);
+                                crate::cprintln!("  \x1b[90m└──\x1b[0m \x1b[38;5;247m{}:\x1b[0m \x1b[38;5;247m{}\x1b[0m", hn, hv);
                             }
                         }
                         // Log WAF detection
                         if let Some(ref waf_info) = target.waf_info {
                             for fp in &waf_info.detected {
-                                println!(
+                                crate::cprintln!(
                                     "\x1b[90m{}\x1b[0m \x1b[33mWAF\x1b[0m {} detected (confidence: {:.0}%, evidence: {})",
                                     ts, fp.waf_type, fp.confidence * 100.0, fp.evidence
                                 );
@@ -1906,13 +2036,13 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                                 let waf_types: Vec<&crate::waf::WafType> = waf_info.waf_types();
                                 let strategy = crate::waf::bypass::merge_strategies(&waf_types);
                                 if !strategy.extra_encoders.is_empty() {
-                                    println!(
+                                    crate::cprintln!(
                                         "  \x1b[90m└──\x1b[0m \x1b[38;5;247mbypass encoders: {}\x1b[0m",
                                         strategy.extra_encoders.join(", ")
                                     );
                                 }
                                 if !strategy.mutations.is_empty() {
-                                    println!(
+                                    crate::cprintln!(
                                         "  \x1b[90m└──\x1b[0m \x1b[38;5;247mbypass mutations: {} types\x1b[0m",
                                         strategy.mutations.len()
                                     );
@@ -1923,7 +2053,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                         if let Some(ref tech_info) = target.tech_info {
                             let tech_names: Vec<String> = tech_info.detected.iter().map(|d| format!("{}", d.tech)).collect();
                             if !tech_names.is_empty() {
-                                println!(
+                                crate::cprintln!(
                                     "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m tech: {}",
                                     ts, tech_names.join(", ")
                                 );
@@ -2141,12 +2271,12 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                         let sid = crate::utils::short_scan_id(&crate::utils::make_scan_id(
                             target.url.as_ref(),
                         ));
-                        println!(
+                        crate::cprintln!(
                             "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m {} found reflected \x1b[33m{}\x1b[0m params",
                             ts, sid, n
                         );
                     } else {
-                        println!(
+                        crate::cprintln!(
                             "\x1b[90m{}\x1b[0m \x1b[36mINF\x1b[0m found reflected \x1b[33m{}\x1b[0m params",
                             ts, n
                         );
@@ -2163,7 +2293,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                             .as_ref()
                             .map(|v| v.iter().collect::<String>())
                             .unwrap_or_else(|| "-".to_string());
-                        println!(
+                        crate::cprintln!(
                             "  \x1b[90m{}\x1b[0m \x1b[38;5;247m{}\x1b[0m \x1b[38;5;247mvalid_specials=\x1b[0m\"\x1b[38;5;247m{}\x1b[0m\" \x1b[38;5;247minvalid_specials=\x1b[0m\"\x1b[38;5;247m{}\x1b[0m\"",
                             bullet, p.name, valid, invalid
                         );
@@ -2181,6 +2311,10 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                                 }
                             }
                             f
+                        };
+                        let cap = args_clone.max_payloads_per_param;
+                        let apply_cap = |n: usize| -> usize {
+                            if cap == 0 { n } else { n.min(cap) }
                         };
                         let mut total: usize = 0;
                         for p in &target.reflection_params {
@@ -2209,7 +2343,14 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                                     (html.len() + attr.len()) * enc_factor
                                 }
                             };
-                            total = total.saturating_add(refl_len.saturating_mul(1 + dom_len));
+                            // Scan loop is additive (one reflection request + one DOM request
+                            // per payload), not cartesian. Mirrors the `total_tasks` calculation
+                            // in src/scanning/mod.rs that drives the progress bar / ETA.
+                            // WAF mutation/encoder expansion isn't reflected here yet, so this
+                            // remains a lower bound.
+                            total = total.saturating_add(
+                                apply_cap(refl_len).saturating_add(apply_cap(dom_len)),
+                            );
                         }
                         if args_clone.format == "plain" && !args_clone.silence {
                             log_dbg(&format!("{} test cases (reqs) estimated", total));
@@ -2255,6 +2396,10 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                     }
                     f
                 };
+                let cap = args.max_payloads_per_param;
+                let apply_cap = |n: usize| -> usize {
+                    if cap == 0 { n } else { n.min(cap) }
+                };
                 let mut estimated_requests: usize = 0;
                 for p in &target.reflection_params {
                     let payload_count = if let Some(ctx) = &p.injection_context {
@@ -2267,7 +2412,8 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                         let js_len = crate::payload::XSS_JAVASCRIPT_PAYLOADS.len() * enc_factor;
                         html_len + js_len
                     };
-                    estimated_requests = estimated_requests.saturating_add(payload_count);
+                    estimated_requests =
+                        estimated_requests.saturating_add(apply_cap(payload_count));
                 }
 
                 let params: Vec<serde_json::Value> = target
@@ -2913,7 +3059,10 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             }
         }
     } else {
-        println!("{}", output_content);
+        // output_content may carry baked-in ANSI escapes from the plain
+        // builder above — cprintln strips them when --no-color / NO_COLOR
+        // is in effect so the final POC/finding block stays plain.
+        crate::cprintln!("{}", output_content);
     }
 
     // Request/Response are displayed inline under each POC in plain mode.

@@ -8,6 +8,7 @@ This module re-exports commonly used helpers so other modules can simply
 pub mod banner;
 pub mod http;
 pub mod scan_id;
+pub mod term;
 
 // Re-export banner helpers at `crate::utils::*`
 pub use banner::print_banner_once;

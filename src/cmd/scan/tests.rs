@@ -67,6 +67,7 @@ fn default_scan_args() -> ScanArgs {
         custom_alert_value: "1".to_string(),
         custom_alert_type: "none".to_string(),
         skip_xss_scanning: false,
+        max_payloads_per_param: 0,
         deep_scan: false,
         sxss: false,
         sxss_url: None,
@@ -390,6 +391,129 @@ fn test_generate_poc_http_request_prefers_request_block() {
     r.request = Some("GET / HTTP/1.1\nHost: example.com".to_string());
     let out = generate_poc(&r, "http-request");
     assert!(out.contains("GET / HTTP/1.1"));
+}
+
+#[test]
+fn test_generate_poc_plain_header_does_not_synthesize_query() {
+    // Regression for the xss-quiz pattern: header reflection used to be
+    // rendered as `?X-Custom-Header=<svg…>` (an invented query param),
+    // which couldn't reproduce the finding. The plain POC must now leave
+    // the URL untouched and tag the line with `[hdr]`.
+    let mut r = ScanResult::new(
+        FindingType::Reflected,
+        "inHTML".to_string(),
+        "GET".to_string(),
+        "http://example.com/".to_string(),
+        "X-Custom-Header".to_string(),
+        "<svg/onload=alert(1)>".to_string(),
+        "evidence".to_string(),
+        "CWE-79".to_string(),
+        "Info".to_string(),
+        0,
+        "msg".to_string(),
+    );
+    r.location = "Header".to_string();
+    let out = generate_poc(&r, "plain");
+    assert!(
+        !out.contains("?X-Custom-Header"),
+        "header POC must not synthesize ?X-Custom-Header=… in URL; got: {}",
+        out
+    );
+    assert!(out.contains("[hdr]"), "plain header POC missing [hdr] tag: {}", out);
+    assert!(out.contains("http://example.com/"));
+}
+
+#[test]
+fn test_generate_poc_curl_header_uses_dash_h_flag() {
+    let mut r = ScanResult::new(
+        FindingType::Reflected,
+        "inHTML".to_string(),
+        "GET".to_string(),
+        "http://example.com/".to_string(),
+        "X-Custom-Header".to_string(),
+        "<svg/onload=alert(1)>".to_string(),
+        "evidence".to_string(),
+        "CWE-79".to_string(),
+        "Info".to_string(),
+        0,
+        "msg".to_string(),
+    );
+    r.location = "Header".to_string();
+    let out = generate_poc(&r, "curl");
+    assert!(out.contains("-H \"X-Custom-Header: <svg/onload=alert(1)>\""), "curl POC missing -H: {}", out);
+    assert!(!out.contains("?X-Custom-Header"));
+}
+
+#[test]
+fn test_generate_poc_cookie_uses_cookie_tag_and_dash_b() {
+    let mut r = ScanResult::new(
+        FindingType::Reflected,
+        "inHTML".to_string(),
+        "GET".to_string(),
+        "http://example.com/".to_string(),
+        "Cookie".to_string(),
+        "<svg/onload=alert(1)>".to_string(),
+        "evidence".to_string(),
+        "CWE-79".to_string(),
+        "Info".to_string(),
+        0,
+        "msg".to_string(),
+    );
+    r.location = "Header".to_string();
+    let plain = generate_poc(&r, "plain");
+    assert!(plain.contains("[cookie]"), "plain cookie POC missing [cookie] tag: {}", plain);
+    let curl = generate_poc(&r, "curl");
+    assert!(curl.contains("-b \"Cookie=<svg/onload=alert(1)>\""), "curl POC missing -b: {}", curl);
+}
+
+#[test]
+fn test_generate_poc_body_emits_data_flag() {
+    let mut r = ScanResult::new(
+        FindingType::Reflected,
+        "inHTML".to_string(),
+        "POST".to_string(),
+        "http://example.com/login".to_string(),
+        "username".to_string(),
+        "<svg/onload=alert(1)>".to_string(),
+        "evidence".to_string(),
+        "CWE-79".to_string(),
+        "Info".to_string(),
+        0,
+        "msg".to_string(),
+    );
+    r.location = "Body".to_string();
+    let plain = generate_poc(&r, "plain");
+    assert!(plain.contains("[body]"), "plain body POC missing [body] tag: {}", plain);
+    assert!(
+        !plain.contains("?username="),
+        "body POC must not synthesize ?username=… in URL: {}",
+        plain
+    );
+    let curl = generate_poc(&r, "curl");
+    assert!(curl.contains("--data \"username=<svg/onload=alert(1)>\""), "curl POC missing --data: {}", curl);
+}
+
+#[test]
+fn test_generate_poc_query_unchanged_when_location_empty() {
+    // Older Result producers don't set `location` yet. The plain POC must
+    // stay byte-identical to the pre-bug-5 format so unrelated downstream
+    // parsers (CI, reporting scripts) don't break.
+    let r = ScanResult::new(
+        FindingType::Reflected,
+        "inHTML".to_string(),
+        "GET".to_string(),
+        "https://example.com".to_string(),
+        "q".to_string(),
+        "<x>".to_string(),
+        "evidence".to_string(),
+        "CWE-79".to_string(),
+        "Info".to_string(),
+        0,
+        "msg".to_string(),
+    );
+    let out = generate_poc(&r, "plain");
+    assert!(out.contains("[POC][R][GET][inHTML]"), "format drift: {}", out);
+    assert!(out.contains("?q=%3Cx%3E"));
 }
 
 #[test]

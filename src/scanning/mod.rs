@@ -276,6 +276,7 @@ async fn run_ast_dom_analysis(
                 0,
                 format!("{} (검증 필요)", description),
             );
+            ast_result.location = format!("{:?}", param.location);
             if !source_uses_url_surface {
                 ast_result.request = Some(build_request_text(target, param, &payload));
             }
@@ -549,6 +550,18 @@ pub async fn run_scanning(
                     &dom_payloads,
                     &strategy.extra_encoders,
                 );
+            }
+        }
+
+        // --max-payloads-per-param: cap each payload set independently.
+        // 0 means unlimited (default), preserving prior behavior.
+        let cap = args.max_payloads_per_param;
+        if cap > 0 {
+            if reflection_payloads.len() > cap {
+                reflection_payloads.truncate(cap);
+            }
+            if dom_payloads.len() > cap {
+                dom_payloads.truncate(cap);
             }
         }
 
@@ -911,6 +924,7 @@ pub async fn run_scanning(
                             606,
                             poc_msg,
                         );
+                        result.location = format!("{:?}", param_clone.location);
                         result.request = Some(build_request_text(
                             &target_clone,
                             &param_clone,
@@ -1024,6 +1038,7 @@ pub async fn run_scanning(
                                 evidence_label, param_clone.name, dom_payload
                             ),
                         );
+                        result.location = format!("{:?}", param_clone.location);
                         result.request = Some(build_request_text(
                             &target_clone,
                             &param_clone,
@@ -1106,6 +1121,7 @@ pub async fn run_scanning(
                                         reflection_note, param_clone.name, hpp_payload, pos_label
                                     ),
                                 );
+                                result.location = format!("{:?}", param_clone.location);
                                 result.response = response_text;
                                 stream_finding(&result);
                                 local_results.push(result);

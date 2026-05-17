@@ -64,6 +64,7 @@ fn default_scan_args() -> crate::cmd::scan::ScanArgs {
         custom_alert_value: "1".to_string(),
         custom_alert_type: "none".to_string(),
         skip_xss_scanning: true,
+        max_payloads_per_param: 0,
         deep_scan: false,
         sxss: false,
         sxss_url: None,
@@ -260,6 +261,112 @@ async fn test_check_discovery_skip_discovery_true_keeps_empty() {
 
     check_discovery(&mut target, &args, reflection_params, semaphore).await;
     assert!(target.reflection_params.is_empty());
+}
+
+/// Mock that mimics Firing Range / App Engine 404 pages: any path that
+/// doesn't match the known route returns 404 with the requested URI
+/// echoed in an HTML `<td>...</td>` — exploitable text-content context.
+async fn start_404_td_echo_mock_server() -> SocketAddr {
+    async fn echo_404(uri: Uri) -> (axum::http::StatusCode, String) {
+        (
+            axum::http::StatusCode::NOT_FOUND,
+            format!(
+                "<html><body><tr><th>URI:</th><td>{}</td></tr></body></html>",
+                uri.path()
+            ),
+        )
+    }
+    async fn ok_root() -> &'static str {
+        "ok"
+    }
+    let app = Router::new()
+        .route("/", any(ok_root))
+        .fallback(any(echo_404));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+    addr
+}
+
+/// Mock that mimics a generic 404 page echoing the path only inside an
+/// `<a href>` breadcrumb — URL-attribute echo with no script-execution
+/// surface, the noise pattern that should still be suppressed.
+async fn start_404_anchor_echo_mock_server() -> SocketAddr {
+    async fn echo_404(uri: Uri) -> (axum::http::StatusCode, String) {
+        (
+            axum::http::StatusCode::NOT_FOUND,
+            format!(
+                "<html><body>Page not found. Try <a href=\"{}\">again</a>.</body></html>",
+                uri.path()
+            ),
+        )
+    }
+    async fn ok_root() -> &'static str {
+        "ok"
+    }
+    let app = Router::new()
+        .route("/", any(ok_root))
+        .fallback(any(echo_404));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+    addr
+}
+
+#[tokio::test]
+async fn test_check_path_discovery_keeps_exploitable_404_td_echo() {
+    // Firing-range / App Engine 404 template: URI rendered inside
+    // `<td>...</td>`. Pre-TP-fix this was suppressed wholesale on
+    // non-2xx; the scan-time filter had the same blanket drop.
+    // Both paths now classify the response and KEEP the finding,
+    // because `<td>` is plain text content and a `<svg/onload=...>`
+    // payload would actually break out and execute.
+    let addr = start_404_td_echo_mock_server().await;
+    let mut target = parse_target(&format!("http://{}/no/such/route", addr)).unwrap();
+    target.delay = 1;
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(Semaphore::new(1));
+    check_path_discovery(&target, reflection_params.clone(), semaphore).await;
+
+    let params = reflection_params.lock().await.clone();
+    let names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
+    assert!(
+        names.contains(&"path_segment_0"),
+        "exploitable 404 td-echo path discovery must surface path_segment_0 (got {:?})",
+        names
+    );
+}
+
+#[tokio::test]
+async fn test_check_path_discovery_drops_url_attr_only_404_echo() {
+    // Generic 404 page that echoes the path only inside `<a href>` —
+    // unexploitable URL echo. Discovery must continue to skip it
+    // so we don't waste payload-set requests on noise.
+    let addr = start_404_anchor_echo_mock_server().await;
+    let mut target = parse_target(&format!("http://{}/no/such/route", addr)).unwrap();
+    target.delay = 1;
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(Semaphore::new(1));
+    check_path_discovery(&target, reflection_params.clone(), semaphore).await;
+
+    let params = reflection_params.lock().await.clone();
+    assert!(
+        params.is_empty(),
+        "url-attr-only 404 echo must NOT surface path segments (got {:?})",
+        params.iter().map(|p| &p.name).collect::<Vec<_>>()
+    );
 }
 
 #[tokio::test]

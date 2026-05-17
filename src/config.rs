@@ -107,6 +107,7 @@ pub struct ScanConfig {
     pub custom_alert_value: Option<String>,
     pub custom_alert_type: Option<String>,
     pub skip_xss_scanning: Option<bool>,
+    pub max_payloads_per_param: Option<usize>,
     pub deep_scan: Option<bool>,
     pub sxss: Option<bool>,
     pub sxss_url: Option<String>,
@@ -297,6 +298,9 @@ impl Config {
             }
             if let Some(v) = scan.skip_xss_scanning {
                 args.skip_xss_scanning = v;
+            }
+            if let Some(v) = scan.max_payloads_per_param {
+                args.max_payloads_per_param = v;
             }
             if let Some(v) = scan.deep_scan {
                 args.deep_scan = v;
@@ -698,6 +702,11 @@ impl Config {
             {
                 args.skip_xss_scanning = v;
             }
+            if let Some(v) = scan.max_payloads_per_param
+                && args.max_payloads_per_param == 0
+            {
+                args.max_payloads_per_param = v;
+            }
             if let Some(v) = scan.deep_scan
                 && !args.deep_scan
             {
@@ -750,7 +759,10 @@ impl Config {
             // so users who pass --waf-min-confidence on the command
             // line keep authority over what the config file says.
             if let Some(v) = scan.waf_min_confidence
-                && args.waf_min_confidence == 0.0
+                && (args.waf_min_confidence
+                    - crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE)
+                    .abs()
+                    < f32::EPSILON
             {
                 args.waf_min_confidence = v;
             }
@@ -909,6 +921,7 @@ pub fn default_toml_template() -> String {
 # custom_payload = "payloads.txt"
 # only_custom_payload = false
 # skip_xss_scanning = false
+# max_payloads_per_param = 0  # cap payloads per param (0 = unlimited)
 # deep_scan = false
 # sxss = false
 # sxss_url = "https://target/echo"
