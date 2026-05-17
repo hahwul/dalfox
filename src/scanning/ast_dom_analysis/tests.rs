@@ -2753,23 +2753,93 @@ fn test_reflect_construct_function_safe_literal_not_detected() {
 }
 
 #[test]
-fn test_xss_game_level3_pattern() {
-    // xss-game L3: hash flows through a wrapper function before reaching
-    // jQuery's `.html()` sink. Inter-procedural taint tracking is the
-    // missing piece.
+fn test_self_location_hash_recognised_as_source() {
+    // Regression for the xss-game L3 hash source: `self === window` so
+    // `self.location.hash` taints just like `location.hash`. Without
+    // `self.location` in DOM_SOURCES the analyzer recurses past the
+    // alias and gives up at the bare `self` identifier.
     let js = r#"
 function chooseTab(num) {
-  var html = "<img src='/static/level3/cloud" + num + ".jpg' />";
+  $('#tabContent').html(num);
+}
+chooseTab(self.location.hash);
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let result = analyzer.analyze(js).expect("parses");
+    assert_eq!(result.len(), 1, "self.location.hash must taint chooseTab arg");
+    assert!(result[0].source.contains("location"));
+    assert_eq!(result[0].sink, "html");
+}
+
+#[test]
+fn test_function_expression_body_in_window_onload_assignment_is_walked() {
+    // Regression for the xss-game L3 outer wrapper: the call that
+    // feeds the tainted source into `chooseTab` lives inside an
+    // anonymous function expression assigned to `window.onload`. The
+    // analyzer used to stop at the assignment RHS — only function
+    // *declarations* had their bodies walked at module scope — so the
+    // sink summary never fired.
+    let js = r#"
+function chooseTab(num) {
+  $('#tabContent').html(num);
+}
+window.onload = function() {
+  chooseTab(self.location.hash);
+}
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let result = analyzer.analyze(js).expect("parses");
+    assert_eq!(
+        result.len(),
+        1,
+        "function-expression body inside window.onload assignment must be walked"
+    );
+}
+
+#[test]
+fn test_arrow_function_expression_body_in_assignment_is_walked() {
+    // Same fix covers arrow-function expressions in assignments.
+    let js = r#"
+function chooseTab(num) {
+  $('#tabContent').html(num);
+}
+window.onload = () => {
+  chooseTab(location.hash);
+};
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let result = analyzer.analyze(js).expect("parses");
+    assert_eq!(result.len(), 1);
+}
+
+#[test]
+fn test_xss_game_level3_full_pattern() {
+    // Full xss-game L3 shape — kept verbatim from the live page so
+    // future analyzer refactors don't silently lose it. The hash
+    // flows through `unescape`, then through `chooseTab`'s parameter,
+    // then concatenated into an HTML string, then handed to jQuery
+    // `.html()`. Every link in the chain must be tracked.
+    let js = r#"
+function chooseTab(num) {
+  var html = "Image " + parseInt(num) + "<br>";
+  html += "<img src='/static/level3/cloud" + num + ".jpg' />";
   $('#tabContent').html(html);
 }
 window.onload = function() {
   chooseTab(unescape(self.location.hash.substr(1)) || "1");
 }
 "#;
-    let analyzer = crate::scanning::ast_dom_analysis::AstDomAnalyzer::new();
+    let analyzer = AstDomAnalyzer::new();
     let result = analyzer.analyze(js).expect("parses");
-    eprintln!("L3 vulns found: {}", result.len());
-    for v in &result {
-        eprintln!("  source={} sink={} line={}:{}", v.source, v.sink, v.line, v.column);
-    }
+    assert!(
+        !result.is_empty(),
+        "xss-game L3 full pattern must produce at least one DOM XSS finding"
+    );
+    let v = &result[0];
+    assert!(
+        v.source.contains("location"),
+        "source should mention location (got {})",
+        v.source
+    );
+    assert_eq!(v.sink, "html");
 }

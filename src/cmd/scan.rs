@@ -163,6 +163,15 @@ fn generate_poc(result: &crate::scanning::result::Result, poc_type: &str) -> Str
             }
         } else if url.contains('?') {
             // Query mutation already embedded
+        } else if result.param == "-" {
+            // AST DOM-XSS findings use `"-"` as a synthetic param name
+            // and have already built a complete POC URL via
+            // `ast_integration::build_dom_xss_poc_url` (which places
+            // the payload in the fragment / search / path according
+            // to the detected DOM source). Skip query synthesis here
+            // — otherwise we'd append `?-=<payload>` after a URL that
+            // already carries `#<payload>`, producing a confusing
+            // double-injection POC.
         } else if !url.contains(&result.payload) && url_can_carry_payload {
             // Synthesize `?param=payload` ONLY when the param actually
             // travels on the URL. For Header/Cookie/Body locations the
