@@ -717,6 +717,18 @@ pub async fn analyze_parameters(
         pb.clone(),
     )
     .await;
+    // Mining can push the same `(name, location)` slot again — most
+    // commonly when DOM mining surfaces a param name that the query /
+    // form / header discovery already registered. Run the collapse
+    // pass here too so by the time payload generation reads
+    // `target.reflection_params` every wire slot is unique. (The
+    // earlier collapse inside `check_discovery` keeps internal
+    // bookkeeping clean before mining starts; this one catches new
+    // duplicates introduced by mining.)
+    {
+        let mut guard = reflection_params.lock().await;
+        crate::parameter_analysis::discovery::dedupe_reflection_params(&mut guard);
+    }
     let mut params = reflection_params.lock().await.clone();
     if !args.ignore_param.is_empty() {
         params.retain(|p| !args.ignore_param.iter().any(|ignored| ignored == &p.name));
