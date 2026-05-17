@@ -2751,3 +2751,25 @@ fn test_reflect_construct_function_safe_literal_not_detected() {
         "Safe literal code should not be detected via Reflect.construct"
     );
 }
+
+#[test]
+fn test_xss_game_level3_pattern() {
+    // xss-game L3: hash flows through a wrapper function before reaching
+    // jQuery's `.html()` sink. Inter-procedural taint tracking is the
+    // missing piece.
+    let js = r#"
+function chooseTab(num) {
+  var html = "<img src='/static/level3/cloud" + num + ".jpg' />";
+  $('#tabContent').html(html);
+}
+window.onload = function() {
+  chooseTab(unescape(self.location.hash.substr(1)) || "1");
+}
+"#;
+    let analyzer = crate::scanning::ast_dom_analysis::AstDomAnalyzer::new();
+    let result = analyzer.analyze(js).expect("parses");
+    eprintln!("L3 vulns found: {}", result.len());
+    for v in &result {
+        eprintln!("  source={} sink={} line={}:{}", v.source, v.sink, v.line, v.column);
+    }
+}

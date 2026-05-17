@@ -740,6 +740,32 @@ fn test_classify_dom_evidence_returns_js_context() {
 }
 
 #[test]
+fn test_classify_dom_evidence_returns_inline_handler_breakout() {
+    // xss-game L4 shape: server emits `<img onload="startTimer('USER')">`,
+    // the browser decodes the `&#39;` HTML entity at attribute-parse
+    // time, so the handler becomes `startTimer('';-alert(1)-'')` and
+    // the alert fires.
+    let payload = "'-alert(1)-'";
+    let body =
+        "<img onload=\"startTimer('&#39;-alert(1)-&#39;');\">".to_string();
+    assert_eq!(
+        classify_dom_evidence(payload, &body),
+        Some(DomEvidenceKind::InlineHandlerBreakout)
+    );
+}
+
+#[test]
+fn test_inline_handler_breakout_ignores_unrelated_alert_in_handler() {
+    // Page-defined `onclick="alert('hi')"` shares the `alert(`
+    // substring with the payload list. Without the
+    // `attr_value.contains(payload)` strictness check we'd false-V
+    // every reflection. Confirm the strict check holds.
+    let payload = "'-alert(1)-'";
+    let body = "<button onclick=\"alert('hi')\">Click</button>".to_string();
+    assert_eq!(classify_dom_evidence(payload, &body), None);
+}
+
+#[test]
 fn test_classify_dom_evidence_returns_executable_url() {
     let payload = "javascript:alert(1)";
     let body = format!("<html><body><a href=\"{}\">x</a></body></html>", payload);

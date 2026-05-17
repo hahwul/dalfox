@@ -347,6 +347,13 @@ pub(crate) enum DomEvidenceKind {
     /// JS-context: payload reflected inside `<script>` produced a sink
     /// CallExpression / AssignmentExpression covered by the payload's range.
     JsContext,
+    /// Payload landed inside an existing `on*` attribute value (server's
+    /// own template, not a payload-introduced tag) and broke out of the
+    /// surrounding JS string so a sink call is now part of the handler
+    /// expression — the xss-game L4 shape, where `<img onload="startTimer(
+    /// 'INJECT')">` becomes `startTimer('';alert(1);'')` once HTML entities
+    /// decode at attribute-parse time.
+    InlineHandlerBreakout,
 }
 
 impl DomEvidenceKind {
@@ -357,6 +364,7 @@ impl DomEvidenceKind {
             DomEvidenceKind::ExecutableUrl => "javascript: URL in attribute",
             DomEvidenceKind::HtmlStructural => "HTML element with sink",
             DomEvidenceKind::JsContext => "JS-context AST",
+            DomEvidenceKind::InlineHandlerBreakout => "inline handler JS breakout",
         }
     }
 }
@@ -366,7 +374,7 @@ impl DomEvidenceKind {
 /// parsing the same response body twice; short-circuits on the marker check
 /// when the payload carries one, which is the common case.
 ///
-/// Four evidence paths, probed in this order:
+/// Five evidence paths, probed in this order:
 /// - DOM marker (class/id) found via CSS selector — the standard HTML/attr case
 /// - Executable URL protocol reflected into a dangerous attribute — `javascript:`/`data:`
 /// - HTML structural: parsed element with `on*` handler containing a sink call,
@@ -374,6 +382,9 @@ impl DomEvidenceKind {
 ///   verbatim in the payload (so it was introduced by the injection)
 /// - JS-context sink call expression introduced into an existing `<script>` block
 ///   (e.g. `var x = "<INJECT>"` where the injection produces a real `alert(...)`)
+/// - Inline handler breakout: payload lands inside the server's own
+///   `on*` attribute and ends the JS string literal so the resulting
+///   handler expression contains a sink call (xss-game L4 shape).
 pub(crate) fn classify_dom_evidence(payload: &str, text: &str) -> Option<DomEvidenceKind> {
     let needs_markers = payload_has_any_marker(payload);
     let needs_attrs = payload_is_executable_url_protocol(payload);
@@ -399,7 +410,107 @@ pub(crate) fn classify_dom_evidence(payload: &str, text: &str) -> Option<DomEvid
     if needs_js && crate::scanning::js_context_verify::has_js_context_evidence(payload, text) {
         return Some(DomEvidenceKind::JsContext);
     }
+    if needs_js && has_inline_handler_breakout_evidence(payload, text) {
+        return Some(DomEvidenceKind::InlineHandlerBreakout);
+    }
     None
+}
+
+/// Detects xss-game L4-style inline-handler breakouts: payload lands
+/// inside an existing `on*` attribute (the server's template emits
+/// `<img onload="startTimer('USER_INPUT')">`), the payload terminates
+/// the surrounding JS string literal (`'-alert(1)-'` etc.), and the
+/// resulting `on*` attribute value — after HTML-entity decoding the
+/// browser performs at attribute parse time — contains a real sink
+/// call (`alert(`, `prompt(`, `confirm(`, `eval(`, …).
+///
+/// Strict: the entity-decoded attribute value must contain the literal
+/// payload bytes. That keeps us from false-positiving on pages where a
+/// site-defined `onclick="alert('hi')"` happens to share a `alert(`
+/// substring with the payload list but the payload itself never landed
+/// in the handler.
+fn has_inline_handler_breakout_evidence(payload: &str, text: &str) -> bool {
+    // Decode HTML entities once for the whole body — cheap and lets a
+    // single substring search cover the dominant on*-attribute escape
+    // pattern that servers use (`&#39;` for `'`, `&quot;` for `"`).
+    let decoded = decode_html_entities(text);
+    let document = scraper::Html::parse_document(&decoded);
+    let selector = selectors::universal();
+    for node in document.select(selector) {
+        let value = node.value();
+        for (attr_name, attr_value) in value.attrs() {
+            if attr_name.len() < 3 || !attr_name.as_bytes()[..2].eq_ignore_ascii_case(b"on") {
+                continue;
+            }
+            if !attr_value.contains(payload) {
+                continue;
+            }
+            if crate::scanning::js_context_verify::payload_carries_js_sink(attr_value) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Minimal HTML entity decoder for the named + numeric escapes that
+/// real-world templates emit when escaping user input into attribute
+/// values. Mirrors browser behaviour for the cases that matter for
+/// inline-handler breakout detection: `&#39;` → `'`, `&quot;` → `"`,
+/// `&lt;`/`&gt;`/`&amp;`. Anything we don't recognise passes through
+/// unchanged so we never lose bytes.
+fn decode_html_entities(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.char_indices().peekable();
+    while let Some((i, c)) = chars.next() {
+        if c != '&' {
+            out.push(c);
+            continue;
+        }
+        let rest = &s[i + 1..];
+        let semi = match rest.find(';') {
+            Some(pos) if pos <= 8 => pos,
+            _ => {
+                out.push(c);
+                continue;
+            }
+        };
+        let entity = &rest[..semi];
+        let decoded = if let Some(stripped) = entity.strip_prefix('#') {
+            let (radix, digits) = if let Some(hex) = stripped.strip_prefix('x') {
+                (16, hex)
+            } else if let Some(hex) = stripped.strip_prefix('X') {
+                (16, hex)
+            } else {
+                (10, stripped)
+            };
+            u32::from_str_radix(digits, radix)
+                .ok()
+                .and_then(char::from_u32)
+        } else {
+            match entity {
+                "amp" => Some('&'),
+                "lt" => Some('<'),
+                "gt" => Some('>'),
+                "quot" => Some('"'),
+                "apos" => Some('\''),
+                _ => None,
+            }
+        };
+        match decoded {
+            Some(ch) => {
+                out.push(ch);
+                // Skip past the entity body + ';'.
+                for _ in 0..(semi + 1) {
+                    chars.next();
+                }
+            }
+            None => {
+                out.push(c);
+            }
+        }
+    }
+    out
 }
 
 /// Backward-compat boolean view used by callers that don't need the kind.
