@@ -502,6 +502,47 @@ const COMMON_PROBE_HEADERS: &[&str] = &[
     "Origin",
 ];
 
+/// Differential probe to detect "blanket header echo" sites — printenv /
+/// phpinfo-style endpoints (e.g. xss-quiz.int21h.jp) that render every
+/// incoming header value back into the response. Without this guard,
+/// each entry in [`COMMON_PROBE_HEADERS`] turns into an independent
+/// reflection finding with identical payloads, drowning out actual
+/// signal. We send one request with a header whose name is
+/// guaranteed-unused (so no legitimate code path looks for it): if the
+/// marker still reflects, the site echoes everything header-shaped,
+/// and we should skip the default probe list.
+///
+/// User-supplied headers (`target.headers`) are NOT suppressed — the
+/// user explicitly opted into testing those, and their findings remain
+/// useful for narrowing a stored-XSS / cookie-injection vector.
+async fn detect_blanket_header_echo(target: &Target) -> bool {
+    let client = target.build_client_or_default();
+    let arc_target = Arc::new(target.clone());
+    let test_value = crate::scanning::markers::bracketed_marker();
+    let guard_name = format!(
+        "X-Dalfox-Probe-{}",
+        crate::utils::short_scan_id(&crate::utils::make_scan_id(test_value))
+    );
+    let parsed_method = target.parse_method();
+    let base = crate::utils::build_request(
+        &client,
+        &arc_target,
+        parsed_method,
+        target.url.clone(),
+        target.data.clone(),
+    );
+    let overrides = vec![(guard_name, test_value.to_string())];
+    let request = crate::utils::apply_header_overrides(base, &overrides);
+    crate::tick_request_count();
+    match request.send().await {
+        Ok(resp) => match resp.text().await {
+            Ok(text) => crate::scanning::markers::classify_probe_reflection(&text).detected(),
+            Err(_) => false,
+        },
+        Err(_) => false,
+    }
+}
+
 pub async fn check_header_discovery(
     target: &Target,
     reflection_params: Arc<Mutex<Vec<Param>>>,
@@ -523,9 +564,23 @@ pub async fn check_header_discovery(
         .iter()
         .map(|(k, _)| k.to_ascii_lowercase())
         .collect();
-    for &hdr in COMMON_PROBE_HEADERS {
-        if !existing_names.contains(&hdr.to_ascii_lowercase()) {
-            headers_to_test.push((hdr.to_string(), String::new()));
+
+    // Differential check: skip the default probe list when the target
+    // echoes any header name. User-supplied headers still get probed
+    // because the operator explicitly asked for them.
+    let blanket_echo = detect_blanket_header_echo(target).await;
+    if blanket_echo {
+        if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+            eprintln!(
+                "[DBG] blanket header echo detected (guard reflected); skipping {} common header probes",
+                COMMON_PROBE_HEADERS.len()
+            );
+        }
+    } else {
+        for &hdr in COMMON_PROBE_HEADERS {
+            if !existing_names.contains(&hdr.to_ascii_lowercase()) {
+                headers_to_test.push((hdr.to_string(), String::new()));
+            }
         }
     }
 

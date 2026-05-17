@@ -150,6 +150,84 @@ async fn test_check_query_discovery_discovers_reflection_and_extends_batch() {
     assert!(params.iter().all(|p| p.invalid_specials.is_some()));
 }
 
+/// Mock that mirrors xss-quiz.int21h.jp / phpinfo: every incoming
+/// request header value is echoed into the response body. Used to
+/// verify the blanket-echo differential filter.
+async fn start_printenv_style_mock_server() -> SocketAddr {
+    async fn echo_all_headers(headers: axum::http::HeaderMap) -> String {
+        let mut out = String::from("<html><body><table>");
+        for (k, v) in headers.iter() {
+            let v = v.to_str().unwrap_or("");
+            out.push_str(&format!(
+                "<tr><th>HTTP_{}</th><td>{}</td></tr>",
+                k.as_str().to_ascii_uppercase().replace('-', "_"),
+                v
+            ));
+        }
+        out.push_str("</table></body></html>");
+        out
+    }
+    let app = Router::new()
+        .route("/", any(echo_all_headers))
+        .route("/{*rest}", any(echo_all_headers));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+    addr
+}
+
+#[tokio::test]
+async fn test_check_header_discovery_blanket_echo_skips_default_probes() {
+    // Site echoes every header back. Without the differential filter,
+    // each of the 11 `COMMON_PROBE_HEADERS` becomes a noisy
+    // reflection finding with identical payloads. The blanket-echo
+    // guard should pre-detect this and skip the default probe set.
+    let addr = start_printenv_style_mock_server().await;
+    let target = parse_target(&format!("http://{}/", addr)).unwrap();
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(Semaphore::new(1));
+    check_header_discovery(&target, reflection_params.clone(), semaphore).await;
+
+    let params = reflection_params.lock().await.clone();
+    let names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
+    let common_hit = names
+        .iter()
+        .any(|n| COMMON_PROBE_HEADERS.iter().any(|h| n.eq_ignore_ascii_case(h)));
+    assert!(
+        !common_hit,
+        "blanket-echo guard must suppress COMMON_PROBE_HEADERS probes (got {:?})",
+        names
+    );
+}
+
+#[tokio::test]
+async fn test_check_header_discovery_blanket_echo_keeps_user_supplied_headers() {
+    // Even on a blanket-echo site, an operator who explicitly passes
+    // `-H "X-Reflect-Me: x"` is asking dalfox to look at that header.
+    // Don't suppress that finding — it's user intent.
+    let addr = start_printenv_style_mock_server().await;
+    let mut target = parse_target(&format!("http://{}/", addr)).unwrap();
+    target
+        .headers
+        .push(("X-Reflect-Me".to_string(), "orig".to_string()));
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(Semaphore::new(1));
+    check_header_discovery(&target, reflection_params.clone(), semaphore).await;
+
+    let params = reflection_params.lock().await.clone();
+    assert!(
+        params.iter().any(|p| p.name == "X-Reflect-Me"),
+        "user-supplied X-Reflect-Me must survive blanket-echo suppression"
+    );
+}
+
 #[tokio::test]
 async fn test_check_header_discovery_discovers_reflected_header() {
     let addr = start_discovery_mock_server().await;
