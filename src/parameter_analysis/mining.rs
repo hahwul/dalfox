@@ -108,6 +108,7 @@ fn make_any_query_param(text: &str) -> Param {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     }
 }
 
@@ -272,13 +273,30 @@ pub fn detect_injection_context_with_marker(text: &str, marker: &str) -> Injecti
         }
     }
 
-    // 2) Attribute context: marker in any attribute value
+    // 2) Attribute context: marker in any attribute value.
+    //
+    // Event-handler attributes (`onload`, `onerror`, `onclick`, …) hold
+    // JavaScript source that the browser feeds into an event handler
+    // function — escaping out of the surrounding string literal yields
+    // a JS-context XSS, not an HTML one. Classifying these as plain
+    // `Attribute(delim)` makes the payload generator emit HTML tag
+    // breakouts (`'><svg…>`) that get serialised as inert HTML inside
+    // the handler's string. JS-breakout payloads (`',alert(1),'`) are
+    // the right strategy, so route on*-attributes through the
+    // `Javascript(delim)` branch.
+    fn is_event_handler_attribute(name: &str) -> bool {
+        let n = name.to_ascii_lowercase();
+        n.starts_with("on") && n.len() > 2
+    }
     {
         let any = selectors::universal();
         for el in document.select(any) {
             for (name, v) in el.value().attrs() {
                 if v.contains(marker) {
                     let delim = infer_quote_delimiter(text, marker);
+                    if is_event_handler_attribute(name) {
+                        return InjectionContext::Javascript(delim);
+                    }
                     return if is_url_like_attribute(name) {
                         InjectionContext::AttributeUrl(delim)
                     } else {
@@ -309,6 +327,118 @@ pub fn detect_injection_context_with_marker(text: &str, marker: &str) -> Injecti
 
     // Fallback to HTML
     InjectionContext::Html(None)
+}
+
+/// Identify a framework innerHTML-style sink the marker landed inside,
+/// if any. Returns the directive/attribute name (`"v-html"`,
+/// `"data-bind"`, `"ng-bind-html"`, …) so scanning can:
+///   1. Upgrade the finding's `inject_type` to surface the sink class.
+///   2. Treat HTML-entity-encoded reflections as exploitable — the
+///      framework hands the entity-decoded value to `innerHTML` at
+///      runtime, so `&lt;img onerror=…&gt;` still executes.
+///
+/// Conservative: only returns `Some(_)` when *every* marker occurrence
+/// sits inside one of the recognised attributes. A single occurrence in
+/// plain text content is enough to fall back to generic HTML payloads —
+/// the regular `detect_injection_context` already covers that path.
+///
+/// Returns `None` when:
+///   * the marker isn't present at all,
+///   * any occurrence lives outside an HTML attribute (text node,
+///     `<script>`, `<style>`), or
+///   * the attribute name isn't in the recognised innerHTML-sink set.
+pub fn detect_framework_html_sink(text: &str, marker: &str) -> Option<&'static str> {
+    if marker.is_empty() || !text.contains(marker) {
+        return None;
+    }
+    let document = scraper::Html::parse_document(text);
+    let any = selectors::universal();
+    let mut found: Option<&'static str> = None;
+    for el in document.select(any) {
+        for (name, value) in el.value().attrs() {
+            if !value.contains(marker) {
+                continue;
+            }
+            let sink = match name.to_ascii_lowercase().as_str() {
+                "v-html" => Some("v-html"),
+                "ng-bind-html" | "[innerhtml]" | "innerhtml" => Some("ng-bind-html"),
+                // Knockout `data-bind` carries multiple clauses
+                // (e.g. `data-bind="text: foo, html: bar"`). Only the
+                // `html:` clause is an innerHTML sink, so require the
+                // clause to live at a real binding boundary — start of
+                // the attribute or after `,` / `;` / whitespace. A bare
+                // `value.contains("html:")` false-positives on
+                // `data-bind="text: 'html: link'"` and on any string
+                // literal that happens to contain `html:`.
+                "data-bind" if has_knockout_html_clause(value) => Some("data-bind"),
+                _ => None,
+            };
+            match sink {
+                Some(s) => match found {
+                    Some(prev) if prev != s => return None,
+                    _ => found = Some(s),
+                },
+                None => return None,
+            }
+        }
+    }
+    found
+}
+
+/// True when `value` (a Knockout `data-bind` attribute) has an `html:`
+/// clause at a real binding boundary — start of the value, or after
+/// `,` / `;` / whitespace that separates clauses. Skipping inside
+/// quoted strings prevents the dominant false-positive shape:
+/// `data-bind="text: 'html: link'"` where `html:` is just data.
+fn has_knockout_html_clause(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let mut i = 0;
+    let mut quote: Option<u8> = None;
+    let mut at_clause_start = true;
+    while i < bytes.len() {
+        let b = bytes[i];
+        // Track string literal context so an `html:` substring inside a
+        // quoted clause value doesn't trigger.
+        if let Some(q) = quote {
+            if b == q {
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+        if b == b'"' || b == b'\'' {
+            quote = Some(b);
+            at_clause_start = false;
+            i += 1;
+            continue;
+        }
+        if b == b',' || b == b';' {
+            at_clause_start = true;
+            i += 1;
+            continue;
+        }
+        if b.is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        if at_clause_start {
+            // Check for `html` followed by whitespace + `:`. ASCII-only
+            // attribute name, so direct byte comparison is fine.
+            let remaining = &bytes[i..];
+            if remaining.len() >= 4 && remaining[..4].eq_ignore_ascii_case(b"html") {
+                let mut j = i + 4;
+                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                if j < bytes.len() && bytes[j] == b':' {
+                    return true;
+                }
+            }
+            at_clause_start = false;
+        }
+        i += 1;
+    }
+    false
 }
 
 pub async fn probe_dictionary_params(
@@ -512,6 +642,7 @@ pub async fn probe_dictionary_params(
                                 wire_name: None,
                                 form_action_url: None,
                                 form_origin_url: None,
+                                framework_sink: None,
                             });
                             if !silence {
                                 eprintln!(
@@ -550,6 +681,7 @@ pub async fn probe_dictionary_params(
                                     wire_name: None,
                                     form_action_url: None,
                                     form_origin_url: None,
+                                    framework_sink: None,
                                 });
                                 if !silence {
                                     eprintln!(
@@ -633,6 +765,7 @@ pub async fn probe_dictionary_params(
                 wire_name: None,
                 form_action_url: None,
                 form_origin_url: None,
+                framework_sink: None,
             });
         } else {
             guard.push(Param {
@@ -647,6 +780,7 @@ pub async fn probe_dictionary_params(
                 wire_name: None,
                 form_action_url: None,
                 form_origin_url: None,
+                framework_sink: None,
             });
         }
     }
@@ -764,6 +898,7 @@ pub async fn probe_body_params(
                                 wire_name: None,
                                 form_action_url: None,
                                 form_origin_url: None,
+                                framework_sink: None,
                             });
                             if !silence {
                                 eprintln!(
@@ -842,6 +977,7 @@ pub async fn probe_body_params(
                     wire_name: None,
                     form_action_url: None,
                     form_origin_url: None,
+                    framework_sink: None,
                 });
             } else {
                 guard.push(Param {
@@ -858,6 +994,7 @@ pub async fn probe_body_params(
                     wire_name: None,
                     form_action_url: None,
                     form_origin_url: None,
+                    framework_sink: None,
                 });
             }
         }
@@ -1017,6 +1154,7 @@ pub async fn probe_response_id_params(
                                     wire_name: None,
                                     form_action_url: None,
                                     form_origin_url: None,
+                                    framework_sink: None,
                                 });
                                 if !silence {
                                     eprintln!(
@@ -1094,6 +1232,7 @@ pub async fn probe_response_id_params(
                     wire_name: None,
                     form_action_url: None,
                     form_origin_url: None,
+                    framework_sink: None,
                 });
             } else {
                 guard.push(Param {
@@ -1110,6 +1249,7 @@ pub async fn probe_response_id_params(
                     wire_name: None,
                     form_action_url: None,
                     form_origin_url: None,
+                    framework_sink: None,
                 });
             }
         }
@@ -1256,6 +1396,7 @@ pub async fn probe_json_body_params(
                             wire_name: None,
                             form_action_url: None,
                             form_origin_url: None,
+                            framework_sink: None,
                         });
                         if !silence {
                             eprintln!(
@@ -1334,6 +1475,7 @@ pub async fn probe_json_body_params(
                 wire_name: None,
                 form_action_url: None,
                 form_origin_url: None,
+                framework_sink: None,
             });
         } else {
             guard.push(Param {
@@ -1348,6 +1490,7 @@ pub async fn probe_json_body_params(
                 wire_name: None,
                 form_action_url: None,
                 form_origin_url: None,
+                framework_sink: None,
             });
         }
     }

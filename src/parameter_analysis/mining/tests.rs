@@ -59,6 +59,7 @@ fn default_scan_args() -> ScanArgs {
         custom_alert_value: "1".to_string(),
         custom_alert_type: "none".to_string(),
         skip_xss_scanning: false,
+        max_payloads_per_param: 0,
         deep_scan: false,
         sxss: false,
         sxss_url: None,
@@ -148,6 +149,160 @@ fn test_detect_injection_context_url_attribute_double_quote() {
         ctx,
         InjectionContext::AttributeUrl(Some(DelimiterType::DoubleQuote))
     );
+}
+
+#[test]
+fn test_detect_injection_context_onload_attribute_is_javascript() {
+    // Event-handler attributes (`on*`) hold JavaScript source, not
+    // HTML — escaping `'` / `"` produces JS-breakout payloads. Regression
+    // for xss-game level 4: marker lives inside
+    // `<img onload="startTimer('MARKER');">` and was previously
+    // bucketed as `Attribute(SingleQuote)`, so the scanner sent HTML
+    // tag breakouts that the browser serialised back into the JS
+    // string instead of executing.
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!("<img onload=\"startTimer('{}');\">", marker);
+    let ctx = detect_injection_context(&body);
+    assert_eq!(
+        ctx,
+        InjectionContext::Javascript(Some(DelimiterType::SingleQuote))
+    );
+}
+
+#[test]
+fn test_detect_injection_context_onerror_double_quote_is_javascript() {
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!("<img src=x onerror='alert(\"{}\")'>", marker);
+    let ctx = detect_injection_context(&body);
+    assert_eq!(
+        ctx,
+        InjectionContext::Javascript(Some(DelimiterType::DoubleQuote))
+    );
+}
+
+#[test]
+fn test_detect_injection_context_non_on_attribute_stays_attribute() {
+    // Confirm we didn't accidentally promote regular attribute echoes.
+    // `on` prefix alone isn't enough — needs a full handler name.
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!("<input value=\"{}\" name=\"ones\">", marker);
+    let ctx = detect_injection_context(&body);
+    assert_eq!(
+        ctx,
+        InjectionContext::Attribute(Some(DelimiterType::DoubleQuote))
+    );
+}
+
+// --- Framework innerHTML sink detection ---
+
+#[test]
+fn test_framework_html_sink_recognises_vue_v_html() {
+    let marker = crate::scanning::markers::bracketed_marker();
+    let body = format!("<div v-html=\"{}\"></div>", marker);
+    assert_eq!(detect_framework_html_sink(&body, marker), Some("v-html"));
+}
+
+#[test]
+fn test_framework_html_sink_rejects_quoted_html_substring_in_data_bind() {
+    // `data-bind="text: 'html: link'"` shares the `html:` substring
+    // with a real innerHTML sink clause but lives inside a quoted
+    // string — Knockout binds `text:` here, not `html:`. The
+    // boundary-aware parser must skip the false positive.
+    let marker = crate::scanning::markers::bracketed_marker();
+    let body = format!(
+        "<div data-bind=\"text: 'html: {} link'\"></div>",
+        marker
+    );
+    assert_eq!(detect_framework_html_sink(&body, marker), None);
+}
+
+#[test]
+fn test_framework_html_sink_recognises_data_bind_html_after_comma() {
+    // Multi-clause `data-bind` where `html:` is the second binding.
+    // The clause boundary detector must accept `,` and whitespace
+    // before `html:`, not just position 0.
+    let marker = crate::scanning::markers::bracketed_marker();
+    let body = format!(
+        "<div data-bind=\"text: name, html: '{}'\"></div>",
+        marker
+    );
+    assert_eq!(
+        detect_framework_html_sink(&body, marker),
+        Some("data-bind")
+    );
+}
+
+#[test]
+fn test_framework_html_sink_recognises_knockout_html_clause() {
+    // Knockout `data-bind` accepts multiple clauses. Only the `html:`
+    // clause maps to innerHTML — pure `text:` bindings escape input
+    // and should not be tagged as a sink.
+    let marker = crate::scanning::markers::bracketed_marker();
+    let html_bind = format!("<div data-bind=\"html: '{}'\"></div>", marker);
+    assert_eq!(
+        detect_framework_html_sink(&html_bind, marker),
+        Some("data-bind")
+    );
+
+    let text_bind = format!("<div data-bind=\"text: '{}'\"></div>", marker);
+    assert_eq!(detect_framework_html_sink(&text_bind, marker), None);
+}
+
+#[test]
+fn test_framework_html_sink_recognises_angular_ng_bind_html() {
+    let marker = crate::scanning::markers::bracketed_marker();
+    let body = format!("<div ng-bind-html=\"{}\"></div>", marker);
+    assert_eq!(
+        detect_framework_html_sink(&body, marker),
+        Some("ng-bind-html")
+    );
+}
+
+#[test]
+fn test_framework_html_sink_recognises_angular_property_binding() {
+    // Angular 2+ uses `[innerHTML]` for property binding to innerHTML.
+    let marker = crate::scanning::markers::bracketed_marker();
+    let body = format!("<div [innerHTML]=\"{}\"></div>", marker);
+    assert_eq!(
+        detect_framework_html_sink(&body, marker),
+        Some("ng-bind-html")
+    );
+}
+
+#[test]
+fn test_framework_html_sink_ignores_plain_text_reflection() {
+    let marker = crate::scanning::markers::bracketed_marker();
+    let body = format!("<div>Hello {}</div>", marker);
+    assert_eq!(detect_framework_html_sink(&body, marker), None);
+}
+
+#[test]
+fn test_framework_html_sink_ignores_non_sink_attribute() {
+    let marker = crate::scanning::markers::bracketed_marker();
+    let body = format!("<input value=\"{}\">", marker);
+    assert_eq!(detect_framework_html_sink(&body, marker), None);
+}
+
+#[test]
+fn test_framework_html_sink_returns_none_for_missing_marker() {
+    let marker = crate::scanning::markers::bracketed_marker();
+    assert_eq!(
+        detect_framework_html_sink("<html><body>no marker</body></html>", marker),
+        None
+    );
+}
+
+#[test]
+fn test_framework_html_sink_rejects_mixed_attribute_sinks() {
+    // Marker shows up in BOTH `v-html` AND `ng-bind-html`. The
+    // exploitation path is ambiguous, so we conservatively return
+    // None and fall back to the generic attribute label.
+    let marker = crate::scanning::markers::bracketed_marker();
+    let body = format!(
+        "<div v-html=\"{}\"></div><div ng-bind-html=\"{}\"></div>",
+        marker, marker
+    );
+    assert_eq!(detect_framework_html_sink(&body, marker), None);
 }
 
 #[tokio::test]

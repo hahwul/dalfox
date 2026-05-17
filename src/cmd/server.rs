@@ -372,7 +372,7 @@ fn log(state: &AppState, level: &str, message: &str) {
         "SERVER" => ("\x1b[36m", "SERVER"),
         other => ("\x1b[37m", other),
     };
-    println!("\x1b[90m{}\x1b[0m {}{}\x1b[0m {}", ts, color, lvl, message);
+    crate::cprintln!("\x1b[90m{}\x1b[0m {}{}\x1b[0m {}", ts, color, lvl, message);
 
     if let Some(path) = &state.log_file {
         let line = format!("[{}] [{}] {}\n", ts, lvl, message);
@@ -485,6 +485,7 @@ async fn run_scan_job(
         custom_alert_type: "none".to_string(),
 
         skip_xss_scanning: false,
+        max_payloads_per_param: 0,
         deep_scan: opts.deep_scan.unwrap_or(false),
         sxss: false,
         sxss_url: None,
@@ -496,7 +497,7 @@ async fn run_scan_job(
         skip_waf_probe: false,
         force_waf: None,
         waf_evasion: false,
-        waf_min_confidence: 0.0,
+        waf_min_confidence: crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE,
         remote_payloads: opts.remote_payloads.clone().unwrap_or_default(),
         remote_wordlists: opts.remote_wordlists.clone().unwrap_or_default(),
 

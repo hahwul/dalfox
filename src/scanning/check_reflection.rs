@@ -113,10 +113,26 @@ fn is_in_safe_context(html: &str, payload: &str) -> bool {
         if !in_safe {
             return false; // at least one occurrence is outside safe context
         }
-        search_start = abs_pos + 1;
+        search_start = next_char_boundary(html, abs_pos + 1);
     }
 
     true
+}
+
+/// Round `idx` up to the next UTF-8 char boundary in `s` (or to `s.len()`).
+/// Prevents `&s[idx..]` from panicking when `idx` lands inside a multi-byte
+/// codepoint — e.g. when a payload contains a full-width character such as
+/// `＜` (3 bytes) and we advance by a single byte to find overlapping matches.
+#[inline]
+fn next_char_boundary(s: &str, mut idx: usize) -> usize {
+    let len = s.len();
+    if idx >= len {
+        return len;
+    }
+    while idx < len && !s.is_char_boundary(idx) {
+        idx += 1;
+    }
+    idx
 }
 
 /// Like `is_in_safe_context` but also checks decoded forms of the payload.
@@ -156,8 +172,155 @@ fn is_in_safe_context_decoded(html: &str, payload: &str) -> bool {
 /// it came from a non-2xx response. Error pages frequently echo the requested
 /// URL/path verbatim, producing reflections that don't represent real
 /// injection points.
+///
+/// **Note**: this is the body-less fast path. The full scan-time check uses
+/// [`should_suppress_path_reflection_with_body`], which keeps non-2xx
+/// findings when the marker reflects outside URL-style attributes — those
+/// are genuinely exploitable error-page XSS (e.g. a 404 template that
+/// renders the requested URI inside `<td>...</td>`). Retained for legacy
+/// tests pinning the conservative status-code-only semantics.
+#[cfg(test)]
 fn should_suppress_path_reflection(location: &Location, status_code: u16) -> bool {
     matches!(location, Location::Path) && !(200..300).contains(&status_code)
+}
+
+/// HTML attributes that carry URL values. Reflections that land *only*
+/// inside one of these are noise: browsers parse them as URLs, so an
+/// injected `<` doesn't open a tag and the payload can't escape into a
+/// script-execution sink. Used by the URL-echo classifier below to keep
+/// firing-range-style canonical-link / `<a href>` reflections suppressed
+/// while letting `<td>URI</td>` style error-page reflections survive.
+const URL_VALUED_ATTRS: &[&[u8]] = &[
+    b"href",
+    b"src",
+    b"action",
+    b"formaction",
+    b"cite",
+    b"data",
+    b"manifest",
+    b"poster",
+    b"srcset",
+    b"longdesc",
+    b"background",
+    b"usemap",
+    b"codebase",
+    b"profile",
+    b"ping",
+    b"archive",
+];
+
+/// True when every occurrence of `marker` in `html` sits inside an HTML
+/// attribute value whose attribute name is URL-valued (see
+/// [`URL_VALUED_ATTRS`]). Used to keep generic error-page URL echo
+/// suppressed (canonical link, `<a href>`, breadcrumb anchors) while
+/// allowing genuine path-XSS sinks — text content, non-URL attribute
+/// values, script blocks — to surface.
+///
+/// Conservative: a single non-URL-attr occurrence flips the result to
+/// `false`, since one exploitable sink is enough to keep the finding.
+pub(crate) fn marker_reflects_in_url_attr_only(html: &str, marker: &str) -> bool {
+    if marker.is_empty() || !html.contains(marker) {
+        return false;
+    }
+    let bytes = html.as_bytes();
+    let mut search_start = 0;
+    let mut any = false;
+    while let Some(pos) = html[search_start..].find(marker) {
+        any = true;
+        let abs = search_start + pos;
+        if !occurrence_is_in_url_attr(bytes, abs) {
+            return false;
+        }
+        search_start = next_char_boundary(html, abs + 1);
+    }
+    any
+}
+
+/// Walk backwards from byte offset `at` looking for the surrounding HTML
+/// attribute context. Returns `true` when the byte sits inside a quoted
+/// or unquoted attribute value whose attribute name is in
+/// [`URL_VALUED_ATTRS`]. Returns `false` for text content (we hit `>`
+/// before finding `=`) and for non-URL attributes.
+fn occurrence_is_in_url_attr(bytes: &[u8], at: usize) -> bool {
+    if at == 0 || at > bytes.len() {
+        return false;
+    }
+    // Phase 1: walk back to find an `=` without crossing a tag boundary.
+    let mut i = at;
+    loop {
+        if i == 0 {
+            return false;
+        }
+        i -= 1;
+        match bytes[i] {
+            b'=' => break,
+            // Crossing a tag boundary means we're outside any attribute.
+            b'<' | b'>' => return false,
+            _ => {}
+        }
+    }
+    // Phase 2: skip backwards over whitespace between `=` and attr name.
+    while i > 0 && bytes[i - 1].is_ascii_whitespace() {
+        i -= 1;
+    }
+    if i == 0 {
+        return false;
+    }
+    // Phase 3: read the attribute name backwards.
+    let name_end = i; // exclusive
+    let mut name_start = name_end;
+    while name_start > 0 {
+        let b = bytes[name_start - 1];
+        if b.is_ascii_whitespace() || b == b'<' || b == b'/' || b == b'"' || b == b'\'' {
+            break;
+        }
+        name_start -= 1;
+    }
+    if name_start == name_end {
+        return false;
+    }
+    let name = &bytes[name_start..name_end];
+    URL_VALUED_ATTRS
+        .iter()
+        .any(|n| name.eq_ignore_ascii_case(n))
+}
+
+/// Body-aware version of [`should_suppress_path_reflection`]. Lets
+/// exploitable error-page reflections (404 templates that render the URI
+/// in `<td>`, 500 fallbacks that emit `<h1>You searched for X</h1>`,
+/// etc.) reach the V/R reporter so users don't lose those true positives.
+///
+/// Suppresses when, on a non-2xx response:
+///   * the body is empty (nothing to classify — preserve legacy conservatism), OR
+///   * the raw payload bytes don't appear in the body (only the
+///     percent-encoded form is present — browsers render `%3Csvg…%3E`
+///     as literal text, no tag is parsed), OR
+///   * every raw occurrence sits inside a URL-valued attribute
+///     ([`URL_VALUED_ATTRS`]) — canonical link / `<a href>` URL echo.
+pub(crate) fn should_suppress_path_reflection_with_body(
+    location: &Location,
+    status_code: u16,
+    body: &str,
+    payload: &str,
+) -> bool {
+    if !matches!(location, Location::Path) {
+        return false;
+    }
+    if (200..300).contains(&status_code) {
+        return false;
+    }
+    if body.is_empty() {
+        return true;
+    }
+    // Without a raw payload byte sequence in the response body, the
+    // upstream reflection detector found us via a URL-decoded match.
+    // That's noise for path injection: the browser never decodes the
+    // percent-escapes back into `<` / `>` when rendering response text,
+    // so there is no tag-parser sink to exploit.
+    if !body.contains(payload) {
+        return true;
+    }
+    marker_reflects_in_url_attr_only(body, payload)
 }
 
 /// Find every `<script>...</script>` byte range in `html`. Used by the
@@ -206,7 +369,7 @@ fn all_occurrences_in_ranges(haystack: &str, needle: &str, ranges: &[(usize, usi
             return false;
         }
         found_any = true;
-        search = abs + 1;
+        search = next_char_boundary(haystack, abs + 1);
     }
     found_any
 }
@@ -971,25 +1134,23 @@ async fn fetch_injection_response_with_client(
             if !args.ignore_return.is_empty() && args.ignore_return.contains(&status_code) {
                 return None;
             }
-            // Suppress path-segment "reflections" on non-2xx responses: error
-            // pages routinely echo the requested URL back, which produces noisy
-            // false-positive R findings rather than real injection points.
-            if should_suppress_path_reflection(&param.location, status_code) {
-                if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                    eprintln!(
-                        "[DBG] suppressing path-injection reflection on non-2xx status (param={}, status={})",
-                        param.name, status_code
-                    );
-                }
-                return None;
-            }
-            // Suppress path-segment "reflections" served as non-HTML content
-            // types (application/javascript, application/json, etc.). Browsers
-            // render those bodies as data, not HTML, so a literal payload in
-            // the response is not exploitable XSS. Only Path location is
-            // affected — query/header/etc. may legitimately produce JSONP
-            // sinks worth reporting.
+            // Hard suppressions for Path that don't need to read the body:
+            //   * 3xx redirects: any reflection lives in the Location header,
+            //     not a rendered HTML sink. Browsers don't execute Location
+            //     bodies, so there's nothing exploitable here regardless of
+            //     marker context — keep the old blanket drop.
+            //   * non-HTML content-types: response is JSON / JS / image and
+            //     browsers render it as data, not markup.
             if matches!(param.location, Location::Path) {
+                if (300..400).contains(&status_code) {
+                    if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                        eprintln!(
+                            "[DBG] suppressing path reflection on 3xx redirect (param={}, status={})",
+                            param.name, status_code
+                        );
+                    }
+                    return None;
+                }
                 let ct = resp
                     .headers()
                     .get(reqwest::header::CONTENT_TYPE)
@@ -1009,6 +1170,8 @@ async fn fetch_injection_response_with_client(
             // the Location header may contain the reflected payload in either
             // its encoded or decoded form (some servers parse the query and
             // rebuild the redirect URL, which decodes the payload on the way).
+            // (Path was already returned above; this only fires for
+            // Query/Header/Cookie/Body/etc.)
             if resp.status().is_redirection()
                 && let Some(location) = resp.headers().get("location").and_then(|v| v.to_str().ok())
                 && (location.contains(&*encoded_payload) || location.contains(payload))
@@ -1028,7 +1191,29 @@ async fn fetch_injection_response_with_client(
                 return Some(format!("<html><body>{}</body></html>", location));
             }
             match resp.text().await {
-                Ok(body) => Some(body),
+                Ok(body) => {
+                    // Body-aware Path suppression for 4xx/5xx: keep the
+                    // finding when the marker reflects somewhere other than
+                    // URL-valued attributes (genuine error-page XSS, e.g. a
+                    // 404 template that renders the URI inside
+                    // `<td>...</td>`). Pure URL echo (canonical link,
+                    // `<a href>` breadcrumbs) is still dropped as noise.
+                    if should_suppress_path_reflection_with_body(
+                        &param.location,
+                        status_code,
+                        &body,
+                        payload,
+                    ) {
+                        if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                            eprintln!(
+                                "[DBG] suppressing url-echo-only path reflection (param={}, status={})",
+                                param.name, status_code
+                            );
+                        }
+                        return None;
+                    }
+                    Some(body)
+                }
                 Err(e) => {
                     if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
                         eprintln!(

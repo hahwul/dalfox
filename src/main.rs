@@ -54,9 +54,18 @@ enum Commands {
 
 #[tokio::main]
 async fn main() {
-    // Determine color policy from TTY and print banner early for help
+    // Determine color policy from TTY + `NO_COLOR` env var. The CLI
+    // `--no-color` / `-S` flags are inspected via raw argv because clap
+    // hasn't parsed yet — the banner is emitted before `Cli::parse()`.
     let __args: Vec<String> = std::env::args().collect();
-    let color_enabled = std::io::IsTerminal::is_terminal(&std::io::stdout());
+    let has_flag = |needles: &[&str]| -> bool {
+        __args.iter().any(|a| needles.iter().any(|n| a == n))
+    };
+    let no_color_env = std::env::var("NO_COLOR").is_ok();
+    let no_color_flag = has_flag(&["--no-color"]);
+    let silence_flag = has_flag(&["-S", "--silence"]);
+    let color_enabled =
+        std::io::IsTerminal::is_terminal(&std::io::stdout()) && !no_color_env && !no_color_flag;
     if __args.iter().any(|a| a == "-h" || a == "--help") {
         utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
     }
@@ -82,7 +91,10 @@ async fn main() {
             Some("json" | "jsonl" | "sarif" | "toml")
         )
     };
-    if !is_mcp && !is_machine_format {
+    // Suppress the banner for pipelines/CI: machine formats, MCP stdio,
+    // and any `--silence` / `-S` invocation. The ASCII art is large enough
+    // that it dominates `| head` output otherwise.
+    if !is_mcp && !is_machine_format && !silence_flag {
         utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
     }
 
@@ -279,6 +291,7 @@ async fn main() {
             custom_alert_type: "none".to_string(),
 
             skip_xss_scanning: false,
+            max_payloads_per_param: 0,
             deep_scan: false,
             sxss: false,
             sxss_url: None,
@@ -290,7 +303,7 @@ async fn main() {
             skip_waf_probe: false,
             force_waf: None,
             waf_evasion: false,
-            waf_min_confidence: 0.0,
+            waf_min_confidence: cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };

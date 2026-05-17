@@ -76,6 +76,61 @@ fn inject_type_label_for(sxss: bool) -> &'static str {
     if sxss { "sxss-inHTML" } else { "inHTML" }
 }
 
+/// True when the payload that produced the finding looks like a
+/// client-side template interpolation. `{{` / `}}` is sufficient on its
+/// own — Mustache, Handlebars, AngularJS, Vue and Ember all share that
+/// delimiter. Used to refine `inject_type` to `*-CSTI` so plain / JSON
+/// output makes the framework-injection finding distinguishable from a
+/// generic HTML reflection.
+fn is_template_shaped_payload(payload: &str) -> bool {
+    payload.contains("{{") && payload.contains("}}")
+}
+
+/// Map a framework innerHTML-sink directive name (recorded on
+/// `Param.framework_sink` during discovery) to the short suffix used in
+/// `inject_type`. Anything unrecognised falls back to a generic
+/// `-FrameworkSink` so the user still sees the class of finding even if
+/// dalfox grows support for a new directive name later.
+fn framework_sink_suffix(sink: &str) -> &'static str {
+    match sink {
+        "v-html" => "-VHtml",
+        "data-bind" => "-DataBind",
+        "ng-bind-html" => "-NgBindHtml",
+        "dangerouslySetInnerHTML" => "-DangerouslySetInnerHTML",
+        _ => "-FrameworkSink",
+    }
+}
+
+/// Refine the base `inject_type` label. Order of precedence:
+///   1. `-VHtml` / `-DataBind` / `-NgBindHtml` from a discovered
+///      framework innerHTML sink (highest signal — entity-encoded
+///      reflections in these attributes still execute).
+///   2. `-CSTI` for client-side template payloads (`{{ … }}`).
+///   3. base label only.
+///
+/// Mirrors the SXSS prefixing convention (`sxss-inHTML-VHtml`) so
+/// downstream parsers don't have to special-case ordering.
+#[cfg(test)]
+fn inject_type_for_payload(sxss: bool, payload: &str) -> String {
+    inject_type_for_payload_with_sink(sxss, payload, None)
+}
+
+fn inject_type_for_payload_with_sink(
+    sxss: bool,
+    payload: &str,
+    framework_sink: Option<&str>,
+) -> String {
+    let base = inject_type_label_for(sxss);
+    if let Some(sink) = framework_sink {
+        return format!("{}{}", base, framework_sink_suffix(sink));
+    }
+    if is_template_shaped_payload(payload) {
+        format!("{}-CSTI", base)
+    } else {
+        base.to_string()
+    }
+}
+
 fn reflection_kind_note(kind: crate::scanning::check_reflection::ReflectionKind) -> &'static str {
     match kind {
         crate::scanning::check_reflection::ReflectionKind::Raw => "reflected",
@@ -276,6 +331,7 @@ async fn run_ast_dom_analysis(
                 0,
                 format!("{} (검증 필요)", description),
             );
+            ast_result.location = format!("{:?}", param.location);
             if !source_uses_url_surface {
                 ast_result.request = Some(build_request_text(target, param, &payload));
             }
@@ -549,6 +605,18 @@ pub async fn run_scanning(
                     &dom_payloads,
                     &strategy.extra_encoders,
                 );
+            }
+        }
+
+        // --max-payloads-per-param: cap each payload set independently.
+        // 0 means unlimited (default), preserving prior behavior.
+        let cap = args.max_payloads_per_param;
+        if cap > 0 {
+            if reflection_payloads.len() > cap {
+                reflection_payloads.truncate(cap);
+            }
+            if dom_payloads.len() > cap {
+                dom_payloads.truncate(cap);
             }
         }
 
@@ -898,9 +966,16 @@ pub async fn run_scanning(
                         // Record reflected/verified XSS finding (fallback path).
                         // In SXSS mode, prefix inject_type so downstream output
                         // (JSON, markdown, plain) makes the stored route visible.
+                        // Template-shaped payloads (`{{…}}`) further refine the
+                        // label to `*-CSTI` so users can tell client-side
+                        // template injection apart from generic HTML reflection.
                         let mut result = crate::scanning::result::Result::new(
                             finding_type,
-                            inject_type_label_for(args_clone.sxss).to_string(),
+                            inject_type_for_payload_with_sink(
+                                args_clone.sxss,
+                                &reflection_payload,
+                                param_clone.framework_sink.as_deref(),
+                            ),
                             target_clone.method.clone(),
                             result_url,
                             param_clone.name.clone(),
@@ -911,6 +986,7 @@ pub async fn run_scanning(
                             606,
                             poc_msg,
                         );
+                        result.location = format!("{:?}", param_clone.location);
                         result.request = Some(build_request_text(
                             &target_clone,
                             &param_clone,
@@ -1007,7 +1083,11 @@ pub async fn run_scanning(
 
                         let mut result = crate::scanning::result::Result::new(
                             FindingType::Verified, // DOM-verified => Vulnerability
-                            inject_type_label_for(args_clone.sxss).to_string(),
+                            inject_type_for_payload_with_sink(
+                                args_clone.sxss,
+                                &dom_payload,
+                                param_clone.framework_sink.as_deref(),
+                            ),
                             target_clone.method.clone(),
                             result_url,
                             param_clone.name.clone(),
@@ -1024,6 +1104,7 @@ pub async fn run_scanning(
                                 evidence_label, param_clone.name, dom_payload
                             ),
                         );
+                        result.location = format!("{:?}", param_clone.location);
                         result.request = Some(build_request_text(
                             &target_clone,
                             &param_clone,
@@ -1106,6 +1187,7 @@ pub async fn run_scanning(
                                         reflection_note, param_clone.name, hpp_payload, pos_label
                                     ),
                                 );
+                                result.location = format!("{:?}", param_clone.location);
                                 result.response = response_text;
                                 stream_finding(&result);
                                 local_results.push(result);

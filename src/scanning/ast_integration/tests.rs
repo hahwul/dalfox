@@ -60,6 +60,59 @@ fn test_generate_dom_xss_poc_for_nested_urlsearchparams_source() {
 }
 
 #[test]
+fn test_generate_dom_xss_poc_hash_to_src_sink_uses_data_uri() {
+    // xss-game L6 shape: `script.src = location.hash.substr(1)`. The
+    // HTML payload `<img onerror>` doesn't execute as a script src —
+    // we need an executable URL scheme. `data:text/javascript,…` is
+    // accepted by the browser; `javascript:` schemes don't execute in
+    // `<script src>` on modern browsers.
+    let (payload, _) = generate_dom_xss_poc("location.hash", "src");
+    assert!(
+        payload.starts_with("#data:text/javascript,alert(1)"),
+        "expected hash-fragment data: URL payload, got {:?}",
+        payload
+    );
+}
+
+#[test]
+fn test_generate_dom_xss_poc_hash_to_eval_sink_uses_bare_js() {
+    // `eval(location.hash.substr(1))` accepts JS source directly — no
+    // need to wrap with an HTML tag or URL scheme. Same for `Function`,
+    // `setTimeout(stringArg)`, etc.
+    let (payload, _) = generate_dom_xss_poc("location.hash", "eval");
+    assert!(
+        payload.starts_with("#alert(1)"),
+        "expected hash-fragment bare-JS payload, got {:?}",
+        payload
+    );
+}
+
+#[test]
+fn test_generate_dom_xss_poc_search_to_href_sink_uses_data_uri() {
+    let (payload, _) = generate_dom_xss_poc("location.search", "href");
+    assert!(
+        payload.starts_with("xss=data:text/javascript,alert(1)"),
+        "expected search query data: URL payload, got {:?}",
+        payload
+    );
+}
+
+#[test]
+fn test_generate_dom_xss_poc_default_innerhtml_still_html_tag() {
+    // Regression: keep the existing HTML payload for innerHTML-style
+    // sinks (jQuery `.html()`, `document.write`, `outerHTML`, …) so we
+    // don't regress all the cases tests #generate_dom_xss_poc_*_source
+    // pinned. The new sink-aware branches only fire for URL / JS-eval
+    // sinks.
+    let (payload, _) = generate_dom_xss_poc("location.hash", "innerHTML");
+    assert!(
+        payload.contains("<img src=x onerror=alert(1)"),
+        "expected HTML payload for innerHTML sink, got {:?}",
+        payload
+    );
+}
+
+#[test]
 fn test_build_dom_xss_poc_url_for_hash_source() {
     let url = build_dom_xss_poc_url(
         "https://example.com/dom/level2/",

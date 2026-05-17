@@ -183,11 +183,16 @@ confidence = 0.85
 evidence_label = "x-ms-forbidden-ip header"
 
 # Google Cloud Armor
+# NOTE: `Server: Google Frontend` is sent by every Google-hosted property
+# (App Engine, Cloud Run, Google APIs, even Search) regardless of whether
+# Cloud Armor is enabled. It's a hint at best, not evidence — keep the
+# confidence below the default `--waf-min-confidence` (0.3) so it stays
+# filtered unless the user explicitly lowers the floor.
 [[header]]
 header = "server"
 value_contains = "google frontend"
 waf_type = "CloudArmor"
-confidence = 0.5
+confidence = 0.15
 evidence_label = "Server: Google Frontend"
 
 [[header]]

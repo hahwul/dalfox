@@ -91,6 +91,17 @@ struct DomXssVisitor<'a> {
 }
 
 // Module-level DOM source/sink/sanitizer constants
+//
+// Both `self`, `top`, `parent`, and `globalThis` refer to the same
+// `Window` object as bare `location` / `name` / `opener`, so a single
+// taint source has up to five spellings the AST recogniser must match.
+// We keep the bare form as the canonical source and add the `self.*`
+// alias for the cases that matter in real-world bundles (xss-game L3
+// uses `self.location.hash.substr(1)`). The `find_source_in_expr`
+// recurses into `.object`, so adding just the second-level alias
+// (`self.location`) is enough for `self.location.hash` to taint —
+// recursion strips the leaf property and matches the alias one level
+// down. `window.location` was already covered for the same reason.
 const DOM_SOURCES: &[&str] = &[
     "location.search",
     "location.hash",
@@ -104,6 +115,17 @@ const DOM_SOURCES: &[&str] = &[
     "document.referrer",
     "window.name",
     "window.location",
+    "window.location.hash",
+    "window.location.search",
+    "window.location.href",
+    "window.location.pathname",
+    "self.location",
+    "self.location.hash",
+    "self.location.search",
+    "self.location.href",
+    "self.location.pathname",
+    "top.location",
+    "parent.location",
     "localStorage",
     "sessionStorage",
     "localStorage.getItem",
@@ -2017,6 +2039,24 @@ impl<'a> DomXssVisitor<'a> {
                         }
                     }
                 }
+            }
+            // Anonymous function expressions assigned to globals
+            // (`window.onload = function () { … }`,
+            // `addEventListener("load", function () { … })`, IIFE
+            // wrappers) used to short-circuit here, so any taint flow
+            // inside their body was invisible to the analyzer — the
+            // xss-game level 3 shape (hash → `chooseTab(…)` inside a
+            // `window.onload = function () {}` body) slipped through.
+            // Walk the function body so call expressions inside reach
+            // `walk_call_expression`, where the function-summary
+            // lookup fires the sink finding.
+            Expression::FunctionExpression(func) => {
+                if let Some(body) = &func.body {
+                    self.walk_statements(&body.statements);
+                }
+            }
+            Expression::ArrowFunctionExpression(arrow) => {
+                self.walk_statements(&arrow.body.statements);
             }
 
             _ => {}

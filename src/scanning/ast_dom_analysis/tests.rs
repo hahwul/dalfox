@@ -2751,3 +2751,175 @@ fn test_reflect_construct_function_safe_literal_not_detected() {
         "Safe literal code should not be detected via Reflect.construct"
     );
 }
+
+#[test]
+fn test_self_location_hash_recognised_as_source() {
+    // Regression for the xss-game L3 hash source: `self === window` so
+    // `self.location.hash` taints just like `location.hash`. Without
+    // `self.location` in DOM_SOURCES the analyzer recurses past the
+    // alias and gives up at the bare `self` identifier.
+    let js = r#"
+function chooseTab(num) {
+  $('#tabContent').html(num);
+}
+chooseTab(self.location.hash);
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let result = analyzer.analyze(js).expect("parses");
+    assert_eq!(result.len(), 1, "self.location.hash must taint chooseTab arg");
+    assert!(result[0].source.contains("location"));
+    assert_eq!(result[0].sink, "html");
+}
+
+#[test]
+fn test_function_expression_body_in_window_onload_assignment_is_walked() {
+    // Regression for the xss-game L3 outer wrapper: the call that
+    // feeds the tainted source into `chooseTab` lives inside an
+    // anonymous function expression assigned to `window.onload`. The
+    // analyzer used to stop at the assignment RHS — only function
+    // *declarations* had their bodies walked at module scope — so the
+    // sink summary never fired.
+    let js = r#"
+function chooseTab(num) {
+  $('#tabContent').html(num);
+}
+window.onload = function() {
+  chooseTab(self.location.hash);
+}
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let result = analyzer.analyze(js).expect("parses");
+    assert_eq!(
+        result.len(),
+        1,
+        "function-expression body inside window.onload assignment must be walked"
+    );
+}
+
+#[test]
+fn test_arrow_function_expression_body_in_assignment_is_walked() {
+    // Same fix covers arrow-function expressions in assignments.
+    let js = r#"
+function chooseTab(num) {
+  $('#tabContent').html(num);
+}
+window.onload = () => {
+  chooseTab(location.hash);
+};
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let result = analyzer.analyze(js).expect("parses");
+    assert_eq!(result.len(), 1);
+}
+
+#[test]
+fn test_xss_game_level3_full_pattern() {
+    // Full xss-game L3 shape — kept verbatim from the live page so
+    // future analyzer refactors don't silently lose it. The hash
+    // flows through `unescape`, then through `chooseTab`'s parameter,
+    // then concatenated into an HTML string, then handed to jQuery
+    // `.html()`. Every link in the chain must be tracked.
+    let js = r#"
+function chooseTab(num) {
+  var html = "Image " + parseInt(num) + "<br>";
+  html += "<img src='/static/level3/cloud" + num + ".jpg' />";
+  $('#tabContent').html(html);
+}
+window.onload = function() {
+  chooseTab(unescape(self.location.hash.substr(1)) || "1");
+}
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let result = analyzer.analyze(js).expect("parses");
+    assert!(
+        !result.is_empty(),
+        "xss-game L3 full pattern must produce at least one DOM XSS finding"
+    );
+    let v = &result[0];
+    assert!(
+        v.source.contains("location"),
+        "source should mention location (got {})",
+        v.source
+    );
+    assert_eq!(v.sink, "html");
+}
+
+// Coverage matrix for the modern SPA shapes that real-world apps lean
+// on. Pin them as regression tests so a future analyzer refactor
+// doesn't silently drop coverage.
+
+#[test]
+fn detects_postmessage_function_handler_to_innerhtml() {
+    let js = r#"
+window.addEventListener("message", function(e) {
+  document.getElementById("out").innerHTML = e.data;
+});
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.iter()
+            .any(|v| v.source.contains("data") && v.sink == "innerHTML"),
+        "postMessage function handler must surface event.data → innerHTML"
+    );
+}
+
+#[test]
+fn detects_postmessage_arrow_handler_to_innerhtml() {
+    let js = r#"
+window.addEventListener("message", (e) => {
+  document.body.innerHTML = e.data;
+});
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.iter()
+            .any(|v| v.source.contains("data") && v.sink == "innerHTML")
+    );
+}
+
+#[test]
+fn detects_template_literal_substitution_into_innerhtml() {
+    let js = r#"
+const name = location.hash.substr(1);
+document.body.innerHTML = `<h1>Hello ${name}</h1>`;
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.iter()
+            .any(|v| v.source.contains("location.hash") && v.sink == "innerHTML"),
+        "template-literal substitution must propagate the hash taint into innerHTML"
+    );
+}
+
+#[test]
+fn detects_direct_script_src_assignment_from_hash() {
+    let js = r#"
+const s = document.createElement('script');
+s.src = location.hash.substr(1);
+document.head.appendChild(s);
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.iter()
+            .any(|v| v.source.contains("location.hash") && v.sink == "src")
+    );
+}
+
+#[test]
+fn detects_json_parse_property_access_into_innerhtml() {
+    let js = r#"
+const cfg = JSON.parse(location.hash.substr(1));
+document.body.innerHTML = cfg.title;
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.iter()
+            .any(|v| v.source.contains("location.hash") && v.sink == "innerHTML"),
+        "JSON.parse(tainted) → property access → innerHTML must surface"
+    );
+}

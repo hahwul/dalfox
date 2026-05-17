@@ -74,6 +74,14 @@ pub struct Result {
     pub severity: String,
     pub message_id: u32,
     pub message_str: String,
+    /// Where the parameter lives on the wire: `"Query"`, `"Header"`,
+    /// `"Body"`, `"JsonBody"`, `"MultipartBody"`, `"Path"`, or `"Fragment"`.
+    /// Empty when the producer didn't set it (older call sites). Consumed
+    /// by `generate_poc` to avoid synthesizing a misleading `?name=payload`
+    /// query for header/cookie/body findings, and to tag the plain POC
+    /// line with a short location hint.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub location: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -107,6 +115,7 @@ impl Result {
             severity,
             message_id,
             message_str,
+            location: String::new(),
             request: None,
             response: None,
         }
@@ -128,6 +137,10 @@ pub struct SanitizedResult {
     pub severity: String,
     pub message_id: u32,
     pub message_str: String,
+    /// Wire location of the parameter (Query / Header / Body / …). See
+    /// [`Result::location`].
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub location: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -149,6 +162,7 @@ impl Result {
             severity: self.severity.clone(),
             message_id: self.message_id,
             message_str: self.message_str.clone(),
+            location: self.location.clone(),
             request: if include_request {
                 self.request.clone()
             } else {
@@ -182,6 +196,14 @@ impl Result {
             "message_id": self.message_id,
             "message_str": self.message_str
         });
+        if !self.location.is_empty()
+            && let serde_json::Value::Object(ref mut map) = obj
+        {
+            map.insert(
+                "location".to_string(),
+                serde_json::Value::String(self.location.clone()),
+            );
+        }
         if include_request
             && let Some(req) = &self.request
             && let serde_json::Value::Object(ref mut map) = obj

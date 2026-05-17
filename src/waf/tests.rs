@@ -230,6 +230,50 @@ fn test_wordfence_detection() {
 }
 
 #[test]
+fn test_gfe_header_is_weak_signal_filtered_by_default() {
+    // `Server: Google Frontend` is emitted by App Engine, Cloud Run, Google
+    // APIs, Search — anything fronted by GFE — regardless of whether Cloud
+    // Armor is actually enabled. The rule keeps a tiny confidence so it
+    // doesn't surface above the default `--waf-min-confidence` floor.
+    let headers = make_headers(&[("server", "Google Frontend")]);
+    let result = fingerprint_from_response(&headers, None, 200);
+    let cloud_armor_fp = result
+        .detected
+        .iter()
+        .find(|fp| fp.waf_type == WafType::CloudArmor)
+        .expect("rule still fires so users can opt-in via --waf-min-confidence 0");
+    assert!(
+        cloud_armor_fp.confidence < crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE,
+        "Server: Google Frontend confidence ({}) must stay below the default \
+         waf-min-confidence ({}); otherwise every appspot.com host triggers \
+         a Cloud Armor false positive at default settings",
+        cloud_armor_fp.confidence,
+        crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE,
+    );
+}
+
+#[test]
+fn test_cloud_armor_body_marker_survives_default_floor() {
+    // Real Cloud Armor block pages contain the literal string. This is a
+    // strong signal and must stay above the default floor.
+    let headers = make_headers(&[("server", "Google Frontend")]);
+    let body = "<html><body>Google Cloud Armor blocked your request</body></html>";
+    let result = fingerprint_from_response(&headers, Some(body), 403);
+    let cloud_armor = result
+        .detected
+        .iter()
+        .find(|fp| fp.waf_type == WafType::CloudArmor)
+        .expect("should detect CloudArmor from body marker");
+    assert!(
+        cloud_armor.confidence >= crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE,
+        "Google Cloud Armor body marker confidence ({}) must clear the \
+         default waf-min-confidence ({})",
+        cloud_armor.confidence,
+        crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE,
+    );
+}
+
+#[test]
 fn test_aws_waf_header_detection() {
     let headers = make_headers(&[("x-amzn-waf-action", "block")]);
     let result = fingerprint_from_response(&headers, None, 403);

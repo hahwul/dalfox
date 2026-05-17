@@ -19,6 +19,7 @@ fn mock_mine_parameters(_target: &mut Target, _args: &ScanArgs) {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     });
 }
 
@@ -79,6 +80,7 @@ fn test_analyze_parameters_with_mock_mining() {
         custom_alert_type: "none".to_string(),
 
         skip_xss_scanning: false,
+        max_payloads_per_param: 0,
         deep_scan: false,
         sxss: false,
         sxss_url: None,
@@ -165,6 +167,7 @@ fn test_analyze_parameters_skip_mining() {
         custom_alert_type: "none".to_string(),
 
         skip_xss_scanning: false,
+        max_payloads_per_param: 0,
         deep_scan: false,
         sxss: false,
         sxss_url: None,
@@ -243,6 +246,7 @@ fn test_probe_body_params_mock() {
         custom_alert_type: "none".to_string(),
 
         skip_xss_scanning: false,
+        max_payloads_per_param: 0,
         deep_scan: false,
         sxss: false,
         sxss_url: None,
@@ -272,6 +276,7 @@ fn test_probe_body_params_mock() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     });
 
     assert!(!target.reflection_params.is_empty());
@@ -298,6 +303,7 @@ fn test_check_header_discovery_mock() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     });
 
     assert!(!target.reflection_params.is_empty());
@@ -324,6 +330,7 @@ fn test_check_cookie_discovery_mock() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     });
 
     assert!(!target.reflection_params.is_empty());
@@ -387,6 +394,7 @@ fn test_cookie_from_raw() {
         custom_alert_type: "none".to_string(),
 
         skip_xss_scanning: false,
+        max_payloads_per_param: 0,
         deep_scan: false,
         sxss: false,
         sxss_url: None,
@@ -486,6 +494,7 @@ fn test_cookie_from_raw_no_file() {
         custom_alert_type: "none".to_string(),
 
         skip_xss_scanning: false,
+        max_payloads_per_param: 0,
         deep_scan: false,
         sxss: false,
         sxss_url: None,
@@ -569,6 +578,7 @@ fn test_filter_params_by_name_and_type() {
             wire_name: None,
             form_action_url: None,
             form_origin_url: None,
+            framework_sink: None,
         },
         Param {
             name: "sort".to_string(),
@@ -582,6 +592,7 @@ fn test_filter_params_by_name_and_type() {
             wire_name: None,
             form_action_url: None,
             form_origin_url: None,
+            framework_sink: None,
         },
         Param {
             name: "id".to_string(),
@@ -595,6 +606,7 @@ fn test_filter_params_by_name_and_type() {
             wire_name: None,
             form_action_url: None,
             form_origin_url: None,
+            framework_sink: None,
         },
         Param {
             name: "session".to_string(),
@@ -608,6 +620,7 @@ fn test_filter_params_by_name_and_type() {
             wire_name: None,
             form_action_url: None,
             form_origin_url: None,
+            framework_sink: None,
         },
     ];
 
@@ -653,6 +666,7 @@ fn test_filter_params_multiple_filters() {
             wire_name: None,
             form_action_url: None,
             form_origin_url: None,
+            framework_sink: None,
         },
         Param {
             name: "id".to_string(),
@@ -666,6 +680,7 @@ fn test_filter_params_multiple_filters() {
             wire_name: None,
             form_action_url: None,
             form_origin_url: None,
+            framework_sink: None,
         },
         Param {
             name: "session".to_string(),
@@ -679,6 +694,7 @@ fn test_filter_params_multiple_filters() {
             wire_name: None,
             form_action_url: None,
             form_origin_url: None,
+            framework_sink: None,
         },
     ];
 
@@ -708,6 +724,7 @@ fn test_filter_params_empty_filters() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     }];
 
     // Empty filters should return all params
@@ -730,6 +747,7 @@ fn test_filter_params_invalid_filter_format() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     }];
 
     // Invalid filter format (too many colons) should be treated as name only
@@ -797,6 +815,7 @@ fn default_scan_args() -> ScanArgs {
         custom_alert_value: "1".to_string(),
         custom_alert_type: "none".to_string(),
         skip_xss_scanning: false,
+        max_payloads_per_param: 0,
         deep_scan: false,
         sxss: false,
         sxss_url: None,
@@ -841,6 +860,7 @@ fn probe_param(name: &str, location: Location) -> Param {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     }
 }
 

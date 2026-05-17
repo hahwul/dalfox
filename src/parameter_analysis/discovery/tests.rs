@@ -64,6 +64,7 @@ fn default_scan_args() -> crate::cmd::scan::ScanArgs {
         custom_alert_value: "1".to_string(),
         custom_alert_type: "none".to_string(),
         skip_xss_scanning: true,
+        max_payloads_per_param: 0,
         deep_scan: false,
         sxss: false,
         sxss_url: None,
@@ -147,6 +148,84 @@ async fn test_check_query_discovery_discovers_reflection_and_extends_batch() {
     );
     assert!(params.iter().all(|p| p.valid_specials.is_some()));
     assert!(params.iter().all(|p| p.invalid_specials.is_some()));
+}
+
+/// Mock that mirrors xss-quiz.int21h.jp / phpinfo: every incoming
+/// request header value is echoed into the response body. Used to
+/// verify the blanket-echo differential filter.
+async fn start_printenv_style_mock_server() -> SocketAddr {
+    async fn echo_all_headers(headers: axum::http::HeaderMap) -> String {
+        let mut out = String::from("<html><body><table>");
+        for (k, v) in headers.iter() {
+            let v = v.to_str().unwrap_or("");
+            out.push_str(&format!(
+                "<tr><th>HTTP_{}</th><td>{}</td></tr>",
+                k.as_str().to_ascii_uppercase().replace('-', "_"),
+                v
+            ));
+        }
+        out.push_str("</table></body></html>");
+        out
+    }
+    let app = Router::new()
+        .route("/", any(echo_all_headers))
+        .route("/{*rest}", any(echo_all_headers));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+    addr
+}
+
+#[tokio::test]
+async fn test_check_header_discovery_blanket_echo_skips_default_probes() {
+    // Site echoes every header back. Without the differential filter,
+    // each of the 11 `COMMON_PROBE_HEADERS` becomes a noisy
+    // reflection finding with identical payloads. The blanket-echo
+    // guard should pre-detect this and skip the default probe set.
+    let addr = start_printenv_style_mock_server().await;
+    let target = parse_target(&format!("http://{}/", addr)).unwrap();
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(Semaphore::new(1));
+    check_header_discovery(&target, reflection_params.clone(), semaphore).await;
+
+    let params = reflection_params.lock().await.clone();
+    let names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
+    let common_hit = names
+        .iter()
+        .any(|n| COMMON_PROBE_HEADERS.iter().any(|h| n.eq_ignore_ascii_case(h)));
+    assert!(
+        !common_hit,
+        "blanket-echo guard must suppress COMMON_PROBE_HEADERS probes (got {:?})",
+        names
+    );
+}
+
+#[tokio::test]
+async fn test_check_header_discovery_blanket_echo_keeps_user_supplied_headers() {
+    // Even on a blanket-echo site, an operator who explicitly passes
+    // `-H "X-Reflect-Me: x"` is asking dalfox to look at that header.
+    // Don't suppress that finding — it's user intent.
+    let addr = start_printenv_style_mock_server().await;
+    let mut target = parse_target(&format!("http://{}/", addr)).unwrap();
+    target
+        .headers
+        .push(("X-Reflect-Me".to_string(), "orig".to_string()));
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(Semaphore::new(1));
+    check_header_discovery(&target, reflection_params.clone(), semaphore).await;
+
+    let params = reflection_params.lock().await.clone();
+    assert!(
+        params.iter().any(|p| p.name == "X-Reflect-Me"),
+        "user-supplied X-Reflect-Me must survive blanket-echo suppression"
+    );
 }
 
 #[tokio::test]
@@ -262,6 +341,112 @@ async fn test_check_discovery_skip_discovery_true_keeps_empty() {
     assert!(target.reflection_params.is_empty());
 }
 
+/// Mock that mimics Firing Range / App Engine 404 pages: any path that
+/// doesn't match the known route returns 404 with the requested URI
+/// echoed in an HTML `<td>...</td>` — exploitable text-content context.
+async fn start_404_td_echo_mock_server() -> SocketAddr {
+    async fn echo_404(uri: Uri) -> (axum::http::StatusCode, String) {
+        (
+            axum::http::StatusCode::NOT_FOUND,
+            format!(
+                "<html><body><tr><th>URI:</th><td>{}</td></tr></body></html>",
+                uri.path()
+            ),
+        )
+    }
+    async fn ok_root() -> &'static str {
+        "ok"
+    }
+    let app = Router::new()
+        .route("/", any(ok_root))
+        .fallback(any(echo_404));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+    addr
+}
+
+/// Mock that mimics a generic 404 page echoing the path only inside an
+/// `<a href>` breadcrumb — URL-attribute echo with no script-execution
+/// surface, the noise pattern that should still be suppressed.
+async fn start_404_anchor_echo_mock_server() -> SocketAddr {
+    async fn echo_404(uri: Uri) -> (axum::http::StatusCode, String) {
+        (
+            axum::http::StatusCode::NOT_FOUND,
+            format!(
+                "<html><body>Page not found. Try <a href=\"{}\">again</a>.</body></html>",
+                uri.path()
+            ),
+        )
+    }
+    async fn ok_root() -> &'static str {
+        "ok"
+    }
+    let app = Router::new()
+        .route("/", any(ok_root))
+        .fallback(any(echo_404));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+    addr
+}
+
+#[tokio::test]
+async fn test_check_path_discovery_keeps_exploitable_404_td_echo() {
+    // Firing-range / App Engine 404 template: URI rendered inside
+    // `<td>...</td>`. Pre-TP-fix this was suppressed wholesale on
+    // non-2xx; the scan-time filter had the same blanket drop.
+    // Both paths now classify the response and KEEP the finding,
+    // because `<td>` is plain text content and a `<svg/onload=...>`
+    // payload would actually break out and execute.
+    let addr = start_404_td_echo_mock_server().await;
+    let mut target = parse_target(&format!("http://{}/no/such/route", addr)).unwrap();
+    target.delay = 1;
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(Semaphore::new(1));
+    check_path_discovery(&target, reflection_params.clone(), semaphore).await;
+
+    let params = reflection_params.lock().await.clone();
+    let names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
+    assert!(
+        names.contains(&"path_segment_0"),
+        "exploitable 404 td-echo path discovery must surface path_segment_0 (got {:?})",
+        names
+    );
+}
+
+#[tokio::test]
+async fn test_check_path_discovery_drops_url_attr_only_404_echo() {
+    // Generic 404 page that echoes the path only inside `<a href>` —
+    // unexploitable URL echo. Discovery must continue to skip it
+    // so we don't waste payload-set requests on noise.
+    let addr = start_404_anchor_echo_mock_server().await;
+    let mut target = parse_target(&format!("http://{}/no/such/route", addr)).unwrap();
+    target.delay = 1;
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(Semaphore::new(1));
+    check_path_discovery(&target, reflection_params.clone(), semaphore).await;
+
+    let params = reflection_params.lock().await.clone();
+    assert!(
+        params.is_empty(),
+        "url-attr-only 404 echo must NOT surface path segments (got {:?})",
+        params.iter().map(|p| &p.name).collect::<Vec<_>>()
+    );
+}
+
 #[tokio::test]
 async fn test_check_path_discovery_skips_existing_segment() {
     let target = {
@@ -282,6 +467,7 @@ async fn test_check_path_discovery_skips_existing_segment() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     }]));
 
     let semaphore = Arc::new(Semaphore::new(1));
@@ -330,4 +516,131 @@ async fn test_check_discovery_skips_path_when_flag_set() {
     )
     .await;
     assert!(reflection_params.lock().await.is_empty());
+}
+
+#[test]
+fn test_dedupe_collapses_same_name_location_pair() {
+    let mut params = vec![
+        Param {
+            name: "query".to_string(),
+            value: "v".to_string(),
+            location: Location::Query,
+            injection_context: None,
+            valid_specials: Some(vec!['<', '>']),
+            invalid_specials: Some(vec!['"', '\'']),
+            pre_encoding: None,
+            pre_encoding_pipeline: None,
+            wire_name: None,
+            form_action_url: None,
+            form_origin_url: None,
+            framework_sink: None,
+        },
+        Param {
+            name: "query".to_string(),
+            value: String::new(),
+            location: Location::Query,
+            injection_context: Some(crate::parameter_analysis::InjectionContext::Html(None)),
+            valid_specials: Some(vec!['<', '/']),
+            invalid_specials: Some(vec!['"']),
+            pre_encoding: None,
+            pre_encoding_pipeline: None,
+            wire_name: None,
+            form_action_url: Some("https://x/y".to_string()),
+            form_origin_url: None,
+            framework_sink: None,
+        },
+    ];
+    dedupe_reflection_params(&mut params);
+    assert_eq!(params.len(), 1, "duplicates must collapse");
+    // injection_context filled in from the second entry
+    assert!(params[0].injection_context.is_some());
+    // form_action_url filled in from the second entry
+    assert_eq!(
+        params[0].form_action_url.as_deref(),
+        Some("https://x/y")
+    );
+    // valid_specials union: {<, >, /}
+    let v = params[0].valid_specials.as_ref().unwrap();
+    assert!(v.contains(&'<'));
+    assert!(v.contains(&'>'));
+    assert!(v.contains(&'/'));
+    // invalid_specials intersection: only `"` (since `'` wasn't in the second set)
+    let i = params[0].invalid_specials.as_ref().unwrap();
+    assert!(i.contains(&'"'));
+    assert!(!i.contains(&'\''));
+}
+
+#[test]
+fn test_dedupe_keeps_different_locations_distinct() {
+    let mut params = vec![
+        Param {
+            name: "q".to_string(),
+            value: String::new(),
+            location: Location::Query,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            pre_encoding_pipeline: None,
+            wire_name: None,
+            form_action_url: None,
+            form_origin_url: None,
+            framework_sink: None,
+        },
+        Param {
+            name: "q".to_string(),
+            value: String::new(),
+            location: Location::Body,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            pre_encoding_pipeline: None,
+            wire_name: None,
+            form_action_url: None,
+            form_origin_url: None,
+            framework_sink: None,
+        },
+    ];
+    dedupe_reflection_params(&mut params);
+    assert_eq!(params.len(), 2);
+}
+
+#[test]
+fn test_dedupe_is_noop_for_unique_entries() {
+    let mut params = vec![
+        Param {
+            name: "a".to_string(),
+            value: String::new(),
+            location: Location::Query,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            pre_encoding_pipeline: None,
+            wire_name: None,
+            form_action_url: None,
+            form_origin_url: None,
+            framework_sink: None,
+        },
+        Param {
+            name: "b".to_string(),
+            value: String::new(),
+            location: Location::Query,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            pre_encoding_pipeline: None,
+            wire_name: None,
+            form_action_url: None,
+            form_origin_url: None,
+            framework_sink: None,
+        },
+    ];
+    let before = params.clone();
+    dedupe_reflection_params(&mut params);
+    assert_eq!(params.len(), 2);
+    assert_eq!(params[0].name, before[0].name);
+    assert_eq!(params[1].name, before[1].name);
 }

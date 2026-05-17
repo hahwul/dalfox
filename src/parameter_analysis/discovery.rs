@@ -69,7 +69,139 @@ pub async fn check_discovery(
         // Fragment discovery: extract params from URL hash fragments (client-side only)
         check_fragment_discovery(target, reflection_params.clone()).await;
     }
+    // Each `check_*_discovery` extends `reflection_params` independently,
+    // so a URL like `/search.jsp?query=…` whose response also embeds
+    // `<form><input name="query">` lands the same (name, location) twice
+    // — once from `check_query_discovery`, once from
+    // `check_form_discovery`. Without dedup we'd double the scan cost
+    // and double every POC line. Collapse here before handing the list
+    // to the scanner.
+    {
+        let mut guard = reflection_params.lock().await;
+        dedupe_reflection_params(&mut guard);
+    }
     target.reflection_params = reflection_params.lock().await.clone();
+}
+
+/// Collapse duplicate `Param` entries that share the same identity
+/// (name, location, effective wire name, pre-encoding pipeline). When
+/// two entries describe the same wire slot, merge their metadata in
+/// place: keep the entry with the richer `injection_context` /
+/// `valid_specials` / `invalid_specials` / `framework_sink`, and union
+/// the special-character sets so later payload generation sees the
+/// widest valid surface either probe observed.
+///
+/// `(name, location, effective_wire_name, pre_encoding_pipeline)` is
+/// the smallest set of fields that meaningfully distinguishes one
+/// injection point from another at scan time — same name in a query
+/// vs body slot is two different sinks, but two pushes of `?query=`
+/// from the URL and from a `<form>` echo are not.
+pub(crate) fn dedupe_reflection_params(params: &mut Vec<Param>) {
+    use std::collections::HashSet;
+
+    if params.len() <= 1 {
+        return;
+    }
+
+    let key_of = |p: &Param| -> String {
+        let pipe = p
+            .pre_encoding_pipeline
+            .as_ref()
+            .map(|p| format!("{:?}", p))
+            .unwrap_or_default();
+        format!(
+            "{}|{:?}|{}|{}",
+            p.name,
+            p.location,
+            p.effective_wire_name(),
+            pipe
+        )
+    };
+
+    // First pass: collect indexes per key so we can merge metadata into
+    // the canonical entry (the first occurrence) before discarding the
+    // rest. Using stable ordering by index keeps deterministic output.
+    let mut seen: HashSet<String> = HashSet::with_capacity(params.len());
+    let mut keep: Vec<usize> = Vec::with_capacity(params.len());
+    let mut merge_into: Vec<Vec<usize>> = Vec::with_capacity(params.len());
+
+    for (idx, p) in params.iter().enumerate() {
+        let key = key_of(p);
+        if seen.insert(key.clone()) {
+            keep.push(idx);
+            merge_into.push(Vec::new());
+        } else {
+            // Find the canonical slot for this key.
+            let canonical = keep
+                .iter()
+                .position(|&i| key_of(&params[i]) == key)
+                .expect("key was inserted above");
+            merge_into[canonical].push(idx);
+        }
+    }
+
+    if keep.len() == params.len() {
+        return; // no duplicates
+    }
+
+    // Materialise the merged set out-of-place to keep borrow scopes
+    // simple while we touch multiple indexes.
+    let mut merged: Vec<Param> = Vec::with_capacity(keep.len());
+    for (slot, &canonical_idx) in keep.iter().enumerate() {
+        let mut base = params[canonical_idx].clone();
+        for &dup_idx in &merge_into[slot] {
+            let other = &params[dup_idx];
+            if base.injection_context.is_none() && other.injection_context.is_some() {
+                base.injection_context = other.injection_context.clone();
+            }
+            if base.framework_sink.is_none() && other.framework_sink.is_some() {
+                base.framework_sink = other.framework_sink.clone();
+            }
+            if base.pre_encoding.is_none() && other.pre_encoding.is_some() {
+                base.pre_encoding = other.pre_encoding.clone();
+            }
+            if base.form_action_url.is_none() && other.form_action_url.is_some() {
+                base.form_action_url = other.form_action_url.clone();
+            }
+            if base.form_origin_url.is_none() && other.form_origin_url.is_some() {
+                base.form_origin_url = other.form_origin_url.clone();
+            }
+            // Union the special-char sets: a char marked valid by
+            // either probe should stay valid; a char marked invalid by
+            // both stays invalid. The discovery probes are noisy so
+            // taking the wider valid set lets the payload generator
+            // exercise everything either run could land.
+            base.valid_specials =
+                merge_char_sets(base.valid_specials.take(), other.valid_specials.clone());
+            base.invalid_specials = intersect_char_sets(
+                base.invalid_specials.take(),
+                other.invalid_specials.clone(),
+            );
+        }
+        merged.push(base);
+    }
+    *params = merged;
+}
+
+fn merge_char_sets(a: Option<Vec<char>>, b: Option<Vec<char>>) -> Option<Vec<char>> {
+    match (a, b) {
+        (None, x) | (x, None) => x,
+        (Some(mut a), Some(b)) => {
+            for c in b {
+                if !a.contains(&c) {
+                    a.push(c);
+                }
+            }
+            Some(a)
+        }
+    }
+}
+
+fn intersect_char_sets(a: Option<Vec<char>>, b: Option<Vec<char>>) -> Option<Vec<char>> {
+    match (a, b) {
+        (None, x) | (x, None) => x,
+        (Some(a), Some(b)) => Some(a.into_iter().filter(|c| b.contains(c)).collect()),
+    }
 }
 
 /// Extract parameters from URL hash fragments and register them for scanning.
@@ -131,6 +263,7 @@ pub async fn check_fragment_discovery(target: &Target, reflection_params: Arc<Mu
             wire_name: None,
             form_action_url: None,
             form_origin_url: None,
+            framework_sink: None,
         });
     }
 }
@@ -160,6 +293,7 @@ pub async fn check_query_discovery(
             wire_name: None,
             form_action_url: None,
             form_origin_url: None,
+            framework_sink: None,
         };
         let url_str = build_injected_url(&target.url, &tmp_param, test_value);
         let url = url::Url::parse(&url_str).expect("build_injected_url produces valid URL");
@@ -216,11 +350,17 @@ pub async fn check_query_discovery(
                         wire_name: None,
                         form_action_url: None,
                         form_origin_url: None,
+                        framework_sink: None,
                     });
                 } else if let Ok(text) = resp.text().await
                     && crate::scanning::markers::classify_probe_reflection(&text).detected()
                 {
                     let (valid, invalid) = classify_special_chars(&text);
+                    let framework_sink = crate::parameter_analysis::detect_framework_html_sink(
+                        &text,
+                        crate::scanning::markers::bracketed_marker(),
+                    )
+                    .map(|s| s.to_string());
                     discovered = Some(Param {
                         name,
                         value,
@@ -233,6 +373,7 @@ pub async fn check_query_discovery(
                         wire_name: None,
                         form_action_url: None,
                         form_origin_url: None,
+                        framework_sink,
                     });
                 }
             }
@@ -301,6 +442,7 @@ pub async fn check_query_discovery(
                     wire_name: None,
                     form_action_url: None,
                     form_origin_url: None,
+                    framework_sink: None,
                 });
                 break; // Found working encoding, no need to try more
             }
@@ -378,6 +520,7 @@ pub async fn check_query_discovery(
                     wire_name: Some(name.clone()),
                     form_action_url: None,
                     form_origin_url: None,
+                    framework_sink: None,
                 });
             }
             if target.delay > 0 {
@@ -408,6 +551,7 @@ pub async fn check_query_discovery(
                 wire_name: None,
                 form_action_url: None,
                 form_origin_url: None,
+                framework_sink: None,
             };
             let url_str = build_injected_url(&target.url, &tmp_param, numeric_marker);
             let url = url::Url::parse(&url_str).expect("valid URL");
@@ -437,6 +581,7 @@ pub async fn check_query_discovery(
                     wire_name: None,
                     form_action_url: None,
                     form_origin_url: None,
+                    framework_sink: None,
                 });
             }
             if target.delay > 0 {
@@ -473,6 +618,7 @@ pub async fn check_query_discovery(
                 wire_name: None,
                 form_action_url: None,
                 form_origin_url: None,
+                framework_sink: None,
             });
         }
         if target.delay > 0 {
@@ -502,6 +648,47 @@ const COMMON_PROBE_HEADERS: &[&str] = &[
     "Origin",
 ];
 
+/// Differential probe to detect "blanket header echo" sites — printenv /
+/// phpinfo-style endpoints (e.g. xss-quiz.int21h.jp) that render every
+/// incoming header value back into the response. Without this guard,
+/// each entry in [`COMMON_PROBE_HEADERS`] turns into an independent
+/// reflection finding with identical payloads, drowning out actual
+/// signal. We send one request with a header whose name is
+/// guaranteed-unused (so no legitimate code path looks for it): if the
+/// marker still reflects, the site echoes everything header-shaped,
+/// and we should skip the default probe list.
+///
+/// User-supplied headers (`target.headers`) are NOT suppressed — the
+/// user explicitly opted into testing those, and their findings remain
+/// useful for narrowing a stored-XSS / cookie-injection vector.
+async fn detect_blanket_header_echo(target: &Target) -> bool {
+    let client = target.build_client_or_default();
+    let arc_target = Arc::new(target.clone());
+    let test_value = crate::scanning::markers::bracketed_marker();
+    let guard_name = format!(
+        "X-Dalfox-Probe-{}",
+        crate::utils::short_scan_id(&crate::utils::make_scan_id(test_value))
+    );
+    let parsed_method = target.parse_method();
+    let base = crate::utils::build_request(
+        &client,
+        &arc_target,
+        parsed_method,
+        target.url.clone(),
+        target.data.clone(),
+    );
+    let overrides = vec![(guard_name, test_value.to_string())];
+    let request = crate::utils::apply_header_overrides(base, &overrides);
+    crate::tick_request_count();
+    match request.send().await {
+        Ok(resp) => match resp.text().await {
+            Ok(text) => crate::scanning::markers::classify_probe_reflection(&text).detected(),
+            Err(_) => false,
+        },
+        Err(_) => false,
+    }
+}
+
 pub async fn check_header_discovery(
     target: &Target,
     reflection_params: Arc<Mutex<Vec<Param>>>,
@@ -523,9 +710,23 @@ pub async fn check_header_discovery(
         .iter()
         .map(|(k, _)| k.to_ascii_lowercase())
         .collect();
-    for &hdr in COMMON_PROBE_HEADERS {
-        if !existing_names.contains(&hdr.to_ascii_lowercase()) {
-            headers_to_test.push((hdr.to_string(), String::new()));
+
+    // Differential check: skip the default probe list when the target
+    // echoes any header name. User-supplied headers still get probed
+    // because the operator explicitly asked for them.
+    let blanket_echo = detect_blanket_header_echo(target).await;
+    if blanket_echo {
+        if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+            eprintln!(
+                "[DBG] blanket header echo detected (guard reflected); skipping {} common header probes",
+                COMMON_PROBE_HEADERS.len()
+            );
+        }
+    } else {
+        for &hdr in COMMON_PROBE_HEADERS {
+            if !existing_names.contains(&hdr.to_ascii_lowercase()) {
+                headers_to_test.push((hdr.to_string(), String::new()));
+            }
         }
     }
 
@@ -558,6 +759,11 @@ pub async fn check_header_discovery(
                 && crate::scanning::markers::classify_probe_reflection(&text).detected()
             {
                 let (valid, invalid) = classify_special_chars(&text);
+                let framework_sink = crate::parameter_analysis::detect_framework_html_sink(
+                    &text,
+                    crate::scanning::markers::bracketed_marker(),
+                )
+                .map(|s| s.to_string());
                 discovered = Some(Param {
                     name: header_name,
                     value: header_value,
@@ -570,6 +776,7 @@ pub async fn check_header_discovery(
                     wire_name: None,
                     form_action_url: None,
                     form_origin_url: None,
+                    framework_sink,
                 });
             }
             if delay > 0 {
@@ -659,24 +866,50 @@ pub async fn check_path_discovery(
 
             crate::tick_request_count();
             let mut discovered: Option<Param> = None;
-            if let Ok(resp) = request.send().await
-                && let Ok(text) = resp.text().await
-                && crate::scanning::markers::classify_probe_reflection(&text).detected()
-            {
-                let (valid, invalid) = classify_special_chars(&text);
-                discovered = Some(Param {
-                    name: param_name,
-                    value: original_value,
-                    location: crate::parameter_analysis::Location::Path,
-                    injection_context: Some(detect_injection_context(&text)),
-                    valid_specials: Some(valid),
-                    invalid_specials: Some(invalid),
-                    pre_encoding: None,
-                    pre_encoding_pipeline: None,
-                    wire_name: None,
-                    form_action_url: None,
-                    form_origin_url: None,
-                });
+            if let Ok(resp) = request.send().await {
+                // Pair discovery with the scan-time `should_suppress_path_*`
+                // policy so we don't pay payload-set requests for path
+                // segments the scanner would later throw away. Concretely:
+                //   * 2xx                              → always honor
+                //   * 3xx                              → drop (Location-only
+                //                                       echo, not a rendered
+                //                                       HTML sink)
+                //   * 4xx/5xx + marker only in URL attrs → drop (canonical
+                //                                       link / `<a href>`
+                //                                       echo noise)
+                //   * 4xx/5xx + marker outside URL attrs → keep
+                //                                       (genuine error-page
+                //                                       XSS — e.g. a 404
+                //                                       template that emits
+                //                                       `<td>{uri}</td>`).
+                let status = resp.status().as_u16();
+                if !(300..400).contains(&status)
+                    && let Ok(text) = resp.text().await
+                    && crate::scanning::markers::classify_probe_reflection(&text).detected()
+                {
+                    let exploitable_context = (200..300).contains(&status)
+                        || !crate::scanning::check_reflection::marker_reflects_in_url_attr_only(
+                            &text,
+                            crate::scanning::markers::bracketed_marker(),
+                        );
+                    if exploitable_context {
+                        let (valid, invalid) = classify_special_chars(&text);
+                        discovered = Some(Param {
+                            name: param_name,
+                            value: original_value,
+                            location: crate::parameter_analysis::Location::Path,
+                            injection_context: Some(detect_injection_context(&text)),
+                            valid_specials: Some(valid),
+                            invalid_specials: Some(invalid),
+                            pre_encoding: None,
+                            pre_encoding_pipeline: None,
+                            wire_name: None,
+                            form_action_url: None,
+                            form_origin_url: None,
+                            framework_sink: None,
+                        });
+                    }
+                }
             }
             if delay > 0 {
                 sleep(Duration::from_millis(delay)).await;
@@ -767,6 +1000,7 @@ pub async fn check_cookie_discovery(
                     wire_name: None,
                     form_action_url: None,
                     form_origin_url: None,
+                    framework_sink: None,
                 });
             }
             if delay > 0 {
@@ -923,6 +1157,7 @@ pub async fn check_form_discovery(
                         wire_name: None,
                         form_action_url: Some(form_url.to_string()),
                         form_origin_url: Some(target.url.to_string()),
+                        framework_sink: None,
                     });
                 }
                 if target.delay > 0 {
@@ -992,6 +1227,7 @@ pub async fn check_form_discovery(
                         wire_name: None,
                         form_action_url: Some(form_url.to_string()),
                         form_origin_url: Some(target.url.to_string()),
+                        framework_sink: None,
                     });
                 }
                 if target.delay > 0 {
@@ -1035,6 +1271,7 @@ pub async fn check_form_discovery(
                         wire_name: None,
                         form_action_url: Some(form_url.to_string()),
                         form_origin_url: Some(target.url.to_string()),
+                        framework_sink: None,
                     });
                 }
                 if target.delay > 0 {
@@ -1079,6 +1316,7 @@ pub async fn check_form_discovery(
                         wire_name: None,
                         form_action_url: Some(form_url.to_string()),
                         form_origin_url: Some(target.url.to_string()),
+                        framework_sink: None,
                     });
                 }
             }
@@ -1160,6 +1398,7 @@ pub async fn check_form_discovery(
                             wire_name: None,
                             form_action_url: Some(target.url.to_string()),
                             form_origin_url: Some(target.url.to_string()),
+                            framework_sink: None,
                         });
                     }
                     if target.delay > 0 {
@@ -1233,6 +1472,7 @@ pub async fn check_form_discovery(
                             wire_name: None,
                             form_action_url: Some(target.url.to_string()),
                             form_origin_url: Some(target.url.to_string()),
+                            framework_sink: None,
                         });
                     }
                     if target.delay > 0 {
