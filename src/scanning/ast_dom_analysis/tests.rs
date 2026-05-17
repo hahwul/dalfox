@@ -2843,3 +2843,83 @@ window.onload = function() {
     );
     assert_eq!(v.sink, "html");
 }
+
+// Coverage matrix for the modern SPA shapes that real-world apps lean
+// on. Pin them as regression tests so a future analyzer refactor
+// doesn't silently drop coverage.
+
+#[test]
+fn detects_postmessage_function_handler_to_innerhtml() {
+    let js = r#"
+window.addEventListener("message", function(e) {
+  document.getElementById("out").innerHTML = e.data;
+});
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.iter()
+            .any(|v| v.source.contains("data") && v.sink == "innerHTML"),
+        "postMessage function handler must surface event.data → innerHTML"
+    );
+}
+
+#[test]
+fn detects_postmessage_arrow_handler_to_innerhtml() {
+    let js = r#"
+window.addEventListener("message", (e) => {
+  document.body.innerHTML = e.data;
+});
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.iter()
+            .any(|v| v.source.contains("data") && v.sink == "innerHTML")
+    );
+}
+
+#[test]
+fn detects_template_literal_substitution_into_innerhtml() {
+    let js = r#"
+const name = location.hash.substr(1);
+document.body.innerHTML = `<h1>Hello ${name}</h1>`;
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.iter()
+            .any(|v| v.source.contains("location.hash") && v.sink == "innerHTML"),
+        "template-literal substitution must propagate the hash taint into innerHTML"
+    );
+}
+
+#[test]
+fn detects_direct_script_src_assignment_from_hash() {
+    let js = r#"
+const s = document.createElement('script');
+s.src = location.hash.substr(1);
+document.head.appendChild(s);
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.iter()
+            .any(|v| v.source.contains("location.hash") && v.sink == "src")
+    );
+}
+
+#[test]
+fn detects_json_parse_property_access_into_innerhtml() {
+    let js = r#"
+const cfg = JSON.parse(location.hash.substr(1));
+document.body.innerHTML = cfg.title;
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.iter()
+            .any(|v| v.source.contains("location.hash") && v.sink == "innerHTML"),
+        "JSON.parse(tainted) → property access → innerHTML must surface"
+    );
+}
