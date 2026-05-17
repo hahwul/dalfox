@@ -69,7 +69,139 @@ pub async fn check_discovery(
         // Fragment discovery: extract params from URL hash fragments (client-side only)
         check_fragment_discovery(target, reflection_params.clone()).await;
     }
+    // Each `check_*_discovery` extends `reflection_params` independently,
+    // so a URL like `/search.jsp?query=…` whose response also embeds
+    // `<form><input name="query">` lands the same (name, location) twice
+    // — once from `check_query_discovery`, once from
+    // `check_form_discovery`. Without dedup we'd double the scan cost
+    // and double every POC line. Collapse here before handing the list
+    // to the scanner.
+    {
+        let mut guard = reflection_params.lock().await;
+        dedupe_reflection_params(&mut guard);
+    }
     target.reflection_params = reflection_params.lock().await.clone();
+}
+
+/// Collapse duplicate `Param` entries that share the same identity
+/// (name, location, effective wire name, pre-encoding pipeline). When
+/// two entries describe the same wire slot, merge their metadata in
+/// place: keep the entry with the richer `injection_context` /
+/// `valid_specials` / `invalid_specials` / `framework_sink`, and union
+/// the special-character sets so later payload generation sees the
+/// widest valid surface either probe observed.
+///
+/// `(name, location, effective_wire_name, pre_encoding_pipeline)` is
+/// the smallest set of fields that meaningfully distinguishes one
+/// injection point from another at scan time — same name in a query
+/// vs body slot is two different sinks, but two pushes of `?query=`
+/// from the URL and from a `<form>` echo are not.
+pub(crate) fn dedupe_reflection_params(params: &mut Vec<Param>) {
+    use std::collections::HashSet;
+
+    if params.len() <= 1 {
+        return;
+    }
+
+    let key_of = |p: &Param| -> String {
+        let pipe = p
+            .pre_encoding_pipeline
+            .as_ref()
+            .map(|p| format!("{:?}", p))
+            .unwrap_or_default();
+        format!(
+            "{}|{:?}|{}|{}",
+            p.name,
+            p.location,
+            p.effective_wire_name(),
+            pipe
+        )
+    };
+
+    // First pass: collect indexes per key so we can merge metadata into
+    // the canonical entry (the first occurrence) before discarding the
+    // rest. Using stable ordering by index keeps deterministic output.
+    let mut seen: HashSet<String> = HashSet::with_capacity(params.len());
+    let mut keep: Vec<usize> = Vec::with_capacity(params.len());
+    let mut merge_into: Vec<Vec<usize>> = Vec::with_capacity(params.len());
+
+    for (idx, p) in params.iter().enumerate() {
+        let key = key_of(p);
+        if seen.insert(key.clone()) {
+            keep.push(idx);
+            merge_into.push(Vec::new());
+        } else {
+            // Find the canonical slot for this key.
+            let canonical = keep
+                .iter()
+                .position(|&i| key_of(&params[i]) == key)
+                .expect("key was inserted above");
+            merge_into[canonical].push(idx);
+        }
+    }
+
+    if keep.len() == params.len() {
+        return; // no duplicates
+    }
+
+    // Materialise the merged set out-of-place to keep borrow scopes
+    // simple while we touch multiple indexes.
+    let mut merged: Vec<Param> = Vec::with_capacity(keep.len());
+    for (slot, &canonical_idx) in keep.iter().enumerate() {
+        let mut base = params[canonical_idx].clone();
+        for &dup_idx in &merge_into[slot] {
+            let other = &params[dup_idx];
+            if base.injection_context.is_none() && other.injection_context.is_some() {
+                base.injection_context = other.injection_context.clone();
+            }
+            if base.framework_sink.is_none() && other.framework_sink.is_some() {
+                base.framework_sink = other.framework_sink.clone();
+            }
+            if base.pre_encoding.is_none() && other.pre_encoding.is_some() {
+                base.pre_encoding = other.pre_encoding.clone();
+            }
+            if base.form_action_url.is_none() && other.form_action_url.is_some() {
+                base.form_action_url = other.form_action_url.clone();
+            }
+            if base.form_origin_url.is_none() && other.form_origin_url.is_some() {
+                base.form_origin_url = other.form_origin_url.clone();
+            }
+            // Union the special-char sets: a char marked valid by
+            // either probe should stay valid; a char marked invalid by
+            // both stays invalid. The discovery probes are noisy so
+            // taking the wider valid set lets the payload generator
+            // exercise everything either run could land.
+            base.valid_specials =
+                merge_char_sets(base.valid_specials.take(), other.valid_specials.clone());
+            base.invalid_specials = intersect_char_sets(
+                base.invalid_specials.take(),
+                other.invalid_specials.clone(),
+            );
+        }
+        merged.push(base);
+    }
+    *params = merged;
+}
+
+fn merge_char_sets(a: Option<Vec<char>>, b: Option<Vec<char>>) -> Option<Vec<char>> {
+    match (a, b) {
+        (None, x) | (x, None) => x,
+        (Some(mut a), Some(b)) => {
+            for c in b {
+                if !a.contains(&c) {
+                    a.push(c);
+                }
+            }
+            Some(a)
+        }
+    }
+}
+
+fn intersect_char_sets(a: Option<Vec<char>>, b: Option<Vec<char>>) -> Option<Vec<char>> {
+    match (a, b) {
+        (None, x) | (x, None) => x,
+        (Some(a), Some(b)) => Some(a.into_iter().filter(|c| b.contains(c)).collect()),
+    }
 }
 
 /// Extract parameters from URL hash fragments and register them for scanning.
