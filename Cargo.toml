@@ -10,7 +10,7 @@ license = "MIT"
 clap = { version = "4.0", features = ["derive", "env"] }
 url = "2.0"
 reqwest = { version = "0.13", features = ["socks", "multipart", "json", "form"] }
-scraper = "0.26"
+scraper = "0.27"
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
