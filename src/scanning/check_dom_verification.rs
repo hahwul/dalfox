@@ -416,6 +416,14 @@ pub(crate) fn classify_dom_evidence(payload: &str, text: &str) -> Option<DomEvid
     None
 }
 
+/// Minimum payload length required to consider an `on*` substring
+/// match as evidence of an injected breakout. Below this length, common
+/// page-defined handlers (`onclick="alert('hi')"`) accidentally contain
+/// the payload bytes as a substring and we'd up-grade an unrelated R
+/// to a fake V. dalfox's real breakout payloads (`'-alert(1)-'`,
+/// `"-alert(1)-"`, `'),alert(1),('`, …) are all comfortably longer.
+const MIN_INLINE_HANDLER_BREAKOUT_PAYLOAD_LEN: usize = 8;
+
 /// Detects xss-game L4-style inline-handler breakouts: payload lands
 /// inside an existing `on*` attribute (the server's template emits
 /// `<img onload="startTimer('USER_INPUT')">`), the payload terminates
@@ -424,12 +432,19 @@ pub(crate) fn classify_dom_evidence(payload: &str, text: &str) -> Option<DomEvid
 /// browser performs at attribute parse time — contains a real sink
 /// call (`alert(`, `prompt(`, `confirm(`, `eval(`, …).
 ///
-/// Strict: the entity-decoded attribute value must contain the literal
-/// payload bytes. That keeps us from false-positiving on pages where a
-/// site-defined `onclick="alert('hi')"` happens to share a `alert(`
-/// substring with the payload list but the payload itself never landed
-/// in the handler.
+/// Strict on three fronts to avoid false-V on pages whose pre-existing
+/// `on*` handlers happen to share substrings with the payload list:
+///   * `attr_value.contains(payload)` — payload bytes must literally
+///     appear in the entity-decoded handler.
+///   * payload length ≥ [`MIN_INLINE_HANDLER_BREAKOUT_PAYLOAD_LEN`]
+///     — short payloads like `'` or `");` are too common as legit
+///     substrings of page-defined handlers.
+///   * the sink call sits *inside* the same handler as the payload,
+///     confirmed via the contains-check above.
 fn has_inline_handler_breakout_evidence(payload: &str, text: &str) -> bool {
+    if payload.len() < MIN_INLINE_HANDLER_BREAKOUT_PAYLOAD_LEN {
+        return false;
+    }
     // Decode HTML entities once for the whole body — cheap and lets a
     // single substring search cover the dominant on*-attribute escape
     // pattern that servers use (`&#39;` for `'`, `&quot;` for `"`).

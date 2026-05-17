@@ -363,11 +363,14 @@ pub fn detect_framework_html_sink(text: &str, marker: &str) -> Option<&'static s
                 "v-html" => Some("v-html"),
                 "ng-bind-html" | "[innerhtml]" | "innerhtml" => Some("ng-bind-html"),
                 // Knockout `data-bind` carries multiple clauses
-                // (e.g. `data-bind="text: foo, html: bar"`); only the
-                // `html:` clause is an innerHTML sink. Require the
-                // substring so plain `text:` / `value:` bindings don't
-                // false-positive.
-                "data-bind" if value.contains("html:") => Some("data-bind"),
+                // (e.g. `data-bind="text: foo, html: bar"`). Only the
+                // `html:` clause is an innerHTML sink, so require the
+                // clause to live at a real binding boundary — start of
+                // the attribute or after `,` / `;` / whitespace. A bare
+                // `value.contains("html:")` false-positives on
+                // `data-bind="text: 'html: link'"` and on any string
+                // literal that happens to contain `html:`.
+                "data-bind" if has_knockout_html_clause(value) => Some("data-bind"),
                 _ => None,
             };
             match sink {
@@ -380,6 +383,62 @@ pub fn detect_framework_html_sink(text: &str, marker: &str) -> Option<&'static s
         }
     }
     found
+}
+
+/// True when `value` (a Knockout `data-bind` attribute) has an `html:`
+/// clause at a real binding boundary — start of the value, or after
+/// `,` / `;` / whitespace that separates clauses. Skipping inside
+/// quoted strings prevents the dominant false-positive shape:
+/// `data-bind="text: 'html: link'"` where `html:` is just data.
+fn has_knockout_html_clause(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    let mut i = 0;
+    let mut quote: Option<u8> = None;
+    let mut at_clause_start = true;
+    while i < bytes.len() {
+        let b = bytes[i];
+        // Track string literal context so an `html:` substring inside a
+        // quoted clause value doesn't trigger.
+        if let Some(q) = quote {
+            if b == q {
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+        if b == b'"' || b == b'\'' {
+            quote = Some(b);
+            at_clause_start = false;
+            i += 1;
+            continue;
+        }
+        if b == b',' || b == b';' {
+            at_clause_start = true;
+            i += 1;
+            continue;
+        }
+        if b.is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        if at_clause_start {
+            // Check for `html` followed by whitespace + `:`. ASCII-only
+            // attribute name, so direct byte comparison is fine.
+            let remaining = &bytes[i..];
+            if remaining.len() >= 4 && remaining[..4].eq_ignore_ascii_case(b"html") {
+                let mut j = i + 4;
+                while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+                    j += 1;
+                }
+                if j < bytes.len() && bytes[j] == b':' {
+                    return true;
+                }
+            }
+            at_clause_start = false;
+        }
+        i += 1;
+    }
+    false
 }
 
 pub async fn probe_dictionary_params(

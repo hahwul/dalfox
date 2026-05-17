@@ -755,6 +755,19 @@ fn test_classify_dom_evidence_returns_inline_handler_breakout() {
 }
 
 #[test]
+fn test_inline_handler_breakout_ignores_short_payload_substring_match() {
+    // A short payload like `'` or `");` will accidentally match the
+    // bytes of any page-defined `onclick="alert('hi')"` — the strict
+    // `contains(payload)` check alone isn't enough. The length floor
+    // (MIN_INLINE_HANDLER_BREAKOUT_PAYLOAD_LEN) keeps short payloads
+    // from auto-upgrading R to V.
+    let payload = "');";
+    let body =
+        "<button onclick=\"alert('hi');\">Click</button>".to_string();
+    assert_eq!(classify_dom_evidence(payload, &body), None);
+}
+
+#[test]
 fn test_inline_handler_breakout_ignores_unrelated_alert_in_handler() {
     // Page-defined `onclick="alert('hi')"` shares the `alert(`
     // substring with the payload list. Without the

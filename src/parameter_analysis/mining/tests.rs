@@ -203,6 +203,36 @@ fn test_framework_html_sink_recognises_vue_v_html() {
 }
 
 #[test]
+fn test_framework_html_sink_rejects_quoted_html_substring_in_data_bind() {
+    // `data-bind="text: 'html: link'"` shares the `html:` substring
+    // with a real innerHTML sink clause but lives inside a quoted
+    // string — Knockout binds `text:` here, not `html:`. The
+    // boundary-aware parser must skip the false positive.
+    let marker = crate::scanning::markers::bracketed_marker();
+    let body = format!(
+        "<div data-bind=\"text: 'html: {} link'\"></div>",
+        marker
+    );
+    assert_eq!(detect_framework_html_sink(&body, marker), None);
+}
+
+#[test]
+fn test_framework_html_sink_recognises_data_bind_html_after_comma() {
+    // Multi-clause `data-bind` where `html:` is the second binding.
+    // The clause boundary detector must accept `,` and whitespace
+    // before `html:`, not just position 0.
+    let marker = crate::scanning::markers::bracketed_marker();
+    let body = format!(
+        "<div data-bind=\"text: name, html: '{}'\"></div>",
+        marker
+    );
+    assert_eq!(
+        detect_framework_html_sink(&body, marker),
+        Some("data-bind")
+    );
+}
+
+#[test]
 fn test_framework_html_sink_recognises_knockout_html_clause() {
     // Knockout `data-bind` accepts multiple clauses. Only the `html:`
     // clause maps to innerHTML — pure `text:` bindings escape input
