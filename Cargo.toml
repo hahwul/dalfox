@@ -23,7 +23,7 @@ axum = "0.8"
 sha2 = "0.11"
 hex = "0.4"
 regex = "1"
-rmcp = { version = "1.6.0", features = ["server", "macros"] }
+rmcp = { version = "1.7.0", features = ["server", "macros"] }
 schemars = { version = "1", features = ["derive"] }
 oxc_parser = "0.129.0"
 oxc_ast = "0.129.0"
