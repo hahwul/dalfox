@@ -11,13 +11,26 @@ on:
         description: manual run
         required: false
         default: ""
+permissions:
+  contents: write
+  pull-requests: write
 jobs:
   contributors:
     runs-on: ubuntu-latest
     steps:
-      - uses: wow-actions/contributors-list@v1
+      - uses: actions/checkout@v4
+      - uses: wow-actions/contributors-list@v1.2.1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           round: false
           includeBots: false
           svgPath: docs/static/images/CONTRIBUTORS.svg
+          noCommit: true
+      - uses: peter-evans/create-pull-request@v8.1.1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore: update contributors"
+          title: "chore: update contributors"
+          body: Automated update of `docs/static/images/CONTRIBUTORS.svg`.
+          branch: chore/update-contributors
+          delete-branch: true
