@@ -108,6 +108,7 @@ fn make_any_query_param(text: &str) -> Param {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     }
 }
 
@@ -311,6 +312,59 @@ pub fn detect_injection_context_with_marker(text: &str, marker: &str) -> Injecti
     InjectionContext::Html(None)
 }
 
+/// Identify a framework innerHTML-style sink the marker landed inside,
+/// if any. Returns the directive/attribute name (`"v-html"`,
+/// `"data-bind"`, `"ng-bind-html"`, …) so scanning can:
+///   1. Upgrade the finding's `inject_type` to surface the sink class.
+///   2. Treat HTML-entity-encoded reflections as exploitable — the
+///      framework hands the entity-decoded value to `innerHTML` at
+///      runtime, so `&lt;img onerror=…&gt;` still executes.
+///
+/// Conservative: only returns `Some(_)` when *every* marker occurrence
+/// sits inside one of the recognised attributes. A single occurrence in
+/// plain text content is enough to fall back to generic HTML payloads —
+/// the regular `detect_injection_context` already covers that path.
+///
+/// Returns `None` when:
+///   * the marker isn't present at all,
+///   * any occurrence lives outside an HTML attribute (text node,
+///     `<script>`, `<style>`), or
+///   * the attribute name isn't in the recognised innerHTML-sink set.
+pub fn detect_framework_html_sink(text: &str, marker: &str) -> Option<&'static str> {
+    if marker.is_empty() || !text.contains(marker) {
+        return None;
+    }
+    let document = scraper::Html::parse_document(text);
+    let any = selectors::universal();
+    let mut found: Option<&'static str> = None;
+    for el in document.select(any) {
+        for (name, value) in el.value().attrs() {
+            if !value.contains(marker) {
+                continue;
+            }
+            let sink = match name.to_ascii_lowercase().as_str() {
+                "v-html" => Some("v-html"),
+                "ng-bind-html" | "[innerhtml]" | "innerhtml" => Some("ng-bind-html"),
+                // Knockout `data-bind` carries multiple clauses
+                // (e.g. `data-bind="text: foo, html: bar"`); only the
+                // `html:` clause is an innerHTML sink. Require the
+                // substring so plain `text:` / `value:` bindings don't
+                // false-positive.
+                "data-bind" if value.contains("html:") => Some("data-bind"),
+                _ => None,
+            };
+            match sink {
+                Some(s) => match found {
+                    Some(prev) if prev != s => return None,
+                    _ => found = Some(s),
+                },
+                None => return None,
+            }
+        }
+    }
+    found
+}
+
 pub async fn probe_dictionary_params(
     target: &Target,
     args: &ScanArgs,
@@ -512,6 +566,7 @@ pub async fn probe_dictionary_params(
                                 wire_name: None,
                                 form_action_url: None,
                                 form_origin_url: None,
+                                framework_sink: None,
                             });
                             if !silence {
                                 eprintln!(
@@ -550,6 +605,7 @@ pub async fn probe_dictionary_params(
                                     wire_name: None,
                                     form_action_url: None,
                                     form_origin_url: None,
+                                    framework_sink: None,
                                 });
                                 if !silence {
                                     eprintln!(
@@ -633,6 +689,7 @@ pub async fn probe_dictionary_params(
                 wire_name: None,
                 form_action_url: None,
                 form_origin_url: None,
+                framework_sink: None,
             });
         } else {
             guard.push(Param {
@@ -647,6 +704,7 @@ pub async fn probe_dictionary_params(
                 wire_name: None,
                 form_action_url: None,
                 form_origin_url: None,
+                framework_sink: None,
             });
         }
     }
@@ -764,6 +822,7 @@ pub async fn probe_body_params(
                                 wire_name: None,
                                 form_action_url: None,
                                 form_origin_url: None,
+                                framework_sink: None,
                             });
                             if !silence {
                                 eprintln!(
@@ -842,6 +901,7 @@ pub async fn probe_body_params(
                     wire_name: None,
                     form_action_url: None,
                     form_origin_url: None,
+                    framework_sink: None,
                 });
             } else {
                 guard.push(Param {
@@ -858,6 +918,7 @@ pub async fn probe_body_params(
                     wire_name: None,
                     form_action_url: None,
                     form_origin_url: None,
+                    framework_sink: None,
                 });
             }
         }
@@ -1017,6 +1078,7 @@ pub async fn probe_response_id_params(
                                     wire_name: None,
                                     form_action_url: None,
                                     form_origin_url: None,
+                                    framework_sink: None,
                                 });
                                 if !silence {
                                     eprintln!(
@@ -1094,6 +1156,7 @@ pub async fn probe_response_id_params(
                     wire_name: None,
                     form_action_url: None,
                     form_origin_url: None,
+                    framework_sink: None,
                 });
             } else {
                 guard.push(Param {
@@ -1110,6 +1173,7 @@ pub async fn probe_response_id_params(
                     wire_name: None,
                     form_action_url: None,
                     form_origin_url: None,
+                    framework_sink: None,
                 });
             }
         }
@@ -1256,6 +1320,7 @@ pub async fn probe_json_body_params(
                             wire_name: None,
                             form_action_url: None,
                             form_origin_url: None,
+                            framework_sink: None,
                         });
                         if !silence {
                             eprintln!(
@@ -1334,6 +1399,7 @@ pub async fn probe_json_body_params(
                 wire_name: None,
                 form_action_url: None,
                 form_origin_url: None,
+                framework_sink: None,
             });
         } else {
             guard.push(Param {
@@ -1348,6 +1414,7 @@ pub async fn probe_json_body_params(
                 wire_name: None,
                 form_action_url: None,
                 form_origin_url: None,
+                framework_sink: None,
             });
         }
     }

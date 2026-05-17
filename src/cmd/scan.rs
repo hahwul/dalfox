@@ -2101,6 +2101,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                                 wire_name: None,
                                 form_action_url: None,
                                 form_origin_url: None,
+                                framework_sink: None,
                             });
                         }
                     }
@@ -2125,6 +2126,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                                             wire_name: None,
                                             form_action_url: None,
                                             form_origin_url: None,
+                                            framework_sink: None,
                                         });
                                     }
                                 }
@@ -2146,6 +2148,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                                         wire_name: None,
                                         form_action_url: None,
                                         form_origin_url: None,
+                                        framework_sink: None,
                                     });
                                 }
                             }
@@ -2167,6 +2170,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                                 wire_name: None,
                                 form_action_url: None,
                                 form_origin_url: None,
+                                framework_sink: None,
                             });
                         }
                     }
@@ -2186,6 +2190,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                                 wire_name: None,
                                 form_action_url: None,
                                 form_origin_url: None,
+                                framework_sink: None,
                             });
                         }
                     }

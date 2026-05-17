@@ -20,6 +20,7 @@ fn test_query_injection_replace() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     let out = build_injected_url(&base, &param, "PAY");
     assert!(out.contains("a=PAY"));
@@ -41,6 +42,7 @@ fn test_query_injection_append() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     let out = build_injected_url(&base, &param, "X");
     assert!(out.contains("q=X"));
@@ -61,6 +63,7 @@ fn test_query_injection_preserves_existing_percent_encoding() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     let out = build_injected_url(&base, &param, "%3Cimg%20src=x%3E");
     assert!(out.contains("q=%3Cimg%20src%3Dx%3E"));
@@ -82,6 +85,7 @@ fn test_query_injection_encodes_raw_spaces_without_plus() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     let out = build_injected_url(&base, &param, "PAY LOAD");
     assert!(out.contains("q=PAY%20LOAD"));
@@ -102,6 +106,7 @@ fn test_path_injection_basic() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     let out = build_injected_url(&base, &param, "PAY LOAD");
     // space should be %20
@@ -123,6 +128,7 @@ fn test_path_injection_index_out_of_bounds() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     let out = build_injected_url(&base, &param, "X");
     assert_eq!(out, "https://example.com/a");
@@ -143,6 +149,7 @@ fn test_non_target_location_passthrough() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     let out = build_injected_url(&base, &param, "IGNORED");
     assert_eq!(out, base.as_str());
@@ -163,6 +170,7 @@ fn test_fragment_injection_spa_route() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     let out = build_injected_url(&base, &param, "javascript:alert()");
     assert_eq!(out, "http://example.com/#/redir?url=javascript:alert()");
@@ -183,6 +191,7 @@ fn test_fragment_injection_simple_kv() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     let out = build_injected_url(&base, &param, "PAYLOAD");
     assert_eq!(out, "http://example.com/#key=PAYLOAD&other=123");
@@ -203,6 +212,7 @@ fn test_fragment_injection_append_when_absent() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     let out = build_injected_url(&base, &param, "INJECTED");
     assert_eq!(
@@ -226,6 +236,7 @@ fn test_fragment_injection_no_existing_fragment() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     let out = build_injected_url(&base, &param, "PAY");
     assert_eq!(out, "http://example.com/page#url=PAY");
@@ -246,6 +257,7 @@ fn test_fragment_injection_multiple_params() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     let out = build_injected_url(&base, &param, "XSS");
     assert_eq!(out, "http://example.com/#/app?a=1&b=XSS&c=3");
@@ -268,6 +280,7 @@ fn test_hpp_last_position() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     let out = build_hpp_url(&base, &param, "<script>", HppPosition::Last).unwrap();
     assert!(out.contains("q=safe&q=%3Cscript%3E"));
@@ -289,6 +302,7 @@ fn test_hpp_first_position() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     let out = build_hpp_url(&base, &param, "<script>", HppPosition::First).unwrap();
     assert!(out.contains("q=%3Cscript%3E&q=safe"));
@@ -310,6 +324,7 @@ fn test_hpp_both_position() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     let out = build_hpp_url(&base, &param, "PAYLOAD", HppPosition::Both).unwrap();
     assert!(out.contains("q=PAYLOAD&q=PAYLOAD"));
@@ -330,6 +345,7 @@ fn test_hpp_non_query_returns_none() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     assert!(build_hpp_url(&base, &param, "PAYLOAD", HppPosition::Last).is_none());
 }
@@ -349,6 +365,7 @@ fn test_hpp_absent_param_appended() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     let out = build_hpp_url(&base, &param, "XSS", HppPosition::Last).unwrap();
     assert!(out.contains("other=1"));
@@ -370,6 +387,7 @@ fn test_hpp_preserves_fragment() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     let out = build_hpp_url(&base, &param, "PAY", HppPosition::Last).unwrap();
     assert!(out.ends_with("#frag"));
@@ -390,6 +408,7 @@ fn test_build_hpp_urls_returns_3_variants() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     let variants = build_hpp_urls(&base, &param, "XSS");
     assert_eq!(variants.len(), 3);

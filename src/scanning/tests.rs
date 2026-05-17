@@ -122,6 +122,55 @@ fn test_is_template_shaped_payload_ignores_single_brace_or_html() {
 }
 
 #[test]
+fn test_inject_type_for_payload_with_sink_prefers_framework_label_over_csti() {
+    // Framework innerHTML sinks have a more specific exploitation
+    // story than a generic `{{…}}` payload — once the sink is known,
+    // the label should reflect it even when the payload itself is
+    // template-shaped. Helps users prioritise the higher-signal hit.
+    let s = super::inject_type_for_payload_with_sink(
+        false,
+        "{{constructor.constructor('alert(1)')()}}",
+        Some("v-html"),
+    );
+    assert_eq!(s, "inHTML-VHtml");
+}
+
+#[test]
+fn test_inject_type_for_payload_with_sink_maps_known_directives() {
+    assert_eq!(
+        super::inject_type_for_payload_with_sink(false, "<svg/onload=alert(1)>", Some("v-html")),
+        "inHTML-VHtml"
+    );
+    assert_eq!(
+        super::inject_type_for_payload_with_sink(false, "<svg/onload=alert(1)>", Some("data-bind")),
+        "inHTML-DataBind"
+    );
+    assert_eq!(
+        super::inject_type_for_payload_with_sink(
+            false,
+            "<svg/onload=alert(1)>",
+            Some("ng-bind-html")
+        ),
+        "inHTML-NgBindHtml"
+    );
+    assert_eq!(
+        super::inject_type_for_payload_with_sink(true, "<svg/onload=alert(1)>", Some("v-html")),
+        "sxss-inHTML-VHtml"
+    );
+    // Unknown directive falls back to the generic `-FrameworkSink`
+    // suffix so a future detector entry surfaces clearly even before
+    // we wire its short label here.
+    assert_eq!(
+        super::inject_type_for_payload_with_sink(
+            false,
+            "<svg/onload=alert(1)>",
+            Some("unknown-future-directive")
+        ),
+        "inHTML-FrameworkSink"
+    );
+}
+
+#[test]
 fn test_inject_type_for_payload_adds_csti_suffix() {
     // Template-shaped payloads get the `-CSTI` suffix so downstream
     // reporters distinguish client-side template injection findings
@@ -326,6 +375,7 @@ fn mock_add_reflection_param(target: &mut Target, name: &str, location: Location
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     });
 }
 
@@ -415,6 +465,7 @@ fn test_get_dom_payloads_javascript_context_returns_breakout_payloads() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     let args = default_scan_args();
     let payloads = get_dom_payloads(&param, &args).expect("dom payload generation");
@@ -442,6 +493,7 @@ fn test_get_dom_payloads_html_context_includes_encoded_variants() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     let args = default_scan_args();
     let payloads = get_dom_payloads(&param, &args).expect("dom payload generation");
@@ -465,6 +517,7 @@ fn test_get_dom_payloads_unknown_context_falls_back_even_with_only_custom() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
     let mut args = default_scan_args();
     args.only_custom_payload = true;
@@ -529,6 +582,7 @@ fn test_build_request_text_query_contains_headers_and_cookies() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
 
     let request = build_request_text(&target, &param, "PAYLOAD");
@@ -555,6 +609,7 @@ fn test_build_request_text_path_segment_injection() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
 
     let request = build_request_text(&target, &param, "hello world");
@@ -766,6 +821,7 @@ async fn test_run_scanning_with_reflection_params() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     });
 
     let args = crate::cmd::scan::ScanArgs {
@@ -909,6 +965,7 @@ async fn test_run_scanning_realworld_level1_shape_promotes_to_verified() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     });
 
     let args = Arc::new(integration_scan_args(false));

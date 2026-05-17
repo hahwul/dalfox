@@ -31,6 +31,7 @@ fn make_param() -> Param {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     }
 }
 

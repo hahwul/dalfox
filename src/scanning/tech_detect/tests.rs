@@ -182,6 +182,32 @@ fn test_angular_payloads_generated() {
 }
 
 #[test]
+fn test_react_payloads_cover_javascript_url_and_innerhtml_sinks() {
+    // React tech used to map to an empty payload set. Real React XSS
+    // vectors are concentrated in `<a href={input}>` (still accepts
+    // `javascript:` schemes — only warned, never blocked) and
+    // `dangerouslySetInnerHTML={{__html: input}}` (maps to innerHTML
+    // so `<svg onload>` / `<img onerror>` execute). The payload set
+    // must cover both.
+    let mut result = TechDetectionResult::default();
+    result.detected.push(TechDetection {
+        tech: TechType::React,
+        evidence: "test".to_string(),
+    });
+    let payloads = get_tech_specific_payloads(&result);
+    assert!(
+        payloads.iter().any(|p| p.starts_with("javascript:")),
+        "expected a javascript: URL payload for href injection, got {:?}",
+        payloads
+    );
+    assert!(
+        payloads.iter().any(|p| p.contains("svg") && p.contains("onload")),
+        "expected an SVG onload payload for innerHTML sinks, got {:?}",
+        payloads
+    );
+}
+
+#[test]
 fn test_jquery_payloads_generated() {
     let mut result = TechDetectionResult::default();
     result.detected.push(TechDetection {

@@ -114,6 +114,16 @@ pub struct Param {
     /// Page URL where the form was discovered (for stored XSS verification).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub form_origin_url: Option<String>,
+    /// Framework-specific innerHTML-style sink the marker landed inside
+    /// during discovery: `"v-html"`, `"data-bind"`, `"ng-bind-html"`,
+    /// `"dangerouslySetInnerHTML"`. When set, the reflection is rendered
+    /// as raw HTML by the framework at runtime — entity-encoded
+    /// payloads also execute because the browser decodes them at
+    /// attribute-value parse time before innerHTML assignment. Used to
+    /// upgrade the finding's `inject_type` label so users can tell
+    /// framework-sink reflections apart from generic attribute echo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub framework_sink: Option<String>,
 }
 
 impl Param {
@@ -445,6 +455,7 @@ pub async fn active_probe_param(
                             wire_name: None,
                             form_action_url: None,
                             form_origin_url: None,
+                            framework_sink: None,
                         },
                         &payload,
                     );

@@ -467,6 +467,7 @@ async fn test_check_path_discovery_skips_existing_segment() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     }]));
 
     let semaphore = Arc::new(Semaphore::new(1));

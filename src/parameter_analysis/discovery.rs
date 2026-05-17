@@ -131,6 +131,7 @@ pub async fn check_fragment_discovery(target: &Target, reflection_params: Arc<Mu
             wire_name: None,
             form_action_url: None,
             form_origin_url: None,
+            framework_sink: None,
         });
     }
 }
@@ -160,6 +161,7 @@ pub async fn check_query_discovery(
             wire_name: None,
             form_action_url: None,
             form_origin_url: None,
+            framework_sink: None,
         };
         let url_str = build_injected_url(&target.url, &tmp_param, test_value);
         let url = url::Url::parse(&url_str).expect("build_injected_url produces valid URL");
@@ -216,11 +218,17 @@ pub async fn check_query_discovery(
                         wire_name: None,
                         form_action_url: None,
                         form_origin_url: None,
+                        framework_sink: None,
                     });
                 } else if let Ok(text) = resp.text().await
                     && crate::scanning::markers::classify_probe_reflection(&text).detected()
                 {
                     let (valid, invalid) = classify_special_chars(&text);
+                    let framework_sink = crate::parameter_analysis::detect_framework_html_sink(
+                        &text,
+                        crate::scanning::markers::bracketed_marker(),
+                    )
+                    .map(|s| s.to_string());
                     discovered = Some(Param {
                         name,
                         value,
@@ -233,6 +241,7 @@ pub async fn check_query_discovery(
                         wire_name: None,
                         form_action_url: None,
                         form_origin_url: None,
+                        framework_sink,
                     });
                 }
             }
@@ -301,6 +310,7 @@ pub async fn check_query_discovery(
                     wire_name: None,
                     form_action_url: None,
                     form_origin_url: None,
+                    framework_sink: None,
                 });
                 break; // Found working encoding, no need to try more
             }
@@ -378,6 +388,7 @@ pub async fn check_query_discovery(
                     wire_name: Some(name.clone()),
                     form_action_url: None,
                     form_origin_url: None,
+                    framework_sink: None,
                 });
             }
             if target.delay > 0 {
@@ -408,6 +419,7 @@ pub async fn check_query_discovery(
                 wire_name: None,
                 form_action_url: None,
                 form_origin_url: None,
+                framework_sink: None,
             };
             let url_str = build_injected_url(&target.url, &tmp_param, numeric_marker);
             let url = url::Url::parse(&url_str).expect("valid URL");
@@ -437,6 +449,7 @@ pub async fn check_query_discovery(
                     wire_name: None,
                     form_action_url: None,
                     form_origin_url: None,
+                    framework_sink: None,
                 });
             }
             if target.delay > 0 {
@@ -473,6 +486,7 @@ pub async fn check_query_discovery(
                 wire_name: None,
                 form_action_url: None,
                 form_origin_url: None,
+                framework_sink: None,
             });
         }
         if target.delay > 0 {
@@ -613,6 +627,11 @@ pub async fn check_header_discovery(
                 && crate::scanning::markers::classify_probe_reflection(&text).detected()
             {
                 let (valid, invalid) = classify_special_chars(&text);
+                let framework_sink = crate::parameter_analysis::detect_framework_html_sink(
+                    &text,
+                    crate::scanning::markers::bracketed_marker(),
+                )
+                .map(|s| s.to_string());
                 discovered = Some(Param {
                     name: header_name,
                     value: header_value,
@@ -625,6 +644,7 @@ pub async fn check_header_discovery(
                     wire_name: None,
                     form_action_url: None,
                     form_origin_url: None,
+                    framework_sink,
                 });
             }
             if delay > 0 {
@@ -754,6 +774,7 @@ pub async fn check_path_discovery(
                             wire_name: None,
                             form_action_url: None,
                             form_origin_url: None,
+                            framework_sink: None,
                         });
                     }
                 }
@@ -847,6 +868,7 @@ pub async fn check_cookie_discovery(
                     wire_name: None,
                     form_action_url: None,
                     form_origin_url: None,
+                    framework_sink: None,
                 });
             }
             if delay > 0 {
@@ -1003,6 +1025,7 @@ pub async fn check_form_discovery(
                         wire_name: None,
                         form_action_url: Some(form_url.to_string()),
                         form_origin_url: Some(target.url.to_string()),
+                        framework_sink: None,
                     });
                 }
                 if target.delay > 0 {
@@ -1072,6 +1095,7 @@ pub async fn check_form_discovery(
                         wire_name: None,
                         form_action_url: Some(form_url.to_string()),
                         form_origin_url: Some(target.url.to_string()),
+                        framework_sink: None,
                     });
                 }
                 if target.delay > 0 {
@@ -1115,6 +1139,7 @@ pub async fn check_form_discovery(
                         wire_name: None,
                         form_action_url: Some(form_url.to_string()),
                         form_origin_url: Some(target.url.to_string()),
+                        framework_sink: None,
                     });
                 }
                 if target.delay > 0 {
@@ -1159,6 +1184,7 @@ pub async fn check_form_discovery(
                         wire_name: None,
                         form_action_url: Some(form_url.to_string()),
                         form_origin_url: Some(target.url.to_string()),
+                        framework_sink: None,
                     });
                 }
             }
@@ -1240,6 +1266,7 @@ pub async fn check_form_discovery(
                             wire_name: None,
                             form_action_url: Some(target.url.to_string()),
                             form_origin_url: Some(target.url.to_string()),
+                            framework_sink: None,
                         });
                     }
                     if target.delay > 0 {
@@ -1313,6 +1340,7 @@ pub async fn check_form_discovery(
                             wire_name: None,
                             form_action_url: Some(target.url.to_string()),
                             form_origin_url: Some(target.url.to_string()),
+                            framework_sink: None,
                         });
                     }
                     if target.delay > 0 {
