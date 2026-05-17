@@ -151,6 +151,48 @@ fn test_detect_injection_context_url_attribute_double_quote() {
     );
 }
 
+#[test]
+fn test_detect_injection_context_onload_attribute_is_javascript() {
+    // Event-handler attributes (`on*`) hold JavaScript source, not
+    // HTML — escaping `'` / `"` produces JS-breakout payloads. Regression
+    // for xss-game level 4: marker lives inside
+    // `<img onload="startTimer('MARKER');">` and was previously
+    // bucketed as `Attribute(SingleQuote)`, so the scanner sent HTML
+    // tag breakouts that the browser serialised back into the JS
+    // string instead of executing.
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!("<img onload=\"startTimer('{}');\">", marker);
+    let ctx = detect_injection_context(&body);
+    assert_eq!(
+        ctx,
+        InjectionContext::Javascript(Some(DelimiterType::SingleQuote))
+    );
+}
+
+#[test]
+fn test_detect_injection_context_onerror_double_quote_is_javascript() {
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!("<img src=x onerror='alert(\"{}\")'>", marker);
+    let ctx = detect_injection_context(&body);
+    assert_eq!(
+        ctx,
+        InjectionContext::Javascript(Some(DelimiterType::DoubleQuote))
+    );
+}
+
+#[test]
+fn test_detect_injection_context_non_on_attribute_stays_attribute() {
+    // Confirm we didn't accidentally promote regular attribute echoes.
+    // `on` prefix alone isn't enough — needs a full handler name.
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!("<input value=\"{}\" name=\"ones\">", marker);
+    let ctx = detect_injection_context(&body);
+    assert_eq!(
+        ctx,
+        InjectionContext::Attribute(Some(DelimiterType::DoubleQuote))
+    );
+}
+
 // --- Framework innerHTML sink detection ---
 
 #[test]

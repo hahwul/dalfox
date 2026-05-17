@@ -273,13 +273,30 @@ pub fn detect_injection_context_with_marker(text: &str, marker: &str) -> Injecti
         }
     }
 
-    // 2) Attribute context: marker in any attribute value
+    // 2) Attribute context: marker in any attribute value.
+    //
+    // Event-handler attributes (`onload`, `onerror`, `onclick`, …) hold
+    // JavaScript source that the browser feeds into an event handler
+    // function — escaping out of the surrounding string literal yields
+    // a JS-context XSS, not an HTML one. Classifying these as plain
+    // `Attribute(delim)` makes the payload generator emit HTML tag
+    // breakouts (`'><svg…>`) that get serialised as inert HTML inside
+    // the handler's string. JS-breakout payloads (`',alert(1),'`) are
+    // the right strategy, so route on*-attributes through the
+    // `Javascript(delim)` branch.
+    fn is_event_handler_attribute(name: &str) -> bool {
+        let n = name.to_ascii_lowercase();
+        n.starts_with("on") && n.len() > 2
+    }
     {
         let any = selectors::universal();
         for el in document.select(any) {
             for (name, v) in el.value().attrs() {
                 if v.contains(marker) {
                     let delim = infer_quote_delimiter(text, marker);
+                    if is_event_handler_attribute(name) {
+                        return InjectionContext::Javascript(delim);
+                    }
                     return if is_url_like_attribute(name) {
                         InjectionContext::AttributeUrl(delim)
                     } else {
