@@ -350,7 +350,7 @@ fn test_cookie_from_raw() {
         cookies: vec![],
         method: "GET".to_string(),
         user_agent: None,
-        cookie_from_raw: Some("samples/sample_request.txt".to_string()),
+        cookie_from_raw: Some("examples/sample_request.txt".to_string()),
         include_url: vec![],
         exclude_url: vec![],
         ignore_param: vec![],
