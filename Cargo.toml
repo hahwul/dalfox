@@ -25,7 +25,7 @@ hex = "0.4"
 regex = "1"
 rmcp = { version = "1.7.0", features = ["server", "macros"] }
 schemars = { version = "1", features = ["derive"] }
-oxc_parser = "0.129.0"
+oxc_parser = "0.131.0"
 oxc_ast = "0.129.0"
 oxc_allocator = "0.129.0"
 oxc_span = "0.129.0"
