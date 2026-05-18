@@ -2766,7 +2766,11 @@ chooseTab(self.location.hash);
 "#;
     let analyzer = AstDomAnalyzer::new();
     let result = analyzer.analyze(js).expect("parses");
-    assert_eq!(result.len(), 1, "self.location.hash must taint chooseTab arg");
+    assert_eq!(
+        result.len(),
+        1,
+        "self.location.hash must taint chooseTab arg"
+    );
     assert!(result[0].source.contains("location"));
     assert_eq!(result[0].sink, "html");
 }

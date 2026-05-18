@@ -759,9 +759,7 @@ impl Config {
             // so users who pass --waf-min-confidence on the command
             // line keep authority over what the config file says.
             if let Some(v) = scan.waf_min_confidence
-                && (args.waf_min_confidence
-                    - crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE)
-                    .abs()
+                && (args.waf_min_confidence - crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE).abs()
                     < f32::EPSILON
             {
                 args.waf_min_confidence = v;

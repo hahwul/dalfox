@@ -209,10 +209,7 @@ fn test_framework_html_sink_rejects_quoted_html_substring_in_data_bind() {
     // string — Knockout binds `text:` here, not `html:`. The
     // boundary-aware parser must skip the false positive.
     let marker = crate::scanning::markers::bracketed_marker();
-    let body = format!(
-        "<div data-bind=\"text: 'html: {} link'\"></div>",
-        marker
-    );
+    let body = format!("<div data-bind=\"text: 'html: {} link'\"></div>", marker);
     assert_eq!(detect_framework_html_sink(&body, marker), None);
 }
 
@@ -222,14 +219,8 @@ fn test_framework_html_sink_recognises_data_bind_html_after_comma() {
     // The clause boundary detector must accept `,` and whitespace
     // before `html:`, not just position 0.
     let marker = crate::scanning::markers::bracketed_marker();
-    let body = format!(
-        "<div data-bind=\"text: name, html: '{}'\"></div>",
-        marker
-    );
-    assert_eq!(
-        detect_framework_html_sink(&body, marker),
-        Some("data-bind")
-    );
+    let body = format!("<div data-bind=\"text: name, html: '{}'\"></div>", marker);
+    assert_eq!(detect_framework_html_sink(&body, marker), Some("data-bind"));
 }
 
 #[test]

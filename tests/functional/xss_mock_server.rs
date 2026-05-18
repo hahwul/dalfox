@@ -1092,6 +1092,7 @@ async fn run_scan_test(
         waf_min_confidence: 0.0,
         remote_payloads: vec![],
         remote_wordlists: vec![],
+        max_payloads_per_param: 0,
     };
 
     scan::run_scan(&args).await;
@@ -1209,6 +1210,7 @@ async fn run_discovery_once(opts: DiscoveryOpts) -> bool {
         waf_min_confidence: 0.0,
         remote_payloads: vec![],
         remote_wordlists: vec![],
+        max_payloads_per_param: 0,
     };
 
     analyze_parameters(&mut target, &args, None).await;

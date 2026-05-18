@@ -746,8 +746,7 @@ fn test_classify_dom_evidence_returns_inline_handler_breakout() {
     // time, so the handler becomes `startTimer('';-alert(1)-'')` and
     // the alert fires.
     let payload = "'-alert(1)-'";
-    let body =
-        "<img onload=\"startTimer('&#39;-alert(1)-&#39;');\">".to_string();
+    let body = "<img onload=\"startTimer('&#39;-alert(1)-&#39;');\">".to_string();
     assert_eq!(
         classify_dom_evidence(payload, &body),
         Some(DomEvidenceKind::InlineHandlerBreakout)
@@ -762,8 +761,7 @@ fn test_inline_handler_breakout_ignores_short_payload_substring_match() {
     // (MIN_INLINE_HANDLER_BREAKOUT_PAYLOAD_LEN) keeps short payloads
     // from auto-upgrading R to V.
     let payload = "');";
-    let body =
-        "<button onclick=\"alert('hi');\">Click</button>".to_string();
+    let body = "<button onclick=\"alert('hi');\">Click</button>".to_string();
     assert_eq!(classify_dom_evidence(payload, &body), None);
 }
 

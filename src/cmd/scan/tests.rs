@@ -419,7 +419,11 @@ fn test_generate_poc_plain_header_does_not_synthesize_query() {
         "header POC must not synthesize ?X-Custom-Header=… in URL; got: {}",
         out
     );
-    assert!(out.contains("[hdr]"), "plain header POC missing [hdr] tag: {}", out);
+    assert!(
+        out.contains("[hdr]"),
+        "plain header POC missing [hdr] tag: {}",
+        out
+    );
     assert!(out.contains("http://example.com/"));
 }
 
@@ -440,7 +444,11 @@ fn test_generate_poc_curl_header_uses_dash_h_flag() {
     );
     r.location = "Header".to_string();
     let out = generate_poc(&r, "curl");
-    assert!(out.contains("-H \"X-Custom-Header: <svg/onload=alert(1)>\""), "curl POC missing -H: {}", out);
+    assert!(
+        out.contains("-H \"X-Custom-Header: <svg/onload=alert(1)>\""),
+        "curl POC missing -H: {}",
+        out
+    );
     assert!(!out.contains("?X-Custom-Header"));
 }
 
@@ -461,9 +469,17 @@ fn test_generate_poc_cookie_uses_cookie_tag_and_dash_b() {
     );
     r.location = "Header".to_string();
     let plain = generate_poc(&r, "plain");
-    assert!(plain.contains("[cookie]"), "plain cookie POC missing [cookie] tag: {}", plain);
+    assert!(
+        plain.contains("[cookie]"),
+        "plain cookie POC missing [cookie] tag: {}",
+        plain
+    );
     let curl = generate_poc(&r, "curl");
-    assert!(curl.contains("-b \"Cookie=<svg/onload=alert(1)>\""), "curl POC missing -b: {}", curl);
+    assert!(
+        curl.contains("-b \"Cookie=<svg/onload=alert(1)>\""),
+        "curl POC missing -b: {}",
+        curl
+    );
 }
 
 #[test]
@@ -483,14 +499,22 @@ fn test_generate_poc_body_emits_data_flag() {
     );
     r.location = "Body".to_string();
     let plain = generate_poc(&r, "plain");
-    assert!(plain.contains("[body]"), "plain body POC missing [body] tag: {}", plain);
+    assert!(
+        plain.contains("[body]"),
+        "plain body POC missing [body] tag: {}",
+        plain
+    );
     assert!(
         !plain.contains("?username="),
         "body POC must not synthesize ?username=… in URL: {}",
         plain
     );
     let curl = generate_poc(&r, "curl");
-    assert!(curl.contains("--data \"username=<svg/onload=alert(1)>\""), "curl POC missing --data: {}", curl);
+    assert!(
+        curl.contains("--data \"username=<svg/onload=alert(1)>\""),
+        "curl POC missing --data: {}",
+        curl
+    );
 }
 
 #[test]
@@ -512,7 +536,11 @@ fn test_generate_poc_query_unchanged_when_location_empty() {
         "msg".to_string(),
     );
     let out = generate_poc(&r, "plain");
-    assert!(out.contains("[POC][R][GET][inHTML]"), "format drift: {}", out);
+    assert!(
+        out.contains("[POC][R][GET][inHTML]"),
+        "format drift: {}",
+        out
+    );
     assert!(out.contains("?q=%3Cx%3E"));
 }
 

@@ -201,7 +201,9 @@ fn test_react_payloads_cover_javascript_url_and_innerhtml_sinks() {
         payloads
     );
     assert!(
-        payloads.iter().any(|p| p.contains("svg") && p.contains("onload")),
+        payloads
+            .iter()
+            .any(|p| p.contains("svg") && p.contains("onload")),
         "expected an SVG onload payload for innerHTML sinks, got {:?}",
         payloads
     );

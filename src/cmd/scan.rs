@@ -1209,32 +1209,32 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         if !enabled || !spinner_allowed {
             return None;
         }
-            let (tx, mut rx) = oneshot::channel::<()>();
-            let (done_tx, done_rx) = oneshot::channel::<()>();
-            tokio::spawn(async move {
-                let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-                let mut i = 0usize;
-                loop {
-                    crate::cprint!(
-                        "\r\x1b[38;5;247m{} {}\x1b[0m",
-                        frames[i % frames.len()],
-                        label
-                    );
-                    let _ = io::stdout().flush();
-                    tokio::select! {
-                        _ = tokio::time::sleep(Duration::from_millis(80)) => {},
-                        _ = &mut rx => {
-                            crate::cprint!("\r\x1b[2K\r");
-                            let _ = io::stdout().flush();
-                            let _ = done_tx.send(());
-                            break;
-                        }
+        let (tx, mut rx) = oneshot::channel::<()>();
+        let (done_tx, done_rx) = oneshot::channel::<()>();
+        tokio::spawn(async move {
+            let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+            let mut i = 0usize;
+            loop {
+                crate::cprint!(
+                    "\r\x1b[38;5;247m{} {}\x1b[0m",
+                    frames[i % frames.len()],
+                    label
+                );
+                let _ = io::stdout().flush();
+                tokio::select! {
+                    _ = tokio::time::sleep(Duration::from_millis(80)) => {},
+                    _ = &mut rx => {
+                        crate::cprint!("\r\x1b[2K\r");
+                        let _ = io::stdout().flush();
+                        let _ = done_tx.send(());
+                        break;
                     }
-                    i = (i + 1) % frames.len();
                 }
-            });
-            Some((tx, done_rx))
-        };
+                i = (i + 1) % frames.len();
+            }
+        });
+        Some((tx, done_rx))
+    };
     // Initialize global encoders once for downstream POC/path handling
     if GLOBAL_ENCODERS.get().is_none() {
         let _ = GLOBAL_ENCODERS.set(args.encoders.clone());
@@ -2411,9 +2411,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                     f
                 };
                 let cap = args.max_payloads_per_param;
-                let apply_cap = |n: usize| -> usize {
-                    if cap == 0 { n } else { n.min(cap) }
-                };
+                let apply_cap = |n: usize| -> usize { if cap == 0 { n } else { n.min(cap) } };
                 let mut estimated_requests: usize = 0;
                 for p in &target.reflection_params {
                     let payload_count = if let Some(ctx) = &p.injection_context {
