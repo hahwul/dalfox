@@ -141,7 +141,7 @@ fn test_make_scan_id_shape() {
 #[tokio::test]
 async fn test_default_constructor_initializes_empty_jobs() {
     let mcp = DalfoxMcp::default();
-    let jobs = mcp.jobs.lock().await;
+    let jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
     assert!(jobs.is_empty());
 }
 
@@ -201,15 +201,15 @@ async fn test_run_job_sets_error_on_parse_failure() {
     let mcp = DalfoxMcp::new();
     let scan_id = "job-parse-fail".to_string();
     {
-        let mut jobs = mcp.jobs.lock().await;
+        let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
         jobs.insert(scan_id.clone(), test_job(JobStatus::Queued, None));
     }
 
     let mut args = default_scan_args("http://example.com");
     args.targets = vec!["not a valid target".to_string()];
-    mcp.run_job(scan_id.clone(), args).await;
+    mcp.run_job(scan_id.clone(), Arc::new(args)).await;
 
-    let jobs = mcp.jobs.lock().await;
+    let jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
     let job = jobs.get(&scan_id).expect("job exists");
     assert_eq!(job.status, JobStatus::Error);
     assert!(
@@ -369,7 +369,7 @@ async fn test_list_scans_filters_by_status() {
     let mcp = DalfoxMcp::new();
     // Manually insert a done job
     {
-        let mut jobs = mcp.jobs.lock().await;
+        let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
         let mut done = test_job(JobStatus::Done, Some(vec![]));
         done.target_url = "https://example.com/done".to_string();
         jobs.insert("done-job".to_string(), done);
@@ -514,7 +514,7 @@ async fn test_get_results_progress_includes_polling_hints() {
     let mcp = DalfoxMcp::new();
     // Manually insert a running job with progress
     {
-        let mut jobs = mcp.jobs.lock().await;
+        let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
         let job = test_job(JobStatus::Running, None);
         job.progress
             .params_total
@@ -551,7 +551,7 @@ async fn test_get_results_progress_includes_polling_hints() {
 async fn test_get_results_done_shows_100_pct_and_zero_poll_interval() {
     let mcp = DalfoxMcp::new();
     {
-        let mut jobs = mcp.jobs.lock().await;
+        let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
         let job = test_job(JobStatus::Done, Some(vec![]));
         job.progress
             .params_total
@@ -577,7 +577,7 @@ async fn test_get_results_done_shows_100_pct_and_zero_poll_interval() {
 async fn test_get_results_includes_timestamps() {
     let mcp = DalfoxMcp::new();
     {
-        let mut jobs = mcp.jobs.lock().await;
+        let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
         let mut job = test_job(JobStatus::Done, Some(vec![]));
         job.started_at_ms = Some(job.queued_at_ms + 5);
         job.finished_at_ms = Some(job.queued_at_ms + 50);
@@ -598,7 +598,7 @@ async fn test_get_results_includes_timestamps() {
 async fn test_list_scans_includes_timestamps() {
     let mcp = DalfoxMcp::new();
     {
-        let mut jobs = mcp.jobs.lock().await;
+        let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
         jobs.insert(
             "ts-list".to_string(),
             test_job(JobStatus::Done, Some(vec![])),
@@ -618,7 +618,7 @@ async fn test_list_scans_includes_timestamps() {
 async fn test_delete_scan_removes_terminal_job() {
     let mcp = DalfoxMcp::new();
     {
-        let mut jobs = mcp.jobs.lock().await;
+        let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
         jobs.insert(
             "done-del".to_string(),
             test_job(JobStatus::Done, Some(vec![])),
@@ -634,7 +634,7 @@ async fn test_delete_scan_removes_terminal_job() {
     assert_eq!(payload["deleted"], true);
     assert_eq!(payload["previous_status"], "done");
 
-    let jobs = mcp.jobs.lock().await;
+    let jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
     assert!(!jobs.contains_key("done-del"));
 }
 
@@ -642,7 +642,7 @@ async fn test_delete_scan_removes_terminal_job() {
 async fn test_delete_scan_rejects_running_job() {
     let mcp = DalfoxMcp::new();
     {
-        let mut jobs = mcp.jobs.lock().await;
+        let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
         jobs.insert("run-del".to_string(), test_job(JobStatus::Running, None));
     }
     let err = mcp
@@ -654,7 +654,7 @@ async fn test_delete_scan_rejects_running_job() {
     assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
     assert!(err.message.contains("cancel it first"));
 
-    let jobs = mcp.jobs.lock().await;
+    let jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
     assert!(jobs.contains_key("run-del"));
 }
 
@@ -743,7 +743,7 @@ async fn test_get_results_pagination_end_to_end() {
     let mcp = DalfoxMcp::new();
     let findings: Vec<SanitizedResult> = (0..5).map(dummy_finding).collect();
     {
-        let mut jobs = mcp.jobs.lock().await;
+        let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
         jobs.insert("pag".to_string(), test_job(JobStatus::Done, Some(findings)));
     }
     let resp = mcp
@@ -840,7 +840,7 @@ async fn test_tick_waf_block_is_scoped_per_job() {
 async fn test_purge_expired_jobs_removes_old_terminal_jobs() {
     let mcp = DalfoxMcp::new();
     {
-        let mut jobs = mcp.jobs.lock().await;
+        let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
         // Old terminal job — outside retention window
         let mut old = test_job(JobStatus::Done, Some(vec![]));
         old.finished_at_ms = Some(now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
@@ -853,9 +853,9 @@ async fn test_purge_expired_jobs_removes_old_terminal_jobs() {
         jobs.insert("active".to_string(), test_job(JobStatus::Running, None));
     }
 
-    mcp.purge_expired_jobs().await;
+    mcp.purge_expired_jobs();
 
-    let jobs = mcp.jobs.lock().await;
+    let jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
     assert!(
         !jobs.contains_key("old"),
         "old terminal job should be purged"
