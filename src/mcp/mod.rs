@@ -76,10 +76,7 @@ where
             {
                 Ok(rt) => *slot = Some(rt),
                 Err(e) => {
-                    eprintln!(
-                        "[MCP][ERR] runtime build failed for tag={}: {}",
-                        tag, e
-                    );
+                    eprintln!("[MCP][ERR] runtime build failed for tag={}: {}", tag, e);
                     return None;
                 }
             }
@@ -861,14 +858,22 @@ Call this repeatedly until status is 'done', 'error', or 'cancelled'."
                     snap.status,
                     JobStatus::Running | JobStatus::Done | JobStatus::Cancelled
                 ) {
-                    let params_total =
-                        snap.progress.params_total.load(std::sync::atomic::Ordering::Relaxed);
-                    let params_tested =
-                        snap.progress.params_tested.load(std::sync::atomic::Ordering::Relaxed);
-                    let requests_sent =
-                        snap.progress.requests_sent.load(std::sync::atomic::Ordering::Relaxed);
-                    let findings_so_far =
-                        snap.progress.findings_so_far.load(std::sync::atomic::Ordering::Relaxed);
+                    let params_total = snap
+                        .progress
+                        .params_total
+                        .load(std::sync::atomic::Ordering::Relaxed);
+                    let params_tested = snap
+                        .progress
+                        .params_tested
+                        .load(std::sync::atomic::Ordering::Relaxed);
+                    let requests_sent = snap
+                        .progress
+                        .requests_sent
+                        .load(std::sync::atomic::Ordering::Relaxed);
+                    let findings_so_far = snap
+                        .progress
+                        .findings_so_far
+                        .load(std::sync::atomic::Ordering::Relaxed);
 
                     // Estimate completion percentage from params tested vs total
                     let estimated_completion_pct: u32 =
@@ -1080,73 +1085,70 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
             let target_url_for_err_inner = target_url_for_err.clone();
             run_on_thread_runtime(&target_url_for_err_inner, |rt| {
                 rt.block_on(async {
-                        // Reachability check: send a probe via the target's fully-hydrated
-                        // HTTP stack so proxy, custom headers, cookies, User-Agent, method,
-                        // and body all match what the real scan would send.
-                        let reachable = send_reachability_probe(&target).await;
+                    // Reachability check: send a probe via the target's fully-hydrated
+                    // HTTP stack so proxy, custom headers, cookies, User-Agent, method,
+                    // and body all match what the real scan would send.
+                    let reachable = send_reachability_probe(&target).await;
 
-                        if !reachable {
-                            return serde_json::json!({
-                                "target": target_url,
-                                "reachable": false,
-                                "error_code": crate::cmd::error_codes::CONNECTION_FAILED,
-                                "params_discovered": 0,
-                                "estimated_total_requests": 0,
-                                "params": [],
-                            });
-                        }
+                    if !reachable {
+                        return serde_json::json!({
+                            "target": target_url,
+                            "reachable": false,
+                            "error_code": crate::cmd::error_codes::CONNECTION_FAILED,
+                            "params_discovered": 0,
+                            "estimated_total_requests": 0,
+                            "params": [],
+                        });
+                    }
 
-                        analyze_parameters(&mut target, &scan_args, None).await;
+                    analyze_parameters(&mut target, &scan_args, None).await;
 
-                        // Estimate request count (encoder expansion factor)
-                        let enc_factor = if scan_args.encoders.iter().any(|e| e == "none") {
-                            1usize
-                        } else {
-                            let mut f = 1usize;
-                            for e in ["url", "html", "2url", "3url", "4url", "base64"] {
-                                if scan_args.encoders.iter().any(|x| x == e) {
-                                    f += 1;
-                                }
+                    // Estimate request count (encoder expansion factor)
+                    let enc_factor = if scan_args.encoders.iter().any(|e| e == "none") {
+                        1usize
+                    } else {
+                        let mut f = 1usize;
+                        for e in ["url", "html", "2url", "3url", "4url", "base64"] {
+                            if scan_args.encoders.iter().any(|x| x == e) {
+                                f += 1;
                             }
-                            f
-                        };
-                        let mut estimated_requests: usize = 0;
-                        let discovered_params: Vec<serde_json::Value> = target
-                            .reflection_params
-                            .iter()
-                            .map(|p| {
-                                let payload_count = if let Some(ctx) = &p.injection_context {
-                                    crate::scanning::xss_common::get_dynamic_payloads(
-                                        ctx, &scan_args,
-                                    )
+                        }
+                        f
+                    };
+                    let mut estimated_requests: usize = 0;
+                    let discovered_params: Vec<serde_json::Value> = target
+                        .reflection_params
+                        .iter()
+                        .map(|p| {
+                            let payload_count = if let Some(ctx) = &p.injection_context {
+                                crate::scanning::xss_common::get_dynamic_payloads(ctx, &scan_args)
                                     .unwrap_or_else(|_| vec![])
                                     .len()
-                                } else {
-                                    let html_len = crate::payload::get_dynamic_xss_html_payloads()
-                                        .len()
-                                        * enc_factor;
-                                    let js_len =
-                                        crate::payload::XSS_JAVASCRIPT_PAYLOADS.len() * enc_factor;
-                                    html_len + js_len
-                                };
-                                estimated_requests =
-                                    estimated_requests.saturating_add(payload_count);
-                                serde_json::json!({
-                                    "name": p.name,
-                                    "location": format!("{:?}", p.location),
-                                    "estimated_requests": payload_count,
-                                })
+                            } else {
+                                let html_len = crate::payload::get_dynamic_xss_html_payloads()
+                                    .len()
+                                    * enc_factor;
+                                let js_len =
+                                    crate::payload::XSS_JAVASCRIPT_PAYLOADS.len() * enc_factor;
+                                html_len + js_len
+                            };
+                            estimated_requests = estimated_requests.saturating_add(payload_count);
+                            serde_json::json!({
+                                "name": p.name,
+                                "location": format!("{:?}", p.location),
+                                "estimated_requests": payload_count,
                             })
-                            .collect();
-
-                        serde_json::json!({
-                            "target": target_url,
-                            "reachable": true,
-                            "method": target.method,
-                            "params_discovered": discovered_params.len(),
-                            "estimated_total_requests": estimated_requests,
-                            "params": discovered_params,
                         })
+                        .collect();
+
+                    serde_json::json!({
+                        "target": target_url,
+                        "reachable": true,
+                        "method": target.method,
+                        "params_discovered": discovered_params.len(),
+                        "estimated_total_requests": estimated_requests,
+                        "params": discovered_params,
+                    })
                 })
             })
             .unwrap_or_else(|| {
