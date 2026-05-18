@@ -24,7 +24,8 @@
 //! The MCP runtime (stdio JSON-RPC) is provided by the `rmcp` crate.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 
 use rmcp::schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -48,6 +49,58 @@ use crate::{
     scanning::result::{Result as ScanResult, SanitizedResult},
     target_parser::parse_target,
 };
+
+thread_local! {
+    /// Per-blocking-thread current_thread runtime. Built lazily on first use
+    /// and reused for the lifetime of the worker thread, so the second scan
+    /// scheduled onto the same blocking-pool slot doesn't pay
+    /// `Builder::new_current_thread().build()` again.
+    static SCAN_RUNTIME: std::cell::RefCell<Option<tokio::runtime::Runtime>> =
+        const { std::cell::RefCell::new(None) };
+}
+
+/// Run `f` on a current_thread runtime cached in thread-local storage and
+/// return its result. The closure receives a borrow of the runtime so
+/// callers can issue `block_on`. Returns `None` if runtime construction
+/// fails — extremely rare; `tag` is logged to identify the call site.
+fn run_on_thread_runtime<F, R>(tag: &str, f: F) -> Option<R>
+where
+    F: FnOnce(&tokio::runtime::Runtime) -> R,
+{
+    SCAN_RUNTIME.with(|cell| {
+        let mut slot = cell.borrow_mut();
+        if slot.is_none() {
+            match tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            {
+                Ok(rt) => *slot = Some(rt),
+                Err(e) => {
+                    eprintln!(
+                        "[MCP][ERR] runtime build failed for tag={}: {}",
+                        tag, e
+                    );
+                    return None;
+                }
+            }
+        }
+        slot.as_ref().map(f)
+    })
+}
+
+/// Cheap view of a `Job` containing only what a tool response needs. Built
+/// while holding the jobs lock so the lock can be released before any
+/// JSON serialization or computation runs.
+struct JobSnapshot {
+    status: JobStatus,
+    target_url: String,
+    results: Option<Arc<Vec<SanitizedResult>>>,
+    progress: crate::cmd::job::JobProgress,
+    error_message: Option<String>,
+    queued_at_ms: i64,
+    started_at_ms: Option<i64>,
+    finished_at_ms: Option<i64>,
+}
 
 /// Render timestamp/duration fields into the given JSON object.
 fn write_timestamps(job: &Job, out: &mut serde_json::Map<String, serde_json::Value>) {
@@ -104,15 +157,27 @@ fn paginate_results(
     (Some(slice), pagination)
 }
 
+/// Minimum interval between consecutive `purge_expired_jobs` sweeps. The
+/// retention TTL is measured in hours, so a per-call O(n) scan over every job
+/// is wasted work — sweeping at most once a minute keeps the map bounded
+/// without paying for it on every tool dispatch.
+const PURGE_MIN_INTERVAL_MS: i64 = 60_000;
+
 /// MCP handler state.
 //
 // rmcp 1.x: `#[tool_router]` (line ~507) generates `Self::tool_router()` as an
 // inherent method, and `#[tool_handler]` calls it automatically. No router
 // field is needed; the 0.x pattern of storing `tool_router: ToolRouter<Self>`
 // became unused dead-code in 1.x.
+//
+// The jobs map uses `std::sync::Mutex` rather than `tokio::sync::Mutex`: every
+// critical section that touches it is non-async and bounded (insert / get /
+// retain), so the async mutex's scheduler overhead is pure waste. Test code
+// holds the lock the same way.
 #[derive(Clone)]
 pub struct DalfoxMcp {
-    jobs: Arc<Mutex<HashMap<String, Job>>>,
+    jobs: Arc<StdMutex<HashMap<String, Job>>>,
+    last_purge_ms: Arc<AtomicI64>,
 }
 
 impl Default for DalfoxMcp {
@@ -124,7 +189,8 @@ impl Default for DalfoxMcp {
 impl DalfoxMcp {
     pub fn new() -> Self {
         Self {
-            jobs: Arc::new(Mutex::new(HashMap::new())),
+            jobs: Arc::new(StdMutex::new(HashMap::new())),
+            last_purge_ms: Arc::new(AtomicI64::new(0)),
         }
     }
 
@@ -137,18 +203,33 @@ impl DalfoxMcp {
         eprintln!("[{}] [{}] {}", ts, level, msg);
     }
 
-    /// Thin wrapper that acquires the jobs lock before delegating to the
-    /// shared retention helper.
-    async fn purge_expired_jobs(&self) {
-        let mut jobs = self.jobs.lock().await;
+    /// Run the retention sweep, but at most once per `PURGE_MIN_INTERVAL_MS`.
+    /// Retention is measured in hours so coarse-grained sweeping is fine, and
+    /// the throttle avoids locking + scanning the whole map on every tool
+    /// dispatch under bursty MCP traffic.
+    fn purge_expired_jobs(&self) {
+        let now = now_ms();
+        let last = self.last_purge_ms.load(Ordering::Relaxed);
+        if now - last < PURGE_MIN_INTERVAL_MS {
+            return;
+        }
+        // CAS so concurrent tool calls can't both decide to sweep.
+        if self
+            .last_purge_ms
+            .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
+            .is_err()
+        {
+            return;
+        }
+        let mut jobs = self.jobs.lock().expect("jobs mutex poisoned");
         purge_jobs_map(&mut jobs, JOB_RETENTION_SECS);
     }
 
     /// Execute a scan job (parameter discovery + scanning) using a fully prepared ScanArgs.
-    async fn run_job(&self, scan_id: String, scan_args: ScanArgs) {
+    async fn run_job(&self, scan_id: String, scan_args: Arc<ScanArgs>) {
         // Grab shared progress counters and cancellation flag for this job
         let (progress, cancel_flag) = {
-            let mut jobs = self.jobs.lock().await;
+            let mut jobs = self.jobs.lock().expect("jobs mutex poisoned");
             if let Some(j) = jobs.get_mut(&scan_id) {
                 if j.status == JobStatus::Cancelled
                     || j.cancelled.load(std::sync::atomic::Ordering::Relaxed)
@@ -166,13 +247,13 @@ impl DalfoxMcp {
         let url = scan_args
             .targets
             .first()
-            .cloned()
-            .unwrap_or_else(|| "<missing>".to_string());
+            .map(String::as_str)
+            .unwrap_or("<missing>");
         let include_request = scan_args.include_request;
         let include_response = scan_args.include_response;
 
         // Parse and hydrate a single target
-        let mut target = match parse_target(&url) {
+        let mut target = match parse_target(url) {
             Ok(mut t) => {
                 t.method = scan_args.method.clone();
                 t.timeout = scan_args.timeout;
@@ -185,7 +266,7 @@ impl DalfoxMcp {
                 t.headers = scan_args
                     .headers
                     .iter()
-                    .filter_map(|h| h.split_once(":"))
+                    .filter_map(|h| h.split_once(':'))
                     .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
                     .collect();
                 t.cookies = scan_args
@@ -200,7 +281,7 @@ impl DalfoxMcp {
             Err(e) => {
                 let msg = format!("parse_target failed: {}", e);
                 Self::log("ERR", &msg);
-                let mut jobs = self.jobs.lock().await;
+                let mut jobs = self.jobs.lock().expect("jobs mutex poisoned");
                 if let Some(j) = jobs.get_mut(&scan_id) {
                     j.status = JobStatus::Error;
                     j.error_message = Some(msg);
@@ -226,7 +307,7 @@ impl DalfoxMcp {
                 crate::WAF_CONSECUTIVE_BLOCKS_JOB
                     .scope(job_waf_consecutive.clone(), async {
                         // Parameter discovery / mining
-                        analyze_parameters(&mut target, &scan_args, None).await;
+                        analyze_parameters(&mut target, scan_args.as_ref(), None).await;
 
                         // Record discovered param count
                         progress.params_total.store(
@@ -236,7 +317,7 @@ impl DalfoxMcp {
 
                         crate::scanning::run_scanning(
                             &target,
-                            Arc::new(scan_args.clone()),
+                            scan_args.clone(),
                             results_arc.clone(),
                             None,
                             None,
@@ -274,7 +355,7 @@ impl DalfoxMcp {
         let was_cancelled = cancel_flag.load(std::sync::atomic::Ordering::Relaxed);
 
         {
-            let mut jobs = self.jobs.lock().await;
+            let mut jobs = self.jobs.lock().expect("jobs mutex poisoned");
             if let Some(j) = jobs.get_mut(&scan_id) {
                 // Store partial or complete results
                 j.results = Some(Arc::new(sanitized));
@@ -527,9 +608,32 @@ Final results (via get_results_dalfox) include finding type \
         &self,
         Parameters(params): Parameters<ScanWithDalfoxParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.purge_expired_jobs().await;
+        self.purge_expired_jobs();
 
-        let target = params.target.trim().to_string();
+        let ScanWithDalfoxParams {
+            target,
+            param,
+            method,
+            data,
+            headers,
+            cookies,
+            user_agent,
+            encoders,
+            timeout,
+            delay,
+            follow_redirects,
+            proxy,
+            include_request,
+            include_response,
+            skip_mining,
+            skip_discovery,
+            deep_scan,
+            skip_ast_analysis,
+            blind_callback_url,
+            workers,
+        } = params;
+
+        let target = target.trim().to_string();
         if target.is_empty() {
             return Err(ErrorData::invalid_params(
                 "missing required field 'target' (example: {\"target\":\"https://example.com\"})",
@@ -543,20 +647,20 @@ Final results (via get_results_dalfox) include finding type \
             ));
         }
 
-        if params.timeout == 0 || params.timeout > MAX_TIMEOUT_SECS {
+        if timeout == 0 || timeout > MAX_TIMEOUT_SECS {
             return Err(ErrorData::invalid_params(
                 format!(
                     "timeout must be between 1 and {} seconds (got {})",
-                    MAX_TIMEOUT_SECS, params.timeout
+                    MAX_TIMEOUT_SECS, timeout
                 ),
                 None,
             ));
         }
-        if params.delay > MAX_DELAY_MS {
+        if delay > MAX_DELAY_MS {
             return Err(ErrorData::invalid_params(
                 format!(
                     "delay must be between 0 and {} ms (got {})",
-                    MAX_DELAY_MS, params.delay
+                    MAX_DELAY_MS, delay
                 ),
                 None,
             ));
@@ -565,7 +669,7 @@ Final results (via get_results_dalfox) include finding type \
         let scan_id = Self::make_scan_id(&target);
 
         {
-            let mut jobs = self.jobs.lock().await;
+            let mut jobs = self.jobs.lock().expect("jobs mutex poisoned");
             jobs.insert(scan_id.clone(), Job::new_queued(target.clone()));
         }
 
@@ -573,33 +677,32 @@ Final results (via get_results_dalfox) include finding type \
             "JOB",
             &format!(
                 "queued scan_id={} target={} include_request={} include_response={}",
-                scan_id, target, params.include_request, params.include_response
+                scan_id, target, include_request, include_response
             ),
         );
+
+        // Normalize encoders: if "none" present use only original payloads.
+        // Move ownership in — no caller after this point reads `encoders`.
+        let encoders = if encoders.iter().any(|e| e == "none") {
+            vec!["none".to_string()]
+        } else {
+            encoders
+        };
 
         // Cookies come from the API field `cookies` only. The CLI's
         // `cookie_from_raw` flag (which reads cookies from a server-side
         // request file) is intentionally not honoured on the MCP path —
         // see the comment on `ScanWithDalfoxParams::cookies` for the reason.
-        let all_cookies = params.cookies.clone();
-
-        // Normalize encoders: if "none" present use only original payloads
-        let encoders = if params.encoders.iter().any(|e| e == "none") {
-            vec!["none".to_string()]
-        } else {
-            params.encoders.clone()
-        };
-
-        let scan_args = ScanArgs {
+        let scan_args = Arc::new(ScanArgs {
             input_type: "url".to_string(),
             format: "json".to_string(),
             targets: vec![target.clone()],
-            param: params.param.clone(),
-            data: params.data.clone(),
-            headers: params.headers.clone(),
-            cookies: all_cookies,
-            method: params.method.clone(),
-            user_agent: params.user_agent.clone(),
+            param,
+            data,
+            headers,
+            cookies,
+            method,
+            user_agent,
             cookie_from_raw: None,
             include_url: vec![],
             exclude_url: vec![],
@@ -607,22 +710,22 @@ Final results (via get_results_dalfox) include finding type \
             out_of_scope: vec![],
             out_of_scope_file: None,
             mining_dict_word: None,
-            skip_mining: params.skip_mining,
-            skip_mining_dict: params.skip_mining,
-            skip_mining_dom: params.skip_mining,
+            skip_mining,
+            skip_mining_dict: skip_mining,
+            skip_mining_dom: skip_mining,
             only_discovery: false,
-            skip_discovery: params.skip_discovery,
+            skip_discovery,
             skip_reflection_header: false,
             skip_reflection_cookie: false,
             skip_reflection_path: false,
-            timeout: params.timeout,
-            delay: params.delay,
-            proxy: params.proxy.clone(),
-            follow_redirects: params.follow_redirects,
+            timeout,
+            delay,
+            proxy,
+            follow_redirects,
             ignore_return: vec![],
             output: None,
-            include_request: params.include_request,
-            include_response: params.include_response,
+            include_request,
+            include_response,
             include_all: false,
             silence: true,
             dry_run: false,
@@ -631,12 +734,12 @@ Final results (via get_results_dalfox) include finding type \
             limit_result_type: "all".to_string(),
             only_poc: vec![],
             no_color: false,
-            workers: params.workers,
+            workers,
             max_concurrent_targets: 50,
             max_targets_per_host: 100,
             encoders,
             custom_blind_xss_payload: None,
-            blind_callback_url: params.blind_callback_url.clone(),
+            blind_callback_url,
             custom_payload: None,
             only_custom_payload: false,
             inject_marker: None,
@@ -644,12 +747,12 @@ Final results (via get_results_dalfox) include finding type \
             custom_alert_type: "none".to_string(),
             skip_xss_scanning: false,
             max_payloads_per_param: 0,
-            deep_scan: params.deep_scan,
+            deep_scan,
             sxss: false,
             sxss_url: None,
             sxss_method: "GET".to_string(),
             sxss_retries: 3,
-            skip_ast_analysis: params.skip_ast_analysis,
+            skip_ast_analysis,
             hpp: false,
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
@@ -658,26 +761,20 @@ Final results (via get_results_dalfox) include finding type \
             waf_min_confidence: 0.0,
             remote_payloads: vec![],
             remote_wordlists: vec![],
-        };
+        });
 
         // Run the scan on tokio's managed blocking-threadpool. We still need a
-        // fresh current_thread runtime inside because analyze_parameters and
-        // the scraper-based HTML inspection hold !Send types across awaits;
-        // spawn_blocking at least reuses OS threads between scans.
+        // current_thread runtime inside because analyze_parameters and the
+        // scraper-based HTML inspection hold !Send types across awaits — but
+        // we cache the runtime per blocking-pool worker thread so consecutive
+        // scans on the same thread skip the rebuild (saves ~ms of setup).
         let handler = self.clone();
         let sid = scan_id.clone();
         tokio::task::spawn_blocking(move || {
-            match tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(rt) => {
-                    rt.block_on(handler.run_job(sid, scan_args));
-                }
-                Err(e) => {
-                    eprintln!("[MCP][ERR] runtime build failed for scan_id={}: {}", sid, e);
-                }
-            }
+            let sid_for_log = sid.clone();
+            run_on_thread_runtime(&sid_for_log, |rt| {
+                rt.block_on(handler.run_job(sid, scan_args));
+            });
         });
 
         let out = serde_json::json!({
@@ -711,61 +808,72 @@ Call this repeatedly until status is 'done', 'error', or 'cancelled'."
         &self,
         Parameters(params): Parameters<GetResultsDalfoxParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.purge_expired_jobs().await;
+        self.purge_expired_jobs();
 
         let pid = params.scan_id.trim().to_string();
         if pid.is_empty() {
             return Err(ErrorData::invalid_params("scan_id must not be empty", None));
         }
-        let job_opt = {
-            let jobs = self.jobs.lock().await;
-            jobs.get(&pid).cloned()
+        // Extract only the fields we need under the lock. `results` and
+        // `progress` are already Arc/atomic-shareable, so this avoids the
+        // deep clone of owned strings (`target_url`, `error_message`) that
+        // `jobs.get(&pid).cloned()` used to perform on every poll.
+        let snapshot = {
+            let jobs = self.jobs.lock().expect("jobs mutex poisoned");
+            jobs.get(&pid).map(|job| JobSnapshot {
+                status: job.status.clone(),
+                target_url: job.target_url.clone(),
+                results: job.results.clone(),
+                progress: job.progress.clone(),
+                error_message: job.error_message.clone(),
+                queued_at_ms: job.queued_at_ms,
+                started_at_ms: job.started_at_ms,
+                finished_at_ms: job.finished_at_ms,
+            })
         };
 
-        match job_opt {
-            Some(job) => {
+        match snapshot {
+            Some(snap) => {
                 let (results_slice, pagination) =
-                    paginate_results(job.results.as_deref(), params.offset, params.limit);
+                    paginate_results(snap.results.as_deref(), params.offset, params.limit);
+                let duration_ms = match (snap.started_at_ms, snap.finished_at_ms) {
+                    (Some(s), Some(f)) => Some(f - s),
+                    (Some(s), None) => Some(now_ms() - s),
+                    _ => None,
+                };
                 let mut out = serde_json::json!({
                     "scan_id": pid,
-                    "target": job.target_url,
-                    "status": job.status,
+                    "target": snap.target_url,
+                    "status": snap.status,
                     "results": results_slice,
                     "pagination": pagination,
+                    "queued_at_ms": snap.queued_at_ms,
+                    "started_at_ms": snap.started_at_ms,
+                    "finished_at_ms": snap.finished_at_ms,
+                    "duration_ms": duration_ms,
                 });
-                if let Some(obj) = out.as_object_mut() {
-                    write_timestamps(&job, obj);
-                }
                 // Include error message when scan failed
-                if let Some(ref err_msg) = job.error_message {
+                if let Some(ref err_msg) = snap.error_message {
                     out["error_message"] = serde_json::json!(err_msg);
                 }
                 // Include progress info when scan is running, done, or cancelled
                 if matches!(
-                    job.status,
+                    snap.status,
                     JobStatus::Running | JobStatus::Done | JobStatus::Cancelled
                 ) {
-                    let params_total = job
-                        .progress
-                        .params_total
-                        .load(std::sync::atomic::Ordering::Relaxed);
-                    let params_tested = job
-                        .progress
-                        .params_tested
-                        .load(std::sync::atomic::Ordering::Relaxed);
-                    let requests_sent = job
-                        .progress
-                        .requests_sent
-                        .load(std::sync::atomic::Ordering::Relaxed);
-                    let findings_so_far = job
-                        .progress
-                        .findings_so_far
-                        .load(std::sync::atomic::Ordering::Relaxed);
+                    let params_total =
+                        snap.progress.params_total.load(std::sync::atomic::Ordering::Relaxed);
+                    let params_tested =
+                        snap.progress.params_tested.load(std::sync::atomic::Ordering::Relaxed);
+                    let requests_sent =
+                        snap.progress.requests_sent.load(std::sync::atomic::Ordering::Relaxed);
+                    let findings_so_far =
+                        snap.progress.findings_so_far.load(std::sync::atomic::Ordering::Relaxed);
 
                     // Estimate completion percentage from params tested vs total
                     let estimated_completion_pct: u32 =
-                        if matches!(job.status, JobStatus::Done | JobStatus::Cancelled) {
-                            if job.status == JobStatus::Done {
+                        if matches!(snap.status, JobStatus::Done | JobStatus::Cancelled) {
+                            if snap.status == JobStatus::Done {
                                 100
                             } else if params_total > 0 {
                                 ((params_tested as f64 / params_total as f64) * 100.0) as u32
@@ -784,7 +892,7 @@ Call this repeatedly until status is 'done', 'error', or 'cancelled'."
                     // - near completion (>80%): poll every 1s
                     // - done/cancelled: no more polling needed
                     let suggested_poll_interval_ms: u64 =
-                        if matches!(job.status, JobStatus::Done | JobStatus::Cancelled) {
+                        if matches!(snap.status, JobStatus::Done | JobStatus::Cancelled) {
                             0
                         } else if estimated_completion_pct > 80 {
                             1000
@@ -823,7 +931,7 @@ status, and result_count."
         &self,
         Parameters(params): Parameters<ListScansDalfoxParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.purge_expired_jobs().await;
+        self.purge_expired_jobs();
 
         let filter_status: Option<JobStatus> = match params
             .status
@@ -843,23 +951,26 @@ status, and result_count."
             None => None,
         };
 
-        let jobs = self.jobs.lock().await;
-        let entries: Vec<serde_json::Value> = jobs
-            .iter()
-            .filter(|(_, job)| filter_status.as_ref().is_none_or(|f| &job.status == f))
-            .map(|(id, job)| {
-                let mut entry = serde_json::json!({
-                    "scan_id": id,
-                    "target": job.target_url,
-                    "status": job.status,
-                    "result_count": job.results.as_ref().map(|r| r.len()).unwrap_or(0)
-                });
-                if let Some(obj) = entry.as_object_mut() {
-                    write_timestamps(job, obj);
-                }
-                entry
-            })
-            .collect();
+        // Build the response under the lock but only on the JSON values we
+        // need; serialization itself runs after the lock is released.
+        let entries: Vec<serde_json::Value> = {
+            let jobs = self.jobs.lock().expect("jobs mutex poisoned");
+            jobs.iter()
+                .filter(|(_, job)| filter_status.as_ref().is_none_or(|f| &job.status == f))
+                .map(|(id, job)| {
+                    let mut entry = serde_json::json!({
+                        "scan_id": id,
+                        "target": job.target_url,
+                        "status": job.status,
+                        "result_count": job.results.as_ref().map(|r| r.len()).unwrap_or(0)
+                    });
+                    if let Some(obj) = entry.as_object_mut() {
+                        write_timestamps(job, obj);
+                    }
+                    entry
+                })
+                .collect()
+        };
 
         let out = serde_json::json!({
             "total": entries.len(),
@@ -884,7 +995,7 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
         &self,
         Parameters(params): Parameters<PreflightDalfoxParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.purge_expired_jobs().await;
+        self.purge_expired_jobs();
 
         let target_url = params.target.trim().to_string();
         if target_url.is_empty() {
@@ -960,16 +1071,15 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
                 .collect(),
         });
 
-        // Run parameter discovery on tokio's blocking threadpool (reused
-        // across calls) with a current_thread runtime inside, because
-        // analyze_parameters and the scraper-based HTML inspection are !Send.
+        // Run parameter discovery on tokio's blocking threadpool with a
+        // thread-local current_thread runtime (analyze_parameters and the
+        // scraper-based HTML inspection are !Send). The runtime is reused
+        // across calls dispatched to the same blocking-pool worker.
+        let target_url_for_err = target_url.clone();
         let result = tokio::task::spawn_blocking(move || {
-            match tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(rt) => {
-                    rt.block_on(async {
+            let target_url_for_err_inner = target_url_for_err.clone();
+            run_on_thread_runtime(&target_url_for_err_inner, |rt| {
+                rt.block_on(async {
                         // Reachability check: send a probe via the target's fully-hydrated
                         // HTTP stack so proxy, custom headers, cookies, User-Agent, method,
                         // and body all match what the real scan would send.
@@ -1037,16 +1147,15 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
                             "estimated_total_requests": estimated_requests,
                             "params": discovered_params,
                         })
-                    })
-                }
-                Err(e) => {
-                    serde_json::json!({
-                        "target": target_url,
-                        "reachable": false,
-                        "error": format!("runtime error: {}", e),
-                    })
-                }
-            }
+                })
+            })
+            .unwrap_or_else(|| {
+                serde_json::json!({
+                    "target": target_url_for_err,
+                    "reachable": false,
+                    "error": "runtime build failed",
+                })
+            })
         })
         .await
         .unwrap_or_else(|_| {
@@ -1075,13 +1184,13 @@ still be retrieved via get_results_dalfox."
         &self,
         Parameters(params): Parameters<CancelScanDalfoxParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.purge_expired_jobs().await;
+        self.purge_expired_jobs();
 
         let pid = params.scan_id.trim().to_string();
         if pid.is_empty() {
             return Err(ErrorData::invalid_params("scan_id must not be empty", None));
         }
-        let mut jobs = self.jobs.lock().await;
+        let mut jobs = self.jobs.lock().expect("jobs mutex poisoned");
         match jobs.get_mut(&pid) {
             Some(job) => {
                 let previous_status = job.status.clone();
@@ -1124,13 +1233,13 @@ Terminal scans are also auto-purged after 1 hour."
         &self,
         Parameters(params): Parameters<DeleteScanDalfoxParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        self.purge_expired_jobs().await;
+        self.purge_expired_jobs();
 
         let pid = params.scan_id.trim().to_string();
         if pid.is_empty() {
             return Err(ErrorData::invalid_params("scan_id must not be empty", None));
         }
-        let mut jobs = self.jobs.lock().await;
+        let mut jobs = self.jobs.lock().expect("jobs mutex poisoned");
         let previous_status = match jobs.get(&pid) {
             Some(job) => {
                 if !job.is_terminal() {
