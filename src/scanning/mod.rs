@@ -630,12 +630,36 @@ pub async fn run_scanning(
 
     let pb = if let Some(ref mp) = multi_pb {
         let pb = mp.add(ProgressBar::new(total_tasks));
+        // Counter snapshot at pb creation so the displayed rate is requests
+        // issued during this bar's lifetime, not since process start. Pairs
+        // with the `req_per_sec` custom key registered below — `{per_sec}` in
+        // indicatif counts pb position increments, but many `pb.inc(1)` calls
+        // here are "no-op" iterations (param already found, payload skipped),
+        // which previously inflated the rate (e.g. 11.5k/s on a 5k-payload
+        // scan that finished in 0.4s). HTTP-request-based rate is what users
+        // actually care about.
+        let req_start = crate::REQUEST_COUNT.load(Ordering::Relaxed);
         pb.set_style(
             ProgressStyle::default_bar()
                 .template(
-                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} ({per_sec}, ETA {eta}) {msg}",
+                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} ({req_per_sec}, ETA {eta}) {msg}",
                 )
                 .expect("valid progress bar template")
+                .with_key(
+                    "req_per_sec",
+                    move |state: &indicatif::ProgressState, w: &mut dyn std::fmt::Write| {
+                        let delta = crate::REQUEST_COUNT
+                            .load(Ordering::Relaxed)
+                            .saturating_sub(req_start);
+                        let elapsed = state.elapsed().as_secs_f64();
+                        let rate = if elapsed > 0.0 {
+                            delta as f64 / elapsed
+                        } else {
+                            0.0
+                        };
+                        let _ = write!(w, "{:.1} req/s", rate);
+                    },
+                )
                 .progress_chars("#>-"),
         );
         pb.enable_steady_tick(Duration::from_millis(120));

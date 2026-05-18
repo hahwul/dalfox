@@ -2633,10 +2633,31 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 multi_pb_clone
             {
                 let pb = mp.add(indicatif::ProgressBar::new(total_overall_tasks));
+                // See the matching note in `scanning/mod.rs`: `{per_sec}` here
+                // would measure pb-position rate, which inflates badly when
+                // early findings cause the inner loops to skip HTTP requests
+                // but still `pb.inc(1)`. Track actual HTTP request rate via
+                // `REQUEST_COUNT` delta from pb creation.
+                let req_start = crate::REQUEST_COUNT.load(Ordering::Relaxed);
                 pb.set_style(
                     indicatif::ProgressStyle::default_bar()
-                        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} ({per_sec}, ETA {eta}) Overall scanning")
+                        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} ({req_per_sec}, ETA {eta}) Overall scanning")
                         .expect("valid progress bar template")
+                        .with_key(
+                            "req_per_sec",
+                            move |state: &indicatif::ProgressState, w: &mut dyn std::fmt::Write| {
+                                let delta = crate::REQUEST_COUNT
+                                    .load(Ordering::Relaxed)
+                                    .saturating_sub(req_start);
+                                let elapsed = state.elapsed().as_secs_f64();
+                                let rate = if elapsed > 0.0 {
+                                    delta as f64 / elapsed
+                                } else {
+                                    0.0
+                                };
+                                let _ = write!(w, "{:.1} req/s", rate);
+                            },
+                        )
                         .progress_chars("#>-"),
                 );
                 pb.enable_steady_tick(Duration::from_millis(120));
