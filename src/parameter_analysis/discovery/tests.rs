@@ -196,9 +196,11 @@ async fn test_check_header_discovery_blanket_echo_skips_default_probes() {
 
     let params = reflection_params.lock().await.clone();
     let names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
-    let common_hit = names
-        .iter()
-        .any(|n| COMMON_PROBE_HEADERS.iter().any(|h| n.eq_ignore_ascii_case(h)));
+    let common_hit = names.iter().any(|n| {
+        COMMON_PROBE_HEADERS
+            .iter()
+            .any(|h| n.eq_ignore_ascii_case(h))
+    });
     assert!(
         !common_hit,
         "blanket-echo guard must suppress COMMON_PROBE_HEADERS probes (got {:?})",
@@ -555,10 +557,7 @@ fn test_dedupe_collapses_same_name_location_pair() {
     // injection_context filled in from the second entry
     assert!(params[0].injection_context.is_some());
     // form_action_url filled in from the second entry
-    assert_eq!(
-        params[0].form_action_url.as_deref(),
-        Some("https://x/y")
-    );
+    assert_eq!(params[0].form_action_url.as_deref(), Some("https://x/y"));
     // valid_specials union: {<, >, /}
     let v = params[0].valid_specials.as_ref().unwrap();
     assert!(v.contains(&'<'));

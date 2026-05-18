@@ -83,6 +83,7 @@ fn test_param_structure_query_location() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
 
     assert_eq!(param.name, "id");
@@ -104,6 +105,7 @@ fn test_param_structure_with_injection_context() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
 
     assert_eq!(param.injection_context, Some(InjectionContext::Html(None)));
@@ -128,6 +130,7 @@ fn test_param_structure_javascript_context() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
 
     match &param.injection_context {
@@ -154,6 +157,7 @@ fn test_param_structure_attribute_context() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
 
     match &param.injection_context {
@@ -237,6 +241,7 @@ fn test_param_serialization() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
 
     // Test serialization
@@ -318,6 +323,7 @@ fn test_special_chars_classification() {
         wire_name: None,
         form_action_url: None,
         form_origin_url: None,
+        framework_sink: None,
     };
 
     assert!(param.valid_specials.as_ref().unwrap().contains(&'<'));
@@ -341,6 +347,7 @@ fn test_multiple_parameters() {
             wire_name: None,
             form_action_url: None,
             form_origin_url: None,
+            framework_sink: None,
         },
         Param {
             name: "name".to_string(),
@@ -354,6 +361,7 @@ fn test_multiple_parameters() {
             wire_name: None,
             form_action_url: None,
             form_origin_url: None,
+            framework_sink: None,
         },
         Param {
             name: "X-Custom".to_string(),
@@ -367,6 +375,7 @@ fn test_multiple_parameters() {
             wire_name: None,
             form_action_url: None,
             form_origin_url: None,
+            framework_sink: None,
         },
     ];
 

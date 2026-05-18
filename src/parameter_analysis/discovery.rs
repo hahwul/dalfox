@@ -173,10 +173,8 @@ pub(crate) fn dedupe_reflection_params(params: &mut Vec<Param>) {
             // exercise everything either run could land.
             base.valid_specials =
                 merge_char_sets(base.valid_specials.take(), other.valid_specials.clone());
-            base.invalid_specials = intersect_char_sets(
-                base.invalid_specials.take(),
-                other.invalid_specials.clone(),
-            );
+            base.invalid_specials =
+                intersect_char_sets(base.invalid_specials.take(), other.invalid_specials.clone());
         }
         merged.push(base);
     }

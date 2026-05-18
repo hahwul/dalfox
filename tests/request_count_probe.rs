@@ -91,6 +91,7 @@ fn make_args() -> ScanArgs {
         waf_min_confidence: 0.0,
         remote_payloads: vec![],
         remote_wordlists: vec![],
+        max_payloads_per_param: 0,
     }
 }
 

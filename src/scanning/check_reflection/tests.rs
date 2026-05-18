@@ -772,10 +772,7 @@ fn test_safe_context_textarea_breakout() {
 #[test]
 fn test_safe_context_fullwidth_payload_no_panic() {
     let payload = "＜ｓｖｇ／ｏｎｌｏａｄ＝ａｌｅｒｔ（１）＞";
-    let html = format!(
-        "<html><body><textarea>{}</textarea></body></html>",
-        payload
-    );
+    let html = format!("<html><body><textarea>{}</textarea></body></html>", payload);
     // Inside <textarea>, so it is in a safe context — and must not panic.
     assert!(is_in_safe_context(&html, payload));
 }
@@ -1086,8 +1083,7 @@ fn test_should_suppress_with_body_drops_percent_encoded_only_echo() {
     // payload via URL-decoded matching, but the browser would render the
     // percent escapes as literal text — no `<` tag is parsed, no XSS.
     // Suppress to avoid the false positive even though status is 4xx.
-    let body =
-        "<html><body><tr><th>URI:</th><td>/foo/%3Csvg/onload=alert(1)%3E/bar</td></tr></body></html>";
+    let body = "<html><body><tr><th>URI:</th><td>/foo/%3Csvg/onload=alert(1)%3E/bar</td></tr></body></html>";
     let raw_payload = "<svg/onload=alert(1)>";
     assert!(
         !body.contains(raw_payload),

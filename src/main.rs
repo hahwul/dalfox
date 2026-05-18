@@ -58,9 +58,8 @@ async fn main() {
     // `--no-color` / `-S` flags are inspected via raw argv because clap
     // hasn't parsed yet — the banner is emitted before `Cli::parse()`.
     let __args: Vec<String> = std::env::args().collect();
-    let has_flag = |needles: &[&str]| -> bool {
-        __args.iter().any(|a| needles.iter().any(|n| a == n))
-    };
+    let has_flag =
+        |needles: &[&str]| -> bool { __args.iter().any(|a| needles.iter().any(|n| a == n)) };
     let no_color_env = std::env::var("NO_COLOR").is_ok();
     let no_color_flag = has_flag(&["--no-color"]);
     let silence_flag = has_flag(&["-S", "--silence"]);

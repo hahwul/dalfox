@@ -509,10 +509,7 @@ pub fn get_tech_specific_payloads(techs: &TechDetectionResult) -> Vec<String> {
                 //      the response, so a generic HTML payload also
                 //      works; the `class={}` marker here lets us
                 //      attribute the finding to the React-aware path.
-                payloads.push(format!(
-                    "javascript:alert(1)/*{}*/",
-                    class_marker
-                ));
+                payloads.push(format!("javascript:alert(1)/*{}*/", class_marker));
                 payloads.push(format!(
                     "<svg onload=alert(1) class={}></svg>",
                     class_marker
