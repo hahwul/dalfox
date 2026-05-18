@@ -46,6 +46,39 @@ use tokio::sync::{Mutex, RwLock, Semaphore};
 /// Prevents payload explosion when WAF bypass mutations are applied.
 const MAX_WAF_MUTATION_VARIANTS_PER_PAYLOAD: usize = 3;
 
+/// Build a `with_key("req_per_sec", …)` tracker for an indicatif progress bar.
+///
+/// `start` is the value of `crate::REQUEST_COUNT` captured at bar creation;
+/// the tracker renders `(REQUEST_COUNT - start) / pb.elapsed()` as
+/// `XXXX.X req/s` with a fixed-width field so the bar's trailing columns
+/// don't jitter as the rate changes magnitude.
+///
+/// Caveats baked into the displayed value:
+///   - `REQUEST_COUNT` is process-global, so when several targets in the
+///     same host group scan concurrently the per-target bar reflects the
+///     group's combined HTTP rate (which matches the overall bar). This is
+///     intentionally a "combined" view — a strictly per-target counter
+///     would need plumbing through every HTTP call site.
+///   - `{eta}` next to this field is still computed by indicatif from
+///     `pos/len` rate, not request rate. In practice ETA still reads
+///     sensibly because the bar finishes the moment the inner loop exits.
+pub(crate) fn req_per_sec_tracker(
+    start: u64,
+) -> impl Fn(&indicatif::ProgressState, &mut dyn std::fmt::Write) + Send + Sync + Clone + 'static {
+    move |state, w| {
+        let delta = crate::REQUEST_COUNT
+            .load(Ordering::Relaxed)
+            .saturating_sub(start);
+        let elapsed = state.elapsed().as_secs_f64();
+        let rate = if elapsed > 0.0 {
+            delta as f64 / elapsed
+        } else {
+            0.0
+        };
+        let _ = write!(w, "{:>7.1} req/s", rate);
+    }
+}
+
 /// A per-parameter work unit for the scan loop: the parameter, its reflection
 /// payloads (checked in Stage 5), and its DOM payloads (verified in Stage 6).
 pub type ParamPayloadJob = (Param, Vec<String>, Vec<String>);
@@ -630,14 +663,11 @@ pub async fn run_scanning(
 
     let pb = if let Some(ref mp) = multi_pb {
         let pb = mp.add(ProgressBar::new(total_tasks));
-        // Counter snapshot at pb creation so the displayed rate is requests
-        // issued during this bar's lifetime, not since process start. Pairs
-        // with the `req_per_sec` custom key registered below — `{per_sec}` in
-        // indicatif counts pb position increments, but many `pb.inc(1)` calls
-        // here are "no-op" iterations (param already found, payload skipped),
-        // which previously inflated the rate (e.g. 11.5k/s on a 5k-payload
-        // scan that finished in 0.4s). HTTP-request-based rate is what users
-        // actually care about.
+        // `{per_sec}` would measure pb-position rate, not HTTP request rate;
+        // many `pb.inc(1)` calls here are "no-op" iterations (param already
+        // found, payload skipped), which inflated the rate (e.g. 11.5k/s on
+        // a 5k-payload scan that finished in 0.4s). See req_per_sec_tracker
+        // for the displayed semantics and caveats.
         let req_start = crate::REQUEST_COUNT.load(Ordering::Relaxed);
         pb.set_style(
             ProgressStyle::default_bar()
@@ -645,21 +675,7 @@ pub async fn run_scanning(
                     "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} ({req_per_sec}, ETA {eta}) {msg}",
                 )
                 .expect("valid progress bar template")
-                .with_key(
-                    "req_per_sec",
-                    move |state: &indicatif::ProgressState, w: &mut dyn std::fmt::Write| {
-                        let delta = crate::REQUEST_COUNT
-                            .load(Ordering::Relaxed)
-                            .saturating_sub(req_start);
-                        let elapsed = state.elapsed().as_secs_f64();
-                        let rate = if elapsed > 0.0 {
-                            delta as f64 / elapsed
-                        } else {
-                            0.0
-                        };
-                        let _ = write!(w, "{:.1} req/s", rate);
-                    },
-                )
+                .with_key("req_per_sec", req_per_sec_tracker(req_start))
                 .progress_chars("#>-"),
         );
         pb.enable_steady_tick(Duration::from_millis(120));
