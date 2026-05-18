@@ -2633,10 +2633,19 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 multi_pb_clone
             {
                 let pb = mp.add(indicatif::ProgressBar::new(total_overall_tasks));
+                // See `crate::scanning::req_per_sec_tracker` for why we
+                // replace `{per_sec}` (pb-position rate, inflated by
+                // skipped-payload `inc(1)` calls) with a `REQUEST_COUNT`-delta
+                // tracker.
+                let req_start = crate::REQUEST_COUNT.load(Ordering::Relaxed);
                 pb.set_style(
                     indicatif::ProgressStyle::default_bar()
-                        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} ({per_sec}, ETA {eta}) Overall scanning")
+                        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} ({req_per_sec}, ETA {eta}) Overall scanning")
                         .expect("valid progress bar template")
+                        .with_key(
+                            "req_per_sec",
+                            crate::scanning::req_per_sec_tracker(req_start),
+                        )
                         .progress_chars("#>-"),
                 );
                 pb.enable_steady_tick(Duration::from_millis(120));
