@@ -380,6 +380,48 @@ async fn start_404_td_echo_mock_server() -> SocketAddr {
     addr
 }
 
+/// Mock that mimics the xssmaze 404 template: path echoed inside a
+/// `<span>` text-content element with `<` / `>` HTML-entity-escaped.
+/// The URL-attr-only filter keeps this candidate (text content, not a
+/// URL attribute), so it's the bracket-survival probe that has to
+/// reject it — without that gate, every 4xx error page like this
+/// would burn the full payload set on guaranteed-negative requests.
+async fn start_404_escaped_text_echo_mock_server() -> SocketAddr {
+    async fn echo_404(uri: Uri) -> (axum::http::StatusCode, String) {
+        // Decode the percent-encoded path first (mirrors a real
+        // template's URL parsing) and then HTML-entity-escape the
+        // brackets the way `html_escape`-style helpers do. The result:
+        // the marker survives but `<MARKER>` shows up as `&lt;MARKER&gt;`,
+        // so the structural probe should treat the segment as inert.
+        let decoded = urlencoding::decode(uri.path())
+            .map(|c| c.into_owned())
+            .unwrap_or_else(|_| uri.path().to_string());
+        let escaped = decoded.replace('<', "&lt;").replace('>', "&gt;");
+        (
+            axum::http::StatusCode::NOT_FOUND,
+            format!(
+                "<html><body><span class='path'>{}</span></body></html>",
+                escaped
+            ),
+        )
+    }
+    async fn ok_root() -> &'static str {
+        "ok"
+    }
+    let app = Router::new()
+        .route("/", any(ok_root))
+        .fallback(any(echo_404));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+    addr
+}
+
 /// Mock that mimics a generic 404 page echoing the path only inside an
 /// `<a href>` breadcrumb — URL-attribute echo with no script-execution
 /// surface, the noise pattern that should still be suppressed.
@@ -432,6 +474,30 @@ async fn test_check_path_discovery_keeps_exploitable_404_td_echo() {
         names.contains(&"path_segment_0"),
         "exploitable 404 td-echo path discovery must surface path_segment_0 (got {:?})",
         names
+    );
+}
+
+#[tokio::test]
+async fn test_check_path_discovery_drops_escaped_text_echo_404() {
+    // xssmaze-style 404 page: server decodes `%3C` but then HTML-entity-
+    // escapes the brackets before emitting them into text content. The
+    // URL-attr-only filter keeps the candidate (it's not a URL attribute),
+    // so this case is the bracket-survival probe's contract: `<MARKER>`
+    // never appears literally in the response, so no tag-shaped payload
+    // can ever land — discovery must skip the segment.
+    let addr = start_404_escaped_text_echo_mock_server().await;
+    let mut target = parse_target(&format!("http://{}/no/such/route", addr)).unwrap();
+    target.delay = 1;
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(Semaphore::new(1));
+    check_path_discovery(&target, reflection_params.clone(), semaphore).await;
+
+    let params = reflection_params.lock().await.clone();
+    assert!(
+        params.is_empty(),
+        "bracket-escaped 404 echo must NOT surface path segments (got {:?})",
+        params.iter().map(|p| &p.name).collect::<Vec<_>>()
     );
 }
 

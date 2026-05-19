@@ -916,6 +916,15 @@ pub async fn check_path_discovery(
                     // entity-escapes either bracket, no HTML-tag payload
                     // will ever reflect — keeping the segment would burn
                     // thousands of requests on guaranteed-negative payloads.
+                    //
+                    // Known limitation: `t.contains(&needle)` is case-sensitive,
+                    // so a server that ASCII-uppercases / -lowercases reflected
+                    // path bytes (e.g. xssmaze's `obfuscation/level2` shape, but
+                    // applied to a 4xx path-echo) would slip past this gate and
+                    // get treated as inert. Real-world servers rarely case-fold
+                    // URL paths, so the trade-off is acceptable; if it surfaces
+                    // in benchmarks, swap to the `ascii_ci_contains` helper used
+                    // by `check_reflection::marker_case_fold_reflected`.
                     let bracket_survives = if exploitable_context
                         && !(200..300).contains(&status)
                     {
