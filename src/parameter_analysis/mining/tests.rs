@@ -434,3 +434,355 @@ async fn test_probe_response_id_params_discovers_reflected_input_name() {
             && p.value == crate::scanning::markers::bracketed_marker()
     }));
 }
+
+// --- Context detection: CSS / HTML text / inner-marker / empty marker ---
+
+#[test]
+fn test_detect_injection_context_css_style_block() {
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!("<html><head><style>.x{{ color: \"{}\"; }}</style></head></html>", marker);
+    let ctx = detect_injection_context(&body);
+    assert!(
+        matches!(ctx, InjectionContext::Css(_)),
+        "expected Css context, got {:?}",
+        ctx
+    );
+}
+
+#[test]
+fn test_detect_injection_context_plain_html_text_node() {
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!("<html><body><div>{}</div></body></html>", marker);
+    let ctx = detect_injection_context(&body);
+    assert_eq!(ctx, InjectionContext::Html(None));
+}
+
+#[test]
+fn test_detect_injection_context_uses_inner_marker_branch() {
+    // bracketed_marker() embeds inner_marker(), exercising the
+    // inner-marker fast path in detect_injection_context.
+    let body = format!(
+        "<html><body><p>{}</p></body></html>",
+        crate::scanning::markers::bracketed_marker()
+    );
+    let ctx = detect_injection_context(&body);
+    assert_eq!(ctx, InjectionContext::Html(None));
+}
+
+#[test]
+fn test_detect_injection_context_with_marker_returns_html_when_marker_missing() {
+    let ctx = detect_injection_context_with_marker("<html></html>", "ZZ_NOT_PRESENT_ZZ");
+    assert_eq!(ctx, InjectionContext::Html(None));
+}
+
+#[test]
+fn test_framework_html_sink_returns_none_for_empty_marker() {
+    assert_eq!(
+        detect_framework_html_sink("<div v-html=\"x\"></div>", ""),
+        None
+    );
+}
+
+// --- Pure-helper coverage: make_any_query_param / collapse_to_any_query_param ---
+
+#[test]
+fn test_make_any_query_param_fills_classification_and_context() {
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!("<div>{} '\"<>(){{}}</div>", marker);
+    let p = make_any_query_param(&body);
+    assert_eq!(p.name, "any");
+    assert_eq!(p.location, Location::Query);
+    assert_eq!(p.value, crate::scanning::markers::bracketed_marker());
+    assert!(p.injection_context.is_some());
+    let valid = p.valid_specials.expect("valid specials populated");
+    let invalid = p.invalid_specials.expect("invalid specials populated");
+    // Specials seen in body should be in `valid`; absent ones in `invalid`.
+    assert!(valid.contains(&'<'));
+    assert!(valid.contains(&'>'));
+    assert!(invalid.contains(&'\\'));
+}
+
+#[tokio::test]
+async fn test_collapse_to_any_query_param_keeps_non_query_and_replaces_query() {
+    let initial = vec![
+        Param {
+            name: "q_old".into(),
+            value: "v".into(),
+            location: Location::Query,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            pre_encoding_pipeline: None,
+            wire_name: None,
+            form_action_url: None,
+            form_origin_url: None,
+            framework_sink: None,
+        },
+        Param {
+            name: "q_old_2".into(),
+            value: "v".into(),
+            location: Location::Query,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            pre_encoding_pipeline: None,
+            wire_name: None,
+            form_action_url: None,
+            form_origin_url: None,
+            framework_sink: None,
+        },
+        Param {
+            name: "h".into(),
+            value: "hv".into(),
+            location: Location::Header,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            pre_encoding_pipeline: None,
+            wire_name: None,
+            form_action_url: None,
+            form_origin_url: None,
+            framework_sink: None,
+        },
+    ];
+    let params = Arc::new(Mutex::new(initial));
+    collapse_to_any_query_param(params.clone(), "<html></html>").await;
+    let guard = params.lock().await;
+    assert_eq!(guard.len(), 2);
+    assert!(guard.iter().any(|p| p.name == "h" && p.location == Location::Header));
+    let any_q = guard
+        .iter()
+        .find(|p| p.location == Location::Query)
+        .expect("any query param present");
+    assert_eq!(any_q.name, "any");
+}
+
+// --- Server-driven coverage for probe_* functions ---
+
+async fn reflect_all_query_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
+    let mut body = String::from("<html><body>");
+    for (_, v) in params.iter() {
+        body.push_str(&format!("<div>{}</div>", v));
+    }
+    body.push_str("</body></html>");
+    Html(body)
+}
+
+async fn start_reflect_all_server() -> SocketAddr {
+    let app = Router::new().route("/r", get(reflect_all_query_handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind listener");
+    let addr = listener.local_addr().expect("listener addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+    addr
+}
+
+#[tokio::test]
+async fn test_probe_dictionary_params_discovers_with_custom_wordlist() {
+    let addr = start_reflect_all_server().await;
+    let target =
+        parse_target(&format!("http://{}:{}/r", addr.ip(), addr.port())).expect("parse target");
+
+    // Small wordlist (<= SENTINEL_PROBE_COUNT*5) → sentinel pre-probe is skipped.
+    let tmp_dir = std::env::temp_dir();
+    let wordlist_path = tmp_dir.join(format!(
+        "dalfox-test-wordlist-{}.txt",
+        std::process::id()
+    ));
+    std::fs::write(&wordlist_path, "foo\nbar\nbaz\n").expect("write wordlist");
+
+    let mut args = default_scan_args();
+    args.mining_dict_word = Some(wordlist_path.to_string_lossy().into_owned());
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    probe_dictionary_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+
+    let params = reflection_params.lock().await.clone();
+    let _ = std::fs::remove_file(&wordlist_path);
+    assert!(
+        params
+            .iter()
+            .any(|p| p.name == "foo" && p.location == Location::Query),
+        "expected 'foo' to be discovered, got {:?}",
+        params.iter().map(|p| &p.name).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_probe_dictionary_params_sentinel_pre_probe_collapses() {
+    let addr = start_reflect_all_server().await;
+    let target =
+        parse_target(&format!("http://{}:{}/r", addr.ip(), addr.port())).expect("parse target");
+
+    // Wordlist length > SENTINEL_PROBE_COUNT*5 triggers sentinel pre-probe.
+    // The server reflects every query param, so every sentinel reflects and
+    // pre_collapse_query_probe returns Some(..) → mining short-circuits to `any`.
+    let mut words = String::new();
+    for i in 0..50 {
+        words.push_str(&format!("p_{}\n", i));
+    }
+    let tmp_dir = std::env::temp_dir();
+    let wordlist_path = tmp_dir.join(format!(
+        "dalfox-test-collapse-wordlist-{}.txt",
+        std::process::id()
+    ));
+    std::fs::write(&wordlist_path, words).expect("write wordlist");
+
+    let mut args = default_scan_args();
+    args.mining_dict_word = Some(wordlist_path.to_string_lossy().into_owned());
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    probe_dictionary_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+
+    let params = reflection_params.lock().await.clone();
+    let _ = std::fs::remove_file(&wordlist_path);
+    // After sentinel collapse we expect exactly one synthetic 'any' Query param.
+    let any_count = params
+        .iter()
+        .filter(|p| p.name == "any" && p.location == Location::Query)
+        .count();
+    assert_eq!(
+        any_count, 1,
+        "expected one 'any' Query param after collapse, got {:?}",
+        params
+    );
+}
+
+async fn reflect_body_handler(body: axum::body::Bytes) -> Html<String> {
+    let s = String::from_utf8_lossy(&body).into_owned();
+    let pairs: Vec<(String, String)> = form_urlencoded::parse(s.as_bytes())
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    let mut body = String::from("<html><body>");
+    for (_, v) in pairs {
+        body.push_str(&format!("<div>{}</div>", v));
+    }
+    body.push_str("</body></html>");
+    Html(body)
+}
+
+async fn start_body_reflect_server() -> SocketAddr {
+    let app = Router::new().route("/b", axum::routing::post(reflect_body_handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind listener");
+    let addr = listener.local_addr().expect("listener addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+    addr
+}
+
+#[tokio::test]
+async fn test_probe_body_params_discovers_reflected_form_field() {
+    let addr = start_body_reflect_server().await;
+    let target =
+        parse_target(&format!("http://{}:{}/b", addr.ip(), addr.port())).expect("parse target");
+    let mut args = default_scan_args();
+    args.data = Some("user=alice&token=t".to_string());
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    probe_body_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+
+    let params = reflection_params.lock().await.clone();
+    assert!(
+        params
+            .iter()
+            .any(|p| p.location == Location::Body && (p.name == "user" || p.name == "token")),
+        "expected a body param discovered, got {:?}",
+        params.iter().map(|p| &p.name).collect::<Vec<_>>()
+    );
+}
+
+async fn reflect_json_handler(body: axum::body::Bytes) -> Html<String> {
+    let s = String::from_utf8_lossy(&body).into_owned();
+    let parsed: serde_json::Value =
+        serde_json::from_str(&s).unwrap_or(serde_json::Value::Object(Default::default()));
+    let mut body = String::from("<html><body>");
+    if let Some(obj) = parsed.as_object() {
+        for (_, v) in obj {
+            if let Some(s) = v.as_str() {
+                body.push_str(&format!("<div>{}</div>", s));
+            }
+        }
+    }
+    body.push_str("</body></html>");
+    Html(body)
+}
+
+async fn start_json_reflect_server() -> SocketAddr {
+    let app = Router::new().route("/j", axum::routing::post(reflect_json_handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind listener");
+    let addr = listener.local_addr().expect("listener addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+    addr
+}
+
+#[tokio::test]
+async fn test_probe_json_body_params_discovers_reflected_top_level_key() {
+    let addr = start_json_reflect_server().await;
+    let target =
+        parse_target(&format!("http://{}:{}/j", addr.ip(), addr.port())).expect("parse target");
+    let mut args = default_scan_args();
+    args.data = Some(r#"{"name":"a","tag":"b"}"#.to_string());
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    probe_json_body_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+
+    let params = reflection_params.lock().await.clone();
+    assert!(
+        params
+            .iter()
+            .any(|p| p.location == Location::JsonBody && (p.name == "name" || p.name == "tag")),
+        "expected a JSON-body param discovered, got {:?}",
+        params.iter().map(|p| &p.name).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_mine_parameters_runs_dom_against_reflecting_server() {
+    let addr = start_dom_mining_server().await;
+    let mut target = parse_target(&format!("http://{}:{}/dom-mining", addr.ip(), addr.port()))
+        .expect("parse target");
+    let mut args = default_scan_args();
+    // Skip dictionary mining (uses default GF list — slow + irrelevant here),
+    // exercise the DOM mining branch of `mine_parameters` end-to-end.
+    args.skip_mining = false;
+    args.skip_mining_dict = true;
+    args.skip_mining_dom = false;
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    mine_parameters(
+        &mut target,
+        &args,
+        reflection_params.clone(),
+        semaphore,
+        None,
+    )
+    .await;
+
+    let params = reflection_params.lock().await.clone();
+    assert!(
+        params.iter().any(|p| p.name == "search"),
+        "expected DOM mining to discover 'search', got {:?}",
+        params.iter().map(|p| &p.name).collect::<Vec<_>>()
+    );
+}
