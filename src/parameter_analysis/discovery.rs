@@ -832,6 +832,20 @@ pub async fn check_path_discovery(
         let mut new_url = target.url.clone();
         new_url.set_path(&new_path);
 
+        // For non-2xx responses, the URL-attr-only filter above keeps any path
+        // reflection that lands in text content — including 404 templates like
+        // `<span class='path'>/{uri}/</span>` where the server HTML-escapes
+        // every `<` and `>` before echoing. Treating those as scannable made
+        // path-segment params dominate the wall time on real benchmarks (xssmaze:
+        // ~99% of requests with zero true positives). The bracket-wrapped
+        // probe below is sent only when the first probe says non-2xx +
+        // exploitable_context, and we keep the path-segment registration only
+        // if the response contains the literal `<MARKER>` substring — i.e. `<`
+        // and `>` both survived reflection without entity-escaping.
+        let bracket_path = new_path.replace(test_value, &format!("%3C{}%3E", test_value));
+        let mut bracket_url = target.url.clone();
+        bracket_url.set_path(&bracket_path);
+
         let client_clone = client.clone();
         let data = target.data.clone();
         let parsed_method = target.parse_method();
@@ -859,8 +873,13 @@ pub async fn check_path_discovery(
                 .await
                 .expect("acquire semaphore permit");
             let m = parsed_method;
-            let request =
-                crate::utils::build_request(&client_clone, &target_clone, m, new_url, data.clone());
+            let request = crate::utils::build_request(
+                &client_clone,
+                &target_clone,
+                m.clone(),
+                new_url,
+                data.clone(),
+            );
 
             crate::tick_request_count();
             let mut discovered: Option<Param> = None;
@@ -890,7 +909,37 @@ pub async fn check_path_discovery(
                             &text,
                             crate::scanning::markers::bracketed_marker(),
                         );
-                    if exploitable_context {
+                    // For 4xx/5xx error pages whose templates echo the URL
+                    // path into text content, require the second probe
+                    // (`<MARKER>`) to come back with raw `<` and `>` before
+                    // declaring the segment scannable. If the server
+                    // entity-escapes either bracket, no HTML-tag payload
+                    // will ever reflect — keeping the segment would burn
+                    // thousands of requests on guaranteed-negative payloads.
+                    let bracket_survives = if exploitable_context
+                        && !(200..300).contains(&status)
+                    {
+                        let needle =
+                            format!("<{}>", crate::scanning::markers::bracketed_marker());
+                        let probe = crate::utils::build_request(
+                            &client_clone,
+                            &target_clone,
+                            m.clone(),
+                            bracket_url,
+                            data.clone(),
+                        );
+                        crate::tick_request_count();
+                        match probe.send().await {
+                            Ok(r) => match r.text().await {
+                                Ok(t) => t.contains(&needle),
+                                Err(_) => false,
+                            },
+                            Err(_) => false,
+                        }
+                    } else {
+                        true
+                    };
+                    if exploitable_context && bracket_survives {
                         let (valid, invalid) = classify_special_chars(&text);
                         discovered = Some(Param {
                             name: param_name,

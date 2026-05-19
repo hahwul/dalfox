@@ -348,11 +348,18 @@ async fn test_check_discovery_skip_discovery_true_keeps_empty() {
 /// echoed in an HTML `<td>...</td>` — exploitable text-content context.
 async fn start_404_td_echo_mock_server() -> SocketAddr {
     async fn echo_404(uri: Uri) -> (axum::http::StatusCode, String) {
+        // Mirror a real "exploitable" 404 template: server decodes the
+        // URL path (`%3C` → `<`) before emitting it into the response.
+        // Without that decode, the bracket-survival probe used by
+        // `check_path_discovery` correctly skips the endpoint as
+        // structurally inert, which would defeat this test's intent.
+        let decoded =
+            urlencoding::decode(uri.path()).map(|c| c.into_owned()).unwrap_or_else(|_| uri.path().to_string());
         (
             axum::http::StatusCode::NOT_FOUND,
             format!(
                 "<html><body><tr><th>URI:</th><td>{}</td></tr></body></html>",
-                uri.path()
+                decoded
             ),
         )
     }
