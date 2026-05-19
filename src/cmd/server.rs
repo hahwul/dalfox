@@ -17,8 +17,8 @@ use tokio::sync::Mutex;
 
 use crate::cmd::JobStatus;
 use crate::cmd::job::{
-    JOB_RETENTION_SECS, Job, JobProgress, MAX_DELAY_MS, MAX_TIMEOUT_SECS, MAX_WORKERS, now_ms,
-    parse_job_status, purge_expired_jobs as purge_jobs_map, send_reachability_probe,
+    AbortOnDrop, JOB_RETENTION_SECS, Job, JobProgress, MAX_DELAY_MS, MAX_TIMEOUT_SECS, MAX_WORKERS,
+    now_ms, parse_job_status, purge_expired_jobs as purge_jobs_map, send_reachability_probe,
 };
 use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::analyze_parameters;
@@ -230,6 +230,18 @@ fn check_api_key(state: &AppState, headers: &HeaderMap) -> bool {
 
 fn make_scan_id(s: &str) -> String {
     crate::utils::make_scan_id(s)
+}
+
+/// Split the server's HTTP-style `Cookie` header value (`a=b; c=d`) into
+/// `(name, value)` pairs. Earlier code did a single `split_once('=')` on the
+/// whole input, which silently folded `; c=d` into the value of the first
+/// pair — `preflight_handler` already used the `;`-split form, so the two
+/// endpoints disagreed on what a multi-cookie header meant.
+fn split_cookie_pairs(raw: &str) -> Vec<(String, String)> {
+    raw.split(';')
+        .filter_map(|p| p.trim().split_once('='))
+        .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+        .collect()
 }
 
 // Validate JSONP callback name to prevent XSS via callback parameter.
@@ -542,8 +554,7 @@ async fn run_scan_job(
             t.cookies = args
                 .cookies
                 .iter()
-                .filter_map(|c| c.split_once('='))
-                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .flat_map(|c| split_cookie_pairs(c))
                 .collect();
             t.timeout = args.timeout;
             t.delay = args.delay;
@@ -566,17 +577,42 @@ async fn run_scan_job(
         }
     };
 
-    // Per-job request counter. All scanning code paths call
-    // `crate::tick_request_count()` which increments both the global counter
-    // and this task-local, so concurrent scans don't pollute each other.
-    // The WAF consecutive-block counter gets the same per-job treatment so
-    // one scan's WAF backoff doesn't throttle unrelated scans.
-    let job_requests = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    // Per-job WAF consecutive-block counter so one scan's WAF backoff doesn't
+    // throttle an unrelated scan.
+    //
+    // For the request counter, we scope `progress.requests_sent` directly
+    // instead of a private local atomic — every `crate::tick_request_count()`
+    // call then writes through to the publicly visible progress field, so
+    // GET /scan/{id} returns a live `requests_sent` value during the scan
+    // instead of `0` until completion.
     let job_waf_consecutive = Arc::new(std::sync::atomic::AtomicU32::new(0));
-    let param_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    // `run_scanning`'s 6th argument is the running findings tally, not a
+    // parameter counter (see scanning/mod.rs:findings_count). Older code
+    // here called it `param_counter` and stored it into `params_tested`,
+    // which conflated two unrelated metrics.
+    let findings_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+    // Mirror the in-flight findings tally into `progress.findings_so_far`
+    // periodically so pollers see a non-zero value before the scan finishes.
+    // The types differ (`AtomicUsize` inside scanning, `AtomicU64` in the
+    // public progress struct), which is why a copying task is needed.
+    let progress_findings = progress.findings_so_far.clone();
+    let findings_count_for_updater = findings_count.clone();
+    // RAII abort — covers the panic path too, not just the manual abort below.
+    let findings_updater = AbortOnDrop(tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_millis(250));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        loop {
+            tick.tick().await;
+            progress_findings.store(
+                findings_count_for_updater.load(std::sync::atomic::Ordering::Relaxed) as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
+    }));
 
     crate::REQUEST_COUNT_JOB
-        .scope(job_requests.clone(), async {
+        .scope(progress.requests_sent.clone(), async {
             crate::WAF_CONSECUTIVE_BLOCKS_JOB
                 .scope(job_waf_consecutive.clone(), async {
                     if let Some(callback_url) = &args.blind_callback_url {
@@ -598,7 +634,7 @@ async fn run_scan_job(
                         results.clone(),
                         None,
                         None,
-                        param_counter.clone(),
+                        findings_count.clone(),
                         Some(cancel_flag.clone()),
                         None,
                     )
@@ -608,12 +644,16 @@ async fn run_scan_job(
         })
         .await;
 
-    progress.requests_sent.store(
-        job_requests.load(std::sync::atomic::Ordering::Relaxed),
-        std::sync::atomic::Ordering::Relaxed,
-    );
+    drop(findings_updater);
+
+    // After completion, every discovered parameter has been processed by
+    // `run_scanning`, so reflect that in `params_tested`. There is no
+    // per-parameter counter wired through `run_scanning` today, so this is
+    // the most honest post-scan value we can publish.
     progress.params_tested.store(
-        param_counter.load(std::sync::atomic::Ordering::Relaxed) as u32,
+        progress
+            .params_total
+            .load(std::sync::atomic::Ordering::Relaxed),
         std::sync::atomic::Ordering::Relaxed,
     );
 
@@ -664,9 +704,11 @@ async fn run_scan_job(
     if let Some(cb_url) = callback_url
         && (cb_url.starts_with("http://") || cb_url.starts_with("https://"))
     {
+        // Report the actual terminal status so downstream consumers can tell
+        // a fully-completed scan from one that was cancelled mid-flight.
         let payload = serde_json::json!({
             "scan_id": job_id,
-            "status": "done",
+            "status": if was_cancelled { "cancelled" } else { "done" },
             "url": url,
             "results": &*final_results_arc
         });

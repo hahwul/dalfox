@@ -41,7 +41,7 @@ use rmcp::{
 use crate::{
     cmd::JobStatus,
     cmd::job::{
-        JOB_RETENTION_SECS, Job, MAX_DELAY_MS, MAX_TIMEOUT_SECS, MAX_WORKERS, now_ms,
+        AbortOnDrop, JOB_RETENTION_SECS, Job, MAX_DELAY_MS, MAX_TIMEOUT_SECS, MAX_WORKERS, now_ms,
         parse_job_status, purge_expired_jobs as purge_jobs_map, send_reachability_probe,
     },
     cmd::scan::ScanArgs,
@@ -288,19 +288,39 @@ impl DalfoxMcp {
             }
         };
 
-        // Per-job request counter. All scanning code paths call
-        // `crate::tick_request_count()` which increments both the global
-        // counter and this task-local one, so concurrent scans don't
-        // pollute each other's tallies. The WAF consecutive-block counter
-        // gets the same per-job treatment so one scan's WAF backoff doesn't
-        // throttle an unrelated scan.
-        let job_requests = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        // Per-job WAF consecutive-block counter so one scan's WAF backoff
+        // doesn't throttle an unrelated scan. The request counter is the
+        // public `progress.requests_sent` field itself — scoping it directly
+        // lets `crate::tick_request_count()` write through to the visible
+        // progress, so pollers see a live `requests_sent` value instead of 0.
         let job_waf_consecutive = Arc::new(std::sync::atomic::AtomicU32::new(0));
         let results_arc = Arc::new(Mutex::new(Vec::<ScanResult>::new()));
-        let param_counter = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        // `run_scanning`'s 6th argument is the running findings tally, not a
+        // parameter counter. Older code stored this into `params_tested`,
+        // which conflated two different metrics.
+        let findings_count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+        // Mirror the in-flight findings tally into `progress.findings_so_far`
+        // so MCP pollers see progress before the scan finishes. The atomic
+        // types differ (`AtomicUsize` inside scanning, `AtomicU64` here),
+        // hence the copying task.
+        let progress_findings = progress.findings_so_far.clone();
+        let findings_count_for_updater = findings_count.clone();
+        // RAII abort — covers the panic path too, not just the manual drop below.
+        let findings_updater = AbortOnDrop(tokio::spawn(async move {
+            let mut tick = tokio::time::interval(std::time::Duration::from_millis(250));
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                tick.tick().await;
+                progress_findings.store(
+                    findings_count_for_updater.load(std::sync::atomic::Ordering::Relaxed) as u64,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+            }
+        }));
 
         crate::REQUEST_COUNT_JOB
-            .scope(job_requests.clone(), async {
+            .scope(progress.requests_sent.clone(), async {
                 crate::WAF_CONSECUTIVE_BLOCKS_JOB
                     .scope(job_waf_consecutive.clone(), async {
                         // Parameter discovery / mining
@@ -318,7 +338,7 @@ impl DalfoxMcp {
                             results_arc.clone(),
                             None,
                             None,
-                            param_counter.clone(),
+                            findings_count.clone(),
                             Some(cancel_flag.clone()),
                             None,
                         )
@@ -328,12 +348,15 @@ impl DalfoxMcp {
             })
             .await;
 
-        progress.requests_sent.store(
-            job_requests.load(std::sync::atomic::Ordering::Relaxed),
-            std::sync::atomic::Ordering::Relaxed,
-        );
+        drop(findings_updater);
+
+        // After completion, all discovered params have been processed by
+        // `run_scanning`. No per-param counter is wired today, so the most
+        // honest post-scan value is `params_total`.
         progress.params_tested.store(
-            param_counter.load(std::sync::atomic::Ordering::Relaxed) as u32,
+            progress
+                .params_total
+                .load(std::sync::atomic::Ordering::Relaxed),
             std::sync::atomic::Ordering::Relaxed,
         );
 
