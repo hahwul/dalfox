@@ -440,7 +440,10 @@ async fn test_probe_response_id_params_discovers_reflected_input_name() {
 #[test]
 fn test_detect_injection_context_css_style_block() {
     let marker = crate::scanning::markers::open_marker();
-    let body = format!("<html><head><style>.x{{ color: \"{}\"; }}</style></head></html>", marker);
+    let body = format!(
+        "<html><head><style>.x{{ color: \"{}\"; }}</style></head></html>",
+        marker
+    );
     let ctx = detect_injection_context(&body);
     assert!(
         matches!(ctx, InjectionContext::Css(_)),
@@ -493,7 +496,8 @@ fn test_make_any_query_param_fills_classification_and_context() {
     assert_eq!(p.name, "any");
     assert_eq!(p.location, Location::Query);
     assert_eq!(p.value, crate::scanning::markers::bracketed_marker());
-    assert!(p.injection_context.is_some());
+    // Marker lives in a plain text node here, so context is generic HTML.
+    assert_eq!(p.injection_context, Some(InjectionContext::Html(None)));
     let valid = p.valid_specials.expect("valid specials populated");
     let invalid = p.invalid_specials.expect("invalid specials populated");
     // Specials seen in body should be in `valid`; absent ones in `invalid`.
@@ -552,7 +556,11 @@ async fn test_collapse_to_any_query_param_keeps_non_query_and_replaces_query() {
     collapse_to_any_query_param(params.clone(), "<html></html>").await;
     let guard = params.lock().await;
     assert_eq!(guard.len(), 2);
-    assert!(guard.iter().any(|p| p.name == "h" && p.location == Location::Header));
+    assert!(
+        guard
+            .iter()
+            .any(|p| p.name == "h" && p.location == Location::Header)
+    );
     let any_q = guard
         .iter()
         .find(|p| p.location == Location::Query)
@@ -561,6 +569,39 @@ async fn test_collapse_to_any_query_param_keeps_non_query_and_replaces_query() {
 }
 
 // --- Server-driven coverage for probe_* functions ---
+
+/// RAII guard that writes a wordlist to a unique temp path and removes
+/// it on drop — so panicking assertions don't leak files into temp_dir.
+struct TempWordlist {
+    path: std::path::PathBuf,
+}
+
+impl TempWordlist {
+    fn new(tag: &str, contents: &str) -> Self {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let path = std::env::temp_dir().join(format!(
+            "dalfox-test-{}-{}-{}.txt",
+            tag,
+            std::process::id(),
+            nanos
+        ));
+        std::fs::write(&path, contents).expect("write wordlist");
+        Self { path }
+    }
+    fn as_str(&self) -> String {
+        self.path.to_string_lossy().into_owned()
+    }
+}
+
+impl Drop for TempWordlist {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
 
 async fn reflect_all_query_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
     let mut body = String::from("<html><body>");
@@ -591,22 +632,16 @@ async fn test_probe_dictionary_params_discovers_with_custom_wordlist() {
         parse_target(&format!("http://{}:{}/r", addr.ip(), addr.port())).expect("parse target");
 
     // Small wordlist (<= SENTINEL_PROBE_COUNT*5) → sentinel pre-probe is skipped.
-    let tmp_dir = std::env::temp_dir();
-    let wordlist_path = tmp_dir.join(format!(
-        "dalfox-test-wordlist-{}.txt",
-        std::process::id()
-    ));
-    std::fs::write(&wordlist_path, "foo\nbar\nbaz\n").expect("write wordlist");
+    let wordlist = TempWordlist::new("wordlist", "foo\nbar\nbaz\n");
 
     let mut args = default_scan_args();
-    args.mining_dict_word = Some(wordlist_path.to_string_lossy().into_owned());
+    args.mining_dict_word = Some(wordlist.as_str());
 
     let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
     let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
     probe_dictionary_params(&target, &args, reflection_params.clone(), semaphore, None).await;
 
     let params = reflection_params.lock().await.clone();
-    let _ = std::fs::remove_file(&wordlist_path);
     assert!(
         params
             .iter()
@@ -629,32 +664,27 @@ async fn test_probe_dictionary_params_sentinel_pre_probe_collapses() {
     for i in 0..50 {
         words.push_str(&format!("p_{}\n", i));
     }
-    let tmp_dir = std::env::temp_dir();
-    let wordlist_path = tmp_dir.join(format!(
-        "dalfox-test-collapse-wordlist-{}.txt",
-        std::process::id()
-    ));
-    std::fs::write(&wordlist_path, words).expect("write wordlist");
+    let wordlist = TempWordlist::new("collapse-wordlist", &words);
 
     let mut args = default_scan_args();
-    args.mining_dict_word = Some(wordlist_path.to_string_lossy().into_owned());
+    args.mining_dict_word = Some(wordlist.as_str());
 
     let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
     let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
     probe_dictionary_params(&target, &args, reflection_params.clone(), semaphore, None).await;
 
     let params = reflection_params.lock().await.clone();
-    let _ = std::fs::remove_file(&wordlist_path);
-    // After sentinel collapse we expect exactly one synthetic 'any' Query param.
-    let any_count = params
-        .iter()
-        .filter(|p| p.name == "any" && p.location == Location::Query)
-        .count();
+    // After sentinel collapse with an empty starting set we expect exactly
+    // one synthetic 'any' Query param — nothing from the wordlist iteration.
     assert_eq!(
-        any_count, 1,
-        "expected one 'any' Query param after collapse, got {:?}",
+        params.len(),
+        1,
+        "expected exactly one param after collapse, got {:?}",
         params
     );
+    let only = &params[0];
+    assert_eq!(only.name, "any");
+    assert_eq!(only.location, Location::Query);
 }
 
 async fn reflect_body_handler(body: axum::body::Bytes) -> Html<String> {
