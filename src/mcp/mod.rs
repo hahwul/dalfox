@@ -662,16 +662,10 @@ Final results (via get_results_dalfox) include finding type \
                 None,
             ));
         }
-        if workers == 0 {
-            return Err(ErrorData::invalid_params(
-                "workers must be at least 1",
-                None,
-            ));
-        }
-        if workers > MAX_WORKERS {
+        if workers == 0 || workers > MAX_WORKERS {
             return Err(ErrorData::invalid_params(
                 format!(
-                    "workers must be at most {} (got {})",
+                    "workers must be between 1 and {} (got {})",
                     MAX_WORKERS, workers
                 ),
                 None,

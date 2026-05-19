@@ -848,7 +848,7 @@ async fn test_scan_with_dalfox_rejects_zero_workers() {
         .await
         .expect_err("zero workers must be rejected");
     assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
-    assert!(err.message.contains("workers must be at least 1"));
+    assert!(err.message.contains("workers must be between"));
 }
 
 #[tokio::test]
@@ -863,7 +863,7 @@ async fn test_scan_with_dalfox_rejects_workers_over_max() {
         .await
         .expect_err("workers over MAX_WORKERS must be rejected");
     assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
-    assert!(err.message.contains("workers must be at most"));
+    assert!(err.message.contains("workers must be between"));
 }
 
 #[tokio::test]
