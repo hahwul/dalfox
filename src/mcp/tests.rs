@@ -837,6 +837,48 @@ async fn test_tick_waf_block_is_scoped_per_job() {
 }
 
 #[tokio::test]
+async fn test_scan_with_dalfox_rejects_zero_workers() {
+    let mcp = DalfoxMcp::new();
+    let params = ScanWithDalfoxParams {
+        workers: 0,
+        ..default_scan_params("http://127.0.0.1:1/?q=a")
+    };
+    let err = mcp
+        .scan_with_dalfox(Parameters(params))
+        .await
+        .expect_err("zero workers must be rejected");
+    assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+    assert!(err.message.contains("workers must be at least 1"));
+}
+
+#[tokio::test]
+async fn test_scan_with_dalfox_rejects_workers_over_max() {
+    let mcp = DalfoxMcp::new();
+    let params = ScanWithDalfoxParams {
+        workers: MAX_WORKERS + 1,
+        ..default_scan_params("http://127.0.0.1:1/?q=a")
+    };
+    let err = mcp
+        .scan_with_dalfox(Parameters(params))
+        .await
+        .expect_err("workers over MAX_WORKERS must be rejected");
+    assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+    assert!(err.message.contains("workers must be at most"));
+}
+
+#[tokio::test]
+async fn test_scan_with_dalfox_accepts_workers_at_max() {
+    let mcp = DalfoxMcp::new();
+    let params = ScanWithDalfoxParams {
+        workers: MAX_WORKERS,
+        ..default_scan_params("http://127.0.0.1:1/?q=a")
+    };
+    mcp.scan_with_dalfox(Parameters(params))
+        .await
+        .expect("workers == MAX_WORKERS must be accepted");
+}
+
+#[tokio::test]
 async fn test_purge_expired_jobs_removes_old_terminal_jobs() {
     let mcp = DalfoxMcp::new();
     {
