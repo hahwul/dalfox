@@ -124,6 +124,18 @@ pub fn purge_expired_jobs(jobs: &mut HashMap<String, Job>, retention_secs: i64) 
     });
 }
 
+/// RAII guard that aborts a background `JoinHandle` on drop, including the
+/// panic path. Both the REST server and MCP spawn a small progress-mirroring
+/// task that must not outlive `run_scan_job` — without this guard, a panic
+/// between the spawn and the manual `abort()` call would leak the task.
+pub struct AbortOnDrop<T>(pub tokio::task::JoinHandle<T>);
+
+impl<T> Drop for AbortOnDrop<T> {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 /// Send one request mirroring the scan's HTTP configuration (method, headers,
 /// cookies, User-Agent, body, proxy, timeout, redirects). Returns true iff a
 /// response came back — content/status are not inspected.

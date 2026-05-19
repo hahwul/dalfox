@@ -84,6 +84,33 @@ async fn start_target_server() -> SocketAddr {
     addr
 }
 
+async fn target_slow_handler() -> impl IntoResponse {
+    tokio::time::sleep(std::time::Duration::from_millis(40)).await;
+    (
+        StatusCode::OK,
+        [("content-type", "text/html; charset=utf-8")],
+        "<html><body><a href=\"?slow=1\">link</a></body></html>",
+    )
+}
+
+/// Target server that adds a fixed delay per request, so callers can
+/// reliably observe `progress.requests_sent` ticking up *before* the scan
+/// finishes — guards against a regression that defers the counter update.
+async fn start_slow_target_server() -> SocketAddr {
+    let app = Router::new()
+        .route("/", any(target_slow_handler))
+        .route("/{*rest}", any(target_slow_handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind slow target listener");
+    let addr = listener.local_addr().expect("slow target local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    addr
+}
+
 #[test]
 fn test_check_api_key_variants() {
     let state_no_key = make_state(None, None, false, false, "callback");
@@ -726,6 +753,68 @@ fn test_split_cookie_pairs_handles_http_style_header() {
             ("a".to_string(), "b".to_string()),
             ("c".to_string(), "d".to_string()),
         ]
+    );
+}
+
+#[tokio::test]
+async fn test_run_scan_job_exposes_requests_sent_before_completion() {
+    // Regression: this asserts the *live* contract — `progress.requests_sent`
+    // must be observably > 0 while `run_scan_job` is still in flight, not
+    // only after it returns. The old code copied a private atomic into
+    // `progress.requests_sent` only at the very end, so a passing test of
+    // the post-scan value alone would not catch a regression to that
+    // behavior. A slow target (40 ms per request) keeps the scan running
+    // long enough for the polling loop to peek.
+    let addr = start_slow_target_server().await;
+    let state = make_state(None, None, false, false, "callback");
+    let id = "live-mid-flight".to_string();
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert(id.clone(), test_job(JobStatus::Queued, None, ""));
+    }
+
+    let opts = ScanOptions {
+        encoders: Some(vec!["none".to_string()]),
+        worker: Some(2),
+        ..ScanOptions::default()
+    };
+    let progress = {
+        let jobs = state.jobs.lock().await;
+        jobs.get(&id).expect("job").progress.clone()
+    };
+
+    let scan_fut = run_scan_job(
+        state.clone(),
+        id.clone(),
+        format!("http://{}/", addr),
+        opts,
+        false,
+        false,
+    );
+    tokio::pin!(scan_fut);
+
+    let mut observed_mid_flight: u64 = 0;
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
+    loop {
+        tokio::select! {
+            _ = &mut scan_fut => break,
+            _ = tokio::time::sleep(std::time::Duration::from_millis(5)) => {
+                let r = progress
+                    .requests_sent
+                    .load(std::sync::atomic::Ordering::Relaxed);
+                if r > observed_mid_flight {
+                    observed_mid_flight = r;
+                }
+                if tokio::time::Instant::now() > deadline {
+                    panic!("scan did not complete within 30s");
+                }
+            }
+        }
+    }
+
+    assert!(
+        observed_mid_flight > 0,
+        "progress.requests_sent must tick during the scan, not only at end"
     );
 }
 

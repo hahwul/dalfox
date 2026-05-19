@@ -41,7 +41,7 @@ use rmcp::{
 use crate::{
     cmd::JobStatus,
     cmd::job::{
-        JOB_RETENTION_SECS, Job, MAX_DELAY_MS, MAX_TIMEOUT_SECS, MAX_WORKERS, now_ms,
+        AbortOnDrop, JOB_RETENTION_SECS, Job, MAX_DELAY_MS, MAX_TIMEOUT_SECS, MAX_WORKERS, now_ms,
         parse_job_status, purge_expired_jobs as purge_jobs_map, send_reachability_probe,
     },
     cmd::scan::ScanArgs,
@@ -306,7 +306,8 @@ impl DalfoxMcp {
         // hence the copying task.
         let progress_findings = progress.findings_so_far.clone();
         let findings_count_for_updater = findings_count.clone();
-        let findings_updater = tokio::spawn(async move {
+        // RAII abort — covers the panic path too, not just the manual drop below.
+        let findings_updater = AbortOnDrop(tokio::spawn(async move {
             let mut tick = tokio::time::interval(std::time::Duration::from_millis(250));
             tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
@@ -316,7 +317,7 @@ impl DalfoxMcp {
                     std::sync::atomic::Ordering::Relaxed,
                 );
             }
-        });
+        }));
 
         crate::REQUEST_COUNT_JOB
             .scope(progress.requests_sent.clone(), async {
@@ -347,7 +348,7 @@ impl DalfoxMcp {
             })
             .await;
 
-        findings_updater.abort();
+        drop(findings_updater);
 
         // After completion, all discovered params have been processed by
         // `run_scanning`. No per-param counter is wired today, so the most
