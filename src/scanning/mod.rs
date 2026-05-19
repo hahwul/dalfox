@@ -518,7 +518,7 @@ pub async fn run_scanning(
     args: Arc<ScanArgs>,
     results: Arc<Mutex<Vec<crate::scanning::result::Result>>>,
     multi_pb: Option<Arc<MultiProgress>>,
-    overall_pb: Option<Arc<Mutex<indicatif::ProgressBar>>>,
+    overall_pb: Option<Arc<indicatif::ProgressBar>>,
     findings_count: Arc<AtomicUsize>,
     cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
     finding_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::scanning::result::Result>>,
@@ -913,7 +913,7 @@ pub async fn run_scanning(
                     pb.inc(1);
                 }
                 if let Some(ref opb) = overall_pb_clone {
-                    opb.lock().await.inc(1);
+                    opb.inc(1);
                 }
                 if let Some(kind) = reflected_kind {
                     let should_add = if args_clone.deep_scan {
@@ -1074,7 +1074,7 @@ pub async fn run_scanning(
                         pb.inc(1);
                     }
                     if let Some(ref opb) = overall_pb_clone {
-                        opb.lock().await.inc(1);
+                        opb.inc(1);
                     }
                     continue;
                 }
@@ -1162,7 +1162,7 @@ pub async fn run_scanning(
                     pb.inc(1);
                 }
                 if let Some(ref opb) = overall_pb_clone {
-                    opb.lock().await.inc(1);
+                    opb.inc(1);
                 }
             }
             // HPP (HTTP Parameter Pollution) phase: test duplicate-param URLs
