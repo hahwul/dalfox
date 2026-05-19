@@ -41,8 +41,8 @@ use rmcp::{
 use crate::{
     cmd::JobStatus,
     cmd::job::{
-        JOB_RETENTION_SECS, Job, MAX_DELAY_MS, MAX_TIMEOUT_SECS, now_ms, parse_job_status,
-        purge_expired_jobs as purge_jobs_map, send_reachability_probe,
+        JOB_RETENTION_SECS, Job, MAX_DELAY_MS, MAX_TIMEOUT_SECS, MAX_WORKERS, now_ms,
+        parse_job_status, purge_expired_jobs as purge_jobs_map, send_reachability_probe,
     },
     cmd::scan::ScanArgs,
     parameter_analysis::analyze_parameters,
@@ -658,6 +658,15 @@ Final results (via get_results_dalfox) include finding type \
                 format!(
                     "delay must be between 0 and {} ms (got {})",
                     MAX_DELAY_MS, delay
+                ),
+                None,
+            ));
+        }
+        if workers == 0 || workers > MAX_WORKERS {
+            return Err(ErrorData::invalid_params(
+                format!(
+                    "workers must be between 1 and {} (got {})",
+                    MAX_WORKERS, workers
                 ),
                 None,
             ));
