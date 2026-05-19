@@ -353,8 +353,9 @@ async fn start_404_td_echo_mock_server() -> SocketAddr {
         // Without that decode, the bracket-survival probe used by
         // `check_path_discovery` correctly skips the endpoint as
         // structurally inert, which would defeat this test's intent.
-        let decoded =
-            urlencoding::decode(uri.path()).map(|c| c.into_owned()).unwrap_or_else(|_| uri.path().to_string());
+        let decoded = urlencoding::decode(uri.path())
+            .map(|c| c.into_owned())
+            .unwrap_or_else(|_| uri.path().to_string());
         (
             axum::http::StatusCode::NOT_FOUND,
             format!(

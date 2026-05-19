@@ -925,11 +925,8 @@ pub async fn check_path_discovery(
                     // URL paths, so the trade-off is acceptable; if it surfaces
                     // in benchmarks, swap to the `ascii_ci_contains` helper used
                     // by `check_reflection::marker_case_fold_reflected`.
-                    let bracket_survives = if exploitable_context
-                        && !(200..300).contains(&status)
-                    {
-                        let needle =
-                            format!("<{}>", crate::scanning::markers::bracketed_marker());
+                    let bracket_survives = if exploitable_context && !(200..300).contains(&status) {
+                        let needle = format!("<{}>", crate::scanning::markers::bracketed_marker());
                         let probe = crate::utils::build_request(
                             &client_clone,
                             &target_clone,

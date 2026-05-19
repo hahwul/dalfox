@@ -2619,19 +2619,16 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 let mut total_overall_tasks = 0u64;
                 for target in &group {
                     for param in &target.reflection_params {
-                        let reflection_payloads =
-                            if let Some(context) = &param.injection_context {
-                                crate::scanning::xss_common::get_dynamic_payloads(
-                                    context, &args_arc,
-                                )
+                        let reflection_payloads = if let Some(context) = &param.injection_context {
+                            crate::scanning::xss_common::get_dynamic_payloads(context, &args_arc)
                                 .unwrap_or_else(|_| vec![])
-                            } else {
-                                crate::scanning::xss_common::get_dynamic_payloads(
-                                    &crate::parameter_analysis::InjectionContext::Html(None),
-                                    &args_arc,
-                                )
-                                .unwrap_or_else(|_| vec![])
-                            };
+                        } else {
+                            crate::scanning::xss_common::get_dynamic_payloads(
+                                &crate::parameter_analysis::InjectionContext::Html(None),
+                                &args_arc,
+                            )
+                            .unwrap_or_else(|_| vec![])
+                        };
                         let dom_payloads = crate::scanning::get_dom_payloads(param, &args_arc)
                             .unwrap_or_else(|_| vec![]);
                         total_overall_tasks +=
