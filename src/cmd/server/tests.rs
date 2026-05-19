@@ -754,6 +754,33 @@ fn test_split_cookie_pairs_handles_http_style_header() {
             ("c".to_string(), "d".to_string()),
         ]
     );
+
+    // Empty input must not panic and must not produce any spurious pairs.
+    assert!(split_cookie_pairs("").is_empty());
+    // Single piece without an `=` is dropped (no empty name/value pair).
+    assert!(split_cookie_pairs("nosemi").is_empty());
+    // Empty key (e.g. `=v`) is preserved as a pair with an empty name —
+    // matches the upstream `split_once('=')` contract. Callers that need
+    // to reject empty names must do so themselves, but record the current
+    // behavior so a future refactor doesn't silently change it.
+    let leading_eq = split_cookie_pairs("=v; k=w");
+    assert_eq!(
+        leading_eq,
+        vec![
+            ("".to_string(), "v".to_string()),
+            ("k".to_string(), "w".to_string()),
+        ]
+    );
+    // Empty value (`k=`) is preserved as an empty string, mirroring how
+    // real browsers send `Set-Cookie: k=` to clear the cookie.
+    let empty_val = split_cookie_pairs("k=; j=1");
+    assert_eq!(
+        empty_val,
+        vec![
+            ("k".to_string(), "".to_string()),
+            ("j".to_string(), "1".to_string()),
+        ]
+    );
 }
 
 #[tokio::test]
@@ -939,6 +966,192 @@ async fn test_run_scan_job_success_marks_done() {
     let job = jobs.get(&id).expect("job should remain");
     assert_eq!(job.status, JobStatus::Done);
     assert!(job.results.is_some());
+}
+
+#[tokio::test]
+async fn test_run_scan_job_webhook_reports_cancelled_status() {
+    // Regression for the webhook payload's `status` field: prior to
+    // #977 the callback always emitted `"status":"done"` even when the
+    // scan was cancelled mid-flight, leaving downstream consumers unable
+    // to distinguish a fully-completed scan from a partial one. The
+    // contract under test: when `cancel_flag` is flipped while the scan
+    // is in flight, the webhook payload reports `"cancelled"`.
+    use std::sync::Arc as StdArc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use tokio::sync::oneshot;
+
+    let target_addr = start_slow_target_server().await;
+
+    // Webhook capture server: records the most recent POST body and signals
+    // a oneshot when it fires so the test doesn't need to poll.
+    let captured: StdArc<Mutex<Option<serde_json::Value>>> = StdArc::new(Mutex::new(None));
+    let fired = StdArc::new(AtomicBool::new(false));
+    let (tx, rx) = oneshot::channel::<()>();
+    let tx_shared = StdArc::new(Mutex::new(Some(tx)));
+
+    let captured_clone = captured.clone();
+    let fired_clone = fired.clone();
+    let tx_clone = tx_shared.clone();
+    let webhook_app = Router::new().route(
+        "/hook",
+        any(move |body: axum::body::Bytes| {
+            let captured = captured_clone.clone();
+            let fired = fired_clone.clone();
+            let tx_shared = tx_clone.clone();
+            async move {
+                let parsed: serde_json::Value =
+                    serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+                *captured.lock().await = Some(parsed);
+                if !fired.swap(true, Ordering::SeqCst)
+                    && let Some(tx) = tx_shared.lock().await.take()
+                {
+                    let _ = tx.send(());
+                }
+                StatusCode::OK
+            }
+        }),
+    );
+    let webhook_listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind webhook listener");
+    let webhook_addr = webhook_listener.local_addr().expect("webhook local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(webhook_listener, webhook_app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+    let state = make_state(None, None, false, false, "callback");
+    let id = "cancel-webhook-test".to_string();
+    let mut job = test_job(JobStatus::Queued, None, "");
+    job.callback_url = Some(format!("http://{}/hook", webhook_addr));
+    let cancel_flag = job.cancelled.clone();
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert(id.clone(), job);
+    }
+
+    let opts = ScanOptions {
+        encoders: Some(vec!["none".to_string()]),
+        worker: Some(2),
+        callback_url: Some(format!("http://{}/hook", webhook_addr)),
+        ..ScanOptions::default()
+    };
+
+    // Flip the cancel flag a short time after the scan starts. The slow
+    // target server (40ms / request) keeps the scan busy long enough.
+    let cancel_flag_for_task = cancel_flag.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+        cancel_flag_for_task.store(true, std::sync::atomic::Ordering::Relaxed);
+    });
+
+    let run = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        run_scan_job(
+            state.clone(),
+            id.clone(),
+            format!("http://{}/", target_addr),
+            opts,
+            false,
+            false,
+        ),
+    )
+    .await;
+    assert!(run.is_ok(), "run_scan_job should complete in time");
+
+    // Wait for the webhook POST to actually arrive (run_scan_job awaits
+    // the POST so once the future resolves this should be immediate, but
+    // be defensive against flakes on slower CI).
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(2), rx).await;
+
+    let payload = captured
+        .lock()
+        .await
+        .clone()
+        .expect("webhook should have been invoked");
+    assert_eq!(
+        payload["status"], "cancelled",
+        "cancelled scan must emit status=cancelled (got payload: {})",
+        payload
+    );
+    assert_eq!(payload["scan_id"], serde_json::Value::String(id.clone()));
+
+    let jobs = state.jobs.lock().await;
+    let job = jobs.get(&id).expect("job still present");
+    assert_eq!(job.status, JobStatus::Cancelled);
+}
+
+#[tokio::test]
+async fn test_run_scan_job_webhook_reports_done_status() {
+    // Companion to the cancelled-status test: the same code path emits
+    // `"done"` when the scan completes without cancellation. Asserting
+    // both branches keeps the conditional honest if someone later flips
+    // the polarity.
+    let target_addr = start_target_server().await;
+
+    let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+    let captured_clone = captured.clone();
+    let webhook_app = Router::new().route(
+        "/hook",
+        any(move |body: axum::body::Bytes| {
+            let captured = captured_clone.clone();
+            async move {
+                let parsed: serde_json::Value =
+                    serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+                *captured.lock().await = Some(parsed);
+                StatusCode::OK
+            }
+        }),
+    );
+    let webhook_listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind webhook listener");
+    let webhook_addr = webhook_listener.local_addr().expect("webhook local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(webhook_listener, webhook_app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+    let state = make_state(None, None, false, false, "callback");
+    let id = "done-webhook-test".to_string();
+    let mut job = test_job(JobStatus::Queued, None, "");
+    job.callback_url = Some(format!("http://{}/hook", webhook_addr));
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert(id.clone(), job);
+    }
+
+    let opts = ScanOptions {
+        encoders: Some(vec!["none".to_string()]),
+        worker: Some(2),
+        callback_url: Some(format!("http://{}/hook", webhook_addr)),
+        ..ScanOptions::default()
+    };
+
+    let run = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        run_scan_job(
+            state.clone(),
+            id.clone(),
+            format!("http://{}/", target_addr),
+            opts,
+            false,
+            false,
+        ),
+    )
+    .await;
+    assert!(run.is_ok(), "run_scan_job should complete in time");
+
+    let payload = captured
+        .lock()
+        .await
+        .clone()
+        .expect("webhook should have been invoked");
+    assert_eq!(
+        payload["status"], "done",
+        "successful scan must emit status=done (got payload: {})",
+        payload
+    );
 }
 
 #[tokio::test]
