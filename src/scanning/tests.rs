@@ -548,6 +548,41 @@ fn test_get_fallback_reflection_payloads_include_encoder_outputs() {
 }
 
 #[test]
+fn test_format_req_per_sec_renders_fixed_width_field() {
+    // Pins the field shape consumed by the `{req_per_sec}` template key in
+    // both the per-target and overall progress bars. The 7-char right-aligned
+    // numeric field + ` req/s` suffix keeps the bar's trailing columns from
+    // jittering as rate magnitude changes; widen with care.
+    let s = format_req_per_sec(120, 2.0);
+    assert_eq!(s, "   60.0 req/s");
+
+    // Sub-unit rate still occupies the same column width.
+    let slow = format_req_per_sec(1, 10.0);
+    assert_eq!(slow, "    0.1 req/s");
+
+    // Large rate doesn't truncate — width is a minimum, not a max.
+    let fast = format_req_per_sec(123_456, 1.0);
+    assert_eq!(fast, "123456.0 req/s");
+}
+
+#[test]
+fn test_format_req_per_sec_zero_elapsed_yields_zero_rate() {
+    // The tracker is queried on the bar's first tick before any wall time
+    // has accumulated; dividing by zero there would render `inf req/s`.
+    // Contract: clamp to `0.0 req/s` until elapsed is positive.
+    assert_eq!(format_req_per_sec(42, 0.0), "    0.0 req/s");
+    assert_eq!(format_req_per_sec(0, 0.0), "    0.0 req/s");
+    // Defensive: negative elapsed (shouldn't happen but guards the branch).
+    assert_eq!(format_req_per_sec(42, -1.0), "    0.0 req/s");
+}
+
+#[test]
+fn test_format_req_per_sec_zero_delta_is_zero_rate() {
+    // Idle bar (no HTTP traffic yet) still renders cleanly.
+    assert_eq!(format_req_per_sec(0, 5.0), "    0.0 req/s");
+}
+
+#[test]
 fn test_get_fallback_reflection_payloads_none_encoder_keeps_raw_only() {
     let mut args = default_scan_args();
     args.encoders = vec!["none".to_string()];

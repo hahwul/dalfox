@@ -69,14 +69,28 @@ pub(crate) fn req_per_sec_tracker(
         let delta = crate::REQUEST_COUNT
             .load(Ordering::Relaxed)
             .saturating_sub(start);
-        let elapsed = state.elapsed().as_secs_f64();
-        let rate = if elapsed > 0.0 {
-            delta as f64 / elapsed
-        } else {
-            0.0
-        };
-        let _ = write!(w, "{:>7.1} req/s", rate);
+        let _ = write!(
+            w,
+            "{}",
+            format_req_per_sec(delta, state.elapsed().as_secs_f64())
+        );
     }
+}
+
+/// Format `delta` requests over `elapsed_secs` as the right-aligned
+/// `XXXX.X req/s` field rendered by [`req_per_sec_tracker`]. Extracted as
+/// a pure helper so the rate / formatting contract can be tested without
+/// constructing an `indicatif::ProgressState`.
+///
+/// `elapsed_secs <= 0.0` yields `0.0 req/s` (avoids div-by-zero on the
+/// first tick before the bar has accumulated any duration).
+pub(crate) fn format_req_per_sec(delta: u64, elapsed_secs: f64) -> String {
+    let rate = if elapsed_secs > 0.0 {
+        delta as f64 / elapsed_secs
+    } else {
+        0.0
+    };
+    format!("{:>7.1} req/s", rate)
 }
 
 /// A per-parameter work unit for the scan loop: the parameter, its reflection
