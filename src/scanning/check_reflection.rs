@@ -627,6 +627,54 @@ fn payload_is_fully_entity_encoded(payload: &str) -> bool {
     decoded != payload && decoded.contains(['<', '>', '"', '\''])
 }
 
+/// True when the payload carries no raw structural HTML characters
+/// (`<`, `>`, `"`, `'`) and URL-decoding actually transforms it. Such
+/// payloads reflected verbatim are inert in HTML body, non-URL attribute,
+/// `<script>`, `<style>`, and event-handler contexts — none of those
+/// parsers percent-decode their content. The one remaining execution path
+/// (URL-valued attributes navigating to an executable scheme) is handled
+/// separately by [`url_encoded_payload_reflects_in_unsafe_url_context`].
+fn payload_is_fully_url_encoded(payload: &str) -> bool {
+    if payload.contains(['<', '>', '"', '\'']) {
+        return false;
+    }
+    let Ok(decoded) = urlencoding::decode(payload) else {
+        return false;
+    };
+    decoded.as_ref() != payload
+}
+
+/// True when a percent-encoded payload that decodes to a JS-executable URL
+/// scheme (`javascript:`, `data:text/html`, `data:image/svg`, `vbscript:`)
+/// is reflected inside at least one URL-valued attribute. URL attributes
+/// are the one context where browsers percent-decode the value (when
+/// parsing the URL), so a dangerous decoded scheme there is exploitable
+/// on navigation. Other contexts (body, non-URL attr, script, style,
+/// event-handler) never decode percent encoding, so they remain safe.
+fn url_encoded_payload_reflects_in_unsafe_url_context(html: &str, payload: &str) -> bool {
+    let Ok(decoded) = urlencoding::decode(payload) else {
+        return false;
+    };
+    let lower = decoded.trim_start().to_ascii_lowercase();
+    let dangerous_scheme = lower.starts_with("javascript:")
+        || lower.starts_with("data:text/html")
+        || lower.starts_with("data:image/svg")
+        || lower.starts_with("vbscript:");
+    if !dangerous_scheme {
+        return false;
+    }
+    let bytes = html.as_bytes();
+    let mut search_start = 0;
+    while let Some(pos) = html[search_start..].find(payload) {
+        let abs = search_start + pos;
+        if occurrence_is_in_url_attr(bytes, abs) {
+            return true;
+        }
+        search_start = next_char_boundary(html, abs + 1);
+    }
+    false
+}
+
 /// Determine if payload is reflected in any normalization variant.
 pub(crate) fn classify_reflection(resp_text: &str, payload: &str) -> Option<ReflectionKind> {
     // Direct match first (fast path — avoids payload_variants allocation)
@@ -647,6 +695,16 @@ pub(crate) fn classify_reflection(resp_text: &str, payload: &str) -> Option<Refl
             if !html_entity_reflection_in_unsafe_context(resp_text, &variants) {
                 return None;
             }
+        }
+        // Same FP guard for percent-encoded payloads: `%3C` etc. survive
+        // HTML/JS/CSS parsing as literal text — no parser decodes percent
+        // encoding inside its tokens. The only execution path is when the
+        // payload lands inside a URL-valued attribute and decodes to an
+        // executable URL scheme (`javascript:`, `data:text/html`, etc.).
+        if payload_is_fully_url_encoded(payload)
+            && !url_encoded_payload_reflects_in_unsafe_url_context(resp_text, payload)
+        {
+            return None;
         }
         return Some(ReflectionKind::Raw);
     }

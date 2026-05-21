@@ -390,6 +390,106 @@ fn test_classify_reflection_keeps_entity_encoded_payload_in_event_handler() {
 }
 
 #[test]
+fn test_classify_reflection_demotes_url_encoded_payload_in_html_body() {
+    // The `url` adaptive encoder produces `%3Cbr%3E`. Reflected verbatim
+    // in HTML body context, no HTML / JS / CSS parser decodes percent
+    // sequences, so the reflection is inert. Without this guard the fast
+    // path returned `Raw` and surfaced as [R] Info noise.
+    let payload = "%3Cscript%3Ealert(1)%3C%2Fscript%3E";
+    let resp = format!("<div>echo {} done</div>", payload);
+    assert_eq!(classify_reflection(&resp, payload), None);
+}
+
+#[test]
+fn test_classify_reflection_demotes_double_url_encoded_payload_in_html_body() {
+    // `2url` encoder doubles the percent layer (`%253C…`). Iterative URL
+    // decode via `payload_variants` collapses both layers and ultimately
+    // produces `<>` — the guard must demote.
+    let payload = "%253Cscript%253Ealert(1)%253C%252Fscript%253E";
+    let resp = format!("<p>{}</p>", payload);
+    assert_eq!(classify_reflection(&resp, payload), None);
+}
+
+#[test]
+fn test_classify_reflection_demotes_url_encoded_payload_in_event_handler() {
+    // `%XX` is NOT decoded by the HTML parser inside attribute values, so
+    // it is also inert in event-handler contexts. Unlike entity-encoded
+    // payloads, URL-encoded payloads can be safely demoted here too.
+    let payload = "%3Cscript%3E";
+    let resp = "<button onclick=\"x='%3Cscript%3E'\">x</button>";
+    assert_eq!(classify_reflection(resp, payload), None);
+}
+
+#[test]
+fn test_classify_reflection_demotes_url_encoded_payload_in_script_block() {
+    // Inside `<script>` the JS parser sees `%XX` as literal characters
+    // (likely a syntax error), never as `<` or `>`. Safe.
+    let payload = "%3Cscript%3E";
+    let resp = "<script>var x = '%3Cscript%3E';</script>";
+    assert_eq!(classify_reflection(resp, payload), None);
+}
+
+#[test]
+fn test_classify_reflection_keeps_url_encoded_javascript_scheme_in_href() {
+    // URL-valued attributes are the one context where the browser DOES
+    // percent-decode the value (when parsing the URL on navigation). A
+    // payload decoding to `javascript:alert(1)` reflected in `href` IS
+    // exploitable — the finding must survive.
+    let payload = "javascript%3Aalert%281%29";
+    let resp = format!("<a href=\"{}\">click</a>", payload);
+    assert_eq!(
+        classify_reflection(&resp, payload),
+        Some(ReflectionKind::Raw)
+    );
+}
+
+#[test]
+fn test_classify_reflection_keeps_url_encoded_data_html_in_href() {
+    // `data:text/html` URLs execute inline content on navigation.
+    let payload = "data%3Atext%2Fhtml%2C%3Cscript%3Ealert(1)%3C%2Fscript%3E";
+    let resp = format!("<iframe src=\"{}\"></iframe>", payload);
+    assert_eq!(
+        classify_reflection(&resp, payload),
+        Some(ReflectionKind::Raw)
+    );
+}
+
+#[test]
+fn test_classify_reflection_demotes_url_encoded_javascript_scheme_outside_url_attr() {
+    // Same `javascript:`-scheme payload but reflected only in body text.
+    // Without a URL attribute boundary the browser never navigates to
+    // it — pure text rendering, safe.
+    let payload = "javascript%3Aalert%281%29";
+    let resp = format!("<div>visit {} please</div>", payload);
+    assert_eq!(classify_reflection(&resp, payload), None);
+}
+
+#[test]
+fn test_classify_reflection_demotes_url_encoded_javascript_scheme_in_non_url_attr() {
+    // `title` is not a URL-valued attribute, so the browser never
+    // percent-decodes its content for URL parsing. URL-encoded
+    // `javascript:` here just renders as a tooltip string — safe.
+    let payload = "javascript%3Aalert%281%29";
+    let resp = format!("<span title=\"{}\">x</span>", payload);
+    assert_eq!(classify_reflection(&resp, payload), None);
+}
+
+#[test]
+fn test_payload_is_fully_url_encoded_detection() {
+    assert!(payload_is_fully_url_encoded("%3Cscript%3E"));
+    // `javascript:`-scheme payload: decoded form differs even though it
+    // contains no raw `<>"'`. The URL-attr-scheme check downstream is
+    // responsible for keeping these when reflected in href/src/etc.
+    assert!(payload_is_fully_url_encoded("javascript%3Aalert%281%29"));
+    // Double-URL form decodes to another encoded layer — still differs.
+    assert!(payload_is_fully_url_encoded("%253Cscript%253E"));
+    // Raw `<` present — not fully encoded
+    assert!(!payload_is_fully_url_encoded("<script>%3C"));
+    // No percent encoding — URL decode is a no-op.
+    assert!(!payload_is_fully_url_encoded("plain text"));
+}
+
+#[test]
 fn test_classify_reflection_keeps_mixed_payload_with_raw_specials() {
     // The payload mixes entity-encoded fragments with raw `<` / `>`, so the
     // raw portion creates real markup when reflected. The full-entity guard
