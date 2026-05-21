@@ -328,11 +328,15 @@ async fn run_ast_dom_analysis(
 ) -> Vec<crate::scanning::result::Result> {
     let mut results = Vec::new();
     let js_blocks = crate::scanning::ast_integration::extract_javascript_from_html(response_text);
+    let script_element_ids =
+        crate::scanning::ast_integration::extract_script_element_ids(response_text);
     for js_code in js_blocks {
-        let findings = crate::scanning::ast_integration::analyze_javascript_for_dom_xss(
-            &js_code,
-            target.url.as_str(),
-        );
+        let findings =
+            crate::scanning::ast_integration::analyze_javascript_for_dom_xss_with_html_context(
+                &js_code,
+                target.url.as_str(),
+                &script_element_ids,
+            );
         for (vuln, payload, description) in findings {
             let self_bootstrap_verified =
                 crate::scanning::ast_integration::has_self_bootstrap_verification(

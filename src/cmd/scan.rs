@@ -2218,10 +2218,12 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                     && let Some(response_text) = preflight_response_body {
                         let mut ast_batch: Vec<crate::scanning::result::Result> = Vec::new();
                         let js_blocks = crate::scanning::ast_integration::extract_javascript_from_html(&response_text);
+                        let script_element_ids = crate::scanning::ast_integration::extract_script_element_ids(&response_text);
                         for js_code in js_blocks {
-                            let findings = crate::scanning::ast_integration::analyze_javascript_for_dom_xss(
+                            let findings = crate::scanning::ast_integration::analyze_javascript_for_dom_xss_with_html_context(
                                 &js_code,
                                 target.url.as_str(),
+                                &script_element_ids,
                             );
                             for (vuln, payload, description) in findings {
                                 let self_bootstrap_verified =

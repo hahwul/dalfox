@@ -1,6 +1,29 @@
 use scraper::Html;
+use std::collections::HashSet;
 
 use super::selectors;
+
+/// Collect the `id` attribute of every `<script>` element in `html`.
+///
+/// Used to teach the AST DOM analyzer that an inline call like
+/// `document.getElementById('scriptTag').innerText = tainted` is writing
+/// into a `<script>` body — i.e. an eval-equivalent sink — even when the
+/// JS file has no `document.createElement('script')` of its own. The
+/// caller threads the returned set into `AstDomAnalyzer::with_script_element_ids`.
+pub fn extract_script_element_ids(html: &str) -> HashSet<String> {
+    let mut ids = HashSet::new();
+    let document = Html::parse_document(html);
+    let selector = selectors::script();
+    for element in document.select(selector) {
+        if let Some(id) = element.value().attr("id") {
+            let trimmed = id.trim();
+            if !trimmed.is_empty() {
+                ids.insert(trimmed.to_string());
+            }
+        }
+    }
+    ids
+}
 
 /// Extract JavaScript code from HTML response
 /// Looks for <script> tags and inline event handlers
@@ -620,7 +643,24 @@ pub fn analyze_javascript_for_dom_xss(
     String,
     String,
 )> {
-    let analyzer = crate::scanning::ast_dom_analysis::AstDomAnalyzer::new();
+    analyze_javascript_for_dom_xss_with_html_context(js_code, _url, &HashSet::new())
+}
+
+/// Same as `analyze_javascript_for_dom_xss`, but supplies the AST analyzer
+/// with the set of `<script>` element IDs observed in the surrounding HTML
+/// so inline `getElementById('id').innerText = tainted` shapes resolve to
+/// a JS-eval sink. Use `extract_script_element_ids(html)` to build the set.
+pub fn analyze_javascript_for_dom_xss_with_html_context(
+    js_code: &str,
+    _url: &str,
+    script_element_ids: &HashSet<String>,
+) -> Vec<(
+    crate::scanning::ast_dom_analysis::DomXssVulnerability,
+    String,
+    String,
+)> {
+    let analyzer = crate::scanning::ast_dom_analysis::AstDomAnalyzer::new()
+        .with_script_element_ids(script_element_ids.clone());
 
     match analyzer.analyze(js_code) {
         Ok(vulnerabilities) => {
