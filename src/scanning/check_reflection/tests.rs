@@ -335,6 +335,70 @@ fn test_is_payload_reflected_html_encoded_in_attribute_value_demoted() {
 }
 
 #[test]
+fn test_classify_reflection_demotes_entity_encoded_payload_in_html_body() {
+    // The payload itself is HTML-entity encoded (e.g. encoder produced
+    // `&#x003c;br&#x003e;`). The server reflects it verbatim into HTML body
+    // context. Browsers decode the entities into literal text characters
+    // and do NOT re-parse them as markup, so no `<br>` element is created.
+    // Classification must demote — surfacing this as [R] is the false
+    // positive we are trying to eliminate.
+    let payload = "&#x003c;br&#x003e;";
+    let resp = "<div>Hello &#x003c;br&#x003e; world</div>";
+    assert_eq!(classify_reflection(resp, payload), None);
+}
+
+#[test]
+fn test_classify_reflection_demotes_entity_encoded_named_payload_in_html_body() {
+    // Same idea using named entities. `&lt;img src=x onerror=alert(1)&gt;`
+    // reflected verbatim into body context renders as visible text, not as
+    // an `<img>` element.
+    let payload = "&lt;img src=x onerror=alert(1)&gt;";
+    let resp = format!("<p>echo: {} done</p>", payload);
+    assert_eq!(classify_reflection(&resp, payload), None);
+}
+
+#[test]
+fn test_classify_reflection_keeps_entity_encoded_payload_in_event_handler() {
+    // Inside an `on*=` attribute the browser decodes HTML entities before
+    // handing the value to the JS parser, so an entity-encoded payload
+    // landing there IS exploitable. The reflection must survive.
+    let payload = "&#x27;-alert(1)-&#x27;";
+    let resp = "<button onclick=\"x=&#x27;-alert(1)-&#x27;\">x</button>";
+    assert_eq!(
+        classify_reflection(resp, payload),
+        Some(ReflectionKind::Raw)
+    );
+}
+
+#[test]
+fn test_classify_reflection_keeps_mixed_payload_with_raw_specials() {
+    // The payload mixes entity-encoded fragments with raw `<` / `>`, so the
+    // raw portion creates real markup when reflected. The full-entity guard
+    // must NOT demote here.
+    let payload = "&#x003c;br&#x003e;<script>alert(1)</script>";
+    let resp = format!("<div>{}</div>", payload);
+    assert_eq!(
+        classify_reflection(&resp, payload),
+        Some(ReflectionKind::Raw)
+    );
+}
+
+#[test]
+fn test_payload_is_fully_entity_encoded_detection() {
+    assert!(payload_is_fully_entity_encoded("&#x003c;br&#x003e;"));
+    assert!(payload_is_fully_entity_encoded(
+        "&lt;script&gt;alert(1)&lt;/script&gt;"
+    ));
+    // Has raw `<` — not fully encoded
+    assert!(!payload_is_fully_entity_encoded("<br>"));
+    // Has no entities at all
+    assert!(!payload_is_fully_entity_encoded("plain text"));
+    // Entity decodes to something with no HTML-significant chars — not the
+    // shape this guard cares about (won't change reflection semantics).
+    assert!(!payload_is_fully_entity_encoded("&#x41;"));
+}
+
+#[test]
 fn test_is_payload_reflected_html_encoded_in_event_handler_kept() {
     // The browser decodes entities inside an `on*=…` attribute value before
     // handing the result to the JS parser, so entity escaping is not

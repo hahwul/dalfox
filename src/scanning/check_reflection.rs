@@ -609,10 +609,42 @@ fn html_entity_reflection_in_unsafe_context(html: &str, variants: &[String]) -> 
     false
 }
 
+/// True when every HTML-significant character (`<`, `>`, `"`, `'`) in the
+/// payload is already represented as an HTML entity reference. Such payloads
+/// reflected verbatim are inert in HTML body / regular-attribute contexts —
+/// the browser decodes the entities into text characters rather than
+/// re-parsing them as markup, so no element or attribute boundary is
+/// crossed. Returns `false` when the payload carries any raw structural
+/// character (which would be exploitable on reflection).
+fn payload_is_fully_entity_encoded(payload: &str) -> bool {
+    if payload.contains(['<', '>', '"', '\'']) {
+        return false;
+    }
+    let decoded = decode_html_entities(payload);
+    decoded != payload && decoded.contains(['<', '>', '"', '\''])
+}
+
 /// Determine if payload is reflected in any normalization variant.
 pub(crate) fn classify_reflection(resp_text: &str, payload: &str) -> Option<ReflectionKind> {
     // Direct match first (fast path — avoids payload_variants allocation)
     if resp_text.contains(payload) {
+        // False-positive guard: when the payload is itself HTML-entity
+        // encoded (e.g. `&#x003c;br&#x003e;`, `&lt;script&gt;alert(1)&lt;/script&gt;`)
+        // and the response reflects that exact encoded form, the reflection
+        // is functionally equivalent to the server having entity-escaped its
+        // output — both render as literal text in HTML body / non-event
+        // attribute context rather than as executable markup. Reuse the same
+        // safe-context heuristic the entity-decoded path below applies so
+        // these reflections do not surface as [R] noise. Keep the finding
+        // when the reflection lands in a context where entity escaping is
+        // not sufficient (event-handler attributes, `<script>` / `<style>`
+        // raw-text bodies).
+        if payload_is_fully_entity_encoded(payload) {
+            let variants = [payload.to_string()];
+            if !html_entity_reflection_in_unsafe_context(resp_text, &variants) {
+                return None;
+            }
+        }
         return Some(ReflectionKind::Raw);
     }
 
