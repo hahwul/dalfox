@@ -242,6 +242,31 @@ fn is_executable_url_attribute(element_tag: &str, attr_name: &str) -> bool {
     }
 }
 
+/// Decide whether a reflected attribute value should count as an executable
+/// URL hit for `payload_trimmed`. The previous check required strict equality,
+/// which over-rejected real exploits like `<a href="javascript:alert(1)//xyz">`
+/// where the server appends or prepends bytes around our reflected scheme.
+///
+/// Browsers parse the *whole* attribute value as a single URL, so the
+/// observable rule is: the trimmed value must start with one of the
+/// executable URL schemes (case-insensitive), and the bytes of `payload_trimmed`
+/// must appear verbatim somewhere in the value so we know the payload
+/// genuinely drives the execution rather than merely sharing a scheme with an
+/// unrelated server-emitted `javascript:` URL.
+fn attribute_value_executes_payload(value: &str, payload_trimmed: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.eq_ignore_ascii_case(payload_trimmed) {
+        return true;
+    }
+    let starts_executable = starts_with_ascii_ci(trimmed, "javascript:")
+        || starts_with_ascii_ci(trimmed, "data:text/html")
+        || starts_with_ascii_ci(trimmed, "vbscript:");
+    if !starts_executable {
+        return false;
+    }
+    trimmed.contains(payload_trimmed)
+}
+
 fn has_executable_url_attribute_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
     if !payload_is_executable_url_protocol(payload) {
         return false;
@@ -254,7 +279,7 @@ fn has_executable_url_attribute_evidence_in_doc(payload: &str, document: &scrape
         let tag = node.value().name();
         node.value().attrs().any(|(name, value)| {
             is_executable_url_attribute(tag, name)
-                && value.trim().eq_ignore_ascii_case(payload_trimmed)
+                && attribute_value_executes_payload(value, payload_trimmed)
         })
     })
 }

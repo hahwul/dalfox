@@ -114,9 +114,23 @@ pub fn generate_dom_xss_poc(source: &str, sink: &str) -> (String, String) {
         sink,
         "src" | "href" | "xlink:href" | "action" | "formaction" | "poster" | "background"
     );
+    // Sinks whose value is fed directly to a JS evaluator. `script.text` /
+    // `script.textContent` / `script.innerText` are listed alongside the
+    // classic eval family because once the created script element is
+    // appended to the DOM the browser parses the assigned value as JS
+    // source verbatim — same effective shape as `eval(payload)`.
     let is_js_eval_sink = matches!(
         sink,
-        "eval" | "Function" | "setTimeout" | "setInterval" | "execScript" | "execCommand"
+        "eval"
+            | "Function"
+            | "setTimeout"
+            | "setInterval"
+            | "execScript"
+            | "execCommand"
+            | "script.text"
+            | "script.textContent"
+            | "script.innerText"
+            | "script.innerHTML"
     );
     let attr_url_payload = format!("data:text/javascript,alert(1)/*{}*/", marker);
     let js_eval_payload = format!("alert(1)/*{}*/", marker);
