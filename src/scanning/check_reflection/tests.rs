@@ -475,6 +475,74 @@ fn test_classify_reflection_demotes_url_encoded_javascript_scheme_in_non_url_att
 }
 
 #[test]
+fn test_classify_reflection_demotes_fullwidth_payload_in_html_body() {
+    // `unicode` adaptive encoder maps ASCII to fullwidth (U+FF01-U+FF5E).
+    // `<br>` becomes `＜br＞`. Browsers never normalize fullwidth to ASCII,
+    // so the reflection cannot start a tag — must demote.
+    let payload = "\u{ff1c}br\u{ff1e}";
+    let resp = format!("<div>echo {} done</div>", payload);
+    assert_eq!(classify_reflection(&resp, payload), None);
+}
+
+#[test]
+fn test_classify_reflection_demotes_fullwidth_payload_in_event_handler() {
+    // Fullwidth bytes are inert in every parser, including the JS parser
+    // reached via event-handler entity decoding.
+    let payload = "\u{ff1c}script\u{ff1e}alert(1)\u{ff1c}/script\u{ff1e}";
+    let resp = format!("<button onclick=\"x='{}'\">x</button>", payload);
+    assert_eq!(classify_reflection(&resp, payload), None);
+}
+
+#[test]
+fn test_classify_reflection_demotes_fullwidth_payload_in_script_block() {
+    let payload = "\u{ff1c}svg onload=alert(1)\u{ff1e}";
+    let resp = format!("<script>var x = '{}';</script>", payload);
+    assert_eq!(classify_reflection(&resp, payload), None);
+}
+
+#[test]
+fn test_classify_reflection_demotes_fullwidth_payload_in_href() {
+    // Even URL-valued attributes are safe — fullwidth `:` (U+FF1A) isn't
+    // recognized as a scheme delimiter by URL parsers.
+    let payload = "javascript\u{ff1a}alert(1)";
+    let resp = format!("<a href=\"{}\">x</a>", payload);
+    assert_eq!(classify_reflection(&resp, payload), None);
+}
+
+#[test]
+fn test_classify_reflection_keeps_mixed_fullwidth_and_raw_specials() {
+    // A payload mixing fullwidth and raw `<` still has the raw structural
+    // char, so reflection IS exploitable. Guard must not demote.
+    let payload = "\u{ff1c}br\u{ff1e}<script>alert(1)</script>";
+    let resp = format!("<div>{}</div>", payload);
+    assert_eq!(
+        classify_reflection(&resp, payload),
+        Some(ReflectionKind::Raw)
+    );
+}
+
+#[test]
+fn test_payload_is_fully_fullwidth_encoded_detection() {
+    assert!(payload_is_fully_fullwidth_encoded("\u{ff1c}br\u{ff1e}"));
+    assert!(payload_is_fully_fullwidth_encoded(
+        "\u{ff1c}script\u{ff1e}alert(1)\u{ff1c}/script\u{ff1e}"
+    ));
+    // Fullwidth `:` enough to gate — covers fullwidth `javascript:` URLs
+    // which the URL parser also refuses to recognize as a scheme.
+    assert!(payload_is_fully_fullwidth_encoded(
+        "javascript\u{ff1a}alert(1)"
+    ));
+    // Raw `<` present — not fully encoded
+    assert!(!payload_is_fully_fullwidth_encoded("<br>"));
+    // No fullwidth chars at all
+    assert!(!payload_is_fully_fullwidth_encoded("plain text"));
+    // A non-fullwidth non-ASCII char (CJK) by itself doesn't qualify —
+    // the guard is specifically for the U+FF01-U+FF5E ASCII-fullwidth
+    // block produced by `unicode_fullwidth_encode`.
+    assert!(!payload_is_fully_fullwidth_encoded("\u{4e2d}"));
+}
+
+#[test]
 fn test_payload_is_fully_url_encoded_detection() {
     assert!(payload_is_fully_url_encoded("%3Cscript%3E"));
     // `javascript:`-scheme payload: decoded form differs even though it

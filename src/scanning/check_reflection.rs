@@ -628,6 +628,22 @@ fn payload_is_fully_entity_encoded(payload: &str) -> bool {
 }
 
 /// True when the payload carries no raw structural HTML characters
+/// (`<`, `>`, `"`, `'`) but does contain at least one ASCII-fullwidth
+/// codepoint (U+FF01-U+FF5E). Output of the `unicode` adaptive encoder.
+/// Reflected verbatim such payloads are inert in every browser context:
+/// fullwidth codepoints are distinct Unicode characters, never normalized
+/// to ASCII by the HTML, JS, CSS, or URL parsers, so they cannot start a
+/// tag, break an attribute, or form an executable URL scheme.
+fn payload_is_fully_fullwidth_encoded(payload: &str) -> bool {
+    if payload.contains(['<', '>', '"', '\'']) {
+        return false;
+    }
+    payload
+        .chars()
+        .any(|c| (0xFF01..=0xFF5E).contains(&(c as u32)))
+}
+
+/// True when the payload carries no raw structural HTML characters
 /// (`<`, `>`, `"`, `'`) and URL-decoding actually transforms it. Such
 /// payloads reflected verbatim are inert in HTML body, non-URL attribute,
 /// `<script>`, `<style>`, and event-handler contexts — none of those
@@ -704,6 +720,15 @@ pub(crate) fn classify_reflection(resp_text: &str, payload: &str) -> Option<Refl
         if payload_is_fully_url_encoded(payload)
             && !url_encoded_payload_reflects_in_unsafe_url_context(resp_text, payload)
         {
+            return None;
+        }
+        // Fullwidth-unicode payloads (`unicode` adaptive encoder, e.g.
+        // `＜br＞` made of U+FF1C/U+FF1E) reflected verbatim are inert in
+        // every browser context: those codepoints are never normalized to
+        // ASCII `<>` by any parser, so they can't start a tag or escape
+        // an attribute. Demote unconditionally — there is no analogue to
+        // the URL-scheme exception here.
+        if payload_is_fully_fullwidth_encoded(payload) {
             return None;
         }
         return Some(ReflectionKind::Raw);
