@@ -2985,6 +2985,34 @@ document.body.appendChild(s);
 }
 
 #[test]
+fn detects_script_inner_html_assignment_without_duplicate_finding() {
+    // `s.innerHTML = tainted` where `s` is a script element must be
+    // reported as `script.innerHTML` (the form the PoC generator emits
+    // raw JS for). The generic `innerHTML` sink path must NOT fire in
+    // addition — otherwise the same line surfaces twice.
+    let js = r#"
+const s = document.createElement('script');
+s.innerHTML = location.hash.slice(1);
+document.body.appendChild(s);
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    let script_findings: Vec<_> = r.iter().filter(|v| v.sink == "script.innerHTML").collect();
+    let generic_findings: Vec<_> = r.iter().filter(|v| v.sink == "innerHTML").collect();
+    assert_eq!(
+        script_findings.len(),
+        1,
+        "expected exactly one script.innerHTML finding; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+    assert!(
+        generic_findings.is_empty(),
+        "script-element sink must suppress the generic innerHTML report; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn script_text_sink_does_not_fire_on_div_element() {
     let js = r#"
 const d = document.createElement('div');

@@ -156,11 +156,11 @@ const DOM_SOURCES: &[&str] = &[
     "XMLHttpRequest.responseText",
     "XMLHttpRequest.response",
     // Clipboard reads on `paste` events expose attacker-controlled bytes from
-    // the OS clipboard. The `getData(...)` call is the canonical reach.
+    // the OS clipboard. The `getData(...)` call is the canonical reach; the
+    // bare `clipboardData` object holds metadata (`.types`, `.files`, …) that
+    // isn't user-controlled string content, so we don't mark it as a source.
     "event.clipboardData.getData",
     "e.clipboardData.getData",
-    "event.clipboardData",
-    "e.clipboardData",
     "navigator.clipboard.readText",
     // Keyboard / composition events – `key` / `code` carry user input
     // verbatim and are the natural source on autocompletion-style handlers.
@@ -2368,7 +2368,13 @@ impl<'a> DomXssVisitor<'a> {
                         right_source.clone(),
                     );
                 }
-                let is_sink = self.is_assignment_sink_property(prop_name);
+                // Suppress the generic assignment-sink path when the more
+                // specific script-element sink already fired — otherwise
+                // `s.innerHTML = tainted` (where `s` is a script element)
+                // would surface twice, once as `script.innerHTML` and once
+                // as the generic `innerHTML`. The script-element form is
+                // the correct one for PoC payload selection.
+                let is_sink = !script_text_sink && self.is_assignment_sink_property(prop_name);
 
                 // Also check if the full member path is a sink (e.g., location.href)
                 let full_path_is_sink = if let Some(full_path) = self.get_member_string(member) {
