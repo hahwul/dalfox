@@ -457,9 +457,12 @@ pub enum ReflectionKind {
 ///   "&#60;alert(1)&#62;"  -> "<alert(1)>"
 fn decode_html_entities(input: &str) -> String {
     // Match patterns like &#xHH; or &#xHHHH; or &#DDDD; (hex 'x' is case-insensitive)
-    // We purposely limit to reasonable length to avoid catastrophic replacements.
+    // Upper bound is 8 hex / 8 decimal digits — covers zero-padded WAF-bypass
+    // payloads emitted by `html_entity_zero_padded_encode` (`&#x0000003c;`,
+    // 7 hex digits) while still capping the regex so a pathological response
+    // can't fan out into catastrophic replacements.
     let re = ENTITY_REGEX.get_or_init(|| {
-        Regex::new(r"&#([xX][0-9a-fA-F]{2,6}|[0-9]{2,6});")
+        Regex::new(r"&#([xX][0-9a-fA-F]{2,8}|[0-9]{2,8});")
             .expect("entity regex pattern must be valid")
     });
     let mut out = String::with_capacity(input.len());

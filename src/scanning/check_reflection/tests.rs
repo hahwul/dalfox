@@ -288,6 +288,25 @@ fn test_decode_html_entities_ignores_invalid_numeric_sequences() {
 }
 
 #[test]
+fn test_decode_html_entities_zero_padded_hex() {
+    // Output shape of `html_entity_zero_padded_encode` — 7 hex digits per char.
+    // The regex must accept this length so the resulting payload classifies
+    // as entity-encoded by the same safe-context guard the 4-digit form uses.
+    let s = "&#x0000003c;script&#x0000003e;alert(1)&#x0000003c;/script&#x0000003e;";
+    let d = decode_html_entities(s);
+    assert_eq!(d, "<script>alert(1)</script>");
+}
+
+#[test]
+fn test_decode_html_entities_eight_digit_hex_boundary() {
+    // 8 hex digits is the new upper bound. Verify it still decodes and that
+    // 9-digit sequences fall through as literal text (regex must not match).
+    assert_eq!(decode_html_entities("&#x0000003e;"), ">");
+    let nine = "&#x000000003e;";
+    assert_eq!(decode_html_entities(nine), nine);
+}
+
+#[test]
 fn test_classify_reflection_prefers_raw_match() {
     let payload = "<script>alert(1)</script>";
     let resp = format!("raw:{} encoded:{}", payload, urlencoding::encode(payload));
@@ -379,6 +398,30 @@ fn test_classify_reflection_keeps_mixed_payload_with_raw_specials() {
     let resp = format!("<div>{}</div>", payload);
     assert_eq!(
         classify_reflection(&resp, payload),
+        Some(ReflectionKind::Raw)
+    );
+}
+
+#[test]
+fn test_classify_reflection_demotes_zero_padded_entity_payload_in_html_body() {
+    // `html_entity_zero_padded_encode` is a common WAF-bypass encoder. With
+    // the entity regex bumped to {2,8}, these payloads decode the same way
+    // 4-digit hex entities do, so the entity-encoded safe-context guard
+    // automatically demotes verbatim reflections in HTML body context.
+    let payload = "&#x0000003c;br&#x0000003e;";
+    let resp = "<div>echo &#x0000003c;br&#x0000003e; done</div>";
+    assert_eq!(classify_reflection(resp, payload), None);
+}
+
+#[test]
+fn test_classify_reflection_keeps_zero_padded_entity_payload_in_event_handler() {
+    // Same context rule as the 4-digit case: zero-padded entities decoded
+    // inside an `on*=` attribute can still produce JS-significant chars,
+    // so the reflection must survive.
+    let payload = "&#x00000027;-alert(1)-&#x00000027;";
+    let resp = "<button onclick=\"x=&#x00000027;-alert(1)-&#x00000027;\">x</button>";
+    assert_eq!(
+        classify_reflection(resp, payload),
         Some(ReflectionKind::Raw)
     );
 }
