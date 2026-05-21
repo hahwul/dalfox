@@ -2927,3 +2927,93 @@ document.body.innerHTML = cfg.title;
         "JSON.parse(tainted) → property access → innerHTML must surface"
     );
 }
+
+#[test]
+fn detects_set_html_unsafe_method_call() {
+    let js = r#"
+const el = document.getElementById('out');
+el.setHTMLUnsafe(location.hash.slice(1));
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.iter()
+            .any(|v| v.source.contains("location.hash") && v.sink == "setHTMLUnsafe"),
+        "setHTMLUnsafe is an explicit-unsafe HTML parsing sink: got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn detects_script_text_assignment_from_hash() {
+    let js = r#"
+const s = document.createElement('script');
+s.text = location.hash.slice(1);
+document.body.appendChild(s);
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.iter()
+            .any(|v| v.source.contains("location.hash") && v.sink == "script.text"),
+        "script.text assignment runs the value as JS once appended: got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn detects_script_text_content_assignment_from_search() {
+    let js = r#"
+const s = document.createElement('script');
+const q = new URLSearchParams(location.search).get('q');
+s.textContent = q;
+document.body.appendChild(s);
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.iter().any(|v| v.sink == "script.textContent"),
+        "script.textContent assignment from URLSearchParams.get must surface: got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn script_text_sink_does_not_fire_on_div_element() {
+    let js = r#"
+const d = document.createElement('div');
+d.text = location.hash.slice(1);
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        !r.iter().any(|v| v.sink.starts_with("script.")),
+        ".text on a non-script element is not a sink; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn clipboard_get_data_is_recognised_as_source() {
+    let js = r#"
+document.addEventListener('paste', function(e) {
+    document.body.innerHTML = e.clipboardData.getData('text');
+});
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.iter()
+            .any(|v| v.sink == "innerHTML" && v.source.contains("clipboardData")),
+        "paste-event clipboardData.getData → innerHTML must surface; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}

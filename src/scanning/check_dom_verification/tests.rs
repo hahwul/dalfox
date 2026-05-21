@@ -610,6 +610,34 @@ fn test_has_executable_url_attribute_evidence_detects_iframe_src_protocol() {
     assert!(has_dom_evidence(payload, body));
 }
 
+/// The server-side template often appends bytes around the reflected
+/// payload (a trailing comment, a serialized `&next=…`, an HTML entity).
+/// Browsers parse the entire attribute value as one URL, so when the value
+/// still *starts* with an executable scheme and the payload bytes appear
+/// verbatim inside it, the navigation still fires. The previous strict
+/// equality check rejected these, costing real findings.
+#[test]
+fn test_has_executable_url_attribute_evidence_with_trailing_bytes() {
+    let payload = "javascript:alert(1)";
+    let body = "<html><body><a href=\"javascript:alert(1)//&next=/home\">go</a></body></html>";
+    assert!(
+        has_dom_evidence(payload, body),
+        "trailing bytes after the reflected javascript: URL must still verify"
+    );
+}
+
+#[test]
+fn test_has_executable_url_attribute_evidence_not_a_substring_match() {
+    // Page already had its own javascript: URL; our payload appears nowhere
+    // inside the attribute value. Must NOT count as evidence.
+    let payload = "javascript:alert(1)";
+    let body = "<html><body><a href=\"javascript:console.log('hi')\">x</a></body></html>";
+    assert!(
+        !has_dom_evidence(payload, body),
+        "an unrelated javascript: URL must not verify our payload"
+    );
+}
+
 #[test]
 fn test_has_dom_evidence_skips_parse_for_irrelevant_payload() {
     // Payload has neither Dalfox markers nor an executable URL protocol,

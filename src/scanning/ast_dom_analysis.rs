@@ -88,6 +88,12 @@ struct DomXssVisitor<'a> {
     url_search_params_objects: HashSet<String>,
     /// Track `paramsVar.key -> upstream source` for URLSearchParams set/get reparses.
     url_search_params_field_sources: HashMap<String, String>,
+    /// Variables that hold a `<script>` element created via
+    /// `document.createElement('script')`. Assigning a tainted value to
+    /// `.text` / `.textContent` / `.innerText` / `.innerHTML` on these
+    /// variables runs the value as JS once the element is appended, which
+    /// is otherwise indistinguishable from a harmless text assignment.
+    script_element_vars: HashSet<String>,
 }
 
 // Module-level DOM source/sink/sanitizer constants
@@ -149,6 +155,28 @@ const DOM_SOURCES: &[&str] = &[
     "Response.json",
     "XMLHttpRequest.responseText",
     "XMLHttpRequest.response",
+    // Clipboard reads on `paste` events expose attacker-controlled bytes from
+    // the OS clipboard. The `getData(...)` call is the canonical reach.
+    "event.clipboardData.getData",
+    "e.clipboardData.getData",
+    "event.clipboardData",
+    "e.clipboardData",
+    "navigator.clipboard.readText",
+    // Keyboard / composition events – `key` / `code` carry user input
+    // verbatim and are the natural source on autocompletion-style handlers.
+    "event.key",
+    "e.key",
+    "event.code",
+    "e.code",
+    // `event.target.innerText` / `textContent` / `innerHTML` is the common
+    // contenteditable / paste-into-div shape: the user typed it, so the
+    // value is tainted at read time.
+    "event.target.innerText",
+    "e.target.innerText",
+    "event.target.textContent",
+    "e.target.textContent",
+    "event.target.innerHTML",
+    "e.target.innerHTML",
 ];
 
 const DOM_SINKS: &[&str] = &[
@@ -177,6 +205,12 @@ const DOM_SINKS: &[&str] = &[
     "after",
     "before",
     "execCommand",
+    // Modern Sanitizer-API methods. `setHTML` accepts a Sanitizer config and
+    // strips known XSS vectors, so on its own it is not an exploitable sink —
+    // we leave it out. `setHTMLUnsafe` is explicitly the opt-out path that
+    // parses the argument as HTML with no sanitization, which is exactly the
+    // shape of an exploitable injection.
+    "setHTMLUnsafe",
 ];
 
 const DOM_SANITIZERS: &[&str] = &[
@@ -449,7 +483,51 @@ impl<'a> DomXssVisitor<'a> {
             url_search_params_sources: HashMap::new(),
             url_search_params_objects: HashSet::new(),
             url_search_params_field_sources: HashMap::new(),
+            script_element_vars: HashSet::new(),
         }
+    }
+
+    /// Recognise `document.createElement('script')` (and the spelling variants
+    /// the AST gives us) so the caller can remember which JS variables hold a
+    /// script element. We accept the call with a case-insensitive `script`
+    /// argument because HTML element tag names are case-insensitive.
+    fn expr_creates_script_element(&self, expr: &Expression<'a>) -> bool {
+        let Expression::CallExpression(call) = expr else {
+            return false;
+        };
+        let callee = match &call.callee {
+            Expression::StaticMemberExpression(m) => self.get_member_string(m),
+            _ => None,
+        };
+        if callee.as_deref() != Some("document.createElement") {
+            return false;
+        }
+        let Some(arg) = call.arguments.first() else {
+            return false;
+        };
+        let tag = match arg.as_expression() {
+            Some(Expression::StringLiteral(s)) => Some(s.value.as_str()),
+            Some(Expression::TemplateLiteral(t))
+                if t.expressions.is_empty() && t.quasis.len() == 1 =>
+            {
+                t.quasis
+                    .first()
+                    .and_then(|q| q.value.cooked.as_ref())
+                    .map(|c| c.as_str())
+            }
+            _ => None,
+        };
+        matches!(tag.map(|s| s.eq_ignore_ascii_case("script")), Some(true))
+    }
+
+    /// Property names that, when assigned on a `<script>` element variable,
+    /// turn the assigned value into executable JavaScript once the element
+    /// is inserted into the document. `text` / `textContent` / `innerText`
+    /// all set the script body; `innerHTML` does the same and additionally
+    /// re-parses tag soup inside. We do *not* include `src` here because
+    /// `src` is already covered by the generic URL-attribute sink path.
+    fn is_script_element_text_sink_prop(prop: &str) -> bool {
+        matches!(prop, "text" | "textContent" | "innerText" | "innerHTML")
     }
 
     /// Get a string representation of an expression if it's an identifier or member expression
@@ -1630,6 +1708,16 @@ impl<'a> DomXssVisitor<'a> {
                     self.url_object_sources.remove(var_name);
                 }
 
+                // `let s = document.createElement('script')` — remember the
+                // variable so a later `s.text = tainted` is recognised as a
+                // sink even though `text` is a benign property on every
+                // other element kind.
+                if self.expr_creates_script_element(init) {
+                    self.script_element_vars.insert(var_name.to_string());
+                } else {
+                    self.script_element_vars.remove(var_name);
+                }
+
                 let mut assigned_url_search_params_source = false;
                 if let Expression::StaticMemberExpression(member) = init
                     && let Some(source) = self.url_search_params_source_for_member(member)
@@ -2263,6 +2351,23 @@ impl<'a> DomXssVisitor<'a> {
                     prop_name,
                     &assign.right,
                 );
+                // Script-element body assignments (e.g. `s.text = tainted`
+                // where `s` came from `document.createElement('script')`).
+                // The browser parses the value as JS source once the
+                // element is inserted, so this is a real eval-equivalent
+                // sink that the generic `is_assignment_sink_property`
+                // check below would miss.
+                let script_text_sink = right_tainted
+                    && Self::is_script_element_text_sink_prop(prop_name)
+                    && matches!(&member.object, Expression::Identifier(id) if self.script_element_vars.contains(id.name.as_str()));
+                if script_text_sink {
+                    self.report_vulnerability_with_source(
+                        assign.span(),
+                        &format!("script.{prop_name}"),
+                        "Assignment to script-element body executes as JS",
+                        right_source.clone(),
+                    );
+                }
                 let is_sink = self.is_assignment_sink_property(prop_name);
 
                 // Also check if the full member path is a sink (e.g., location.href)

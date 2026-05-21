@@ -38,6 +38,10 @@ const JS_SINK_NAMES: &[&str] = &[
     "write",
     "writeln",
     "insertAdjacentHTML",
+    // Modern Sanitizer-API opt-out: explicitly parses its argument as
+    // HTML with no sanitization, so a payload that names it is almost
+    // certainly attempting code execution through that path.
+    "setHTMLUnsafe",
 ];
 
 /// Properties whose assignment from injected content is itself an XSS sink
