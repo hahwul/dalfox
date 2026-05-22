@@ -216,9 +216,7 @@ fn prune_blocked_raw_angles(payloads: Vec<String>, invalid_specials: &[char]) ->
     }
     payloads
         .into_iter()
-        .filter(|p| {
-            !((block_lt && p.contains('<')) || (block_gt && p.contains('>')))
-        })
+        .filter(|p| !((block_lt && p.contains('<')) || (block_gt && p.contains('>'))))
         .collect()
 }
 
@@ -274,10 +272,7 @@ fn payload_is_angle_free(p: &str) -> bool {
 /// request usually comes from an angle-free payload, the loop short-
 /// circuits, and the budget for the param collapses from thousands of
 /// requests to dozens.
-fn hoist_angle_free_payloads(
-    payloads: Vec<String>,
-    invalid_specials: &[char],
-) -> Vec<String> {
+fn hoist_angle_free_payloads(payloads: Vec<String>, invalid_specials: &[char]) -> Vec<String> {
     let block_lt = invalid_specials.contains(&'<');
     let block_gt = invalid_specials.contains(&'>');
     if !block_lt && !block_gt {
@@ -783,8 +778,7 @@ pub async fn run_scanning(
             reflection_payloads = hoist_angle_free_payloads(reflection_payloads, invalid);
             dom_payloads = hoist_angle_free_payloads(dom_payloads, invalid);
             if crate::DEBUG.load(Ordering::Relaxed)
-                && (refl_before != reflection_payloads.len()
-                    || dom_before != dom_payloads.len())
+                && (refl_before != reflection_payloads.len() || dom_before != dom_payloads.len())
             {
                 eprintln!(
                     "[DBG] adaptive prune (param={}): reflection {}→{}, dom {}→{} (invalid_specials={:?})",
