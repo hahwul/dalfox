@@ -81,6 +81,27 @@ fn selective_path_segment_encode(raw: &str) -> Cow<'_, str> {
     Cow::Owned(out)
 }
 
+/// Resolve the URL where a Query-location param should be probed.
+///
+/// When `param` was discovered through a `<form action=...>`, its
+/// `form_action_url` points at the form's action endpoint — that's the URL
+/// hosting the sink, not the page where the `<form>` tag was found. Without
+/// this redirection, GET-form scans probe the form-host page (no sink) and
+/// produce a false negative even though discovery flagged the field as
+/// reflecting at the action URL (issue #424).
+///
+/// For non-Query locations and for params without a form_action_url, the
+/// caller's `target_url` is returned unchanged.
+pub fn effective_query_base(target_url: &url::Url, param: &Param) -> url::Url {
+    if matches!(param.location, Location::Query)
+        && let Some(ref action) = param.form_action_url
+        && let Ok(parsed) = url::Url::parse(action)
+    {
+        return parsed;
+    }
+    target_url.clone()
+}
+
 /// Build a URL string with the given parameter injected/replaced by `injected`.
 /// For Location::Query it rewrites or appends the query pair.
 /// For Location::Path it replaces the indexed segment derived from param name pattern

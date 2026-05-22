@@ -126,9 +126,14 @@ pub async fn verify_dom_xss_light_with_client(
             crate::utils::build_request(client, target, method, parsed_url, None).multipart(form)
         }
         _ => {
+            // GET form discovery sets form_action_url; light-verify must
+            // follow it to the action endpoint — otherwise the reflection
+            // we're confirming lives on a different URL (issue #424).
+            let base_url =
+                crate::scanning::url_inject::effective_query_base(&target.url, param);
             let inject_url =
-                crate::scanning::url_inject::build_injected_url(&target.url, param, payload);
-            let parsed_url = url::Url::parse(&inject_url).unwrap_or_else(|_| target.url.clone());
+                crate::scanning::url_inject::build_injected_url(&base_url, param, payload);
+            let parsed_url = url::Url::parse(&inject_url).unwrap_or_else(|_| base_url.clone());
             crate::utils::build_request(client, target, method, parsed_url, target.data.clone())
         }
     };

@@ -256,18 +256,27 @@ pub async fn active_probe_param(
                 }
                 _ => parsed_method,
             };
+            // Resolve the probe destination: when this param came from form
+            // discovery (issue #424), `form_action_url` points at the form's
+            // action endpoint, which may differ from the page URL where the
+            // form was found. Body/JsonBody/Multipart all probe at the action;
+            // Query must do the same, otherwise we test the form-host page
+            // instead of the sink and produce a false negative.
             let body_url = form_action_url
                 .as_ref()
                 .and_then(|u| url::Url::parse(u).ok())
                 .unwrap_or_else(|| url_original.clone());
-            let mut url = url_original.clone();
+            let mut url = match location {
+                Location::Query => body_url.clone(),
+                _ => url_original.clone(),
+            };
             let mut request_builder;
 
             match location {
                 Location::Query => {
                     let mut new_pairs: Vec<(String, String)> = Vec::new();
                     let mut replaced = false;
-                    for (k, v) in url_original.query_pairs() {
+                    for (k, v) in url.query_pairs() {
                         if k == wire_name {
                             new_pairs.push((k.to_string(), payload.clone()));
                             replaced = true;

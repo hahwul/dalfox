@@ -457,7 +457,8 @@ async fn run_ast_dom_analysis(
                     &payload,
                 )
             } else {
-                crate::scanning::url_inject::build_injected_url(&target.url, param, &payload)
+                let base = crate::scanning::url_inject::effective_query_base(&target.url, param);
+                crate::scanning::url_inject::build_injected_url(&base, param, &payload)
             };
             let mut ast_result = crate::scanning::result::Result::new(
                 FindingType::AstDetected,
@@ -518,8 +519,12 @@ async fn run_ast_dom_analysis(
 fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
     let url = match param.location {
         crate::parameter_analysis::Location::Query => {
-            let mut pairs: Vec<(String, String)> = target
-                .url
+            // Show the request against the actual sink URL — form action when
+            // the param came from form discovery, otherwise target.url. The
+            // displayed PoC must match the URL that scanning actually hits
+            // (issue #424).
+            let base = crate::scanning::url_inject::effective_query_base(&target.url, param);
+            let mut pairs: Vec<(String, String)> = base
                 .query_pairs()
                 .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect();
@@ -537,7 +542,7 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
             let query = url::form_urlencoded::Serializer::new(String::new())
                 .extend_pairs(&pairs)
                 .finish();
-            let mut url = target.url.clone();
+            let mut url = base;
             url.set_query(Some(&query));
             url
         }
@@ -1081,9 +1086,15 @@ pub async fn run_scanning(
                     };
 
                     if should_add {
-                        // Build result URL with the reflected payload (via helper)
-                        let result_url = crate::scanning::url_inject::build_injected_url(
+                        // Build result URL with the reflected payload (via helper).
+                        // Use the form action URL when the param came from form
+                        // discovery, so the PoC URL points at the actual sink.
+                        let base = crate::scanning::url_inject::effective_query_base(
                             &target_clone.url,
+                            &param_clone,
+                        );
+                        let result_url = crate::scanning::url_inject::build_injected_url(
+                            &base,
                             &param_clone,
                             &reflection_payload,
                         );
@@ -1252,9 +1263,14 @@ pub async fn run_scanning(
                     };
 
                     if should_add {
-                        // Create result (via helper)
-                        let result_url = crate::scanning::url_inject::build_injected_url(
+                        // Create result (via helper). Use the form action URL
+                        // when the param came from form discovery.
+                        let base = crate::scanning::url_inject::effective_query_base(
                             &target_clone.url,
+                            &param_clone,
+                        );
+                        let result_url = crate::scanning::url_inject::build_injected_url(
+                            &base,
                             &param_clone,
                             &dom_payload,
                         );
