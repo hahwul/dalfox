@@ -88,9 +88,9 @@ fn selective_path_segment_encode(raw: &str) -> Cow<'_, str> {
 /// hosting the sink, not the page where the `<form>` tag was found. Without
 /// this redirection, GET-form scans probe the form-host page (no sink) and
 /// produce a false negative even though discovery flagged the field as
-/// reflecting at the action URL (issue #424).
+/// reflecting at the action URL.
 ///
-/// For non-Query locations and for params without a form_action_url, the
+/// For non-Query locations and for params without a `form_action_url`, the
 /// caller's `target_url` is returned unchanged.
 pub fn effective_query_base(target_url: &url::Url, param: &Param) -> url::Url {
     if matches!(param.location, Location::Query)

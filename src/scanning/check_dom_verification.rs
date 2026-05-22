@@ -747,7 +747,7 @@ fn build_url_inject_request(
     // Query params discovered through a `<form action=...>` must be verified
     // at the action URL — that's where the sink lives. Path params keep
     // target.url because path-segment injection depends on the original
-    // path layout (issue #424).
+    // path layout.
     let base_url = crate::scanning::url_inject::effective_query_base(&target.url, param);
     let inject_url_str =
         crate::scanning::url_inject::build_injected_url(&base_url, param, encoded_payload);

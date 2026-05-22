@@ -1128,9 +1128,9 @@ async fn fetch_injection_response_with_client(
         _ => {
             // Query / Path: inject encoded payload into the URL.
             // `effective_query_base` rebases Query params discovered through
-            // a `<form action=...>` onto the action endpoint (issue #424);
-            // Path keeps target.url because path-segment injection depends
-            // on the original path layout.
+            // a `<form action=...>` onto the action endpoint; Path keeps
+            // target.url because path-segment injection depends on the
+            // original path layout.
             let base_url =
                 crate::scanning::url_inject::effective_query_base(&target.url, param);
             let inject_url = crate::scanning::url_inject::build_injected_url(

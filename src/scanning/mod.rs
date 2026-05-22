@@ -521,8 +521,7 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
         crate::parameter_analysis::Location::Query => {
             // Show the request against the actual sink URL — form action when
             // the param came from form discovery, otherwise target.url. The
-            // displayed PoC must match the URL that scanning actually hits
-            // (issue #424).
+            // displayed PoC must match the URL that scanning actually hits.
             let base = crate::scanning::url_inject::effective_query_base(&target.url, param);
             let mut pairs: Vec<(String, String)> = base
                 .query_pairs()

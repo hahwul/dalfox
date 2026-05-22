@@ -481,6 +481,35 @@ fn effective_query_base_ignores_form_action_for_non_query_locations() {
 }
 
 #[test]
+fn effective_query_base_preserves_existing_query_on_action() {
+    // `<form action="/app.php?ref=login">` — the action URL already has
+    // its own query params. Injecting our target field must keep them.
+    let target = make_url("https://example.com/page");
+    let param = Param {
+        name: "xss".into(),
+        value: "".into(),
+        location: Location::Query,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: Some("https://example.com/app.php?ref=login".to_string()),
+        form_origin_url: None,
+        framework_sink: None,
+    };
+    let base = effective_query_base(&target, &param);
+    let out = build_injected_url(&base, &param, "PAY");
+    assert!(
+        out.starts_with("https://example.com/app.php?"),
+        "expected app.php probe, got: {out}"
+    );
+    assert!(out.contains("ref=login"), "lost preexisting query: {out}");
+    assert!(out.contains("xss=PAY"), "missing injected param: {out}");
+}
+
+#[test]
 fn effective_query_base_falls_back_when_action_unparseable() {
     let target = make_url("https://example.com/page");
     let param = Param {
