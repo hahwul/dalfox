@@ -1750,25 +1750,120 @@ async fn test_run_scan_job_webhook_fires_on_pre_start_cancellation() {
 }
 
 #[tokio::test]
-async fn test_send_terminal_webhook_skips_non_http_url() {
-    // The webhook helper must refuse non-http(s) URLs (file:// etc.) so
-    // a malicious callback_url can't trick the server into touching odd
-    // schemes. Verified by passing a `file://` URL and confirming the
-    // helper returns without panicking (and we have no other side effect
-    // we can observe — the contract is "silently drop").
-    let state = make_state(None, None, false, false, "cb");
-    // Should be a no-op; main assertion is that this returns at all.
-    send_terminal_webhook(
-        &state,
-        Some("file:///etc/passwd".to_string()),
-        "id",
-        "http://example.com",
-        "cancelled",
-        &[],
-        None,
+async fn test_run_scan_job_pre_cancel_webhook_falls_back_when_url_unparseable() {
+    // Companion to the pre-start cancellation webhook test: even when the
+    // submitted URL is garbage (so `parse_target` would fail when we try to
+    // honor opts.proxy/TLS), the webhook must still fire with status=
+    // cancelled. The pre-cancel path falls back to a default reqwest
+    // client in that case rather than dropping the callback.
+    let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+    let captured_clone = captured.clone();
+    let webhook_app = Router::new().route(
+        "/hook",
+        any(move |body: axum::body::Bytes| {
+            let captured = captured_clone.clone();
+            async move {
+                let parsed: serde_json::Value =
+                    serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+                *captured.lock().await = Some(parsed);
+                StatusCode::OK
+            }
+        }),
+    );
+    let webhook_listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind webhook listener");
+    let webhook_addr = webhook_listener.local_addr().expect("webhook local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(webhook_listener, webhook_app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+    let state = make_state(None, None, false, false, "callback");
+    let id = "pre-cancel-bad-url".to_string();
+    let target_url = "definitely-not-a-valid-url";
+    let mut job = test_job(JobStatus::Queued, None, target_url);
+    job.callback_url = Some(format!("http://{}/hook", webhook_addr));
+    job.cancelled
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert(id.clone(), job);
+    }
+
+    let opts = ScanOptions {
+        callback_url: Some(format!("http://{}/hook", webhook_addr)),
+        ..ScanOptions::default()
+    };
+
+    let run = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        run_scan_job(
+            state.clone(),
+            id.clone(),
+            target_url.to_string(),
+            opts,
+            false,
+            false,
+        ),
     )
     .await;
+    assert!(run.is_ok(), "pre-cancelled run_scan_job should return fast");
+
+    let payload = captured
+        .lock()
+        .await
+        .clone()
+        .expect("webhook must fire even when target url is unparseable");
+    assert_eq!(payload["status"], "cancelled");
+    assert_eq!(payload["scan_id"], serde_json::Value::String(id));
+}
+
+#[tokio::test]
+async fn test_send_terminal_webhook_skips_non_http_url() {
+    // The webhook helper must refuse non-http(s) URLs so a malicious
+    // callback_url can't trick the server into dialing odd schemes
+    // (file://, ftp://, javascript://, etc.). The contract is "silently
+    // drop"; verify two observable things:
+    //
+    //   1. Each scheme returns under a tight deadline — proves we never
+    //      reached reqwest's transport layer, which for unsupported
+    //      schemes would emit a callback-failed log line. The default
+    //      reqwest request timeout for these helpers is 10s, so a sub-
+    //      second deadline reliably catches a regression that lets a
+    //      non-http URL through to the client.
+    //   2. The `None` callback_url path is also a no-op (no scheme to
+    //      check at all).
+    let state = make_state(None, None, false, false, "cb");
+    for url in [
+        "file:///etc/passwd",
+        "ftp://example.com/payload",
+        "javascript:alert(1)",
+        "ws://example.com/hook",
+    ] {
+        let started = std::time::Instant::now();
+        send_terminal_webhook(
+            &state,
+            Some(url.to_string()),
+            "id",
+            "http://example.com",
+            "cancelled",
+            &[],
+            None,
+        )
+        .await;
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(500),
+            "send_terminal_webhook took too long for {} ({:?}) — scheme filter may have leaked",
+            url,
+            started.elapsed()
+        );
+    }
+
+    // None-callback path: should be a fast no-op as well.
+    let started = std::time::Instant::now();
     send_terminal_webhook(&state, None, "id", "http://example.com", "done", &[], None).await;
+    assert!(started.elapsed() < std::time::Duration::from_millis(500));
 }
 
 #[tokio::test]

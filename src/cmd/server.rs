@@ -570,8 +570,29 @@ async fn run_scan_job(
                 "JOB",
                 &format!("cancelled-pre-start id={} url={}", job_id, url),
             );
-            send_terminal_webhook(&state, callback_url, &job_id, &url, "cancelled", &[], None)
-                .await;
+            // Honor opts.proxy / follow_redirects / TLS settings on this
+            // path the same way the mid-flight cancel path does — otherwise
+            // a webhook behind a corporate proxy would silently fail only
+            // for "cancel-before-start" scans. Fall back to the default
+            // client when parse_target can't make sense of the URL (the
+            // user-submitted url may be invalid; we still want the
+            // webhook to fire so subscribers see the terminal callback).
+            let timeout_secs = opts
+                .timeout
+                .unwrap_or(crate::cmd::scan::DEFAULT_TIMEOUT_SECS);
+            let cb_client = hydrate_preflight_target(&url, &opts, timeout_secs)
+                .ok()
+                .map(|t| t.build_client_or_default());
+            send_terminal_webhook(
+                &state,
+                callback_url,
+                &job_id,
+                &url,
+                "cancelled",
+                &[],
+                cb_client,
+            )
+            .await;
             return;
         }
         StartDecision::Missing => return,
