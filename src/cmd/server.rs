@@ -348,14 +348,10 @@ fn build_cors_headers(state: &AppState, req_headers: &HeaderMap) -> HeaderMap {
     if let Some(origin_val) = req_headers.get("Origin")
         && let Ok(origin_str) = origin_val.to_str()
     {
-        let exact_allowed = state
-            .allowed_origins
-            .as_ref()
-            .map(|v| {
-                v.iter()
-                    .any(|o| !o.starts_with("regex:") && o != "*" && o == origin_str)
-            })
-            .unwrap_or(false);
+        let exact_allowed = state.allowed_origins.as_ref().is_some_and(|v| {
+            v.iter()
+                .any(|o| !o.starts_with("regex:") && o != "*" && o == origin_str)
+        });
         let regex_allowed = state
             .allowed_origin_regexes
             .iter()
@@ -1184,14 +1180,8 @@ async fn get_scan_handler(
         .unwrap_or_else(|| "GET".to_string());
     let data_opt = params.get("data").cloned();
     let user_agent = params.get("user_agent").cloned();
-    let include_request = params
-        .get("include_request")
-        .map(|s| s == "true")
-        .unwrap_or(false);
-    let include_response = params
-        .get("include_response")
-        .map(|s| s == "true")
-        .unwrap_or(false);
+    let include_request = params.get("include_request").is_some_and(|s| s == "true");
+    let include_response = params.get("include_response").is_some_and(|s| s == "true");
 
     let param_list: Option<Vec<String>> = params.get("param").map(|s| {
         s.split(',')
@@ -1200,26 +1190,11 @@ async fn get_scan_handler(
             .collect()
     });
     let proxy = params.get("proxy").cloned();
-    let follow_redirects = params
-        .get("follow_redirects")
-        .map(|s| s == "true")
-        .unwrap_or(false);
-    let skip_mining = params
-        .get("skip_mining")
-        .map(|s| s == "true")
-        .unwrap_or(false);
-    let skip_discovery = params
-        .get("skip_discovery")
-        .map(|s| s == "true")
-        .unwrap_or(false);
-    let deep_scan = params
-        .get("deep_scan")
-        .map(|s| s == "true")
-        .unwrap_or(false);
-    let skip_ast_analysis = params
-        .get("skip_ast_analysis")
-        .map(|s| s == "true")
-        .unwrap_or(false);
+    let follow_redirects = params.get("follow_redirects").is_some_and(|s| s == "true");
+    let skip_mining = params.get("skip_mining").is_some_and(|s| s == "true");
+    let skip_discovery = params.get("skip_discovery").is_some_and(|s| s == "true");
+    let deep_scan = params.get("deep_scan").is_some_and(|s| s == "true");
+    let skip_ast_analysis = params.get("skip_ast_analysis").is_some_and(|s| s == "true");
 
     let opts = ScanOptions {
         cookie,
@@ -1365,8 +1340,7 @@ async fn cancel_scan_handler(
     // must first cancel a running scan and wait for it to settle.
     let purge_requested = params
         .get("purge")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
+        .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
 
     let mut jobs = state.jobs.lock().await;
     match jobs.get_mut(&id) {
@@ -1520,7 +1494,7 @@ async fn list_scans_handler(
                 "scan_id": id,
                 "target": job.target_url,
                 "status": job.status,
-                "result_count": job.results.as_ref().map(|r| r.len()).unwrap_or(0),
+                "result_count": job.results.as_ref().map_or(0, |r| r.len()),
                 "queued_at_ms": job.queued_at_ms,
                 "started_at_ms": job.started_at_ms,
                 "finished_at_ms": job.finished_at_ms,

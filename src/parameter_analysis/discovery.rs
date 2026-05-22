@@ -323,10 +323,9 @@ pub async fn check_query_discovery(
                     resp.headers()
                         .get("location")
                         .and_then(|v| v.to_str().ok())
-                        .map(|loc| {
+                        .is_some_and(|loc| {
                             crate::scanning::markers::classify_probe_reflection(loc).detected()
                         })
-                        .unwrap_or(false)
                 } else {
                     false
                 };
@@ -358,7 +357,7 @@ pub async fn check_query_discovery(
                         &text,
                         crate::scanning::markers::bracketed_marker(),
                     )
-                    .map(|s| s.to_string());
+                    .map(ToString::to_string);
                     discovered = Some(Param {
                         name,
                         value,
@@ -761,7 +760,7 @@ pub async fn check_header_discovery(
                     &text,
                     crate::scanning::markers::bracketed_marker(),
                 )
-                .map(|s| s.to_string());
+                .map(ToString::to_string);
                 discovered = Some(Param {
                     name: header_name,
                     value: header_value,
@@ -824,7 +823,10 @@ pub async fn check_path_discovery(
 
     let mut handles = Vec::new();
 
-    let mut new_segments: Vec<String> = segments.iter().map(|s| s.to_string()).collect();
+    let mut new_segments: Vec<String> = segments
+        .iter()
+        .map(ToString::to_string)
+        .collect();
     for (idx, original) in segments.iter().enumerate() {
         let saved = std::mem::replace(&mut new_segments[idx], test_value.to_string());
         let new_path = format!("/{}", new_segments.join("/"));
@@ -1385,7 +1387,7 @@ pub async fn check_form_discovery(
                 .expect("inline JSON regex is valid")
         });
         for caps in inline_re.captures_iter(&html) {
-            let full = caps.get(0).map(|m| m.as_str()).unwrap_or("");
+            let full = caps.get(0).map_or("", |m| m.as_str());
             // Try to parse as JSON
             if let Ok(serde_json::Value::Object(obj)) =
                 serde_json::from_str::<serde_json::Value>(full)

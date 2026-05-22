@@ -460,7 +460,7 @@ async fn preflight_content_type(
     let ct_opt = head_headers
         .get(CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .map(|s| s.to_string());
+        .map(ToString::to_string);
     let mut csp_header = head_headers
         .get("content-security-policy")
         .and_then(|v| v.to_str().ok())
@@ -1377,7 +1377,10 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 }
                 let file_path = &args.targets[0];
                 match fs::read_to_string(file_path) {
-                    Ok(content) => content.lines().map(|s| s.to_string()).collect(),
+                    Ok(content) => content
+                        .lines()
+                        .map(ToString::to_string)
+                        .collect(),
                     Err(e) => {
                         if !args.silence {
                             emit_error(
@@ -1756,7 +1759,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         host_groups.entry(host).or_default().push(target);
     }
 
-    let total_targets = host_groups.values().map(|g| g.len()).sum::<usize>();
+    let total_targets = host_groups.values().map(Vec::len).sum::<usize>();
     let preflight_idx = Arc::new(AtomicUsize::new(0));
     let analyze_idx = Arc::new(AtomicUsize::new(0));
     let scan_idx = Arc::new(AtomicUsize::new(0));
@@ -2301,14 +2304,10 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                         let bullet = if i + 1 == n { "└──" } else { "├──" };
                         let valid = p
                             .valid_specials
-                            .as_ref()
-                            .map(|v| v.iter().collect::<String>())
-                            .unwrap_or_else(|| "-".to_string());
+                            .as_ref().map_or_else(|| "-".to_string(), |v| v.iter().collect::<String>());
                         let invalid = p
                             .invalid_specials
-                            .as_ref()
-                            .map(|v| v.iter().collect::<String>())
-                            .unwrap_or_else(|| "-".to_string());
+                            .as_ref().map_or_else(|| "-".to_string(), |v| v.iter().collect::<String>());
                         crate::cprintln!(
                             "  \x1b[90m{}\x1b[0m \x1b[38;5;247m{}\x1b[0m \x1b[38;5;247mvalid_specials=\x1b[0m\"\x1b[38;5;247m{}\x1b[0m\" \x1b[38;5;247minvalid_specials=\x1b[0m\"\x1b[38;5;247m{}\x1b[0m\"",
                             bullet, p.name, valid, invalid

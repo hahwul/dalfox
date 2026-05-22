@@ -283,8 +283,7 @@ fn callee_identifier_is_sink(callee: &Expression<'_>) -> bool {
         Expression::SequenceExpression(seq) => seq
             .expressions
             .last()
-            .map(callee_identifier_is_sink)
-            .unwrap_or(false),
+            .is_some_and(callee_identifier_is_sink),
         _ => false,
     }
 }

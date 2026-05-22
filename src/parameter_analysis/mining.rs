@@ -77,8 +77,7 @@ async fn pre_collapse_query_probe(client: &reqwest::Client, target: &Target) -> 
                 .headers()
                 .get("location")
                 .and_then(|v| v.to_str().ok())
-                .map(|loc| loc.contains(marker))
-                .unwrap_or(false);
+                .is_some_and(|loc| loc.contains(marker));
         let text = resp.text().await.ok()?;
         if !location_has_marker && !text.contains(marker) {
             return None;
@@ -490,7 +489,10 @@ pub async fn probe_dictionary_params(
     }
 
     if !loaded {
-        params = GF_PATTERNS_PARAMS.iter().map(|s| s.to_string()).collect();
+        params = GF_PATTERNS_PARAMS
+            .iter()
+            .map(ToString::to_string)
+            .collect();
     }
 
     // Sentinel pre-probe: 3 unique random param names. If every one reflects,
@@ -614,10 +616,9 @@ pub async fn probe_dictionary_params(
                         r.headers()
                             .get("location")
                             .and_then(|v| v.to_str().ok())
-                            .map(|loc| {
+                            .is_some_and(|loc| {
                                 crate::scanning::markers::classify_probe_reflection(loc).detected()
                             })
-                            .unwrap_or(false)
                     } else {
                         false
                     };

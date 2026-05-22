@@ -185,8 +185,7 @@ pub fn fingerprint_from_response(
                 Some(substr) => val
                     .to_str()
                     .ok()
-                    .map(|v| v.to_ascii_lowercase().contains(substr))
-                    .unwrap_or(false),
+                    .is_some_and(|v| v.to_ascii_lowercase().contains(substr)),
             };
             if matched {
                 merge_fingerprint(

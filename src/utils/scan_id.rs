@@ -19,8 +19,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 pub fn make_scan_id(seed: &str) -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_nanos())
-        .unwrap_or(0);
+        .map_or(0, |d| d.as_nanos());
 
     make_scan_id_with_nonce(seed, now)
 }

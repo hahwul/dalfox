@@ -1284,8 +1284,7 @@ pub async fn run_scanning(
                                     body,
                                 )
                             })
-                            .map(|k| k.label())
-                            .unwrap_or("DOM evidence");
+                            .map_or("DOM evidence", |k| k.label());
 
                         let mut result = crate::scanning::result::Result::new(
                             FindingType::Verified, // DOM-verified => Vulnerability

@@ -29,7 +29,7 @@ pub struct CspAnalysis {
 pub fn analyze_csp(csp_value: &str) -> CspAnalysis {
     let mut analysis = CspAnalysis::default();
 
-    let directives: Vec<&str> = csp_value.split(';').map(|s| s.trim()).collect();
+    let directives: Vec<&str> = csp_value.split(';').map(str::trim).collect();
 
     let mut has_script_src = false;
     let mut has_default_src = false;
