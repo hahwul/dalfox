@@ -193,6 +193,104 @@ fn reflection_kind_note(kind: crate::scanning::check_reflection::ReflectionKind)
     }
 }
 
+/// Drop payloads whose raw bytes carry an HTML-structural character the
+/// server has been observed to filter (recorded in
+/// `Param.invalid_specials` by Stage 3 active probing). Raw `<`/`>` cannot
+/// pass through a server-side blocklist that strips those bytes after
+/// decoding, so the corresponding payload has no chance to reflect — every
+/// HTTP request spent on it is wasted. The encoded variants of the same
+/// payload (`%3Csvg%3E`, `&lt;svg&gt;`, multi-URL-encoded forms) carry no
+/// raw `<`/`>` themselves and survive this pass, preserving the bypass
+/// surface for naive filters that decode only once.
+///
+/// Conservative on quotes: attribute-breakout payloads intentionally lead
+/// with the same delimiter character the surrounding HTML attribute uses,
+/// and that delimiter must already be a "valid" special (the server
+/// emitted it), so pruning on `"`/`'` would mistakenly drop the very
+/// payloads that exploit attribute injection.
+fn prune_blocked_raw_angles(payloads: Vec<String>, invalid_specials: &[char]) -> Vec<String> {
+    let block_lt = invalid_specials.contains(&'<');
+    let block_gt = invalid_specials.contains(&'>');
+    if !block_lt && !block_gt {
+        return payloads;
+    }
+    payloads
+        .into_iter()
+        .filter(|p| !((block_lt && p.contains('<')) || (block_gt && p.contains('>'))))
+        .collect()
+}
+
+/// Common encoded forms of `<` / `>` we look for when deciding whether a
+/// payload depends on angle brackets. A payload that carries any of these
+/// forms is hoping the server single-pass-decodes the input — when the
+/// server filters `<` after decode (the common case), the bypass fails.
+/// Hoisting payloads that carry no angle bracket in any form (event-
+/// handler quote-breakouts, protocol-URI payloads) ahead of these
+/// angle-dependent variants lets the scanner hit a working payload first
+/// and short-circuit the rest of the loop via `reflection_found_locally`.
+const ANGLE_ENCODED_NEEDLES_LT: &[&str] = &[
+    "%3C", "%3c", "%253C", "%253c", "&lt;", "&LT;", "&#60;", "&#x3c;", "&#x3C;", "&#x003c;",
+    "&#x003C;",
+];
+const ANGLE_ENCODED_NEEDLES_GT: &[&str] = &[
+    "%3E", "%3e", "%253E", "%253e", "&gt;", "&GT;", "&#62;", "&#x3e;", "&#x3E;", "&#x003e;",
+    "&#x003E;",
+];
+
+/// True when the payload carries no `<` or `>` in any of: raw bytes,
+/// percent-encoded form (single or double), or HTML entity (named,
+/// decimal, hex). Used to hoist angle-free payloads to the front of the
+/// payload list when `Param.invalid_specials` flags angle brackets — those
+/// payloads (event-handler quote-breakouts, `javascript:` protocol URIs)
+/// are the ones that actually reflect through an angle-stripping filter,
+/// and the loop's `reflection_found_locally` short-circuit means the
+/// first hit zeros out the rest of the budget.
+fn payload_is_angle_free(p: &str) -> bool {
+    if p.contains('<') || p.contains('>') {
+        return false;
+    }
+    for n in ANGLE_ENCODED_NEEDLES_LT {
+        if p.contains(n) {
+            return false;
+        }
+    }
+    for n in ANGLE_ENCODED_NEEDLES_GT {
+        if p.contains(n) {
+            return false;
+        }
+    }
+    true
+}
+
+/// Stable-partition the payload list so payloads that don't depend on
+/// `<`/`>` (in any encoded form) come first when active probing has
+/// flagged angles as invalid. Pairs with [`prune_blocked_raw_angles`]:
+/// pruning kills raw-angle payloads outright, hoisting reorders the
+/// remaining list so the angle-free survivors get tested before the
+/// encoded-angle variants whose only hope is a naive single-pass-decode
+/// filter (rare in practice). Net effect: the first reflection-finding
+/// request usually comes from an angle-free payload, the loop short-
+/// circuits, and the budget for the param collapses from thousands of
+/// requests to dozens.
+fn hoist_angle_free_payloads(payloads: Vec<String>, invalid_specials: &[char]) -> Vec<String> {
+    let block_lt = invalid_specials.contains(&'<');
+    let block_gt = invalid_specials.contains(&'>');
+    if !block_lt && !block_gt {
+        return payloads;
+    }
+    let mut clean: Vec<String> = Vec::with_capacity(payloads.len());
+    let mut rest: Vec<String> = Vec::with_capacity(payloads.len());
+    for p in payloads {
+        if payload_is_angle_free(&p) {
+            clean.push(p);
+        } else {
+            rest.push(p);
+        }
+    }
+    clean.extend(rest);
+    clean
+}
+
 fn get_fallback_reflection_payloads(
     args: &ScanArgs,
 ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
@@ -655,6 +753,41 @@ pub async fn run_scanning(
                 dom_payloads = crate::encoding::apply_encoders_to_payloads(
                     &dom_payloads,
                     &strategy.extra_encoders,
+                );
+            }
+        }
+
+        // Adaptive prune + reorder: when active probing recorded that the
+        // server strips `<` / `>`, (a) drop reflection/DOM payloads whose
+        // raw bytes carry those characters (guaranteed misses), and
+        // (b) hoist payloads that carry no `<`/`>` in any encoded form to
+        // the front of the list. The reorder is the bigger lever: the
+        // loop's `reflection_found_locally` short-circuit means the first
+        // reflecting payload zeros out the rest of the budget, so putting
+        // angle-free payloads (event-handler / quote-breakout shapes that
+        // actually work against an angle-stripping filter) before the
+        // angle-encoded variants collapses the per-param request count
+        // from thousands to dozens on attribute-context params.
+        if let Some(invalid) = param.invalid_specials.as_deref()
+            && !invalid.is_empty()
+        {
+            let refl_before = reflection_payloads.len();
+            let dom_before = dom_payloads.len();
+            reflection_payloads = prune_blocked_raw_angles(reflection_payloads, invalid);
+            dom_payloads = prune_blocked_raw_angles(dom_payloads, invalid);
+            reflection_payloads = hoist_angle_free_payloads(reflection_payloads, invalid);
+            dom_payloads = hoist_angle_free_payloads(dom_payloads, invalid);
+            if crate::DEBUG.load(Ordering::Relaxed)
+                && (refl_before != reflection_payloads.len() || dom_before != dom_payloads.len())
+            {
+                eprintln!(
+                    "[DBG] adaptive prune (param={}): reflection {}→{}, dom {}→{} (invalid_specials={:?})",
+                    param.name,
+                    refl_before,
+                    reflection_payloads.len(),
+                    dom_before,
+                    dom_payloads.len(),
+                    invalid,
                 );
             }
         }

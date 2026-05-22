@@ -583,6 +583,79 @@ fn test_format_req_per_sec_zero_delta_is_zero_rate() {
 }
 
 #[test]
+fn test_prune_blocked_raw_angles_drops_lt_and_gt_when_blocked() {
+    let payloads = vec![
+        "<svg onload=alert(1)>".to_string(),
+        "\" onfocus=alert(1) \"".to_string(),
+        "%3Csvg%20onload%3Dalert(1)%3E".to_string(),
+        "&lt;svg&gt;".to_string(),
+        "\"><img src=x onerror=alert(1)>".to_string(),
+    ];
+    let pruned = prune_blocked_raw_angles(payloads, &['<', '>']);
+    assert_eq!(pruned.len(), 3, "raw < / > payloads must be dropped");
+    assert!(pruned.iter().all(|p| !p.contains('<') && !p.contains('>')));
+}
+
+#[test]
+fn test_prune_blocked_raw_angles_no_op_without_block() {
+    let payloads = vec![
+        "<svg onload=alert(1)>".to_string(),
+        "\" onfocus=alert(1) \"".to_string(),
+    ];
+    let original = payloads.clone();
+    // Empty invalid set — must be a pass-through.
+    let pruned = prune_blocked_raw_angles(payloads, &[]);
+    assert_eq!(pruned, original);
+}
+
+#[test]
+fn test_prune_blocked_raw_angles_partial_block_keeps_other_angle() {
+    // Only `>` is blocked: payloads carrying `>` get dropped, but a raw `<`
+    // alone is still allowed through. Captures servers that strip one angle
+    // but not the other (uncommon, but the helper should respect that).
+    let payloads = vec!["<a>".to_string(), "<a".to_string(), "a>".to_string()];
+    let pruned = prune_blocked_raw_angles(payloads, &['>']);
+    assert_eq!(pruned, vec!["<a".to_string()]);
+}
+
+#[test]
+fn test_payload_is_angle_free_detects_encoded_forms() {
+    assert!(payload_is_angle_free("\" onfocus=alert(1) \""));
+    assert!(payload_is_angle_free("javascript:alert(1)"));
+    assert!(!payload_is_angle_free("<svg>"));
+    assert!(!payload_is_angle_free("%3Csvg%3E"));
+    assert!(!payload_is_angle_free("%3csvg%3e"));
+    assert!(!payload_is_angle_free("&lt;svg&gt;"));
+    assert!(!payload_is_angle_free("&#60;svg&#62;"));
+    assert!(!payload_is_angle_free("&#x3c;svg&#x3e;"));
+    assert!(!payload_is_angle_free("%253Csvg%253E"));
+}
+
+#[test]
+fn test_hoist_angle_free_payloads_orders_clean_first() {
+    let payloads = vec![
+        "%3Csvg%20onload%3Dalert(1)%3E".to_string(), // encoded angles
+        "\" onfocus=alert(1) \"".to_string(),        // angle-free
+        "&lt;img&gt;".to_string(),                   // encoded angles
+        "javascript:alert(1)".to_string(),           // angle-free
+    ];
+    let hoisted = hoist_angle_free_payloads(payloads, &['<']);
+    assert_eq!(hoisted[0], "\" onfocus=alert(1) \"");
+    assert_eq!(hoisted[1], "javascript:alert(1)");
+    // The encoded-angle ones come after, in original relative order.
+    assert!(hoisted[2].contains("%3C"));
+    assert!(hoisted[3].contains("&lt;"));
+}
+
+#[test]
+fn test_hoist_angle_free_payloads_no_op_without_block() {
+    let payloads = vec!["<svg>".to_string(), "\" onfocus=alert(1) \"".to_string()];
+    let original = payloads.clone();
+    let hoisted = hoist_angle_free_payloads(payloads, &['"']);
+    assert_eq!(hoisted, original, "non-angle invalids must not reorder");
+}
+
+#[test]
 fn test_get_fallback_reflection_payloads_none_encoder_keeps_raw_only() {
     let mut args = default_scan_args();
     args.encoders = vec!["none".to_string()];
