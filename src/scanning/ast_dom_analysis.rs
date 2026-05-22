@@ -553,6 +553,7 @@ impl<'a> DomXssVisitor<'a> {
     ///     when the selector statically picks a script element;
     ///   * `document.getElementsByTagName('script')[N]` /
     ///     `document.scripts[N]`.
+    ///
     /// The selector parsing is intentionally conservative — only fully
     /// static literal arguments resolve, so a dynamic selector never
     /// false-positives on a non-script element.
@@ -608,10 +609,10 @@ impl<'a> DomXssVisitor<'a> {
             // `<script>` elements, so any numeric / string-numeric index
             // returns a script element.
             Expression::StaticMemberExpression(inner) => {
-                if let Some(path) = self.get_member_string(inner) {
-                    if path == "document.scripts" {
-                        return true;
-                    }
+                if let Some(path) = self.get_member_string(inner)
+                    && path == "document.scripts"
+                {
+                    return true;
                 }
                 false
             }
@@ -658,14 +659,12 @@ impl<'a> DomXssVisitor<'a> {
         // we'd need real CSS parsing to handle these reliably.
         if trimmed
             .chars()
-            .any(|c| c == ',' || c == ' ' || c == '>' || c == '+' || c == '~')
+            .any(|c| [',', ' ', '>', '+', '~'].contains(&c))
         {
             return false;
         }
         // The tag portion is everything up to the first `.`, `#`, `[`, or `:`.
-        let tag_end = trimmed
-            .find(|c: char| c == '.' || c == '#' || c == '[' || c == ':')
-            .unwrap_or(trimmed.len());
+        let tag_end = trimmed.find(['.', '#', '[', ':']).unwrap_or(trimmed.len());
         let tag = &trimmed[..tag_end];
         tag.eq_ignore_ascii_case("script")
     }

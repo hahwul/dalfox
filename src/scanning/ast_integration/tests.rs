@@ -695,4 +695,3 @@ fn test_extract_script_element_ids_ignores_blank_ids() {
     assert_eq!(ids.len(), 1);
     assert!(ids.contains("ok"));
 }
-
