@@ -94,6 +94,13 @@ struct DomXssVisitor<'a> {
     /// variables runs the value as JS once the element is appended, which
     /// is otherwise indistinguishable from a harmless text assignment.
     script_element_vars: HashSet<String>,
+    /// IDs of `<script>` elements observed in the surrounding HTML.
+    /// When `document.getElementById('id')` resolves to one of these,
+    /// the returned element is a real `<script>` and text-property
+    /// assignments execute as JS, even though the call is inline and
+    /// never bound to a variable. Populated by the HTML pre-scan in
+    /// `ast_integration::extract_script_element_ids`.
+    script_element_ids: HashSet<String>,
 }
 
 // Module-level DOM source/sink/sanitizer constants
@@ -484,7 +491,13 @@ impl<'a> DomXssVisitor<'a> {
             url_search_params_objects: HashSet::new(),
             url_search_params_field_sources: HashMap::new(),
             script_element_vars: HashSet::new(),
+            script_element_ids: HashSet::new(),
         }
+    }
+
+    fn with_script_element_ids(mut self, ids: HashSet<String>) -> Self {
+        self.script_element_ids = ids;
+        self
     }
 
     /// Recognise `document.createElement('script')` (and the spelling variants
@@ -528,6 +541,132 @@ impl<'a> DomXssVisitor<'a> {
     /// `src` is already covered by the generic URL-attribute sink path.
     fn is_script_element_text_sink_prop(prop: &str) -> bool {
         matches!(prop, "text" | "textContent" | "innerText" | "innerHTML")
+    }
+
+    /// Decide whether an expression resolves to a `<script>` DOM element.
+    /// Covers:
+    ///   * identifiers previously assigned a script element
+    ///     (`document.createElement('script')` or a script lookup);
+    ///   * inline `document.getElementById('id')` when `id` matches a
+    ///     `<script id="...">` observed in the surrounding HTML;
+    ///   * inline `document.querySelector(...)` / `querySelectorAll(...)[N]`
+    ///     when the selector statically picks a script element;
+    ///   * `document.getElementsByTagName('script')[N]` /
+    ///     `document.scripts[N]`.
+    ///
+    /// The selector parsing is intentionally conservative — only fully
+    /// static literal arguments resolve, so a dynamic selector never
+    /// false-positives on a non-script element.
+    fn expr_resolves_to_script_element(&self, expr: &Expression<'a>) -> bool {
+        match expr {
+            Expression::Identifier(id) => self.script_element_vars.contains(id.name.as_str()),
+            Expression::ParenthesizedExpression(p) => {
+                self.expr_resolves_to_script_element(&p.expression)
+            }
+            Expression::CallExpression(call) => self.call_resolves_to_script_element(call),
+            Expression::ComputedMemberExpression(member) => {
+                self.computed_member_resolves_to_script_element(member)
+            }
+            Expression::StaticMemberExpression(member) => {
+                // `document.scripts` as a *value* is a collection, not an
+                // element. Only `document.scripts[N]` resolves, and that
+                // shape is handled in `computed_member_resolves_to_script_element`.
+                let _ = member;
+                false
+            }
+            _ => false,
+        }
+    }
+
+    fn call_resolves_to_script_element(&self, call: &CallExpression<'a>) -> bool {
+        let Some(method) = self.get_callee_property_name(&call.callee) else {
+            return false;
+        };
+        match method.as_str() {
+            "getElementById" => {
+                let Some(id) = Self::extract_static_string_argument(call, 0) else {
+                    return false;
+                };
+                self.script_element_ids.contains(&id)
+            }
+            "querySelector" => {
+                let Some(sel) = Self::extract_static_string_argument(call, 0) else {
+                    return false;
+                };
+                Self::selector_targets_script(&sel)
+            }
+            _ => false,
+        }
+    }
+
+    fn computed_member_resolves_to_script_element(
+        &self,
+        member: &ComputedMemberExpression<'a>,
+    ) -> bool {
+        // Look at the object being indexed.
+        match &member.object {
+            // `document.scripts[N]` — `scripts` is an HTMLCollection of all
+            // `<script>` elements, so any numeric / string-numeric index
+            // returns a script element.
+            Expression::StaticMemberExpression(inner) => {
+                if let Some(path) = self.get_member_string(inner)
+                    && path == "document.scripts"
+                {
+                    return true;
+                }
+                false
+            }
+            // `document.getElementsByTagName('script')[N]` and
+            // `document.querySelectorAll('script')[N]`.
+            Expression::CallExpression(call) => {
+                let Some(method) = self.get_callee_property_name(&call.callee) else {
+                    return false;
+                };
+                match method.as_str() {
+                    "getElementsByTagName" => Self::call_first_arg_eq_ignore_case(call, "script"),
+                    "querySelectorAll" => {
+                        let Some(sel) = Self::extract_static_string_argument(call, 0) else {
+                            return false;
+                        };
+                        Self::selector_targets_script(&sel)
+                    }
+                    _ => false,
+                }
+            }
+            _ => false,
+        }
+    }
+
+    fn call_first_arg_eq_ignore_case(call: &CallExpression<'a>, expected: &str) -> bool {
+        Self::extract_static_string_argument(call, 0)
+            .map(|s| s.eq_ignore_ascii_case(expected))
+            .unwrap_or(false)
+    }
+
+    /// Static-selector matcher for "this picks a `<script>`."
+    /// Accepts the conservative shapes that appear in real bundles —
+    /// `script`, `script#id`, `script[id="x"]`, `script.cls`, `script[*]`.
+    /// Combinators (`,`, ` `, `>`, `+`, `~`) are rejected so we never
+    /// claim a selector resolves to script when the rightmost element
+    /// could be anything.
+    fn selector_targets_script(selector: &str) -> bool {
+        let trimmed = selector.trim();
+        if trimmed.is_empty() {
+            return false;
+        }
+        // A descendant / sibling / list combinator means the matched
+        // element is the *last* compound selector. Be safe and reject —
+        // we'd need real CSS parsing to handle these reliably.
+        if trimmed
+            .chars()
+            .any(|c| [',', ' ', '>', '+', '~'].contains(&c))
+        {
+            return false;
+        }
+        // The tag portion is everything up to the first `.`, `#`, `[`, or `:`.
+        let tag_end = trimmed.find(['.', '#', '[', ':']).unwrap_or(trimmed.len());
+        let tag = &trimmed[..tag_end];
+        tag.eq_ignore_ascii_case("script")
     }
 
     /// Get a string representation of an expression if it's an identifier or member expression
@@ -1711,8 +1850,13 @@ impl<'a> DomXssVisitor<'a> {
                 // `let s = document.createElement('script')` — remember the
                 // variable so a later `s.text = tainted` is recognised as a
                 // sink even though `text` is a benign property on every
-                // other element kind.
-                if self.expr_creates_script_element(init) {
+                // other element kind. Also covers element lookups that
+                // statically resolve to a `<script>` element
+                // (`getElementById('script-id')`, `querySelector('script')`,
+                // `document.scripts[N]`, …).
+                if self.expr_creates_script_element(init)
+                    || self.expr_resolves_to_script_element(init)
+                {
                     self.script_element_vars.insert(var_name.to_string());
                 } else {
                     self.script_element_vars.remove(var_name);
@@ -2359,7 +2503,7 @@ impl<'a> DomXssVisitor<'a> {
                 // check below would miss.
                 let script_text_sink = right_tainted
                     && Self::is_script_element_text_sink_prop(prop_name)
-                    && matches!(&member.object, Expression::Identifier(id) if self.script_element_vars.contains(id.name.as_str()));
+                    && self.expr_resolves_to_script_element(&member.object);
                 if script_text_sink {
                     self.report_vulnerability_with_source(
                         assign.span(),
@@ -3116,12 +3260,26 @@ impl<'a> DomXssVisitor<'a> {
 }
 
 /// AST-based DOM XSS analyzer
-pub struct AstDomAnalyzer;
+#[derive(Default)]
+pub struct AstDomAnalyzer {
+    /// IDs of `<script>` elements gathered from the surrounding HTML
+    /// (see `ast_integration::extract_script_element_ids`). Empty when
+    /// the caller has no HTML context.
+    script_element_ids: HashSet<String>,
+}
 
 impl AstDomAnalyzer {
     /// Create a new AST DOM analyzer
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    /// Attach the set of `<script>` element IDs from the surrounding HTML
+    /// so `document.getElementById('id').innerText = tainted` can be
+    /// recognised as a JS-eval sink even when the lookup is inline.
+    pub fn with_script_element_ids(mut self, ids: HashSet<String>) -> Self {
+        self.script_element_ids = ids;
+        self
     }
 
     /// Analyze JavaScript source code for DOM XSS vulnerabilities
@@ -3136,16 +3294,11 @@ impl AstDomAnalyzer {
             return Err(format!("Parse errors: {}", error_messages.join(", ")));
         }
 
-        let mut visitor = DomXssVisitor::new(source_code);
+        let mut visitor = DomXssVisitor::new(source_code)
+            .with_script_element_ids(self.script_element_ids.clone());
         visitor.walk_statements(&ret.program.body);
 
         Ok(visitor.vulnerabilities)
-    }
-}
-
-impl Default for AstDomAnalyzer {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

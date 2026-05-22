@@ -666,3 +666,32 @@ fn test_has_self_bootstrap_verification_ignores_manual_only_sources() {
 
     assert!(!has_self_bootstrap_verification(js, "document.referrer"));
 }
+
+#[test]
+fn test_extract_script_element_ids_collects_only_script_ids() {
+    let html = r#"
+<html>
+<body>
+<div id='output'></div>
+<script id='scriptTag'></script>
+<script id='another'></script>
+<script>
+  document.getElementById('scriptTag').innerText = location.hash.slice(1);
+</script>
+</body>
+</html>
+"#;
+    let ids = extract_script_element_ids(html);
+    assert!(ids.contains("scriptTag"));
+    assert!(ids.contains("another"));
+    // The <div id='output'> id must NOT be in the set — only script tags.
+    assert!(!ids.contains("output"));
+}
+
+#[test]
+fn test_extract_script_element_ids_ignores_blank_ids() {
+    let html = r#"<script id='   '></script><script></script><script id='ok'></script>"#;
+    let ids = extract_script_element_ids(html);
+    assert_eq!(ids.len(), 1);
+    assert!(ids.contains("ok"));
+}

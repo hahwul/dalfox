@@ -3028,6 +3028,141 @@ d.text = location.hash.slice(1);
 }
 
 #[test]
+fn detects_get_element_by_id_script_element_inline_inner_text() {
+    // Matches xssmaze dom-level9: an empty <script id="scriptTag"></script>
+    // placeholder, then an inline `getElementById('scriptTag').innerText = tainted`
+    // populates it. The HTML pre-scan tells the analyzer that `scriptTag`
+    // is a script-element id, so the inline call resolves to a script
+    // element and the assignment must be reported as a JS-eval sink.
+    let js = r#"
+const urlParams = new URL(location.href).searchParams;
+const query = urlParams.get('query');
+document.getElementById('scriptTag').innerText = query;
+"#;
+    let analyzer = AstDomAnalyzer::new()
+        .with_script_element_ids(std::iter::once("scriptTag".to_string()).collect());
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.iter().any(|v| v.sink == "script.innerText"),
+        "inline getElementById('script-id').innerText must be a JS-eval sink; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn get_element_by_id_script_sink_requires_html_context() {
+    // Without an HTML pre-scan, `getElementById('whatever')` could be any
+    // element — we must not surface `.innerText` assignments as a JS-eval
+    // sink in that case.
+    let js = r#"
+const urlParams = new URL(location.href).searchParams;
+const query = urlParams.get('query');
+document.getElementById('whatever').innerText = query;
+"#;
+    let analyzer = AstDomAnalyzer::new(); // no script_element_ids supplied
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        !r.iter().any(|v| v.sink.starts_with("script.")),
+        "getElementById without HTML context must not be claimed as script element; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn get_element_by_id_non_script_id_is_not_script_element() {
+    // The HTML pre-scan only seeds ids whose tag is `<script>`. A page
+    // with `<div id="output">` and `<script id="scriptTag">` must yield
+    // only `scriptTag` — assignments on `output.innerText` stay benign.
+    let js = r#"
+const urlParams = new URL(location.href).searchParams;
+const query = urlParams.get('query');
+document.getElementById('output').innerText = query;
+"#;
+    let analyzer = AstDomAnalyzer::new()
+        .with_script_element_ids(std::iter::once("scriptTag".to_string()).collect());
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        !r.iter().any(|v| v.sink.starts_with("script.")),
+        ".innerText on a non-script element id must not surface; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn detects_query_selector_script_inner_text_pure_ast() {
+    // `document.querySelector('script')` returns the first script element
+    // without needing HTML context — the selector itself declares the tag.
+    let js = r#"
+const q = new URLSearchParams(location.search).get('q');
+document.querySelector('script').textContent = q;
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.iter().any(|v| v.sink == "script.textContent"),
+        "querySelector('script') resolves to a script element; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn detects_document_scripts_index_inner_text_pure_ast() {
+    let js = r#"
+const q = new URLSearchParams(location.search).get('q');
+document.scripts[0].innerText = q;
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.iter().any(|v| v.sink == "script.innerText"),
+        "document.scripts[N] is a script element; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn detects_get_elements_by_tag_name_script_index_text() {
+    let js = r#"
+const q = new URLSearchParams(location.search).get('q');
+document.getElementsByTagName('script')[0].text = q;
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.iter().any(|v| v.sink == "script.text"),
+        "getElementsByTagName('script')[N] is a script element; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn query_selector_combinator_selector_does_not_resolve_to_script() {
+    // `'div script'` ends in `script` but is a descendant combinator —
+    // play it safe and don't claim resolution without real CSS parsing.
+    // What we actually want to assert is the *negative* direction: the
+    // text-property assignment must not be reported as a script.* sink.
+    let js = r#"
+const q = new URLSearchParams(location.search).get('q');
+document.querySelector('div script').textContent = q;
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        !r.iter().any(|v| v.sink.starts_with("script.")),
+        "descendant combinator must not resolve statically; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn clipboard_get_data_is_recognised_as_source() {
     let js = r#"
 document.addEventListener('paste', function(e) {
