@@ -416,3 +416,118 @@ fn test_build_hpp_urls_returns_3_variants() {
     assert_eq!(variants[1].1, HppPosition::First);
     assert_eq!(variants[2].1, HppPosition::Both);
 }
+
+// Regression: issue #424 — Query param discovered via `<form action=...>`
+// must be probed at the action endpoint, not the page hosting the form.
+#[test]
+fn effective_query_base_uses_form_action_for_query_params() {
+    let target = make_url("https://example.com/page");
+    let mut param = Param {
+        name: "xss".into(),
+        value: "".into(),
+        location: Location::Query,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: Some("https://example.com/app.php".to_string()),
+        form_origin_url: Some("https://example.com/page".to_string()),
+        framework_sink: None,
+    };
+    let base = effective_query_base(&target, &param);
+    assert_eq!(base.as_str(), "https://example.com/app.php");
+
+    // Building the injected URL on top of the resolved base must hit /app.php
+    let out = build_injected_url(&base, &param, "PAY");
+    assert!(
+        out.starts_with("https://example.com/app.php?"),
+        "expected app.php probe, got: {out}"
+    );
+    assert!(out.contains("xss=PAY"));
+
+    // No form_action_url -> stays on target
+    param.form_action_url = None;
+    assert_eq!(
+        effective_query_base(&target, &param).as_str(),
+        target.as_str()
+    );
+}
+
+#[test]
+fn effective_query_base_ignores_form_action_for_non_query_locations() {
+    let target = make_url("https://example.com/page");
+    let param = Param {
+        name: "xss".into(),
+        value: "".into(),
+        location: Location::Body,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: Some("https://example.com/app.php".to_string()),
+        form_origin_url: None,
+        framework_sink: None,
+    };
+    // Body/JsonBody/Multipart resolve form_action_url at their own call site;
+    // the Query-specific helper must not steal that responsibility.
+    assert_eq!(
+        effective_query_base(&target, &param).as_str(),
+        target.as_str()
+    );
+}
+
+#[test]
+fn effective_query_base_preserves_existing_query_on_action() {
+    // `<form action="/app.php?ref=login">` — the action URL already has
+    // its own query params. Injecting our target field must keep them.
+    let target = make_url("https://example.com/page");
+    let param = Param {
+        name: "xss".into(),
+        value: "".into(),
+        location: Location::Query,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: Some("https://example.com/app.php?ref=login".to_string()),
+        form_origin_url: None,
+        framework_sink: None,
+    };
+    let base = effective_query_base(&target, &param);
+    let out = build_injected_url(&base, &param, "PAY");
+    assert!(
+        out.starts_with("https://example.com/app.php?"),
+        "expected app.php probe, got: {out}"
+    );
+    assert!(out.contains("ref=login"), "lost preexisting query: {out}");
+    assert!(out.contains("xss=PAY"), "missing injected param: {out}");
+}
+
+#[test]
+fn effective_query_base_falls_back_when_action_unparseable() {
+    let target = make_url("https://example.com/page");
+    let param = Param {
+        name: "xss".into(),
+        value: "".into(),
+        location: Location::Query,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: Some("::not a url::".to_string()),
+        form_origin_url: None,
+        framework_sink: None,
+    };
+    assert_eq!(
+        effective_query_base(&target, &param).as_str(),
+        target.as_str()
+    );
+}

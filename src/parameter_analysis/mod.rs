@@ -256,18 +256,26 @@ pub async fn active_probe_param(
                 }
                 _ => parsed_method,
             };
-            let body_url = form_action_url
+            // When this param came from form discovery, `form_action_url`
+            // points at the form's action endpoint, which may differ from
+            // the page URL where the form was found. Every body-bearing
+            // location probes at the action; Query must do the same so we
+            // exercise the sink rather than the form-host page.
+            let action_resolved_url = form_action_url
                 .as_ref()
                 .and_then(|u| url::Url::parse(u).ok())
                 .unwrap_or_else(|| url_original.clone());
-            let mut url = url_original.clone();
+            let mut url = match location {
+                Location::Query => action_resolved_url.clone(),
+                _ => url_original.clone(),
+            };
             let mut request_builder;
 
             match location {
                 Location::Query => {
                     let mut new_pairs: Vec<(String, String)> = Vec::new();
                     let mut replaced = false;
-                    for (k, v) in url_original.query_pairs() {
+                    for (k, v) in url.query_pairs() {
                         if k == wire_name {
                             new_pairs.push((k.to_string(), payload.clone()));
                             replaced = true;
@@ -308,7 +316,7 @@ pub async fn active_probe_param(
                         body_string = format!("{}={}", param_name, payload);
                     }
                     request_builder = client_clone
-                        .request(req_method, body_url.clone())
+                        .request(req_method, action_resolved_url.clone())
                         .header("Content-Type", "application/x-www-form-urlencoded")
                         .body(body_string);
                 }
@@ -401,7 +409,7 @@ pub async fn active_probe_param(
                     let body_string = serde_json::to_string(&root)
                         .unwrap_or_else(|_| format!("{{\"{}\":\"{}\"}}", param_name, payload));
                     request_builder = client_clone
-                        .request(req_method, body_url.clone())
+                        .request(req_method, action_resolved_url.clone())
                         .header("Content-Type", "application/json")
                         .body(body_string);
                 }
@@ -435,7 +443,7 @@ pub async fn active_probe_param(
                         form = form.text(param_name.clone(), payload.clone());
                     }
                     request_builder = client_clone
-                        .request(req_method, body_url.clone())
+                        .request(req_method, action_resolved_url.clone())
                         .multipart(form);
                 }
                 Location::Fragment => {
