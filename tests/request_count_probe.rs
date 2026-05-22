@@ -161,13 +161,29 @@ async fn handler_echo_all(Query(p): Query<HashMap<String, String>>) -> impl Into
     Html(body)
 }
 
+/// Reflects `q` inside an attribute value while stripping every `<` / `>`
+/// byte from the input. The attribute context exposes autotrigger event
+/// handler / quote-break payloads (no angle brackets needed), so a finding
+/// is still reachable — but every raw `<svg…>` style payload becomes a
+/// guaranteed miss. Used to measure the request savings from the
+/// adaptive-prune step in `scanning/mod.rs::run_scanning` that drops raw
+/// `<`/`>` payloads when `Param.invalid_specials` flags them.
+async fn handler_filter_angles(Query(p): Query<HashMap<String, String>>) -> impl IntoResponse {
+    let q = p.get("q").cloned().unwrap_or_default();
+    let stripped: String = q.chars().filter(|c| *c != '<' && *c != '>').collect();
+    Html(format!(
+        "<!DOCTYPE html><html><body><input value=\"{stripped}\"></body></html>"
+    ))
+}
+
 async fn start_server() -> SocketAddr {
     let app = Router::new()
         .route("/plain", get(handler_plain))
         .route("/b64", get(handler_b64_json))
         .route("/jwt", get(handler_jwt))
         .route("/urljson", get(handler_url_json))
-        .route("/echo_all", get(handler_echo_all));
+        .route("/echo_all", get(handler_echo_all))
+        .route("/filter_angles", get(handler_filter_angles));
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
         .await
         .expect("bind");
@@ -232,6 +248,17 @@ async fn measure_request_counts() {
     measure(
         "non_reflected",
         format!("http://{addr}/plain?other=ignored"),
+    )
+    .await;
+
+    // Angle-filtering server: `<` / `>` get stripped, so any raw-angle
+    // reflection payload is doomed. Stage 3 marks both chars as invalid
+    // and the scanning hot path prunes them out, so the request budget
+    // should be visibly smaller than `plain_query` even though both
+    // produce one finding.
+    measure(
+        "angle_filtered",
+        format!("http://{addr}/filter_angles?q=hello"),
     )
     .await;
 

