@@ -315,12 +315,10 @@ pub async fn send_with_retry(
             .headers()
             .get("retry-after")
             .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse::<u64>().ok())
-            .map(|secs| (secs * 1000).min(max_retry_delay_ms))
-            .unwrap_or_else(|| {
+            .and_then(|s| s.parse::<u64>().ok()).map_or_else(|| {
                 // Exponential backoff: 1s, 2s, 4s
                 (1000 * (1u64 << attempts.min(3))).min(max_retry_delay_ms)
-            });
+            }, |secs| (secs * 1000).min(max_retry_delay_ms));
 
         let Some(rb) = next_rb else {
             // Cannot retry (request body was streamed), return the 429

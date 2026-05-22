@@ -22,7 +22,7 @@ fn ensure_default_registries() {
     // Seed payload providers if empty
     {
         let reg = PAYLOAD_PROVIDER_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
-        let mut m = reg.lock().unwrap_or_else(|e| e.into_inner());
+        let mut m = reg.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if m.is_empty() {
             m.insert(
                 "payloadbox".to_string(),
@@ -37,7 +37,7 @@ fn ensure_default_registries() {
     // Seed wordlist providers if empty
     {
         let reg = WORDLIST_PROVIDER_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
-        let mut m = reg.lock().unwrap_or_else(|e| e.into_inner());
+        let mut m = reg.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         if m.is_empty() {
             m.insert(
                 "assetnote".to_string(),
@@ -55,14 +55,14 @@ fn ensure_default_registries() {
 pub fn register_payload_provider<N: AsRef<str>>(name: N, urls: Vec<String>) {
     let reg = PAYLOAD_PROVIDER_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
     let key = name.as_ref().to_ascii_lowercase();
-    let mut m = reg.lock().unwrap_or_else(|e| e.into_inner());
+    let mut m = reg.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     m.insert(key, urls);
 }
 
 pub fn register_wordlist_provider<N: AsRef<str>>(name: N, urls: Vec<String>) {
     let reg = WORDLIST_PROVIDER_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
     let key = name.as_ref().to_ascii_lowercase();
-    let mut m = reg.lock().unwrap_or_else(|e| e.into_inner());
+    let mut m = reg.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     m.insert(key, urls);
 }
 
@@ -72,7 +72,7 @@ pub fn list_payload_providers() -> Vec<String> {
     let Some(reg) = PAYLOAD_PROVIDER_REGISTRY.get() else {
         return Vec::new();
     };
-    let m = reg.lock().unwrap_or_else(|e| e.into_inner());
+    let m = reg.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     m.keys().cloned().collect()
 }
 
@@ -81,7 +81,7 @@ pub fn list_wordlist_providers() -> Vec<String> {
     let Some(reg) = WORDLIST_PROVIDER_REGISTRY.get() else {
         return Vec::new();
     };
-    let m = reg.lock().unwrap_or_else(|e| e.into_inner());
+    let m = reg.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     m.keys().cloned().collect()
 }
 
@@ -244,7 +244,7 @@ fn collect_payload_provider_urls(providers: &[String]) -> Vec<String> {
     let Some(reg) = PAYLOAD_PROVIDER_REGISTRY.get() else {
         return Vec::new();
     };
-    let m = reg.lock().unwrap_or_else(|e| e.into_inner());
+    let m = reg.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut urls: Vec<String> = Vec::new();
     for p in providers {
         if let Some(lst) = m.get(&p.to_ascii_lowercase()) {
@@ -260,7 +260,7 @@ fn collect_wordlist_provider_urls(providers: &[String]) -> Vec<String> {
     let Some(reg) = WORDLIST_PROVIDER_REGISTRY.get() else {
         return Vec::new();
     };
-    let m = reg.lock().unwrap_or_else(|e| e.into_inner());
+    let m = reg.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut urls: Vec<String> = Vec::new();
     for p in providers {
         if let Some(lst) = m.get(&p.to_ascii_lowercase()) {
@@ -311,12 +311,12 @@ async fn fetch_multiple_text_lists(client: &Client, urls: &[String]) -> String {
 /// - drop comment lines starting with '#', '//', or ';'
 fn sanitize_lines(text: &str) -> Vec<String> {
     text.lines()
-        .map(|l| l.trim())
+        .map(str::trim)
         .filter(|l| !l.is_empty())
         .filter(|l| !l.starts_with('#'))
         .filter(|l| !l.starts_with("//"))
         .filter(|l| !l.starts_with(';'))
-        .map(|l| l.to_string())
+        .map(std::string::ToString::to_string)
         .collect()
 }
 

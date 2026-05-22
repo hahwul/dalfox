@@ -162,7 +162,7 @@ pub async fn verify_dom_xss_light_with_client(
             .headers()
             .get("Content-Security-Policy")
             .and_then(|v| v.to_str().ok())
-            .map(|s| s.to_string());
+            .map(std::string::ToString::to_string);
         if let Ok(text) = resp.text().await {
             // 1) Payload reflection present after normalization
             if crate::utils::is_htmlish_content_type(&ct)

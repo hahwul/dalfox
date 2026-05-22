@@ -330,7 +330,7 @@ pub fn load_custom_payloads(path: &str) -> Result<Vec<String>, Box<dyn std::erro
     }
 
     let content = std::fs::read_to_string(path)?;
-    let payloads: Vec<String> = content.lines().map(|s| s.to_string()).collect();
+    let payloads: Vec<String> = content.lines().map(std::string::ToString::to_string).collect();
 
     if let Ok(mut guard) = cache.lock() {
         guard.insert(path.to_string(), payloads.clone());

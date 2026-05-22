@@ -244,8 +244,7 @@ impl DalfoxMcp {
         let url = scan_args
             .targets
             .first()
-            .map(String::as_str)
-            .unwrap_or("<missing>");
+            .map_or("<missing>", String::as_str);
         let include_request = scan_args.include_request;
         let include_response = scan_args.include_response;
 
@@ -509,7 +508,7 @@ fn default_method() -> String {
 fn default_encoders() -> Vec<String> {
     crate::cmd::scan::DEFAULT_ENCODERS
         .iter()
-        .map(|s| s.to_string())
+        .map(std::string::ToString::to_string)
         .collect()
 }
 fn default_timeout() -> u64 {
@@ -999,7 +998,7 @@ status, and result_count."
                         "scan_id": id,
                         "target": job.target_url,
                         "status": job.status,
-                        "result_count": job.results.as_ref().map(|r| r.len()).unwrap_or(0)
+                        "result_count": job.results.as_ref().map_or(0, |r| r.len())
                     });
                     if let Some(obj) = entry.as_object_mut() {
                         write_timestamps(job, obj);
@@ -1104,7 +1103,7 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
             skip_discovery: params.skip_discovery,
             encoders: crate::cmd::scan::DEFAULT_ENCODERS
                 .iter()
-                .map(|s| s.to_string())
+                .map(std::string::ToString::to_string)
                 .collect(),
         });
 

@@ -87,11 +87,10 @@ fn any_element_has_class_ascii_ci(document: &scraper::Html, marker: &str) -> boo
     document.select(selector).any(|node| {
         node.value()
             .attr("class")
-            .map(|cls| {
+            .is_some_and(|cls| {
                 cls.split_ascii_whitespace()
                     .any(|c| c.eq_ignore_ascii_case(marker))
             })
-            .unwrap_or(false)
     })
 }
 
@@ -103,8 +102,7 @@ fn any_element_has_id_ascii_ci(document: &scraper::Html, marker: &str) -> bool {
     document.select(selector).any(|node| {
         node.value()
             .attr("id")
-            .map(|id| id.trim().eq_ignore_ascii_case(marker))
-            .unwrap_or(false)
+            .is_some_and(|id| id.trim().eq_ignore_ascii_case(marker))
     })
 }
 

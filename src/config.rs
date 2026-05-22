@@ -651,7 +651,7 @@ impl Config {
             if let Some(v) = &scan.encoders {
                 // Override only if current encoders equal the canonical defaults (user did not supply CLI override).
                 // Canonical defaults are defined in cmd::scan::DEFAULT_ENCODERS (["url","html"]).
-                if args.encoders.iter().map(|s| s.as_str()).collect::<Vec<_>>()
+                if args.encoders.iter().map(std::string::String::as_str).collect::<Vec<_>>()
                     == crate::cmd::scan::DEFAULT_ENCODERS
                 {
                     args.encoders = v.clone();

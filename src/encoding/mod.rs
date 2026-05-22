@@ -26,7 +26,7 @@ pub fn apply_encoders_to_payloads(base_payloads: &[String], encoders: &[String])
 
     // Use a HashSet for O(1) encoder lookup instead of O(n) linear scan
     let encoder_set: std::collections::HashSet<&str> =
-        encoders.iter().map(|s| s.as_str()).collect();
+        encoders.iter().map(std::string::String::as_str).collect();
 
     // Expansion order
     let prio = [

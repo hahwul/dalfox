@@ -373,7 +373,7 @@ pub async fn active_probe_param(
                                 .trim_matches('/')
                                 .split('/')
                                 .filter(|s| !s.is_empty())
-                                .map(|s| s.to_string())
+                                .map(std::string::ToString::to_string)
                                 .collect()
                         };
                         if idx < segments.len() {
@@ -519,7 +519,7 @@ pub async fn active_probe_param(
                         resp.headers()
                             .get(reqwest::header::LOCATION)
                             .and_then(|v| v.to_str().ok())
-                            .map(|s| s.to_string())
+                            .map(std::string::ToString::to_string)
                     } else {
                         None
                     };
@@ -771,14 +771,10 @@ pub async fn analyze_parameters(
         for p in &target.reflection_params {
             let valid = p
                 .valid_specials
-                .as_ref()
-                .map(|v| v.iter().collect::<String>())
-                .unwrap_or_else(|| "-".to_string());
+                .as_ref().map_or_else(|| "-".to_string(), |v| v.iter().collect::<String>());
             let invalid = p
                 .invalid_specials
-                .as_ref()
-                .map(|v| v.iter().collect::<String>())
-                .unwrap_or_else(|| "-".to_string());
+                .as_ref().map_or_else(|| "-".to_string(), |v| v.iter().collect::<String>());
             let line = format!(
                 "[param-analysis] name={} type={:?} reflected=true context={:?} valid_specials=\"{}\" invalid_specials=\"{}\"",
                 p.name, p.location, p.injection_context, valid, invalid
