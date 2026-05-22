@@ -85,12 +85,10 @@ fn payload_has_any_marker(payload: &str) -> bool {
 fn any_element_has_class_ascii_ci(document: &scraper::Html, marker: &str) -> bool {
     let selector = super::selectors::universal();
     document.select(selector).any(|node| {
-        node.value()
-            .attr("class")
-            .is_some_and(|cls| {
-                cls.split_ascii_whitespace()
-                    .any(|c| c.eq_ignore_ascii_case(marker))
-            })
+        node.value().attr("class").is_some_and(|cls| {
+            cls.split_ascii_whitespace()
+                .any(|c| c.eq_ignore_ascii_case(marker))
+        })
     })
 }
 

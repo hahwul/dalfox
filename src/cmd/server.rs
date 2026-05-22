@@ -348,13 +348,10 @@ fn build_cors_headers(state: &AppState, req_headers: &HeaderMap) -> HeaderMap {
     if let Some(origin_val) = req_headers.get("Origin")
         && let Ok(origin_str) = origin_val.to_str()
     {
-        let exact_allowed = state
-            .allowed_origins
-            .as_ref()
-            .is_some_and(|v| {
-                v.iter()
-                    .any(|o| !o.starts_with("regex:") && o != "*" && o == origin_str)
-            });
+        let exact_allowed = state.allowed_origins.as_ref().is_some_and(|v| {
+            v.iter()
+                .any(|o| !o.starts_with("regex:") && o != "*" && o == origin_str)
+        });
         let regex_allowed = state
             .allowed_origin_regexes
             .iter()
@@ -1183,12 +1180,8 @@ async fn get_scan_handler(
         .unwrap_or_else(|| "GET".to_string());
     let data_opt = params.get("data").cloned();
     let user_agent = params.get("user_agent").cloned();
-    let include_request = params
-        .get("include_request")
-        .is_some_and(|s| s == "true");
-    let include_response = params
-        .get("include_response")
-        .is_some_and(|s| s == "true");
+    let include_request = params.get("include_request").is_some_and(|s| s == "true");
+    let include_response = params.get("include_response").is_some_and(|s| s == "true");
 
     let param_list: Option<Vec<String>> = params.get("param").map(|s| {
         s.split(',')
@@ -1197,21 +1190,11 @@ async fn get_scan_handler(
             .collect()
     });
     let proxy = params.get("proxy").cloned();
-    let follow_redirects = params
-        .get("follow_redirects")
-        .is_some_and(|s| s == "true");
-    let skip_mining = params
-        .get("skip_mining")
-        .is_some_and(|s| s == "true");
-    let skip_discovery = params
-        .get("skip_discovery")
-        .is_some_and(|s| s == "true");
-    let deep_scan = params
-        .get("deep_scan")
-        .is_some_and(|s| s == "true");
-    let skip_ast_analysis = params
-        .get("skip_ast_analysis")
-        .is_some_and(|s| s == "true");
+    let follow_redirects = params.get("follow_redirects").is_some_and(|s| s == "true");
+    let skip_mining = params.get("skip_mining").is_some_and(|s| s == "true");
+    let skip_discovery = params.get("skip_discovery").is_some_and(|s| s == "true");
+    let deep_scan = params.get("deep_scan").is_some_and(|s| s == "true");
+    let skip_ast_analysis = params.get("skip_ast_analysis").is_some_and(|s| s == "true");
 
     let opts = ScanOptions {
         cookie,

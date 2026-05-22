@@ -489,7 +489,10 @@ pub async fn probe_dictionary_params(
     }
 
     if !loaded {
-        params = GF_PATTERNS_PARAMS.iter().map(std::string::ToString::to_string).collect();
+        params = GF_PATTERNS_PARAMS
+            .iter()
+            .map(ToString::to_string)
+            .collect();
     }
 
     // Sentinel pre-probe: 3 unique random param names. If every one reflects,

@@ -460,7 +460,7 @@ async fn preflight_content_type(
     let ct_opt = head_headers
         .get(CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
-        .map(std::string::ToString::to_string);
+        .map(ToString::to_string);
     let mut csp_header = head_headers
         .get("content-security-policy")
         .and_then(|v| v.to_str().ok())
@@ -1377,7 +1377,10 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 }
                 let file_path = &args.targets[0];
                 match fs::read_to_string(file_path) {
-                    Ok(content) => content.lines().map(std::string::ToString::to_string).collect(),
+                    Ok(content) => content
+                        .lines()
+                        .map(ToString::to_string)
+                        .collect(),
                     Err(e) => {
                         if !args.silence {
                             emit_error(
@@ -1756,7 +1759,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         host_groups.entry(host).or_default().push(target);
     }
 
-    let total_targets = host_groups.values().map(std::vec::Vec::len).sum::<usize>();
+    let total_targets = host_groups.values().map(Vec::len).sum::<usize>();
     let preflight_idx = Arc::new(AtomicUsize::new(0));
     let analyze_idx = Arc::new(AtomicUsize::new(0));
     let scan_idx = Arc::new(AtomicUsize::new(0));

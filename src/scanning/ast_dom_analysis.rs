@@ -526,7 +526,7 @@ impl<'a> DomXssVisitor<'a> {
                 t.quasis
                     .first()
                     .and_then(|q| q.value.cooked.as_ref())
-                    .map(oxc_ast::ast::Str::as_str)
+                    .map(Str::as_str)
             }
             _ => None,
         };
@@ -1963,9 +1963,7 @@ impl<'a> DomXssVisitor<'a> {
                 {
                     let is_arg_tainted = match arg {
                         Argument::SpreadElement(spread) => self.is_tainted(&spread.argument),
-                        _ => arg
-                            .as_expression()
-                            .is_some_and(|e| self.is_tainted(e)),
+                        _ => arg.as_expression().is_some_and(|e| self.is_tainted(e)),
                     };
                     if is_arg_tainted {
                         self.tainted_vars.insert(var_name.to_string());
@@ -1974,13 +1972,17 @@ impl<'a> DomXssVisitor<'a> {
                             _ => arg.as_expression(),
                         };
                         let source = source_expr
-                            .and_then(|e| self.find_source_in_expr(e)).map_or_else(|| "location.search".to_string(), |source| {
-                                if id.name.as_str() == "URLSearchParams" {
-                                    self.normalize_search_param_source(&source)
-                                } else {
-                                    source
-                                }
-                            });
+                            .and_then(|e| self.find_source_in_expr(e))
+                            .map_or_else(
+                                || "location.search".to_string(),
+                                |source| {
+                                    if id.name.as_str() == "URLSearchParams" {
+                                        self.normalize_search_param_source(&source)
+                                    } else {
+                                        source
+                                    }
+                                },
+                            );
                         self.var_aliases
                             .insert(var_name.to_string(), source.clone());
                         if id.name.as_str() == "URLSearchParams" {
@@ -2031,9 +2033,7 @@ impl<'a> DomXssVisitor<'a> {
                     if let Some(arg) = call.arguments.first() {
                         let is_arg_tainted = match arg {
                             Argument::SpreadElement(spread) => self.is_tainted(&spread.argument),
-                            _ => arg
-                                .as_expression()
-                                .is_some_and(|e| self.is_tainted(e)),
+                            _ => arg.as_expression().is_some_and(|e| self.is_tainted(e)),
                         };
                         if is_arg_tainted {
                             self.tainted_vars.insert(var_name.to_string());
@@ -2286,9 +2286,7 @@ impl<'a> DomXssVisitor<'a> {
                                 Argument::SpreadElement(spread) => {
                                     self.is_tainted(&spread.argument)
                                 }
-                                _ => arg
-                                    .as_expression()
-                                    .is_some_and(|e| self.is_tainted(e)),
+                                _ => arg.as_expression().is_some_and(|e| self.is_tainted(e)),
                             };
                             if is_arg_tainted {
                                 self.report_vulnerability(
@@ -2398,7 +2396,7 @@ impl<'a> DomXssVisitor<'a> {
                     && matches!(
                         self.instance_classes
                             .get(id.name.as_str())
-                            .map(std::string::String::as_str),
+                            .map(String::as_str),
                         Some("MessageChannel")
                     )
                 {
@@ -2410,7 +2408,7 @@ impl<'a> DomXssVisitor<'a> {
                     && matches!(
                         self.instance_classes
                             .get(id.name.as_str())
-                            .map(std::string::String::as_str),
+                            .map(String::as_str),
                         Some("SharedWorker")
                     )
                 {
@@ -3331,7 +3329,11 @@ impl AstDomAnalyzer {
         let ret = Parser::new(&allocator, source_code, source_type).parse();
 
         if !ret.errors.is_empty() {
-            let error_messages: Vec<String> = ret.errors.iter().map(std::string::ToString::to_string).collect();
+            let error_messages: Vec<String> = ret
+                .errors
+                .iter()
+                .map(ToString::to_string)
+                .collect();
             return Err(format!("Parse errors: {}", error_messages.join(", ")));
         }
 

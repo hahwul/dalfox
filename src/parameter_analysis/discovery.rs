@@ -357,7 +357,7 @@ pub async fn check_query_discovery(
                         &text,
                         crate::scanning::markers::bracketed_marker(),
                     )
-                    .map(std::string::ToString::to_string);
+                    .map(ToString::to_string);
                     discovered = Some(Param {
                         name,
                         value,
@@ -760,7 +760,7 @@ pub async fn check_header_discovery(
                     &text,
                     crate::scanning::markers::bracketed_marker(),
                 )
-                .map(std::string::ToString::to_string);
+                .map(ToString::to_string);
                 discovered = Some(Param {
                     name: header_name,
                     value: header_value,
@@ -823,7 +823,10 @@ pub async fn check_path_discovery(
 
     let mut handles = Vec::new();
 
-    let mut new_segments: Vec<String> = segments.iter().map(std::string::ToString::to_string).collect();
+    let mut new_segments: Vec<String> = segments
+        .iter()
+        .map(ToString::to_string)
+        .collect();
     for (idx, original) in segments.iter().enumerate() {
         let saved = std::mem::replace(&mut new_segments[idx], test_value.to_string());
         let new_path = format!("/{}", new_segments.join("/"));

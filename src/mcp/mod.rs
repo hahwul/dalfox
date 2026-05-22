@@ -508,7 +508,7 @@ fn default_method() -> String {
 fn default_encoders() -> Vec<String> {
     crate::cmd::scan::DEFAULT_ENCODERS
         .iter()
-        .map(std::string::ToString::to_string)
+        .map(ToString::to_string)
         .collect()
 }
 fn default_timeout() -> u64 {
@@ -1103,7 +1103,7 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
             skip_discovery: params.skip_discovery,
             encoders: crate::cmd::scan::DEFAULT_ENCODERS
                 .iter()
-                .map(std::string::ToString::to_string)
+                .map(ToString::to_string)
                 .collect(),
         });
 

@@ -169,7 +169,7 @@ pub fn parse_method_url_body(s: &str) -> (String, String, Option<String>) {
             let body = parts
                 .get(2)
                 .filter(|s| !s.is_empty())
-                .map(std::string::ToString::to_string);
+                .map(ToString::to_string);
             return (potential_method, url, body);
         }
     }
