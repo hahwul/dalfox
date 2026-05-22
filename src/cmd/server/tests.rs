@@ -1666,6 +1666,162 @@ async fn test_list_scans_handler_zero_limit_returns_all() {
 }
 
 #[tokio::test]
+async fn test_run_scan_job_webhook_fires_on_pre_start_cancellation() {
+    // Regression: previously run_scan_job returned silently when it
+    // observed the job was already cancelled / cancel_flag set before
+    // entering the Running state, so subscribers wired to the webhook
+    // never got a terminal callback for "cancel immediately after submit"
+    // scans. The mid-flight cancel path already fired the webhook with
+    // status=cancelled — this asserts the pre-start path matches that
+    // contract.
+    let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+    let captured_clone = captured.clone();
+    let webhook_app = Router::new().route(
+        "/hook",
+        any(move |body: axum::body::Bytes| {
+            let captured = captured_clone.clone();
+            async move {
+                let parsed: serde_json::Value =
+                    serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+                *captured.lock().await = Some(parsed);
+                StatusCode::OK
+            }
+        }),
+    );
+    let webhook_listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind webhook listener");
+    let webhook_addr = webhook_listener.local_addr().expect("webhook local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(webhook_listener, webhook_app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+    let state = make_state(None, None, false, false, "callback");
+    let id = "pre-cancel-webhook".to_string();
+    let target_url = "http://example.com/will-not-be-scanned";
+    let mut job = test_job(JobStatus::Queued, None, target_url);
+    job.callback_url = Some(format!("http://{}/hook", webhook_addr));
+    // Trip the cancel flag *before* run_scan_job starts. The new code
+    // path must observe this, fire the webhook, and return — without
+    // ever issuing a request to the target.
+    job.cancelled
+        .store(true, std::sync::atomic::Ordering::Relaxed);
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert(id.clone(), job);
+    }
+
+    let opts = ScanOptions {
+        callback_url: Some(format!("http://{}/hook", webhook_addr)),
+        ..ScanOptions::default()
+    };
+
+    let run = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        run_scan_job(
+            state.clone(),
+            id.clone(),
+            target_url.to_string(),
+            opts,
+            false,
+            false,
+        ),
+    )
+    .await;
+    assert!(run.is_ok(), "pre-cancelled run_scan_job should return fast");
+
+    // The webhook is awaited in run_scan_job, so by the time it returns
+    // the body should already be captured.
+    let payload = captured
+        .lock()
+        .await
+        .clone()
+        .expect("webhook must fire for pre-start cancellation");
+    assert_eq!(payload["status"], "cancelled");
+    assert_eq!(payload["scan_id"], serde_json::Value::String(id));
+    assert_eq!(payload["url"], target_url);
+    // No scan ran, so results must be an empty array (not missing).
+    assert!(
+        payload["results"].is_array() && payload["results"].as_array().unwrap().is_empty(),
+        "results should be [] for pre-start cancellation, got {:?}",
+        payload["results"]
+    );
+}
+
+#[tokio::test]
+async fn test_send_terminal_webhook_skips_non_http_url() {
+    // The webhook helper must refuse non-http(s) URLs (file:// etc.) so
+    // a malicious callback_url can't trick the server into touching odd
+    // schemes. Verified by passing a `file://` URL and confirming the
+    // helper returns without panicking (and we have no other side effect
+    // we can observe — the contract is "silently drop").
+    let state = make_state(None, None, false, false, "cb");
+    // Should be a no-op; main assertion is that this returns at all.
+    send_terminal_webhook(
+        &state,
+        Some("file:///etc/passwd".to_string()),
+        "id",
+        "http://example.com",
+        "cancelled",
+        &[],
+        None,
+    )
+    .await;
+    send_terminal_webhook(&state, None, "id", "http://example.com", "done", &[], None).await;
+}
+
+#[tokio::test]
+async fn test_mark_job_error_transitions_non_terminal() {
+    // Recovery primitive used by spawn_scan_task when the inner scan
+    // panics or the scan runtime fails to build. Verify the basic
+    // contract: a non-terminal job is moved to Error with the message
+    // and a finished_at_ms timestamp.
+    let state = make_state(None, None, false, false, "cb");
+    let id = "panic-recover".to_string();
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert(id.clone(), test_job(JobStatus::Running, None, "http://x"));
+    }
+
+    mark_job_error(&state, &id, "synthetic panic".to_string()).await;
+
+    let jobs = state.jobs.lock().await;
+    let job = jobs.get(&id).expect("job present");
+    assert_eq!(job.status, JobStatus::Error);
+    assert_eq!(job.error_message.as_deref(), Some("synthetic panic"));
+    assert!(job.finished_at_ms.is_some());
+}
+
+#[tokio::test]
+async fn test_mark_job_error_does_not_clobber_terminal_state() {
+    // If the scan task panics *after* it has already written a terminal
+    // outcome (e.g. cancelled mid-flight, then the cleanup path panics),
+    // the recovery must not rewrite Done/Cancelled/Error to Error. The
+    // gate is `!is_terminal()`; assert it holds for each terminal state.
+    let state = make_state(None, None, false, false, "cb");
+
+    for (id, status) in [
+        ("done-stays-done", JobStatus::Done),
+        ("cancelled-stays-cancelled", JobStatus::Cancelled),
+        ("error-stays-error", JobStatus::Error),
+    ] {
+        {
+            let mut jobs = state.jobs.lock().await;
+            jobs.insert(id.to_string(), test_job(status.clone(), None, "http://x"));
+        }
+        mark_job_error(&state, id, "should-not-overwrite".to_string()).await;
+        let jobs = state.jobs.lock().await;
+        let job = jobs.get(id).expect("job present");
+        assert_eq!(
+            job.status, status,
+            "terminal status must not be rewritten by recovery"
+        );
+        assert!(job.error_message.is_none());
+    }
+}
+
+#[tokio::test]
 async fn test_cancel_scan_handler_purge_deletes_terminal_job() {
     let state = make_state(None, None, false, false, "cb");
     {

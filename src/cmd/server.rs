@@ -399,6 +399,129 @@ fn log(state: &AppState, level: &str, message: &str) {
     }
 }
 
+/// Spawn `run_scan_job` on the blocking pool with full panic / runtime-build
+/// isolation. Without this wrapper, a panic inside the spawned task — or a
+/// failure to build the inner current-thread runtime — silently drops the
+/// `JoinHandle` and leaves the job pinned in `Queued`/`Running` forever.
+/// `purge_expired_jobs` only collects terminal jobs, so the orphan also
+/// leaks the job slot indefinitely.
+fn spawn_scan_task(
+    state: AppState,
+    job_id: String,
+    url: String,
+    opts: ScanOptions,
+    include_request: bool,
+    include_response: bool,
+) {
+    tokio::task::spawn_blocking(move || {
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(r) => r,
+            Err(e) => {
+                let msg = format!("scan runtime build failed: {}", e);
+                eprintln!("[server] {} for job {}", msg, job_id);
+                fail_job_via_fresh_runtime(&state, &job_id, msg);
+                return;
+            }
+        };
+
+        let state_for_recovery = state.clone();
+        let job_id_for_recovery = job_id.clone();
+
+        let rt_ref = &rt;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
+            rt_ref.block_on(run_scan_job(
+                state,
+                job_id,
+                url,
+                opts,
+                include_request,
+                include_response,
+            ));
+        }));
+
+        if let Err(panic) = result {
+            let payload = if let Some(s) = panic.downcast_ref::<String>() {
+                s.clone()
+            } else if let Some(s) = panic.downcast_ref::<&str>() {
+                (*s).to_string()
+            } else {
+                "unknown panic payload".to_string()
+            };
+            let msg = format!("scan task panicked: {}", payload);
+            eprintln!(
+                "[server] {} (job_id={})",
+                msg, job_id_for_recovery
+            );
+            // The scan runtime itself is still valid after a panic inside the
+            // future, so reuse it for the recovery write rather than spinning
+            // up a second runtime just to update one map entry.
+            rt.block_on(async {
+                mark_job_error(&state_for_recovery, &job_id_for_recovery, msg).await;
+            });
+        }
+    });
+}
+
+/// Best-effort recovery path used when the scan runtime could not be built at
+/// all. Builds a tiny one-shot runtime just to update the job map; if even
+/// that fails, the job is unrecoverable from this thread.
+fn fail_job_via_fresh_runtime(state: &AppState, job_id: &str, msg: String) {
+    let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    else {
+        eprintln!(
+            "[server] could not build recovery runtime to fail job {}",
+            job_id
+        );
+        return;
+    };
+    let state = state.clone();
+    let job_id = job_id.to_string();
+    rt.block_on(async move {
+        mark_job_error(&state, &job_id, msg).await;
+    });
+}
+
+/// Transition a non-terminal job into `Error` with the supplied message. Safe
+/// to call even after the job has reached a terminal state (the update is
+/// gated on `!is_terminal()`) so panic / cancel races don't clobber a real
+/// outcome.
+async fn mark_job_error(state: &AppState, job_id: &str, msg: String) {
+    let mut jobs = state.jobs.lock().await;
+    if let Some(job) = jobs.get_mut(job_id)
+        && !job.is_terminal()
+    {
+        job.status = JobStatus::Error;
+        job.error_message = Some(msg);
+        if job.finished_at_ms.is_none() {
+            job.finished_at_ms = Some(now_ms());
+        }
+    }
+}
+
+/// Decision made by the run_scan_job preamble after looking up the job.
+/// Capturing it in a value type lets us release the jobs lock before any
+/// awaits — important because the pre-cancelled path needs to fire a
+/// webhook and we don't want to hold the lock across that network call.
+enum StartDecision {
+    Run {
+        progress: JobProgress,
+        cancel_flag: Arc<std::sync::atomic::AtomicBool>,
+    },
+    /// Job was cancelled (or its cancel flag set) before the scan task got
+    /// a chance to start. Caller must still fire the webhook so subscribers
+    /// see a terminal callback for this scan_id.
+    PreCancelled {
+        callback_url: Option<String>,
+    },
+    /// Job was deleted from the map between submission and dispatch.
+    Missing,
+}
+
 async fn run_scan_job(
     state: AppState,
     job_id: String,
@@ -408,20 +531,50 @@ async fn run_scan_job(
     include_response: bool,
 ) {
     // Grab progress counters and cancellation flag
-    let (progress, cancel_flag) = {
+    let decision = {
         let mut jobs = state.jobs.lock().await;
-        if let Some(job) = jobs.get_mut(&job_id) {
-            if job.status == JobStatus::Cancelled
-                || job.cancelled.load(std::sync::atomic::Ordering::Relaxed)
-            {
-                return;
+        match jobs.get_mut(&job_id) {
+            Some(job) => {
+                if job.status == JobStatus::Cancelled
+                    || job.cancelled.load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    StartDecision::PreCancelled {
+                        callback_url: job.callback_url.clone(),
+                    }
+                } else {
+                    job.status = JobStatus::Running;
+                    job.started_at_ms = Some(now_ms());
+                    StartDecision::Run {
+                        progress: job.progress.clone(),
+                        cancel_flag: job.cancelled.clone(),
+                    }
+                }
             }
-            job.status = JobStatus::Running;
-            job.started_at_ms = Some(now_ms());
-            (job.progress.clone(), job.cancelled.clone())
-        } else {
+            None => StartDecision::Missing,
+        }
+    };
+
+    let (progress, cancel_flag) = match decision {
+        StartDecision::Run {
+            progress,
+            cancel_flag,
+        } => (progress, cancel_flag),
+        StartDecision::PreCancelled { callback_url } => {
+            // Previously this branch returned silently, so any subscriber
+            // wired to the webhook never received a terminal callback for
+            // scans that were cancelled before the task got a chance to
+            // run. Mirror the mid-flight cancellation contract here so the
+            // webhook fires for every terminal state, not just some.
+            log(
+                &state,
+                "JOB",
+                &format!("cancelled-pre-start id={} url={}", job_id, url),
+            );
+            send_terminal_webhook(&state, callback_url, &job_id, &url, "cancelled", &[], None)
+                .await;
             return;
         }
+        StartDecision::Missing => return,
     };
 
     let args = ScanArgs {
@@ -700,44 +853,67 @@ async fn run_scan_job(
         &format!("{} id={} url={}", status_label, job_id, url),
     );
 
-    // Fire webhook callback if configured (only http/https to mitigate SSRF)
-    if let Some(cb_url) = callback_url
-        && (cb_url.starts_with("http://") || cb_url.starts_with("https://"))
-    {
-        // Report the actual terminal status so downstream consumers can tell
-        // a fully-completed scan from one that was cancelled mid-flight.
-        let payload = serde_json::json!({
-            "scan_id": job_id,
-            "status": if was_cancelled { "cancelled" } else { "done" },
-            "url": url,
-            "results": &*final_results_arc
-        });
-        // Reuse the target's HTTP configuration (proxy, TLS relaxation, redirect
-        // policy) so webhook delivery respects the same network boundary as the
-        // scan itself.
-        let cb_client = target.build_client_or_default();
-        let cb_result: Result<reqwest::Response, reqwest::Error> = cb_client
-            .post(&cb_url)
-            .json(&payload)
-            .timeout(std::time::Duration::from_secs(10))
-            .send()
-            .await;
-        match cb_result {
-            Ok(resp) => {
-                log(
-                    &state,
-                    "CALLBACK",
-                    &format!("POST {} -> {}", cb_url, resp.status()),
-                );
-            }
-            Err(e) => {
-                log(
-                    &state,
-                    "CALLBACK",
-                    &format!("POST {} failed: {}", cb_url, e),
-                );
-            }
-        }
+    // Reuse the target's HTTP configuration (proxy, TLS relaxation, redirect
+    // policy) so webhook delivery respects the same network boundary as the
+    // scan itself.
+    let cb_client = target.build_client_or_default();
+    send_terminal_webhook(
+        &state,
+        callback_url,
+        &job_id,
+        &url,
+        status_label,
+        &final_results_arc,
+        Some(cb_client),
+    )
+    .await;
+}
+
+/// POST the scan-completion payload to the configured webhook, if any.
+/// Only `http`/`https` URLs are dialed (mitigates SSRF via odd schemes such
+/// as `file://`). The status string is the same one we put in the response
+/// payload (`"done"` or `"cancelled"`) so downstream consumers can branch
+/// on it without re-deriving terminal state.
+async fn send_terminal_webhook(
+    state: &AppState,
+    callback_url: Option<String>,
+    job_id: &str,
+    url: &str,
+    status_label: &str,
+    results: &[SanitizedResult],
+    client: Option<reqwest::Client>,
+) {
+    let Some(cb_url) = callback_url else { return };
+    if !(cb_url.starts_with("http://") || cb_url.starts_with("https://")) {
+        return;
+    }
+    let payload = serde_json::json!({
+        "scan_id": job_id,
+        "status": status_label,
+        "url": url,
+        "results": results,
+    });
+    // When the caller has no parsed target (e.g. pre-start cancellation),
+    // fall back to a default client. Webhook delivery should not silently
+    // drop just because the scan never got far enough to build a target.
+    let client = client.unwrap_or_default();
+    let result = client
+        .post(&cb_url)
+        .json(&payload)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await;
+    match result {
+        Ok(resp) => log(
+            state,
+            "CALLBACK",
+            &format!("POST {} -> {}", cb_url, resp.status()),
+        ),
+        Err(e) => log(
+            state,
+            "CALLBACK",
+            &format!("POST {} failed: {}", cb_url, e),
+        ),
     }
 }
 
@@ -802,24 +978,14 @@ async fn start_scan_handler(
     }
     log(&state, "JOB", &format!("queued id={} url={}", id, req.url));
 
-    // Spawn the scanning task (run !Send future inside blocking thread with local runtime)
-    let state_clone = state.clone();
-    let url = req.url.clone();
-    let job_id = id.clone();
-    tokio::task::spawn_blocking(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("failed to build current-thread runtime");
-        rt.block_on(run_scan_job(
-            state_clone,
-            job_id,
-            url,
-            opts.clone(),
-            include_request,
-            include_response,
-        ));
-    });
+    spawn_scan_task(
+        state.clone(),
+        id.clone(),
+        req.url.clone(),
+        opts,
+        include_request,
+        include_response,
+    );
 
     let resp = ApiResponse::<serde_json::Value> {
         code: 200,
@@ -1110,22 +1276,14 @@ async fn get_scan_handler(
     log(&state, "JOB", &format!("queued id={} url={}", id, url));
 
     let id_for_resp = id.clone();
-    let state_clone = state.clone();
-    let url_clone = url.clone();
-    tokio::task::spawn_blocking(move || {
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("failed to build current-thread runtime");
-        rt.block_on(run_scan_job(
-            state_clone,
-            id,
-            url_clone,
-            opts,
-            include_request,
-            include_response,
-        ));
-    });
+    spawn_scan_task(
+        state.clone(),
+        id,
+        url.clone(),
+        opts,
+        include_request,
+        include_response,
+    );
 
     let resp = ApiResponse::<serde_json::Value> {
         code: 200,
