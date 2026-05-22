@@ -845,6 +845,43 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
+    /// Walk the object chain of a member-expression callee and return true
+    /// when the chain terminates in a `$(...)` or `jQuery(...)` call.
+    ///
+    /// Used to gate native-vs-jQuery DOM insertion methods (`append`,
+    /// `prepend`, `after`, `before`). On a native `Element` these methods
+    /// insert string arguments as text nodes — no HTML parsing, no script
+    /// execution — so they are NOT XSS sinks. They only behave as sinks
+    /// when called on a jQuery selector chain, where `.append(html)`
+    /// invokes `innerHTML` semantics under the hood.
+    ///
+    /// Handles chains like `$('#x').append(...)` and
+    /// `$('#x').find('.y').append(...)` by following the `object` link of
+    /// each intermediate `StaticMemberExpression` / `CallExpression`.
+    fn callee_receiver_is_jquery_chain(callee: &Expression<'a>) -> bool {
+        let mut current: &Expression<'a> = match callee {
+            Expression::StaticMemberExpression(m) => &m.object,
+            Expression::ComputedMemberExpression(m) => &m.object,
+            _ => return false,
+        };
+        loop {
+            match current {
+                Expression::CallExpression(call) => match &call.callee {
+                    Expression::Identifier(id) => {
+                        return id.name == "$" || id.name == "jQuery";
+                    }
+                    Expression::StaticMemberExpression(m) => current = &m.object,
+                    Expression::ComputedMemberExpression(m) => current = &m.object,
+                    _ => return false,
+                },
+                Expression::StaticMemberExpression(m) => current = &m.object,
+                Expression::ComputedMemberExpression(m) => current = &m.object,
+                Expression::ParenthesizedExpression(p) => current = &p.expression,
+                _ => return false,
+            }
+        }
+    }
+
     fn build_bound_alias_from_bind_call(
         &self,
         bind_call: &CallExpression<'a>,
@@ -3224,6 +3261,20 @@ impl<'a> DomXssVisitor<'a> {
                         return;
                     }
                 }
+            } else if matches!(
+                method_name.as_str(),
+                "append" | "prepend" | "after" | "before"
+            ) && !Self::callee_receiver_is_jquery_chain(&call.callee)
+            {
+                // FP suppression: native `Element.append / .prepend / .after
+                // / .before` insert string arguments as text nodes — they do
+                // NOT parse HTML and cannot trigger script execution. Only
+                // jQuery's same-named methods are real HTML sinks (they call
+                // `innerHTML` internally). Without a `$(...)` / `jQuery(...)`
+                // receiver chain, treat these method calls as inert.
+                //
+                // Falls through to walk the callee so taint tracking through
+                // arguments and sub-expressions still proceeds.
             } else {
                 // Generic method sink: if any argument is tainted
                 let mut tainted_source: Option<String> = None;

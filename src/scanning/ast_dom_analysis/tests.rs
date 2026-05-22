@@ -3180,3 +3180,73 @@ document.addEventListener('paste', function(e) {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn native_element_append_is_not_a_sink() {
+    // `Element.prototype.append(string)` inserts the string as a Text node
+    // — no HTML parsing — so a tainted argument is not exploitable. The
+    // analyzer must not flag this shape.
+    let js = r#"
+const q = new URLSearchParams(location.search).get('q');
+document.getElementById('out').append(q);
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.is_empty(),
+        "native el.append(tainted) is not an XSS sink; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn native_element_prepend_after_before_are_not_sinks() {
+    let js = r#"
+const q = new URLSearchParams(location.search).get('q');
+document.getElementById('a').prepend(q);
+document.getElementById('b').after(q);
+document.getElementById('c').before(q);
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.is_empty(),
+        "native el.prepend/.after/.before(tainted) are not XSS sinks; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn jquery_append_remains_a_sink() {
+    // jQuery's `.append(html)` invokes innerHTML semantics — a tainted
+    // string argument is exploitable, so the analyzer must still flag it.
+    let js = r#"
+const q = new URLSearchParams(location.search).get('q');
+$('#out').append(q);
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.iter().any(|v| v.sink == "append"),
+        "jQuery $(...).append(tainted) must surface; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn jquery_chained_append_remains_a_sink() {
+    // `$('#x').find('.y').append(tainted)` — the chain must still be
+    // recognised as a jQuery receiver even through an intermediate
+    // method call.
+    let js = r#"
+const q = new URLSearchParams(location.search).get('q');
+$('#root').find('.target').append(q);
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let r = analyzer.analyze(js).expect("parses");
+    assert!(
+        r.iter().any(|v| v.sink == "append"),
+        "jQuery chained .find().append(tainted) must surface; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
