@@ -451,10 +451,7 @@ fn spawn_scan_task(
                 "unknown panic payload".to_string()
             };
             let msg = format!("scan task panicked: {}", payload);
-            eprintln!(
-                "[server] {} (job_id={})",
-                msg, job_id_for_recovery
-            );
+            eprintln!("[server] {} (job_id={})", msg, job_id_for_recovery);
             // The scan runtime itself is still valid after a panic inside the
             // future, so reuse it for the recovery write rather than spinning
             // up a second runtime just to update one map entry.
@@ -515,9 +512,7 @@ enum StartDecision {
     /// Job was cancelled (or its cancel flag set) before the scan task got
     /// a chance to start. Caller must still fire the webhook so subscribers
     /// see a terminal callback for this scan_id.
-    PreCancelled {
-        callback_url: Option<String>,
-    },
+    PreCancelled { callback_url: Option<String> },
     /// Job was deleted from the map between submission and dispatch.
     Missing,
 }
@@ -930,11 +925,7 @@ async fn send_terminal_webhook(
             "CALLBACK",
             &format!("POST {} -> {}", cb_url, resp.status()),
         ),
-        Err(e) => log(
-            state,
-            "CALLBACK",
-            &format!("POST {} failed: {}", cb_url, e),
-        ),
+        Err(e) => log(state, "CALLBACK", &format!("POST {} failed: {}", cb_url, e)),
     }
 }
 

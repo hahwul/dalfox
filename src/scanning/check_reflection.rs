@@ -1131,13 +1131,9 @@ async fn fetch_injection_response_with_client(
             // a `<form action=...>` onto the action endpoint; Path keeps
             // target.url because path-segment injection depends on the
             // original path layout.
-            let base_url =
-                crate::scanning::url_inject::effective_query_base(&target.url, param);
-            let inject_url = crate::scanning::url_inject::build_injected_url(
-                &base_url,
-                param,
-                &encoded_payload,
-            );
+            let base_url = crate::scanning::url_inject::effective_query_base(&target.url, param);
+            let inject_url =
+                crate::scanning::url_inject::build_injected_url(&base_url, param, &encoded_payload);
             let parsed_url = url::Url::parse(&inject_url).unwrap_or_else(|_| base_url.clone());
             crate::utils::build_request(
                 client,
