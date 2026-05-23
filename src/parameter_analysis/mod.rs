@@ -372,8 +372,7 @@ async fn send_probe_request_for_param(
             {
                 json_value_opt = Some(parsed);
             }
-            let mut root =
-                json_value_opt.unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+            let mut root = json_value_opt.unwrap_or_else(|| Value::Object(serde_json::Map::new()));
             if let Value::Object(ref mut map) = root {
                 map.insert(param_name.clone(), Value::String(payload.to_string()));
             } else {
@@ -558,10 +557,7 @@ pub async fn active_probe_param(
     let batched_payload =
         crate::encoding::pre_encoding::apply_param_encoding(&batched_probe, &param);
 
-    let permit = semaphore
-        .acquire()
-        .await
-        .expect("acquire semaphore permit");
+    let permit = semaphore.acquire().await.expect("acquire semaphore permit");
     let batched_response =
         send_probe_request_for_param(&client, target, &param, &batched_payload).await;
     drop(permit);
@@ -570,7 +566,10 @@ pub async fn active_probe_param(
     let mut invalid: Vec<char> = Vec::new();
     let mut need_per_char_fallback = false;
 
-    match batched_response.as_deref().and_then(extract_reflected_segment) {
+    match batched_response
+        .as_deref()
+        .and_then(extract_reflected_segment)
+    {
         Some(segment) => {
             for &c in SPECIAL_PROBE_CHARS {
                 if char_reflected_in_segment(segment, c) {
@@ -619,13 +618,9 @@ pub async fn active_probe_param(
                 );
                 let pp = crate::encoding::pre_encoding::apply_param_encoding(&probe, &param_clone);
                 let _permit = sem.acquire().await.expect("acquire semaphore permit");
-                let resp = send_probe_request_for_param(
-                    &client_clone,
-                    &target_clone,
-                    &param_clone,
-                    &pp,
-                )
-                .await;
+                let resp =
+                    send_probe_request_for_param(&client_clone, &target_clone, &param_clone, &pp)
+                        .await;
                 let ok = resp
                     .as_deref()
                     .and_then(extract_reflected_segment)
