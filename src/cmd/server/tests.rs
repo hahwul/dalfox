@@ -524,10 +524,10 @@ async fn test_start_scan_handler_unauthorized_and_bad_request_jsonp() {
         State(state_auth),
         HeaderMap::new(),
         Query(params_auth),
-        Json(ScanRequest {
+        Ok(Json(ScanRequest {
             url: "http://example.com".to_string(),
             options: None,
-        }),
+        })),
     )
     .await
     .into_response();
@@ -542,10 +542,10 @@ async fn test_start_scan_handler_unauthorized_and_bad_request_jsonp() {
         State(state_no_key),
         HeaderMap::new(),
         Query(params_bad_req),
-        Json(ScanRequest {
+        Ok(Json(ScanRequest {
             url: "   ".to_string(),
             options: None,
-        }),
+        })),
     )
     .await
     .into_response();
@@ -561,14 +561,14 @@ async fn test_start_scan_handler_success_creates_queued_job() {
         State(state.clone()),
         HeaderMap::new(),
         Query(Map::new()),
-        Json(ScanRequest {
+        Ok(Json(ScanRequest {
             url: "not-a-valid-target".to_string(),
             options: Some(ScanOptions {
                 include_request: Some(true),
                 include_response: Some(true),
                 ..ScanOptions::default()
             }),
-        }),
+        })),
     )
     .await
     .into_response();
@@ -606,10 +606,10 @@ async fn test_start_scan_handler_success_jsonp_response() {
         State(state),
         HeaderMap::new(),
         Query(q),
-        Json(ScanRequest {
+        Ok(Json(ScanRequest {
             url: "still-not-valid-target".to_string(),
             options: None,
-        }),
+        })),
     )
     .await
     .into_response();
@@ -1370,10 +1370,10 @@ async fn test_preflight_handler_rejects_invalid_url() {
         State(state),
         HeaderMap::new(),
         Query(Map::new()),
-        Json(ScanRequest {
+        Ok(Json(ScanRequest {
             url: "not-http".to_string(),
             options: None,
-        }),
+        })),
     )
     .await
     .into_response();
@@ -1387,10 +1387,10 @@ async fn test_preflight_handler_requires_auth() {
         State(state),
         HeaderMap::new(),
         Query(Map::new()),
-        Json(ScanRequest {
+        Ok(Json(ScanRequest {
             url: "http://example.com".to_string(),
             options: None,
-        }),
+        })),
     )
     .await
     .into_response();
@@ -1404,13 +1404,13 @@ async fn test_preflight_handler_unreachable_target() {
         State(state),
         HeaderMap::new(),
         Query(Map::new()),
-        Json(ScanRequest {
+        Ok(Json(ScanRequest {
             url: "http://127.0.0.1:1/unreachable".to_string(),
             options: Some(ScanOptions {
                 timeout: Some(1),
                 ..ScanOptions::default()
             }),
-        }),
+        })),
     )
     .await
     .into_response();
@@ -1467,13 +1467,13 @@ async fn test_start_scan_handler_rejects_out_of_range_timeout() {
         State(state),
         HeaderMap::new(),
         Query(Map::new()),
-        Json(ScanRequest {
+        Ok(Json(ScanRequest {
             url: "http://example.com".to_string(),
             options: Some(ScanOptions {
                 timeout: Some(9999),
                 ..ScanOptions::default()
             }),
-        }),
+        })),
     )
     .await
     .into_response();

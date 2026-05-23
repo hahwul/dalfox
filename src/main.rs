@@ -29,18 +29,19 @@ struct Cli {
     debug: bool,
 
     // `--no-color` and `--silence` (`-S`) are accepted at the root level
-    // so `dalfox <TARGET> --no-color` (no subcommand) works. They are
-    // *also* declared on `ScanArgs` so `dalfox scan <TARGET> --no-color`
-    // works — clap's `global = true` flag-propagation from root to
-    // subcommand turned out to be unreliable in the derive macro when
-    // the same flag is needed on both levels, so we just declare them
-    // twice and OR-merge in `main.rs` when dispatching `Scan`.
+    // so `dalfox <TARGET> --no-color` (no subcommand) works, *and* with
+    // `global = true` they're also accepted on every subcommand
+    // (`payload`, `server`, `mcp`, hidden compat). They are still
+    // declared on `ScanArgs` separately so `dalfox scan URL --no-color`
+    // (flag *after* the scan subcommand) keeps working — the derive
+    // macro doesn't always propagate `global = true` to the parent
+    // struct, so main.rs OR-merges both locations when dispatching scan.
     /// Disable colored output (also respects NO_COLOR env var)
-    #[arg(long = "no-color")]
+    #[arg(long = "no-color", global = true)]
     no_color: bool,
 
     /// Silence all logs except POC output to STDOUT
-    #[arg(short = 'S', long = "silence")]
+    #[arg(short = 'S', long = "silence", global = true)]
     silence: bool,
 
     /// Targets (when no subcommand is provided, defaults to scan)
@@ -99,8 +100,17 @@ async fn main() {
         |needles: &[&str]| -> bool { __args.iter().any(|a| needles.iter().any(|n| a == n)) };
     let no_color_env = std::env::var("NO_COLOR").is_ok();
     let no_color_flag = has_flag(&["--no-color"]);
-    let color_enabled =
-        std::io::IsTerminal::is_terminal(&std::io::stdout()) && !no_color_env && !no_color_flag;
+    let stdout_is_tty = std::io::IsTerminal::is_terminal(&std::io::stdout());
+    let color_enabled = stdout_is_tty && !no_color_env && !no_color_flag;
+    // Wire the *global* color decision now so every downstream module
+    // (scan, server logger, payload subcommand) honours it consistently.
+    // Previously only ScanArgs.no_color drove `crate::NO_COLOR`, leaving
+    // `dalfox scan URL | cat` (non-TTY pipe) emitting raw ANSI through
+    // the POC line, and `dalfox server` writing escape codes to a
+    // redirected log file. Auto-disable when stdout isn't a TTY.
+    if !color_enabled {
+        dalfox::NO_COLOR.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
     if __args.iter().any(|a| a == "-h" || a == "--help") {
         utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
     }

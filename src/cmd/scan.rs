@@ -1513,7 +1513,13 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                     Ok(content) => {
                         for line in content.lines() {
                             let line = line.trim();
-                            if !line.is_empty() {
+                            // Industry-standard target-list shape: skip
+                            // blank lines *and* `#` comments (nuclei, ffuf,
+                            // httpx all behave this way). Previously a
+                            // commented line would be sent to parse_target
+                            // and surface as a confusing "empty host"
+                            // error.
+                            if !line.is_empty() && !line.starts_with('#') {
                                 target_strings.push(line.to_string());
                             }
                         }
@@ -1541,7 +1547,12 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 }
                 let file_path = &args.targets[0];
                 match fs::read_to_string(file_path) {
-                    Ok(content) => content.lines().map(ToString::to_string).collect(),
+                    Ok(content) => content
+                        .lines()
+                        .map(str::trim)
+                        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                        .map(ToString::to_string)
+                        .collect(),
                     Err(e) => {
                         if !args.silence {
                             emit_error(
@@ -1561,7 +1572,11 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                         .lines()
                         .filter_map(|line| {
                             let trimmed = line.trim();
-                            if trimmed.is_empty() {
+                            // Same comment-skipping convention as the
+                            // auto/file paths above so `cat targets.txt
+                            // | dalfox` and `dalfox scan targets.txt`
+                            // behave identically.
+                            if trimmed.is_empty() || trimmed.starts_with('#') {
                                 None
                             } else {
                                 Some(trimmed.to_string())

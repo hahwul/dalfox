@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use axum::{
     Json, Router,
-    extract::{Path, Query, State},
+    extract::{Path, Query, State, rejection::JsonRejection},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, options, post},
@@ -1000,7 +1000,12 @@ async fn start_scan_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(params): Query<std::collections::HashMap<String, String>>,
-    Json(req): Json<ScanRequest>,
+    // Accept the rejection ourselves so a missing `url` field or any
+    // other JSON-deserialization failure surfaces as our `{"code":400,
+    // "msg":...}` envelope instead of axum's default 422 with a raw
+    // `Failed to deserialize the JSON body...` string. The wire shape
+    // is now consistent across happy and error paths for clients.
+    req: Result<Json<ScanRequest>, JsonRejection>,
 ) -> impl IntoResponse {
     if !check_api_key(&state, &headers) {
         log(&state, "AUTH", "Unauthorized access to /scan");
@@ -1013,6 +1018,18 @@ async fn start_scan_handler(
     }
 
     purge_expired_jobs(&state).await;
+
+    let req = match req {
+        Ok(Json(r)) => r,
+        Err(rej) => {
+            let resp = ApiResponse::<serde_json::Value> {
+                code: 400,
+                msg: format!("invalid request body: {}", rej),
+                data: None,
+            };
+            return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+        }
+    };
 
     if req.url.trim().is_empty() {
         let resp = ApiResponse::<serde_json::Value> {
@@ -1643,7 +1660,11 @@ async fn preflight_handler(
     State(state): State<AppState>,
     headers: HeaderMap,
     Query(params): Query<std::collections::HashMap<String, String>>,
-    Json(req): Json<ScanRequest>,
+    // See start_scan_handler — surface JSON-deserialization failures
+    // through our `{"code","msg","data"}` envelope instead of axum's
+    // default 422 raw error string so clients can parse error
+    // responses the same shape as success responses.
+    req: Result<Json<ScanRequest>, JsonRejection>,
 ) -> impl IntoResponse {
     if !check_api_key(&state, &headers) {
         let resp = ApiResponse::<serde_json::Value> {
@@ -1655,6 +1676,18 @@ async fn preflight_handler(
     }
 
     purge_expired_jobs(&state).await;
+
+    let req = match req {
+        Ok(Json(r)) => r,
+        Err(rej) => {
+            let resp = ApiResponse::<serde_json::Value> {
+                code: 400,
+                msg: format!("invalid request body: {}", rej),
+                data: None,
+            };
+            return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+        }
+    };
 
     let target_url = req.url.trim().to_string();
     if target_url.is_empty()
