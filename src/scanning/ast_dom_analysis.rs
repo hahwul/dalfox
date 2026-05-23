@@ -3329,11 +3329,7 @@ impl AstDomAnalyzer {
         let ret = Parser::new(&allocator, source_code, source_type).parse();
 
         if !ret.errors.is_empty() {
-            let error_messages: Vec<String> = ret
-                .errors
-                .iter()
-                .map(ToString::to_string)
-                .collect();
+            let error_messages: Vec<String> = ret.errors.iter().map(ToString::to_string).collect();
             return Err(format!("Parse errors: {}", error_messages.join(", ")));
         }
 

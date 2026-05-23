@@ -89,11 +89,7 @@ where
 /// Safe to call after panic or runtime-build failure: gated on
 /// `!is_terminal()` so it won't clobber a real outcome, and recovers from
 /// mutex poisoning by taking the inner guard rather than re-panicking.
-fn mark_job_error_sync(
-    jobs: &Arc<StdMutex<HashMap<String, Job>>>,
-    job_id: &str,
-    msg: String,
-) {
+fn mark_job_error_sync(jobs: &Arc<StdMutex<HashMap<String, Job>>>, job_id: &str, msg: String) {
     let mut guard = match jobs.lock() {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),

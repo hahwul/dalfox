@@ -336,7 +336,13 @@ fn render_finding_block(
         sections.push("Response");
     }
     let last_idx = sections.len().saturating_sub(1);
-    let bullet_for = |i: usize| if i == last_idx { "└──" } else { "├──" };
+    let bullet_for = |i: usize| {
+        if i == last_idx {
+            "└──"
+        } else {
+            "├──"
+        }
+    };
 
     let mut idx = 0usize;
 
@@ -1499,10 +1505,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 }
                 let file_path = &args.targets[0];
                 match fs::read_to_string(file_path) {
-                    Ok(content) => content
-                        .lines()
-                        .map(ToString::to_string)
-                        .collect(),
+                    Ok(content) => content.lines().map(ToString::to_string).collect(),
                     Err(e) => {
                         if !args.silence {
                             emit_error(
@@ -2710,12 +2713,8 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 // when streaming is enabled, so users see each finding
                 // exactly once with full context instead of a duplicate
                 // POC header line and orphan tree.
-                let block = render_finding_block(
-                    &result,
-                    &poc_type,
-                    include_request,
-                    include_response,
-                );
+                let block =
+                    render_finding_block(&result, &poc_type, include_request, include_response);
                 let rendered = if printer_nc {
                     crate::utils::term::strip_ansi(block.trim_end_matches('\n'))
                 } else {

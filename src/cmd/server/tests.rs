@@ -1956,7 +1956,13 @@ async fn test_mark_job_error_fires_webhook_with_error_status() {
         jobs.insert(id.clone(), job);
     }
 
-    mark_job_error(&state, &id, target_url, "parse_target failed: bad url".to_string()).await;
+    mark_job_error(
+        &state,
+        &id,
+        target_url,
+        "parse_target failed: bad url".to_string(),
+    )
+    .await;
 
     let payload = captured
         .lock()
