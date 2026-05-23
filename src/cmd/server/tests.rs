@@ -1879,7 +1879,7 @@ async fn test_mark_job_error_transitions_non_terminal() {
         jobs.insert(id.clone(), test_job(JobStatus::Running, None, "http://x"));
     }
 
-    mark_job_error(&state, &id, "synthetic panic".to_string()).await;
+    mark_job_error(&state, &id, "http://x", "synthetic panic".to_string()).await;
 
     let jobs = state.jobs.lock().await;
     let job = jobs.get(&id).expect("job present");
@@ -1905,7 +1905,7 @@ async fn test_mark_job_error_does_not_clobber_terminal_state() {
             let mut jobs = state.jobs.lock().await;
             jobs.insert(id.to_string(), test_job(status.clone(), None, "http://x"));
         }
-        mark_job_error(&state, id, "should-not-overwrite".to_string()).await;
+        mark_job_error(&state, id, "http://x", "should-not-overwrite".to_string()).await;
         let jobs = state.jobs.lock().await;
         let job = jobs.get(id).expect("job present");
         assert_eq!(
@@ -1914,6 +1914,120 @@ async fn test_mark_job_error_does_not_clobber_terminal_state() {
         );
         assert!(job.error_message.is_none());
     }
+}
+
+#[tokio::test]
+async fn test_mark_job_error_fires_webhook_with_error_status() {
+    // Regression: parse_target / panic recovery paths used to mark the
+    // job Error but never fire the webhook, so subscribers waiting on a
+    // terminal callback hung indefinitely for malformed-URL scans. The
+    // contract now matches mid-flight cancel and natural completion —
+    // every terminal transition fires the webhook exactly once.
+    let captured: Arc<Mutex<Option<serde_json::Value>>> = Arc::new(Mutex::new(None));
+    let captured_clone = captured.clone();
+    let webhook_app = Router::new().route(
+        "/hook",
+        any(move |body: axum::body::Bytes| {
+            let captured = captured_clone.clone();
+            async move {
+                let parsed: serde_json::Value =
+                    serde_json::from_slice(&body).unwrap_or(serde_json::Value::Null);
+                *captured.lock().await = Some(parsed);
+                StatusCode::OK
+            }
+        }),
+    );
+    let webhook_listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind webhook listener");
+    let webhook_addr = webhook_listener.local_addr().expect("webhook local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(webhook_listener, webhook_app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+    let state = make_state(None, None, false, false, "cb");
+    let id = "error-webhook".to_string();
+    let target_url = "http://example.com/bad";
+    let mut job = test_job(JobStatus::Running, None, target_url);
+    job.callback_url = Some(format!("http://{}/hook", webhook_addr));
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert(id.clone(), job);
+    }
+
+    mark_job_error(&state, &id, target_url, "parse_target failed: bad url".to_string()).await;
+
+    let payload = captured
+        .lock()
+        .await
+        .clone()
+        .expect("webhook must fire on Error transition");
+    assert_eq!(payload["status"], "error");
+    assert_eq!(payload["scan_id"], serde_json::Value::String(id));
+    assert_eq!(payload["url"], target_url);
+    assert!(payload["results"].is_array() && payload["results"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn test_mark_job_error_does_not_double_fire_webhook_on_terminal_job() {
+    // The transition guard (!is_terminal) must also gate the webhook —
+    // otherwise a panic-recovery path racing with natural completion
+    // would emit two terminal callbacks for the same scan_id and
+    // confuse subscribers tracking lifecycle events.
+    let webhook_hits: Arc<std::sync::atomic::AtomicUsize> =
+        Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let webhook_hits_clone = webhook_hits.clone();
+    let webhook_app = Router::new().route(
+        "/hook",
+        any(move || {
+            let hits = webhook_hits_clone.clone();
+            async move {
+                hits.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                StatusCode::OK
+            }
+        }),
+    );
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, webhook_app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+    let state = make_state(None, None, false, false, "cb");
+    let id = "already-done".to_string();
+    let mut job = test_job(JobStatus::Done, None, "http://x");
+    job.callback_url = Some(format!("http://{}/hook", addr));
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert(id.clone(), job);
+    }
+
+    mark_job_error(&state, &id, "http://x", "late panic".to_string()).await;
+    // Give the webhook a beat in case it was sent anyway (it shouldn't be).
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    assert_eq!(
+        webhook_hits.load(std::sync::atomic::Ordering::Relaxed),
+        0,
+        "webhook must not fire when the job is already terminal"
+    );
+}
+
+#[test]
+fn test_constant_time_eq_matches_and_differs() {
+    // Sanity: the timing-safe comparator must agree with `==` on equality
+    // outcomes. Length mismatches return false without examining contents
+    // (we don't try to assert constant-time timing here — that needs
+    // statistical measurement — but verify behavioral correctness).
+    assert!(constant_time_eq(b"", b""));
+    assert!(constant_time_eq(b"secret-key-123", b"secret-key-123"));
+    assert!(!constant_time_eq(b"secret-key-123", b"secret-key-124"));
+    assert!(!constant_time_eq(b"short", b"longer"));
+    assert!(!constant_time_eq(b"a", b""));
+    assert!(!constant_time_eq(b"", b"a"));
 }
 
 #[tokio::test]

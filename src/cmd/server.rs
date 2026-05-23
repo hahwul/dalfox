@@ -214,13 +214,28 @@ struct ProgressPayload {
     suggested_poll_interval_ms: u64,
 }
 
+/// Constant-time byte comparison. Returns false for differing lengths
+/// without iterating, which leaks length only — never the contents. Used
+/// for the API-key check so an attacker can't recover the key byte-by-byte
+/// from response-time differences.
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 fn check_api_key(state: &AppState, headers: &HeaderMap) -> bool {
     match &state.api_key {
         Some(required) if !required.is_empty() => {
             if let Some(h) = headers.get("X-API-KEY")
                 && let Ok(v) = h.to_str()
             {
-                return v == required;
+                return constant_time_eq(v.as_bytes(), required.as_bytes());
             }
             false
         }
@@ -418,13 +433,14 @@ fn spawn_scan_task(
             Err(e) => {
                 let msg = format!("scan runtime build failed: {}", e);
                 eprintln!("[server] {} for job {}", msg, job_id);
-                fail_job_via_fresh_runtime(&state, &job_id, msg);
+                fail_job_via_fresh_runtime(&state, &job_id, &url, msg);
                 return;
             }
         };
 
         let state_for_recovery = state.clone();
         let job_id_for_recovery = job_id.clone();
+        let url_for_recovery = url.clone();
 
         let rt_ref = &rt;
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(move || {
@@ -452,16 +468,23 @@ fn spawn_scan_task(
             // future, so reuse it for the recovery write rather than spinning
             // up a second runtime just to update one map entry.
             rt.block_on(async {
-                mark_job_error(&state_for_recovery, &job_id_for_recovery, msg).await;
+                mark_job_error(
+                    &state_for_recovery,
+                    &job_id_for_recovery,
+                    &url_for_recovery,
+                    msg,
+                )
+                .await;
             });
         }
     });
 }
 
 /// Best-effort recovery path used when the scan runtime could not be built at
-/// all. Builds a tiny one-shot runtime just to update the job map; if even
-/// that fails, the job is unrecoverable from this thread.
-fn fail_job_via_fresh_runtime(state: &AppState, job_id: &str, msg: String) {
+/// all. Builds a tiny one-shot runtime just to update the job map and fire
+/// the terminal webhook; if even that fails, the job is unrecoverable from
+/// this thread.
+fn fail_job_via_fresh_runtime(state: &AppState, job_id: &str, url: &str, msg: String) {
     let Ok(rt) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -474,25 +497,42 @@ fn fail_job_via_fresh_runtime(state: &AppState, job_id: &str, msg: String) {
     };
     let state = state.clone();
     let job_id = job_id.to_string();
+    let url = url.to_string();
     rt.block_on(async move {
-        mark_job_error(&state, &job_id, msg).await;
+        mark_job_error(&state, &job_id, &url, msg).await;
     });
 }
 
-/// Transition a non-terminal job into `Error` with the supplied message. Safe
-/// to call even after the job has reached a terminal state (the update is
-/// gated on `!is_terminal()`) so panic / cancel races don't clobber a real
-/// outcome.
-async fn mark_job_error(state: &AppState, job_id: &str, msg: String) {
-    let mut jobs = state.jobs.lock().await;
-    if let Some(job) = jobs.get_mut(job_id)
-        && !job.is_terminal()
-    {
-        job.status = JobStatus::Error;
-        job.error_message = Some(msg);
-        if job.finished_at_ms.is_none() {
-            job.finished_at_ms = Some(now_ms());
+/// Transition a non-terminal job into `Error` and fire the terminal webhook
+/// if the job had a callback_url. Safe to call even after the job has
+/// reached a terminal state (the update is gated on `!is_terminal()`), so
+/// panic / cancel races don't clobber a real outcome — and because we only
+/// fire the webhook when the transition actually happened, subscribers
+/// don't receive duplicate notifications.
+///
+/// The webhook is dispatched after the jobs lock is released so a slow
+/// callback URL can't block concurrent job updates. We use the default
+/// reqwest client because the panic / parse-error paths may not have a
+/// fully-built target available; this still mirrors the contract that
+/// every terminal state fires the webhook (see commit aeb8cdb).
+async fn mark_job_error(state: &AppState, job_id: &str, url: &str, msg: String) {
+    let (transitioned, callback_url) = {
+        let mut jobs = state.jobs.lock().await;
+        if let Some(job) = jobs.get_mut(job_id)
+            && !job.is_terminal()
+        {
+            job.status = JobStatus::Error;
+            job.error_message = Some(msg);
+            if job.finished_at_ms.is_none() {
+                job.finished_at_ms = Some(now_ms());
+            }
+            (true, job.callback_url.clone())
+        } else {
+            (false, None)
         }
+    };
+    if transitioned {
+        send_terminal_webhook(state, callback_url, job_id, url, "error", &[], None).await;
     }
 }
 
@@ -730,14 +770,13 @@ async fn run_scan_job(
             t
         }
         Err(e) => {
+            // Webhook subscribers expect a terminal callback for every scan;
+            // before, this branch transitioned the job to Error but never
+            // fired the webhook, so a malformed URL silently left the
+            // subscriber waiting indefinitely. mark_job_error now handles
+            // both the status update and the webhook dispatch.
             let msg = format!("parse_target failed: {}", e);
-            let mut jobs = state.jobs.lock().await;
-            if let Some(job) = jobs.get_mut(&job_id) {
-                job.status = JobStatus::Error;
-                job.error_message = Some(msg);
-                job.results = None;
-                job.finished_at_ms = Some(now_ms());
-            }
+            mark_job_error(&state, &job_id, &url, msg).await;
             return;
         }
     };
