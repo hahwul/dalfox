@@ -1729,15 +1729,22 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
 
     // Apply URL scope filtering (--include-url / --exclude-url)
     {
+        // Invalid scope patterns must always surface on stderr, even when
+        // `--silence` is on: silently discarding the user's filter means
+        // every target gets scanned anyway, which is exactly the opposite
+        // of what the operator asked for. stderr stays out of the stdout
+        // payload that scripts parse, so a noise-sensitive caller can
+        // still redirect `2>/dev/null` if they really want it gone.
         let include_patterns: Vec<regex::Regex> = args
             .include_url
             .iter()
             .filter_map(|p| match regex::Regex::new(p) {
                 Ok(r) => Some(r),
                 Err(e) => {
-                    if !args.silence {
-                        eprintln!("Warning: invalid --include-url pattern '{}': {}", p, e);
-                    }
+                    eprintln!(
+                        "Warning: invalid --include-url regex '{}': {} (hint: --include-url takes a regex like '.*/api/.*', not a shell glob)",
+                        p, e
+                    );
                     None
                 }
             })
@@ -1748,9 +1755,10 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             .filter_map(|p| match regex::Regex::new(p) {
                 Ok(r) => Some(r),
                 Err(e) => {
-                    if !args.silence {
-                        eprintln!("Warning: invalid --exclude-url pattern '{}': {}", p, e);
-                    }
+                    eprintln!(
+                        "Warning: invalid --exclude-url regex '{}': {} (hint: --exclude-url takes a regex like '.*/admin.*', not a shell glob)",
+                        p, e
+                    );
                     None
                 }
             })
@@ -1828,13 +1836,15 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     }
 
     if parsed_targets.is_empty() {
-        if !args.silence {
-            emit_error(
-                &args.format,
-                crate::cmd::error_codes::NO_TARGETS,
-                "No targets specified",
-            );
-        }
+        // Always surface this — `--silence` should suppress scan log
+        // noise, not swallow input-validation errors. emit_error writes
+        // to stderr, so it doesn't pollute the stdout payload that
+        // `--silence` callers are typically piping into another tool.
+        emit_error(
+            &args.format,
+            crate::cmd::error_codes::NO_TARGETS,
+            "No targets specified",
+        );
         return ScanOutcome::Error;
     }
 
