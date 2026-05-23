@@ -226,6 +226,17 @@ async fn main() {
         config::load_or_init()
     };
 
+    // When the user explicitly passes `--config <path>`, a parse failure
+    // must be visible — silently falling back to defaults masks typos
+    // like an unclosed brace in `my-scan.toml` and leaves the operator
+    // wondering why their `silence = true` / `format = "jsonl"` /
+    // `encoders = […]` settings had no effect. Implicit default-path
+    // loading still stays quiet because most users never create that
+    // file and a missing-or-malformed default isn't actionable.
+    if let (Some(cfg_path), Err(e)) = (&cli.config, &config_load) {
+        eprintln!("Warning: failed to load --config {}: {}", cfg_path, e);
+    }
+
     // Emit the banner now that the config file (if any) has been parsed.
     // `effective_silence` folds three places `--silence` can land:
     //   - `cli.silence` — the root-level flag (`dalfox --silence …`)
