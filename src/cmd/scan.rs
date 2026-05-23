@@ -627,12 +627,13 @@ async fn preflight_content_type(
     // Technology detection accumulator
     let mut tech_result = crate::scanning::tech_detect::TechDetectionResult::default();
 
-    // WAF detection from HEAD response headers (zero extra requests)
-    let mut waf_result = if args.waf_bypass != "off" {
-        crate::waf::fingerprint_from_response(&head_headers, None, head_status)
-    } else {
-        crate::waf::WafDetectionResult::default()
-    };
+    // WAF detection from HEAD response headers (zero extra requests).
+    // Detection runs unconditionally so the operator still sees `waf.detected`
+    // in target_summary even with `--waf-bypass off` — that flag only
+    // disables payload mutations, not fingerprinting. To suppress
+    // detection too, use `--skip-waf-probe` (no provocation request)
+    // or just don't read the `waf` field.
+    let mut waf_result = crate::waf::fingerprint_from_response(&head_headers, None, head_status);
 
     // Always fetch a small body for CSP parsing and AST analysis
     let mut response_body: Option<String> = None;
@@ -644,12 +645,13 @@ async fn preflight_content_type(
         if let Ok(body) = get_resp.text().await {
             response_body = Some(body.clone());
 
-            // WAF detection from GET response (headers + body)
-            if args.waf_bypass != "off" {
-                let body_waf =
-                    crate::waf::fingerprint_from_response(&get_headers, Some(&body), get_status);
-                crate::waf::merge_results(&mut waf_result, body_waf);
-            }
+            // WAF detection from GET response (headers + body). Same
+            // reasoning as the HEAD-based pass above — fingerprinting
+            // runs unconditionally so operators using `--waf-bypass off`
+            // still get the `waf.detected` field populated.
+            let body_waf =
+                crate::waf::fingerprint_from_response(&get_headers, Some(&body), get_status);
+            crate::waf::merge_results(&mut waf_result, body_waf);
 
             // Technology/framework detection from GET response
             tech_result =
@@ -1071,8 +1073,8 @@ pub struct ScanArgs {
     pub hpp: bool,
 
     #[clap(help_heading = "WAF")]
-    /// WAF bypass mode: auto (detect+bypass), force (use --force-waf), off (disable). Default: auto
-    #[arg(long, default_value = "auto")]
+    /// WAF bypass mode: auto (detect+bypass), force (use --force-waf), off (detect-only; no payload mutations). Default: auto
+    #[arg(long, default_value = "auto", value_parser = clap::builder::PossibleValuesParser::new(["auto", "force", "off"]))]
     pub waf_bypass: String,
 
     #[clap(help_heading = "WAF")]
