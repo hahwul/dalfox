@@ -55,6 +55,12 @@ static GLOBAL_ENCODERS: OnceLock<Vec<String>> = OnceLock::new();
 
 use crate::scanning::selectors;
 
+// Kept around for unit-test coverage of the message-shape contract.
+// The actual scan, server, and MCP paths now go through
+// `ast_integration::run_initial_ast_dom_analysis`, which inlines the
+// same hint logic. If the contract drifts the unit tests under
+// `src/cmd/scan/tests.rs` will catch it.
+#[allow(dead_code)]
 fn build_ast_dom_message(
     description: &str,
     source: &str,
@@ -2404,71 +2410,27 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                     let _ = done_rx.await;
                 }
 
-                // Run AST-based DOM XSS analysis on the initial response (enabled by default)
+                // Run AST-based DOM XSS analysis on the initial response
+                // (enabled by default). The helper is shared with the
+                // server (`dalfox server`) and MCP (`scan_with_dalfox`)
+                // paths so all three surfaces produce the same DOM-XSS
+                // findings for an identical target.
                 if !args_clone.skip_ast_analysis
-                    && let Some(response_text) = preflight_response_body {
-                        let mut ast_batch: Vec<crate::scanning::result::Result> = Vec::new();
-                        let js_blocks = crate::scanning::ast_integration::extract_javascript_from_html(&response_text);
-                        let script_element_ids = crate::scanning::ast_integration::extract_script_element_ids(&response_text);
-                        for js_code in js_blocks {
-                            let findings = crate::scanning::ast_integration::analyze_javascript_for_dom_xss_with_html_context(
-                                &js_code,
-                                target.url.as_str(),
-                                &script_element_ids,
-                            );
-                            for (vuln, payload, description) in findings {
-                                let self_bootstrap_verified =
-                                    crate::scanning::ast_integration::has_self_bootstrap_verification(
-                                        &js_code,
-                                        &vuln.source,
-                                    );
-                                let poc_url =
-                                    crate::scanning::ast_integration::build_dom_xss_poc_url(
-                                        target.url.as_str(),
-                                        &vuln.source,
-                                        &payload,
-                                    );
-                                let message = build_ast_dom_message(
-                                    &description,
-                                    &vuln.source,
-                                    target.url.as_str(),
-                                    &payload,
-                                );
-                                // Create an AST-based DOM XSS result with actual executable payload
-                                let ast_result = crate::scanning::result::Result::new(
-                                    FindingType::AstDetected, // AST-detected
-                                    "DOM-XSS".to_string(),
-                                    target.method.clone(),
-                                    poc_url,
-                                    "-".to_string(), // No specific parameter
-                                    payload, // Actual XSS payload
-                                    format!("{}:{}:{} - {} (Source: {}, Sink: {})",
-                                        target.url.as_str(), vuln.line, vuln.column,
-                                        description, vuln.source, vuln.sink),
-                                    "CWE-79".to_string(),
-                                    "Medium".to_string(),
-                                    0,
-                                    message,
-                                );
-                                let mut ast_result = ast_result;
-                                if self_bootstrap_verified {
-                                    ast_result.result_type = FindingType::Verified;
-                                    ast_result.severity = "High".to_string();
-                                    ast_result.message_str = format!(
-                                        "{} [정적 self-bootstrap 확인]",
-                                        ast_result.message_str
-                                    );
-                                }
-                                ast_batch.push(ast_result);
-                            }
-                        }
-                        if !ast_batch.is_empty() {
-                            let added = ast_batch.len();
-                            let mut guard = results_clone.lock().await;
-                            guard.extend(ast_batch);
-                            findings_count_clone.fetch_add(added, Ordering::Relaxed);
-                        }
+                    && let Some(response_text) = preflight_response_body
+                {
+                    let ast_batch =
+                        crate::scanning::ast_integration::run_initial_ast_dom_analysis(
+                            &response_text,
+                            target.url.as_str(),
+                            &target.method,
+                        );
+                    if !ast_batch.is_empty() {
+                        let added = ast_batch.len();
+                        let mut guard = results_clone.lock().await;
+                        guard.extend(ast_batch);
+                        findings_count_clone.fetch_add(added, Ordering::Relaxed);
                     }
+                }
 
                 // Pretty reflection summary (plain only)
                 if args_clone.format == "plain" && !args_clone.silence && total_targets_copy == 1 {

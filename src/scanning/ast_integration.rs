@@ -678,5 +678,68 @@ pub fn analyze_javascript_for_dom_xss_with_html_context(
     }
 }
 
+/// Run the "initial response" AST DOM-XSS analysis used to seed scans
+/// with findings that don't require an active payload injection — the
+/// JavaScript already wires a known source (e.g. `location.hash`) to a
+/// dangerous sink (e.g. `innerHTML`). Returns the list of result
+/// records ready to be pushed onto the shared findings vector.
+///
+/// Extracted from `cmd/scan.rs` so server (`dalfox server`) and MCP
+/// (`scan_with_dalfox`) can run the same first-pass DOM analysis as
+/// CLI does — they previously skipped it because they didn't run the
+/// preflight step that produced the response body, so identical
+/// targets produced 0 findings via API but multiple via CLI.
+pub fn run_initial_ast_dom_analysis(
+    response_text: &str,
+    target_url: &str,
+    target_method: &str,
+) -> Vec<crate::scanning::result::Result> {
+    let js_blocks = extract_javascript_from_html(response_text);
+    let script_element_ids = extract_script_element_ids(response_text);
+    let mut out: Vec<crate::scanning::result::Result> = Vec::new();
+    for js_code in js_blocks {
+        let findings = analyze_javascript_for_dom_xss_with_html_context(
+            &js_code,
+            target_url,
+            &script_element_ids,
+        );
+        for (vuln, payload, description) in findings {
+            let self_bootstrap_verified = has_self_bootstrap_verification(&js_code, &vuln.source);
+            let poc_url = build_dom_xss_poc_url(target_url, &vuln.source, &payload);
+            let message = if let Some(hint) =
+                build_dom_xss_manual_poc_hint(target_url, &vuln.source, &payload)
+            {
+                format!("{description} (검증 필요) [manual POC: {hint}]")
+            } else {
+                format!("{description} (검증 필요) [경량 확인: 파라미터 없음]")
+            };
+            let mut ast_result = crate::scanning::result::Result::new(
+                crate::scanning::result::FindingType::AstDetected,
+                "DOM-XSS".to_string(),
+                target_method.to_string(),
+                poc_url,
+                "-".to_string(),
+                payload,
+                format!(
+                    "{}:{}:{} - {} (Source: {}, Sink: {})",
+                    target_url, vuln.line, vuln.column, description, vuln.source, vuln.sink
+                ),
+                "CWE-79".to_string(),
+                "Medium".to_string(),
+                0,
+                message,
+            );
+            if self_bootstrap_verified {
+                ast_result.result_type = crate::scanning::result::FindingType::Verified;
+                ast_result.severity = "High".to_string();
+                ast_result.message_str =
+                    format!("{} [정적 self-bootstrap 확인]", ast_result.message_str);
+            }
+            out.push(ast_result);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests;

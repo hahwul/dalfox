@@ -342,6 +342,33 @@ impl DalfoxMcp {
             .scope(progress.requests_sent.clone(), async {
                 crate::WAF_CONSECUTIVE_BLOCKS_JOB
                     .scope(job_waf_consecutive.clone(), async {
+                        // Initial AST DOM-XSS pass on the GET response so MCP
+                        // scans match CLI for targets where the vulnerability
+                        // lives entirely in JS (location.hash → innerHTML
+                        // etc.). MCP previously skipped this because the
+                        // scan path didn't run preflight; same divergence
+                        // hit the REST server, now fixed in both places.
+                        if !scan_args.skip_ast_analysis {
+                            let client = target.build_client_or_default();
+                            if let Ok(resp) = client.get(target.url.clone()).send().await
+                                && let Ok(body) = resp.text().await
+                            {
+                                let ast_batch =
+                                    crate::scanning::ast_integration::run_initial_ast_dom_analysis(
+                                        &body,
+                                        target.url.as_str(),
+                                        &target.method,
+                                    );
+                                if !ast_batch.is_empty() {
+                                    let added = ast_batch.len();
+                                    let mut guard = results_arc.lock().await;
+                                    guard.extend(ast_batch);
+                                    findings_count
+                                        .fetch_add(added, std::sync::atomic::Ordering::Relaxed);
+                                }
+                            }
+                        }
+
                         // Parameter discovery / mining
                         analyze_parameters(&mut target, scan_args.as_ref(), None).await;
 

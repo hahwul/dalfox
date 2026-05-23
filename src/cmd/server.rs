@@ -824,6 +824,34 @@ async fn run_scan_job(
                         crate::scanning::blind_scanning(&target, callback_url).await;
                     }
 
+                    // Initial AST DOM-XSS pass on the GET response, mirroring
+                    // the CLI flow. Server used to skip this because it
+                    // didn't run preflight, so identical targets reported
+                    // 0 findings via API even when CLI saw multiple
+                    // DOM-XSS sinks (e.g. xss-game level3 with
+                    // location.hash → html). Best-effort fetch — if it
+                    // fails the regular scan path below still runs.
+                    if !args.skip_ast_analysis {
+                        let client = target.build_client_or_default();
+                        if let Ok(resp) = client.get(target.url.clone()).send().await
+                            && let Ok(body) = resp.text().await
+                        {
+                            let ast_batch =
+                                crate::scanning::ast_integration::run_initial_ast_dom_analysis(
+                                    &body,
+                                    target.url.as_str(),
+                                    &target.method,
+                                );
+                            if !ast_batch.is_empty() {
+                                let added = ast_batch.len();
+                                let mut guard = results.lock().await;
+                                guard.extend(ast_batch);
+                                findings_count
+                                    .fetch_add(added, std::sync::atomic::Ordering::Relaxed);
+                            }
+                        }
+                    }
+
                     let mut silent_args = args.clone();
                     silent_args.silence = true;
                     analyze_parameters(&mut target, &silent_args, None).await;
