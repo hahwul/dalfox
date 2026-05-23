@@ -978,7 +978,7 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "XSS SCANNING")]
     /// Specify payload encoders to use (comma-separated). Options: none, url, 2url, 3url, 4url, html, base64. Default: url,html
-    #[arg(short = 'e', long, value_delimiter = ',', default_values = &["url", "html"])]
+    #[arg(short = 'e', long, value_delimiter = ',', default_values = &["url", "html"], value_parser = clap::builder::PossibleValuesParser::new(["none", "url", "2url", "3url", "4url", "html", "base64"]))]
     pub encoders: Vec<String>,
 
     #[clap(help_heading = "XSS SCANNING")]
