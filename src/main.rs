@@ -28,6 +28,21 @@ struct Cli {
     #[arg(long = "debug", global = true)]
     debug: bool,
 
+    // `--no-color` and `--silence` (`-S`) are accepted at the root level
+    // so `dalfox <TARGET> --no-color` (no subcommand) works. They are
+    // *also* declared on `ScanArgs` so `dalfox scan <TARGET> --no-color`
+    // works — clap's `global = true` flag-propagation from root to
+    // subcommand turned out to be unreliable in the derive macro when
+    // the same flag is needed on both levels, so we just declare them
+    // twice and OR-merge in `main.rs` when dispatching `Scan`.
+    /// Disable colored output (also respects NO_COLOR env var)
+    #[arg(long = "no-color")]
+    no_color: bool,
+
+    /// Silence all logs except POC output to STDOUT
+    #[arg(short = 'S', long = "silence")]
+    silence: bool,
+
     /// Targets (when no subcommand is provided, defaults to scan)
     #[arg(value_name = "TARGET")]
     targets: Vec<String>,
@@ -76,12 +91,14 @@ async fn main() {
     // Determine color policy from TTY + `NO_COLOR` env var. The CLI
     // `--no-color` / `-S` flags are inspected via raw argv because clap
     // hasn't parsed yet — the banner is emitted before `Cli::parse()`.
+    // We need the color decision before `Cli::parse()` so the -h/--help
+    // banner can pick the right palette — clap's auto-help writes to
+    // stdout and exits before our normal post-parse banner block runs.
     let __args: Vec<String> = std::env::args().collect();
     let has_flag =
         |needles: &[&str]| -> bool { __args.iter().any(|a| needles.iter().any(|n| a == n)) };
     let no_color_env = std::env::var("NO_COLOR").is_ok();
     let no_color_flag = has_flag(&["--no-color"]);
-    let silence_flag = has_flag(&["-S", "--silence"]);
     let color_enabled =
         std::io::IsTerminal::is_terminal(&std::io::stdout()) && !no_color_env && !no_color_flag;
     if __args.iter().any(|a| a == "-h" || a == "--help") {
@@ -116,12 +133,9 @@ async fn main() {
             Some("json" | "jsonl" | "sarif" | "toml")
         )
     };
-    // Suppress the banner for pipelines/CI: machine formats, MCP stdio,
-    // and any `--silence` / `-S` invocation. The ASCII art is large enough
-    // that it dominates `| head` output otherwise.
-    if !is_mcp && !is_machine_format && !silence_flag && !is_payload_selector {
-        utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
-    }
+    // Banner emission is deferred until after the config file has been
+    // loaded (further down) so a `silence = true` in the config file
+    // suppresses it the same way the `--silence` CLI flag does.
 
     // Load configuration with optional --config override
     let config_load = if let Some(cfg_path) = &cli.config {
@@ -212,6 +226,31 @@ async fn main() {
         config::load_or_init()
     };
 
+    // Emit the banner now that the config file (if any) has been parsed.
+    // `effective_silence` folds three places `--silence` can land:
+    //   - `cli.silence` — the root-level flag (`dalfox --silence …`)
+    //   - `scan_silence` — the same flag parsed under `Commands::Scan`
+    //     because clap stores it on the subcommand's `ArgMatches`, not
+    //     the parent, when the user writes `dalfox scan --silence URL`
+    //     (the derive macro doesn't auto-propagate to the root struct
+    //     even with `global = true`, so we read both places explicitly)
+    //   - `config_silence` — the TOML config value, so a config-only
+    //     `silence = true` suppresses the banner just like the flag.
+    let scan_silence = match &cli.command {
+        Some(Commands::Scan(args)) => args.silence,
+        _ => false,
+    };
+    let config_silence = config_load
+        .as_ref()
+        .ok()
+        .and_then(|r| r.config.scan.as_ref())
+        .and_then(|s| s.silence)
+        .unwrap_or(false);
+    let effective_silence = cli.silence || scan_silence || config_silence;
+    if !is_mcp && !is_machine_format && !effective_silence && !is_payload_selector {
+        utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
+    }
+
     // Exit codes:
     //   0 = success, no findings
     //   1 = success, findings found
@@ -222,6 +261,14 @@ async fn main() {
         match command {
             Commands::Scan(args) => {
                 let mut args = args;
+                // `--no-color` and `--silence` are global flags on `Cli`
+                // so users can write `dalfox scan URL --silence` or
+                // `dalfox URL --silence` without clap rejecting them.
+                // Mirror the parsed values into `ScanArgs` before the
+                // config layer runs so `apply_to_scan_args_if_default`
+                // sees them as already-set when deciding precedence.
+                args.no_color = args.no_color || cli.no_color;
+                args.silence = args.silence || cli.silence;
                 if let Ok(res) = &config_load {
                     res.config.apply_to_scan_args_if_default(&mut args);
                 }
@@ -292,8 +339,11 @@ async fn main() {
             include_request: false,
             include_response: false,
             include_all: false,
-            no_color: false,
-            silence: false,
+            // No-subcommand path (`dalfox <TARGET>`); read the global
+            // flags from `Cli` so `dalfox URL --silence` and
+            // `dalfox URL --no-color` flow through to scan.
+            no_color: cli.no_color,
+            silence: cli.silence,
             dry_run: false,
             stream_findings: false,
             poc_type: "plain".to_string(),
@@ -340,9 +390,10 @@ async fn main() {
             args.include_response = true;
         }
 
-        if !is_machine_format {
-            utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
-        }
+        // No redundant banner emission here — the earlier
+        // post-config-load block already called `print_banner_once`
+        // with the full `effective_silence` decision (CLI, scan
+        // subcommand, and config-file silence all OR-folded).
         outcome = cmd::scan::run_scan(&args).await;
     }
 

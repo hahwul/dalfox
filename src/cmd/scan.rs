@@ -750,6 +750,12 @@ pub struct ScanArgs {
     #[arg(long)]
     pub include_all: bool,
 
+    // `--no-color` and `--silence` (`-S`) are *also* declared on the
+    // top-level `Cli` so `dalfox <TARGET> --no-color` (no subcommand)
+    // works. clap accepts the same long name at root and subcommand
+    // levels without conflict — whichever level the user typed the
+    // flag on receives it, and `main.rs` OR-merges `cli.{no_color,
+    // silence}` into these fields before invoking `run_scan`.
     #[clap(help_heading = "OUTPUT")]
     /// Disable colored output (also respects NO_COLOR env var)
     #[arg(long)]
