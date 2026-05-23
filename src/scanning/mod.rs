@@ -896,16 +896,17 @@ pub async fn run_scanning(
                 .expect("semaphore closed unexpectedly");
             // Batch local results to reduce mutex contention
             let mut local_results: Vec<crate::scanning::result::Result> = Vec::new();
-            // Stream every new finding through the channel (if provided) before it's
-            // batched into the shared results — so the CLI can print POC lines while
-            // the scan is still running instead of waiting for the end-of-scan flush.
-            // The printer only needs metadata (type/url/param/payload), so drop the
-            // (potentially large) HTTP response body from the clone we send.
+            // Stream every new finding through the channel (if provided) before
+            // it's batched into the shared results — so the CLI can print the
+            // full finding block (POC + Issue + Payload + Line) while the scan
+            // is still running instead of waiting for the end-of-scan flush.
+            // The response body is forwarded so the CLI's `L13:` context line
+            // can be extracted from the actual response; it's dropped from the
+            // clone at the receiver after use. Channel is unbounded but the
+            // total payload is bounded by the finding count, which is small.
             let stream_finding = |r: &crate::scanning::result::Result| {
                 if let Some(tx) = finding_tx_clone.as_ref() {
-                    let mut light = r.clone();
-                    light.response = None;
-                    let _ = tx.send(light);
+                    let _ = tx.send(r.clone());
                 }
             };
             let mut local_ast_seen: HashSet<String> = HashSet::new();

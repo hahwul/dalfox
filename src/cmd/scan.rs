@@ -281,6 +281,122 @@ fn render_httpie_poc(result: &crate::scanning::result::Result, attack_url: &str)
     }
 }
 
+/// Render a single finding as the user-visible "plain" block — POC header
+/// line followed by the tree details (Issue / Payload / optional Line /
+/// optional Request / optional Response). Always emits ANSI escape codes;
+/// the caller decides whether to print as-is or strip via `cprintln!` /
+/// `strip_ansi` (e.g. when `--no-color` is in effect).
+///
+/// Shared by the end-of-scan plain renderer and the mid-scan streaming
+/// printer so the two paths can't drift apart and so the same finding
+/// isn't emitted twice with different shapes (the old streamer printed
+/// just the POC line, then end-of-scan re-emitted POC + tree, leaving
+/// users with a duplicated POC URL).
+fn render_finding_block(
+    result: &crate::scanning::result::Result,
+    poc_type: &str,
+    include_request: bool,
+    include_response: bool,
+) -> String {
+    let mut output = String::new();
+
+    let poc_line = generate_poc(result, poc_type);
+    let trimmed = poc_line.trim_end();
+    // Type-based colorization only makes sense for the `plain` POC; the
+    // other formats (curl / httpie / http-request) are meant to be
+    // copy-pasted into a shell and shouldn't have ANSI bytes baked in.
+    let colored_poc = if poc_type == "plain" {
+        match result.result_type {
+            FindingType::Verified => format!("\x1b[31m{}\x1b[0m", trimmed),
+            FindingType::Reflected => format!("\x1b[33m{}\x1b[0m", trimmed),
+            FindingType::AstDetected => format!("\x1b[35m{}\x1b[0m", trimmed),
+        }
+    } else {
+        trimmed.to_string()
+    };
+    output.push_str(&colored_poc);
+    output.push('\n');
+
+    let context_info = if let Some(resp) = &result.response {
+        extract_context(resp, &result.payload)
+    } else {
+        None
+    };
+
+    let mut sections: Vec<&str> = vec!["Issue", "Payload"];
+    if context_info.is_some() {
+        sections.push("Line");
+    }
+    let want_request = include_request && result.request.is_some();
+    let want_response = include_response && result.response.is_some();
+    if want_request {
+        sections.push("Request");
+    }
+    if want_response {
+        sections.push("Response");
+    }
+    let last_idx = sections.len().saturating_sub(1);
+    let bullet_for = |i: usize| if i == last_idx { "└──" } else { "├──" };
+
+    let mut idx = 0usize;
+
+    let issue_text = if result.result_type == FindingType::Reflected {
+        "XSS payload reflected"
+    } else {
+        "XSS payload DOM object identified"
+    };
+    output.push_str(&format!(
+        "  \x1b[90m{}\x1b[0m \x1b[38;5;247mIssue:\x1b[0m \x1b[38;5;247m{}\x1b[0m\n",
+        bullet_for(idx),
+        issue_text
+    ));
+    idx += 1;
+
+    output.push_str(&format!(
+        "  \x1b[90m{}\x1b[0m \x1b[38;5;247mPayload:\x1b[0m \x1b[38;5;247m{}\x1b[0m\n",
+        bullet_for(idx),
+        result.payload
+    ));
+    idx += 1;
+
+    if let Some((line_num, context)) = context_info {
+        output.push_str(&format!(
+            "  \x1b[90m{}\x1b[0m \x1b[38;5;247mL{}:\x1b[0m \x1b[38;5;247m{}\x1b[0m\n",
+            bullet_for(idx),
+            line_num,
+            context
+        ));
+        idx += 1;
+    }
+
+    if want_request {
+        output.push_str(&format!(
+            "  \x1b[90m{}\x1b[0m \x1b[38;5;247mRequest:\x1b[0m\n",
+            bullet_for(idx)
+        ));
+        if let Some(req) = &result.request {
+            for line in req.lines() {
+                output.push_str(&format!("      \x1b[38;5;247m{}\x1b[0m\n", line));
+            }
+        }
+        idx += 1;
+    }
+
+    if want_response {
+        output.push_str(&format!(
+            "  \x1b[90m{}\x1b[0m \x1b[38;5;247mResponse:\x1b[0m\n",
+            bullet_for(idx)
+        ));
+        if let Some(resp) = &result.response {
+            for line in resp.lines() {
+                output.push_str(&format!("      \x1b[38;5;247m{}\x1b[0m\n", line));
+            }
+        }
+    }
+
+    output
+}
+
 fn extract_context(response: &str, payload: &str) -> Option<(usize, String)> {
     for (line_num, line) in response.lines().enumerate() {
         if let Some(pos) = line.find(payload) {
@@ -2540,13 +2656,27 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // instead of waiting for the end-of-scan flush. Only enabled for the
     // plain text format — JSON/SARIF/TOML output is built once at the end
     // and would break if we wrote ad-hoc lines into its stream.
-    let stream_findings_enabled = args.format == "plain";
+    // Streaming printer policy: enabled for the plain format whenever the
+    // end-of-scan path would otherwise be the sole renderer. We bail out
+    // for cases the end-of-scan path applies filters/transforms that the
+    // streamer can't easily replicate without growing more state:
+    //   - `--output <file>`: final results go to disk, not stdout.
+    //   - `--limit N`: capped result count; streamer would over-print.
+    //   - `--only-poc <list>`: type filter applied to the final view.
+    // In those cases the streamer stays off and end-of-scan renders, so
+    // the user still sees a single, correctly-filtered finding block.
+    let stream_findings_enabled = args.format == "plain"
+        && args.output.is_none()
+        && args.limit.is_none()
+        && args.only_poc.is_empty();
     let (finding_tx, finding_printer_handle) = if stream_findings_enabled {
         let (tx, mut rx) =
             tokio::sync::mpsc::unbounded_channel::<crate::scanning::result::Result>();
         let multi_pb_for_printer = multi_pb.clone();
         let poc_type = args.poc_type.clone();
         let printer_nc = nc;
+        let include_request = args.include_request;
+        let include_response = args.include_response;
         let handle = tokio::spawn(async move {
             let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
             while let Some(result) = rx.recv().await {
@@ -2563,23 +2693,29 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 if !seen.insert(key) {
                     continue;
                 }
-                let poc_line = generate_poc(&result, &poc_type);
-                let trimmed = poc_line.trim_end();
-                let line = if printer_nc {
-                    trimmed.to_string()
+                // Emit the same POC + tree block the end-of-scan path
+                // would emit; end-of-scan then skips per-finding rendering
+                // when streaming is enabled, so users see each finding
+                // exactly once with full context instead of a duplicate
+                // POC header line and orphan tree.
+                let block = render_finding_block(
+                    &result,
+                    &poc_type,
+                    include_request,
+                    include_response,
+                );
+                let rendered = if printer_nc {
+                    crate::utils::term::strip_ansi(block.trim_end_matches('\n'))
                 } else {
-                    match result.result_type {
-                        FindingType::Verified => format!("\x1b[31m{}\x1b[0m", trimmed),
-                        FindingType::Reflected => format!("\x1b[33m{}\x1b[0m", trimmed),
-                        FindingType::AstDetected => format!("\x1b[35m{}\x1b[0m", trimmed),
-                    }
+                    block.trim_end_matches('\n').to_string()
                 };
-                // Route through MultiProgress when present so the line is
-                // emitted above the spinner bars without garbling them.
+                // Route through MultiProgress when present so the lines
+                // are emitted above the spinner bars without garbling
+                // them.
                 if let Some(ref mp) = multi_pb_for_printer {
-                    let _ = mp.println(&line);
+                    let _ = mp.println(&rendered);
                 } else {
-                    println!("{}", line);
+                    println!("{}", rendered);
                 }
             }
         });
@@ -2947,127 +3083,19 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             .count();
         log_warn(&format!("XSS found \x1b[33m{}\x1b[0m XSS", v_count));
 
-        for result in display_results {
-            let mut poc_line = generate_poc(result, &args.poc_type);
-            if args.poc_type == "plain" {
-                match result.result_type {
-                    FindingType::Reflected => {
-                        let trimmed = poc_line.trim_end();
-                        poc_line = format!("\x1b[33m{}\x1b[0m\n", trimmed);
-                    }
-                    FindingType::Verified => {
-                        let trimmed = poc_line.trim_end();
-                        poc_line = format!("\x1b[31m{}\x1b[0m\n", trimmed);
-                    }
-                    FindingType::AstDetected => {
-                        let trimmed = poc_line.trim_end();
-                        poc_line = format!("\x1b[35m{}\x1b[0m\n", trimmed);
-                    }
-                }
-            }
-            output.push_str(&poc_line);
-
-            // Determine context (for Line rendering)
-            let context_info = if let Some(resp) = &result.response {
-                extract_context(resp, &result.payload)
-            } else {
-                None
-            };
-
-            // Build sequence of detail sections to render under POC
-            let mut sections: Vec<&str> = vec!["Issue", "Payload"];
-            if context_info.is_some() {
-                sections.push("Line");
-            }
-            let want_request = args.include_request && result.request.is_some();
-            let want_response = args.include_response && result.response.is_some();
-            if want_request {
-                sections.push("Request");
-            }
-            if want_response {
-                sections.push("Response");
-            }
-            let last_idx = sections.len().saturating_sub(1);
-
-            // 1) Issue
-            let issue_text = if result.result_type == FindingType::Reflected {
-                "XSS payload reflected"
-            } else {
-                "XSS payload DOM object identified"
-            };
-            let mut idx = 0usize;
-            let bullet = if idx == last_idx {
-                "└──"
-            } else {
-                "├──"
-            };
-            output.push_str(&format!(
-                "  \x1b[90m{}\x1b[0m \x1b[38;5;247mIssue:\x1b[0m \x1b[38;5;247m{}\x1b[0m\n",
-                bullet, issue_text
-            ));
-            idx += 1;
-
-            // 2) Payload
-            let bullet = if idx == last_idx {
-                "└──"
-            } else {
-                "├──"
-            };
-            output.push_str(&format!(
-                "  \x1b[90m{}\x1b[0m \x1b[38;5;247mPayload:\x1b[0m \x1b[38;5;247m{}\x1b[0m\n",
-                bullet, result.payload
-            ));
-            idx += 1;
-
-            // 3) Line (context), if available
-            if let Some((line_num, context)) = context_info {
-                let bullet = if idx == last_idx {
-                    "└──"
-                } else {
-                    "├──"
-                };
-                output.push_str(&format!(
-                    "  \x1b[90m{}\x1b[0m \x1b[38;5;247mL{}:\x1b[0m \x1b[38;5;247m{}\x1b[0m\n",
-                    bullet, line_num, context
+        // When the streaming printer ran (`stream_findings_enabled`), every
+        // finding has already been emitted mid-scan with its full block —
+        // re-rendering here would produce the duplicate POC headers users
+        // reported. Skip per-finding rendering in that case and let the
+        // summary line above stand alone.
+        if !stream_findings_enabled {
+            for result in display_results {
+                output.push_str(&render_finding_block(
+                    result,
+                    &args.poc_type,
+                    args.include_request,
+                    args.include_response,
                 ));
-                idx += 1;
-            }
-
-            // 4) Request, if included
-            if want_request {
-                let bullet = if idx == last_idx {
-                    "└──"
-                } else {
-                    "├──"
-                };
-                output.push_str(&format!(
-                    "  \x1b[90m{}\x1b[0m \x1b[38;5;247mRequest:\x1b[0m\n",
-                    bullet
-                ));
-                if let Some(req) = &result.request {
-                    for line in req.lines() {
-                        output.push_str(&format!("      \x1b[38;5;247m{}\x1b[0m\n", line));
-                    }
-                }
-                idx += 1;
-            }
-
-            // 5) Response, if included
-            if want_response {
-                let bullet = if idx == last_idx {
-                    "└──"
-                } else {
-                    "├──"
-                };
-                output.push_str(&format!(
-                    "  \x1b[90m{}\x1b[0m \x1b[38;5;247mResponse:\x1b[0m\n",
-                    bullet
-                ));
-                if let Some(resp) = &result.response {
-                    for line in resp.lines() {
-                        output.push_str(&format!("      \x1b[38;5;247m{}\x1b[0m\n", line));
-                    }
-                }
             }
         }
         output
