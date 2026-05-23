@@ -61,6 +61,7 @@ fn make_args() -> ScanArgs {
         no_color: true,
         silence: true,
         dry_run: false,
+        stream_findings: false,
         poc_type: "plain".to_string(),
         limit: None,
         limit_result_type: "all".to_string(),

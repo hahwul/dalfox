@@ -55,6 +55,7 @@ pub struct ScanConfig {
     pub include_all: Option<bool>,
     pub silence: Option<bool>,
     pub dry_run: Option<bool>,
+    pub stream_findings: Option<bool>,
     pub poc_type: Option<String>,
     pub limit: Option<usize>,
     pub limit_result_type: Option<String>,
@@ -156,6 +157,9 @@ impl Config {
             }
             if let Some(v) = scan.dry_run {
                 args.dry_run = v;
+            }
+            if let Some(v) = scan.stream_findings {
+                args.stream_findings = v;
             }
             if let Some(v) = &scan.poc_type {
                 args.poc_type = v.clone();
@@ -461,6 +465,11 @@ impl Config {
                 && !args.dry_run
             {
                 args.dry_run = v;
+            }
+            if let Some(v) = scan.stream_findings
+                && !args.stream_findings
+            {
+                args.stream_findings = v;
             }
             if let Some(v) = &scan.poc_type
                 && args.poc_type == "plain"
@@ -880,6 +889,7 @@ pub fn default_toml_template() -> String {
 # include_all = false          # shorthand for include_request + include_response
 # silence = false
 # debug = false              # enable debug logging (DBG lines)
+# stream_findings = false    # emit findings mid-scan instead of after `WRN XSS found N XSS` (plain format only)
 # poc_type = "plain"         # plain, curl, httpie, http-request
 # limit = 100
 

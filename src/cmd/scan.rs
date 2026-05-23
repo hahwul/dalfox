@@ -760,6 +760,11 @@ pub struct ScanArgs {
     pub dry_run: bool,
 
     #[clap(help_heading = "OUTPUT")]
+    /// Emit each finding (POC + Issue / Payload / Line) the moment it is verified, instead of waiting for end-of-scan. Useful for long scans where you want immediate feedback; off by default so the default flow shows findings after `WRN XSS found N XSS`.
+    #[arg(long = "stream-findings")]
+    pub stream_findings: bool,
+
+    #[clap(help_heading = "OUTPUT")]
     /// POC output type: plain, curl, httpie, http-request
     #[arg(long, default_value = "plain")]
     pub poc_type: String,
@@ -1123,6 +1128,7 @@ impl ScanArgs {
             include_all: false,
             silence: true,
             dry_run: true,
+            stream_findings: false,
             poc_type: "plain".to_string(),
             limit: None,
             limit_result_type: "all".to_string(),
@@ -2656,16 +2662,22 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // instead of waiting for the end-of-scan flush. Only enabled for the
     // plain text format — JSON/SARIF/TOML output is built once at the end
     // and would break if we wrote ad-hoc lines into its stream.
-    // Streaming printer policy: enabled for the plain format whenever the
-    // end-of-scan path would otherwise be the sole renderer. We bail out
-    // for cases the end-of-scan path applies filters/transforms that the
-    // streamer can't easily replicate without growing more state:
+    // Streaming printer policy: opt-in via `--stream-findings` and only
+    // for the plain format. The default (off) keeps the natural log
+    // ordering — `start scan → progress bars → WRN XSS found N XSS →
+    // finding blocks` — so users don't read mid-scan findings as
+    // "partial" results placed before scan completion.
+    //
+    // Even when the user opts in we bail out for cases where the
+    // end-of-scan path applies filters/transforms the streamer can't
+    // easily replicate without more state:
     //   - `--output <file>`: final results go to disk, not stdout.
     //   - `--limit N`: capped result count; streamer would over-print.
     //   - `--only-poc <list>`: type filter applied to the final view.
     // In those cases the streamer stays off and end-of-scan renders, so
     // the user still sees a single, correctly-filtered finding block.
     let stream_findings_enabled = args.format == "plain"
+        && args.stream_findings
         && args.output.is_none()
         && args.limit.is_none()
         && args.only_poc.is_empty();

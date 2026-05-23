@@ -21,6 +21,7 @@ fn base_scan_args() -> ScanArgs {
         no_color: false,
         silence: true,
         dry_run: false,
+        stream_findings: false,
         poc_type: "plain".to_string(),
         limit: None,
         limit_result_type: "all".to_string(),
