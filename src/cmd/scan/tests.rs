@@ -1,9 +1,9 @@
 use super::{
     CLI_MAX_DELAY_MS, CLI_MAX_TIMEOUT_SECS, CLI_MAX_WORKERS, DEFAULT_DELAY_MS, DEFAULT_ENCODERS,
     DEFAULT_MAX_CONCURRENT_TARGETS, DEFAULT_MAX_TARGETS_PER_HOST, DEFAULT_METHOD,
-    DEFAULT_TIMEOUT_SECS, DEFAULT_WORKERS, ScanArgs, build_ast_dom_message, dedupe_ast_results,
-    extract_context, generate_poc, is_allowed_content_type, preflight_content_type,
-    validate_numeric_args,
+    DEFAULT_TIMEOUT_SECS, DEFAULT_WORKERS, PreflightOutcome, ScanArgs, build_ast_dom_message,
+    dedupe_ast_results, extract_context, generate_poc, is_allowed_content_type,
+    preflight_content_type, validate_numeric_args,
 };
 use crate::scanning::result::{FindingType, Result as ScanResult};
 use crate::target_parser::parse_target;
@@ -705,9 +705,11 @@ async fn test_preflight_content_type_reads_http_csp_header() {
 
     let mut args = default_scan_args();
     args.skip_waf_probe = true; // avoid extra request in test
-    let preflight = preflight_content_type(&target, &args)
-        .await
-        .expect("preflight response");
+    let preflight = match preflight_content_type(&target, &args).await {
+        PreflightOutcome::WithContentType(r) => r,
+        PreflightOutcome::NoContentType => panic!("preflight should return a Content-Type"),
+        PreflightOutcome::Unreachable => panic!("preflight target should be reachable in tests"),
+    };
     handle.abort();
 
     assert!(preflight.content_type.contains("text/html"));
@@ -725,9 +727,11 @@ async fn test_preflight_content_type_extracts_meta_csp_when_header_missing() {
     let target = parse_target(&url).expect("valid target");
     let mut args = default_scan_args();
     args.skip_waf_probe = true;
-    let preflight = preflight_content_type(&target, &args)
-        .await
-        .expect("preflight response");
+    let preflight = match preflight_content_type(&target, &args).await {
+        PreflightOutcome::WithContentType(r) => r,
+        PreflightOutcome::NoContentType => panic!("preflight should return a Content-Type"),
+        PreflightOutcome::Unreachable => panic!("preflight target should be reachable in tests"),
+    };
     handle.abort();
 
     assert!(preflight.content_type.contains("text/html"));

@@ -480,6 +480,25 @@ struct PreflightResult {
     tech_result: crate::scanning::tech_detect::TechDetectionResult,
 }
 
+/// Outcome of the `preflight_content_type` probe. We split out the
+/// "couldn't get a response" case from the "got a response but no usable
+/// Content-Type" case so callers can promote a hard reachability failure
+/// to a skipped-target outcome (and ultimately `ScanOutcome::Error`)
+/// without also skipping legitimate POST-only endpoints whose GET probe
+/// returns no Content-Type.
+enum PreflightOutcome {
+    /// HEAD/GET preflight returned a response with a usable Content-Type.
+    WithContentType(PreflightResult),
+    /// Response was received (e.g. 405 from a POST-only endpoint) but
+    /// no Content-Type header — keep scanning, just without preflight
+    /// metadata (CSP, WAF, tech).
+    NoContentType,
+    /// Hard reachability failure — DNS lookup failed, TCP refused, TLS
+    /// handshake timed out, etc. The caller marks the target as skipped
+    /// and excludes it from the scan rotation.
+    Unreachable,
+}
+
 /// Compact, user-facing summary of a reqwest network failure. Keeps the
 /// preflight banner single-line (e.g. "TLS timeout", "connection refused",
 /// "DNS error") instead of dumping the full reqwest::Error chain.
@@ -508,7 +527,7 @@ fn describe_reqwest_failure(err: &reqwest::Error) -> &'static str {
 async fn preflight_content_type(
     target: &crate::target_parser::Target,
     args: &ScanArgs,
-) -> Option<PreflightResult> {
+) -> PreflightOutcome {
     let client = match target.build_client() {
         Ok(c) => c,
         Err(e) => {
@@ -518,7 +537,7 @@ async fn preflight_content_type(
                     target.url, e
                 );
             }
-            return None;
+            return PreflightOutcome::Unreachable;
         }
     };
 
@@ -573,7 +592,7 @@ async fn preflight_content_type(
                         reason
                     );
                 }
-                return None;
+                return PreflightOutcome::Unreachable;
             }
         }
     };
@@ -688,13 +707,16 @@ async fn preflight_content_type(
             .retain(|fp| fp.confidence >= args.waf_min_confidence);
     }
 
-    ct_opt.map(|ct| PreflightResult {
-        content_type: ct,
-        csp_header,
-        response_body,
-        waf_result,
-        tech_result,
-    })
+    match ct_opt {
+        Some(ct) => PreflightOutcome::WithContentType(PreflightResult {
+            content_type: ct,
+            csp_header,
+            response_body,
+            waf_result,
+            tech_result,
+        }),
+        None => PreflightOutcome::NoContentType,
+    }
 }
 
 /// Parse a WAF type string (from --force-waf) into a WafType enum.
@@ -2053,6 +2075,31 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                         let _ = done_rx.await;
                     }
 
+                    let __preflight_info = match __preflight_info {
+                        PreflightOutcome::Unreachable => {
+                            // Hard reachability failure (DNS, TCP refused,
+                            // TLS handshake timeout). preflight_content_type
+                            // already surfaced the UNREACHABLE diagnostic.
+                            // Mark the target as skipped so target_summary
+                            // shows it and the all-unreachable check at
+                            // the end of run_scan can promote the outcome
+                            // to Error instead of falling through to Clean.
+                            skipped_targets_clone.lock().await.insert(
+                                target.url.to_string(),
+                                crate::cmd::error_codes::CONNECTION_FAILED,
+                            );
+                            return None;
+                        }
+                        // NoContentType (e.g. GET preflight on a POST-only
+                        // endpoint that 405s without a Content-Type header)
+                        // — keep scanning, just skip the preflight metadata
+                        // population below. Preserves the v3.0 behavior
+                        // that body-param scans of /post-only endpoints
+                        // still work.
+                        PreflightOutcome::NoContentType => None,
+                        PreflightOutcome::WithContentType(r) => Some(r),
+                    };
+
                     if let Some(preflight) = __preflight_info {
                         preflight_response_body = preflight.response_body;
                         if let Some((hn, hv)) = preflight.csp_header {
@@ -3160,6 +3207,24 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 crate::REQUEST_COUNT.load(Ordering::Relaxed)
             ));
         }
+    }
+
+    // A scan where every supplied target failed reachability checks
+    // (DNS lookup failure, connection refused, content-type mismatch,
+    // etc.) used to fall through to `ScanOutcome::Clean` here — same
+    // exit code 0 as "scanned and found nothing." That silently masked
+    // hard failures from scripts like
+    //   `dalfox scan https://target && echo "no XSS found"`,
+    // so the operator could read a downed server or typo'd host as a
+    // clean pass. Treat the all-skipped case as an error instead; if
+    // even one target produced any scan activity (even with zero
+    // findings) the outcome falls through to Clean as before.
+    let all_unreachable = !all_target_urls.is_empty() && {
+        let skipped = skipped_targets.lock().await;
+        !skipped.is_empty() && all_target_urls.iter().all(|u| skipped.contains_key(u))
+    };
+    if all_unreachable {
+        return ScanOutcome::Error;
     }
 
     if final_results.is_empty() {
