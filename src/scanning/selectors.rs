@@ -33,9 +33,13 @@ pub fn form() -> &'static Selector {
 
 pub fn input_textarea_select() -> &'static Selector {
     static SEL: OnceLock<Selector> = OnceLock::new();
+    // `button[name]` is part of the HTML form-submitter set per the
+    // spec — login forms commonly carry `<button name="action"
+    // value="login">` and dalfox used to miss the `action` param
+    // entirely because the selector stopped at input/textarea/select.
     SEL.get_or_init(|| {
-        Selector::parse("input, textarea, select")
-            .expect("valid CSS input/textarea/select selector")
+        Selector::parse("input, textarea, select, button[name]")
+            .expect("valid CSS form-controls selector")
     })
 }
 

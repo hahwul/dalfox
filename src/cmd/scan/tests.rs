@@ -708,7 +708,7 @@ async fn test_preflight_content_type_reads_http_csp_header() {
     let preflight = match preflight_content_type(&target, &args).await {
         PreflightOutcome::WithContentType(r) => r,
         PreflightOutcome::NoContentType => panic!("preflight should return a Content-Type"),
-        PreflightOutcome::Unreachable => panic!("preflight target should be reachable in tests"),
+        PreflightOutcome::Unreachable(_) => panic!("preflight target should be reachable in tests"),
     };
     handle.abort();
 
@@ -730,7 +730,7 @@ async fn test_preflight_content_type_extracts_meta_csp_when_header_missing() {
     let preflight = match preflight_content_type(&target, &args).await {
         PreflightOutcome::WithContentType(r) => r,
         PreflightOutcome::NoContentType => panic!("preflight should return a Content-Type"),
-        PreflightOutcome::Unreachable => panic!("preflight target should be reachable in tests"),
+        PreflightOutcome::Unreachable(_) => panic!("preflight target should be reachable in tests"),
     };
     handle.abort();
 

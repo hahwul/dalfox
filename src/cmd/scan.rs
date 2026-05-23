@@ -51,6 +51,74 @@ pub const CLI_MAX_WORKERS: usize = 500;
 // Default HTTP method (used by CLI and target parsing)
 pub const DEFAULT_METHOD: &str = "GET";
 
+/// clap value-parser for `--method` / `-X`. Normalises the input to
+/// uppercase so `--method get` and `--method GET` behave identically
+/// (case-sensitive comparisons downstream — e.g. `args.method !=
+/// "GET"` — used to silently break discovery), and rejects unknown
+/// or empty methods at parse time instead of letting them surface as
+/// `[POC][V][][body]` / `[POC][V][WAT][body]` garbage later.
+/// clap value-parser for `--force-waf`. Accepts the same alias set that
+/// `parse_waf_type` recognises (case-insensitive) and rejects anything
+/// else at parse time so a typo like `--force-waf cloudflair` doesn't
+/// silently fall into the `WafType::Unknown(other)` bucket and skip
+/// the targeted bypass mutations.
+fn parse_force_waf_arg(s: &str) -> std::result::Result<String, String> {
+    let lower = s.trim().to_ascii_lowercase();
+    let known = [
+        "cloudflare",
+        "cf",
+        "aws",
+        "awswaf",
+        "aws-waf",
+        "akamai",
+        "imperva",
+        "incapsula",
+        "modsecurity",
+        "modsec",
+        "owasp-crs",
+        "owaspcrs",
+        "crs",
+        "sucuri",
+        "f5",
+        "bigip",
+        "f5-bigip",
+        "barracuda",
+        "fortiweb",
+        "forti",
+        "azure",
+        "azurewaf",
+        "azure-waf",
+        "cloudarmor",
+        "cloud-armor",
+        "gcp",
+        "fastly",
+        "wordfence",
+    ];
+    if known.contains(&lower.as_str()) {
+        Ok(lower)
+    } else {
+        Err(format!(
+            "unknown WAF '{}' (use one of: cloudflare, aws, akamai, imperva, modsecurity, owasp-crs, sucuri, f5, barracuda, fortiweb, azure, cloudarmor, fastly, wordfence)",
+            s
+        ))
+    }
+}
+
+fn parse_http_method_arg(s: &str) -> std::result::Result<String, String> {
+    let trimmed = s.trim();
+    if trimmed.is_empty() {
+        return Err("HTTP method must not be empty".to_string());
+    }
+    let upper = trimmed.to_ascii_uppercase();
+    match upper.as_str() {
+        "GET" | "POST" | "PUT" | "DELETE" | "HEAD" | "OPTIONS" | "PATCH" => Ok(upper),
+        other => Err(format!(
+            "unsupported HTTP method '{}' (expected one of: GET, POST, PUT, DELETE, HEAD, OPTIONS, PATCH)",
+            other
+        )),
+    }
+}
+
 static GLOBAL_ENCODERS: OnceLock<Vec<String>> = OnceLock::new();
 
 use crate::scanning::selectors;
@@ -499,10 +567,12 @@ enum PreflightOutcome {
     /// no Content-Type header — keep scanning, just without preflight
     /// metadata (CSP, WAF, tech).
     NoContentType,
-    /// Hard reachability failure — DNS lookup failed, TCP refused, TLS
-    /// handshake timed out, etc. The caller marks the target as skipped
-    /// and excludes it from the scan rotation.
-    Unreachable,
+    /// Hard reachability failure — the `&'static str` carries the
+    /// specific error_code (`DNS_RESOLUTION_FAILED`,
+    /// `TLS_HANDSHAKE_FAILED`, `REQUEST_TIMEOUT`, or
+    /// `CONNECTION_FAILED`) so target_summary surfaces *which* layer
+    /// failed instead of lumping DNS / refused / handshake together.
+    Unreachable(&'static str),
 }
 
 /// Compact, user-facing summary of a reqwest network failure. Keeps the
@@ -530,6 +600,39 @@ fn describe_reqwest_failure(err: &reqwest::Error) -> &'static str {
     }
 }
 
+/// Pick the right error code for a reqwest failure so target_summary
+/// surfaces DNS / TLS / timeout / refused separately. reqwest doesn't
+/// expose a structured "kind" enum publicly; sniff the chained source
+/// for `hyper_util::client::legacy::Error` / `hickory_resolver` /
+/// `rustls`-style messages. Falls back to CONNECTION_FAILED when we
+/// can't classify, which preserves prior behavior.
+fn classify_reqwest_error_code(err: &reqwest::Error) -> &'static str {
+    if err.is_timeout() {
+        return crate::cmd::error_codes::REQUEST_TIMEOUT;
+    }
+    // Walk the source chain looking for telltale substrings.
+    let mut cur: Option<&dyn std::error::Error> = Some(err);
+    while let Some(e) = cur {
+        let s = e.to_string().to_lowercase();
+        if s.contains("dns")
+            || s.contains("name resolution")
+            || s.contains("nodename")
+            || s.contains("failed to lookup")
+        {
+            return crate::cmd::error_codes::DNS_RESOLUTION_FAILED;
+        }
+        if s.contains("tls")
+            || s.contains("handshake")
+            || s.contains("certificate")
+            || s.contains("ssl")
+        {
+            return crate::cmd::error_codes::TLS_HANDSHAKE_FAILED;
+        }
+        cur = e.source();
+    }
+    crate::cmd::error_codes::CONNECTION_FAILED
+}
+
 async fn preflight_content_type(
     target: &crate::target_parser::Target,
     args: &ScanArgs,
@@ -543,7 +646,7 @@ async fn preflight_content_type(
                     target.url, e
                 );
             }
-            return PreflightOutcome::Unreachable;
+            return PreflightOutcome::Unreachable(crate::cmd::error_codes::CONNECTION_FAILED);
         }
     };
 
@@ -598,7 +701,7 @@ async fn preflight_content_type(
                         reason
                     );
                 }
-                return PreflightOutcome::Unreachable;
+                return PreflightOutcome::Unreachable(classify_reqwest_error_code(&e));
             }
         }
     };
@@ -848,7 +951,7 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "TARGETS")]
     /// Override the HTTP method. Example: -X 'PUT' (default "GET")
-    #[arg(short = 'X', long, default_value = DEFAULT_METHOD)]
+    #[arg(short = 'X', long, default_value = DEFAULT_METHOD, value_parser = parse_http_method_arg)]
     pub method: String,
 
     #[clap(help_heading = "TARGETS")]
@@ -1084,7 +1187,7 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "WAF")]
     /// Force a specific WAF type for bypass strategies (e.g., cloudflare, akamai, modsecurity)
-    #[arg(long)]
+    #[arg(long, value_parser = parse_force_waf_arg)]
     pub force_waf: Option<String>,
 
     #[clap(help_heading = "WAF")]
@@ -1338,6 +1441,42 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     }
     let __dalfox_scan_start = std::time::Instant::now();
     crate::REQUEST_COUNT.store(0, Ordering::Relaxed);
+
+    // SIGINT (Ctrl-C) handler: dogfood found that long scans ignored the
+    // signal entirely, requiring SIGTERM/SIGKILL to stop. Plumb a shared
+    // cancel flag from here all the way down to `run_scanning`, then
+    // listen for SIGINT on a background task and flip it. The scanning
+    // loop polls this flag at safe points and exits cleanly. A second
+    // SIGINT exits immediately (escape hatch for hung tasks).
+    let cancel_flag = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    {
+        let cf = cancel_flag.clone();
+        let silence = args.silence;
+        tokio::spawn(async move {
+            // First Ctrl-C: graceful — set the flag and let the scan
+            // loop drain in-flight requests at the next checkpoint.
+            // Message goes to stderr so it never pollutes the JSON /
+            // JSONL / SARIF / TOML payload on stdout. Honor --silence
+            // explicitly.
+            if tokio::signal::ctrl_c().await.is_ok() {
+                if !silence {
+                    eprintln!(
+                        "\n[!] Ctrl-C received — stopping in-flight tasks (press again to force exit)"
+                    );
+                }
+                cf.store(true, std::sync::atomic::Ordering::Relaxed);
+            }
+            // Second Ctrl-C: hard exit so a hung HTTP request can't
+            // strand the user. Use process::exit so we skip any
+            // outstanding awaits.
+            if tokio::signal::ctrl_c().await.is_ok() {
+                if !silence {
+                    eprintln!("[!] Second Ctrl-C — exiting now");
+                }
+                std::process::exit(130); // 128 + SIGINT(2)
+            }
+        });
+    }
     // cprintln strips ANSI when --no-color / NO_COLOR is in effect. Callers
     // sometimes embed colored fragments inside `msg` (e.g. `XSS found
     // \x1b[33m{}\x1b[0m XSS`) — strip handles those too.
@@ -1449,6 +1588,39 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 ));
             }
             Ok(_) => {}
+        }
+    }
+
+    // Warn loudly about unknown remote-provider names *before* the init
+    // call swallows them as silent no-ops. Previously a typo like
+    // `--remote-payloads payloadboxx` would just not fetch anything and
+    // the user would never know.
+    if !args.remote_payloads.is_empty() {
+        let known: std::collections::HashSet<String> = crate::payload::list_payload_providers()
+            .into_iter()
+            .collect();
+        for p in &args.remote_payloads {
+            if !known.contains(&p.to_ascii_lowercase()) {
+                eprintln!(
+                    "Warning: unknown --remote-payloads provider '{}' (known: {})",
+                    p,
+                    crate::payload::list_payload_providers().join(", ")
+                );
+            }
+        }
+    }
+    if !args.remote_wordlists.is_empty() {
+        let known: std::collections::HashSet<String> = crate::payload::list_wordlist_providers()
+            .into_iter()
+            .collect();
+        for p in &args.remote_wordlists {
+            if !known.contains(&p.to_ascii_lowercase()) {
+                eprintln!(
+                    "Warning: unknown --remote-wordlists provider '{}' (known: {})",
+                    p,
+                    crate::payload::list_wordlist_providers().join(", ")
+                );
+            }
         }
     }
 
@@ -2109,18 +2281,19 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                     }
 
                     let __preflight_info = match __preflight_info {
-                        PreflightOutcome::Unreachable => {
+                        PreflightOutcome::Unreachable(code) => {
                             // Hard reachability failure (DNS, TCP refused,
                             // TLS handshake timeout). preflight_content_type
                             // already surfaced the UNREACHABLE diagnostic.
-                            // Mark the target as skipped so target_summary
-                            // shows it and the all-unreachable check at
-                            // the end of run_scan can promote the outcome
-                            // to Error instead of falling through to Clean.
-                            skipped_targets_clone.lock().await.insert(
-                                target.url.to_string(),
-                                crate::cmd::error_codes::CONNECTION_FAILED,
-                            );
+                            // Mark the target as skipped with the *specific*
+                            // error_code we classified — DNS_RESOLUTION_FAILED
+                            // vs TLS_HANDSHAKE_FAILED vs REQUEST_TIMEOUT vs
+                            // CONNECTION_FAILED — so target_summary tells
+                            // ops *which* layer broke instead of lumping.
+                            skipped_targets_clone
+                                .lock()
+                                .await
+                                .insert(target.url.to_string(), code);
                             return None;
                         }
                         // NoContentType (e.g. GET preflight on a POST-only
@@ -2681,19 +2854,59 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
 
     // --only-discovery: print discovered params and exit early
     if args.only_discovery {
+        // Collect once so we can render both human-readable plain
+        // output and the `{meta, params}` envelope shape that matches
+        // every other JSON/JSONL output dalfox emits.
+        let mut entries: Vec<serde_json::Value> = Vec::new();
         for group in host_groups.values() {
             for target in group {
                 for p in &target.reflection_params {
-                    if args.format == "json" || args.format == "jsonl" {
-                        let entry = serde_json::json!({
-                            "url": target.url.as_str(),
-                            "param": p.name,
-                            "location": format!("{:?}", p.location),
-                        });
-                        println!("{}", serde_json::to_string(&entry).unwrap_or_default());
-                    } else {
-                        println!("[{}] {} ({:?})", target.url, p.name, p.location);
+                    entries.push(serde_json::json!({
+                        "url": target.url.as_str(),
+                        "param": p.name,
+                        "location": format!("{:?}", p.location),
+                    }));
+                }
+            }
+        }
+        match args.format.as_str() {
+            "json" => {
+                let envelope = serde_json::json!({
+                    "meta": {
+                        "dalfox_version": env!("CARGO_PKG_VERSION"),
+                        "mode": "only_discovery",
+                        "params_discovered": entries.len(),
+                    },
+                    "params": entries,
+                });
+                println!(
+                    "{}",
+                    serde_json::to_string_pretty(&envelope).unwrap_or_default()
+                );
+            }
+            "jsonl" => {
+                // Meta line first (consistent with `-f jsonl` for scans),
+                // then one param per line.
+                let meta = serde_json::json!({
+                    "meta": {
+                        "dalfox_version": env!("CARGO_PKG_VERSION"),
+                        "mode": "only_discovery",
+                        "params_discovered": entries.len(),
                     }
+                });
+                println!("{}", serde_json::to_string(&meta).unwrap_or_default());
+                for e in &entries {
+                    println!("{}", serde_json::to_string(e).unwrap_or_default());
+                }
+            }
+            _ => {
+                for e in &entries {
+                    println!(
+                        "[{}] {} ({})",
+                        e["url"].as_str().unwrap_or(""),
+                        e["param"].as_str().unwrap_or(""),
+                        e["location"].as_str().unwrap_or("")
+                    );
                 }
             }
         }
@@ -2794,6 +3007,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
 
         let scan_idx = scan_idx.clone();
         let overall_done_clone = overall_done.clone();
+        let cancel_flag_group = cancel_flag.clone();
         let group_handle = tokio::spawn(async move {
             // Skip the (expensive) payload-counting loop entirely when no
             // overall progress bar will be drawn — generating ~10k payloads
@@ -2855,6 +3069,12 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 {
                     break;
                 }
+                // SIGINT bail-out at the per-target dispatch boundary —
+                // skip queuing any more targets once the user pressed
+                // Ctrl-C, even if some are still pending.
+                if cancel_flag_group.load(std::sync::atomic::Ordering::Relaxed) {
+                    break;
+                }
                 let Ok(permit) = global_semaphore_clone.clone().acquire_owned().await else {
                     break;
                 };
@@ -2866,6 +3086,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 let total_targets_copy = total_targets;
                 let findings_count_target = findings_count_group.clone();
                 let finding_tx_target = finding_tx_group.clone();
+                let cancel_flag_inner = cancel_flag_group.clone();
 
                 let multi_pb_active = multi_pb_clone_inner.is_some();
                 let target_handle = tokio::spawn(async move {
@@ -2896,7 +3117,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                             multi_pb_clone_inner,
                             overall_pb_clone,
                             findings_count_target,
-                            None,
+                            Some(cancel_flag_inner.clone()),
                             finding_tx_target,
                         )
                         .await;

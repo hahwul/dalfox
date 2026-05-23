@@ -25,6 +25,9 @@ pub mod error_codes {
     pub const FILE_READ_ERROR: &str = "FILE_READ_ERROR";
     pub const STDIN_ERROR: &str = "STDIN_ERROR";
     pub const CONNECTION_FAILED: &str = "CONNECTION_FAILED";
+    pub const DNS_RESOLUTION_FAILED: &str = "DNS_RESOLUTION_FAILED";
+    pub const TLS_HANDSHAKE_FAILED: &str = "TLS_HANDSHAKE_FAILED";
+    pub const REQUEST_TIMEOUT: &str = "REQUEST_TIMEOUT";
 
     // Scan filtering
     pub const CONTENT_TYPE_MISMATCH: &str = "CONTENT_TYPE_MISMATCH";
