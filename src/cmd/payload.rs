@@ -1,5 +1,15 @@
 use clap::Args;
 
+use crate::cmd::scan::ScanOutcome;
+
+const KNOWN_SELECTORS: &[&str] = &[
+    "event-handlers",
+    "useful-tags",
+    "payloadbox",
+    "portswigger",
+    "uri-scheme",
+];
+
 /// Manage or inspect payloads (no local flags).
 ///
 /// Note:
@@ -51,8 +61,14 @@ fn print_summary() {
     println!("- Control encoder variants with: -e none,url,2url,3url,4url,html,base64");
 }
 
-fn fetch_and_print_remote(provider: &str) {
+/// Fetch payloads from a remote provider and print one per line.
+/// Returns `true` when initialization (and any printing) finished without an
+/// error path being taken; `false` on runtime build failure, fetch failure,
+/// or an uninitialized cache. Callers translate this into the CLI exit code.
+fn fetch_and_print_remote(provider: &str) -> bool {
     let provider = provider.to_string();
+    let ok = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let ok_clone = ok.clone();
     let join = std::thread::spawn(move || {
         let rt = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
@@ -73,6 +89,7 @@ fn fetch_and_print_remote(provider: &str) {
                         if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
                             eprintln!("[DBG] {}: {} payloads", provider, count);
                         }
+                        ok_clone.store(true, std::sync::atomic::Ordering::Relaxed);
                     } else {
                         eprintln!(
                             "[payload] no payloads initialized for provider {}",
@@ -86,10 +103,15 @@ fn fetch_and_print_remote(provider: &str) {
             }
         }
     });
-    let _ = join.join();
+    // A worker-thread panic is exceptional but should not be silently dropped.
+    if let Err(e) = join.join() {
+        eprintln!("[payload] fetch worker panicked: {:?}", e);
+        return false;
+    }
+    ok.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-pub fn run_payload(args: PayloadArgs) {
+pub fn run_payload(args: PayloadArgs) -> ScanOutcome {
     match args.selector.as_deref() {
         Some("event-handlers") => {
             let list = crate::payload::xss_event::common_event_handler_names();
@@ -99,6 +121,7 @@ pub fn run_payload(args: PayloadArgs) {
             if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
                 eprintln!("[DBG] event-handlers: {} items", list.len());
             }
+            ScanOutcome::Clean
         }
         Some("useful-tags") => {
             let list = crate::payload::xss_html::useful_html_tag_names();
@@ -108,28 +131,41 @@ pub fn run_payload(args: PayloadArgs) {
             if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
                 eprintln!("[DBG] useful-tags: {} items", list.len());
             }
+            ScanOutcome::Clean
         }
         Some("payloadbox") => {
-            fetch_and_print_remote("payloadbox");
+            if fetch_and_print_remote("payloadbox") {
+                ScanOutcome::Clean
+            } else {
+                ScanOutcome::Error
+            }
         }
         Some("portswigger") => {
-            fetch_and_print_remote("portswigger");
+            if fetch_and_print_remote("portswigger") {
+                ScanOutcome::Clean
+            } else {
+                ScanOutcome::Error
+            }
         }
         Some("uri-scheme") => {
-            // print scheme-based XSS payloads
-            for payload in uri_scheme_payloads() {
+            let list = uri_scheme_payloads();
+            for payload in list {
                 println!("{}", payload);
             }
             if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                eprintln!("[DBG] uri-scheme: {} payloads", uri_scheme_payloads().len());
+                eprintln!("[DBG] uri-scheme: {} payloads", list.len());
             }
+            ScanOutcome::Clean
         }
         Some(other) => {
             eprintln!("Unknown selector: {}", other);
+            eprintln!("Available selectors: {}", KNOWN_SELECTORS.join(", "));
+            ScanOutcome::Error
         }
         None => {
             // Provide a small, helpful summary rather than a no-op.
             print_summary();
+            ScanOutcome::Clean
         }
     }
 }

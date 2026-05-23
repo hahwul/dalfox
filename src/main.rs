@@ -54,6 +54,25 @@ enum Commands {
 
 #[tokio::main]
 async fn main() {
+    // Exit cleanly when a downstream consumer (e.g. `head`, `grep -q`) closes
+    // the pipe. Rust ignores SIGPIPE by default, so the next `println!` panics
+    // inside the stdio shim with `failed printing to stdout: Broken pipe` and
+    // exits 101 with a stack trace — surprising for `dalfox payload payloadbox
+    // | head -10`. Override the panic hook to swallow only that specific
+    // payload and exit 0; any other panic still flows through the default hook.
+    let default_panic_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let payload_str = info
+            .payload()
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| info.payload().downcast_ref::<&str>().copied());
+        if matches!(payload_str, Some(s) if s.contains("Broken pipe")) {
+            std::process::exit(0);
+        }
+        default_panic_hook(info);
+    }));
+
     // Determine color policy from TTY + `NO_COLOR` env var. The CLI
     // `--no-color` / `-S` flags are inspected via raw argv because clap
     // hasn't parsed yet — the banner is emitted before `Cli::parse()`.
@@ -75,6 +94,13 @@ async fn main() {
     // Skip banner for MCP subcommand (stdout is JSON-RPC) and for
     // machine-readable output formats (json, jsonl, sarif, toml) to keep stdout parseable.
     let is_mcp = matches!(cli.command, Some(Commands::Mcp));
+    // Suppress banner when `payload <selector>` is invoked: the selector path
+    // emits one-line-per-item output that users routinely pipe into grep/jq.
+    // The argless `payload` summary stays human-readable and keeps the banner.
+    let is_payload_selector = matches!(
+        &cli.command,
+        Some(Commands::Payload(args)) if args.selector.is_some()
+    );
     let is_machine_format = {
         let scan_format = match &cli.command {
             Some(Commands::Scan(args)) => Some(args.format.as_str()),
@@ -93,7 +119,7 @@ async fn main() {
     // Suppress the banner for pipelines/CI: machine formats, MCP stdio,
     // and any `--silence` / `-S` invocation. The ASCII art is large enough
     // that it dominates `| head` output otherwise.
-    if !is_mcp && !is_machine_format && !silence_flag {
+    if !is_mcp && !is_machine_format && !silence_flag && !is_payload_selector {
         utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
     }
 
@@ -210,8 +236,7 @@ async fn main() {
                 outcome = ScanOutcome::Clean;
             }
             Commands::Payload(args) => {
-                cmd::payload::run_payload(args);
-                outcome = ScanOutcome::Clean;
+                outcome = cmd::payload::run_payload(args);
             }
             Commands::Mcp => {
                 // Run MCP stdio server (no banner already)
