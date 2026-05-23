@@ -2722,7 +2722,14 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             }
 
             for handle in target_handles {
-                let _ = handle.await;
+                // Surface panics from per-target scan tasks instead of letting
+                // them disappear silently — a panic here points to a bug in
+                // the scanning pipeline and operators need a chance to see it.
+                if let Err(e) = handle.await
+                    && e.is_panic()
+                {
+                    eprintln!("[scan] target task panicked: {}", e);
+                }
                 // Update global overall progress line when multiple targets
                 overall_done_clone.fetch_add(1, Ordering::Relaxed);
                 // overall ticker handles rendering globally
@@ -2736,7 +2743,11 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     }
 
     for handle in group_handles {
-        let _ = handle.await;
+        if let Err(e) = handle.await
+            && e.is_panic()
+        {
+            eprintln!("[scan] target-group task panicked: {}", e);
+        }
         if let Some(lim) = args.limit
             && findings_count.load(Ordering::Relaxed) >= lim
         {
@@ -2749,8 +2760,11 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // this, the printer would either leak (if we forgot to drop tx) or
     // race with end-of-scan output.
     drop(finding_tx);
-    if let Some(handle) = finding_printer_handle {
-        let _ = handle.await;
+    if let Some(handle) = finding_printer_handle
+        && let Err(e) = handle.await
+        && e.is_panic()
+    {
+        eprintln!("[scan] finding printer task panicked: {}", e);
     }
 
     if args.format == "plain" && !args.silence && total_targets > 1 {
