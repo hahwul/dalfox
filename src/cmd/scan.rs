@@ -755,7 +755,7 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "OUTPUT")]
     /// Output format: json, jsonl, plain, markdown, sarif, toml
-    #[arg(short, long, default_value = "plain")]
+    #[arg(short, long, default_value = "plain", value_parser = clap::builder::PossibleValuesParser::new(["plain", "json", "jsonl", "markdown", "sarif", "toml"]))]
     pub format: String,
 
     #[clap(help_heading = "OUTPUT")]
@@ -806,7 +806,7 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "OUTPUT")]
     /// POC output type: plain, curl, httpie, http-request
-    #[arg(long, default_value = "plain")]
+    #[arg(long, default_value = "plain", value_parser = clap::builder::PossibleValuesParser::new(["plain", "curl", "httpie", "http-request"]))]
     pub poc_type: String,
 
     #[clap(help_heading = "OUTPUT")]
