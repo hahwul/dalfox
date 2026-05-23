@@ -1011,7 +1011,7 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "XSS SCANNING")]
     /// Custom alert function type. Options: none (keep original), str (wrap value in quotes). Default: "none"
-    #[arg(long, default_value = "none")]
+    #[arg(long, default_value = "none", value_parser = clap::builder::PossibleValuesParser::new(["none", "str"]))]
     pub custom_alert_type: String,
 
     #[clap(help_heading = "XSS SCANNING")]
