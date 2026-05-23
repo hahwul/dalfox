@@ -821,7 +821,7 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "OUTPUT")]
     /// Filter output to show only specific finding types (comma-separated). Options: v (verified), r (reflected), a (AST DOM XSS). Example: --only-poc "v,r"
-    #[arg(long, value_delimiter = ',')]
+    #[arg(long, value_delimiter = ',', value_parser = clap::builder::PossibleValuesParser::new(["v", "r", "a", "V", "R", "A"]))]
     pub only_poc: Vec<String>,
 
     #[clap(help_heading = "TARGETS")]
