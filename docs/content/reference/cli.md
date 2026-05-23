@@ -63,6 +63,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--no-color` | — | false | Disable ANSI colour |
 | `--silence` | `-S` | false | Emit only findings to STDOUT |
 | `--dry-run` | — | false | Discover and plan without sending payloads |
+| `--stream-findings` | — | false | Emit each finding the moment it is verified instead of after the end-of-scan summary (plain format only; auto-disabled with `--output`, `--limit`, `--only-poc`) |
 | `--poc-type` | — | `plain` | `plain`, `curl`, `httpie`, `http-request` |
 | `--limit` | — | — | Cap total results shown |
 | `--limit-result-type` | — | `all` | `all`, `v`, `r`, `a` — which types count toward `--limit` |

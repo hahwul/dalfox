@@ -28,6 +28,7 @@ include_response = false
 include_all = false
 silence = false
 dry_run = false
+stream_findings = false
 poc_type = "plain"
 # limit = 100
 limit_result_type = "all"
@@ -118,6 +119,7 @@ debug = false
 | `include_all` | bool | `false` | Shorthand for both |
 | `silence` | bool | `false` | Suppress logs |
 | `dry_run` | bool | `false` | Don't send payloads |
+| `stream_findings` | bool | `false` | Print each finding mid-scan instead of after the end-of-scan summary (plain format only) |
 | `poc_type` | string | `"plain"` | `plain`, `curl`, `httpie`, `http-request` |
 | `limit` | int | — | Cap on result count |
 | `limit_result_type` | string | `"all"` | Which types count: `all`, `v`, `r`, `a` |

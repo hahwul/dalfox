@@ -67,6 +67,24 @@ cat urls.txt | dalfox --silence -f jsonl | jq 'select(.severity=="High")'
 
 Great for shell pipelines and cron jobs.
 
+## Streaming findings during long scans
+
+By default the plain renderer prints each finding block (POC + Issue /
+Payload / Line) **after** the end-of-scan `WRN XSS found N XSS` summary,
+so the log reads in natural order: start → progress → summary → details.
+
+For long scans against large targets, you can flip to mid-scan emission
+with `--stream-findings`. Each finding is printed the moment it is
+verified, above the progress bars:
+
+```bash
+dalfox https://target.app --stream-findings
+```
+
+`--stream-findings` only affects the `plain` format and is auto-disabled
+when the end-of-scan path needs to apply filters the streamer can't
+mirror cleanly (`--output`, `--limit`, `--only-poc`).
+
 ## POC styles
 
 Re-render the proof-of-concept in different client shapes:
