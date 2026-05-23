@@ -14,8 +14,13 @@
 //! - `pre_encoding` auto-detected (base64, 2base64, 2url, 3url) when `<` is
 //!   invalid in naive check but valid after encoding
 //!
-//! **Side effects:** HTTP requests (one per special character per parameter).
-//! Runs concurrently via tokio tasks bounded by `target.workers`.
+//! **Side effects:** One batched probe request per parameter that carries
+//! every `SPECIAL_PROBE_CHARS` entry between the open/close markers; the
+//! reflected segment is scanned to classify each char. Falls back to a
+//! per-char fan-out (one request per char) only when the batched probe
+//! reflects the markers but strips every special char — a likely WAF
+//! tripwire on the dense payload that per-char probes can sidestep. All
+//! work runs under `target.workers` semaphore gating.
 
 pub mod discovery;
 pub mod mining;
@@ -202,7 +207,334 @@ fn extract_reflected_segment(body: &str) -> Option<&str> {
     Some(&rest[..end_rel])
 }
 
-/// Active probe for one parameter: send per-char payloads and classify specials.
+/// Send one probe request that injects `payload` into `param`'s location and
+/// return the response text combined with any redirect Location header. The
+/// payload is sent verbatim — pre-encoding must already be applied by the
+/// caller. Returns `None` when the request fails, the server returns a status
+/// in `target.ignore_return`, or the body cannot be read.
+async fn send_probe_request_for_param(
+    client: &reqwest::Client,
+    target: &Target,
+    param: &Param,
+    payload: &str,
+) -> Option<String> {
+    let parsed_method = target.parse_method();
+    let url_original = target.url.clone();
+    let headers = target.headers.clone();
+    let cookies = target.cookies.clone();
+    let user_agent = target.user_agent.clone();
+    let data = target.data.clone();
+    let param_name = param.name.clone();
+    let wire_name = param.effective_wire_name().to_string();
+    let location = param.location.clone();
+    let form_action_url = param.form_action_url.clone();
+    let ignore_return = target.ignore_return.clone();
+
+    // Force POST for Body/JsonBody/MultipartBody params even when default target method is GET
+    let req_method = match location {
+        Location::Body | Location::JsonBody | Location::MultipartBody => reqwest::Method::POST,
+        _ => parsed_method,
+    };
+
+    // When this param came from form discovery, `form_action_url` points at
+    // the form's action endpoint, which may differ from the page URL where
+    // the form was found. Every body-bearing location probes at the action;
+    // Query must do the same so we exercise the sink rather than the
+    // form-host page.
+    let action_resolved_url = form_action_url
+        .as_ref()
+        .and_then(|u| url::Url::parse(u).ok())
+        .unwrap_or_else(|| url_original.clone());
+    let mut url = match location {
+        Location::Query => action_resolved_url.clone(),
+        _ => url_original.clone(),
+    };
+    let mut request_builder;
+
+    match location {
+        Location::Query => {
+            let mut new_pairs: Vec<(String, String)> = Vec::new();
+            let mut replaced = false;
+            for (k, v) in url.query_pairs() {
+                if k == wire_name {
+                    new_pairs.push((k.to_string(), payload.to_string()));
+                    replaced = true;
+                } else {
+                    new_pairs.push((k.to_string(), v.to_string()));
+                }
+            }
+            if !replaced {
+                new_pairs.push((wire_name.clone(), payload.to_string()));
+            }
+            url.query_pairs_mut().clear();
+            for (k, v) in new_pairs {
+                url.query_pairs_mut().append_pair(&k, &v);
+            }
+            request_builder = client.request(req_method, url);
+        }
+        Location::Body => {
+            let body_string;
+            if let Some(d) = &data {
+                let mut pairs: Vec<(String, String)> = url::form_urlencoded::parse(d.as_bytes())
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect();
+                let mut found = false;
+                for (k, v) in &mut pairs {
+                    if *k == param_name {
+                        *v = payload.to_string();
+                        found = true;
+                    }
+                }
+                if !found {
+                    pairs.push((param_name.clone(), payload.to_string()));
+                }
+                body_string = url::form_urlencoded::Serializer::new(String::new())
+                    .extend_pairs(pairs)
+                    .finish();
+            } else {
+                body_string = format!("{}={}", param_name, payload);
+            }
+            request_builder = client
+                .request(req_method, action_resolved_url.clone())
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .body(body_string);
+        }
+        Location::Header => {
+            let is_cookie = cookies.iter().any(|(n, _)| n == &param_name);
+            request_builder = client.request(req_method, url);
+            if is_cookie {
+                let mut cookie_header = String::new();
+                for (k, v) in &cookies {
+                    if k == &param_name {
+                        cookie_header.push_str(k);
+                        cookie_header.push('=');
+                        cookie_header.push_str(payload);
+                        cookie_header.push_str("; ");
+                    } else {
+                        cookie_header.push_str(k);
+                        cookie_header.push('=');
+                        cookie_header.push_str(v);
+                        cookie_header.push_str("; ");
+                    }
+                }
+                if !cookie_header.is_empty() {
+                    cookie_header.pop();
+                    cookie_header.pop();
+                    request_builder = request_builder.header("Cookie", cookie_header);
+                }
+            } else {
+                let mut injected = false;
+                for (k, v) in &headers {
+                    if k == &param_name {
+                        request_builder = request_builder.header(k, payload);
+                        injected = true;
+                    } else {
+                        request_builder = request_builder.header(k, v);
+                    }
+                }
+                if !injected {
+                    request_builder = request_builder.header(&param_name, payload);
+                }
+            }
+        }
+        Location::Path => {
+            let mut path_url = url_original.clone();
+            if let Some(idx_str) = param_name.strip_prefix("path_segment_")
+                && let Ok(idx) = idx_str.parse::<usize>()
+            {
+                let original_path = path_url.path();
+                let mut segments: Vec<String> = if original_path == "/" {
+                    Vec::new()
+                } else {
+                    original_path
+                        .trim_matches('/')
+                        .split('/')
+                        .filter(|s| !s.is_empty())
+                        .map(ToString::to_string)
+                        .collect()
+                };
+                if idx < segments.len() {
+                    segments[idx] = payload.to_string();
+                    let new_path = if segments.is_empty() {
+                        "/".to_string()
+                    } else {
+                        format!("/{}", segments.join("/"))
+                    };
+                    path_url.set_path(&new_path);
+                }
+            }
+            request_builder = client.request(req_method, path_url);
+        }
+        Location::JsonBody => {
+            let mut json_value_opt: Option<Value> = None;
+            if let Some(d) = &data
+                && let Ok(parsed) = serde_json::from_str::<Value>(d)
+            {
+                json_value_opt = Some(parsed);
+            }
+            let mut root = json_value_opt.unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+            if let Value::Object(ref mut map) = root {
+                map.insert(param_name.clone(), Value::String(payload.to_string()));
+            } else {
+                let mut map = serde_json::Map::new();
+                map.insert(param_name.clone(), Value::String(payload.to_string()));
+                root = Value::Object(map);
+            }
+            let body_string = serde_json::to_string(&root)
+                .unwrap_or_else(|_| format!("{{\"{}\":\"{}\"}}", param_name, payload));
+            request_builder = client
+                .request(req_method, action_resolved_url.clone())
+                .header("Content-Type", "application/json")
+                .body(body_string);
+        }
+        Location::MultipartBody => {
+            let mut form = reqwest::multipart::Form::new();
+            if let Some(d) = &data {
+                for pair in d.split('&') {
+                    if let Some((k, v)) = pair.split_once('=') {
+                        let k = urlencoding::decode(k)
+                            .unwrap_or(std::borrow::Cow::Borrowed(k))
+                            .to_string();
+                        let v = urlencoding::decode(v)
+                            .unwrap_or(std::borrow::Cow::Borrowed(v))
+                            .to_string();
+                        if k == param_name {
+                            form = form.text(k, payload.to_string());
+                        } else {
+                            form = form.text(k, v);
+                        }
+                    }
+                }
+            }
+            if data.is_none()
+                || !data
+                    .as_ref()
+                    .unwrap_or(&String::new())
+                    .contains(&param_name)
+            {
+                form = form.text(param_name.clone(), payload.to_string());
+            }
+            request_builder = client
+                .request(req_method, action_resolved_url.clone())
+                .multipart(form);
+        }
+        Location::Fragment => {
+            let inject_url_str = crate::scanning::url_inject::build_injected_url(
+                &url_original,
+                &crate::parameter_analysis::Param {
+                    name: param_name.clone(),
+                    value: String::new(),
+                    location: Location::Fragment,
+                    injection_context: None,
+                    valid_specials: None,
+                    invalid_specials: None,
+                    pre_encoding: None,
+                    pre_encoding_pipeline: None,
+                    wire_name: None,
+                    form_action_url: None,
+                    form_origin_url: None,
+                    framework_sink: None,
+                },
+                payload,
+            );
+            let frag_url =
+                url::Url::parse(&inject_url_str).unwrap_or_else(|_| url_original.clone());
+            request_builder = client.request(req_method, frag_url);
+        }
+    }
+
+    if let Some(ua) = &user_agent {
+        request_builder = request_builder.header("User-Agent", ua);
+    }
+    let is_cookie_param =
+        location == Location::Header && cookies.iter().any(|(n, _)| n == &param_name);
+    if !is_cookie_param && !cookies.is_empty() {
+        let mut cookie_header = String::new();
+        for (ck, cv) in &cookies {
+            if ck == &param_name && location == Location::Header {
+                continue;
+            }
+            cookie_header.push_str(ck);
+            cookie_header.push('=');
+            cookie_header.push_str(cv);
+            cookie_header.push_str("; ");
+        }
+        if !cookie_header.is_empty() {
+            cookie_header.pop();
+            cookie_header.pop();
+            request_builder = request_builder.header("Cookie", cookie_header);
+        }
+    }
+    if let Some(d) = &data
+        && matches!(
+            location,
+            Location::Query | Location::Header | Location::Fragment
+        )
+    {
+        request_builder = request_builder.body(d.clone());
+    }
+
+    crate::tick_request_count();
+    let resp = request_builder.send().await.ok()?;
+    if !ignore_return.is_empty() && ignore_return.contains(&resp.status().as_u16()) {
+        return None;
+    }
+    let redirect_text = if resp.status().is_redirection() {
+        resp.headers()
+            .get(reqwest::header::LOCATION)
+            .and_then(|v| v.to_str().ok())
+            .map(ToString::to_string)
+    } else {
+        None
+    };
+    let body_text = match resp.text().await {
+        Ok(body) => Some(body),
+        Err(e) => {
+            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!("[DBG] discovery response body read failed: {}", e);
+            }
+            None
+        }
+    };
+    Some(match (redirect_text, body_text) {
+        (Some(loc), Some(body)) => format!("{}{}", loc, body),
+        (Some(loc), None) => loc,
+        (None, Some(body)) => body,
+        (None, None) => String::new(),
+    })
+}
+
+/// Check whether a single char `c` is observable in the reflected segment,
+/// either as the literal char, one of its HTML/numeric entity variants, or
+/// its `%HH` URL-encoded form. Matches the legacy per-char classification.
+fn char_reflected_in_segment(segment: &str, c: char) -> bool {
+    if segment.contains(c) {
+        return true;
+    }
+    for e in encoded_variants(c) {
+        if segment.contains(e) {
+            return true;
+        }
+    }
+    let pct = format!("%{:02X}", c as u32);
+    if segment.to_ascii_uppercase().contains(&pct) {
+        return true;
+    }
+    false
+}
+
+/// Active probe for one parameter. Sends a single **batched** probe carrying
+/// all `SPECIAL_PROBE_CHARS` between the open/close markers, then classifies
+/// each char by inspecting the reflected segment of the response. This
+/// replaces the previous per-char fan-out (one request per character) with
+/// one request per parameter — the dominant request-count reducer at scan
+/// time.
+///
+/// Coverage safety net: if the batched probe is reflected but **no** char
+/// survives in the reflected segment (likely the server's WAF tripped on the
+/// dense special-char payload, while individual chars would pass), the
+/// function falls back to the legacy per-char loop so payload generators
+/// still see an accurate valid/invalid split.
 pub async fn active_probe_param(
     target: &Target,
     mut param: Param,
@@ -210,387 +542,107 @@ pub async fn active_probe_param(
 ) -> Param {
     let client = target.build_client_or_default();
 
-    let mut handles = Vec::new();
-    let valid_specials = Arc::new(Mutex::new(Vec::<char>::new()));
-    let invalid_specials = Arc::new(Mutex::new(Vec::<char>::new()));
+    // Single batched probe — `OPEN + all special chars concatenated + CLOSE`.
+    // `extract_reflected_segment` recovers the substring between markers, and
+    // `classify_special_chars`-style per-char checks then split it into
+    // valid/invalid. One request replaces SPECIAL_PROBE_CHARS.len()
+    // requests.
+    let batched_chars: String = SPECIAL_PROBE_CHARS.iter().collect();
+    let batched_probe = format!(
+        "{}{}{}",
+        crate::scanning::markers::open_marker(),
+        batched_chars,
+        crate::scanning::markers::close_marker()
+    );
+    let batched_payload =
+        crate::encoding::pre_encoding::apply_param_encoding(&batched_probe, &param);
 
-    for &c in SPECIAL_PROBE_CHARS {
-        let sem_clone = semaphore.clone();
-        let client_clone = client.clone();
-        let parsed_method = target.parse_method();
-        let url_original = target.url.clone();
-        let headers = target.headers.clone();
-        let cookies = target.cookies.clone();
-        let user_agent = target.user_agent.clone();
-        let data = target.data.clone();
-        let param_name = param.name.clone();
-        let wire_name = param.effective_wire_name().to_string();
-        let location = param.location.clone();
-        let param_for_encoding = param.clone();
-        let form_action_url = param.form_action_url.clone();
-        let ignore_return = target.ignore_return.clone();
+    let permit = semaphore.acquire().await.expect("acquire semaphore permit");
+    let batched_response =
+        send_probe_request_for_param(&client, target, &param, &batched_payload).await;
+    drop(permit);
 
-        let valid_ref = valid_specials.clone();
-        let invalid_ref = invalid_specials.clone();
+    let mut valid: Vec<char> = Vec::new();
+    let mut invalid: Vec<char> = Vec::new();
+    let mut need_per_char_fallback = false;
 
-        let handle = tokio::spawn(async move {
-            let _permit = sem_clone.acquire().await.expect("acquire semaphore permit");
-            let probe_payload = format!(
-                "{}{}{}",
-                crate::scanning::markers::open_marker(),
-                c,
-                crate::scanning::markers::close_marker()
-            );
-            // Apply per-Param pre-encoding (pipeline > legacy) so the server
-            // can decode the probe value the same way it decodes normal
-            // user input. For nested params this also wraps the marker into
-            // the JSON shell at the right field pointer.
-            let payload = crate::encoding::pre_encoding::apply_param_encoding(
-                &probe_payload,
-                &param_for_encoding,
-            );
-            // Force POST for Body/JsonBody/MultipartBody params even when default target method is GET
-            let req_method = match location {
-                Location::Body | Location::JsonBody | Location::MultipartBody => {
-                    reqwest::Method::POST
-                }
-                _ => parsed_method,
-            };
-            // When this param came from form discovery, `form_action_url`
-            // points at the form's action endpoint, which may differ from
-            // the page URL where the form was found. Every body-bearing
-            // location probes at the action; Query must do the same so we
-            // exercise the sink rather than the form-host page.
-            let action_resolved_url = form_action_url
-                .as_ref()
-                .and_then(|u| url::Url::parse(u).ok())
-                .unwrap_or_else(|| url_original.clone());
-            let mut url = match location {
-                Location::Query => action_resolved_url.clone(),
-                _ => url_original.clone(),
-            };
-            let mut request_builder;
-
-            match location {
-                Location::Query => {
-                    let mut new_pairs: Vec<(String, String)> = Vec::new();
-                    let mut replaced = false;
-                    for (k, v) in url.query_pairs() {
-                        if k == wire_name {
-                            new_pairs.push((k.to_string(), payload.clone()));
-                            replaced = true;
-                        } else {
-                            new_pairs.push((k.to_string(), v.to_string()));
-                        }
-                    }
-                    if !replaced {
-                        new_pairs.push((wire_name.clone(), payload.clone()));
-                    }
-                    url.query_pairs_mut().clear();
-                    for (k, v) in new_pairs {
-                        url.query_pairs_mut().append_pair(&k, &v);
-                    }
-                    request_builder = client_clone.request(req_method, url);
-                }
-                Location::Body => {
-                    let body_string;
-                    if let Some(d) = &data {
-                        let mut pairs: Vec<(String, String)> =
-                            url::form_urlencoded::parse(d.as_bytes())
-                                .map(|(k, v)| (k.to_string(), v.to_string()))
-                                .collect();
-                        let mut found = false;
-                        for (k, v) in &mut pairs {
-                            if *k == param_name {
-                                *v = payload.clone();
-                                found = true;
-                            }
-                        }
-                        if !found {
-                            pairs.push((param_name.clone(), payload.clone()));
-                        }
-                        body_string = url::form_urlencoded::Serializer::new(String::new())
-                            .extend_pairs(pairs)
-                            .finish();
-                    } else {
-                        body_string = format!("{}={}", param_name, payload);
-                    }
-                    request_builder = client_clone
-                        .request(req_method, action_resolved_url.clone())
-                        .header("Content-Type", "application/x-www-form-urlencoded")
-                        .body(body_string);
-                }
-                Location::Header => {
-                    let is_cookie = cookies.iter().any(|(n, _)| n == &param_name);
-                    request_builder = client_clone.request(req_method, url);
-                    if is_cookie {
-                        let mut cookie_header = String::new();
-                        for (k, v) in &cookies {
-                            if k == &param_name {
-                                cookie_header.push_str(k);
-                                cookie_header.push('=');
-                                cookie_header.push_str(&payload);
-                                cookie_header.push_str("; ");
-                            } else {
-                                cookie_header.push_str(k);
-                                cookie_header.push('=');
-                                cookie_header.push_str(v);
-                                cookie_header.push_str("; ");
-                            }
-                        }
-                        if !cookie_header.is_empty() {
-                            cookie_header.pop();
-                            cookie_header.pop();
-                            request_builder = request_builder.header("Cookie", cookie_header);
-                        }
-                    } else {
-                        let mut injected = false;
-                        for (k, v) in &headers {
-                            if k == &param_name {
-                                request_builder = request_builder.header(k, payload.clone());
-                                injected = true;
-                            } else {
-                                request_builder = request_builder.header(k, v);
-                            }
-                        }
-                        // If param was discovered (e.g. via check_header_discovery)
-                        // but isn't in the user-provided headers, inject it directly.
-                        if !injected {
-                            request_builder = request_builder.header(&param_name, payload.clone());
-                        }
-                    }
-                }
-                Location::Path => {
-                    let mut path_url = url_original.clone();
-                    if let Some(idx_str) = param_name.strip_prefix("path_segment_")
-                        && let Ok(idx) = idx_str.parse::<usize>()
-                    {
-                        let original_path = path_url.path();
-                        let mut segments: Vec<String> = if original_path == "/" {
-                            Vec::new()
-                        } else {
-                            original_path
-                                .trim_matches('/')
-                                .split('/')
-                                .filter(|s| !s.is_empty())
-                                .map(ToString::to_string)
-                                .collect()
-                        };
-                        if idx < segments.len() {
-                            segments[idx] = payload.clone();
-                            let new_path = if segments.is_empty() {
-                                "/".to_string()
-                            } else {
-                                format!("/{}", segments.join("/"))
-                            };
-                            path_url.set_path(&new_path);
-                        }
-                    }
-                    request_builder = client_clone.request(req_method, path_url);
-                }
-                Location::JsonBody => {
-                    // Attempt JSON body mutation
-                    let mut json_value_opt: Option<Value> = None;
-                    if let Some(d) = &data
-                        && let Ok(parsed) = serde_json::from_str::<Value>(d)
-                    {
-                        json_value_opt = Some(parsed);
-                    }
-                    let mut root =
-                        json_value_opt.unwrap_or_else(|| Value::Object(serde_json::Map::new()));
-                    if let Value::Object(ref mut map) = root {
-                        map.insert(param_name.clone(), Value::String(payload.clone()));
-                    } else {
-                        // If existing body isn't an object, wrap it
-                        let mut map = serde_json::Map::new();
-                        map.insert(param_name.clone(), Value::String(payload.clone()));
-                        root = Value::Object(map);
-                    }
-                    let body_string = serde_json::to_string(&root)
-                        .unwrap_or_else(|_| format!("{{\"{}\":\"{}\"}}", param_name, payload));
-                    request_builder = client_clone
-                        .request(req_method, action_resolved_url.clone())
-                        .header("Content-Type", "application/json")
-                        .body(body_string);
-                }
-                Location::MultipartBody => {
-                    // Build multipart/form-data body
-                    let mut form = reqwest::multipart::Form::new();
-                    if let Some(d) = &data {
-                        for pair in d.split('&') {
-                            if let Some((k, v)) = pair.split_once('=') {
-                                let k = urlencoding::decode(k)
-                                    .unwrap_or(std::borrow::Cow::Borrowed(k))
-                                    .to_string();
-                                let v = urlencoding::decode(v)
-                                    .unwrap_or(std::borrow::Cow::Borrowed(v))
-                                    .to_string();
-                                if k == param_name {
-                                    form = form.text(k, payload.clone());
-                                } else {
-                                    form = form.text(k, v);
-                                }
-                            }
-                        }
-                    }
-                    // If param not found in existing data, add it
-                    if data.is_none()
-                        || !data
-                            .as_ref()
-                            .unwrap_or(&String::new())
-                            .contains(&param_name)
-                    {
-                        form = form.text(param_name.clone(), payload.clone());
-                    }
-                    request_builder = client_clone
-                        .request(req_method, action_resolved_url.clone())
-                        .multipart(form);
-                }
-                Location::Fragment => {
-                    // Fragment injection: payload goes into the URL fragment.
-                    // Use build_injected_url which handles fragment param replacement.
-                    let inject_url_str = crate::scanning::url_inject::build_injected_url(
-                        &url_original,
-                        &crate::parameter_analysis::Param {
-                            name: param_name.clone(),
-                            value: String::new(),
-                            location: Location::Fragment,
-                            injection_context: None,
-                            valid_specials: None,
-                            invalid_specials: None,
-                            pre_encoding: None,
-                            pre_encoding_pipeline: None,
-                            wire_name: None,
-                            form_action_url: None,
-                            form_origin_url: None,
-                            framework_sink: None,
-                        },
-                        &payload,
-                    );
-                    let frag_url =
-                        url::Url::parse(&inject_url_str).unwrap_or_else(|_| url_original.clone());
-                    request_builder = client_clone.request(req_method, frag_url);
-                }
-            }
-
-            if let Some(ua) = &user_agent {
-                request_builder = request_builder.header("User-Agent", ua);
-            }
-            // Aggregate cookies into a single Cookie header to avoid duplicates
-            let is_cookie_param =
-                location == Location::Header && cookies.iter().any(|(n, _)| n == &param_name);
-            if !is_cookie_param && !cookies.is_empty() {
-                let mut cookie_header = String::new();
-                for (ck, cv) in &cookies {
-                    // Skip the probed cookie param itself (already injected above if applicable)
-                    if ck == &param_name && location == Location::Header {
-                        continue;
-                    }
-                    cookie_header.push_str(ck);
-                    cookie_header.push('=');
-                    cookie_header.push_str(cv);
-                    cookie_header.push_str("; ");
-                }
-                if !cookie_header.is_empty() {
-                    cookie_header.pop();
-                    cookie_header.pop();
-                    request_builder = request_builder.header("Cookie", cookie_header);
-                }
-            }
-            if let Some(d) = &data
-                && matches!(
-                    location,
-                    Location::Query | Location::Header | Location::Fragment
-                )
-            {
-                request_builder = request_builder.body(d.clone());
-            }
-
-            let reflected_ok = if let Ok(resp) = {
-                crate::tick_request_count();
-                request_builder.send().await
-            } {
-                // Skip processing if the status code is in the ignore_return list
-                if !ignore_return.is_empty() && ignore_return.contains(&resp.status().as_u16()) {
-                    false
+    match batched_response
+        .as_deref()
+        .and_then(extract_reflected_segment)
+    {
+        Some(segment) => {
+            for &c in SPECIAL_PROBE_CHARS {
+                if char_reflected_in_segment(segment, c) {
+                    valid.push(c);
                 } else {
-                    // For redirect responses, also check the Location header
-                    let redirect_text = if resp.status().is_redirection() {
-                        resp.headers()
-                            .get(reqwest::header::LOCATION)
-                            .and_then(|v| v.to_str().ok())
-                            .map(ToString::to_string)
-                    } else {
-                        None
-                    };
-                    let body_text = match resp.text().await {
-                        Ok(body) => Some(body),
-                        Err(e) => {
-                            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                                eprintln!("[DBG] discovery response body read failed: {}", e);
-                            }
-                            None
-                        }
-                    };
-                    // Combine redirect Location and body for reflection checking
-                    let combined = match (&redirect_text, &body_text) {
-                        (Some(loc), Some(body)) => format!("{}{}", loc, body),
-                        (Some(loc), None) => loc.clone(),
-                        (None, Some(body)) => body.clone(),
-                        (None, None) => String::new(),
-                    };
-                    if let Some(segment) = extract_reflected_segment(&combined) {
-                        if segment.contains(c) {
-                            true
-                        } else {
-                            let encs = encoded_variants(c);
-                            let mut found = false;
-                            for e in encs {
-                                if segment.contains(e) {
-                                    found = true;
-                                    break;
-                                }
-                            }
-                            if !found {
-                                let pct = format!("%{:02X}", c as u32);
-                                if segment.to_ascii_uppercase().contains(&pct) {
-                                    found = true;
-                                }
-                            }
-                            found
-                        }
-                    } else {
-                        false
-                    }
+                    invalid.push(c);
                 }
-            } else {
-                false
-            };
-
-            if reflected_ok {
-                valid_ref.lock().await.push(c);
-            } else {
-                // Literal character is blocked by the server.  Classify as
-                // invalid so payload generators can skip payloads that rely
-                // on the raw char (e.g. angle-bracket tag payloads in
-                // attribute context).  Encoded-bypass opportunities are
-                // handled separately by the encoding pipeline during
-                // scanning.
-                invalid_ref.lock().await.push(c);
             }
-        });
-        handles.push(handle);
+            // Coverage safety net: if the server echoed the bracketed marker
+            // but stripped every special char from the segment, the dense
+            // batched payload likely tripped a WAF rule that wouldn't fire
+            // on per-char probes. Re-probe individually to avoid blanket
+            // false-positive "all invalid" classifications that would mute
+            // the entire payload set during scanning.
+            if valid.is_empty() {
+                need_per_char_fallback = true;
+            }
+        }
+        None => {
+            // No reflected segment — either the request failed or the
+            // server didn't echo the markers. Mark all chars invalid (same
+            // as the legacy per-char path's failure behavior).
+            invalid.extend_from_slice(SPECIAL_PROBE_CHARS);
+        }
     }
 
-    for h in handles {
-        let _ = h.await;
+    if need_per_char_fallback {
+        valid.clear();
+        invalid.clear();
+        let mut handles = Vec::new();
+        let valid_specials = Arc::new(Mutex::new(Vec::<char>::new()));
+        let invalid_specials = Arc::new(Mutex::new(Vec::<char>::new()));
+        for &c in SPECIAL_PROBE_CHARS {
+            let sem = semaphore.clone();
+            let client_clone = client.clone();
+            let target_clone = target.clone();
+            let param_clone = param.clone();
+            let valid_ref = valid_specials.clone();
+            let invalid_ref = invalid_specials.clone();
+            handles.push(tokio::spawn(async move {
+                let probe = format!(
+                    "{}{}{}",
+                    crate::scanning::markers::open_marker(),
+                    c,
+                    crate::scanning::markers::close_marker()
+                );
+                let pp = crate::encoding::pre_encoding::apply_param_encoding(&probe, &param_clone);
+                let _permit = sem.acquire().await.expect("acquire semaphore permit");
+                let resp =
+                    send_probe_request_for_param(&client_clone, &target_clone, &param_clone, &pp)
+                        .await;
+                let ok = resp
+                    .as_deref()
+                    .and_then(extract_reflected_segment)
+                    .map(|seg| char_reflected_in_segment(seg, c))
+                    .unwrap_or(false);
+                if ok {
+                    valid_ref.lock().await.push(c);
+                } else {
+                    invalid_ref.lock().await.push(c);
+                }
+            }));
+        }
+        for h in handles {
+            let _ = h.await;
+        }
+        valid = valid_specials.lock().await.clone();
+        invalid = invalid_specials.lock().await.clone();
     }
 
-    let v = valid_specials.lock().await.clone();
-    let iv = invalid_specials.lock().await.clone();
-
-    param.valid_specials = Some(v.clone());
-    param.invalid_specials = Some(iv.clone());
+    let iv = invalid.clone();
+    param.valid_specials = Some(valid);
+    param.invalid_specials = Some(invalid);
 
     // If '<' is invalid and no pre_encoding is set, try double/triple URL encoding
     // to detect servers that multi-decode input (e.g. double URL decode).
