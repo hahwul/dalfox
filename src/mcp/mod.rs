@@ -85,6 +85,30 @@ where
     })
 }
 
+/// Transition a non-terminal job into `Error` with the supplied message.
+/// Safe to call after panic or runtime-build failure: gated on
+/// `!is_terminal()` so it won't clobber a real outcome, and recovers from
+/// mutex poisoning by taking the inner guard rather than re-panicking.
+fn mark_job_error_sync(
+    jobs: &Arc<StdMutex<HashMap<String, Job>>>,
+    job_id: &str,
+    msg: String,
+) {
+    let mut guard = match jobs.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    if let Some(job) = guard.get_mut(job_id)
+        && !job.is_terminal()
+    {
+        job.status = JobStatus::Error;
+        job.error_message = Some(msg);
+        if job.finished_at_ms.is_none() {
+            job.finished_at_ms = Some(now_ms());
+        }
+    }
+}
+
 /// Cheap view of a `Job` containing only what a tool response needs. Built
 /// while holding the jobs lock so the lock can be released before any
 /// JSON serialization or computation runs.
@@ -349,15 +373,25 @@ impl DalfoxMcp {
 
         drop(findings_updater);
 
-        // After completion, all discovered params have been processed by
-        // `run_scanning`. No per-param counter is wired today, so the most
-        // honest post-scan value is `params_total`.
-        progress.params_tested.store(
-            progress
-                .params_total
-                .load(std::sync::atomic::Ordering::Relaxed),
-            std::sync::atomic::Ordering::Relaxed,
-        );
+        // Check if cancelled during scanning. Read this BEFORE rewriting
+        // `params_tested` — a cancelled scan exited early and almost
+        // certainly did not finish every discovered parameter, so promoting
+        // `params_tested` to `params_total` would lie about completion
+        // (the client would compute estimated_completion_pct = 100 even
+        // though the scan stopped at, say, 10/50 params).
+        let was_cancelled = cancel_flag.load(std::sync::atomic::Ordering::Relaxed);
+
+        if !was_cancelled {
+            // After natural completion, all discovered params have been
+            // processed by `run_scanning`. No per-param counter is wired
+            // today, so the most honest post-scan value is `params_total`.
+            progress.params_tested.store(
+                progress
+                    .params_total
+                    .load(std::sync::atomic::Ordering::Relaxed),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
 
         let sanitized = {
             let locked = results_arc.lock().await;
@@ -369,9 +403,6 @@ impl DalfoxMcp {
                 .map(|r| r.to_sanitized(include_request, include_response))
                 .collect::<Vec<_>>()
         };
-
-        // Check if cancelled during scanning
-        let was_cancelled = cancel_flag.load(std::sync::atomic::Ordering::Relaxed);
 
         {
             let mut jobs = self.jobs.lock().expect("jobs mutex poisoned");
@@ -796,13 +827,48 @@ Final results (via get_results_dalfox) include finding type \
         // scraper-based HTML inspection hold !Send types across awaits — but
         // we cache the runtime per blocking-pool worker thread so consecutive
         // scans on the same thread skip the rebuild (saves ~ms of setup).
+        //
+        // Two failure modes used to leak the job into Queued forever:
+        // 1) `run_on_thread_runtime` returns None when the cached runtime
+        //    can't be built — `run_job` then never runs.
+        // 2) A panic inside `run_job` (parameter analysis, scanning, etc.)
+        //    bubbles out of the spawn_blocking task and is dropped because
+        //    the JoinHandle isn't awaited.
+        // Both paths now transition the job to Error via mark_job_error_sync
+        // so clients see a terminal status and `purge_expired_jobs` can
+        // collect the entry. Mirrors `server.rs::spawn_scan_task` recovery.
         let handler = self.clone();
         let sid = scan_id.clone();
         tokio::task::spawn_blocking(move || {
             let sid_for_log = sid.clone();
-            run_on_thread_runtime(&sid_for_log, |rt| {
-                rt.block_on(handler.run_job(sid, scan_args));
-            });
+            let sid_for_recovery = sid.clone();
+            let jobs_for_recovery = handler.jobs.clone();
+
+            let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let ran = run_on_thread_runtime(&sid_for_log, |rt| {
+                    rt.block_on(handler.run_job(sid, scan_args));
+                });
+                if ran.is_none() {
+                    mark_job_error_sync(
+                        &jobs_for_recovery,
+                        &sid_for_recovery,
+                        "scan runtime build failed".to_string(),
+                    );
+                }
+            }));
+
+            if let Err(panic) = result {
+                let payload = if let Some(s) = panic.downcast_ref::<String>() {
+                    s.clone()
+                } else if let Some(s) = panic.downcast_ref::<&str>() {
+                    (*s).to_string()
+                } else {
+                    "unknown panic payload".to_string()
+                };
+                let msg = format!("scan task panicked: {}", payload);
+                eprintln!("[MCP][ERR] {} scan_id={}", msg, sid_for_recovery);
+                mark_job_error_sync(&jobs_for_recovery, &sid_for_recovery, msg);
+            }
         });
 
         let out = serde_json::json!({

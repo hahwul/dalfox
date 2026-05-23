@@ -811,18 +811,21 @@ async fn run_scan_job(
 
     drop(findings_updater);
 
-    // After completion, every discovered parameter has been processed by
-    // `run_scanning`, so reflect that in `params_tested`. There is no
-    // per-parameter counter wired through `run_scanning` today, so this is
-    // the most honest post-scan value we can publish.
-    progress.params_tested.store(
-        progress
-            .params_total
-            .load(std::sync::atomic::Ordering::Relaxed),
-        std::sync::atomic::Ordering::Relaxed,
-    );
-
     let was_cancelled = cancel_flag.load(std::sync::atomic::Ordering::Relaxed);
+
+    if !was_cancelled {
+        // After natural completion, every discovered parameter has been
+        // processed by `run_scanning`, so reflect that in `params_tested`.
+        // Skip this on cancellation: the scan stopped early and promoting
+        // params_tested to params_total would falsely report 100%
+        // completion to API pollers computing estimated_completion_pct.
+        progress.params_tested.store(
+            progress
+                .params_total
+                .load(std::sync::atomic::Ordering::Relaxed),
+            std::sync::atomic::Ordering::Relaxed,
+        );
+    }
 
     let final_results = {
         let locked = results.lock().await;
