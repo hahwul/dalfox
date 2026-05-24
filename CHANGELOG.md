@@ -7,7 +7,7 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The previous Go implementation lives on the [`v2` branch](https://github.com/hahwul/dalfox/tree/v2)
 and continues to receive security backports per [SECURITY.md](./SECURITY.md).
 
-## [3.0.0] - 2026-05-23
+## [3.0.0] - 2026-05-24
 
 ### Highlights
 
@@ -58,6 +58,10 @@ and continues to receive security backports per [SECURITY.md](./SECURITY.md).
   end-of-scan `WRN XSS found N XSS` summary).
 - `--limit-result-type` (`all`, `v`, `r`, `a`) to control which finding
   types count toward `--limit`.
+- `--scan-timeout`: hard wall-clock cap (seconds) for the per-target
+  scan stage (post-preflight). Bounds the cumulative cost of sequential
+  phases that each pay the per-request `--timeout` against partially-
+  hung endpoints. `0` disables (default).
 - Live progress: per-target progress bars showing request count, rate,
   and ETA. Overall progress line aggregates targets/findings.
 - Remote payload / wordlist providers (`payloadbox`, `portswigger`,
@@ -80,6 +84,58 @@ and continues to receive security backports per [SECURITY.md](./SECURITY.md).
 - `payload` subcommand: scoped to enumeration only (`event-handlers`,
   `useful-tags`, `payloadbox`, `portswigger`, `uri-scheme`); the legacy
   `enum-*` flags from v2 are gone.
+
+### Fixed
+
+- **Detection coverage** (caught via pre-release dogfood against
+  xss-game and xssmaze):
+  - JavaScript template-literal reflection context (`` `…${marker}…` ``)
+    is now recognized; the payload generator emits `${…}` expression
+    breakouts. Previously these reflections fell through to a generic
+    `Javascript(None)` and `'`/`"` escapes were tried in vain.
+  - Free attribute-name slot inside an existing tag (`<div id='x'
+    MARKER>`) is now classified as `Attribute(None)`; payloads now
+    include self-triggering event handlers
+    (`onfocus=… autofocus`, `ontoggle=… popover`, …) that promote
+    these to V instead of stalling at R.
+  - AST DOM-XSS analysis: `new Function(URLSearchParams.get('q'))`
+    now reports the originating source (`URLSearchParams.get`) instead
+    of falling back to `"unknown source"`.
+- **Finding metadata accuracy**:
+  - POST-form-discovered findings now render with `method = POST` and
+    the form action URL — previously every `Location::Body` finding
+    inherited the discovering page's URL and method (typically GET),
+    which made the displayed PoC inconsistent with the actual request.
+- **Reliability**:
+  - `parameter_analysis` skips fragment-only parameters in the scan
+    loop; AST DOM analysis runs over the initial response so
+    `dalfox server` / `dalfox mcp` produce the same DOM-XSS findings
+    as the CLI.
+  - Server `axum` graceful shutdown via `tokio::signal::unix::signal`;
+    SIGINT/SIGTERM no longer drop in-flight scan tasks mid-write.
+  - Scan-task panics are isolated with `catch_unwind`; the task no
+    longer leaks into `Queued`/`Running` forever, and pre-start
+    cancellations fire the configured webhook.
+  - `429 + Retry-After` is no longer auto-classified as an unknown
+    WAF — that engaged bypass mutations against benign rate-limited
+    backends and produced garbage results.
+- **CLI hygiene**:
+  - Input validation for `--format`, `--poc-type`, `--encoders`,
+    `--only-poc`, `--custom-alert-type`, `--waf-bypass`, `--method`,
+    and a sanity-capped `--timeout` — earlier these accepted any
+    string and surfaced cryptic mid-scan errors.
+  - URL scheme check is case-insensitive (`HTTP://…` no longer
+    double-prefixes to `http://HTTP://…`).
+  - `UNREACHABLE` preflight diagnostic now classifies the failure
+    layer (`DNS_RESOLUTION_FAILED`, `TLS_HANDSHAKE_FAILED`,
+    `REQUEST_TIMEOUT`, `CONNECTION_FAILED`).
+  - SIGPIPE on stdout exits cleanly via a global panic hook;
+    `dalfox payload event-handlers | head -10` no longer panics.
+  - `--no-color` / `--silence` accepted at the root as well as on
+    subcommands; `NO_COLOR` auto-engages on non-TTY stdout.
+- **HTTP**:
+  - Decompression for `gzip`, `deflate`, `brotli` enabled via reqwest
+    features so compressed responses are inspected, not skipped.
 
 ### Removed
 

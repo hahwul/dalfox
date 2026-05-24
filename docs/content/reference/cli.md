@@ -115,7 +115,8 @@ dalfox scan [TARGETS]... [FLAGS]
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--timeout` | — | `10` | Request timeout (seconds) |
+| `--timeout` | — | `10` | Per-request timeout in seconds (network only; does not bound total scan time) |
+| `--scan-timeout` | — | `0` | Hard wall-clock cap per target for the scan stage (post-preflight), in seconds. Aborts a target once exceeded — useful when many sequential phases each pay the per-request `--timeout` cost against a partially-hung endpoint. `0` disables. |
 | `--delay` | — | `0` | Delay between requests (ms) |
 | `--proxy` | — | — | Proxy URL (`http://`, `socks5://`) |
 | `--follow-redirects` | `-F` | false | Follow 3xx responses |

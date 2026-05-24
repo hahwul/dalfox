@@ -89,7 +89,7 @@ Each fingerprint carries a confidence score (0.0–1.0). Generic markers like `R
 dalfox https://target.app --waf-min-confidence 0.7
 ```
 
-Default is `0.0` (keep every match). Raise it when you suspect noisy passive detection is steering Dalfox into the wrong evasion strategy.
+Default is `0.3` (suppresses weak/generic matches like `Server: Google Frontend`). Pass `--waf-min-confidence 0.0` to keep every match, or raise it when you suspect noisy passive detection is steering Dalfox into the wrong evasion strategy.
 
 ## Mutation tactics (under the hood)
 
