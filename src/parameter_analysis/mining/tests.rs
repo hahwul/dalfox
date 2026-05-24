@@ -132,6 +132,35 @@ fn test_detect_injection_context_script_single_quote() {
 }
 
 #[test]
+fn test_detect_injection_context_script_backtick_template_literal() {
+    // Reflection inside a JS template literal (backtick-quoted string)
+    // must report Backtick so the payload generator emits `${…}` breakouts
+    // instead of the `'`/`"` escapes that don't apply.
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!("<script>var content = `{}`;</script>", marker);
+    let ctx = detect_injection_context(&body);
+    assert_eq!(
+        ctx,
+        InjectionContext::Javascript(Some(DelimiterType::Backtick))
+    );
+}
+
+#[test]
+fn test_detect_injection_context_script_backtick_wins_over_earlier_quote() {
+    // When both an earlier `'`/`"` and a backtick precede the marker, the
+    // closer (innermost) one is the actual surrounding delimiter.
+    // Regression: a naive max-position scan that only considered `'`/`"`
+    // would mislabel this as DoubleQuote.
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!("<script>var s = \"x\"; var t = `{}`;</script>", marker);
+    let ctx = detect_injection_context(&body);
+    assert_eq!(
+        ctx,
+        InjectionContext::Javascript(Some(DelimiterType::Backtick))
+    );
+}
+
+#[test]
 fn test_detect_injection_context_attribute_double_quote() {
     let marker = crate::scanning::markers::open_marker();
     let body = format!("<img alt=\"{}\">", marker);

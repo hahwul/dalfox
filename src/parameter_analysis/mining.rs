@@ -205,32 +205,30 @@ pub fn detect_injection_context_with_marker(text: &str, marker: &str) -> Injecti
     // Parse HTML and locate marker via element text/attributes/script
     let document = scraper::Html::parse_document(text);
 
-    // Heuristic to infer surrounding quote delimiter around the first marker
+    // Heuristic to infer surrounding quote delimiter around the first marker.
+    // Picks the *closest* opening quote before the marker (the one that
+    // actually contains it). Includes backtick template literals so a marker
+    // reflected inside `` `…` `` is reported as Backtick rather than falling
+    // back to None — the breakout payload (`${…}`) is different from `'/`"`.
     fn infer_quote_delimiter(text: &str, marker: &str) -> Option<DelimiterType> {
         let pos = text.find(marker)?;
         let before = &text[..pos];
         let after = &text[pos + marker.len()..];
-        let prev_dq = before.rfind('"');
-        let prev_sq = before.rfind('\'');
-        let (qch, _qpos) = match (prev_dq, prev_sq) {
-            (Some(dq), Some(sq)) => {
-                if dq > sq {
-                    ('"', dq)
-                } else {
-                    ('\'', sq)
-                }
-            }
-            (Some(dq), None) => ('"', dq),
-            (None, Some(sq)) => ('\'', sq),
-            (None, None) => return None,
-        };
-        let next = after.find(qch);
-        if next.is_some() {
-            return Some(match qch {
-                '"' => DelimiterType::DoubleQuote,
-                '\'' => DelimiterType::SingleQuote,
-                _ => return None,
-            });
+
+        let candidates: [(char, DelimiterType); 3] = [
+            ('"', DelimiterType::DoubleQuote),
+            ('\'', DelimiterType::SingleQuote),
+            ('`', DelimiterType::Backtick),
+        ];
+
+        let (qch, delim) = candidates
+            .iter()
+            .filter_map(|(c, d)| before.rfind(*c).map(|p| (*c, d.clone(), p)))
+            .max_by_key(|(_, _, p)| *p)
+            .map(|(c, d, _)| (c, d))?;
+
+        if after.find(qch).is_some() {
+            return Some(delim);
         }
         None
     }

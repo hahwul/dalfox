@@ -112,6 +112,23 @@ fn test_generate_dynamic_payloads_javascript_comment() {
 }
 
 #[test]
+fn test_generate_dynamic_payloads_javascript_backtick() {
+    // Backtick (JS template literal) context must emit `${…}` expression-
+    // injection payloads — `'`/`"` escapes don't work inside template
+    // literals, so we'd silently miss reflections that land in `` `…` ``.
+    let payloads =
+        generate_dynamic_payloads(&InjectionContext::Javascript(Some(DelimiterType::Backtick)));
+    assert!(!payloads.is_empty());
+    assert!(
+        payloads
+            .iter()
+            .any(|p| p.starts_with("${") && p.ends_with('}')),
+        "expected at least one `${{…}}` template-expression payload, got: {:?}",
+        &payloads[..payloads.len().min(5)]
+    );
+}
+
+#[test]
 fn test_generate_dynamic_payloads_comment_single_quote() {
     // With the new representation, comment context is represented via Html(Some(Comment))
     let payloads = generate_dynamic_payloads(&InjectionContext::Html(Some(DelimiterType::Comment)));

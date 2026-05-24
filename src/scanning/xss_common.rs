@@ -127,6 +127,18 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
                     payloads.push(format!("\"+{}+\"", payload));
                 }
             }
+            Some(DelimiterType::Backtick) => {
+                // Template-literal context: `${expr}` evaluates the inner
+                // expression without needing to escape the surrounding `` ` ``.
+                // Also emit a backtick-break form for sinks that re-parse the
+                // string (e.g. eval(`…`)), and the </script> wrapper for the
+                // rare case the template literal is the script's only token.
+                for &payload in crate::payload::XSS_JAVASCRIPT_PAYLOADS.iter() {
+                    payloads.push(format!("${{{}}}", payload));
+                    payloads.push(format!("`-{}-`", payload));
+                    payloads.push(format!("`+{}+`", payload));
+                }
+            }
             Some(DelimiterType::Comment) => {
                 for &payload in crate::payload::XSS_JAVASCRIPT_PAYLOADS.iter() {
                     payloads.push(format!("*/{}/*", payload));

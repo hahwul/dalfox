@@ -64,6 +64,11 @@ pub enum Location {
 pub enum DelimiterType {
     SingleQuote,
     DoubleQuote,
+    /// JavaScript template literal (backtick-quoted string). Distinct from
+    /// `'` / `"` because the breakout payload is different — inside a
+    /// template literal, `${expr}` evaluates the expression with no need
+    /// to escape the surrounding quote.
+    Backtick,
     Comment,
 }
 
