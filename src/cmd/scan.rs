@@ -594,24 +594,56 @@ enum PreflightOutcome {
 /// "DNS error") instead of dumping the full reqwest::Error chain.
 fn describe_reqwest_failure(err: &reqwest::Error) -> &'static str {
     if err.is_timeout() {
-        "timeout"
-    } else if err.is_connect() {
-        "connection failed"
-    } else if err.is_request() {
-        "request error"
-    } else if err.is_redirect() {
-        "redirect loop"
-    } else if err.is_status() {
-        "bad status"
-    } else if err.is_body() {
-        "body read failed"
-    } else if err.is_decode() {
-        "decode error"
-    } else if err.is_builder() {
-        "request build error"
-    } else {
-        "network error"
+        return "timeout";
     }
+    if err.is_redirect() {
+        return "redirect loop";
+    }
+    if err.is_status() {
+        return "bad status";
+    }
+    if err.is_body() {
+        return "body read failed";
+    }
+    if err.is_decode() {
+        return "decode error";
+    }
+    if err.is_builder() {
+        return "request build error";
+    }
+    // For connect / request errors, walk the source chain so we can
+    // tell "DNS failed" from "TLS handshake failed" from "TCP refused"
+    // in the UNREACHABLE diagnostic instead of lumping every layer
+    // under "connection failed".
+    if err.is_connect() || err.is_request() {
+        let mut cur: Option<&dyn std::error::Error> = Some(err);
+        while let Some(e) = cur {
+            let s = e.to_string().to_lowercase();
+            if s.contains("dns")
+                || s.contains("name resolution")
+                || s.contains("nodename")
+                || s.contains("failed to lookup")
+            {
+                return "DNS resolution failed";
+            }
+            if s.contains("certificate")
+                || s.contains("handshake")
+                || s.contains("tls")
+                || s.contains("ssl")
+            {
+                return "TLS handshake failed";
+            }
+            if s.contains("connection refused") {
+                return "connection refused";
+            }
+            cur = e.source();
+        }
+        if err.is_connect() {
+            return "connection failed";
+        }
+        return "request error";
+    }
+    "network error"
 }
 
 /// Pick the right error code for a reqwest failure so target_summary
