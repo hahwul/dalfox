@@ -2136,6 +2136,23 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // Per-target tracking for structured output (target_summary in JSON envelope)
     // Collect all target URLs that will be scanned, then track status per target.
     let all_target_urls: Vec<String> = parsed_targets.iter().map(|t| t.url.to_string()).collect();
+    // One-shot insecure-mode warning. dalfox unconditionally uses
+    // `danger_accept_invalid_certs(true)` (target_parser/mod.rs:106) and
+    // `danger_accept_invalid_hostnames(...)` so self-signed / expired /
+    // hostname-mismatch certs are silently trusted. That is intentional
+    // for a scanner but ops triaging a MITM scenario need a signal —
+    // print one warning per scan when any https:// target is present.
+    // Security note must reach the operator even with `--silence` —
+    // silencing is for stdout, this is stderr and tells them about a
+    // deliberate but consequential TLS posture.
+    if parsed_targets
+        .iter()
+        .any(|t| t.url.scheme().eq_ignore_ascii_case("https"))
+    {
+        eprintln!(
+            "Warning: TLS certificate validation is disabled (scanner mode); self-signed, expired, or hostname-mismatched certs will be silently trusted"
+        );
+    }
     // Track targets that were skipped during preflight (content-type mismatch etc.)
     // Map of skipped target URL -> error code explaining why it was skipped.
     // Used by target_summary to surface skips (content-type mismatch, per-host
