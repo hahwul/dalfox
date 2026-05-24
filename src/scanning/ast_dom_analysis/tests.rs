@@ -1649,6 +1649,27 @@ fn test_new_function_with_tainted_arg() {
 }
 
 #[test]
+fn test_new_function_source_label_propagated() {
+    // `new Function(URLSearchParams.get('q'))` previously fell back to
+    // "unknown source" because the NewExpression sink path never asked
+    // for the originating source — exposing it on the finding gives
+    // users actionable provenance (the same way CallExpression sinks do).
+    let code = r#"
+        let q = new URLSearchParams(location.search).get('q');
+        new Function(q);
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let result = analyzer.analyze(code).unwrap();
+    assert!(!result.is_empty(), "Should detect tainted new Function()");
+    let v = &result[0];
+    assert_eq!(v.sink, "Function");
+    assert_ne!(
+        v.source, "unknown source",
+        "source must propagate from URLSearchParams.get, not fall back to 'unknown source'"
+    );
+}
+
+#[test]
 fn test_execcommand_inserthtml_sink() {
     let code = r#"
         let html = location.hash;

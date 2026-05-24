@@ -35,6 +35,7 @@ pub fn create_test_scan_args() -> ScanArgs {
         skip_reflection_cookie: false,
         skip_reflection_path: false,
         timeout: 10,
+        scan_timeout: 0,
         delay: 0,
         proxy: None,
         follow_redirects: false,

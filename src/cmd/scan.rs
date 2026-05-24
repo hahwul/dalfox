@@ -1086,9 +1086,19 @@ pub struct ScanArgs {
     pub skip_mining_dom: bool,
 
     #[clap(help_heading = "NETWORK")]
-    /// Timeout in seconds
+    /// Per-request timeout in seconds (network only; does not bound total scan time)
     #[arg(long, default_value_t = crate::cmd::scan::DEFAULT_TIMEOUT_SECS)]
     pub timeout: u64,
+
+    #[clap(help_heading = "NETWORK")]
+    /// Hard wall-clock cap per target for the scan stage (post-preflight) in
+    /// seconds. When set, dalfox stops a target's payload-injection stage
+    /// once this budget is exceeded — useful when many sequential phases each
+    /// pay the per-request `--timeout` cost against a partially-hung
+    /// endpoint. Preflight is bounded separately by per-request `--timeout`.
+    /// 0 disables (default).
+    #[arg(long, default_value_t = 0)]
+    pub scan_timeout: u64,
 
     #[clap(help_heading = "NETWORK")]
     /// Delay in milliseconds
@@ -1309,6 +1319,7 @@ impl ScanArgs {
             skip_reflection_cookie: false,
             skip_reflection_path: false,
             timeout,
+            scan_timeout: 0,
             delay: 0,
             proxy: opts.proxy,
             follow_redirects: opts.follow_redirects,
@@ -3196,7 +3207,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                                 },
                             )
                         };
-                        crate::scanning::run_scanning(
+                        let scan_fut = crate::scanning::run_scanning(
                             &target,
                             args_clone.clone(),
                             results_clone_inner,
@@ -3205,8 +3216,27 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                             findings_count_target,
                             Some(cancel_flag_inner.clone()),
                             finding_tx_target,
-                        )
-                        .await;
+                        );
+                        // Honor --scan-timeout as a hard wall-clock cap per
+                        // target. When a slow endpoint streams a partial body
+                        // and pins every phase at the per-request `--timeout`,
+                        // the per-target scan would otherwise serialize each
+                        // phase × per-request timeout and run far longer than
+                        // the user expects. Setting the cap to 0 disables it.
+                        if args_clone.scan_timeout > 0 {
+                            let budget = std::time::Duration::from_secs(args_clone.scan_timeout);
+                            if let Err(_elapsed) = tokio::time::timeout(budget, scan_fut).await {
+                                cancel_flag_inner.store(true, Ordering::Relaxed);
+                                if !args_clone.silence {
+                                    eprintln!(
+                                        "[scan] {} exceeded --scan-timeout ({}s); aborting target",
+                                        target.url, args_clone.scan_timeout,
+                                    );
+                                }
+                            }
+                        } else {
+                            scan_fut.await;
+                        }
                         if let Some((tx, done_rx)) = __scan_spinner {
                             let _ = tx.send(());
                             let _ = done_rx.await;

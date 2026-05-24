@@ -50,6 +50,7 @@ fn make_args() -> ScanArgs {
         skip_reflection_cookie: true,
         skip_reflection_path: true,
         timeout: 10,
+        scan_timeout: 0,
         delay: 0,
         proxy: None,
         follow_redirects: false,

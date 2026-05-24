@@ -456,9 +456,9 @@ fn effective_query_base_uses_form_action_for_query_params() {
 }
 
 #[test]
-fn effective_query_base_ignores_form_action_for_non_query_locations() {
+fn effective_query_base_uses_form_action_for_body_locations() {
     let target = make_url("https://example.com/page");
-    let param = Param {
+    let mut param = Param {
         name: "xss".into(),
         value: "".into(),
         location: Location::Body,
@@ -472,12 +472,42 @@ fn effective_query_base_ignores_form_action_for_non_query_locations() {
         form_origin_url: None,
         framework_sink: None,
     };
-    // Body/JsonBody/Multipart resolve form_action_url at their own call site;
-    // the Query-specific helper must not steal that responsibility.
-    assert_eq!(
-        effective_query_base(&target, &param).as_str(),
-        target.as_str()
-    );
+    // Body / JsonBody / MultipartBody params point at the form's action URL,
+    // so the displayed PoC matches the POST that was actually sent (not the
+    // page the form was discovered on).
+    for loc in [Location::Body, Location::JsonBody, Location::MultipartBody] {
+        param.location = loc;
+        assert_eq!(
+            effective_query_base(&target, &param).as_str(),
+            "https://example.com/app.php"
+        );
+    }
+}
+
+#[test]
+fn effective_query_base_ignores_form_action_for_header_fragment() {
+    let target = make_url("https://example.com/page");
+    let mut param = Param {
+        name: "xss".into(),
+        value: "".into(),
+        location: Location::Header,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: Some("https://example.com/app.php".to_string()),
+        form_origin_url: None,
+        framework_sink: None,
+    };
+    for loc in [Location::Header, Location::Fragment] {
+        param.location = loc;
+        assert_eq!(
+            effective_query_base(&target, &param).as_str(),
+            target.as_str()
+        );
+    }
 }
 
 #[test]

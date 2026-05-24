@@ -1470,11 +1470,6 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
-    /// Report a vulnerability
-    fn report_vulnerability(&mut self, span: oxc_span::Span, sink: &str, description: &str) {
-        self.report_vulnerability_with_source(span, sink, description, None);
-    }
-
     /// Report a vulnerability with an optional explicit source
     fn report_vulnerability_with_source(
         &mut self,
@@ -2282,17 +2277,25 @@ impl<'a> DomXssVisitor<'a> {
                     // Check if this is a sink constructor (e.g., Function)
                     if self.sinks.contains(callee_name) {
                         for arg in &new_expr.arguments {
-                            let is_arg_tainted = match arg {
-                                Argument::SpreadElement(spread) => {
-                                    self.is_tainted(&spread.argument)
-                                }
-                                _ => arg.as_expression().is_some_and(|e| self.is_tainted(e)),
+                            let arg_expr = match arg {
+                                Argument::SpreadElement(spread) => Some(&spread.argument),
+                                _ => arg.as_expression(),
                             };
+                            let is_arg_tainted = arg_expr.is_some_and(|e| self.is_tainted(e));
                             if is_arg_tainted {
-                                self.report_vulnerability(
+                                // Propagate the originating source (e.g.
+                                // `URLSearchParams.get('q')`) instead of
+                                // letting the finding fall back to
+                                // "unknown source". CallExpression sinks
+                                // already do this — mirror it here so
+                                // `new Function(...)` carries the same
+                                // provenance string into the report.
+                                let source = arg_expr.and_then(|e| self.find_source_in_expr(e));
+                                self.report_vulnerability_with_source(
                                     new_expr.span(),
                                     callee_name,
                                     "Tainted data passed to constructor",
+                                    source,
                                 );
                                 break;
                             }

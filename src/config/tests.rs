@@ -40,6 +40,7 @@ fn default_scan_args() -> crate::cmd::scan::ScanArgs {
         skip_mining_dict: false,
         skip_mining_dom: false,
         timeout: crate::cmd::scan::DEFAULT_TIMEOUT_SECS,
+        scan_timeout: 0,
         delay: crate::cmd::scan::DEFAULT_DELAY_MS,
         proxy: None,
         follow_redirects: false,

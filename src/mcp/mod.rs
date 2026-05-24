@@ -805,6 +805,7 @@ Final results (via get_results_dalfox) include finding type \
             skip_reflection_cookie: false,
             skip_reflection_path: false,
             timeout,
+            scan_timeout: 0,
             delay,
             proxy,
             follow_redirects,

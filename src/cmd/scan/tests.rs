@@ -51,6 +51,7 @@ fn default_scan_args() -> ScanArgs {
         skip_mining_dict: false,
         skip_mining_dom: false,
         timeout: DEFAULT_TIMEOUT_SECS,
+        scan_timeout: 0,
         delay: DEFAULT_DELAY_MS,
         proxy: None,
         follow_redirects: false,

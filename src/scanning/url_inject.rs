@@ -93,13 +93,28 @@ fn selective_path_segment_encode(raw: &str) -> Cow<'_, str> {
 /// For non-Query locations and for params without a `form_action_url`, the
 /// caller's `target_url` is returned unchanged.
 pub fn effective_query_base(target_url: &url::Url, param: &Param) -> url::Url {
-    if matches!(param.location, Location::Query)
+    let uses_form_action = matches!(
+        param.location,
+        Location::Query | Location::Body | Location::JsonBody | Location::MultipartBody
+    );
+    if uses_form_action
         && let Some(ref action) = param.form_action_url
         && let Ok(parsed) = url::Url::parse(action)
     {
         return parsed;
     }
     target_url.clone()
+}
+
+/// HTTP method that will actually be used to send a payload-bearing
+/// request for `param`. Body-bearing locations are always POSTed (see
+/// `check_reflection::build_test_request`), independent of the target's
+/// own method — so finding metadata should reflect POST, not GET.
+pub fn effective_method(target_method: &str, param: &Param) -> String {
+    match param.location {
+        Location::Body | Location::JsonBody | Location::MultipartBody => "POST".to_string(),
+        _ => target_method.to_string(),
+    }
 }
 
 /// Build a URL string with the given parameter injected/replaced by `injected`.

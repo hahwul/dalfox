@@ -36,6 +36,7 @@ fn default_scan_args() -> crate::cmd::scan::ScanArgs {
         skip_mining_dict: false,
         skip_mining_dom: false,
         timeout: 10,
+        scan_timeout: 0,
         delay: 0,
         proxy: None,
         follow_redirects: false,

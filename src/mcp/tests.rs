@@ -76,6 +76,7 @@ fn default_scan_args(target: &str) -> ScanArgs {
         skip_reflection_cookie: false,
         skip_reflection_path: false,
         timeout: 1,
+        scan_timeout: 0,
         delay: 0,
         proxy: None,
         follow_redirects: false,

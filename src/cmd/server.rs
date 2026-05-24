@@ -680,6 +680,7 @@ async fn run_scan_job(
         timeout: opts
             .timeout
             .unwrap_or(crate::cmd::scan::DEFAULT_TIMEOUT_SECS),
+        scan_timeout: 0,
         delay: opts.delay.unwrap_or(0),
         proxy: opts.proxy.clone(),
         follow_redirects: opts.follow_redirects.unwrap_or(false),

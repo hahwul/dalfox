@@ -410,6 +410,7 @@ async fn main() {
             skip_reflection_cookie: false,
             skip_reflection_path: false,
             timeout: cmd::scan::DEFAULT_TIMEOUT_SECS,
+            scan_timeout: 0,
             delay: cmd::scan::DEFAULT_DELAY_MS,
             proxy: None,
             follow_redirects: false,

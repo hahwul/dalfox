@@ -463,7 +463,7 @@ async fn run_ast_dom_analysis(
             let mut ast_result = crate::scanning::result::Result::new(
                 FindingType::AstDetected,
                 "DOM-XSS".to_string(),
-                target.method.clone(),
+                crate::scanning::url_inject::effective_method(&target.method, param),
                 result_url.clone(),
                 param.name.clone(),
                 payload.clone(),
@@ -517,8 +517,9 @@ async fn run_ast_dom_analysis(
 }
 
 fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
+    use crate::parameter_analysis::Location;
     let url = match param.location {
-        crate::parameter_analysis::Location::Query => {
+        Location::Query => {
             // Show the request against the actual sink URL — form action when
             // the param came from form discovery, otherwise target.url. The
             // displayed PoC must match the URL that scanning actually hits.
@@ -545,7 +546,7 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
             url.set_query(Some(&query));
             url
         }
-        crate::parameter_analysis::Location::Path => {
+        Location::Path => {
             // Inject into a specific path segment (param.name pattern: path_segment_{idx})
             let mut url = target.url.clone();
             if let Some(idx_str) = param.name.strip_prefix("path_segment_")
@@ -573,13 +574,72 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
             }
             url
         }
+        Location::Body | Location::JsonBody | Location::MultipartBody => {
+            // Body params use the form action URL when discovered from a form,
+            // so the displayed request matches the POST actually sent.
+            crate::scanning::url_inject::effective_query_base(&target.url, param)
+        }
         _ => target.url.clone(),
+    };
+
+    let method = crate::scanning::url_inject::effective_method(&target.method, param);
+    // Body-bearing locations always send a body; synthesize one when the
+    // target has no original `data`, so the displayed PoC isn't an empty POST.
+    let (body, content_type): (Option<String>, Option<&'static str>) = match param.location {
+        Location::Body => {
+            let body = if let Some(data) = &target.data {
+                let mut pairs: Vec<(String, String)> = url::form_urlencoded::parse(data.as_bytes())
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect();
+                let mut found = false;
+                for pair in &mut pairs {
+                    if pair.0 == param.name {
+                        pair.1 = payload.to_string();
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    pairs.push((param.name.clone(), payload.to_string()));
+                }
+                url::form_urlencoded::Serializer::new(String::new())
+                    .extend_pairs(&pairs)
+                    .finish()
+            } else {
+                format!(
+                    "{}={}",
+                    urlencoding::encode(&param.name),
+                    urlencoding::encode(payload)
+                )
+            };
+            (Some(body), Some("application/x-www-form-urlencoded"))
+        }
+        Location::JsonBody => {
+            let body = if let Some(data) = &target.data {
+                if let Ok(mut json_val) = serde_json::from_str::<serde_json::Value>(data) {
+                    if let Some(obj) = json_val.as_object_mut() {
+                        obj.insert(
+                            param.name.clone(),
+                            serde_json::Value::String(payload.to_string()),
+                        );
+                    }
+                    serde_json::to_string(&json_val).unwrap_or_else(|_| data.clone())
+                } else {
+                    data.replace(&param.value, payload)
+                }
+            } else {
+                serde_json::json!({ &param.name: payload }).to_string()
+            };
+            (Some(body), Some("application/json"))
+        }
+        Location::MultipartBody => (target.data.clone(), Some("multipart/form-data")),
+        _ => (target.data.clone(), None),
     };
 
     let mut buf = String::with_capacity(512);
 
     // Request line
-    buf.push_str(&target.method);
+    buf.push_str(&method);
     buf.push(' ');
     buf.push_str(url.path());
     if let Some(q) = url.query() {
@@ -589,11 +649,19 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
     buf.push_str(" HTTP/1.1\r\nHost: ");
     buf.push_str(url.host_str().unwrap_or(""));
 
+    let has_ct_header = target
+        .headers
+        .iter()
+        .any(|(k, _)| k.eq_ignore_ascii_case("content-type"));
     for (k, v) in &target.headers {
         buf.push_str("\r\n");
         buf.push_str(k);
         buf.push_str(": ");
         buf.push_str(v);
+    }
+    if !has_ct_header && let Some(ct) = content_type {
+        buf.push_str("\r\nContent-Type: ");
+        buf.push_str(ct);
     }
 
     if !target.cookies.is_empty() {
@@ -608,7 +676,7 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
         }
     }
 
-    if let Some(data) = &target.data {
+    if let Some(data) = &body {
         buf.push_str("\r\nContent-Length: ");
         buf.push_str(&data.len().to_string());
         buf.push_str("\r\n\r\n");
@@ -1191,7 +1259,10 @@ pub async fn run_scanning(
                                 &reflection_payload,
                                 param_clone.framework_sink.as_deref(),
                             ),
-                            target_clone.method.clone(),
+                            crate::scanning::url_inject::effective_method(
+                                &target_clone.method,
+                                &param_clone,
+                            ),
                             result_url,
                             param_clone.name.clone(),
                             reflection_payload.clone(),
@@ -1307,7 +1378,10 @@ pub async fn run_scanning(
                                 &dom_payload,
                                 param_clone.framework_sink.as_deref(),
                             ),
-                            target_clone.method.clone(),
+                            crate::scanning::url_inject::effective_method(
+                                &target_clone.method,
+                                &param_clone,
+                            ),
                             result_url,
                             param_clone.name.clone(),
                             dom_payload.clone(),
