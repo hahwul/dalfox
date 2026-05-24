@@ -26,7 +26,7 @@ Got a list of URLs from your crawler? Feed them in:
 
 ```bash
 # urls.txt — one target per line
-dalfox file urls.txt
+dalfox scan urls.txt
 ```
 
 Each URL runs through the same pipeline. Results stream as they're found.

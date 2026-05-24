@@ -206,7 +206,7 @@ template = "landing"
       <div class="how-step">
         <h3>Ship the findings</h3>
         <p>Export to SARIF, JSON, or Markdown, or proxy results to your pipeline. Findings come verified, not guessed.</p>
-        <code>dalfox file urls.txt -o report.sarif</code>
+        <code>dalfox scan urls.txt -o report.sarif</code>
       </div>
     </div>
   </div>

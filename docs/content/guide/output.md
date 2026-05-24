@@ -35,7 +35,7 @@ Every finding includes:
 
 | Field | Example | Meaning |
 |-------|---------|---------|
-| `result_type` | `V`, `A`, `R` | Verified / AST-detected / Reflected |
+| `type` | `V`, `A`, `R` | Verified / AST-detected / Reflected |
 | `type_description` | `"Verified"` | Human label |
 | `inject_type` | `"inHTML"` | Context (`inHTML`, `inAttr`, `inJS`, …) |
 | `method` | `"GET"` | HTTP method |
@@ -151,7 +151,7 @@ dalfox https://target.app -f toml -o report.toml
 ## SARIF → GitHub code scanning
 
 ```bash
-dalfox file urls.txt -f sarif -o dalfox.sarif
+dalfox scan urls.txt -f sarif -o dalfox.sarif
 ```
 
 Upload `dalfox.sarif` through GitHub's `upload-sarif` action, and findings appear in the repository's **Security → Code scanning** tab.
@@ -161,7 +161,7 @@ Upload `dalfox.sarif` through GitHub's `upload-sarif` action, and findings appea
 ```yaml
 # .github/workflows/xss-scan.yml
 - name: Dalfox scan
-  run: dalfox file scope.txt -f sarif -o dalfox.sarif --silence --waf-evasion
+  run: dalfox scan scope.txt -f sarif -o dalfox.sarif --silence --waf-evasion
 
 - uses: github/codeql-action/upload-sarif@v3
   with:

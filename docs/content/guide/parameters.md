@@ -62,7 +62,7 @@ dalfox https://target.app --ignore-param csrf --ignore-param __RequestVerificati
 Scope by URL pattern:
 
 ```bash
-dalfox file urls.txt \
+dalfox scan urls.txt \
   --include-url '^https://api\.target\.app/' \
   --exclude-url '/static/|/health'
 ```
@@ -70,9 +70,9 @@ dalfox file urls.txt \
 Out-of-scope domain list:
 
 ```bash
-dalfox file urls.txt --out-of-scope-file scope-block.txt
+dalfox scan urls.txt --out-of-scope-file scope-block.txt
 # or inline, with wildcards
-dalfox file urls.txt --out-of-scope '*.google.com,*.cdn.cloudflare.net'
+dalfox scan urls.txt --out-of-scope '*.google.com,*.cdn.cloudflare.net'
 ```
 
 ## Only discover, don't attack
