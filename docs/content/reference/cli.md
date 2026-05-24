@@ -147,6 +147,8 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--sxss` | — | false | Enable Stored XSS mode |
 | `--sxss-url` | — | — | Retrieval URL for SXSS |
 | `--sxss-method` | — | `GET` | Retrieval method |
+| `--sxss-retries` | — | `3` | Retries on the retrieval URL when fetching stored output |
+| `--max-payloads-per-param` | — | `0` | Cap payloads tested per parameter (`0` = no cap) |
 | `--skip-ast-analysis` | — | false | Skip AST DOM-XSS |
 | `--hpp` | — | false | HTTP Parameter Pollution |
 
@@ -158,7 +160,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--skip-waf-probe` | false | Skip active WAF fingerprinting |
 | `--force-waf` | — | WAF name when `--waf-bypass force` |
 | `--waf-evasion` | false | Auto-throttle (`workers=1`, `delay=3000`) on WAF detection |
-| `--waf-min-confidence` | `0.0` | Drop fingerprints below this confidence (0.0–1.0). Suppresses weak matches like generic `Request blocked` (0.3) or `Server: Google Frontend` (0.5) |
+| `--waf-min-confidence` | `0.3` | Drop fingerprints below this confidence (0.0–1.0). The default `0.3` suppresses weak matches like `Server: Google Frontend` (0.15). Set lower to keep weak signals; `1.0` keeps only fingerprints with full confidence. |
 
 ---
 

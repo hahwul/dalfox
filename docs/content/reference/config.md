@@ -100,7 +100,7 @@ waf_bypass = "auto"
 skip_waf_probe = false
 # force_waf = "cloudflare"
 waf_evasion = false
-waf_min_confidence = 0.0
+waf_min_confidence = 0.3
 
 # LOGGING
 debug = false
@@ -199,6 +199,8 @@ debug = false
 | `sxss` | bool | `false` | Enable Stored XSS mode |
 | `sxss_url` | string | — | Retrieval URL |
 | `sxss_method` | string | `"GET"` | Retrieval method |
+| `sxss_retries` | int | `3` | Retries when fetching the retrieval URL |
+| `max_payloads_per_param` | int | `0` | Cap payloads tested per parameter (`0` = no cap) |
 | `skip_ast_analysis` | bool | `false` | Skip AST DOM-XSS |
 | `hpp` | bool | `false` | HTTP Parameter Pollution |
 
@@ -210,7 +212,7 @@ debug = false
 | `skip_waf_probe` | bool | `false` | Skip active fingerprinting |
 | `force_waf` | string | — | WAF name when `waf_bypass = "force"` |
 | `waf_evasion` | bool | `false` | Auto-throttle on WAF detection |
-| `waf_min_confidence` | float | `0.0` | Drop fingerprints below this confidence (0.0–1.0) |
+| `waf_min_confidence` | float | `0.3` | Drop fingerprints below this confidence (0.0–1.0); default suppresses weak matches |
 
 ### Logging
 

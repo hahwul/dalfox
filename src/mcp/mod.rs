@@ -509,10 +509,12 @@ pub struct ScanWithDalfoxParams {
 
     /// HTTP request timeout in seconds (1-299). Default: 10
     #[serde(default = "default_timeout")]
+    #[schemars(range(min = 1, max = 299))]
     pub timeout: u64,
 
     /// Delay between requests in milliseconds (0-9999). Default: 0
     #[serde(default)]
+    #[schemars(range(max = 9999))]
     pub delay: u64,
 
     /// Follow HTTP redirects (3xx). Default: false
@@ -551,8 +553,9 @@ pub struct ScanWithDalfoxParams {
     #[serde(default)]
     pub blind_callback_url: Option<String>,
 
-    /// Number of concurrent workers. Default: 50
+    /// Number of concurrent workers (1-500). Default: 50
     #[serde(default = "default_workers")]
+    #[schemars(range(min = 1, max = 500))]
     pub workers: usize,
 }
 
@@ -590,7 +593,7 @@ pub struct GetResultsDalfoxParams {
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
 pub struct ListScansDalfoxParams {
-    /// Optional status filter: "queued", "running", "done", or "error". Omit to list all.
+    /// Optional status filter: "queued", "running", "done", "error", or "cancelled". Omit to list all.
     #[serde(default)]
     pub status: Option<String>,
 }
@@ -637,8 +640,9 @@ pub struct PreflightDalfoxParams {
     #[serde(default)]
     pub user_agent: Option<String>,
 
-    /// HTTP request timeout in seconds. Default: 10
+    /// HTTP request timeout in seconds (1-299). Default: 10
     #[serde(default = "default_timeout")]
+    #[schemars(range(min = 1, max = 299))]
     pub timeout: u64,
 
     /// HTTP/SOCKS proxy URL.

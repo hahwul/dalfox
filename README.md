@@ -68,9 +68,9 @@ See [Installation guide](https://dalfox.hahwul.com/docs/installation/) for detai
 dalfox [mode] [target] [flags]
 ```
 
-* Single URL: `dalfox url http://example.com -b https://callback`
-* File Mode: `dalfox file urls.txt --custom-payload mypayloads.txt`
-* Pipeline: `cat urls.txt | dalfox pipe -H "AuthToken: xxx"`
+* Single URL: `dalfox scan http://example.com -b https://callback`
+* File Mode: `dalfox scan urls.txt --custom-payload mypayloads.txt`
+* Pipeline: `cat urls.txt | dalfox scan --headers "AuthToken: xxx"`
 
 Check the [Usage](https://dalfox.hahwul.com/page/usage/) and [Running](https://dalfox.hahwul.com/page/running/) documents for more examples.
 

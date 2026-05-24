@@ -878,7 +878,7 @@ pub fn default_toml_template() -> String {
 # input_type = "auto"        # auto, url, file, pipe, raw-http (parses raw HTTP request file or literal)
 
 # OUTPUT
-# format = "plain"           # json, jsonl, plain
+# format = "plain"           # plain, json, jsonl, markdown, sarif, toml
 # output = "output.txt"
 # include_request = false
 # include_response = false

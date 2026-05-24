@@ -68,6 +68,58 @@ enum Commands {
     Pipe(cmd::pipe::PipeArgs),
 }
 
+/// Read a small file (UTF-8) with a byte cap so non-regular files like
+/// `/dev/zero` can't stream forever. Returns `Err` when the cap is hit
+/// or the file isn't a regular file, otherwise the file's contents.
+fn read_bounded(path: &std::path::Path, max_bytes: u64) -> std::io::Result<String> {
+    use std::io::Read;
+    // Refuse anything that isn't a regular file — symlinks pointing at
+    // a regular file are fine because `metadata()` follows symlinks.
+    let md = std::fs::metadata(path)?;
+    if !md.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("{} is not a regular file", path.display()),
+        ));
+    }
+    // metadata() reports a real size for regular files; reject early
+    // when it's already over the cap so we don't even open the handle.
+    if md.len() > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "config file too large: {} bytes (cap {})",
+                md.len(),
+                max_bytes
+            ),
+        ));
+    }
+    let mut f = std::fs::File::open(path)?;
+    let mut buf = String::new();
+    // `take(N)` enforces the cap during the read itself — even when
+    // metadata lied (some pseudo-files report size 0 but stream
+    // forever, /dev/zero being the canonical case).
+    f.by_ref()
+        .take(max_bytes + 1)
+        .read_to_string(&mut buf)
+        .map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("read failed (or non-UTF8): {}", e),
+            )
+        })?;
+    if buf.len() as u64 > max_bytes {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "config file exceeded {}-byte cap during read (likely a streaming device)",
+                max_bytes
+            ),
+        ));
+    }
+    Ok(buf)
+}
+
 #[tokio::main]
 async fn main() {
     // Exit cleanly when a downstream consumer (e.g. `head`, `grep -q`) closes
@@ -181,7 +233,13 @@ async fn main() {
                 }
             }
         } else {
-            match std::fs::read_to_string(p) {
+            // Bound the read so `--config /dev/zero` (or any other
+            // non-regular file that streams forever) can't hang dalfox
+            // indefinitely. Config files are TOML/JSON — 1 MiB is more
+            // than two orders of magnitude over what any real
+            // operator-curated config will ever be.
+            const MAX_CONFIG_BYTES: u64 = 1 << 20; // 1 MiB
+            match read_bounded(p, MAX_CONFIG_BYTES) {
                 Ok(content) => {
                     let is_json_ext = p
                         .extension()
