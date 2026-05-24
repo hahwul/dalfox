@@ -2097,14 +2097,21 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 None => {
                     let p = std::path::Path::new(&s);
                     if p.exists() {
-                        match crate::utils::fs::read_bounded(p, MAX_TARGET_LIST_BYTES, "raw HTTP request") {
+                        match crate::utils::fs::read_bounded(
+                            p,
+                            MAX_TARGET_LIST_BYTES,
+                            "raw HTTP request",
+                        ) {
                             Ok(c) => c,
                             Err(e) => {
                                 if !args.silence {
                                     emit_error(
                                         &args.format,
                                         crate::cmd::error_codes::INPUT_TOO_LARGE,
-                                        &format!("Error reading raw HTTP request file {}: {}", s, e),
+                                        &format!(
+                                            "Error reading raw HTTP request file {}: {}",
+                                            s, e
+                                        ),
                                     );
                                 }
                                 return ScanOutcome::Error;

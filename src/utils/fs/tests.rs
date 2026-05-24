@@ -55,8 +55,5 @@ fn read_bounded_rejects_dev_zero() {
     let err = read_bounded(p, 1024, "target list").unwrap_err();
     // `/dev/zero` is a character device, so the regular-file gate
     // catches it before the read even starts.
-    assert!(
-        err.to_string().contains("not a regular file"),
-        "got: {err}"
-    );
+    assert!(err.to_string().contains("not a regular file"), "got: {err}");
 }

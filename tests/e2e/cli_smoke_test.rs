@@ -159,7 +159,11 @@ fn test_hidden_pipe_subcommand_reads_stdin_and_exits() {
 fn test_e2e_file_shadowing_ambiguity_warning() {
     let mut shadow_file = std::env::temp_dir();
     shadow_file.push(format!("dalfox-e2e-shadow-{}.com", std::process::id()));
-    std::fs::write(&shadow_file, b"http://127.0.0.1:9999/should-not-be-attacked\n").unwrap();
+    std::fs::write(
+        &shadow_file,
+        b"http://127.0.0.1:9999/should-not-be-attacked\n",
+    )
+    .unwrap();
 
     let target_name = shadow_file.file_name().unwrap().to_str().unwrap();
 
@@ -191,7 +195,8 @@ fn test_e2e_file_shadowing_ambiguity_warning() {
 
     // Target parsed should be the URL form, not the file contents!
     assert!(
-        stdout.contains(&format!("http://{}/", target_name)) || stdout.contains(&format!("http://{}", target_name)),
+        stdout.contains(&format!("http://{}/", target_name))
+            || stdout.contains(&format!("http://{}", target_name)),
         "stdout should target the domain literal, got:\n{}",
         stdout
     );
