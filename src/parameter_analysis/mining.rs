@@ -301,6 +301,20 @@ pub fn detect_injection_context_with_marker(text: &str, marker: &str) -> Injecti
                     };
                 }
             }
+            // Marker landed *as* an attribute name (not a value). Example:
+            //   <div id='x' MARKER>
+            // Scraper parses MARKER as a boolean attribute with empty value,
+            // so the value-side scan above misses it. This is the "free
+            // attribute slot inside an existing tag" position — HTML-tag
+            // breakouts (`<svg…>`) just become more attribute names, but
+            // bare event handlers (`onmouseover=alert(1)`) execute as-is.
+            // Classify as Attribute(None) so the payload generator emits
+            // the unquoted-attribute branch (event handlers + protocols).
+            for (name, _v) in el.value().attrs() {
+                if name.contains(marker) {
+                    return InjectionContext::Attribute(None);
+                }
+            }
         }
     }
 

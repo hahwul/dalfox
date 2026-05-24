@@ -39,6 +39,30 @@ fn test_generate_dynamic_payloads_attribute() {
 }
 
 #[test]
+fn test_generate_dynamic_payloads_attribute_none_has_autotriggers() {
+    // The unquoted-attribute branch must include marker-carrying self-
+    // triggering handlers (`autofocus`, `popover`, …) so reflections in
+    // the "free attribute slot" position (e.g. `<div id='x' MARKER>`)
+    // promote to V instead of stalling at R — `onabort=alert(1)` never
+    // fires on a static div.
+    let payloads = generate_dynamic_payloads(&InjectionContext::Attribute(None));
+    let id = crate::scanning::markers::id_marker();
+    assert!(
+        payloads
+            .iter()
+            .any(|p| p.contains("autofocus") && p.contains(&format!("id={}", id))),
+        "expected an `autofocus`-carrying marker payload, got: {:?}",
+        &payloads[..payloads.len().min(8)]
+    );
+    assert!(
+        payloads
+            .iter()
+            .any(|p| p.contains("ontoggle") && p.contains("popover")),
+        "expected an `ontoggle=… popover` payload (auto-fires on popover open)"
+    );
+}
+
+#[test]
 fn test_generate_dynamic_payloads_attribute_single_quote() {
     let payloads = generate_dynamic_payloads(&InjectionContext::Attribute(Some(
         DelimiterType::SingleQuote,

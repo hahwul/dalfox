@@ -172,6 +172,22 @@ fn test_detect_injection_context_attribute_double_quote() {
 }
 
 #[test]
+fn test_detect_injection_context_attribute_name_slot() {
+    // Reflection lands as a free attribute *name* inside an existing tag
+    // (e.g. `<div id='x' MARKER>`). The HTML5 parser treats MARKER as a
+    // boolean attribute, so the value-side scan finds nothing — but the
+    // position is exploitable via bare event-handler attributes
+    // (`onmouseover=alert(1)`). Classifying as Attribute(None) routes
+    // payload generation to the unquoted-attribute branch that emits
+    // them; previously this fell through to Html(None) and dalfox tried
+    // `<svg…>` tag payloads that just become more attribute names.
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!("<div id='x' {}>more</div>", marker);
+    let ctx = detect_injection_context(&body);
+    assert_eq!(ctx, InjectionContext::Attribute(None));
+}
+
+#[test]
 fn test_detect_injection_context_url_attribute_double_quote() {
     let marker = crate::scanning::markers::open_marker();
     let body = format!("<iframe src=\"{}\"></iframe>", marker);
