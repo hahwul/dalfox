@@ -329,8 +329,33 @@ pub fn load_custom_payloads(path: &str) -> Result<Vec<String>, Box<dyn std::erro
         return Ok(cached.clone());
     }
 
-    let content = std::fs::read_to_string(path)?;
-    let payloads: Vec<String> = content.lines().map(ToString::to_string).collect();
+    // read_to_string already rejects non-UTF-8, but a missing/binary/empty
+    // file used to fall through to "no custom payloads" silently —
+    // `--only-custom-payload` then claimed it ran but actually scanned with
+    // zero payloads, or fell back to built-ins without warning. Surface
+    // *something* in every failure mode so operators can debug.
+    let content = std::fs::read_to_string(path).map_err(|e| {
+        format!(
+            "Cannot read --custom-payload {} (UTF-8 required): {}",
+            path, e
+        )
+    })?;
+    // Industry-standard list shape: skip blank and `#`-comment lines so
+    // users don't accidentally send `# comment` as a payload literal.
+    let payloads: Vec<String> = content
+        .lines()
+        .map(|l| l.trim_end_matches('\r')) // strip CR for CRLF files
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(ToString::to_string)
+        .collect();
+
+    if payloads.is_empty() {
+        return Err(format!(
+            "--custom-payload {} contained no usable lines (empty after stripping blanks and # comments)",
+            path
+        )
+        .into());
+    }
 
     if let Ok(mut guard) = cache.lock() {
         guard.insert(path.to_string(), payloads.clone());

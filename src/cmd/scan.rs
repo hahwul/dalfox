@@ -2178,8 +2178,18 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         }
         for group in host_groups.values() {
             for target in group {
-                crate::scanning::blind_scanning(target, callback_url).await;
-                crate::scanning::blind_scan_forms(target, callback_url).await;
+                crate::scanning::blind_scanning(
+                    target,
+                    callback_url,
+                    args.custom_blind_xss_payload.as_deref(),
+                )
+                .await;
+                crate::scanning::blind_scan_forms(
+                    target,
+                    callback_url,
+                    args.custom_blind_xss_payload.as_deref(),
+                )
+                .await;
             }
         }
     }

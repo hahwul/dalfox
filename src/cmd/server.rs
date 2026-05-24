@@ -821,7 +821,12 @@ async fn run_scan_job(
             crate::WAF_CONSECUTIVE_BLOCKS_JOB
                 .scope(job_waf_consecutive.clone(), async {
                     if let Some(callback_url) = &args.blind_callback_url {
-                        crate::scanning::blind_scanning(&target, callback_url).await;
+                        crate::scanning::blind_scanning(
+                            &target,
+                            callback_url,
+                            args.custom_blind_xss_payload.as_deref(),
+                        )
+                        .await;
                     }
 
                     // Initial AST DOM-XSS pass on the GET response, mirroring
@@ -1380,7 +1385,12 @@ async fn health_handler(
         data: Some(serde_json::json!({
             "status": "ok",
             "version": env!("CARGO_PKG_VERSION"),
-            "auth_required": state.api_key.is_some(),
+            // Match `check_api_key`: an empty `Some("")` falls through to
+            // the no-auth branch ("Leave empty to disable auth" per
+            // --api-key help). Previously /health advertised
+            // `auth_required: true` for empty-string keys while the rest
+            // of the API accepted unauth requests, confusing clients.
+            "auth_required": state.api_key.as_deref().is_some_and(|s| !s.is_empty()),
             "endpoints": [
                 {"method": "POST", "path": "/scan", "description": "Submit a new XSS scan"},
                 {"method": "GET",  "path": "/scan", "description": "Submit a scan via query params (JSONP-friendly)"},
@@ -1982,7 +1992,31 @@ pub async fn run_server(args: ServerArgs) {
             return;
         }
     };
-    if let Err(e) = axum::serve(listener, app).await {
+    // Graceful shutdown on SIGINT / SIGTERM. axum drains in-flight
+    // requests before returning; previously the server ignored Ctrl-C
+    // outright and required SIGKILL, leaking any in-flight scans and
+    // their webhook subscribers' terminal callbacks.
+    let shutdown_signal = async {
+        #[cfg(unix)]
+        {
+            use tokio::signal::unix::{SignalKind, signal};
+            let mut sigint = signal(SignalKind::interrupt()).expect("install SIGINT handler");
+            let mut sigterm = signal(SignalKind::terminate()).expect("install SIGTERM handler");
+            tokio::select! {
+                _ = sigint.recv() => {}
+                _ = sigterm.recv() => {}
+            }
+        }
+        #[cfg(not(unix))]
+        {
+            let _ = tokio::signal::ctrl_c().await;
+        }
+        eprintln!("[server] shutdown signal received — draining in-flight requests");
+    };
+    if let Err(e) = axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal)
+        .await
+    {
         eprintln!("server error: {}", e);
     }
 }

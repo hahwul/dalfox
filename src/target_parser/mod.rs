@@ -126,7 +126,12 @@ impl Target {
 }
 
 pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
-    let url_str = if s.starts_with("http://") || s.starts_with("https://") {
+    // RFC 3986 schemes are case-insensitive. Previously `HTTP://x` got
+    // double-prefixed because the case-sensitive check missed the
+    // uppercase scheme and the fallback rewrote it as
+    // `http://HTTP://x`, which then DNS-failed.
+    let lower = s.to_ascii_lowercase();
+    let url_str = if lower.starts_with("http://") || lower.starts_with("https://") {
         s.to_string()
     } else {
         format!("http://{}", s)
