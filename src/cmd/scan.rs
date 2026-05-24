@@ -5,7 +5,7 @@ use reqwest::header::CONTENT_TYPE;
 use scraper::Html;
 use std::collections::HashMap;
 use std::fs;
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::sync::Arc;
 use std::sync::{
     OnceLock,
@@ -1466,6 +1466,76 @@ fn validate_numeric_args(args: &ScanArgs) -> std::result::Result<(), (&'static s
     Ok(())
 }
 
+/// Does this positional argument *look* like a URL or host rather than
+/// a file path? Used to break the "input is both a domain and a local
+/// file" tie in favour of the URL, instead of silently slurping the
+/// file. Conservative — anything starting with an explicit path prefix
+/// (`./`, `../`, `/`, `~`) or containing whitespace is never URL-like.
+fn looks_like_url_input(s: &str) -> bool {
+    if s.is_empty() {
+        return false;
+    }
+    if s.contains("://") {
+        return true;
+    }
+    // Explicit path prefixes the user typed to *mean* "this is a file".
+    if s.starts_with("./")
+        || s.starts_with("../")
+        || s.starts_with('/')
+        || s.starts_with('~')
+        || s.contains(char::is_whitespace)
+    {
+        return false;
+    }
+    // Host with port: "example.com:8080", "127.0.0.1:8080", "[::1]:80".
+    // The brace form is a literal IPv6 host. A bare colon followed by
+    // digits is the port separator — strong URL signal regardless of
+    // what's left.
+    if s.starts_with('[') && s.contains("]:") {
+        return true;
+    }
+    if let Some((host, after)) = s.split_once(':')
+        && after.chars().next().is_some_and(|c| c.is_ascii_digit())
+        && !host.is_empty()
+        && !host.contains('/')
+    {
+        return true;
+    }
+    // Host-only form: at least one dot, no path separators before it,
+    // and every dot-segment is a non-empty DNS label. This catches
+    // `example.com`, `api.target.app/foo`, `127.0.0.1`, while filtering
+    // out garbage like `..` or `.config`.
+    let host_part = s.split_once('/').map_or(s, |(h, _)| h);
+    if !host_part.contains('.') {
+        return false;
+    }
+    host_part
+        .split('.')
+        .all(|seg| !seg.is_empty() && seg.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'))
+}
+
+/// Known target-list file extensions. When an input matches one of
+/// these, the file interpretation always wins over URL even if the
+/// name *also* satisfies `looks_like_url_input` (e.g. `urls.txt`
+/// passes both: it has a dot, all labels are alnum). This keeps the
+/// long-standing `dalfox scan urls.txt` workflow silent and ambiguity-
+/// free, while still routing the genuinely ambiguous case
+/// (`dalfox scan example.com` with a same-named file in cwd) into
+/// the warn-and-prefer-URL branch.
+fn looks_like_target_list_filename(s: &str) -> bool {
+    const EXTS: &[&str] = &[
+        "txt", "list", "lst", "csv", "tsv", "log", "json", "jsonl", "ndjson", "yaml", "yml",
+        "conf", "cfg", "ini", "req", "raw", "http",
+    ];
+    s.rsplit('.')
+        .next()
+        .map(|ext| {
+            let lower = ext.to_ascii_lowercase();
+            EXTS.iter().any(|e| *e == lower)
+        })
+        .unwrap_or(false)
+}
+
 /// Emit a structured error to stderr when format is json/jsonl, otherwise plain eprintln.
 fn emit_error(format: &str, code: &str, message: &str) {
     if format == "json" || format == "jsonl" {
@@ -1707,10 +1777,30 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     {
         eprintln!("Error initializing remote resources: {}", e);
     }
+    // Byte budget for any path that slurps a file or stdin into memory.
+    // 256 MiB lands well above realistic URL lists (≈5 M URLs at ~50 B
+    // each) while still cutting `/dev/zero`, runaway pipes, and
+    // gigabyte misclassified blobs to a fast, clear error instead of
+    // OOM-ing the process. The matching `read_bounded` / `read_stdin_
+    // bounded` enforce the cap during the read itself, so a pseudo-
+    // file that lies about its size (`/dev/zero` reports 0 bytes via
+    // metadata) is still stopped.
+    const MAX_TARGET_LIST_BYTES: u64 = 256 << 20; // 256 MiB
+
+    // Auto-detect raw-http on positional args. Read each candidate
+    // file *once* into a cache so the later "auto" branch can reuse
+    // the content — previously this code ran `fs::read_to_string`
+    // here and again immediately below, doubling the I/O on every
+    // legitimate target list.
+    let mut auto_file_cache: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
+    let stdin_is_piped = !std::io::IsTerminal::is_terminal(&std::io::stdin());
+
     let input_type = if args.input_type == "auto" {
         if args.targets.is_empty() {
-            // If no positional targets and STDIN is piped, treat as pipe mode
-            if !std::io::IsTerminal::is_terminal(&std::io::stdin()) {
+            // No positional targets: only honour stdin if it's actually
+            // piped — never block waiting for terminal input.
+            if stdin_is_piped {
                 "pipe".to_string()
             } else {
                 if !args.silence {
@@ -1723,12 +1813,22 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 return ScanOutcome::Error;
             }
         } else {
-            // Check if all targets look like raw HTTP requests or files containing them
+            // Raw-http auto-detect. Read each candidate file once and
+            // cache the content; the later auto branch re-uses the
+            // same string. Bounded so a `/dev/zero` argument can't
+            // OOM us during *detection*.
             let is_raw_http = args.targets.iter().all(|t| {
                 if crate::target_parser::is_raw_http_request(t) {
-                    true
-                } else if let Ok(content) = fs::read_to_string(t) {
-                    crate::target_parser::is_raw_http_request(&content)
+                    return true;
+                }
+                if let Ok(content) = crate::utils::fs::read_bounded(
+                    std::path::Path::new(t),
+                    MAX_TARGET_LIST_BYTES,
+                    "target list",
+                ) {
+                    let is_raw = crate::target_parser::is_raw_http_request(&content);
+                    auto_file_cache.insert(t.clone(), content);
+                    is_raw
                 } else {
                     false
                 }
@@ -1746,30 +1846,119 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     let mut target_strings = Vec::new();
 
     if input_type == "auto" {
+        // If stdin is piped under auto, read it and merge targets!
+        if stdin_is_piped {
+            match crate::utils::fs::read_stdin_bounded(MAX_TARGET_LIST_BYTES, "stdin pipe") {
+                Ok(buffer) => {
+                    let mut stdin_count = 0;
+                    for line in buffer.lines() {
+                        let trimmed = line.trim();
+                        if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                            target_strings.push(trimmed.to_string());
+                            stdin_count += 1;
+                        }
+                    }
+                    if stdin_count > 0 && !args.targets.is_empty() && !args.silence {
+                        eprintln!(
+                            "[info] Merged {} target(s) from stdin and {} target(s) from arguments",
+                            stdin_count,
+                            args.targets.len()
+                        );
+                    }
+                }
+                Err(e) => {
+                    if !args.silence {
+                        emit_error(
+                            &args.format,
+                            crate::cmd::error_codes::STDIN_ERROR,
+                            &format!("Error reading from stdin: {}", e),
+                        );
+                    }
+                    return ScanOutcome::Error;
+                }
+            }
+        }
+
         for target in &args.targets {
             if target.contains("://") {
                 target_strings.push(target.clone());
-            } else {
-                // Try as file first
-                match fs::read_to_string(target) {
-                    Ok(content) => {
-                        for line in content.lines() {
-                            let line = line.trim();
-                            // Industry-standard target-list shape: skip
-                            // blank lines *and* `#` comments (nuclei, ffuf,
-                            // httpx all behave this way). Previously a
-                            // commented line would be sent to parse_target
-                            // and surface as a confusing "empty host"
-                            // error.
-                            if !line.is_empty() && !line.starts_with('#') {
-                                target_strings.push(line.to_string());
-                            }
+                continue;
+            }
+            // Try the cached read from the raw-http detection pass
+            // first; fall back to a fresh bounded read for anything
+            // not already in the cache (this branch is also reached
+            // when raw-http detection short-circuited on an earlier
+            // target and didn't try fs at all).
+            let file_read: Option<std::result::Result<String, std::io::Error>> =
+                match auto_file_cache.remove(target) {
+                    Some(content) => Some(Ok(content)),
+                    None => {
+                        let p = std::path::Path::new(target);
+                        if p.exists() {
+                            Some(crate::utils::fs::read_bounded(
+                                p,
+                                MAX_TARGET_LIST_BYTES,
+                                "target list",
+                            ))
+                        } else {
+                            None
                         }
                     }
-                    Err(_) => {
-                        // Not a file, treat as URL
+                };
+            match file_read {
+                Some(Ok(content)) => {
+                    // Ambiguity: input is both a readable file *and*
+                    // looks like a host/URL. Previously the file won
+                    // silently, so `dalfox scan example.com` against
+                    // a cwd that happens to contain `./example.com`
+                    // attacked whatever was inside the file instead
+                    // of the public host. Prefer the URL interpretation
+                    // when the input has a domain shape that doesn't
+                    // match a known target-list file extension (.txt,
+                    // .csv, …), and emit a one-line warning so the
+                    // user can switch to `-i file` if they really did
+                    // mean the file.
+                    if looks_like_url_input(target) && !looks_like_target_list_filename(target) {
+                        if !args.silence {
+                            eprintln!(
+                                "[warn] '{}' matches both a URL and a local file; \
+                                 treating as URL. Use `-i file {}` to scan the file instead.",
+                                target, target
+                            );
+                        }
                         target_strings.push(target.clone());
+                        continue;
                     }
+                    for line in content.lines() {
+                        let line = line.trim();
+                        // Industry-standard target-list shape: skip
+                        // blank lines *and* `#` comments (nuclei, ffuf,
+                        // httpx all behave this way). Previously a
+                        // commented line would be sent to parse_target
+                        // and surface as a confusing "empty host"
+                        // error.
+                        if !line.is_empty() && !line.starts_with('#') {
+                            target_strings.push(line.to_string());
+                        }
+                    }
+                }
+                Some(Err(e)) => {
+                    // The file exists but `read_bounded` refused it
+                    // (over the cap, non-regular, non-UTF-8). Surface
+                    // the specific reason — silently falling through
+                    // to URL would hide a real misconfiguration.
+                    if !args.silence {
+                        emit_error(
+                            &args.format,
+                            crate::cmd::error_codes::INPUT_TOO_LARGE,
+                            &format!("Error reading target list {}: {}", target, e),
+                        );
+                    }
+                    return ScanOutcome::Error;
+                }
+                None => {
+                    // Not a file on disk — treat as URL literal.
+                    target_strings.push(target.clone());
                 }
             }
         }
@@ -1788,7 +1977,11 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                     return ScanOutcome::Error;
                 }
                 let file_path = &args.targets[0];
-                match fs::read_to_string(file_path) {
+                match crate::utils::fs::read_bounded(
+                    std::path::Path::new(file_path),
+                    MAX_TARGET_LIST_BYTES,
+                    "target list",
+                ) {
                     Ok(content) => content
                         .lines()
                         .map(str::trim)
@@ -1808,23 +2001,34 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                 }
             }
             "pipe" => {
-                let mut buffer = String::new();
-                match io::stdin().read_to_string(&mut buffer) {
-                    Ok(_) => buffer
-                        .lines()
-                        .filter_map(|line| {
+                // `-i pipe` with a TTY stdin would otherwise hang
+                // waiting for Ctrl-D. Fail fast with a clear message —
+                // the operator either forgot the pipe or meant `-i
+                // auto`.
+                if !stdin_is_piped {
+                    if !args.silence {
+                        emit_error(
+                            &args.format,
+                            crate::cmd::error_codes::STDIN_NOT_PIPED,
+                            "`-i pipe` requires data on stdin (no pipe detected)",
+                        );
+                    }
+                    return ScanOutcome::Error;
+                }
+                let mut piped_targets = Vec::new();
+                match crate::utils::fs::read_stdin_bounded(MAX_TARGET_LIST_BYTES, "stdin pipe") {
+                    Ok(buffer) => {
+                        for line in buffer.lines() {
                             let trimmed = line.trim();
                             // Same comment-skipping convention as the
                             // auto/file paths above so `cat targets.txt
                             // | dalfox` and `dalfox scan targets.txt`
                             // behave identically.
-                            if trimmed.is_empty() || trimmed.starts_with('#') {
-                                None
-                            } else {
-                                Some(trimmed.to_string())
+                            if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                                piped_targets.push(trimmed.to_string());
                             }
-                        })
-                        .collect(),
+                        }
+                    }
                     Err(e) => {
                         if !args.silence {
                             emit_error(
@@ -1836,6 +2040,20 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                         return ScanOutcome::Error;
                     }
                 }
+                if !args.targets.is_empty() {
+                    let before_merge = piped_targets.len();
+                    for target in &args.targets {
+                        piped_targets.push(target.clone());
+                    }
+                    if !args.silence {
+                        eprintln!(
+                            "[info] Merged {} target(s) from stdin and {} target(s) from arguments",
+                            before_merge,
+                            args.targets.len()
+                        );
+                    }
+                }
+                piped_targets
             }
             "raw-http" => {
                 // Treat targets as raw HTTP request files or literals; actual parsing happens later
@@ -1873,9 +2091,29 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     for s in target_strings {
         if input_type == "raw-http" {
             // Parse raw HTTP from file or literal via target_parser helper
-            let content = match fs::read_to_string(&s) {
-                Ok(c) => c,
-                Err(_) => s.clone(),
+            // Try cached first, then bounded read, then fallback to literal
+            let content = match auto_file_cache.remove(&s) {
+                Some(content) => content,
+                None => {
+                    let p = std::path::Path::new(&s);
+                    if p.exists() {
+                        match crate::utils::fs::read_bounded(p, MAX_TARGET_LIST_BYTES, "raw HTTP request") {
+                            Ok(c) => c,
+                            Err(e) => {
+                                if !args.silence {
+                                    emit_error(
+                                        &args.format,
+                                        crate::cmd::error_codes::INPUT_TOO_LARGE,
+                                        &format!("Error reading raw HTTP request file {}: {}", s, e),
+                                    );
+                                }
+                                return ScanOutcome::Error;
+                            }
+                        }
+                    } else {
+                        s.clone()
+                    }
+                }
             };
             match crate::target_parser::parse_raw_http_request(&content) {
                 Ok(mut target) => {
@@ -2056,7 +2294,11 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     {
         let mut oos_domains: Vec<String> = args.out_of_scope.clone();
         if let Some(ref path) = args.out_of_scope_file {
-            match std::fs::read_to_string(path) {
+            match crate::utils::fs::read_bounded(
+                std::path::Path::new(path),
+                MAX_TARGET_LIST_BYTES,
+                "out-of-scope domain file",
+            ) {
                 Ok(contents) => {
                     for line in contents.lines() {
                         let trimmed = line.trim();
@@ -2115,7 +2357,11 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
 
     // Load cookies from raw HTTP request file if specified
     if let Some(path) = &args.cookie_from_raw {
-        match std::fs::read_to_string(path) {
+        match crate::utils::fs::read_bounded(
+            std::path::Path::new(path),
+            MAX_TARGET_LIST_BYTES,
+            "raw cookie file",
+        ) {
             Ok(content) => {
                 let mut cookies_from_raw: Vec<(String, String)> = Vec::new();
                 for line in content.lines() {
@@ -2134,8 +2380,8 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                     }
                 }
             }
-            Err(_) if !args.silence => {
-                eprintln!("Error reading cookie file: {}", path);
+            Err(e) if !args.silence => {
+                eprintln!("Error reading cookie file {}: {}", path, e);
             }
             Err(_) => {}
         }

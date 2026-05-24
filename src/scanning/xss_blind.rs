@@ -11,7 +11,11 @@ use crate::target_parser::Target;
 /// the built-in template.
 fn build_blind_payloads(callback_url: &str, custom_template_path: Option<&str>) -> Vec<String> {
     if let Some(path) = custom_template_path {
-        match std::fs::read_to_string(path) {
+        match crate::utils::fs::read_bounded(
+            std::path::Path::new(path),
+            256 << 20, // 256 MiB budget
+            "custom blind XSS template",
+        ) {
             Ok(content) => {
                 let mut payloads: Vec<String> = Vec::new();
                 let mut bad_lines = 0u32;

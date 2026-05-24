@@ -154,3 +154,126 @@ fn test_hidden_pipe_subcommand_reads_stdin_and_exits() {
         .expect("failed waiting for dalfox pipe");
     let _ = output.status;
 }
+
+#[test]
+fn test_e2e_file_shadowing_ambiguity_warning() {
+    let mut shadow_file = std::env::temp_dir();
+    shadow_file.push(format!("dalfox-e2e-shadow-{}.com", std::process::id()));
+    std::fs::write(&shadow_file, b"http://127.0.0.1:9999/should-not-be-attacked\n").unwrap();
+
+    let target_name = shadow_file.file_name().unwrap().to_str().unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args([
+            "scan",
+            target_name,
+            "--skip-xss-scanning",
+            "--skip-discovery",
+            "--skip-mining",
+            "--format",
+            "json",
+        ])
+        .current_dir(std::env::temp_dir())
+        .output()
+        .expect("Failed to execute dalfox with shadowed file");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    let _ = std::fs::remove_file(&shadow_file);
+
+    // Should warn on stderr
+    assert!(
+        stderr.contains("matches both a URL and a local file; treating as URL"),
+        "stderr should warn about file shadowing, got:\n{}",
+        stderr
+    );
+
+    // Target parsed should be the URL form, not the file contents!
+    assert!(
+        stdout.contains(&format!("http://{}/", target_name)) || stdout.contains(&format!("http://{}", target_name)),
+        "stdout should target the domain literal, got:\n{}",
+        stdout
+    );
+    assert!(
+        !stdout.contains("should-not-be-attacked"),
+        "stdout should NOT parse the shadowed file contents, got:\n{}",
+        stdout
+    );
+}
+
+#[test]
+fn test_e2e_stdin_and_positional_targets_merged() {
+    let mut child = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args([
+            "scan",
+            "http://positional-target.com",
+            "--skip-xss-scanning",
+            "--skip-discovery",
+            "--skip-mining",
+            "--format",
+            "json",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("Failed to execute dalfox for merge");
+
+    {
+        let stdin = child.stdin.as_mut().expect("child stdin should be piped");
+        stdin
+            .write_all(b"http://piped-target.com\n")
+            .expect("failed to write pipe input");
+    }
+
+    let output = child
+        .wait_with_output()
+        .expect("failed waiting for dalfox merge");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    // Both should be in target list!
+    assert!(
+        stdout.contains("http://positional-target.com/"),
+        "expected positional target in stdout, got:\n{}",
+        stdout
+    );
+    assert!(
+        stdout.contains("http://piped-target.com/"),
+        "expected piped target in stdout, got:\n{}",
+        stdout
+    );
+    // Should warn/info about the merge on stderr
+    assert!(
+        stderr.contains("Merged 1 target(s) from stdin"),
+        "stderr should inform about merging stdin, got:\n{}",
+        stderr
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn test_e2e_non_regular_file_rejected() {
+    let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args(["scan", "/dev/zero"])
+        .output()
+        .expect("failed to execute dalfox scan /dev/zero");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "scanning non-regular file should exit with code 2, got stderr:\n{}\nstdout:\n{}",
+        stderr,
+        stdout
+    );
+    assert!(
+        stderr.contains("is not a regular file") || stdout.contains("is not a regular file"),
+        "should refuse /dev/zero as non-regular file, got stderr:\n{}",
+        stderr
+    );
+}

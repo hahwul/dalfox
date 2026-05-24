@@ -24,6 +24,15 @@ pub mod error_codes {
     // I/O
     pub const FILE_READ_ERROR: &str = "FILE_READ_ERROR";
     pub const STDIN_ERROR: &str = "STDIN_ERROR";
+    /// Input source (target list file or stdin pipe) exceeded the
+    /// configured byte cap. Distinct from generic FILE_READ_ERROR so
+    /// users see *why* the read was refused — most often a non-regular
+    /// file like `/dev/zero` or an unintended huge file.
+    pub const INPUT_TOO_LARGE: &str = "INPUT_TOO_LARGE";
+    /// `--input-type pipe` was set, but stdin is a terminal (no pipe
+    /// attached). Reading would block forever waiting for Ctrl-D —
+    /// fail fast with a clear message instead.
+    pub const STDIN_NOT_PIPED: &str = "STDIN_NOT_PIPED";
     pub const CONNECTION_FAILED: &str = "CONNECTION_FAILED";
     pub const DNS_RESOLUTION_FAILED: &str = "DNS_RESOLUTION_FAILED";
     pub const TLS_HANDSHAKE_FAILED: &str = "TLS_HANDSHAKE_FAILED";

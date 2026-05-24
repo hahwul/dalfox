@@ -68,57 +68,12 @@ enum Commands {
     Pipe(cmd::pipe::PipeArgs),
 }
 
-/// Read a small file (UTF-8) with a byte cap so non-regular files like
-/// `/dev/zero` can't stream forever. Returns `Err` when the cap is hit
-/// or the file isn't a regular file, otherwise the file's contents.
-fn read_bounded(path: &std::path::Path, max_bytes: u64) -> std::io::Result<String> {
-    use std::io::Read;
-    // Refuse anything that isn't a regular file — symlinks pointing at
-    // a regular file are fine because `metadata()` follows symlinks.
-    let md = std::fs::metadata(path)?;
-    if !md.is_file() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            format!("{} is not a regular file", path.display()),
-        ));
-    }
-    // metadata() reports a real size for regular files; reject early
-    // when it's already over the cap so we don't even open the handle.
-    if md.len() > max_bytes {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!(
-                "config file too large: {} bytes (cap {})",
-                md.len(),
-                max_bytes
-            ),
-        ));
-    }
-    let mut f = std::fs::File::open(path)?;
-    let mut buf = String::new();
-    // `take(N)` enforces the cap during the read itself — even when
-    // metadata lied (some pseudo-files report size 0 but stream
-    // forever, /dev/zero being the canonical case).
-    f.by_ref()
-        .take(max_bytes + 1)
-        .read_to_string(&mut buf)
-        .map_err(|e| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("read failed (or non-UTF8): {}", e),
-            )
-        })?;
-    if buf.len() as u64 > max_bytes {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!(
-                "config file exceeded {}-byte cap during read (likely a streaming device)",
-                max_bytes
-            ),
-        ));
-    }
-    Ok(buf)
-}
+// Bounded file/stdin readers moved to `crate::utils::fs` so the
+// auto-detect / target-list / pipe paths can share the same cap (a
+// 5 MB config and a 256 MB target list have very different ceilings,
+// but the safety model — refuse non-regular files, enforce a hard
+// byte budget — is identical).
+use dalfox::utils::fs::read_bounded;
 
 #[tokio::main]
 async fn main() {
@@ -239,7 +194,7 @@ async fn main() {
             // than two orders of magnitude over what any real
             // operator-curated config will ever be.
             const MAX_CONFIG_BYTES: u64 = 1 << 20; // 1 MiB
-            match read_bounded(p, MAX_CONFIG_BYTES) {
+            match read_bounded(p, MAX_CONFIG_BYTES, "config file") {
                 Ok(content) => {
                     let is_json_ext = p
                         .extension()

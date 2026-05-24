@@ -368,7 +368,12 @@ pub fn load_custom_payloads(path: &str) -> Result<Vec<String>, Box<dyn std::erro
     // `--only-custom-payload` then claimed it ran but actually scanned with
     // zero payloads, or fell back to built-ins without warning. Surface
     // *something* in every failure mode so operators can debug.
-    let content = std::fs::read_to_string(path).map_err(|e| {
+    let content = crate::utils::fs::read_bounded(
+        std::path::Path::new(path),
+        256 << 20, // 256 MiB budget
+        "custom payload list",
+    )
+    .map_err(|e| {
         format!(
             "Cannot read --custom-payload {} (UTF-8 required): {}",
             path, e

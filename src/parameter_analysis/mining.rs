@@ -482,7 +482,11 @@ pub async fn probe_dictionary_params(
     }
 
     if !loaded && let Some(wordlist_path) = &args.mining_dict_word {
-        match std::fs::read_to_string(wordlist_path) {
+        match crate::utils::fs::read_bounded(
+            std::path::Path::new(wordlist_path),
+            256 << 20, // 256 MiB budget
+            "parameter wordlist",
+        ) {
             Ok(content) => {
                 params = content
                     .lines()
