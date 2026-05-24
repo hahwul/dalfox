@@ -202,14 +202,19 @@ fn intersect_char_sets(a: Option<Vec<char>>, b: Option<Vec<char>>) -> Option<Vec
     }
 }
 
-/// Extract parameters from URL hash fragments and register them for scanning.
+/// Extract parameters from URL hash fragments for AST DOM-XSS analysis
+/// correlation.
 ///
 /// Handles two formats:
 /// - SPA routing: `#/path?key=value&key2=value2`
 /// - Simple fragments: `#key=value&key2=value2`
 ///
-/// No HTTP requests are needed because fragments are client-side only (never sent to the server).
-/// These params are relevant for DOM XSS detection where JavaScript reads `location.hash`.
+/// No HTTP requests are needed — fragments are client-side only — and
+/// the run_scanning loop now skips `Location::Fragment` params for
+/// reflection probes (HTTP servers never see the fragment) to avoid the
+/// "discovered but never fuzzed" phantom that dogfood surfaced. The
+/// params still get registered so the AST DOM analyzer can correlate a
+/// `location.hash`-source finding with the user-supplied key.
 pub async fn check_fragment_discovery(target: &Target, reflection_params: Arc<Mutex<Vec<Param>>>) {
     let frag = match target.url.fragment() {
         Some(f) if !f.is_empty() => f,

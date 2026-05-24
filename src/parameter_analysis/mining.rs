@@ -480,9 +480,14 @@ pub async fn probe_dictionary_params(
                 loaded = true;
             }
             Err(e) => {
-                if !silence {
-                    eprintln!("Error reading wordlist file {}: {}", wordlist_path, e);
-                }
+                // Always surface on stderr — an unreadable
+                // `--mining-dict-word` is a user-supplied input error and
+                // silencing it (because server/MCP pass silence=true to
+                // analyze_parameters) means the operator can't tell why
+                // their custom dictionary did nothing. stderr never
+                // pollutes the stdout JSON/JSONL payload anyway.
+                eprintln!("Error reading wordlist file {}: {}", wordlist_path, e);
+                let _ = silence; // intentionally unused now
                 return;
             }
         }

@@ -283,8 +283,17 @@ pub async fn fingerprint_with_probe(
 
     let mut result = fingerprint_from_response(&headers, body_text.as_deref(), status);
 
-    // If we got a blocking status code but no WAF was identified, mark as Unknown
-    if result.is_empty() && (status == 403 || status == 406 || status == 429 || status == 503) {
+    // If we got a blocking status code but no WAF was identified, mark
+    // as Unknown — *except* when the response is a plain rate-limit
+    // (429 + `Retry-After`), which is application-level throttling, not
+    // a WAF. Auto-classifying that as `WafType::Unknown` engaged bypass
+    // mutations against benign rate-limited backends and produced
+    // garbage results.
+    let is_plain_rate_limit = status == 429 && headers.get("retry-after").is_some();
+    if result.is_empty()
+        && (status == 403 || status == 406 || status == 429 || status == 503)
+        && !is_plain_rate_limit
+    {
         result.detected.push(WafFingerprint {
             waf_type: WafType::Unknown(format!("HTTP {}", status)),
             confidence: 0.4,

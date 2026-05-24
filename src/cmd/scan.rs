@@ -104,6 +104,20 @@ fn parse_force_waf_arg(s: &str) -> std::result::Result<String, String> {
     }
 }
 
+/// `--limit 0` used to mean "no findings" — counter-intuitive and
+/// inconsistent with `--max-payloads-per-param 0` (which means "no
+/// cap"). Reject 0 outright so the meaning is unambiguous: either
+/// omit `--limit` for unlimited, or supply a positive cap.
+fn parse_limit_arg(s: &str) -> std::result::Result<usize, String> {
+    let n: usize = s
+        .parse()
+        .map_err(|_| format!("invalid --limit '{}': must be a positive integer", s))?;
+    if n == 0 {
+        return Err("--limit must be at least 1 (omit the flag entirely for no cap)".to_string());
+    }
+    Ok(n)
+}
+
 fn parse_http_method_arg(s: &str) -> std::result::Result<String, String> {
     let trimmed = s.trim();
     if trimmed.is_empty() {
@@ -915,8 +929,8 @@ pub struct ScanArgs {
     pub poc_type: String,
 
     #[clap(help_heading = "OUTPUT")]
-    /// Limit the number of results to display. Example: --limit 10
-    #[arg(long)]
+    /// Limit the number of results to display (must be >=1). Example: --limit 10
+    #[arg(long, value_parser = parse_limit_arg)]
     pub limit: Option<usize>,
 
     #[clap(help_heading = "OUTPUT")]
@@ -1550,6 +1564,19 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             emit_error(&args.format, code, &msg);
         }
         return ScanOutcome::Error;
+    }
+
+    // `--limit-result-type` only affects which finding types count
+    // toward `--limit`; without `--limit` it is a no-op. Dogfood
+    // showed operators conflating it with `--only-poc`, which IS the
+    // output filter, so emit a one-line nudge on stderr when used
+    // alone. stderr stays out of the stdout payload that scripts
+    // parse.
+    if !args.limit_result_type.eq_ignore_ascii_case("all") && args.limit.is_none() {
+        eprintln!(
+            "Hint: --limit-result-type only affects counting toward --limit; for output filtering use --only-poc {}",
+            args.limit_result_type.to_uppercase()
+        );
     }
 
     // Validate --custom-payload up front. Without this check, a missing or
@@ -3395,6 +3422,19 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     };
 
     if let Some(output_path) = &args.output {
+        // Surface `..` traversal so the operator notices before a
+        // pipeline silently writes into a parent directory. We don't
+        // refuse — there are legitimate uses (`-o ../results.json` from
+        // a per-target subdir) — just emit a one-time stderr warning.
+        if output_path
+            .split(std::path::is_separator)
+            .any(|seg| seg == "..")
+        {
+            eprintln!(
+                "Warning: --output path '{}' contains parent-dir references — final path will be resolved by the OS",
+                output_path
+            );
+        }
         match std::fs::write(output_path, &output_content) {
             Ok(_) => {
                 if !args.silence {

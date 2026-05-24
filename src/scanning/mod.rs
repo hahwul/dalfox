@@ -697,6 +697,19 @@ pub async fn run_scanning(
     let mut total_tasks = 0u64;
     let mut param_jobs: Vec<ParamPayloadJob> = Vec::with_capacity(target.reflection_params.len());
     for param in &target.reflection_params {
+        // URL fragments are client-side only — HTTP servers never see
+        // them, so reflection probes for `Location::Fragment` params
+        // were pure-waste requests (the dry-run summary said
+        // "discovered" but the scan sent 0 reqs with the param actually
+        // populated). The AST DOM analyzer detects `location.hash`
+        // sources from response JS independently, so skipping the
+        // server-side scan here doesn't lose detection coverage.
+        if matches!(
+            param.location,
+            crate::parameter_analysis::Location::Fragment
+        ) {
+            continue;
+        }
         let mut reflection_payloads = if let Some(context) = &param.injection_context {
             crate::scanning::xss_common::get_dynamic_payloads(context, args.as_ref())
                 .unwrap_or_else(|_| vec![])
