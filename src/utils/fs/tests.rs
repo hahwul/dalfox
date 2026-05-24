@@ -57,3 +57,13 @@ fn read_bounded_rejects_dev_zero() {
     // catches it before the read even starts.
     assert!(err.to_string().contains("not a regular file"), "got: {err}");
 }
+
+#[test]
+fn read_bounded_rejects_non_utf8() {
+    let p = tmp("non-utf8");
+    std::fs::write(&p, vec![0x80, 0x81]).unwrap();
+    let err = read_bounded(&p, 1024, "target list").unwrap_err();
+    assert!(err.to_string().contains("read failed (or non-UTF8)"));
+    let _ = std::fs::remove_file(&p);
+}
+

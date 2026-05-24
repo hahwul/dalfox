@@ -288,3 +288,80 @@ fn redirect_location_wrapper_does_not_trigger_js_context() {
         "wrapped Location body must not produce JS-context evidence"
     );
 }
+
+#[test]
+fn detects_js_sinks_inside_loops() {
+    // Test for ForStatement, WhileStatement, DoWhileStatement
+    let payload1 = "for(let i=0;i<1;i++){alert(1)}";
+    let html1 = format!("<script>{}</script>", payload1);
+    assert!(has_js_context_evidence(payload1, &html1));
+
+    let payload2 = "while(true){alert(1)}";
+    let html2 = format!("<script>{}</script>", payload2);
+    assert!(has_js_context_evidence(payload2, &html2));
+
+    let payload3 = "do{alert(1)}while(false)";
+    let html3 = format!("<script>{}</script>", payload3);
+    assert!(has_js_context_evidence(payload3, &html3));
+}
+
+#[test]
+fn detects_js_sinks_inside_conditionals() {
+    // Test for IfStatement, SwitchStatement, ConditionalExpression
+    let payload1 = "if(true){alert(1)}else{print()}";
+    let html1 = format!("<script>{}</script>", payload1);
+    assert!(has_js_context_evidence(payload1, &html1));
+
+    let payload2 = "switch(1){case 1:alert(1);break;}";
+    let html2 = format!("<script>{}</script>", payload2);
+    assert!(has_js_context_evidence(payload2, &html2));
+
+    let payload3 = "true?alert(1):0";
+    let html3 = format!("<script>var x = {};</script>", payload3);
+    assert!(has_js_context_evidence(payload3, &html3));
+}
+
+#[test]
+fn detects_js_sinks_inside_error_handling() {
+    // Test for TryStatement, ThrowStatement
+    let payload1 = "try{throw 1}catch(e){alert(1)}finally{print()}";
+    let html1 = format!("<script>{}</script>", payload1);
+    assert!(has_js_context_evidence(payload1, &html1));
+}
+
+#[test]
+fn detects_js_sinks_in_advanced_expressions() {
+    // Test for ArrowFunctionExpression, FunctionExpression, LabeledStatement, ObjectExpression, TemplateLiteral, NewExpression, LogicalExpression, ComputedMemberExpression, ChainExpression
+    let payload_arrow = "(()=>{alert(1)})()";
+    let html_arrow = format!("<script>{}</script>", payload_arrow);
+    assert!(has_js_context_evidence(payload_arrow, &html_arrow));
+
+    let payload_func = "(function(){alert(1)})()";
+    let html_func = format!("<script>{}</script>", payload_func);
+    assert!(has_js_context_evidence(payload_func, &html_func));
+
+    let payload_label = "lbl:alert(1)";
+    let html_label = format!("<script>{}</script>", payload_label);
+    assert!(has_js_context_evidence(payload_label, &html_label));
+
+    let payload_obj = "var o={x:alert(1)}";
+    let html_obj = format!("<script>{}</script>", payload_obj);
+    assert!(has_js_context_evidence(payload_obj, &html_obj));
+
+    let payload_template = "alert(`${1}`)";
+    let html_template = format!("<script>{}</script>", payload_template);
+    assert!(has_js_context_evidence(payload_template, &html_template));
+
+    let payload_new = "new Function('alert(1)')()";
+    let html_new = format!("<script>{}</script>", payload_new);
+    assert!(has_js_context_evidence(payload_new, &html_new));
+
+    let payload_logical = "true&&alert(1)";
+    let html_logical = format!("<script>{}</script>", payload_logical);
+    assert!(has_js_context_evidence(payload_logical, &html_logical));
+
+    let payload_chain = "window?.alert(1)";
+    let html_chain = format!("<script>{}</script>", payload_chain);
+    assert!(has_js_context_evidence(payload_chain, &html_chain));
+}
+
