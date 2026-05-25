@@ -89,6 +89,7 @@ pub struct ScanConfig {
     pub skip_mining_dom: Option<bool>,
     // NETWORK
     pub timeout: Option<u64>,
+    pub scan_timeout: Option<u64>,
     pub delay: Option<u64>,
     pub proxy: Option<String>,
     pub follow_redirects: Option<bool>,
@@ -113,6 +114,7 @@ pub struct ScanConfig {
     pub sxss: Option<bool>,
     pub sxss_url: Option<String>,
     pub sxss_method: Option<String>,
+    pub sxss_retries: Option<u32>,
     pub skip_ast_analysis: Option<bool>,
     // HPP
     pub hpp: Option<bool>,
@@ -250,6 +252,9 @@ impl Config {
             if let Some(v) = scan.timeout {
                 args.timeout = v;
             }
+            if let Some(v) = scan.scan_timeout {
+                args.scan_timeout = v;
+            }
             if let Some(v) = scan.delay {
                 args.delay = v;
             }
@@ -318,6 +323,9 @@ impl Config {
             if let Some(v) = &scan.sxss_method {
                 args.sxss_method = v.clone();
             }
+            if let Some(v) = scan.sxss_retries {
+                args.sxss_retries = v;
+            }
         }
     }
 
@@ -362,6 +370,17 @@ impl Config {
             {
                 args.cookie_from_raw = Some(v.clone());
             }
+             // SCOPE
+            if let Some(v) = &scan.include_url
+                && args.include_url.is_empty()
+            {
+                args.include_url = v.clone();
+            }
+            if let Some(v) = &scan.exclude_url
+                && args.exclude_url.is_empty()
+            {
+                args.exclude_url = v.clone();
+            }
             // PARAMETER MINING
             if let Some(v) = &scan.mining_dict_word
                 && args.mining_dict_word.is_none()
@@ -378,6 +397,11 @@ impl Config {
                 && args.proxy.is_none()
             {
                 args.proxy = Some(v.clone());
+            }
+            if let Some(v) = scan.scan_timeout
+                && args.scan_timeout == 0
+            {
+                args.scan_timeout = v;
             }
             if let Some(v) = &scan.ignore_return
                 && args.ignore_return.is_empty()
@@ -409,6 +433,11 @@ impl Config {
                 && args.sxss_url.is_none()
             {
                 args.sxss_url = Some(v.clone());
+            }
+            if let Some(v) = scan.sxss_retries
+                && args.sxss_retries == 3
+            {
+                args.sxss_retries = v;
             }
             // PARAMETER DISCOVERY (conservative mapping)
             if let Some(v) = scan.skip_reflection_path
@@ -547,6 +576,16 @@ impl Config {
             }
 
             // SCOPE (if_default)
+            if let Some(v) = &scan.include_url
+                && args.include_url.is_empty()
+            {
+                args.include_url = v.clone();
+            }
+            if let Some(v) = &scan.exclude_url
+                && args.exclude_url.is_empty()
+            {
+                args.exclude_url = v.clone();
+            }
             if let Some(v) = &scan.ignore_param
                 && args.ignore_param.is_empty()
             {
@@ -617,6 +656,11 @@ impl Config {
                 && args.timeout == crate::cmd::scan::DEFAULT_TIMEOUT_SECS
             {
                 args.timeout = v;
+            }
+            if let Some(v) = scan.scan_timeout
+                && args.scan_timeout == 0
+            {
+                args.scan_timeout = v;
             }
             if let Some(v) = scan.delay
                 && args.delay == crate::cmd::scan::DEFAULT_DELAY_MS
@@ -735,6 +779,11 @@ impl Config {
                 && args.sxss_method == "GET"
             {
                 args.sxss_method = v.clone();
+            }
+            if let Some(v) = scan.sxss_retries
+                && args.sxss_retries == 3
+            {
+                args.sxss_retries = v;
             }
             if let Some(v) = scan.skip_ast_analysis
                 && !args.skip_ast_analysis
@@ -898,6 +947,10 @@ pub fn default_toml_template() -> String {
 # user_agent = "Dalfox/3"
 # cookie_from_raw = "request.txt"
 
+# SCOPE
+# include_url = []
+# exclude_url = []
+
 # PARAMETER DISCOVERY
 # skip_discovery = false
 # skip_reflection_header = false
@@ -912,6 +965,7 @@ pub fn default_toml_template() -> String {
 
 # NETWORK
 # timeout = 10               # seconds (applies to HTTP requests and remote provider fetches)
+# scan_timeout = 0           # hard wall-clock cap per target for the scan stage in seconds
 # delay = 0                  # milliseconds
 # proxy = "http://127.0.0.1:8080"  # also used for remote provider fetches
 # follow_redirects = false
@@ -934,13 +988,13 @@ pub fn default_toml_template() -> String {
 # sxss = false
 # sxss_url = "https://target/echo"
 # sxss_method = "GET"
+# sxss_retries = 3
 "#;
     tpl.to_string()
 }
 
 // Optional helpers for JSON (rarely used because TOML is preferred)
 pub fn default_json_template() -> String {
-    // Represents the same defaults but as commented JSON is not standard, we include minimal fields.
     let obj = serde_json::json!({
         "scan": serde_json::Value::Object(serde_json::Map::new())
     });

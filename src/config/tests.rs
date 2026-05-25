@@ -101,8 +101,8 @@ fn full_scan_config() -> ScanConfig {
         method: Some("POST".to_string()),
         user_agent: Some("DalfoxTest/1.0".to_string()),
         cookie_from_raw: Some("request.txt".to_string()),
-        include_url: Some(vec![]),
-        exclude_url: Some(vec![]),
+        include_url: Some(vec!["https://example.com/.*".to_string()]),
+        exclude_url: Some(vec!["https://example.com/exclude".to_string()]),
         ignore_param: Some(vec![]),
         out_of_scope: Some(vec![]),
         out_of_scope_file: None,
@@ -117,6 +117,7 @@ fn full_scan_config() -> ScanConfig {
         skip_mining_dict: Some(true),
         skip_mining_dom: Some(true),
         timeout: Some(21),
+        scan_timeout: Some(45),
         delay: Some(123),
         proxy: Some("http://127.0.0.1:8080".to_string()),
         follow_redirects: Some(true),
@@ -139,6 +140,7 @@ fn full_scan_config() -> ScanConfig {
         sxss: Some(true),
         sxss_url: Some("https://example.com/sxss".to_string()),
         sxss_method: Some("POST".to_string()),
+        sxss_retries: Some(12),
         skip_ast_analysis: Some(true),
         hpp: Some(false),
         waf_bypass: Some("auto".to_string()),
@@ -426,6 +428,8 @@ fn test_apply_to_scan_args_if_default_maps_all_supported_fields() {
     assert_eq!(args.cookies, vec!["sid=abc".to_string()]);
     assert_eq!(args.method, "POST");
     assert_eq!(args.user_agent.as_deref(), Some("DalfoxTest/1.0"));
+    assert_eq!(args.include_url, vec!["https://example.com/.*".to_string()]);
+    assert_eq!(args.exclude_url, vec!["https://example.com/exclude".to_string()]);
     assert!(args.skip_reflection_path);
     assert_eq!(args.cookie_from_raw.as_deref(), Some("request.txt"));
     assert!(args.skip_discovery);
@@ -440,6 +444,7 @@ fn test_apply_to_scan_args_if_default_maps_all_supported_fields() {
     assert!(args.skip_mining_dict);
     assert!(args.skip_mining_dom);
     assert_eq!(args.timeout, 21);
+    assert_eq!(args.scan_timeout, 45);
     assert_eq!(args.delay, 123);
     assert_eq!(args.proxy.as_deref(), Some("http://127.0.0.1:8080"));
     assert!(args.follow_redirects);
@@ -466,6 +471,7 @@ fn test_apply_to_scan_args_if_default_maps_all_supported_fields() {
     assert!(args.sxss);
     assert_eq!(args.sxss_url.as_deref(), Some("https://example.com/sxss"));
     assert_eq!(args.sxss_method, "POST");
+    assert_eq!(args.sxss_retries, 12);
     assert!(args.skip_ast_analysis);
 }
 

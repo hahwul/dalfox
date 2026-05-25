@@ -67,6 +67,7 @@ skip_mining_dom = false
 
 # NETWORK
 timeout = 10
+scan_timeout = 0
 delay = 0
 # proxy = "http://127.0.0.1:8080"
 follow_redirects = false
@@ -168,6 +169,7 @@ debug = false
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `timeout` | int | `10` | Request timeout (seconds) |
+| `scan_timeout` | int | `0` | Hard wall-clock cap per target for the scan stage (post-preflight) in seconds. 0 disables. |
 | `delay` | int | `0` | Inter-request delay (ms) |
 | `proxy` | string | — | Proxy URL |
 | `follow_redirects` | bool | `false` | Follow 3xx responses |
