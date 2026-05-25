@@ -429,7 +429,10 @@ fn test_apply_to_scan_args_if_default_maps_all_supported_fields() {
     assert_eq!(args.method, "POST");
     assert_eq!(args.user_agent.as_deref(), Some("DalfoxTest/1.0"));
     assert_eq!(args.include_url, vec!["https://example.com/.*".to_string()]);
-    assert_eq!(args.exclude_url, vec!["https://example.com/exclude".to_string()]);
+    assert_eq!(
+        args.exclude_url,
+        vec!["https://example.com/exclude".to_string()]
+    );
     assert!(args.skip_reflection_path);
     assert_eq!(args.cookie_from_raw.as_deref(), Some("request.txt"));
     assert!(args.skip_discovery);

@@ -370,7 +370,7 @@ impl Config {
             {
                 args.cookie_from_raw = Some(v.clone());
             }
-             // SCOPE
+            // SCOPE
             if let Some(v) = &scan.include_url
                 && args.include_url.is_empty()
             {
