@@ -2,6 +2,7 @@
 title = "Configuration"
 description = "Save your favorite flags in a Dalfox config file."
 weight = 4
+toc = true
 +++
 
 Dalfox reads a config file on startup so you don't have to pass the same flags every time. Anything you set in the config is overridden by an explicit CLI flag, so it's safe to keep "defaults" here.

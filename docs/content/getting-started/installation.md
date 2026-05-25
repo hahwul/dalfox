@@ -2,6 +2,7 @@
 title = "Installation"
 description = "Install Dalfox on macOS, Linux, Windows, NixOS, or build from source."
 weight = 2
+toc = true
 +++
 
 Pick the installer that fits your platform. Dalfox ships as a single self-contained binary — no runtime to manage.

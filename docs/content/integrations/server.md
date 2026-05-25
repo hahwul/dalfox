@@ -2,6 +2,7 @@
 title = "REST API Server"
 description = "Run Dalfox as an HTTP service with async job management, CORS, JSONP, and API-key auth."
 weight = 1
+toc = true
 +++
 
 `dalfox server` starts a long-lived HTTP service that queues and runs scans asynchronously. You submit a scan, get back a `scan_id`, and poll or cancel it however you like.

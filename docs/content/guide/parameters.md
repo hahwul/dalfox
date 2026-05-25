@@ -2,6 +2,7 @@
 title = "Parameters & Discovery"
 description = "How Dalfox finds the inputs that matter, and how to steer the discovery phase."
 weight = 2
+toc = true
 +++
 
 Finding XSS starts with finding the right parameter. Dalfox's discovery engine is a multi-stage pipeline; you rarely need to understand all of it, but knowing the moving parts helps when you want to tune a scan.

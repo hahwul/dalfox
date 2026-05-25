@@ -2,6 +2,7 @@
 title = "Agent Skill"
 description = "Drop-in `SKILL.md` for Claude Code, Cursor, OpenCode, Codex, and other skill-aware agents."
 weight = 3
+toc = true
 +++
 
 Dalfox ships a **SKILL.md** that teaches any skill-aware agent how to drive Dalfox correctly — authorization gate first, MCP over CLI, preflight before heavy scans, `V > A > R` finding prioritization. Point your agent at it and the model stops guessing flags.

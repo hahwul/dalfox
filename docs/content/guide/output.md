@@ -2,6 +2,7 @@
 title = "Output & Reports"
 description = "Plain, JSON, JSONL, Markdown, SARIF, TOML — and how to integrate findings with your pipeline."
 weight = 6
+toc = true
 +++
 
 Every scan produces the same internal result structure. Dalfox renders it in whichever format you pick. Machine-readable formats automatically suppress the banner so your file stays clean.

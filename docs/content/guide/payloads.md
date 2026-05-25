@@ -2,6 +2,7 @@
 title = "Payloads & Encoding"
 description = "Built-in payload families, encoders, custom payloads, and remote wordlists."
 weight = 3
+toc = true
 +++
 
 Dalfox ships with a curated, context-aware payload library. Most of the time you don't need to think about it — the engine picks the right payloads for each injection context. This page covers what's built in and how to extend it.

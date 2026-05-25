@@ -2,6 +2,7 @@
 title = "Stored XSS"
 description = "Inject on one URL, verify the payload fires on another."
 weight = 5
+toc = true
 +++
 
 A Stored XSS lives on the server: you submit it once (a comment, a profile field, a chat message) and it triggers every time someone views that page. Dalfox has a dedicated mode for this pattern.

@@ -2,6 +2,7 @@
 title = "WAF Bypass"
 description = "Detect WAFs automatically and apply per-WAF evasion strategies."
 weight = 4
+toc = true
 +++
 
 Most real targets sit behind a WAF. Dalfox fingerprints the WAF, then automatically chooses an evasion strategy — extra encoders and payload mutations tuned to that specific WAF's rules.

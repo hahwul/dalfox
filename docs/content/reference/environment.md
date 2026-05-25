@@ -2,6 +2,7 @@
 title = "Environment"
 description = "Environment variables Dalfox reads at runtime."
 weight = 3
+toc = true
 +++
 
 Dalfox respects a small set of environment variables for configuration that doesn't belong in a file or on the command line.

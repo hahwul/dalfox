@@ -2,6 +2,7 @@
 title = "Scanning Modes"
 description = "Single URL, file batch, pipeline, stored XSS, server, and MCP — pick the mode that fits your workflow."
 weight = 1
+toc = true
 +++
 
 Dalfox accepts targets in several shapes. Every mode shares the same discovery, payload, and verification engine — they differ only in how you feed URLs in and where results go.

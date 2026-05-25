@@ -55,8 +55,18 @@
       </nav>
     </aside>
     <main class="docs-main">
-      <article class="docs-article">
-        <h1>{{ page.title | e }}</h1>
-        {{ content }}
-      </article>
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>{{ page.title | e }}</h1>
+          {{ content }}
+        </article>
+        {% if page.toc and toc %}
+        <aside class="docs-toc">
+          <div class="toc-title">On this page</div>
+          <div class="toc-content">
+            {{ toc }}
+          </div>
+        </aside>
+        {% endif %}
+      </div>
 {% include "footer.html" %}

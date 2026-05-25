@@ -2,6 +2,7 @@
 title = "Config File"
 description = "All keys supported in Dalfox's TOML/JSON config file."
 weight = 2
+toc = true
 +++
 
 Dalfox looks for its config at (in order):

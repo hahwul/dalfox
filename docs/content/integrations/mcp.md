@@ -2,6 +2,7 @@
 title = "MCP Server"
 description = "Expose Dalfox to Claude and other MCP clients as a set of scanner tools."
 weight = 2
+toc = true
 +++
 
 The **Model Context Protocol** (MCP) is an open standard for letting AI clients talk to external tools. `dalfox mcp` runs a stdio-based MCP server so Claude Desktop, Claude Code, Cursor, and any other MCP-compatible client can drive Dalfox scans directly.

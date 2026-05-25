@@ -2,6 +2,7 @@
 title = "Quick Start"
 description = "Your first Dalfox scan in five minutes."
 weight = 3
+toc = true
 +++
 
 This page walks you from install to a verified finding. We'll use an intentionally vulnerable demo target so you can see real output.

@@ -2,6 +2,7 @@
 title = "CLI Reference"
 description = "Every subcommand and flag Dalfox accepts."
 weight = 1
+toc = true
 +++
 
 Dalfox is organised into four subcommands. The default (when you just pass a target) is `scan`.
