@@ -7,12 +7,6 @@ template = "landing"
 <section class="hero">
   <div class="hero-inner">
     <div class="hero-text">
-      <span class="hero-eyebrow">
-        <span class="dot"></span>
-        <strong>v3.0</strong>
-        <span class="divider">·</span>
-        Rust rewrite is here
-      </span>
       <h1 class="hero-title">
         Hunt <span class="strike">every</span> <span class="accent">XSS</span><br>
         before it hunts you.
