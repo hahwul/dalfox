@@ -18,6 +18,9 @@ jobs:
     steps:
       - name: Check out Git repository
         uses: actions/checkout@v6
+      - name: Set up QEMU
+        if: matrix.platform == 'arm64'
+        uses: docker/setup-qemu-action@v4
       - uses: diddlesnaps/snapcraft-multiarch-action@v1
         with:
           architecture: ${{ matrix.platform }}
