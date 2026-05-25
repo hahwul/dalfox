@@ -52,7 +52,7 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
                         // HTML Entity version of = inside attribute events
                         let ev_entity = ev.replace("=", "&#61;");
                         payloads.push(format!("' {} id={} '", ev_entity, id_marker));
-                        
+
                         // Tab separator variant (bypasses space filtering)
                         payloads.push(format!("'\t{}\tid={}\t'", ev, id_marker));
                         payloads.push(format!("'\t{}\tid={}\t'", ev_entity, id_marker));
@@ -98,7 +98,7 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
                         // HTML Entity version of = inside attribute events
                         let ev_entity = ev.replace("=", "&#61;");
                         payloads.push(format!("\" {} id={} \"", ev_entity, id_marker));
-                        
+
                         // Tab separator variant (bypasses space filtering)
                         payloads.push(format!("\"\t{}\tid={}\t\"", ev, id_marker));
                         payloads.push(format!("\"\t{}\tid={}\t\"", ev_entity, id_marker));
