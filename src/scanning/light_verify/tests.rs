@@ -2,17 +2,16 @@ use super::*;
 use crate::parameter_analysis::{Location, Param};
 use crate::target_parser::{Target, parse_target};
 use axum::{
-    Router,
+    Json, Router,
     extract::{Query, State},
-    http::{StatusCode, HeaderMap},
+    http::{HeaderMap, StatusCode},
     response::{Html, IntoResponse},
     routing::{get, post},
-    Json,
 };
+use reqwest::Client;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use tokio::time::{Duration, sleep};
-use reqwest::Client;
 
 #[derive(Clone)]
 struct TestState {

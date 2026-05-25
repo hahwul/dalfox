@@ -364,4 +364,3 @@ fn detects_js_sinks_in_advanced_expressions() {
     let html_chain = format!("<script>{}</script>", payload_chain);
     assert!(has_js_context_evidence(payload_chain, &html_chain));
 }
-

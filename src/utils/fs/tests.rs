@@ -66,4 +66,3 @@ fn read_bounded_rejects_non_utf8() {
     assert!(err.to_string().contains("read failed (or non-UTF8)"));
     let _ = std::fs::remove_file(&p);
 }
-
