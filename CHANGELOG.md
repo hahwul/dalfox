@@ -9,51 +9,30 @@ and continues to receive security backports per [SECURITY.md](./SECURITY.md).
 
 ## 3.0.0
 
-Dalfox v3 is rewritten in Rust. It replaces the legacy Go implementation (now on the `v2` branch) with an async architecture and updated CLI structure.
+Dalfox v3 is a complete rewrite in Rust, replacing the legacy Go implementation (now on the `v2` branch) with an asynchronous architecture and a modern CLI structure.
 
 ### Added
 
-* Model Context Protocol (MCP) server (`dalfox mcp`) with `scan_with_dalfox`, `get_results_dalfox`, and related tools.
-* Async REST API server (`dalfox server`) using axum, with job management, cancellation, and webhook support.
-* AST + DOM verification using oxc (verified findings now include execution evidence).
-* Composable encoder pipelines and tag/JavaScript keyword bypass mutations.
-* Configuration file support (TOML, JSON) under `$XDG_CONFIG_HOME/dalfox/`.
-* Output formats: `plain`, `json`, `jsonl`, `markdown`, `sarif`, `toml`.
-* `--dry-run` mode for preflight summary.
-* Per-target progress bars and `--stream-findings` option.
-* Cached remote payload/wordlist providers.
+* **AST-Based JS Analysis**: Replaced heavy headless browsers with fast and accurate static analysis powered by `oxc` for DOM-XSS detection.
+* **Model Context Protocol (MCP)**: Added an MCP stdio server (`dalfox mcp`) to expose Dalfox tools directly to AI coding assistants.
+* **Async REST API Server**: Rebuilt the API server using `axum` with async job queueing, real-time cancellation, and webhook notifications.
+* **Extended Formats & Configurations**: Added TOML/JSON configuration files along with `markdown`, `sarif` (GitHub Code Scanning), and `toml` output formats.
+* **Safety & Control**: Introduced `--dry-run` preflight mode, `--stream-findings` for immediate feedback, and limit-capping flags (`--max-payloads-per-param`, `--scan-timeout`).
 
 ### Changed
 
-* CLI unified under `scan` subcommand (legacy `url`/`file`/`pipe` aliases preserved for compatibility).
-* Exit codes standardized: `0` (clean), `1` (findings), `2` (error).
-* Banner automatically suppressed for machine-readable outputs, MCP, and `--silence` mode.
-* `payload` subcommand limited to enumeration only.
-
-### Fixed
-
-* Improved template literal and free attribute context detection.
-* Accurate POST form method and action reporting.
-* Panic isolation in scan tasks and MCP worker using `catch_unwind`.
-* Server graceful shutdown handling.
-* False-positive WAF detection on standard rate limiting.
-* URL scheme double-prefixing issue.
-* Preflight error classification and response decompression (gzip, deflate, brotli).
-* SIGPIPE handling on stdout.
+* **Unified CLI Interface**: Consolidated all target scan paths under a single `scan` subcommand, preserving legacy aliases (`url`, `file`, `pipe`) for backward compatibility.
+* **Exit Code Standardization**: Aligned standard exits (`0` for clean, `1` for findings, `2` for errors) for seamless CI pipeline integration.
+* **Intelligent Output**: Replaced command-line spinners with per-target progress bars, automatically suppressing banners for silence or machine-readable modes.
 
 ### Removed
 
-* Legacy Go runtime and v2-specific flags.
-* BAV
-* `--found-action` flag
+* **Headless Browser Engine**: Removed Chromium/`chromedp` engine and all headless-related CLI flags.
+* **Legacy Vulnerability Checkers (BAV)**: Deprecated non-XSS checks to strictly focus on specialized XSS scanning.
+* **Outmoded CLI Options**: Removed `--found-action`, `--grep`, `--report`, and `--max-cpu` flags in favor of unified pipelines, formats, and async runtimes.
 
-### Security
+### Security & Reliability
 
-* Constant-time API key comparison in REST server.
-* JSONP callback validation to prevent script injection.
-* File-based cookie loading excluded from MCP interface.
-
-### Documentation & Packaging
-
-* Documentation site updated for v3.
-* Nix flakes, AUR, snap, and Dockerfile updated with automated checks.
+* Hardened the REST server with constant-time API key comparisons and strict JSONP callback validation.
+* Sandbox improvements to exclude local cookie file loaders (`--cookie-from-raw`) from the MCP tool interface.
+* Implemented panic isolation (`catch_unwind`) to prevent scanner and MCP thread crashes.
