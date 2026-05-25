@@ -49,11 +49,18 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
                     ];
                     for ev in &autotrigger_events {
                         payloads.push(format!("' {} id={} '", ev, id_marker));
+                        // HTML Entity version of = inside attribute events
+                        let ev_entity = ev.replace("=", "&#61;");
+                        payloads.push(format!("' {} id={} '", ev_entity, id_marker));
+                        
                         // Tab separator variant (bypasses space filtering)
                         payloads.push(format!("'\t{}\tid={}\t'", ev, id_marker));
+                        payloads.push(format!("'\t{}\tid={}\t'", ev_entity, id_marker));
                     }
                     for payload in attr_payloads.iter() {
                         payloads.push(format!("' {} a='", payload));
+                        let payload_entity = payload.replace("=", "&#61;");
+                        payloads.push(format!("' {} a='", payload_entity));
                     }
                     if !url_like {
                         // Protocol payloads for src/href attributes (e.g. iframe src='VALUE')
@@ -88,11 +95,18 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
                     ];
                     for ev in &autotrigger_events {
                         payloads.push(format!("\" {} id={} \"", ev, id_marker));
+                        // HTML Entity version of = inside attribute events
+                        let ev_entity = ev.replace("=", "&#61;");
+                        payloads.push(format!("\" {} id={} \"", ev_entity, id_marker));
+                        
                         // Tab separator variant (bypasses space filtering)
                         payloads.push(format!("\"\t{}\tid={}\t\"", ev, id_marker));
+                        payloads.push(format!("\"\t{}\tid={}\t\"", ev_entity, id_marker));
                     }
                     for payload in attr_payloads.iter() {
                         payloads.push(format!("\" {} \"", payload));
+                        let payload_entity = payload.replace("=", "&#61;");
+                        payloads.push(format!("\" {} \"", payload_entity));
                     }
                     if !url_like {
                         // Protocol payloads for src/href attributes (e.g. iframe src="VALUE")
@@ -126,9 +140,16 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
                     ];
                     for ev in &autotrigger_events {
                         payloads.push(format!("{} id={}", ev, id_marker));
+                        let ev_entity = ev.replace("=", "&#61;");
+                        payloads.push(format!("{} id={}", ev_entity, id_marker));
                     }
                     payloads.extend(html_payloads);
-                    payloads.extend(attr_payloads);
+                    payloads.extend(attr_payloads.clone());
+                    // Also include entity-encoded variants for general attribute events in unquoted context
+                    for payload in attr_payloads.iter() {
+                        let payload_entity = payload.replace("=", "&#61;");
+                        payloads.push(payload_entity);
+                    }
                     if !url_like {
                         // Protocol payloads for unquoted src/href attributes
                         payloads.extend(protocol_payloads);
@@ -198,6 +219,7 @@ pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
                         .chain(clobbering_payloads.iter())
                     {
                         payloads.push(format!("-->{}<!--", payload));
+                        payloads.push(format!("--!>{}<!--", payload));
                     }
                 }
                 _ => {

