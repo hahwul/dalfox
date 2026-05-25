@@ -4,7 +4,7 @@
 
 title = "Dalfox"
 description = "Powerful open-source XSS scanner and automation utility — reflected, stored, DOM-based with AST-level verification."
-base_url = "http://localhost:3000"
+base_url = "https://dalfox.hahwul.com"
 
 # =============================================================================
 # Multilingual (Optional)
