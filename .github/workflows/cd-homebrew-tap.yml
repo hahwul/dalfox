@@ -23,6 +23,6 @@ jobs:
             system "cargo build --release"
             bin.install "target/release/dalfox"
           test: system "#{bin}/dalfox", "-V"
-          update_readme_table: true
+          update_readme_table: false
           skip_commit: false
           debug: false
