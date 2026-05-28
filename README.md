@@ -37,6 +37,16 @@ brew install dalfox
 sudo snap install dalfox
 ```
 
+### Arch Linux (AUR)
+
+```bash
+yay -S dalfox
+# or
+paru -S dalfox
+```
+
+See the [Installation guide](https://dalfox.hahwul.com/docs/installation/) for manual build instructions.
+
 ### Nixpkgs (NixOS)
 
 A package is available for Nix or NixOS users. Keep in mind that the latest releases might only

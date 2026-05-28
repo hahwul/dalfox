@@ -1,6 +1,6 @@
 +++
 title = "Installation"
-description = "Install Dalfox on macOS, Linux, Windows, NixOS, or build from source."
+description = "Install Dalfox on macOS, Linux, Windows, NixOS, Arch Linux, or build from source."
 weight = 2
 toc = true
 +++
@@ -19,6 +19,24 @@ The Homebrew formula tracks the latest stable release. Source: [formulae.brew.sh
 
 ```bash
 sudo snap install dalfox
+```
+
+## Arch Linux (AUR)
+
+Using an AUR helper (recommended):
+
+```bash
+yay -S dalfox
+# or
+paru -S dalfox
+```
+
+Manual build from the [AUR package](https://aur.archlinux.org/packages/dalfox):
+
+```bash
+git clone https://aur.archlinux.org/dalfox.git
+cd dalfox
+makepkg -si
 ```
 
 ## Nix & NixOS
