@@ -92,9 +92,11 @@ jobs:
           echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc" >> $GITHUB_ENV
       - name: Install zig
         if: matrix.zig == true
-        uses: taiki-e/install-action@v2
-        with:
-          tool: zig
+        run: |
+          ZIG_VERSION="0.13.0"
+          curl -L "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" \
+            | tar -xJ -C /tmp
+          echo "/tmp/zig-x86_64-linux-${ZIG_VERSION}" >> $GITHUB_PATH
       - name: Configure zig linker (aarch64 musl)
         if: matrix.zig == true
         run: |
