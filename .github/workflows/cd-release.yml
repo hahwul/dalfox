@@ -3,6 +3,17 @@ name: Release
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version string to use for the build (e.g. v3.0.1-test)'
+        required: true
+        default: 'v0.0.0-test'
+      upload:
+        description: 'Upload artifacts to a release (only works on actual releases)'
+        required: true
+        default: false
+        type: boolean
 env:
   CARGO_TERM_COLOR: always
 jobs:
@@ -23,6 +34,12 @@ jobs:
             os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
             use_cross: false
+          # Linux musl (static) - x86_64 only for now
+          - build: linux-x86_64-musl
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            use_cross: false
+            musl: true
           # macOS targets
           - build: macos-x86_64
             os: macos-latest
@@ -41,9 +58,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
-      - name: Get the release version from the tag
+      - name: Determine version
         shell: bash
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+          else
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_ENV
+          fi
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -53,6 +75,15 @@ jobs:
         uses: taiki-e/install-action@v2
         with:
           tool: cross
+      - name: Install musl tools
+        if: matrix.musl == true
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+      - name: Configure musl linker
+        if: matrix.musl == true
+        run: |
+          echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc" >> $GITHUB_ENV
       - name: Build
         shell: bash
         run: |
@@ -92,6 +123,7 @@ jobs:
             shasum -a 256 "$ASSET" > "$ASSET.sha256"
           fi
       - name: Upload release archive
+        if: github.event_name == 'release' || github.event.inputs.upload == 'true'
         uses: softprops/action-gh-release@v3
         with:
           files: |-
