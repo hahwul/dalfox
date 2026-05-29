@@ -25,7 +25,7 @@
   <header class="site-header">
     <div class="header-inner">
       <div class="header-left">
-        <button class="hamburger" aria-label="Menu" onclick="document.querySelector('.docs-sidebar')?.classList.toggle('open');document.querySelector('.site-overlay')?.classList.toggle('active');">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
           <span></span><span></span><span></span>
         </button>
         <a href="{{ base_url }}/" class="header-logo">
@@ -50,4 +50,4 @@
       </div>
     </div>
   </header>
-  <div class="site-overlay" onclick="document.querySelector('.docs-sidebar')?.classList.remove('open');this.classList.remove('active');"></div>
+  <div class="site-overlay" aria-hidden="true"></div>
