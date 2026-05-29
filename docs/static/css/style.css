@@ -1299,6 +1299,18 @@ body:has(.docs-layout) .site-footer {
 .t-dim {
     color: var(--text-muted);
 }
+.t-ts {
+    color: #6b7280;
+    font-size: 0.72em;
+}
+.t-wrn {
+    color: #fbbf24;
+    font-weight: 700;
+}
+.t-poc {
+    color: #f87171;
+    font-weight: 600;
+}
 .t-label {
     display: inline-block;
     padding: 0 5px;

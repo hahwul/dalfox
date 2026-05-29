@@ -42,17 +42,20 @@ template = "landing"
           <div class="terminal-title">dalfox — scan</div>
         </div>
         <div class="terminal-body">
-          <div class="t-line"><span class="t-prompt">$</span><span class="t-cmd">dalfox scan https://target.app/search?q=test</span></div>
-          <div class="t-line t-dim">  <span class="t-info">INFO</span> Parameter analysis · mining 24 params</div>
-          <div class="t-line t-dim">  <span class="t-info">INFO</span> Static/BAV · charset, WAF, reflection</div>
-          <div class="t-line t-dim">  <span class="t-info">INFO</span> Launching XSS payloads · 2,318 tests</div>
+          <div class="t-line"><span class="t-prompt">$</span><span class="t-cmd">dalfox scan https://xss-game.appspot.com/level1/frame</span></div>
+          <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> start scan to https://xss-game.appspot.com/level1/frame</div>
+          <div class="t-line t-dim">  Completed analyzing parameters for target</div>
+          <div class="t-line t-dim">  <span class="t-info">INF</span> found reflected 1 params</div>
+          <div class="t-line t-dim">    └── query</div>
           <div class="t-line"></div>
-          <div class="t-line"><span class="t-label verify">VERIFY</span><span class="t-ok">[V]</span> <span class="t-dim">param=</span><span class="t-cmd">q</span> <span class="t-dim">·</span> html-context</div>
-          <div class="t-line t-dim">         ↳ &lt;svg/onload=alert(1)&gt;</div>
-          <div class="t-line"><span class="t-label reflected">REFLECT</span><span class="t-warn">[R]</span> <span class="t-dim">param=</span><span class="t-cmd">callback</span> <span class="t-dim">·</span> js-context</div>
-          <div class="t-line t-dim">         ↳ ";alert(1);//</div>
           <div class="t-line"></div>
-          <div class="t-line"><span class="t-ok">✓ 2 vulnerabilities verified</span> <span class="t-dim">in 4.12s</span></div>
+          <div class="t-line"><span class="t-ts">6:42PM</span> <span class="t-wrn">WRN</span> XSS found 1 XSS</div>
+          <div class="t-line"><span class="t-poc">[POC][V][GET][inHTML]</span> ...?query=%3Csvg%2Fonload%3Dalert%281%29%3E</div>
+          <div class="t-line t-dim">  ├── Issue: XSS payload DOM object identified</div>
+          <div class="t-line t-dim">  ├── Payload: &lt;svg/onload=alert(1)&gt;</div>
+          <div class="t-line t-dim">  └── L13: ...</div>
+          <div class="t-line"></div>
+          <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> scan completed in 3.482 seconds</div>
           <div class="t-line t-cursor"></div>
         </div>
       </div>
