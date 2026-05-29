@@ -69,6 +69,13 @@ Requires a recent Rust toolchain (stable is fine). Builds into `~/.cargo/bin/dal
 
 Grab a release archive for your OS/arch from [github.com/hahwul/dalfox/releases](https://github.com/hahwul/dalfox/releases), extract it, and drop the binary somewhere on your `PATH` (`/usr/local/bin`, `~/.local/bin`, etc.).
 
+We publish the following Linux variants per release:
+
+- `linux-x86_64` (glibc)
+- `linux-x86_64-musl` (statically linked — recommended for Alpine, Docker, and CI)
+- `linux-aarch64` (glibc)
+- `linux-aarch64-musl` (statically linked)
+
 ## Build from source
 
 ```bash

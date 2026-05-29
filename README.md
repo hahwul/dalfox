@@ -73,6 +73,8 @@ nix develop github:hahwul/dalfox
 
 See [Installation guide](https://dalfox.hahwul.com/docs/installation/) for details.
 
+Prebuilt binaries (including statically-linked musl variants for Linux) are available on the [GitHub Releases](https://github.com/hahwul/dalfox/releases) page.
+
 ## Usage
 ```bash
 dalfox [mode] [target] [flags]
