@@ -41,11 +41,10 @@ jobs:
             use_cross: false
             musl: true
           - build: linux-aarch64-musl
-            os: ubuntu-latest
+            os: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
             use_cross: false
             musl: true
-            musl_cross: true
           # macOS targets
           - build: macos-x86_64
             os: macos-latest
@@ -82,21 +81,18 @@ jobs:
         with:
           tool: cross
       - name: Install musl tools
-        if: matrix.musl == true && !matrix.musl_cross
+        if: matrix.musl == true
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools
-      - name: Configure musl linker
-        if: matrix.musl == true && !matrix.musl_cross
+
+      - name: Configure x86_64 musl linker
+        if: matrix.musl == true && matrix.target == 'x86_64-unknown-linux-musl'
         run: |
           echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc" >> $GITHUB_ENV
-      - name: Install aarch64 musl cross toolchain
-        if: matrix.musl_cross == true
-        run: |
-          curl -L https://musl.cc/aarch64-linux-musl-cross.tgz | tar -xz -C /tmp
-          echo "/tmp/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
+
       - name: Configure aarch64 musl linker
-        if: matrix.musl_cross == true
+        if: matrix.musl == true && matrix.target == 'aarch64-unknown-linux-musl'
         run: |
           echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-musl-gcc" >> $GITHUB_ENV
       - name: Build
