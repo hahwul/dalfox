@@ -134,7 +134,7 @@ jobs:
           matrix.target == 'x86_64-unknown-linux-gnu' ||
           matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
-          cargo generate-rpm --no-build
+          cargo generate-rpm --target ${{ matrix.target }}
 
       - name: Rename and checksum packages
         if: |
