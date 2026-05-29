@@ -94,4 +94,4 @@ if you want to contribute to this project, please see [CONTRIBUTING.md](https://
 ## About the Name
 As for the name, Dal([달](https://en.wiktionary.org/wiki/달)) is the Korean word for "moon," while "Fox" stands for "Finder Of XSS" or 🦊
 
-![](docs/images/illust.webp)
+![](docs/static/images/illust.webp)
