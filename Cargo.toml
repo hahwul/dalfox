@@ -37,3 +37,29 @@ oxc_span = "0.131.0"
 lto = true
 codegen-units = 1
 strip = "symbols"
+
+[package.metadata.deb]
+maintainer = "hahwul <hahwul@gmail.com>"
+copyright = "2024, hahwul"
+license-file = "LICENSE.txt"
+homepage = "https://github.com/hahwul/dalfox"
+description = "Powerful open-source XSS scanner"
+extended-description = """Dalfox is a powerful open-source XSS scanner and automation utility.
+It supports reflected, stored, and DOM-based XSS discovery with AST-backed verification."""
+depends = ["ca-certificates"]
+section = "utils"
+priority = "optional"
+assets = [
+    { source = "target/release/dalfox", dest = "/usr/bin/dalfox", mode = "755" },
+]
+
+[package.metadata.generate-rpm]
+license = "MIT"
+summary = "Powerful open-source XSS scanner"
+group = "Applications/System"
+homepage = "https://github.com/hahwul/dalfox"
+description = """Dalfox is a powerful open-source XSS scanner and automation utility.
+It supports reflected, stored, and DOM-based XSS discovery with AST-backed verification."""
+assets = [
+    { source = "target/release/dalfox", dest = "/usr/bin/dalfox", mode = "755" },
+]
