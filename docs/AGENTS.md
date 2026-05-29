@@ -67,21 +67,23 @@ This site documents [Dalfox](https://github.com/hahwul/dalfox), a Rust XSS scann
 ### Source of truth for flags and defaults
 
 - **CLI flags / default values**: `src/cmd/scan.rs` (look for `pub struct ScanArgs` and `DEFAULT_*` constants). When you add or change a flag in code, update `docs/content/reference/cli.md` *in the same commit*.
+- **Agent skill surface**: `skills/dalfox/` (SKILL.md + `references/*.md`). The published agent skill must stay in sync with flag names, defaults, error codes, MCP tool schemas, and the invariants in the repo-root `AGENTS.md`. Treat it as a fourth interface alongside CLI / server / MCP.
 - **Output formats**: `src/scanning/result.rs` and `src/cmd/scan.rs` (output routing). Keep `docs/content/guide/output.md` aligned.
-- **Stage names**: see `src/lib.rs` doc-comment and `src/parameter_analysis/mining.rs` / `src/scanning/mod.rs` headers. Don't invent stage numbers — read what the code already labels.
+- **Stage names**: see `src/lib.rs` doc-comment (authoritative 6-stage table) and `src/parameter_analysis/mining.rs` / `src/scanning/mod.rs` headers. Don't invent stage numbers — read what the code already labels.
 
 ### Stage model (current)
 
-The scan pipeline has slightly more stages than the brief overview in `parameters.md` suggests. When writing about internals, the actual moving parts are:
+The canonical high-level contract is documented in `src/lib.rs` (6 stages, Stages 1–6). The runtime flow has one important nuance:
 
 1. Discovery (Stage 1) — query / body / cookie / header / path / fragment / form / parameter-key probes. Bracketed sandwich marker.
 2. Mining (Stage 2) — DOM-input names, dictionary wordlist, JSON body keys. Sentinel pre-probe + EWMA collapse for reflect-everything pages.
 3. Active probing (Stage 3) — per-special-character probes; sets `valid_specials` / `invalid_specials`.
-4. Stage 0 fast probe — single bracketed-marker request, used to short-circuit non-reflective parameters before payload generation.
-5. Reflection check (Stage 5) — payload sent, body matched against payload + decoded variants.
-6. DOM verification (Stage 6) — full DOM evidence: CSS marker, executable URL attribute, HTML structural sink, or JS-context AST.
+4. Payload generation (Stage 4) — inside `scanning::run_scanning`.
+5. **Stage 0 fast probe** (inside Stage 4) — single bracketed-marker request that gates whether full payload reflection + DOM verification run for a parameter. Non-reflective params are short-circuited here.
+6. Reflection check (Stage 5) — payload sent, body matched against payload + decoded variants.
+7. DOM verification (Stage 6) — full DOM evidence: CSS marker, executable URL attribute, HTML structural sink, or JS-context AST.
 
-The fast probe is logically Stage 0 but listed last here because it sits *between* Stage 3 and Stage 5 in execution order — it gates whether 5/6 run at all.
+When writing user-facing docs, refer to the 6-stage model from `src/lib.rs`. When explaining performance characteristics or "why some params cost almost nothing," surface the Stage 0 fast-probe gate that lives inside the scanning loop.
 
 ### Recently-shipped surfaces that often need doc updates
 
@@ -107,3 +109,4 @@ If `--help` and the docs disagree, the code wins; update the docs.
 - Speculative documentation. If a feature doesn't exist in code yet, don't pre-announce it here.
 - Duplicating code-block content from `cli.md` into the guides — link to the reference instead.
 - Marketing copy in the guide pages. The landing page (`content/index.md`) carries the pitch; everything under `content/guide/` should be operational.
+- Forgetting the agent skill bundle: changes to CLI surfaces, MCP tools, or core invariants must also land in `skills/dalfox/references/` (and the root `AGENTS.md`) in the same change.

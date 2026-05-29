@@ -9,6 +9,7 @@ Scope:
 - `src/` runtime logic (CLI, scanning engine, server API, MCP)
 - `tests/` validation
 - config/default behavior consistency
+- `skills/dalfox/` — agent skill bundle (SKILL.md + references/) that must stay aligned with AGENTS.md invariants and code behavior
 
 ---
 
@@ -35,6 +36,7 @@ Primary modules:
 - `src/waf/`: WAF fingerprinting + bypass strategies
 - `src/utils/`: shared CLI helpers (banner, color, logging)
 - `src/cmd/server.rs`: async scan API server + CORS/JSONP/API-key logic
+- `src/cmd/job.rs`: shared async job lifecycle + progress + bounds validation (used by server + MCP)
 - `src/mcp/mod.rs`: MCP stdio tool server (`scan_with_dalfox`, `get_results_dalfox`, `list_scans_dalfox`, `cancel_scan_dalfox`, `delete_scan_dalfox`, `preflight_dalfox`)
 
 Top-level commands:
@@ -59,7 +61,8 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan.rs`):
 
 1. Keep CLI/default constants centralized.
 - Source of truth: `src/cmd/scan.rs`
-- Examples: `DEFAULT_TIMEOUT_SECS`, `DEFAULT_WORKERS`, `DEFAULT_ENCODERS`, `DEFAULT_METHOD`
+- Examples: `DEFAULT_TIMEOUT_SECS`, `DEFAULT_WORKERS`, `DEFAULT_ENCODERS`, `DEFAULT_METHOD`, `DEFAULT_DELAY_MS`, `DEFAULT_MAX_CONCURRENT_TARGETS`, `DEFAULT_MAX_TARGETS_PER_HOST`, `DEFAULT_WAF_MIN_CONFIDENCE`
+- CLI sanity caps also live here: `CLI_MAX_TIMEOUT_SECS`, `CLI_MAX_DELAY_MS`, `CLI_MAX_WORKERS`
 - If a default changes, align all call sites that compare against defaults.
 
 2. Preserve config precedence semantics.
@@ -152,8 +155,8 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan.rs`):
 
 - New error code:
   - Add constant to `src/cmd/mod.rs` `error_codes` module
-  - Use the constant in all three interfaces (CLI, server, MCP)
-  - Existing codes: `NO_TARGETS`, `NO_FILE`, `INVALID_INPUT_TYPE`, `PARSE_ERROR`, `FILE_READ_ERROR`, `STDIN_ERROR`, `CONNECTION_FAILED`, `CONTENT_TYPE_MISMATCH`
+  - Use the constant in all three interfaces (CLI, server, MCP) plus the agent skill bundle (`skills/dalfox/references/results.md`)
+  - Existing codes: `NO_TARGETS`, `NO_FILE`, `INVALID_INPUT_TYPE`, `PARSE_ERROR`, `FILE_READ_ERROR`, `STDIN_ERROR`, `STDIN_NOT_PIPED`, `INPUT_TOO_LARGE`, `CONNECTION_FAILED`, `DNS_RESOLUTION_FAILED`, `TLS_HANDSHAKE_FAILED`, `REQUEST_TIMEOUT`, `CONTENT_TYPE_MISMATCH`, `TRUNCATED_PER_HOST_CAP`
 
 ---
 
@@ -179,7 +182,10 @@ Handy task aliases (from `justfile`):
 - `just test_all` — `cargo test -- --include-ignored`
 - `just dev` (alias `just d`) — debug build
 - `just build` (alias `just b`) — release build
-- `just version-check` / `just version-update` — keep version in lockstep across `Cargo.toml`, `Cargo.lock`, `flake.nix`, snap
+- `just version-check` (alias `just vc`) / `just version-update` (alias `just vu`) — keep version in lockstep across `Cargo.toml`, `Cargo.lock`, `flake.nix`, snap
+- `just docs-serve` (alias `just ds`) — serve the docs site locally via hwaro
+- `just docs-dependencies` — install docs tooling (hwaro) on macOS
+- `just nix-update` — update the Nix flake lockfile
 
 When behavior changes, add or update tests near the touched module plus one higher-level test when the change crosses module boundaries.
 
@@ -213,5 +219,6 @@ Before finishing a change, verify:
 - Reuse existing helpers (encoding/payload/target parsing) before adding new abstractions.
 - Avoid `unwrap()` in runtime paths where user input or network I/O is involved.
 - Keep logs user-readable in CLI mode and protocol-safe in MCP mode.
+- The `skills/dalfox/` bundle (SKILL.md + references/*.md) is published for agent consumers and must be updated when CLI flags, MCP tool schemas, error codes, or core invariants change.
 
 If code and docs diverge, treat code as source of truth and update docs in the same change.
