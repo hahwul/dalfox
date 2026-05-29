@@ -45,7 +45,7 @@ jobs:
             target: aarch64-unknown-linux-musl
             use_cross: false
             musl: true
-            zig: true
+            musl_cross: true
           # macOS targets
           - build: macos-x86_64
             os: macos-latest
@@ -82,25 +82,23 @@ jobs:
         with:
           tool: cross
       - name: Install musl tools
-        if: matrix.musl == true && !matrix.zig
+        if: matrix.musl == true && !matrix.musl_cross
         run: |
           sudo apt-get update
           sudo apt-get install -y musl-tools
       - name: Configure musl linker
-        if: matrix.musl == true && !matrix.zig
+        if: matrix.musl == true && !matrix.musl_cross
         run: |
           echo "CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc" >> $GITHUB_ENV
-      - name: Install zig
-        if: matrix.zig == true
+      - name: Install aarch64 musl cross toolchain
+        if: matrix.musl_cross == true
         run: |
-          ZIG_VERSION="0.14.0"
-          curl -fL --retry 3 "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" \
-            | tar -xJ -C /tmp
-          echo "/tmp/zig-x86_64-linux-${ZIG_VERSION}" >> $GITHUB_PATH
-      - name: Configure zig linker (aarch64 musl)
-        if: matrix.zig == true
+          curl -L https://musl.cc/aarch64-linux-musl-cross.tgz | tar -xz -C /tmp
+          echo "/tmp/aarch64-linux-musl-cross/bin" >> $GITHUB_PATH
+      - name: Configure aarch64 musl linker
+        if: matrix.musl_cross == true
         run: |
-          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=zig cc" >> $GITHUB_ENV
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=aarch64-linux-musl-gcc" >> $GITHUB_ENV
       - name: Build
         shell: bash
         run: |
