@@ -113,19 +113,28 @@ jobs:
           cargo install cargo-deb --locked
           cargo install cargo-generate-rpm --locked
 
+      # Copy the cross-compiled binary to the default location that cargo-deb expects
+      - name: Prepare binary for packaging tools
+        if: |
+          matrix.target == 'x86_64-unknown-linux-gnu' ||
+          matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          mkdir -p target/release
+          cp "target/${{ matrix.target }}/release/dalfox" target/release/dalfox
+
       - name: Build Debian package
         if: |
           matrix.target == 'x86_64-unknown-linux-gnu' ||
           matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
-          cargo deb --target ${{ matrix.target }} --no-build --output target/${{ matrix.target }}/release/
+          cargo deb --no-build
 
       - name: Build RPM package
         if: |
           matrix.target == 'x86_64-unknown-linux-gnu' ||
           matrix.target == 'aarch64-unknown-linux-gnu'
         run: |
-          cargo generate-rpm --target ${{ matrix.target }} --no-build --output target/${{ matrix.target }}/release/
+          cargo generate-rpm --no-build
 
       - name: Rename and checksum packages
         if: |

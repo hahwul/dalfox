@@ -41,7 +41,7 @@ strip = "symbols"
 [package.metadata.deb]
 maintainer = "hahwul <hahwul@gmail.com>"
 copyright = "2024, hahwul"
-license-file = ["LICENSE", "4"]
+license-file = "LICENSE.txt"
 extended-description = """Dalfox is a powerful open-source XSS scanner and automation utility.
 It supports reflected, stored, and DOM-based XSS discovery with AST-backed verification."""
 depends = ["ca-certificates"]
