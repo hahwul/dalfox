@@ -93,8 +93,8 @@ jobs:
       - name: Install zig
         if: matrix.zig == true
         run: |
-          ZIG_VERSION="0.13.0"
-          curl -L "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" \
+          ZIG_VERSION="0.14.0"
+          curl -fL --retry 3 "https://ziglang.org/download/${ZIG_VERSION}/zig-x86_64-linux-${ZIG_VERSION}.tar.xz" \
             | tar -xJ -C /tmp
           echo "/tmp/zig-x86_64-linux-${ZIG_VERSION}" >> $GITHUB_PATH
       - name: Configure zig linker (aarch64 musl)
