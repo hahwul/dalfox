@@ -92,6 +92,7 @@ if you want to contribute to this project, please see [CONTRIBUTING.md](https://
 [![](docs/static/images/CONTRIBUTORS.svg)](https://github.com/hahwul/dalfox/graphs/contributors)
 
 ## About the Name
-As for the name, Dal([달](https://en.wiktionary.org/wiki/달)) is the Korean word for "moon," while "Fox" stands for "Finder Of XSS" or 🦊
+
+The name comes from 'Dal' ([달](https://en.wiktionary.org/wiki/달)) 🌙, the Korean word for 'moon', combined with 'Fox' 🦊.
 
 ![](docs/static/images/illust.webp)
