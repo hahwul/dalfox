@@ -868,6 +868,8 @@ body:has(.docs-layout) .site-footer {
     overflow-x: hidden;
 }
 
+
+
 /* Hero */
 .hero {
     position: relative;
@@ -1716,6 +1718,11 @@ body:has(.docs-layout) .site-footer {
     }
     .hamburger {
         display: flex;
+    }
+    /* Hide mobile hamburger on pages without sidebar (landing + 404) */
+    body:has(.landing) .hamburger,
+    body:has(.error-page) .hamburger {
+        display: none;
     }
     .header-nav {
         display: none;
