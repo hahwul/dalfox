@@ -64,6 +64,8 @@ dalfox scan --input-type raw-http request.txt
 
 The file is a standard raw HTTP request (method + path + headers + blank line + body). Dalfox preserves every header, cookie, and body parameter.
 
+For live proxy workflows (especially Caido Active Workflows) see the dedicated **[Caido integration guide](../integrations/caido/)** — it covers the exact shell pattern, the Caido boolean gotcha in If/Else nodes, and how to turn results into Findings automatically.
+
 ## Stored XSS mode (SXSS)
 
 Test the classic "inject on form A, payload appears on page B" pattern:
