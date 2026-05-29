@@ -915,6 +915,108 @@ body:has(.docs-layout) .site-footer {
     pointer-events: none;
     z-index: 0;
 }
+
+/* Hero atmospheric illustration (with terminal present — stronger left mask) */
+.hero-illustration {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-image: url('/images/illust.webp');
+    /* Let the night scene cover the entire headline area ("Hunt every XSS") */
+    background-position: 48% 28%;
+    background-size: 82% auto;
+    background-repeat: no-repeat;
+    opacity: 0.32;
+    filter: saturate(0.92) contrast(1.02);
+    /* Aggressive right-side blending — 4-layer mask to kill visible edges on the entire right side */
+    mask-image:
+        /* 1. Much softer left protection — allow the illustration to cover the entire "Hunt every XSS" headline area */
+        linear-gradient(
+            to right,
+            transparent 0%,
+            transparent 6%,
+            rgba(0, 0, 0, 0.06) 15%,
+            rgba(0, 0, 0, 0.22) 27%,
+            rgba(0, 0, 0, 0.48) 40%,
+            rgba(0, 0, 0, 0.78) 55%,
+            black 70%
+        ),
+        /* 2. Very soft large vignette (bright areas) */
+        radial-gradient(
+            ellipse at 88% 36%,
+            black 38%,
+            rgba(0, 0, 0, 0.97) 54%,
+            rgba(0, 0, 0, 0.78) 66%,
+            rgba(0, 0, 0, 0.42) 78%,
+            rgba(0, 0, 0, 0.18) 88%,
+            rgba(0, 0, 0, 0.05) 94%,
+            transparent 99%
+        ),
+        /* 3. Top fade */
+        linear-gradient(
+            to bottom,
+            transparent 0%,
+            rgba(0, 0, 0, 0.1) 7%,
+            rgba(0, 0, 0, 0.42) 14%,
+            rgba(0, 0, 0, 0.76) 23%,
+            black 34%
+        ),
+        /* 4. STRONG right-edge fade (aggressive vertical dissolve on the entire right side) */
+        linear-gradient(
+            to left,
+            transparent 0%,
+            rgba(0, 0, 0, 0.06) 9%,
+            rgba(0, 0, 0, 0.32) 18%,
+            rgba(0, 0, 0, 0.68) 29%,
+            rgba(0, 0, 0, 0.91) 40%,
+            black 52%
+        );
+    -webkit-mask-image:
+        /* 1. Much softer left protection — allow the illustration to cover the entire "Hunt every XSS" headline area */
+        linear-gradient(
+            to right,
+            transparent 0%,
+            transparent 6%,
+            rgba(0, 0, 0, 0.06) 15%,
+            rgba(0, 0, 0, 0.22) 27%,
+            rgba(0, 0, 0, 0.48) 40%,
+            rgba(0, 0, 0, 0.78) 55%,
+            black 70%
+        ),
+        /* 2. Very soft large vignette (bright areas) */
+        radial-gradient(
+            ellipse at 88% 36%,
+            black 38%,
+            rgba(0, 0, 0, 0.97) 54%,
+            rgba(0, 0, 0, 0.78) 66%,
+            rgba(0, 0, 0, 0.42) 78%,
+            rgba(0, 0, 0, 0.18) 88%,
+            rgba(0, 0, 0, 0.05) 94%,
+            transparent 99%
+        ),
+        /* 3. Top fade */
+        linear-gradient(
+            to bottom,
+            transparent 0%,
+            rgba(0, 0, 0, 0.1) 7%,
+            rgba(0, 0, 0, 0.42) 14%,
+            rgba(0, 0, 0, 0.76) 23%,
+            black 34%
+        ),
+        /* 4. STRONG right-edge fade (aggressive vertical dissolve on the entire right side) */
+        linear-gradient(
+            to left,
+            transparent 0%,
+            rgba(0, 0, 0, 0.06) 9%,
+            rgba(0, 0, 0, 0.32) 18%,
+            rgba(0, 0, 0, 0.68) 29%,
+            rgba(0, 0, 0, 0.91) 40%,
+            black 52%
+        );
+    mask-composite: intersect;
+    -webkit-mask-composite: intersect;
+    pointer-events: none;
+}
 .hero-inner {
     position: relative;
     z-index: 1;
@@ -1196,6 +1298,18 @@ body:has(.docs-layout) .site-footer {
 }
 .t-dim {
     color: var(--text-muted);
+}
+.t-ts {
+    color: #6b7280;
+    font-size: 0.72em;
+}
+.t-wrn {
+    color: #fbbf24;
+    font-weight: 700;
+}
+.t-poc {
+    color: #f87171;
+    font-weight: 600;
 }
 .t-label {
     display: inline-block;
@@ -1563,6 +1677,12 @@ body:has(.docs-layout) .site-footer {
     .hero-inner {
         grid-template-columns: 1fr;
         gap: 2.5rem;
+    }
+    /* Hide the full illustration treatment below 1024px.
+       The rich "cover the headline" version only makes sense in true two-column desktop.
+       In the awkward intermediate sizes it ends up looking isolated in the middle. */
+    .hero-illustration {
+        display: none;
     }
     .features-grid {
         grid-template-columns: repeat(2, 1fr);
