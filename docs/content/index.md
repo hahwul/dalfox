@@ -5,6 +5,7 @@ template = "landing"
 +++
 
 <section class="hero">
+  <div class="hero-illustration" aria-hidden="true"></div>
   <div class="hero-inner">
     <div class="hero-text">
       <h1 class="hero-title">
