@@ -133,9 +133,19 @@ pub fn generate_dom_xss_poc(source: &str, sink: &str) -> (String, String) {
     //   * Everything else (`innerHTML`, jQuery `html()`, `document.write`,
     //     …) renders the payload as HTML, so a tag + event-handler combo
     //     wins.
+    // `import` takes a module *specifier* (a URL), so the same executable
+    // `data:text/javascript,…` payload as a URL-attribute sink loads and runs
+    // an attacker module — group it with the URL-attribute shape.
     let is_url_attr_sink = matches!(
         sink,
-        "src" | "href" | "xlink:href" | "action" | "formaction" | "poster" | "background"
+        "src"
+            | "href"
+            | "xlink:href"
+            | "action"
+            | "formaction"
+            | "poster"
+            | "background"
+            | "import"
     );
     // Sinks whose value is fed directly to a JS evaluator. `script.text` /
     // `script.textContent` / `script.innerText` are listed alongside the
