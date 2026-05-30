@@ -226,3 +226,189 @@ fn test_display_tech_types() {
     assert_eq!(format!("{}", TechType::JQuery), "jQuery");
     assert_eq!(format!("{}", TechType::WordPress), "WordPress");
 }
+
+// --- Additional header-based detection ---
+
+#[test]
+fn test_detect_aspnet_from_header() {
+    let headers = make_headers(&[("x-powered-by", "ASP.NET")]);
+    let result = detect_technologies(&headers, None);
+    assert!(result.has(&TechType::ASPNet));
+}
+
+#[test]
+fn test_detect_nextjs_from_header() {
+    let headers = make_headers(&[("x-powered-by", "Next.js")]);
+    let result = detect_technologies(&headers, None);
+    assert!(result.has(&TechType::NextJs));
+}
+
+#[test]
+fn test_detect_wordpress_from_link_header() {
+    let headers = make_headers(&[(
+        "link",
+        "<https://site/wp-json/>; rel=\"https://api.w.org/\"",
+    )]);
+    let result = detect_technologies(&headers, None);
+    assert!(result.has(&TechType::WordPress));
+}
+
+// --- Additional body-based detection ---
+
+#[test]
+fn test_detect_handlebars_from_body() {
+    let headers = make_headers(&[]);
+    let body = "<script src='/js/handlebars.min.js'></script>";
+    let result = detect_technologies(&headers, Some(body));
+    assert!(result.has(&TechType::Handlebars));
+}
+
+#[test]
+fn test_detect_svelte_from_body() {
+    let headers = make_headers(&[]);
+    let body = "<script src='/build/svelte-app.js'></script>";
+    let result = detect_technologies(&headers, Some(body));
+    assert!(result.has(&TechType::Svelte));
+}
+
+#[test]
+fn test_detect_ember_from_body() {
+    let headers = make_headers(&[]);
+    let body = "<script src='/assets/ember.min.js'></script>";
+    let result = detect_technologies(&headers, Some(body));
+    assert!(result.has(&TechType::Ember));
+}
+
+#[test]
+fn test_detect_backbone_from_body() {
+    let headers = make_headers(&[]);
+    let body = "<script src='/js/backbone.min.js'></script>";
+    let result = detect_technologies(&headers, Some(body));
+    assert!(result.has(&TechType::Backbone));
+}
+
+#[test]
+fn test_detect_knockout_from_body() {
+    let headers = make_headers(&[]);
+    let body = "<div data-bind=\"text: name\"></div>";
+    let result = detect_technologies(&headers, Some(body));
+    assert!(result.has(&TechType::Knockout));
+}
+
+#[test]
+fn test_detect_nuxt_from_body() {
+    let headers = make_headers(&[]);
+    let body = "<script>window.__NUXT__={}</script>";
+    let result = detect_technologies(&headers, Some(body));
+    assert!(result.has(&TechType::Nuxt));
+}
+
+#[test]
+fn test_detect_nextjs_from_body() {
+    let headers = make_headers(&[]);
+    let body = "<script src='/_next/static/chunks/main.js'></script>";
+    let result = detect_technologies(&headers, Some(body));
+    assert!(result.has(&TechType::NextJs));
+}
+
+#[test]
+fn test_detect_wordpress_from_body() {
+    let headers = make_headers(&[]);
+    let body = "<link href='/wp-content/themes/x/style.css'>";
+    let result = detect_technologies(&headers, Some(body));
+    assert!(result.has(&TechType::WordPress));
+}
+
+// --- Additional tech-specific payload generation ---
+
+#[test]
+fn test_vue_payloads_generated() {
+    let mut result = TechDetectionResult::default();
+    result.detected.push(TechDetection {
+        tech: TechType::Vue,
+        evidence: "test".to_string(),
+    });
+    let payloads = get_tech_specific_payloads(&result);
+    assert!(payloads.iter().any(|p| p.contains("constructor")));
+    assert!(payloads.iter().any(|p| p.contains("v-html")));
+}
+
+#[test]
+fn test_handlebars_payloads_generated() {
+    let mut result = TechDetectionResult::default();
+    result.detected.push(TechDetection {
+        tech: TechType::Handlebars,
+        evidence: "test".to_string(),
+    });
+    let payloads = get_tech_specific_payloads(&result);
+    assert!(payloads.iter().any(|p| p.contains("#with")));
+}
+
+#[test]
+fn test_knockout_payloads_generated() {
+    let mut result = TechDetectionResult::default();
+    result.detected.push(TechDetection {
+        tech: TechType::Knockout,
+        evidence: "test".to_string(),
+    });
+    let payloads = get_tech_specific_payloads(&result);
+    assert!(payloads.iter().any(|p| p.contains("data-bind")));
+}
+
+#[test]
+fn test_ember_payloads_generated() {
+    let mut result = TechDetectionResult::default();
+    result.detected.push(TechDetection {
+        tech: TechType::Ember,
+        evidence: "test".to_string(),
+    });
+    let payloads = get_tech_specific_payloads(&result);
+    assert!(payloads.iter().any(|p| p.contains("constructor")));
+}
+
+#[test]
+fn test_wordpress_payloads_generated() {
+    let mut result = TechDetectionResult::default();
+    result.detected.push(TechDetection {
+        tech: TechType::WordPress,
+        evidence: "test".to_string(),
+    });
+    let payloads = get_tech_specific_payloads(&result);
+    assert!(payloads.iter().any(|p| p.contains("onerror=alert(1)")));
+}
+
+#[test]
+fn test_server_side_techs_generate_no_payloads() {
+    let mut result = TechDetectionResult::default();
+    for tech in [
+        TechType::PHP,
+        TechType::Express,
+        TechType::ASPNet,
+        TechType::Nuxt,
+        TechType::Svelte,
+        TechType::Backbone,
+    ] {
+        result.detected.push(TechDetection {
+            tech,
+            evidence: "t".to_string(),
+        });
+    }
+    let payloads = get_tech_specific_payloads(&result);
+    assert!(payloads.is_empty());
+}
+
+#[test]
+fn test_display_all_tech_types() {
+    assert_eq!(format!("{}", TechType::React), "React");
+    assert_eq!(format!("{}", TechType::Vue), "Vue.js");
+    assert_eq!(format!("{}", TechType::Handlebars), "Handlebars");
+    assert_eq!(format!("{}", TechType::Svelte), "Svelte");
+    assert_eq!(format!("{}", TechType::Ember), "Ember");
+    assert_eq!(format!("{}", TechType::Backbone), "Backbone");
+    assert_eq!(format!("{}", TechType::Knockout), "Knockout");
+    assert_eq!(format!("{}", TechType::ASPNet), "ASP.NET");
+    assert_eq!(format!("{}", TechType::PHP), "PHP");
+    assert_eq!(format!("{}", TechType::Express), "Express");
+    assert_eq!(format!("{}", TechType::NextJs), "Next.js");
+    assert_eq!(format!("{}", TechType::Nuxt), "Nuxt");
+}

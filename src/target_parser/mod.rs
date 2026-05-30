@@ -323,12 +323,21 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
 mod tests {
     use super::*;
 
+    // The client cache is process-global; these tests mutate it via
+    // `reset_client_cache_for_tests()` / `build_client()`. Resetting
+    // before/after is not enough on its own: when the two cache tests run
+    // concurrently, one test's reset can clear the cache mid-assertion in the
+    // other (observed as a `len 0 -> 1` flake). Serialize them with a shared
+    // lock so each runs its build/reset sequence in isolation.
+    static CACHE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// Cache returns the same Client on the second call with an equal key,
     /// and a fresh entry for a different key. Tests run serially via
     /// `--test-threads=1` is not assumed; we reset before/after to avoid
     /// cross-test pollution.
     #[test]
     fn test_client_cache_reuses_for_same_key() {
+        let _guard = CACHE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         reset_client_cache_for_tests();
         let mut t = parse_target("http://example.com").unwrap();
         t.timeout = 7;
@@ -345,6 +354,7 @@ mod tests {
 
     #[test]
     fn test_client_cache_separates_distinct_keys() {
+        let _guard = CACHE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         reset_client_cache_for_tests();
         let mut a = parse_target("http://example.com").unwrap();
         a.timeout = 7;

@@ -66,3 +66,21 @@ fn read_bounded_rejects_non_utf8() {
     assert!(err.to_string().contains("read failed (or non-UTF8)"));
     let _ = std::fs::remove_file(&p);
 }
+
+#[test]
+fn read_bounded_accepts_file_at_exact_cap() {
+    let p = tmp("exact");
+    std::fs::write(&p, b"0123456789").unwrap(); // 10 bytes
+    let s = read_bounded(&p, 10, "config file").unwrap();
+    assert_eq!(s, "0123456789");
+    let _ = std::fs::remove_file(&p);
+}
+
+#[test]
+fn read_bounded_accepts_empty_file_with_zero_cap() {
+    let p = tmp("empty-zero");
+    std::fs::write(&p, b"").unwrap();
+    let s = read_bounded(&p, 0, "config file").unwrap();
+    assert!(s.is_empty());
+    let _ = std::fs::remove_file(&p);
+}
