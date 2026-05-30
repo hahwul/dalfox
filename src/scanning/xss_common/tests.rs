@@ -350,11 +350,7 @@ fn test_load_custom_payloads_strips_crlf() {
 fn test_load_custom_payloads_empty_after_strip_errors() {
     let p = tmp_payload_file("empty", "# only a comment\n\n");
     let err = load_custom_payloads(p.to_str().unwrap()).unwrap_err();
-    assert!(
-        err.to_string().contains("no usable lines"),
-        "got: {}",
-        err
-    );
+    assert!(err.to_string().contains("no usable lines"), "got: {}", err);
     let _ = std::fs::remove_file(&p);
 }
 
