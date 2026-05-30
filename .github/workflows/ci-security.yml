@@ -1,0 +1,28 @@
+---
+name: Security Audit
+on:
+  push:
+    branches: [main]
+    paths: [Cargo.toml, Cargo.lock, .github/workflows/ci-security.yml]
+  pull_request:
+    branches: [main]
+    paths: [Cargo.toml, Cargo.lock, .github/workflows/ci-security.yml]
+  schedule:
+    # Weekly: catch newly-disclosed RUSTSEC advisories even when the
+    # dependency tree itself has not changed.
+    - cron: "0 6 * * 1"
+  workflow_dispatch:
+permissions:
+  contents: read
+  issues: write
+  checks: write
+jobs:
+  audit:
+    name: cargo audit (RUSTSEC)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run security audit
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
