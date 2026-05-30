@@ -1776,6 +1776,7 @@ impl<'a> DomXssVisitor<'a> {
         let saved_aliases = self.var_aliases.clone();
         let saved_instance_classes = self.instance_classes.clone();
         let saved_bound_aliases = self.bound_function_aliases.clone();
+        let saved_response_vars = self.response_object_vars.clone();
         let saved_vuln_len = self.vulnerabilities.len();
         let saved_collecting_tainted_returns = self.collecting_tainted_returns;
         let saved_tainted_return_sources = std::mem::take(&mut self.tainted_return_sources);
@@ -1829,6 +1830,7 @@ impl<'a> DomXssVisitor<'a> {
         self.var_aliases = saved_aliases;
         self.instance_classes = saved_instance_classes;
         self.bound_function_aliases = saved_bound_aliases;
+        self.response_object_vars = saved_response_vars;
         self.vulnerabilities.truncate(saved_vuln_len);
         self.collecting_tainted_returns = saved_collecting_tainted_returns;
         self.tainted_return_sources = saved_tainted_return_sources;
@@ -1962,12 +1964,16 @@ impl<'a> DomXssVisitor<'a> {
                     // Save current tainted vars state
                     let saved_tainted = self.tainted_vars.clone();
                     let saved_aliases = self.var_aliases.clone();
+                    let saved_response_vars = self.response_object_vars.clone();
 
                     self.walk_statements(&body.statements);
 
-                    // Restore state after function (parameters are local scope)
+                    // Restore state after function (locals don't leak out —
+                    // e.g. a `const r = await fetch()` Response binding must
+                    // not taint an unrelated outer `r.text()`).
                     self.tainted_vars = saved_tainted;
                     self.var_aliases = saved_aliases;
+                    self.response_object_vars = saved_response_vars;
                 }
             }
             Statement::ClassDeclaration(class_decl) => {
@@ -2687,7 +2693,7 @@ impl<'a> DomXssVisitor<'a> {
             }
             // Named callback, e.g. `.then(render)`.
             Expression::Identifier(id) => {
-                return self.named_promise_callback_kind(id.name.as_str(), &incoming);
+                return self.named_promise_callback_kind(id.name.as_str(), id.span, &incoming);
             }
             _ => return PromiseValueKind::Unknown,
         };
@@ -2730,15 +2736,37 @@ impl<'a> DomXssVisitor<'a> {
         result_kind
     }
 
-    /// Best-effort threading for `.then(namedFn)`: if the summarized callback
-    /// returns tainted data, propagate it to the next `.then`. Sinks *inside*
-    /// the named callback are reported by the normal function-summary
-    /// call-site path, not here.
+    /// Handle a named `.then(namedFn)` callback against the resolved promise
+    /// value. When the incoming value is tainted and the callback's summary
+    /// says its first parameter reaches a sink (e.g.
+    /// `fetch().then(r => r.text()).then(render)` with
+    /// `function render(t){ el.innerHTML = t; }`), report it — the
+    /// fetch-chain driver consumed the call, so the normal function-summary
+    /// call-site path never runs for this reference. Also propagate the
+    /// callback's tainted return so the next `.then` sees it.
     fn named_promise_callback_kind(
-        &self,
+        &mut self,
         fn_name: &str,
+        span: oxc_span::Span,
         incoming: &PromiseValueKind,
     ) -> PromiseValueKind {
+        // Sink reached by the callback's first parameter, when the resolved
+        // value flowing into it is tainted.
+        if let PromiseValueKind::Tainted(source) = incoming
+            && let Some(sink_name) = self
+                .function_summaries
+                .get(fn_name)
+                .and_then(|summary| summary.tainted_param_sinks.get(&0))
+                .cloned()
+        {
+            self.report_vulnerability_with_source(
+                span,
+                &sink_name,
+                "Tainted fetch response reaches sink through named .then() callback",
+                Some(source.clone()),
+            );
+        }
+
         if let Some(summary) = self.function_summaries.get(fn_name) {
             if matches!(
                 incoming,

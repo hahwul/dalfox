@@ -3646,3 +3646,41 @@ fn jquery_constructor_walks_nested_sink_in_argument() {
         sinks
     );
 }
+
+#[test]
+fn fetch_named_then_callback_reaches_sink() {
+    // Named .then() callback: the fetch-chain driver consumes the call, so
+    // the sink inside `render` must be reported via the callback's summary.
+    let js = r#"
+function render(t) { document.getElementById('o').innerHTML = t; }
+fetch('/api').then(function (r) { return r.text(); }).then(render);
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.iter()
+            .any(|v| v.sink == "innerHTML" && v.source.contains("Response")),
+        "named .then(render) sink must surface; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn awaited_fetch_var_does_not_leak_out_of_function_summary() {
+    // A summarized function with `const r = await fetch(...)` must not leave
+    // its response-var binding in the outer analysis, or an unrelated outer
+    // `rsp.text()` would be wrongly treated as a tainted source.
+    let js = r#"
+async function loader() { var rsp = await fetch('/api'); return rsp; }
+document.getElementById('o').innerHTML = rsp.text();
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.is_empty(),
+        "response-var binding must not leak out of the function summary; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
