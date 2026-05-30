@@ -2,6 +2,7 @@
 name = "dalfox"
 version = "3.0.0"
 edition = "2024"
+rust-version = "1.93"
 authors = ["hahwul"]
 description = "Dalfox is a powerful open-source XSS scanner and utility focused on automation"
 license = "MIT"
