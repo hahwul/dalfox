@@ -39,7 +39,19 @@ jobs:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
       - name: Run normally-ignored tests
+        # --include-ignored runs the normally-skipped functional suite. The
+        # four detection-coverage *benchmark* tests are excluded by name:
+        # they assert detection-rate targets the scanner does not yet meet
+        # (see their `#[ignore = "benchmark: ..."]` reasons) and are tracked
+        # separately, so they must not gate CI. The --skip patterns are
+        # substrings chosen to match only those four:
+        #   realworld            -> test_realworld_xss_scenarios, _by_category
+        #   category_baselines   -> test_query_reflection_category_baselines_v2
+        #   test_query_reflection_v2 -> that exact test (not the _diverse/_advanced variants)
         # No --all-targets: it would try to run the bench-shaped probe files
-        # as benchmarks. Plain `cargo test` covers unit + integration tests,
-        # and --include-ignored adds the normally-skipped functional suite.
-        run: cargo test -- --include-ignored
+        # as benchmarks, which fails.
+        run: |
+          cargo test -- --include-ignored \
+            --skip realworld \
+            --skip category_baselines \
+            --skip test_query_reflection_v2

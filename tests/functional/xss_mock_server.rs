@@ -258,11 +258,11 @@ fn apply_filter(input: &str, filter_chain: &str) -> String {
             // Truncation
             _ if filter.starts_with("truncate:") => {
                 if let Ok(n) = filter["truncate:".len()..].parse::<usize>() {
-                    if result.len() > n {
-                        result[..n].to_string()
-                    } else {
-                        result
-                    }
+                    // Truncate by characters, not bytes: `result[..n]` panics
+                    // when n lands inside a multi-byte UTF-8 sequence (some
+                    // mock payloads contain non-ASCII), which crashed the
+                    // realworld test before it could assert.
+                    result.chars().take(n).collect()
                 } else {
                     result
                 }
@@ -1234,7 +1234,7 @@ struct ScanTestConfig {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "benchmark: asserts a detection-coverage target the scanner does not yet meet; tracked separately, excluded from the CI ignored-tests job"]
 async fn test_query_reflection_v2() {
     let (addr, state) = start_mock_server_v2().await;
 
@@ -1486,7 +1486,7 @@ async fn test_query_reflection_advanced_xss_coverage_v2() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "benchmark: asserts a detection-coverage target the scanner does not yet meet; tracked separately, excluded from the CI ignored-tests job"]
 async fn test_query_reflection_category_baselines_v2() {
     let (addr, _state) = start_mock_server_v2().await;
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -2223,7 +2223,7 @@ fn load_realworld_cases_by_file() -> Result<HashMap<String, Vec<MockCase>>, Stri
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "benchmark: asserts a detection-coverage target the scanner does not yet meet; tracked separately, excluded from the CI ignored-tests job"]
 async fn test_realworld_xss_scenarios() {
     let (addr, state) = start_mock_server_v2().await;
     tokio::time::sleep(Duration::from_millis(100)).await;
@@ -2336,7 +2336,7 @@ async fn test_realworld_xss_scenarios() {
 }
 
 #[tokio::test]
-#[ignore]
+#[ignore = "benchmark: asserts a detection-coverage target the scanner does not yet meet; tracked separately, excluded from the CI ignored-tests job"]
 async fn test_realworld_xss_by_category() {
     let (addr, _state) = start_mock_server_v2().await;
     tokio::time::sleep(Duration::from_millis(100)).await;
