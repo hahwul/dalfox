@@ -3627,3 +3627,22 @@ async function load() {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn jquery_constructor_walks_nested_sink_in_argument() {
+    // A nested sink inside the (tainted) `$()` argument must also be visited.
+    // `$(eval(location.hash))` is both a jQuery$ finding and an eval finding.
+    let js = r#"$(eval(location.hash));"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    let sinks: Vec<String> = r.iter().map(|v| v.sink.clone()).collect();
+    assert!(
+        sinks.iter().any(|s| s == "eval"),
+        "nested eval sink inside $() argument must be visited; got {:?}",
+        sinks
+    );
+    assert!(
+        sinks.iter().any(|s| s == "jQuery$"),
+        "jQuery$ constructor on the tainted argument must also fire; got {:?}",
+        sinks
+    );
+}

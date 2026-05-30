@@ -902,14 +902,15 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
-    /// The constant string that must appear at the *start* of `expr`'s value,
-    /// when statically determinable. Used to decide whether a jQuery `$()`
-    /// argument is forced into selector mode (a leading `#`/`.`/tag char) or
-    /// can be parsed as HTML (no static prefix, or a leading `<`).
+    /// The non-empty constant string that must appear at the *start* of
+    /// `expr`'s value, when statically determinable. Used to decide whether a
+    /// jQuery `$()` argument is forced into selector mode (a leading
+    /// `#`/`.`/tag char) or can be parsed as HTML (no static prefix, or a
+    /// leading `<`).
     ///
-    /// Returns `Some("")` when the leading segment is dynamic but provably
-    /// empty-prefixed (e.g. a template literal that opens with `${expr}`),
-    /// `None` when no static leading text can be determined.
+    /// Returns `None` when no non-empty static leading text can be determined
+    /// — including a template literal that opens with `${expr}` (empty first
+    /// quasi), where the runtime prefix is dynamic.
     fn static_leading_string(&self, expr: &Expression<'a>) -> Option<String> {
         match expr {
             Expression::StringLiteral(s) => Some(s.value.to_string()),
@@ -3148,8 +3149,11 @@ impl<'a> DomXssVisitor<'a> {
                 "Tainted HTML string passed to jQuery $() constructor builds DOM nodes (selector-to-HTML)",
                 source,
             );
-            // Continue walking so inner sinks/sources in the argument are still
-            // visited (the argument expression itself may chain further).
+            // Walk the (tainted) argument so a nested sink inside it — e.g.
+            // `$(eval(location.hash))` — is also reported; the trailing
+            // `walk_expression(&call.callee)` only descends the `$` callee,
+            // never the call's arguments.
+            self.walk_expression(arg_expr);
         }
 
         if let Expression::StaticMemberExpression(member) = &call.callee
