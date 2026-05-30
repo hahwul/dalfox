@@ -941,12 +941,12 @@ async fn start_mock_server_v2() -> (SocketAddr, AppState) {
     };
 
     let app = Router::new()
-        .route("/query/:case_id", get(query_handler_v2))
-        .route("/header/:case_id", get(header_handler_v2))
-        .route("/cookie/:case_id", get(cookie_handler_v2))
-        .route("/path/:case_id/:param", get(path_handler_v2))
-        .route("/body/:case_id", post(body_handler_v2))
-        .route("/realworld/query/:case_id", get(realworld_handler))
+        .route("/query/{case_id}", get(query_handler_v2))
+        .route("/header/{case_id}", get(header_handler_v2))
+        .route("/cookie/{case_id}", get(cookie_handler_v2))
+        .route("/path/{case_id}/{param}", get(path_handler_v2))
+        .route("/body/{case_id}", post(body_handler_v2))
+        .route("/realworld/query/{case_id}", get(realworld_handler))
         .with_state(state.clone());
 
     let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
