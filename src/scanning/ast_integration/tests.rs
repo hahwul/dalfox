@@ -695,3 +695,128 @@ fn test_extract_script_element_ids_ignores_blank_ids() {
     assert_eq!(ids.len(), 1);
     assert!(ids.contains("ok"));
 }
+
+// ===== End-to-end pipeline coverage for issues #1021 / #1022 / #1024 =====
+// Each test feeds the actual xssmaze page HTML through the same path the
+// scanner uses (extract JS from HTML -> AST analyze -> POC generation).
+
+#[test]
+fn e2e_jquery_level1_constructor_finding_and_hash_poc() {
+    // xssmaze /jquery/level1/
+    let html = r#"<html><head><script src='https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js'></script></head>
+    <body>
+    <div id='content'></div>
+    <script>
+      var target = decodeURIComponent(location.hash.slice(1));
+      if (target) { $(target).appendTo('#content'); }
+    </script>
+    </body></html>"#;
+    let results = run_initial_ast_dom_analysis(html, "http://t/jquery/level1/", "GET");
+    assert!(
+        results.iter().any(|r| r.evidence.contains("jQuery$")),
+        "jQuery $() constructor must surface a finding; got {:?}",
+        results
+            .iter()
+            .map(|r| r.evidence.clone())
+            .collect::<Vec<_>>()
+    );
+    // location.hash source -> HTML payload carried in the fragment (the PoC
+    // URL is stored in the `data` field).
+    assert!(
+        results
+            .iter()
+            .any(|r| r.data.contains('#') && r.payload.contains("onerror=alert(1)")),
+        "expected a hash-fragment HTML PoC; got {:?}",
+        results
+            .iter()
+            .map(|r| (r.data.clone(), r.payload.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn e2e_codeexec_level1_dynamic_import_finding_and_data_uri_poc() {
+    // xssmaze /codeexec/level1/
+    let html = r#"<html><body>
+    <div id='status'>loading plugin...</div>
+    <script>
+      var name = new URLSearchParams(location.search).get('query') || '';
+      if (name) {
+        import(name).then(function () {}).catch(function () {});
+      }
+    </script>
+    </body></html>"#;
+    let results = run_initial_ast_dom_analysis(html, "http://t/codeexec/level1/?query=a", "GET");
+    assert!(
+        results.iter().any(|r| r.evidence.contains("Sink: import")),
+        "dynamic import() must surface a finding; got {:?}",
+        results
+            .iter()
+            .map(|r| r.evidence.clone())
+            .collect::<Vec<_>>()
+    );
+    // import takes a module specifier -> executable data: URL payload on `query`.
+    assert!(
+        results
+            .iter()
+            .any(|r| r.payload.contains("query=data:text/javascript,alert(1)")),
+        "expected a data: URL module PoC on query; got {:?}",
+        results
+            .iter()
+            .map(|r| r.payload.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn e2e_apidom_level1_fetch_innerhtml_finding() {
+    // xssmaze /apidom/level1/
+    let html = r#"<html><body>
+    <div id='out'>loading...</div>
+    <script>
+      var q = new URLSearchParams(location.search).get('q') || '';
+      fetch('/apidom/level1/api?q=' + encodeURIComponent(q))
+        .then(function (r) { return r.text(); })
+        .then(function (t) { document.getElementById('out').innerHTML = t; });
+    </script>
+    </body></html>"#;
+    let results = run_initial_ast_dom_analysis(html, "http://t/apidom/level1/?q=a", "GET");
+    assert!(
+        results
+            .iter()
+            .any(|r| r.evidence.contains("Source: Response.text")
+                && r.evidence.contains("Sink: innerHTML")),
+        "fetch text response -> innerHTML must surface; got {:?}",
+        results
+            .iter()
+            .map(|r| r.evidence.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn e2e_apidom_level3_xhr_innerhtml_finding() {
+    // xssmaze /apidom/level3/
+    let html = r#"<html><body>
+    <div id='out'>loading...</div>
+    <script>
+      var q = new URLSearchParams(location.search).get('q') || '';
+      var xhr = new XMLHttpRequest();
+      xhr.open('GET', '/apidom/level3/api?q=' + encodeURIComponent(q));
+      xhr.onload = function () { document.getElementById('out').innerHTML = xhr.responseText; };
+      xhr.send();
+    </script>
+    </body></html>"#;
+    let results = run_initial_ast_dom_analysis(html, "http://t/apidom/level3/?q=a", "GET");
+    assert!(
+        results.iter().any(
+            |r| r.evidence.contains("Source: XMLHttpRequest.responseText")
+                && r.evidence.contains("Sink: innerHTML")
+        ),
+        "xhr.responseText -> innerHTML must surface; got {:?}",
+        results
+            .iter()
+            .map(|r| r.evidence.clone())
+            .collect::<Vec<_>>()
+    );
+}

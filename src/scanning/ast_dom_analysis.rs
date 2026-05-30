@@ -48,6 +48,19 @@ struct BoundCallableAlias {
     bound_args: Vec<BoundArgInfo>,
 }
 
+/// What a Promise in a `fetch().then(…).then(…)` chain resolves to, threaded
+/// from one `.then` callback's return value to the next callback's parameter.
+#[derive(Clone)]
+enum PromiseValueKind {
+    /// The value is a `fetch()` `Response` object — its `.text()`/`.json()`
+    /// reads are tainted network data.
+    Response,
+    /// The value is tainted, carrying the given source label.
+    Tainted(String),
+    /// The value is not (known to be) tainted.
+    Unknown,
+}
+
 /// AST visitor for DOM XSS analysis
 struct DomXssVisitor<'a> {
     /// Set of tainted variable names
@@ -101,6 +114,13 @@ struct DomXssVisitor<'a> {
     /// never bound to a variable. Populated by the HTML pre-scan in
     /// `ast_integration::extract_script_element_ids`.
     script_element_ids: HashSet<String>,
+    /// Callback parameters currently bound to a `fetch()` `Response`
+    /// object — the first `.then(resp => …)` of a fetch chain. While such
+    /// a parameter is in scope, `resp.text()` / `resp.json()` read the
+    /// network response body, which is an untrusted DOM-XSS source. The
+    /// set is pushed/popped as the promise-chain driver enters and leaves
+    /// each callback so the binding never leaks past its callback.
+    response_object_vars: HashSet<String>,
 }
 
 // Module-level DOM source/sink/sanitizer constants
@@ -492,6 +512,7 @@ impl<'a> DomXssVisitor<'a> {
             url_search_params_field_sources: HashMap::new(),
             script_element_vars: HashSet::new(),
             script_element_ids: HashSet::new(),
+            response_object_vars: HashSet::new(),
         }
     }
 
@@ -881,6 +902,141 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
+    /// The constant string that must appear at the *start* of `expr`'s value,
+    /// when statically determinable. Used to decide whether a jQuery `$()`
+    /// argument is forced into selector mode (a leading `#`/`.`/tag char) or
+    /// can be parsed as HTML (no static prefix, or a leading `<`).
+    ///
+    /// Returns `Some("")` when the leading segment is dynamic but provably
+    /// empty-prefixed (e.g. a template literal that opens with `${expr}`),
+    /// `None` when no static leading text can be determined.
+    fn static_leading_string(&self, expr: &Expression<'a>) -> Option<String> {
+        match expr {
+            Expression::StringLiteral(s) => Some(s.value.to_string()),
+            Expression::TemplateLiteral(t) => {
+                // A template opening with `${…}` has an empty first quasi, so
+                // the runtime prefix is whatever that expression yields — no
+                // static leading text we can rely on.
+                let first = t.quasis.first()?;
+                let raw = first.value.cooked.as_ref().map(Str::as_str).unwrap_or("");
+                if raw.is_empty() {
+                    None
+                } else {
+                    Some(raw.to_string())
+                }
+            }
+            Expression::BinaryExpression(b) if b.operator == BinaryOperator::Addition => {
+                self.static_leading_string(&b.left)
+            }
+            Expression::ParenthesizedExpression(p) => self.static_leading_string(&p.expression),
+            _ => None,
+        }
+    }
+
+    /// True when a jQuery `$()` / `jQuery()` argument is pinned into *selector*
+    /// mode by a constant leading character (`#id`, `.class`, `tag`, `[attr]`,
+    /// …). jQuery only builds DOM nodes (the XSS-relevant path) when the first
+    /// non-whitespace character of the string is `<`, so a constant non-`<`
+    /// prefix means the tainted tail can never start an HTML tag — suppress.
+    ///
+    /// No static prefix (`$(taint)`, `$(decodeURIComponent(...))`) or a
+    /// leading `<` (`$('<div>' + taint)`) does NOT force selector mode, so the
+    /// constructor can create elements and we keep the finding.
+    fn jquery_arg_forces_selector(&self, expr: &Expression<'a>) -> bool {
+        match self.static_leading_string(expr) {
+            Some(prefix) => {
+                let trimmed = prefix.trim_start();
+                !trimmed.is_empty() && !trimmed.starts_with('<')
+            }
+            None => false,
+        }
+    }
+
+    /// Recognise the `fetch(...)` global call (bare, or via `window`/`self`/
+    /// `globalThis`). Its returned Promise resolves to a `Response`.
+    fn is_fetch_call(&self, call: &CallExpression<'a>) -> bool {
+        match &call.callee {
+            Expression::Identifier(id) => id.name == "fetch",
+            Expression::StaticMemberExpression(_) => matches!(
+                self.get_expr_string(&call.callee).as_deref(),
+                Some("window.fetch" | "self.fetch" | "globalThis.fetch")
+            ),
+            _ => false,
+        }
+    }
+
+    /// True when `expr` is `await fetch(...)` (through parentheses) — the
+    /// awaited value is a `Response`, so a variable bound to it has
+    /// `.text()`/`.json()` reads that are tainted network data (issue #1024).
+    fn awaited_fetch_var(&self, expr: &Expression<'a>) -> bool {
+        let inner = match expr {
+            Expression::AwaitExpression(a) => &a.argument,
+            Expression::ParenthesizedExpression(p) => return self.awaited_fetch_var(&p.expression),
+            _ => return false,
+        };
+        let mut current = inner;
+        loop {
+            match current {
+                Expression::ParenthesizedExpression(p) => current = &p.expression,
+                Expression::CallExpression(call) => return self.is_fetch_call(call),
+                _ => return false,
+            }
+        }
+    }
+
+    /// If `call` invokes a Promise combinator (`.then` / `.catch` / `.finally`),
+    /// return the method name.
+    fn promise_method_name(call: &CallExpression<'a>) -> Option<&'static str> {
+        let Expression::StaticMemberExpression(member) = &call.callee else {
+            return None;
+        };
+        match member.property.name.as_str() {
+            "then" => Some("then"),
+            "catch" => Some("catch"),
+            "finally" => Some("finally"),
+            _ => None,
+        }
+    }
+
+    /// True when this `.then`/`.catch`/`.finally` call sits on a Promise chain
+    /// whose root is a `fetch(...)` call. Walks the receiver chain down through
+    /// nested combinators.
+    fn promise_chain_roots_at_fetch(&self, call: &CallExpression<'a>) -> bool {
+        let mut current: &Expression<'a> = match &call.callee {
+            Expression::StaticMemberExpression(m) => &m.object,
+            _ => return false,
+        };
+        loop {
+            match current {
+                Expression::ParenthesizedExpression(p) => current = &p.expression,
+                Expression::CallExpression(inner) => {
+                    if self.is_fetch_call(inner) {
+                        return true;
+                    }
+                    if Self::promise_method_name(inner).is_some()
+                        && let Expression::StaticMemberExpression(m) = &inner.callee
+                    {
+                        current = &m.object;
+                        continue;
+                    }
+                    return false;
+                }
+                _ => return false,
+            }
+        }
+    }
+
+    /// First `return <expr>;` argument in a callback's block body, used to
+    /// thread the resolved value of one `.then` callback into the next.
+    fn first_return_expr<'b>(stmts: &'b [Statement<'a>]) -> Option<&'b Expression<'a>> {
+        for stmt in stmts {
+            if let Statement::ReturnStatement(ret) = stmt {
+                return ret.argument.as_ref();
+            }
+        }
+        None
+    }
+
     fn build_bound_alias_from_bind_call(
         &self,
         bind_call: &CallExpression<'a>,
@@ -1190,6 +1346,20 @@ impl<'a> DomXssVisitor<'a> {
 
     /// Determine whether a call expression yields tainted data and provide source hint.
     fn call_taint_and_source(&self, call: &CallExpression<'a>) -> (bool, Option<String>) {
+        // `responseVar.text()` / `responseVar.json()` on a `fetch()` Response
+        // reads untrusted network data (issue #1024). The receiver is bound by
+        // the promise-chain driver; the resolved string is the DOM-XSS source.
+        if let Expression::StaticMemberExpression(member) = &call.callee
+            && let Expression::Identifier(id) = &member.object
+            && self.response_object_vars.contains(id.name.as_str())
+        {
+            match member.property.name.as_str() {
+                "text" => return (true, Some("Response.text".to_string())),
+                "json" => return (true, Some("Response.json".to_string())),
+                _ => {}
+            }
+        }
+
         // Sanitizers produce de-tainted values
         if let Some(func_name) = self.get_expr_string(&call.callee)
             && (self.sanitizers.contains(func_name.as_str())
@@ -1376,6 +1546,33 @@ impl<'a> DomXssVisitor<'a> {
         (false, None)
     }
 
+    /// Source label when `member` reads an `XMLHttpRequest` response body
+    /// (`xhr.responseText` / `xhr.response`) on a variable known to hold a
+    /// `new XMLHttpRequest()` instance (issue #1024). The Ajax response is
+    /// server/network-controlled and routinely echoes a reflected/stored
+    /// param, so reading it is an untrusted DOM-XSS source.
+    fn xhr_response_source_for_member(
+        &self,
+        member: &StaticMemberExpression<'a>,
+    ) -> Option<String> {
+        let Expression::Identifier(id) = &member.object else {
+            return None;
+        };
+        if self
+            .instance_classes
+            .get(id.name.as_str())
+            .map(String::as_str)
+            != Some("XMLHttpRequest")
+        {
+            return None;
+        }
+        match member.property.name.as_str() {
+            "responseText" => Some("XMLHttpRequest.responseText".to_string()),
+            "response" => Some("XMLHttpRequest.response".to_string()),
+            _ => None,
+        }
+    }
+
     /// Check if expression is tainted
     fn is_tainted(&self, expr: &Expression) -> bool {
         match expr {
@@ -1385,6 +1582,9 @@ impl<'a> DomXssVisitor<'a> {
             }
             Expression::StaticMemberExpression(member) => {
                 if self.url_search_params_source_for_member(member).is_some() {
+                    return true;
+                }
+                if self.xhr_response_source_for_member(member).is_some() {
                     return true;
                 }
                 if let Some(full_path) = self.get_member_string(member) {
@@ -1466,6 +1666,9 @@ impl<'a> DomXssVisitor<'a> {
                     false
                 }
             }
+            // `await taintedPromise` yields the resolved tainted value — e.g.
+            // `await r.text()` on a fetch Response (issue #1024).
+            Expression::AwaitExpression(await_expr) => self.is_tainted(&await_expr.argument),
             _ => false,
         }
     }
@@ -1852,6 +2055,13 @@ impl<'a> DomXssVisitor<'a> {
                 if !assigned_instance_class {
                     self.instance_classes.remove(var_name);
                 }
+                // `const r = await fetch(url)` — r holds a Response, so later
+                // `r.text()` / `r.json()` reads are tainted (issue #1024).
+                if self.awaited_fetch_var(init) {
+                    self.response_object_vars.insert(var_name.to_string());
+                } else {
+                    self.response_object_vars.remove(var_name);
+                }
                 // Track aliases created by `.bind()` so subsequent calls can resolve
                 // to sink functions or function summaries.
                 let mut assigned_bind_alias = false;
@@ -2113,6 +2323,9 @@ impl<'a> DomXssVisitor<'a> {
                 if let Some(source) = self.url_search_params_source_for_member(member) {
                     return Some(source);
                 }
+                if let Some(source) = self.xhr_response_source_for_member(member) {
+                    return Some(source);
+                }
                 if let Some(full_path) = self.get_member_string(member) {
                     if matches!(
                         full_path.as_str(),
@@ -2239,6 +2452,9 @@ impl<'a> DomXssVisitor<'a> {
                 .expressions
                 .last()
                 .and_then(|expr| self.find_source_in_expr(expr)),
+            Expression::AwaitExpression(await_expr) => {
+                self.find_source_in_expr(&await_expr.argument)
+            }
             _ => None,
         }
     }
@@ -2321,9 +2537,227 @@ impl<'a> DomXssVisitor<'a> {
             Expression::ArrowFunctionExpression(arrow) => {
                 self.walk_statements(&arrow.body.statements);
             }
+            // Dynamic `import(tainted)` runs an attacker-controlled module
+            // (issue #1022). Detect it here; reached both as a bare statement
+            // (`import(t);`) and as the object of a chain (`import(t).then(…)`)
+            // via the member-object recursion below.
+            Expression::ImportExpression(import_expr) => {
+                self.walk_import_expression(import_expr);
+            }
+            Expression::AwaitExpression(await_expr) => {
+                self.walk_expression(&await_expr.argument);
+            }
+            Expression::ParenthesizedExpression(paren) => {
+                self.walk_expression(&paren.expression);
+            }
+            Expression::SequenceExpression(seq) => {
+                for e in &seq.expressions {
+                    self.walk_expression(e);
+                }
+            }
+            // Reach call / import expressions that sit as the *object* of a
+            // member access — e.g. `$(tainted).appendTo(...)`,
+            // `import(tainted).then(...)`, `eval(tainted).x`. A member-callee
+            // chain otherwise never visits its leftmost operand.
+            Expression::StaticMemberExpression(member) => {
+                self.walk_expression(&member.object);
+            }
+            Expression::ComputedMemberExpression(member) => {
+                self.walk_expression(&member.object);
+                self.walk_expression(&member.expression);
+            }
 
             _ => {}
         }
+    }
+
+    /// Report `import(tainted)` as a code-execution sink and walk the
+    /// specifier for any nested sinks. A tainted module specifier (a
+    /// `data:text/javascript,…` URL or a remote/`//host` URL derived from
+    /// `location.*`, `URLSearchParams`, `name`, `document.referrer`, …) loads
+    /// and runs an attacker-controlled ES module — a real DOM XSS.
+    fn walk_import_expression(&mut self, import_expr: &ImportExpression<'a>) {
+        if self.is_tainted(&import_expr.source) {
+            let source = self.find_source_in_expr(&import_expr.source);
+            self.report_vulnerability_with_source(
+                import_expr.span,
+                "import",
+                "Tainted module specifier passed to dynamic import() runs attacker-controlled module code",
+                source,
+            );
+        }
+        self.walk_expression(&import_expr.source);
+    }
+
+    /// Drive a `fetch().then(...)…` Promise chain (issue #1024): walk each
+    /// callback body so nested sinks fire, threading the resolved value
+    /// (`Response`, then the awaited text/json) from one callback's return
+    /// into the next callback's parameter. Returns the kind the chain
+    /// ultimately resolves to (unused at the top level).
+    fn promise_kind_of_call(&mut self, call: &CallExpression<'a>) -> PromiseValueKind {
+        if self.is_fetch_call(call) {
+            // The URL argument is rarely a sink, but walk it so any nested
+            // source/sink inside the request expression is still visited.
+            for arg in &call.arguments {
+                if let Some(expr) = arg.as_expression() {
+                    self.walk_expression(expr);
+                }
+            }
+            return PromiseValueKind::Response;
+        }
+
+        let Some(method) = Self::promise_method_name(call) else {
+            return PromiseValueKind::Unknown;
+        };
+        let Expression::StaticMemberExpression(member) = &call.callee else {
+            return PromiseValueKind::Unknown;
+        };
+        let receiver_kind = self.promise_kind_of_expr(&member.object);
+
+        match method {
+            "then" => {
+                // arg0 = onFulfilled (the resolved value); arg1 = onRejected
+                // (an error — never the tainted response body).
+                if let Some(on_rejected) = call.arguments.get(1) {
+                    self.process_promise_callback(on_rejected, PromiseValueKind::Unknown);
+                }
+                match call.arguments.first() {
+                    Some(on_fulfilled) => {
+                        self.process_promise_callback(on_fulfilled, receiver_kind)
+                    }
+                    None => receiver_kind,
+                }
+            }
+            // `.catch` / `.finally`: still walk the callback, but on the
+            // success path the resolved value flows through unchanged.
+            _ => {
+                if let Some(cb) = call.arguments.first() {
+                    self.process_promise_callback(cb, PromiseValueKind::Unknown);
+                }
+                receiver_kind
+            }
+        }
+    }
+
+    fn promise_kind_of_expr(&mut self, expr: &Expression<'a>) -> PromiseValueKind {
+        match expr {
+            Expression::ParenthesizedExpression(p) => self.promise_kind_of_expr(&p.expression),
+            Expression::CallExpression(call) => self.promise_kind_of_call(call),
+            _ => PromiseValueKind::Unknown,
+        }
+    }
+
+    /// Walk a `.then`/`.catch`/`.finally` callback with its first parameter
+    /// bound to the incoming Promise value, then report the value its body
+    /// returns so the next `.then` in the chain sees it.
+    fn process_promise_callback(
+        &mut self,
+        cb_arg: &Argument<'a>,
+        incoming: PromiseValueKind,
+    ) -> PromiseValueKind {
+        let Some(expr) = cb_arg.as_expression() else {
+            return PromiseValueKind::Unknown;
+        };
+
+        let (param_name, statements, return_expr): (
+            Option<String>,
+            &oxc_allocator::Vec<'a, Statement<'a>>,
+            Option<&Expression<'a>>,
+        ) = match expr {
+            Expression::FunctionExpression(func) => {
+                let Some(body) = &func.body else {
+                    return PromiseValueKind::Unknown;
+                };
+                let pname = Self::first_param_name(&func.params);
+                let ret = Self::first_return_expr(&body.statements);
+                (pname, &body.statements, ret)
+            }
+            Expression::ArrowFunctionExpression(arrow) => {
+                let pname = Self::first_param_name(&arrow.params);
+                let ret = if arrow.expression {
+                    match arrow.body.statements.first() {
+                        Some(Statement::ExpressionStatement(stmt)) => Some(&stmt.expression),
+                        _ => None,
+                    }
+                } else {
+                    Self::first_return_expr(&arrow.body.statements)
+                };
+                (pname, &arrow.body.statements, ret)
+            }
+            // Named callback, e.g. `.then(render)`.
+            Expression::Identifier(id) => {
+                return self.named_promise_callback_kind(id.name.as_str(), &incoming);
+            }
+            _ => return PromiseValueKind::Unknown,
+        };
+
+        let saved_tainted = self.tainted_vars.clone();
+        let saved_aliases = self.var_aliases.clone();
+        let saved_response_vars = self.response_object_vars.clone();
+
+        if let Some(name) = &param_name {
+            // A fresh parameter binding shadows any same-named outer state.
+            self.tainted_vars.remove(name);
+            self.var_aliases.remove(name);
+            self.response_object_vars.remove(name);
+            match &incoming {
+                PromiseValueKind::Response => {
+                    self.response_object_vars.insert(name.clone());
+                }
+                PromiseValueKind::Tainted(source) => {
+                    self.tainted_vars.insert(name.clone());
+                    self.var_aliases.insert(name.clone(), source.clone());
+                }
+                PromiseValueKind::Unknown => {}
+            }
+        }
+
+        self.walk_statements(statements);
+
+        let result_kind = match return_expr {
+            Some(re) if self.is_tainted(re) => PromiseValueKind::Tainted(
+                self.find_source_in_expr(re)
+                    .unwrap_or_else(|| "Response.text".to_string()),
+            ),
+            _ => PromiseValueKind::Unknown,
+        };
+
+        self.tainted_vars = saved_tainted;
+        self.var_aliases = saved_aliases;
+        self.response_object_vars = saved_response_vars;
+
+        result_kind
+    }
+
+    /// Best-effort threading for `.then(namedFn)`: if the summarized callback
+    /// returns tainted data, propagate it to the next `.then`. Sinks *inside*
+    /// the named callback are reported by the normal function-summary
+    /// call-site path, not here.
+    fn named_promise_callback_kind(
+        &self,
+        fn_name: &str,
+        incoming: &PromiseValueKind,
+    ) -> PromiseValueKind {
+        if let Some(summary) = self.function_summaries.get(fn_name) {
+            if matches!(
+                incoming,
+                PromiseValueKind::Tainted(_) | PromiseValueKind::Response
+            ) && let Some(src) = summary.tainted_param_returns.get(&0)
+            {
+                return PromiseValueKind::Tainted(src.clone());
+            }
+            if let Some(src) = &summary.return_without_tainted_params {
+                return PromiseValueKind::Tainted(src.clone());
+            }
+        }
+        PromiseValueKind::Unknown
+    }
+
+    fn first_param_name(params: &FormalParameters<'a>) -> Option<String> {
+        params.items.first().and_then(|p| match &p.pattern {
+            BindingPattern::BindingIdentifier(id) => Some(id.name.to_string()),
+            _ => None,
+        })
     }
 
     fn walk_event_handler_body(
@@ -2687,6 +3121,37 @@ impl<'a> DomXssVisitor<'a> {
 
     /// Walk through a call expression
     fn walk_call_expression(&mut self, call: &CallExpression<'a>) {
+        // fetch().then(...) response-source chains (issue #1024). Drive the
+        // whole chain here so each callback body is walked with the resolved
+        // Response / tainted value bound to its parameter, then return.
+        if Self::promise_method_name(call).is_some() && self.promise_chain_roots_at_fetch(call) {
+            self.promise_kind_of_call(call);
+            return;
+        }
+
+        // jQuery `$(tainted)` / `jQuery(tainted)` selector-to-HTML constructor
+        // (issue #1021). A string whose first non-whitespace char is `<` makes
+        // jQuery build live DOM nodes (running onerror/onload). Fire only when
+        // the argument is tainted AND not pinned into selector mode by a
+        // constant `#`/`.`/tag prefix — see `jquery_arg_forces_selector`.
+        if let Expression::Identifier(id) = &call.callee
+            && (id.name == "$" || id.name == "jQuery")
+            && let Some(arg0) = call.arguments.first()
+            && let Some(arg_expr) = arg0.as_expression()
+            && self.is_tainted(arg_expr)
+            && !self.jquery_arg_forces_selector(arg_expr)
+        {
+            let source = self.find_source_in_expr(arg_expr);
+            self.report_vulnerability_with_source(
+                call.span(),
+                "jQuery$",
+                "Tainted HTML string passed to jQuery $() constructor builds DOM nodes (selector-to-HTML)",
+                source,
+            );
+            // Continue walking so inner sinks/sources in the argument are still
+            // visited (the argument expression itself may chain further).
+        }
+
         if let Expression::StaticMemberExpression(member) = &call.callee
             && member.property.name.as_str() == "set"
             && call.arguments.len() >= 2

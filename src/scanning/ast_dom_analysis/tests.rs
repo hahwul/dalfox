@@ -3271,3 +3271,359 @@ $('#root').find('.target').append(q);
         r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
     );
 }
+
+// ===== Issue #1021: jQuery $() / jQuery() selector-to-HTML constructor =====
+
+#[test]
+fn jquery_constructor_hash_to_html_is_sink() {
+    // xssmaze /jquery/level1/ — $(location.hash) builds DOM nodes.
+    let js = r#"
+var target = decodeURIComponent(location.hash.slice(1));
+if (target) { $(target).appendTo('#content'); }
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.iter()
+            .any(|v| v.sink == "jQuery$" && v.source.contains("location.hash")),
+        "jQuery $() constructor on tainted hash must be a sink; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn jquery_constructor_jquery_alias_is_sink() {
+    let js = r#"
+var t = location.search;
+jQuery(t);
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.iter().any(|v| v.sink == "jQuery$"),
+        "jQuery() alias constructor must be a sink; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn jquery_constructor_name_source_is_sink() {
+    let js = r#"$(window.name);"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.iter().any(|v| v.sink == "jQuery$"),
+        "jQuery $() on window.name must be a sink; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn jquery_constructor_id_selector_prefix_suppressed() {
+    // `$('#' + tainted)` is pinned into selector mode by the leading '#',
+    // so the tainted tail can never open an HTML tag — no finding.
+    let js = r#"
+var t = location.hash.slice(1);
+$('#' + t);
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        !r.iter().any(|v| v.sink == "jQuery$"),
+        "selector-prefixed $('#'+t) must NOT fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn jquery_constructor_class_selector_prefix_suppressed() {
+    let js = r#"
+var t = location.search;
+$('.item-' + t);
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        !r.iter().any(|v| v.sink == "jQuery$"),
+        "selector-prefixed $('.x'+t) must NOT fire; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn jquery_constructor_html_prefix_still_sink() {
+    // A leading '<' means HTML-build mode even with a constant prefix.
+    let js = r#"
+var t = location.hash.slice(1);
+$('<div>' + t);
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.iter().any(|v| v.sink == "jQuery$"),
+        "$('<div>'+t) opens an HTML tag and must fire; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn jquery_constructor_untainted_selector_no_finding() {
+    let js = r#"$('#content').hide(); $('.menu').show();"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.is_empty(),
+        "constant jQuery selectors must not produce findings; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+// ===== Issue #1022: dynamic import() code-execution sink =====
+
+#[test]
+fn dynamic_import_hash_is_sink() {
+    let js = r#"
+var t = decodeURIComponent(location.hash.slice(1));
+if (t) { import(t); }
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.iter()
+            .any(|v| v.sink == "import" && v.source.contains("location.hash")),
+        "dynamic import(tainted hash) must be a sink; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn dynamic_import_searchparams_is_sink() {
+    // xssmaze /codeexec/level1/.
+    let js = r#"
+var name = new URLSearchParams(location.search).get('query') || '';
+if (name) {
+  import(name).then(function () {}).catch(function () {});
+}
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.iter().any(|v| v.sink == "import"),
+        "dynamic import() of URLSearchParams value must be a sink; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn dynamic_import_constant_specifier_no_finding() {
+    let js = r#"import('./plugins/chart.js').then(function (m) { m.init(); });"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        !r.iter().any(|v| v.sink == "import"),
+        "import() of a constant module path must NOT fire; got {:?}",
+        r.iter().map(|v| v.sink.clone()).collect::<Vec<_>>()
+    );
+}
+
+// ===== Issue #1024: fetch()/XMLHttpRequest response source =====
+
+#[test]
+fn fetch_text_response_to_innerhtml() {
+    // xssmaze /apidom/level1/.
+    let js = r#"
+fetch('/data.txt').then(function (r) { return r.text(); })
+  .then(function (t) { document.getElementById('o').innerHTML = t; });
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.iter()
+            .any(|v| v.sink == "innerHTML" && v.source.contains("Response")),
+        "fetch().then(r=>r.text()).then(t=>innerHTML=t) must fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn fetch_json_field_to_innerhtml() {
+    // xssmaze /apidom/level2/.
+    let js = r#"
+fetch('/api').then(function (r) { return r.json(); })
+  .then(function (d) { document.getElementById('card').innerHTML = d.html; });
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.iter().any(|v| v.sink == "innerHTML"),
+        "fetch().then(r=>r.json()).then(d=>innerHTML=d.html) must fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn fetch_arrow_chain_to_document_write() {
+    // xssmaze /apidom/level5/ with arrow callbacks.
+    let js = r#"
+fetch('/api').then(r => r.text()).then(t => document.write(t));
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.iter().any(|v| v.sink == "document.write"),
+        "fetch arrow chain into document.write must fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn fetch_json_to_insert_adjacent_html() {
+    // xssmaze /apidom/level4/.
+    let js = r#"
+fetch('/api').then(function (r) { return r.json(); })
+  .then(function (d) {
+    document.getElementById('feed').insertAdjacentHTML('beforeend', '<li>' + d.msg + '</li>');
+  });
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.iter().any(|v| v.sink == "insertAdjacentHTML"),
+        "fetch json -> insertAdjacentHTML must fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn fetch_text_to_contextual_fragment() {
+    // xssmaze /apidom/level6/.
+    let js = r#"
+fetch('/api').then(function (r) { return r.text(); })
+  .then(function (t) {
+    var frag = document.createRange().createContextualFragment(t);
+    document.getElementById('out').appendChild(frag);
+  });
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.iter().any(|v| v.sink == "createContextualFragment"),
+        "fetch text -> createContextualFragment must fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn xhr_response_text_to_innerhtml() {
+    // xssmaze /apidom/level3/.
+    let js = r#"
+var xhr = new XMLHttpRequest();
+xhr.open('GET', '/data.txt');
+xhr.onload = function () { document.getElementById('o').innerHTML = xhr.responseText; };
+xhr.send();
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.iter()
+            .any(|v| v.sink == "innerHTML" && v.source.contains("XMLHttpRequest")),
+        "xhr.responseText -> innerHTML must fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn xhr_response_to_document_write() {
+    let js = r#"
+var xhr = new XMLHttpRequest();
+xhr.onload = function () { document.write(xhr.response); };
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.iter()
+            .any(|v| v.sink == "document.write" && v.source.contains("XMLHttpRequest")),
+        "xhr.response -> document.write must fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn fetch_text_to_safe_textcontent_no_finding() {
+    // textContent is not an HTML sink, so even tainted response text is safe.
+    let js = r#"
+fetch('/data.txt').then(function (r) { return r.text(); })
+  .then(function (t) { document.getElementById('o').textContent = t; });
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.is_empty(),
+        "fetch response into textContent must NOT fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn non_fetch_promise_chain_no_false_positive() {
+    // A non-fetch promise resolving an arbitrary value must not be treated
+    // as a tainted response source.
+    let js = r#"
+somePromise.then(function (r) { return r.text(); })
+  .then(function (t) { document.getElementById('o').innerHTML = t; });
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.is_empty(),
+        "non-fetch promise chain must NOT fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn fetch_await_form_response_to_innerhtml() {
+    // async/await fetch: `const r = await fetch(); const t = await r.text();`
+    let js = r#"
+async function load() {
+  const r = await fetch('/api');
+  const t = await r.text();
+  document.getElementById('o').innerHTML = t;
+}
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.iter()
+            .any(|v| v.sink == "innerHTML" && v.source.contains("Response")),
+        "awaited fetch response -> innerHTML must fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn fetch_await_json_form_response_to_innerhtml() {
+    let js = r#"
+async function load() {
+  const res = await fetch('/api');
+  const data = await res.json();
+  document.querySelector('#x').innerHTML = data.body;
+}
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        r.iter().any(|v| v.sink == "innerHTML"),
+        "awaited fetch json -> innerHTML must fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
