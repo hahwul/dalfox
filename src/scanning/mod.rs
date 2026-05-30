@@ -971,10 +971,18 @@ pub async fn run_scanning(
         let finding_tx_clone = finding_tx.clone();
 
         let handle = tokio::spawn(async move {
-            let _permit = semaphore_clone
-                .acquire()
-                .await
-                .expect("semaphore closed unexpectedly");
+            // `acquire()` only errors if the semaphore has been closed. Nothing
+            // closes this one today (it lives for the whole scan), so the error
+            // path is currently unreachable — but `expect` would turn any future
+            // cooperative-shutdown change into a panic across every waiting
+            // worker, which is especially bad when dalfox runs embedded as a
+            // library / server / MCP backend. A closed semaphore means there is
+            // no work left to do, so wind the worker down cleanly (the task
+            // batches results into the shared `results_clone`, so there is
+            // nothing to return).
+            let Ok(_permit) = semaphore_clone.acquire().await else {
+                return;
+            };
             // Batch local results to reduce mutex contention
             let mut local_results: Vec<crate::scanning::result::Result> = Vec::new();
             // Stream every new finding through the channel (if provided) before
