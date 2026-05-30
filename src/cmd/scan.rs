@@ -1727,7 +1727,27 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                     path, e
                 ));
             }
-            Ok(_) => {}
+            Ok(_) => {
+                // The stat above only proves a regular file exists. An empty,
+                // comment-only, non-UTF-8, or over-budget file passes it yet
+                // yields zero usable payloads — load_custom_payloads rejects
+                // those, but the scan driver swallows that error via
+                // `.unwrap_or_else(|_| vec![])`, so --only-custom-payload would
+                // "succeed" having scanned nothing. Validate the content here
+                // (this also warms the shared cache the scan reuses): fatal
+                // under --only-custom-payload, a warning in additive mode.
+                if let Err(e) = crate::scanning::xss_common::load_custom_payloads(path) {
+                    if args.only_custom_payload {
+                        emit_error(
+                            &args.format,
+                            crate::cmd::error_codes::FILE_READ_ERROR,
+                            &e.to_string(),
+                        );
+                        return ScanOutcome::Error;
+                    }
+                    log_warn(&format!("{} — built-in payloads only", e));
+                }
+            }
         }
     }
 
