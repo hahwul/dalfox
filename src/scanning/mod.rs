@@ -1,17 +1,21 @@
 //! # Scanning (Stages 4–6)
 //!
 //! Drives payload generation, reflection checking, and DOM verification for
-//! each probed parameter.
+//! each probed parameter. [`run_scanning`] is the orchestrator: it builds the
+//! per-parameter jobs (`generate_param_jobs`) and fans them out across
+//! `ScanWorkerCtx::scan_param` workers.
 //!
-//! ## Stage 4: Payload Generation (`run_scanning` — first half)
+//! ## Stage 4: Payload Generation (`generate_param_jobs`)
 //! Builds per-parameter payload sets based on `injection_context`, CSP bypass,
 //! technology-specific payloads, and WAF bypass mutations/encoders.
 //! Output: `ParamPayloadJob` tuples fed into the concurrent scan loop.
 //!
-//! ## Stage 5: Reflection Check (see `check_reflection` module)
+//! ## Stage 5: Reflection Check (`ScanWorkerCtx::run_reflection_phase`, see
+//! also the `check_reflection` module)
 //! Each payload is injected and the response is checked for reflection.
 //!
-//! ## Stage 6: DOM Verification (see `check_dom_verification` module)
+//! ## Stage 6: DOM Verification (`ScanWorkerCtx::run_dom_phase`, see also
+//! the `check_dom_verification` module)
 //! Reflected payloads are verified for actual DOM evidence to upgrade
 //! findings from "R" (Reflected) to "V" (DOM-verified).
 
@@ -700,68 +704,63 @@ fn ast_source_uses_browser_url_surface(source: &str) -> bool {
         || source.contains("event.oldValue")
 }
 
-#[allow(clippy::too_many_arguments)]
-pub async fn run_scanning(
+/// Compute the WAF bypass strategy for this scan. Returns `None` when WAF
+/// bypass is disabled (`--waf-bypass off`), no WAF was fingerprinted, or the
+/// fingerprint set is empty — in which case payload generation skips the
+/// mutation / extra-encoder expansion entirely.
+fn compute_waf_strategy(
     target: &Target,
-    args: Arc<ScanArgs>,
-    results: Arc<Mutex<Vec<crate::scanning::result::Result>>>,
-    multi_pb: Option<Arc<MultiProgress>>,
-    overall_pb: Option<Arc<indicatif::ProgressBar>>,
-    findings_count: Arc<AtomicUsize>,
-    cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
-    finding_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::scanning::result::Result>>,
-) {
-    // Short-circuit scanning when skip_xss_scanning is enabled (e.g., in unit tests)
-    if args.skip_xss_scanning {
-        return;
+    args: &ScanArgs,
+) -> Option<crate::waf::bypass::BypassStrategy> {
+    if args.waf_bypass == "off" {
+        return None;
     }
-    let arc_target = Arc::new(target.clone());
-    let shared_client = Arc::new(arc_target.build_client_or_default());
-    let semaphore = Arc::new(Semaphore::new(if args.sxss { 1 } else { target.workers }));
-    let limit = args.limit;
-    let limit_result_type: Arc<str> = Arc::from(args.limit_result_type.to_uppercase());
+    target.waf_info.as_ref().and_then(|waf_info| {
+        if waf_info.is_empty() {
+            None
+        } else {
+            let waf_types: Vec<&crate::waf::WafType> = waf_info.waf_types();
+            Some(crate::waf::bypass::merge_strategies(&waf_types))
+        }
+    })
+}
 
-    // Reset WAF block counters for this scan
-    crate::WAF_BLOCK_COUNT.store(0, std::sync::atomic::Ordering::Relaxed);
-    crate::WAF_CONSECUTIVE_BLOCKS.store(0, std::sync::atomic::Ordering::Relaxed);
-
-    // Compute WAF bypass strategy if WAF was detected
-    let waf_strategy = if args.waf_bypass != "off" {
-        target.waf_info.as_ref().and_then(|waf_info| {
-            if waf_info.is_empty() {
-                None
-            } else {
-                let waf_types: Vec<&crate::waf::WafType> = waf_info.waf_types();
-                Some(crate::waf::bypass::merge_strategies(&waf_types))
-            }
-        })
-    } else {
-        None
-    };
-
-    // Generate CSP bypass payloads if CSP was analyzed
+/// Pre-merge the payloads shared across every parameter: CSP-bypass payloads
+/// (when CSP was analysed) followed by technology-specific payloads (when a
+/// stack was fingerprinted). Built once per scan so [`generate_param_jobs`]
+/// can clone the merged set per parameter instead of recomputing it.
+fn build_shared_payloads(target: &Target) -> Vec<String> {
     let csp_bypass_payloads: Vec<String> = target
         .csp_analysis
         .as_ref()
         .map(crate::payload::xss_csp_bypass::get_csp_bypass_payloads)
         .unwrap_or_default();
-
-    // Generate technology-specific payloads
     let tech_payloads: Vec<String> = target
         .tech_info
         .as_ref()
         .map(crate::scanning::tech_detect::get_tech_specific_payloads)
         .unwrap_or_default();
+    let mut shared = Vec::with_capacity(csp_bypass_payloads.len() + tech_payloads.len());
+    shared.extend(csp_bypass_payloads);
+    shared.extend(tech_payloads);
+    shared
+}
 
-    // Pre-merge shared payloads (CSP bypass + tech-specific) to avoid repeated cloning
-    let shared_payloads: Vec<String> = {
-        let mut sp = Vec::with_capacity(csp_bypass_payloads.len() + tech_payloads.len());
-        sp.extend(csp_bypass_payloads.iter().cloned());
-        sp.extend(tech_payloads.iter().cloned());
-        sp
-    };
-
-    // === Stage 4: Payload Generation — build per-parameter payload sets ===
+/// === Stage 4: Payload Generation — build per-parameter payload sets ===
+///
+/// For each (non-fragment) reflection parameter, build a [`ParamPayloadJob`]
+/// of `(param, reflection payloads, DOM payloads)` by applying, in order:
+/// context-aware base generation, the shared CSP/tech payloads, WAF bypass
+/// mutations + extra encoders, the adaptive angle prune/hoist, and the
+/// `--max-payloads-per-param` cap. Returns the jobs plus the total payload
+/// count used to size the progress bar (one tick per reflection + DOM
+/// payload).
+fn generate_param_jobs(
+    target: &Target,
+    args: &ScanArgs,
+    waf_strategy: Option<&crate::waf::bypass::BypassStrategy>,
+    shared_payloads: &[String],
+) -> (Vec<ParamPayloadJob>, u64) {
     let mut total_tasks = 0u64;
     let mut param_jobs: Vec<ParamPayloadJob> = Vec::with_capacity(target.reflection_params.len());
     for param in &target.reflection_params {
@@ -779,19 +778,19 @@ pub async fn run_scanning(
             continue;
         }
         let mut reflection_payloads = if let Some(context) = &param.injection_context {
-            crate::scanning::xss_common::get_dynamic_payloads(context, args.as_ref())
+            crate::scanning::xss_common::get_dynamic_payloads(context, args)
                 .unwrap_or_else(|_| vec![])
         } else {
-            get_fallback_reflection_payloads(args.as_ref()).unwrap_or_else(|_| vec![])
+            get_fallback_reflection_payloads(args).unwrap_or_else(|_| vec![])
         };
-        let mut dom_payloads = get_dom_payloads(param, args.as_ref()).unwrap_or_else(|_| vec![]);
+        let mut dom_payloads = get_dom_payloads(param, args).unwrap_or_else(|_| vec![]);
 
         // Append shared payloads (CSP bypass + tech-specific)
         reflection_payloads.extend(shared_payloads.iter().cloned());
         dom_payloads.extend(shared_payloads.iter().cloned());
 
         // Apply WAF bypass mutations and extra encoders if WAF was detected
-        if let Some(ref strategy) = waf_strategy {
+        if let Some(strategy) = waf_strategy {
             // Apply mutations (capped per base payload to prevent explosion).
             // Use the tagged variant so we can attribute each generated
             // variant to its mutation type — record_variant feeds the
@@ -889,51 +888,773 @@ pub async fn run_scanning(
             }
         }
 
-        // One pb.inc(1) per reflection payload (line ~770) plus one per DOM
-        // payload (lines ~904 / ~988). The previous `len * (1 + len)` formula
-        // overcounted by orders of magnitude, which made `{eta}` meaningless
-        // (it would project hours for a sub-minute scan).
+        // One pb.inc(1) per reflection payload plus one per DOM payload.
+        // The previous `len * (1 + len)` formula overcounted by orders of
+        // magnitude, which made `{eta}` meaningless (it would project hours
+        // for a sub-minute scan).
         total_tasks += reflection_payloads.len() as u64 + dom_payloads.len() as u64;
         param_jobs.push((param.clone(), reflection_payloads, dom_payloads));
     }
+    (param_jobs, total_tasks)
+}
 
-    let pb = if let Some(ref mp) = multi_pb {
-        let pb = mp.add(ProgressBar::new(total_tasks));
-        // `{per_sec}` would measure pb-position rate, not HTTP request rate;
-        // many `pb.inc(1)` calls here are "no-op" iterations (param already
-        // found, payload skipped), which inflated the rate (e.g. 11.5k/s on
-        // a 5k-payload scan that finished in 0.4s). See req_per_sec_tracker
-        // for the displayed semantics and caveats.
-        let req_start = crate::REQUEST_COUNT.load(Ordering::Relaxed);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template(
-                    "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} ({req_per_sec}, ETA {eta}) {msg}",
+/// Build the per-target indicatif progress bar (one tick per reflection /
+/// DOM payload). Returns `None` when no `MultiProgress` is supplied (quiet /
+/// embedded runs), in which case the scan loop simply skips the `inc(1)`
+/// calls.
+fn build_scan_progress_bar(
+    multi_pb: &Option<Arc<MultiProgress>>,
+    total_tasks: u64,
+    target: &Target,
+) -> Option<ProgressBar> {
+    let mp = multi_pb.as_ref()?;
+    let pb = mp.add(ProgressBar::new(total_tasks));
+    // `{per_sec}` would measure pb-position rate, not HTTP request rate;
+    // many `pb.inc(1)` calls here are "no-op" iterations (param already
+    // found, payload skipped), which inflated the rate (e.g. 11.5k/s on
+    // a 5k-payload scan that finished in 0.4s). See req_per_sec_tracker
+    // for the displayed semantics and caveats.
+    let req_start = crate::REQUEST_COUNT.load(Ordering::Relaxed);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template(
+                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} ({req_per_sec}, ETA {eta}) {msg}",
+            )
+            .expect("valid progress bar template")
+            .with_key("req_per_sec", req_per_sec_tracker(req_start))
+            .progress_chars("#>-"),
+    );
+    pb.enable_steady_tick(Duration::from_millis(120));
+    pb.set_message(format!("Scanning {}", target.url));
+    Some(pb)
+}
+
+/// Log WAF block statistics gathered during the scan (debug builds only).
+fn log_waf_block_stats(target: &Target) {
+    if crate::DEBUG.load(Ordering::Relaxed) {
+        let total_waf_blocks = crate::WAF_BLOCK_COUNT.load(Ordering::Relaxed);
+        if total_waf_blocks > 0 {
+            eprintln!(
+                "[*] WAF block stats: {} total blocks detected during scan of {}",
+                total_waf_blocks, target.url,
+            );
+        }
+    }
+}
+
+/// Collapse this target's R findings that are already proven by one of its
+/// own V findings on the same `(param, inject_type)`, adjusting
+/// `findings_count` for any dropped duplicates. Multiple per-param payload
+/// variants typically surface the same logical issue twice — keep the
+/// strongest evidence and drop weaker R duplicates. See
+/// [`collapse_redundant_reflected`] for the target-scoping rationale.
+async fn collapse_target_results(
+    results: &Arc<Mutex<Vec<crate::scanning::result::Result>>>,
+    findings_count: &Arc<AtomicUsize>,
+    target: &Target,
+) {
+    let mut guard = results.lock().await;
+    let before = guard.len();
+    let original = std::mem::take(&mut *guard);
+    let target_url_str = target.url.to_string();
+    let collapsed = collapse_redundant_reflected(original, &target_url_str);
+    let after = collapsed.len();
+    *guard = collapsed;
+    if after < before {
+        findings_count.fetch_sub(before - after, Ordering::Relaxed);
+    }
+}
+
+/// Outcome of a per-parameter scan phase. `Abort` mirrors the pre-refactor
+/// `return` out of the worker task: a global `--limit` was reached mid-phase,
+/// so the worker stops immediately and drops any results batched so far (the
+/// limit is already hit and the scan is winding down). A `break`-style early
+/// exit (cancellation) instead yields `Continue`, so later phases run their
+/// own cancellation checks and the batched results are still flushed.
+enum PhaseFlow {
+    Continue,
+    Abort,
+}
+
+/// Mutable per-parameter state shared across a single worker's probe,
+/// reflection, DOM, and HPP phases.
+#[derive(Default)]
+struct ParamScanState {
+    /// Findings batched locally, flushed to the shared vector once at the
+    /// end of the worker (one lock acquisition instead of one per finding).
+    local_results: Vec<crate::scanning::result::Result>,
+    /// AST findings already recorded for this param (dedup key set).
+    ast_seen: HashSet<String>,
+    /// AST DOM analysis runs at most once per param.
+    ast_analysis_done: bool,
+    /// Reflection already confirmed for this param locally — skip the
+    /// remaining reflection payloads.
+    reflection_found_locally: bool,
+    /// DOM XSS already confirmed for this param locally — skip the
+    /// remaining DOM payloads.
+    dom_found_locally: bool,
+}
+
+/// Shared, cheaply-clonable context handed to each spawned worker. Every
+/// field is an `Arc`/handle, so `clone()` per worker is just a refcount
+/// bump (plus a `ProgressBar` clone, itself an `Arc` internally).
+#[derive(Clone)]
+struct ScanWorkerCtx {
+    args: Arc<ScanArgs>,
+    target: Arc<Target>,
+    client: Arc<reqwest::Client>,
+    results: Arc<Mutex<Vec<crate::scanning::result::Result>>>,
+    found_params: Arc<RwLock<FoundParams>>,
+    findings_count: Arc<AtomicUsize>,
+    pb: Option<ProgressBar>,
+    overall_pb: Option<Arc<indicatif::ProgressBar>>,
+    limit_result_type: Arc<str>,
+    cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+    finding_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::scanning::result::Result>>,
+    semaphore: Arc<Semaphore>,
+}
+
+impl ScanWorkerCtx {
+    /// True when a cancellation flag was supplied and is now set.
+    fn cancelled(&self) -> bool {
+        self.cancel
+            .as_ref()
+            .is_some_and(|c| c.load(Ordering::Relaxed))
+    }
+
+    /// True when a global `--limit` was supplied and the running findings
+    /// tally has reached it.
+    fn limit_reached(&self) -> bool {
+        self.args
+            .limit
+            .is_some_and(|lim| self.findings_count.load(Ordering::Relaxed) >= lim)
+    }
+
+    /// Stream a new finding through the channel (if provided) before it is
+    /// batched into the shared results — so the CLI can print the full
+    /// finding block (POC + Issue + Payload + Line) while the scan is still
+    /// running instead of waiting for the end-of-scan flush. The response
+    /// body is forwarded so the CLI's `L13:` context line can be extracted
+    /// from the actual response; it's dropped from the clone at the receiver
+    /// after use. Channel is unbounded but the total payload is bounded by
+    /// the (small) finding count.
+    fn stream_finding(&self, r: &crate::scanning::result::Result) {
+        if let Some(tx) = self.finding_tx.as_ref() {
+            let _ = tx.send(r.clone());
+        }
+    }
+
+    /// Flush locally-batched findings into the shared results vector with a
+    /// single lock acquisition, bumping `findings_count` by the number that
+    /// match `--limit-result-type`.
+    async fn flush_results(&self, local_results: &mut Vec<crate::scanning::result::Result>) {
+        if local_results.is_empty() {
+            return;
+        }
+        let batch = std::mem::take(local_results);
+        let added = count_matching_results(&batch, &self.limit_result_type);
+        let mut guard = self.results.lock().await;
+        guard.extend(batch);
+        self.findings_count.fetch_add(added, Ordering::Relaxed);
+    }
+
+    /// Scan a single parameter end-to-end: acquire a worker permit, probe
+    /// for reflection (running a one-shot AST analysis on the probe
+    /// response), then run the reflection, DOM, and HPP phases before
+    /// flushing the batched findings.
+    async fn scan_param(
+        &self,
+        param: Param,
+        reflection_payloads: Vec<String>,
+        dom_payloads: Vec<String>,
+    ) {
+        // `acquire()` only errors if the semaphore has been closed. Nothing
+        // closes this one today (it lives for the whole scan), so the error
+        // path is currently unreachable — but `expect` would turn any future
+        // cooperative-shutdown change into a panic across every waiting
+        // worker, which is especially bad when dalfox runs embedded as a
+        // library / server / MCP backend. A closed semaphore means there is
+        // no work left to do, so wind the worker down cleanly (results are
+        // batched into the shared vector, so there is nothing to return).
+        let Ok(_permit) = self.semaphore.acquire().await else {
+            return;
+        };
+
+        let mut state = ParamScanState::default();
+
+        // Stage 0: fast probe to avoid large payload blasts on non-reflective
+        // params (also runs one-shot AST DOM analysis on the probe response).
+        let probe_reflected = self.probe_param(&param, &mut state).await;
+
+        // If probe found no reflection and not in deep_scan, skip heavy
+        // payload loops for this param.
+        if !probe_reflected && !self.args.deep_scan {
+            self.flush_results(&mut state.local_results).await;
+            return;
+        }
+
+        // Save a reference copy for the HPP phase (only first 5 payloads)
+        // before the reflection phase consumes `reflection_payloads`.
+        let hpp_payloads: Vec<String> = if self.args.hpp {
+            reflection_payloads.iter().take(5).cloned().collect()
+        } else {
+            vec![]
+        };
+
+        if let PhaseFlow::Abort = self
+            .run_reflection_phase(&param, reflection_payloads, &mut state)
+            .await
+        {
+            return;
+        }
+        if let PhaseFlow::Abort = self.run_dom_phase(&param, dom_payloads, &mut state).await {
+            return;
+        }
+        self.run_hpp_phase(&param, hpp_payloads, &mut state).await;
+
+        self.flush_results(&mut state.local_results).await;
+    }
+
+    /// Stage 0 fast probe: detect whether the param reflects at all before
+    /// blasting the full payload set. Runs the sandwich marker probe, a
+    /// one-shot AST DOM analysis on the probe response, and a numeric-only
+    /// fallback probe (to catch letter-stripping filters). Returns whether
+    /// any reflection was observed; AST findings are pushed into `state`.
+    async fn probe_param(&self, param: &Param, state: &mut ParamScanState) -> bool {
+        let client = self.client.as_ref();
+
+        // Sandwich probe (OPEN+INNER+CLOSE) so the response check picks up
+        // partial reflections (PrefixOnly / SuffixOnly / InnerOnly) where a
+        // server-side filter strips a prefix or suffix off the input before
+        // echoing — those cases would slip past a single-token contains().
+        let probe_payloads: [&str; 1] = [crate::scanning::markers::bracketed_marker()];
+        let mut probe_reflected = false;
+        let mut probe_response_text: Option<String> = None;
+        for pp in probe_payloads {
+            let (kind, response_text) =
+                check_reflection_with_response_client(client, &self.target, param, pp, &self.args)
+                    .await;
+            if kind.is_some() {
+                probe_reflected = true;
+                probe_response_text = response_text;
+                break;
+            } else if let Some(ref text) = response_text {
+                // Even if safe-context suppressed the reflection kind,
+                // check if the probe marker actually appears in the response.
+                // This ensures breakout payloads get a chance to be tried
+                // for params reflected inside safe tags (title, textarea, etc.).
+                if crate::scanning::markers::classify_probe_reflection(text).detected() {
+                    probe_reflected = true;
+                    probe_response_text = response_text;
+                    break;
+                }
+                // Keep one response for AST analysis below.
+                probe_response_text = response_text;
+            }
+        }
+
+        // Run AST-based DOM XSS static analysis once using the probe response (if available)
+        if !self.args.skip_ast_analysis
+            && let Some(ref response_text) = probe_response_text
+        {
+            state.ast_analysis_done = true;
+            let ast_findings = run_ast_dom_analysis(
+                client,
+                &self.target,
+                param,
+                response_text,
+                &mut state.ast_seen,
+            )
+            .await;
+            for f in &ast_findings {
+                self.stream_finding(f);
+            }
+            state.local_results.extend(ast_findings);
+        }
+
+        // If probe found no reflection, try a numeric-only probe to detect
+        // letter-stripping filters (e.g., /[a-zA-Z]/ removal).
+        if !probe_reflected {
+            let numeric_probe = "90197752";
+            let (kind, _) = check_reflection_with_response_client(
+                client,
+                &self.target,
+                param,
+                numeric_probe,
+                &self.args,
+            )
+            .await;
+            if kind.is_some() {
+                probe_reflected = true;
+            }
+        }
+
+        probe_reflected
+    }
+
+    /// === Stage 5: Reflection Check ===
+    ///
+    /// Inject each reflection payload, recording an R (Reflected) finding —
+    /// or upgrading to a V (Verified) finding when the reflection response
+    /// itself already carries browser-executable DOM evidence (the static V
+    /// upgrade). Lazily runs AST analysis if the probe had no usable
+    /// response. Returns `Abort` when the global limit was reached mid-loop.
+    async fn run_reflection_phase(
+        &self,
+        param: &Param,
+        reflection_payloads: Vec<String>,
+        state: &mut ParamScanState,
+    ) -> PhaseFlow {
+        for reflection_payload in reflection_payloads {
+            // Check cancellation
+            if self.cancelled() {
+                break;
+            }
+            // Early stop if global limit reached
+            if self.limit_reached() {
+                return PhaseFlow::Abort;
+            }
+            // Skip reflection if already found for this param
+            let reflection_tuple = if state.reflection_found_locally {
+                (None, None)
+            } else {
+                let already = self
+                    .found_params
+                    .read()
+                    .await
+                    .reflection
+                    .contains(&param.name);
+                if already {
+                    state.reflection_found_locally = true;
+                    (None, None)
+                } else {
+                    check_reflection_with_response_client(
+                        self.client.as_ref(),
+                        &self.target,
+                        param,
+                        &reflection_payload,
+                        &self.args,
+                    )
+                    .await
+                }
+            };
+            let reflected_kind = reflection_tuple.0;
+            let reflection_response_text = reflection_tuple.1;
+
+            // AST-based DOM XSS analysis (enabled by default unless skipped)
+            if !self.args.skip_ast_analysis
+                && !state.ast_analysis_done
+                && let Some(ref response_text) = reflection_response_text
+            {
+                state.ast_analysis_done = true;
+                let ast_findings = run_ast_dom_analysis(
+                    self.client.as_ref(),
+                    &self.target,
+                    param,
+                    response_text,
+                    &mut state.ast_seen,
                 )
-                .expect("valid progress bar template")
-                .with_key("req_per_sec", req_per_sec_tracker(req_start))
-                .progress_chars("#>-"),
-        );
-        pb.enable_steady_tick(Duration::from_millis(120));
-        pb.set_message(format!("Scanning {}", target.url));
-        Some(pb)
-    } else {
-        None
-    };
+                .await;
+                for f in &ast_findings {
+                    self.stream_finding(f);
+                }
+                state.local_results.extend(ast_findings);
+            }
+
+            if let Some(ref pb) = self.pb {
+                pb.inc(1);
+            }
+            if let Some(ref opb) = self.overall_pb {
+                opb.inc(1);
+            }
+            if let Some(kind) = reflected_kind {
+                let should_add = if self.args.deep_scan {
+                    true
+                } else {
+                    let mut found = self.found_params.write().await;
+                    if !found.reflection.contains(&param.name) {
+                        found.reflection.insert(param.name.clone());
+                        state.reflection_found_locally = true;
+                        true
+                    } else {
+                        false
+                    }
+                };
+
+                if should_add {
+                    // Build result URL with the reflected payload (via helper).
+                    // Use the form action URL when the param came from form
+                    // discovery, so the PoC URL points at the actual sink.
+                    let base =
+                        crate::scanning::url_inject::effective_query_base(&self.target.url, param);
+                    let result_url = crate::scanning::url_inject::build_injected_url(
+                        &base,
+                        param,
+                        &reflection_payload,
+                    );
+
+                    let reflection_note = reflection_kind_note(kind);
+
+                    // Static V upgrade: re-use the reflection response body
+                    // to look for browser-executable DOM evidence. Saves one
+                    // HTTP request relative to running a separate
+                    // `check_dom_verification` request. The four evidence
+                    // kinds (marker, executable URL in dangerous attribute,
+                    // HTML element with sink handler, JS-context sink call)
+                    // are the same set DOM verification ultimately uses, so
+                    // the static path is consistent with the dedicated path.
+                    //
+                    // Without this broader check, multi-site reflections where
+                    // the reflection-phase payload already contains the
+                    // structurally exploitable bytes (e.g. xssmaze
+                    // /realworld/level1 reflecting `<svg onload=alert(1)>`
+                    // raw into <h2>, and xssmaze /hpp/level1 where the
+                    // first-value reflection renders the unfiltered payload)
+                    // surfaced as R-only despite being trivially V — the
+                    // adaptive DOM payload generator drops HTML-tag payloads
+                    // when angles are reported "invalid" at one of the
+                    // reflection sites, and the prior `has_js_context_evidence`
+                    // check only covered the `<script>`-block case.
+                    let dom_evidence_kind = reflection_response_text.as_deref().and_then(|body| {
+                        crate::scanning::check_dom_verification::classify_dom_evidence(
+                            &reflection_payload,
+                            body,
+                        )
+                    });
+
+                    let (finding_type, severity, summary, poc_msg) =
+                        if let Some(kind) = dom_evidence_kind {
+                            // Mark dom_found so we skip redundant DOM verification
+                            {
+                                let mut found = self.found_params.write().await;
+                                found.dom.insert(param.name.clone());
+                            }
+                            state.dom_found_locally = true;
+                            let evidence_label = kind.label();
+                            (
+                                FindingType::Verified,
+                                "High".to_string(),
+                                format!(
+                                    "DOM verification successful for param {} ({})",
+                                    param.name, evidence_label
+                                ),
+                                format!(
+                                    "Triggered XSS Payload ({}): {}={}",
+                                    evidence_label, param.name, reflection_payload
+                                ),
+                            )
+                        } else {
+                            (
+                                FindingType::Reflected,
+                                "Info".to_string(),
+                                format!(
+                                    "Reflected XSS detected for param {} ({})",
+                                    param.name, reflection_note
+                                ),
+                                format!(
+                                    "[R] Triggered XSS Payload ({}): {}={}",
+                                    reflection_note, param.name, reflection_payload
+                                ),
+                            )
+                        };
+
+                    // Record reflected/verified XSS finding (fallback path).
+                    // In SXSS mode, prefix inject_type so downstream output
+                    // (JSON, markdown, plain) makes the stored route visible.
+                    // Template-shaped payloads (`{{…}}`) further refine the
+                    // label to `*-CSTI` so users can tell client-side
+                    // template injection apart from generic HTML reflection.
+                    let mut result = crate::scanning::result::Result::new(
+                        finding_type,
+                        inject_type_for_payload_with_sink(
+                            self.args.sxss,
+                            &reflection_payload,
+                            param.framework_sink.as_deref(),
+                        ),
+                        crate::scanning::url_inject::effective_method(&self.target.method, param),
+                        result_url,
+                        param.name.clone(),
+                        reflection_payload.clone(),
+                        summary,
+                        "CWE-79".to_string(),
+                        severity,
+                        606,
+                        poc_msg,
+                    );
+                    result.location = format!("{:?}", param.location);
+                    result.request =
+                        Some(build_request_text(&self.target, param, &reflection_payload));
+                    result.response = reflection_response_text;
+
+                    self.stream_finding(&result);
+                    // Defer pushing to shared results (batched)
+                    state.local_results.push(result);
+                }
+            }
+        }
+        PhaseFlow::Continue
+    }
+
+    /// === Stage 6: DOM Verification ===
+    ///
+    /// Inject each DOM payload and verify actual DOM evidence, recording a V
+    /// (Verified) finding on the first hit (one per param). Returns `Abort`
+    /// when the global limit was reached mid-loop.
+    async fn run_dom_phase(
+        &self,
+        param: &Param,
+        dom_payloads: Vec<String>,
+        state: &mut ParamScanState,
+    ) -> PhaseFlow {
+        for dom_payload in dom_payloads {
+            // Check cancellation
+            if self.cancelled() {
+                break;
+            }
+            // Early stop if global limit reached
+            if self.limit_reached() {
+                return PhaseFlow::Abort;
+            }
+            // Skip DOM verification if already found for this param
+            let already_dom_found = if state.dom_found_locally {
+                true
+            } else {
+                let is_found = self.found_params.read().await.dom.contains(&param.name);
+                if is_found {
+                    state.dom_found_locally = true;
+                }
+                is_found
+            };
+            if already_dom_found {
+                if let Some(ref pb) = self.pb {
+                    pb.inc(1);
+                }
+                if let Some(ref opb) = self.overall_pb {
+                    opb.inc(1);
+                }
+                continue;
+            }
+            let (dom_verified, response_text) = check_dom_verification_with_client(
+                self.client.as_ref(),
+                &self.target,
+                param,
+                &dom_payload,
+                &self.args,
+            )
+            .await;
+            if dom_verified {
+                let should_add = if self.args.deep_scan {
+                    true
+                } else {
+                    let mut found = self.found_params.write().await;
+                    if !found.dom.contains(&param.name) {
+                        found.dom.insert(param.name.clone());
+                        state.dom_found_locally = true;
+                        true
+                    } else {
+                        false
+                    }
+                };
+
+                if should_add {
+                    // Create result (via helper). Use the form action URL
+                    // when the param came from form discovery.
+                    let base =
+                        crate::scanning::url_inject::effective_query_base(&self.target.url, param);
+                    let result_url =
+                        crate::scanning::url_inject::build_injected_url(&base, param, &dom_payload);
+
+                    // Determine which evidence path proved exploitability
+                    // so the V finding's message reflects the route.
+                    let evidence_label = response_text
+                        .as_deref()
+                        .and_then(|body| {
+                            crate::scanning::check_dom_verification::classify_dom_evidence(
+                                &dom_payload,
+                                body,
+                            )
+                        })
+                        .map_or("DOM evidence", |k| k.label());
+
+                    let mut result = crate::scanning::result::Result::new(
+                        FindingType::Verified, // DOM-verified => Vulnerability
+                        inject_type_for_payload_with_sink(
+                            self.args.sxss,
+                            &dom_payload,
+                            param.framework_sink.as_deref(),
+                        ),
+                        crate::scanning::url_inject::effective_method(&self.target.method, param),
+                        result_url,
+                        param.name.clone(),
+                        dom_payload.clone(),
+                        format!(
+                            "DOM verification successful for param {} ({})",
+                            param.name, evidence_label
+                        ),
+                        "CWE-79".to_string(),
+                        "High".to_string(),
+                        606,
+                        format!(
+                            "Triggered XSS Payload ({}): {}={}",
+                            evidence_label, param.name, dom_payload
+                        ),
+                    );
+                    result.location = format!("{:?}", param.location);
+                    result.request = Some(build_request_text(&self.target, param, &dom_payload));
+                    result.response = response_text;
+
+                    self.stream_finding(&result);
+                    // Defer pushing to shared results (batched)
+                    state.local_results.push(result);
+                    break;
+                }
+            }
+            if let Some(ref pb) = self.pb {
+                pb.inc(1);
+            }
+            if let Some(ref opb) = self.overall_pb {
+                opb.inc(1);
+            }
+        }
+        PhaseFlow::Continue
+    }
+
+    /// HPP (HTTP Parameter Pollution) phase: re-test the param with
+    /// duplicate-parameter URLs. Only runs for query params under `--hpp`,
+    /// uses a small subset of reflection payloads to avoid request
+    /// explosion, and records at most one finding per param.
+    async fn run_hpp_phase(
+        &self,
+        param: &Param,
+        hpp_payloads: Vec<String>,
+        state: &mut ParamScanState,
+    ) {
+        if !(self.args.hpp && param.location == crate::parameter_analysis::Location::Query) {
+            return;
+        }
+        use crate::scanning::url_inject::{HppPosition, build_hpp_url};
+
+        // Use a small subset of reflection payloads to avoid request explosion
+        let hpp_payloads: Vec<String> = hpp_payloads.iter().take(5).cloned().collect();
+        let hpp_positions = [HppPosition::Last, HppPosition::First, HppPosition::Both];
+
+        'hpp_outer: for hpp_payload in &hpp_payloads {
+            if self.limit_reached() {
+                break;
+            }
+            for &position in &hpp_positions {
+                if let Some(hpp_url) = build_hpp_url(&self.target.url, param, hpp_payload, position)
+                {
+                    let (kind, response_text) =
+                        crate::scanning::check_reflection::check_reflection_with_hpp_url(
+                            self.client.as_ref(),
+                            &self.target,
+                            param,
+                            hpp_payload,
+                            &hpp_url,
+                            &self.args,
+                        )
+                        .await;
+
+                    if let Some(kind) = kind {
+                        let pos_label = match position {
+                            HppPosition::Last => "last",
+                            HppPosition::First => "first",
+                            HppPosition::Both => "both",
+                        };
+                        let reflection_note = reflection_kind_note(kind);
+
+                        let mut result = crate::scanning::result::Result::new(
+                            FindingType::Reflected,
+                            "inHTML-HPP".to_string(),
+                            self.target.method.clone(),
+                            hpp_url.clone(),
+                            param.name.clone(),
+                            hpp_payload.clone(),
+                            format!(
+                                "HPP bypass: reflected XSS for param {} (position={}, {})",
+                                param.name, pos_label, reflection_note
+                            ),
+                            "CWE-79".to_string(),
+                            "Medium".to_string(),
+                            606,
+                            format!(
+                                "[R] HPP Bypass ({}): {}={} (position={})",
+                                reflection_note, param.name, hpp_payload, pos_label
+                            ),
+                        );
+                        result.location = format!("{:?}", param.location);
+                        result.response = response_text;
+                        self.stream_finding(&result);
+                        state.local_results.push(result);
+                        break 'hpp_outer; // One HPP finding per param is enough
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn run_scanning(
+    target: &Target,
+    args: Arc<ScanArgs>,
+    results: Arc<Mutex<Vec<crate::scanning::result::Result>>>,
+    multi_pb: Option<Arc<MultiProgress>>,
+    overall_pb: Option<Arc<indicatif::ProgressBar>>,
+    findings_count: Arc<AtomicUsize>,
+    cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
+    finding_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::scanning::result::Result>>,
+) {
+    // Short-circuit scanning when skip_xss_scanning is enabled (e.g., in unit tests)
+    if args.skip_xss_scanning {
+        return;
+    }
+    let arc_target = Arc::new(target.clone());
+    let shared_client = Arc::new(arc_target.build_client_or_default());
+    let semaphore = Arc::new(Semaphore::new(if args.sxss { 1 } else { target.workers }));
+    let limit_result_type: Arc<str> = Arc::from(args.limit_result_type.to_uppercase());
+
+    // Reset WAF block counters for this scan
+    crate::WAF_BLOCK_COUNT.store(0, Ordering::Relaxed);
+    crate::WAF_CONSECUTIVE_BLOCKS.store(0, Ordering::Relaxed);
+
+    // Compute WAF bypass strategy + pre-merge the payloads shared across all
+    // parameters (CSP bypass + tech-specific).
+    let waf_strategy = compute_waf_strategy(target, &args);
+    let shared_payloads = build_shared_payloads(target);
+
+    // === Stage 4: Payload Generation — build per-parameter payload sets ===
+    let (param_jobs, total_tasks) =
+        generate_param_jobs(target, &args, waf_strategy.as_ref(), &shared_payloads);
+
+    let pb = build_scan_progress_bar(&multi_pb, total_tasks, target);
 
     let found_params = Arc::new(RwLock::new(FoundParams {
         reflection: HashSet::new(),
         dom: HashSet::new(),
     }));
 
-    let mut handles = vec![];
+    let ctx = ScanWorkerCtx {
+        args: args.clone(),
+        target: arc_target.clone(),
+        client: shared_client.clone(),
+        results: results.clone(),
+        found_params: found_params.clone(),
+        findings_count: findings_count.clone(),
+        pb: pb.clone(),
+        overall_pb: overall_pb.clone(),
+        limit_result_type: limit_result_type.clone(),
+        cancel: cancel.clone(),
+        finding_tx: finding_tx.clone(),
+        semaphore: semaphore.clone(),
+    };
 
-    // === Stage 5 & 6: Reflection Check + DOM Verification (per payload) ===
+    // === Stage 5 & 6: spawn one worker per parameter (Reflection + DOM) ===
+    let mut handles = vec![];
     for (param_clone, reflection_payloads, dom_payloads) in param_jobs {
         // Check cancellation before spawning next param task
-        if let Some(ref c) = cancel
-            && c.load(Ordering::Relaxed)
-        {
+        if ctx.cancelled() {
             if let Some(ref pb) = pb {
                 pb.finish_with_message(format!("Cancelled scanning {}", target.url));
             }
@@ -944,567 +1665,22 @@ pub async fn run_scanning(
             fp.reflection.contains(&param_clone.name) || fp.dom.contains(&param_clone.name)
         };
         if already_found && !args.deep_scan {
-            // Skip further testing for this param if reflection or DOM XSS already found and not deep scanning
+            // Skip further testing for this param if reflection or DOM XSS
+            // already found and not deep scanning
             continue;
         }
         // Early stop if global limit reached
-        if let Some(lim) = limit
-            && findings_count.load(Ordering::Relaxed) >= lim
-        {
+        if ctx.limit_reached() {
             if let Some(ref pb) = pb {
                 pb.finish_with_message(format!("Completed scanning {}", target.url));
             }
             return;
         }
 
-        let args_clone = args.clone();
-        let semaphore_clone = semaphore.clone();
-        let target_clone = arc_target.clone();
-        let results_clone = results.clone();
-        let pb_clone = pb.clone();
-        let found_params_clone = found_params.clone();
-        let overall_pb_clone = overall_pb.clone();
-        let shared_client_clone = shared_client.clone();
-        let findings_count_clone = findings_count.clone();
-        let limit_result_type_clone = limit_result_type.clone();
-        let cancel_clone = cancel.clone();
-        let finding_tx_clone = finding_tx.clone();
-
+        let ctx = ctx.clone();
         let handle = tokio::spawn(async move {
-            // `acquire()` only errors if the semaphore has been closed. Nothing
-            // closes this one today (it lives for the whole scan), so the error
-            // path is currently unreachable — but `expect` would turn any future
-            // cooperative-shutdown change into a panic across every waiting
-            // worker, which is especially bad when dalfox runs embedded as a
-            // library / server / MCP backend. A closed semaphore means there is
-            // no work left to do, so wind the worker down cleanly (the task
-            // batches results into the shared `results_clone`, so there is
-            // nothing to return).
-            let Ok(_permit) = semaphore_clone.acquire().await else {
-                return;
-            };
-            // Batch local results to reduce mutex contention
-            let mut local_results: Vec<crate::scanning::result::Result> = Vec::new();
-            // Stream every new finding through the channel (if provided) before
-            // it's batched into the shared results — so the CLI can print the
-            // full finding block (POC + Issue + Payload + Line) while the scan
-            // is still running instead of waiting for the end-of-scan flush.
-            // The response body is forwarded so the CLI's `L13:` context line
-            // can be extracted from the actual response; it's dropped from the
-            // clone at the receiver after use. Channel is unbounded but the
-            // total payload is bounded by the finding count, which is small.
-            let stream_finding = |r: &crate::scanning::result::Result| {
-                if let Some(tx) = finding_tx_clone.as_ref() {
-                    let _ = tx.send(r.clone());
-                }
-            };
-            let mut local_ast_seen: HashSet<String> = HashSet::new();
-            let mut ast_analysis_done = false;
-            let mut reflection_found_locally = false;
-            let mut dom_found_locally = false;
-            let client = shared_client_clone.as_ref();
-
-            // Stage 0: fast probe to avoid large payload blasts on non-reflective params.
-            // Sandwich probe (OPEN+INNER+CLOSE) so the response check picks up
-            // partial reflections (PrefixOnly / SuffixOnly / InnerOnly) where a
-            // server-side filter strips a prefix or suffix off the input before
-            // echoing — those cases would slip past a single-token contains().
-            let probe_payloads: [&str; 1] = [crate::scanning::markers::bracketed_marker()];
-            let mut probe_reflected = false;
-            let mut probe_response_text: Option<String> = None;
-            for pp in probe_payloads {
-                let (kind, response_text) = check_reflection_with_response_client(
-                    client,
-                    &target_clone,
-                    &param_clone,
-                    pp,
-                    &args_clone,
-                )
+            ctx.scan_param(param_clone, reflection_payloads, dom_payloads)
                 .await;
-                if kind.is_some() {
-                    probe_reflected = true;
-                    probe_response_text = response_text;
-                    break;
-                } else if let Some(ref text) = response_text {
-                    // Even if safe-context suppressed the reflection kind,
-                    // check if the probe marker actually appears in the response.
-                    // This ensures breakout payloads get a chance to be tried
-                    // for params reflected inside safe tags (title, textarea, etc.).
-                    if crate::scanning::markers::classify_probe_reflection(text).detected() {
-                        probe_reflected = true;
-                        probe_response_text = response_text;
-                        break;
-                    }
-                    // Keep one response for AST analysis below.
-                    probe_response_text = response_text;
-                }
-            }
-
-            // Run AST-based DOM XSS static analysis once using the probe response (if available)
-            if !args_clone.skip_ast_analysis
-                && let Some(ref response_text) = probe_response_text
-            {
-                ast_analysis_done = true;
-                let ast_findings = run_ast_dom_analysis(
-                    client,
-                    &target_clone,
-                    &param_clone,
-                    response_text,
-                    &mut local_ast_seen,
-                )
-                .await;
-                for f in &ast_findings {
-                    stream_finding(f);
-                }
-                local_results.extend(ast_findings);
-            }
-
-            // If probe found no reflection, try a numeric-only probe to detect
-            // letter-stripping filters (e.g., /[a-zA-Z]/ removal).
-            if !probe_reflected {
-                let numeric_probe = "90197752";
-                let (kind, _) = check_reflection_with_response_client(
-                    client,
-                    &target_clone,
-                    &param_clone,
-                    numeric_probe,
-                    &args_clone,
-                )
-                .await;
-                if kind.is_some() {
-                    probe_reflected = true;
-                }
-            }
-
-            // If probe found no reflection and not in deep_scan, skip heavy payload loops for this param
-            if !probe_reflected && !args_clone.deep_scan {
-                if !local_results.is_empty() {
-                    let added = count_matching_results(&local_results, &limit_result_type_clone);
-                    let mut guard = results_clone.lock().await;
-                    guard.extend(local_results);
-                    findings_count_clone.fetch_add(added, Ordering::Relaxed);
-                }
-                return;
-            }
-
-            // Save a reference copy for HPP phase (only first 5 payloads)
-            let reflection_payloads_for_hpp: Vec<String> = if args_clone.hpp {
-                reflection_payloads.iter().take(5).cloned().collect()
-            } else {
-                vec![]
-            };
-
-            // Sequential testing for this param
-            for reflection_payload in reflection_payloads {
-                // Check cancellation
-                if let Some(ref c) = cancel_clone
-                    && c.load(Ordering::Relaxed)
-                {
-                    break;
-                }
-                // Early stop if global limit reached
-                if let Some(lim) = args_clone.limit
-                    && findings_count_clone.load(Ordering::Relaxed) >= lim
-                {
-                    return;
-                }
-                // Skip reflection if already found for this param
-                let reflection_tuple = if reflection_found_locally {
-                    (None, None)
-                } else {
-                    let already = found_params_clone
-                        .read()
-                        .await
-                        .reflection
-                        .contains(&param_clone.name);
-                    if already {
-                        reflection_found_locally = true;
-                        (None, None)
-                    } else {
-                        check_reflection_with_response_client(
-                            client,
-                            &target_clone,
-                            &param_clone,
-                            &reflection_payload,
-                            &args_clone,
-                        )
-                        .await
-                    }
-                };
-                let reflected_kind = reflection_tuple.0;
-                let reflection_response_text = reflection_tuple.1;
-
-                // AST-based DOM XSS analysis (enabled by default unless skipped)
-                if !args_clone.skip_ast_analysis
-                    && !ast_analysis_done
-                    && let Some(ref response_text) = reflection_response_text
-                {
-                    ast_analysis_done = true;
-                    let ast_findings = run_ast_dom_analysis(
-                        client,
-                        &target_clone,
-                        &param_clone,
-                        response_text,
-                        &mut local_ast_seen,
-                    )
-                    .await;
-                    for f in &ast_findings {
-                        stream_finding(f);
-                    }
-                    local_results.extend(ast_findings);
-                }
-
-                if let Some(ref pb) = pb_clone {
-                    pb.inc(1);
-                }
-                if let Some(ref opb) = overall_pb_clone {
-                    opb.inc(1);
-                }
-                if let Some(kind) = reflected_kind {
-                    let should_add = if args_clone.deep_scan {
-                        true
-                    } else {
-                        let mut found = found_params_clone.write().await;
-                        if !found.reflection.contains(&param_clone.name) {
-                            found.reflection.insert(param_clone.name.clone());
-                            reflection_found_locally = true;
-                            true
-                        } else {
-                            false
-                        }
-                    };
-
-                    if should_add {
-                        // Build result URL with the reflected payload (via helper).
-                        // Use the form action URL when the param came from form
-                        // discovery, so the PoC URL points at the actual sink.
-                        let base = crate::scanning::url_inject::effective_query_base(
-                            &target_clone.url,
-                            &param_clone,
-                        );
-                        let result_url = crate::scanning::url_inject::build_injected_url(
-                            &base,
-                            &param_clone,
-                            &reflection_payload,
-                        );
-
-                        let reflection_note = reflection_kind_note(kind);
-
-                        // Static V upgrade: re-use the reflection response body
-                        // to look for browser-executable DOM evidence. Saves one
-                        // HTTP request relative to running a separate
-                        // `check_dom_verification` request. The four evidence
-                        // kinds (marker, executable URL in dangerous attribute,
-                        // HTML element with sink handler, JS-context sink call)
-                        // are the same set DOM verification ultimately uses, so
-                        // the static path is consistent with the dedicated path.
-                        //
-                        // Without this broader check, multi-site reflections where
-                        // the reflection-phase payload already contains the
-                        // structurally exploitable bytes (e.g. xssmaze
-                        // /realworld/level1 reflecting `<svg onload=alert(1)>`
-                        // raw into <h2>, and xssmaze /hpp/level1 where the
-                        // first-value reflection renders the unfiltered payload)
-                        // surfaced as R-only despite being trivially V — the
-                        // adaptive DOM payload generator drops HTML-tag payloads
-                        // when angles are reported "invalid" at one of the
-                        // reflection sites, and the prior `has_js_context_evidence`
-                        // check only covered the `<script>`-block case.
-                        let dom_evidence_kind =
-                            reflection_response_text.as_deref().and_then(|body| {
-                                crate::scanning::check_dom_verification::classify_dom_evidence(
-                                    &reflection_payload,
-                                    body,
-                                )
-                            });
-
-                        let (finding_type, severity, summary, poc_msg) =
-                            if let Some(kind) = dom_evidence_kind {
-                                // Mark dom_found so we skip redundant DOM verification
-                                {
-                                    let mut found = found_params_clone.write().await;
-                                    found.dom.insert(param_clone.name.clone());
-                                }
-                                dom_found_locally = true;
-                                let evidence_label = kind.label();
-                                (
-                                    FindingType::Verified,
-                                    "High".to_string(),
-                                    format!(
-                                        "DOM verification successful for param {} ({})",
-                                        param_clone.name, evidence_label
-                                    ),
-                                    format!(
-                                        "Triggered XSS Payload ({}): {}={}",
-                                        evidence_label, param_clone.name, reflection_payload
-                                    ),
-                                )
-                            } else {
-                                (
-                                    FindingType::Reflected,
-                                    "Info".to_string(),
-                                    format!(
-                                        "Reflected XSS detected for param {} ({})",
-                                        param_clone.name, reflection_note
-                                    ),
-                                    format!(
-                                        "[R] Triggered XSS Payload ({}): {}={}",
-                                        reflection_note, param_clone.name, reflection_payload
-                                    ),
-                                )
-                            };
-
-                        // Record reflected/verified XSS finding (fallback path).
-                        // In SXSS mode, prefix inject_type so downstream output
-                        // (JSON, markdown, plain) makes the stored route visible.
-                        // Template-shaped payloads (`{{…}}`) further refine the
-                        // label to `*-CSTI` so users can tell client-side
-                        // template injection apart from generic HTML reflection.
-                        let mut result = crate::scanning::result::Result::new(
-                            finding_type,
-                            inject_type_for_payload_with_sink(
-                                args_clone.sxss,
-                                &reflection_payload,
-                                param_clone.framework_sink.as_deref(),
-                            ),
-                            crate::scanning::url_inject::effective_method(
-                                &target_clone.method,
-                                &param_clone,
-                            ),
-                            result_url,
-                            param_clone.name.clone(),
-                            reflection_payload.clone(),
-                            summary,
-                            "CWE-79".to_string(),
-                            severity,
-                            606,
-                            poc_msg,
-                        );
-                        result.location = format!("{:?}", param_clone.location);
-                        result.request = Some(build_request_text(
-                            &target_clone,
-                            &param_clone,
-                            &reflection_payload,
-                        ));
-                        result.response = reflection_response_text;
-
-                        stream_finding(&result);
-                        // Defer pushing to shared results (batched)
-                        local_results.push(result);
-                    }
-                }
-            }
-
-            // DOM verification
-            for dom_payload in dom_payloads {
-                // Check cancellation
-                if let Some(ref c) = cancel_clone
-                    && c.load(Ordering::Relaxed)
-                {
-                    break;
-                }
-                // Early stop if global limit reached
-                if let Some(lim) = args_clone.limit
-                    && findings_count_clone.load(Ordering::Relaxed) >= lim
-                {
-                    return;
-                }
-                // Skip DOM verification if already found for this param
-                let already_dom_found = if dom_found_locally {
-                    true
-                } else {
-                    let is_found = found_params_clone
-                        .read()
-                        .await
-                        .dom
-                        .contains(&param_clone.name);
-                    if is_found {
-                        dom_found_locally = true;
-                    }
-                    is_found
-                };
-                if already_dom_found {
-                    if let Some(ref pb) = pb_clone {
-                        pb.inc(1);
-                    }
-                    if let Some(ref opb) = overall_pb_clone {
-                        opb.inc(1);
-                    }
-                    continue;
-                }
-                let (dom_verified, response_text) = check_dom_verification_with_client(
-                    client,
-                    &target_clone,
-                    &param_clone,
-                    &dom_payload,
-                    &args_clone,
-                )
-                .await;
-                if dom_verified {
-                    let should_add = if args_clone.deep_scan {
-                        true
-                    } else {
-                        let mut found = found_params_clone.write().await;
-                        if !found.dom.contains(&param_clone.name) {
-                            found.dom.insert(param_clone.name.clone());
-                            dom_found_locally = true;
-                            true
-                        } else {
-                            false
-                        }
-                    };
-
-                    if should_add {
-                        // Create result (via helper). Use the form action URL
-                        // when the param came from form discovery.
-                        let base = crate::scanning::url_inject::effective_query_base(
-                            &target_clone.url,
-                            &param_clone,
-                        );
-                        let result_url = crate::scanning::url_inject::build_injected_url(
-                            &base,
-                            &param_clone,
-                            &dom_payload,
-                        );
-
-                        // Determine which evidence path proved exploitability
-                        // so the V finding's message reflects the route.
-                        let evidence_label = response_text
-                            .as_deref()
-                            .and_then(|body| {
-                                crate::scanning::check_dom_verification::classify_dom_evidence(
-                                    &dom_payload,
-                                    body,
-                                )
-                            })
-                            .map_or("DOM evidence", |k| k.label());
-
-                        let mut result = crate::scanning::result::Result::new(
-                            FindingType::Verified, // DOM-verified => Vulnerability
-                            inject_type_for_payload_with_sink(
-                                args_clone.sxss,
-                                &dom_payload,
-                                param_clone.framework_sink.as_deref(),
-                            ),
-                            crate::scanning::url_inject::effective_method(
-                                &target_clone.method,
-                                &param_clone,
-                            ),
-                            result_url,
-                            param_clone.name.clone(),
-                            dom_payload.clone(),
-                            format!(
-                                "DOM verification successful for param {} ({})",
-                                param_clone.name, evidence_label
-                            ),
-                            "CWE-79".to_string(),
-                            "High".to_string(),
-                            606,
-                            format!(
-                                "Triggered XSS Payload ({}): {}={}",
-                                evidence_label, param_clone.name, dom_payload
-                            ),
-                        );
-                        result.location = format!("{:?}", param_clone.location);
-                        result.request = Some(build_request_text(
-                            &target_clone,
-                            &param_clone,
-                            &dom_payload,
-                        ));
-                        result.response = response_text;
-
-                        stream_finding(&result);
-                        // Defer pushing to shared results (batched)
-                        local_results.push(result);
-                        break;
-                    }
-                }
-                if let Some(ref pb) = pb_clone {
-                    pb.inc(1);
-                }
-                if let Some(ref opb) = overall_pb_clone {
-                    opb.inc(1);
-                }
-            }
-            // HPP (HTTP Parameter Pollution) phase: test duplicate-param URLs
-            // Only for query params when --hpp is enabled
-            if args_clone.hpp && param_clone.location == crate::parameter_analysis::Location::Query
-            {
-                use crate::scanning::url_inject::{HppPosition, build_hpp_url};
-
-                // Use a small subset of reflection payloads to avoid request explosion
-                let hpp_payloads: Vec<String> = reflection_payloads_for_hpp
-                    .iter()
-                    .take(5)
-                    .cloned()
-                    .collect();
-                let hpp_positions = [HppPosition::Last, HppPosition::First, HppPosition::Both];
-
-                'hpp_outer: for hpp_payload in &hpp_payloads {
-                    if let Some(lim) = args_clone.limit
-                        && findings_count_clone.load(Ordering::Relaxed) >= lim
-                    {
-                        break;
-                    }
-                    for &position in &hpp_positions {
-                        if let Some(hpp_url) =
-                            build_hpp_url(&target_clone.url, &param_clone, hpp_payload, position)
-                        {
-                            let (kind, response_text) =
-                                crate::scanning::check_reflection::check_reflection_with_hpp_url(
-                                    client,
-                                    &target_clone,
-                                    &param_clone,
-                                    hpp_payload,
-                                    &hpp_url,
-                                    &args_clone,
-                                )
-                                .await;
-
-                            if let Some(kind) = kind {
-                                let pos_label = match position {
-                                    HppPosition::Last => "last",
-                                    HppPosition::First => "first",
-                                    HppPosition::Both => "both",
-                                };
-                                let reflection_note = reflection_kind_note(kind);
-
-                                let mut result = crate::scanning::result::Result::new(
-                                    FindingType::Reflected,
-                                    "inHTML-HPP".to_string(),
-                                    target_clone.method.clone(),
-                                    hpp_url.clone(),
-                                    param_clone.name.clone(),
-                                    hpp_payload.clone(),
-                                    format!(
-                                        "HPP bypass: reflected XSS for param {} (position={}, {})",
-                                        param_clone.name, pos_label, reflection_note
-                                    ),
-                                    "CWE-79".to_string(),
-                                    "Medium".to_string(),
-                                    606,
-                                    format!(
-                                        "[R] HPP Bypass ({}): {}={} (position={})",
-                                        reflection_note, param_clone.name, hpp_payload, pos_label
-                                    ),
-                                );
-                                result.location = format!("{:?}", param_clone.location);
-                                result.response = response_text;
-                                stream_finding(&result);
-                                local_results.push(result);
-                                break 'hpp_outer; // One HPP finding per param is enough
-                            }
-                        }
-                    }
-                }
-            }
-
-            if !local_results.is_empty() {
-                let added = count_matching_results(&local_results, &limit_result_type_clone);
-                let mut guard = results_clone.lock().await;
-                guard.extend(local_results);
-                findings_count_clone.fetch_add(added, Ordering::Relaxed);
-            }
         });
         handles.push(handle);
     }
@@ -1515,36 +1691,12 @@ pub async fn run_scanning(
         }
     }
 
-    // Log WAF block statistics if any blocks were observed (debug only)
-    if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-        let total_waf_blocks = crate::WAF_BLOCK_COUNT.load(std::sync::atomic::Ordering::Relaxed);
-        if total_waf_blocks > 0 {
-            eprintln!(
-                "[*] WAF block stats: {} total blocks detected during scan of {}",
-                total_waf_blocks, target.url,
-            );
-        }
-    }
+    log_waf_block_stats(target);
 
     // Collapse this target's R findings that are already proven by one of
-    // its own V findings on the same (param, inject_type). Multiple per-
-    // param payload variants typically surface the same logical issue
-    // twice — keep the strongest evidence and drop weaker R duplicates.
-    // AST-detected and per-payload V findings are preserved, and the
-    // collapse is scoped to the current target so other targets' findings
-    // are never affected.
-    {
-        let mut guard = results.lock().await;
-        let before = guard.len();
-        let original = std::mem::take(&mut *guard);
-        let target_url_str = target.url.to_string();
-        let collapsed = collapse_redundant_reflected(original, &target_url_str);
-        let after = collapsed.len();
-        *guard = collapsed;
-        if after < before {
-            findings_count.fetch_sub(before - after, Ordering::Relaxed);
-        }
-    }
+    // its own V findings on the same (param, inject_type), scoped to the
+    // current target so other targets' findings are never affected.
+    collapse_target_results(&results, &findings_count, target).await;
 
     if let Some(pb) = pb {
         pb.finish_with_message(format!("Completed scanning {}", target.url));
