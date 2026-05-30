@@ -1534,8 +1534,8 @@ impl ScanWorkerCtx {
         }
         use crate::scanning::url_inject::{HppPosition, build_hpp_url};
 
-        // Use a small subset of reflection payloads to avoid request explosion
-        let hpp_payloads: Vec<String> = hpp_payloads.iter().take(5).cloned().collect();
+        // `hpp_payloads` is already the small reflection-payload subset capped
+        // by the caller (see `scan_param`), which bounds the request fan-out.
         let hpp_positions = [HppPosition::Last, HppPosition::First, HppPosition::Both];
 
         'hpp_outer: for hpp_payload in &hpp_payloads {
