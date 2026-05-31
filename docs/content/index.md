@@ -219,8 +219,21 @@ template = "landing"
       <a href="https://github.com/hahwul/dalfox" class="btn btn-ghost" target="_blank" rel="noopener">GitHub →</a>
     </div>
     <p class="contributors-label">Thanks to our contributors</p>
-    <div class="contributors-image">
-      <img src="https://github.com/hahwul/dalfox/raw/main/docs/static/images/CONTRIBUTORS.svg" alt="Contributors" loading="lazy">
+    <svg class="cg-filters" width="0" height="0" aria-hidden="true" focusable="false">
+      <filter id="cg-red" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
+        <feColorMatrix type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0"/>
+      </filter>
+      <filter id="cg-cyan" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
+        <feColorMatrix type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0"/>
+      </filter>
+    </svg>
+    <div class="contributors-glitch" role="img" aria-label="Dalfox contributors"
+         style="--contrib-src: url('https://github.com/hahwul/dalfox/raw/main/docs/static/images/CONTRIBUTORS.svg')">
+      <img class="cg-base" src="https://github.com/hahwul/dalfox/raw/main/docs/static/images/CONTRIBUTORS.svg" alt="" aria-hidden="true" loading="lazy">
+      <span class="cg-layer cg-r" aria-hidden="true"></span>
+      <span class="cg-layer cg-b" aria-hidden="true"></span>
+      <span class="cg-layer cg-slice" aria-hidden="true"></span>
+      <span class="cg-scan" aria-hidden="true"></span>
     </div>
   </div>
 </section>
