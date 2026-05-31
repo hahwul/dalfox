@@ -80,7 +80,9 @@
       var titleIdx = item.title.toLowerCase().indexOf(q);
       var contentIdx = item.content.toLowerCase().indexOf(q);
       if (titleIdx !== -1 || contentIdx !== -1) {
-        var score = titleIdx !== -1 ? 100 - titleIdx : contentIdx;
+        // Title matches always rank above content-only matches; within each
+        // group an earlier match position ranks higher.
+        var score = titleIdx !== -1 ? 10000 - titleIdx : -contentIdx;
         results.push({ item: item, score: score });
       }
     }
