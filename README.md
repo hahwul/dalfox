@@ -95,4 +95,4 @@ if you want to contribute to this project, please see [CONTRIBUTING.md](https://
 
 The name comes from 'Dal' ([달](https://en.wiktionary.org/wiki/달)) 🌙, the Korean word for 'moon', combined with 'Fox' 🦊.
 
-![](docs/static/images/illust.webp)
+![](docs/static/images/illust2.webp)
