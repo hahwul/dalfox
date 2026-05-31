@@ -98,9 +98,12 @@ rescue ex
 end
 
 # snap convention here keeps the `v` prefix (matches release tags).
+# NOTE: Crystal's `/m` flag is MULTILINE *and* DOTALL, so `.` matches
+# newlines. Match the value with `[^\n]*` to stay on a single line —
+# `.*` would swallow the rest of the file.
 def update_snap(new_version : String) : Bool
   content = File.read(SNAP_YAML)
-  updated = content.sub(/^(version:\s*)['"]?v?[^'"\s]+['"]?\s*$/m, "\\1v#{new_version}")
+  updated = content.sub(/^(version:[ \t]*)[^\n]*/m, "\\1v#{new_version}")
   return false if updated == content
   File.write(SNAP_YAML, updated)
   true
@@ -111,11 +114,12 @@ end
 
 # AUR pkgver disallows hyphens; rewrite `-` as `_` so dev/rc tags remain
 # valid for `makepkg --printsrcinfo`. Also resets pkgrel=1 on bump.
+# `[^\n]*` (not `.*`) — see the DOTALL note on update_snap above.
 def update_aur(new_version : String) : Bool
   content = File.read(AUR_PKGBUILD)
   aur_ver = new_version.gsub('-', '_')
-  updated = content.sub(/^pkgver=.*/m, "pkgver=#{aur_ver}")
-                   .sub(/^pkgrel=.*/m, "pkgrel=1")
+  updated = content.sub(/^pkgver=[^\n]*/m, "pkgver=#{aur_ver}")
+                   .sub(/^pkgrel=[^\n]*/m, "pkgrel=1")
   return false if updated == content
   File.write(AUR_PKGBUILD, updated)
   true
