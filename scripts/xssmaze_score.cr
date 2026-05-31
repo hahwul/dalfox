@@ -281,10 +281,32 @@ end
 
 def bar_color(rate : Float64) : String
   case
-  when rate >= 90 then "#4ade80" # green
+  when rate >= 90 then "#34d399" # success
   when rate >= 70 then "#8b94e8" # accent
   when rate >= 40 then "#f59e0b" # amber
   else                 "#f87171" # red
+  end
+end
+
+# Meter fill colour as hex + "r,g,b" (for the rgba glow), keyed off the overall rate.
+def meter_palette(rate : Float64) : {String, String}
+  case
+  when rate >= 90 then {"#34d399", "52,211,153"}
+  when rate >= 70 then {"#8b94e8", "139,148,232"}
+  when rate >= 40 then {"#f59e0b", "245,158,11"}
+  else                 {"#f87171", "248,113,113"}
+  end
+end
+
+# Flat metric tile — no left-accent border; value can be tinted for meaning.
+def tile(label : String, value : String, sub : String,
+         value_color : String = "var(--text-primary,#e7e9f3)") : String
+  String.build do |io|
+    io << %(<div style="padding:.85rem 1rem;background:var(--bg-surface,#11141f);border:1px solid var(--border-light,#222741);border-radius:10px">)
+    io << %(<div style="font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted,#636980)">#{label}</div>)
+    io << %(<div style="margin-top:.3rem;font-size:1.5rem;font-weight:700;line-height:1;color:#{value_color};font-variant-numeric:tabular-nums">#{value}</div>)
+    io << %(<div style="margin-top:.35rem;font-size:.75rem;color:var(--text-secondary,#9aa0bb)">#{sub}</div>) unless sub.empty?
+    io << %(</div>)
   end
 end
 
@@ -292,56 +314,65 @@ def render_block(data : JSON::Any) : String
   total = data["total"]
   cats = data["categories"].as_a
   digest = data["xssmaze_digest"]?.try(&.as_s?)
-  short_digest = digest.try { |d| d.includes?("@") ? d.split("@").last[0, 19] : d[0, 19] }
+  rate = total["rate"].as_f
+  detected = total["detected"]
+  endpoints = total["endpoints"]
+  hex, rgb = meter_palette(rate)
+  perfect = cats.count { |c| c["rate"].as_f >= 100.0 }
+  gaps = cats.reject { |c| c["rate"].as_f >= 100.0 }.sort_by { |c| c["rate"].as_f }
+  gen_date = data["generated_at"].as_s.split("T").first
 
   String.build do |io|
-    # Summary cards.
-    io << %(<div style="display:flex;flex-wrap:wrap;gap:.75rem;margin:1.25rem 0">)
-    io << stat_card("Overall detection",
-      "#{total["detected"]} / #{total["endpoints"]}",
-      "#{total["rate"]}% of endpoints", bar_color(total["rate"].as_f))
-    io << stat_card("Categories", cats.size.to_s, "", "#8b94e8")
-    io << stat_card("dalfox", "v#{data["dalfox_version"].as_s}", "", "#8b94e8")
-    io << stat_card("xssmaze", "v#{data["xssmaze_version"].as_s}",
-      short_digest || "main", "#8b94e8")
+    # --- Score board: one big score readout (one contiguous HTML block) ---
+    io << %(<div style="margin:1.5rem 0;padding:1.6rem 1.75rem;background:radial-gradient(120% 140% at 100% 0%,rgba(139,148,232,0.10),transparent 55%),linear-gradient(135deg,var(--bg-surface,#11141f),var(--bg-sidebar,#0b0d18));border:1px solid var(--border-light,#222741);border-radius:14px">)
+    io << %(<div style="font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.12em;color:var(--text-muted,#636980)">Detection score</div>)
+    io << %(<div style="display:flex;align-items:baseline;margin-top:.4rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums"><span style="font-size:clamp(2.6rem,9vw,3.6rem);font-weight:700;line-height:1;letter-spacing:-.02em">#{rate}</span><span style="font-size:1.6rem;font-weight:600;color:var(--text-secondary,#9aa0bb)">%</span></div>)
+    io << %(<div style="margin-top:.55rem;font-size:.95rem;color:var(--text-secondary,#9aa0bb)"><strong style="color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">#{detected}</strong> / #{endpoints} endpoints detected across #{cats.size} categories</div>)
+    io << %(<div style="margin-top:1.4rem;height:.6rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><div style="height:100%;width:#{rate}%;background:#{hex};box-shadow:0 0 16px rgba(#{rgb},0.45);border-radius:999px"></div></div>)
+    io << %(<div style="margin-top:1.3rem;padding-top:1rem;border-top:1px solid var(--border,#161a28);display:flex;flex-wrap:wrap;gap:.4rem 1.25rem;font-size:.8rem;color:var(--text-muted,#636980)">)
+    io << %(<span><span style="color:var(--text-secondary,#9aa0bb)">dalfox</span> v#{data["dalfox_version"].as_s}</span>)
+    io << %(<span><span style="color:var(--text-secondary,#9aa0bb)">xssmaze</span> v#{data["xssmaze_version"].as_s}</span>)
+    io << %(<span>generated #{gen_date}</span>)
     io << %(</div>)
-    io << "\n\n### Coverage by category\n\n"
+    io << %(</div>)
 
-    # Horizontal bar chart (one contiguous HTML block — no blank lines).
-    io << %(<div style="margin:1rem 0;font-size:.85rem">)
-    cats.each do |c|
-      r = c["rate"].as_f
-      io << %(<div style="display:flex;align-items:center;gap:.6rem;margin:.3rem 0">)
-      io << %(<span style="flex:0 0 13rem;color:var(--text-secondary,#9aa0bb);font-family:var(--font-mono,ui-monospace,monospace);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">#{c["category"].as_s}</span>)
-      io << %(<span style="flex:1;height:.7rem;background:var(--bg-surface,#11141f);border:1px solid var(--border-light,#222741);border-radius:999px;overflow:hidden">)
-      io << %(<span style="display:block;height:100%;width:#{r}%;background:#{bar_color(r)}"></span>)
-      io << %(</span>)
-      io << %(<span style="flex:0 0 7rem;text-align:right;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">#{c["detected"]}/#{c["endpoints"]} · #{r}%</span>)
+    # --- Stat tiles: flat, no left accent; values tinted for meaning ---
+    io << %(<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.75rem;margin:1rem 0">)
+    io << tile("Endpoints", endpoints.to_s, "catalogued")
+    io << tile("Categories", cats.size.to_s, "test groups")
+    io << tile("Fully detected", perfect.to_s, "categories at 100%", "#34d399")
+    io << tile("With gaps", gaps.size.to_s, "below 100%", gaps.empty? ? "#34d399" : "#f59e0b")
+    io << %(</div>)
+
+    # --- Detailed scores ---
+    io << "\n\n### Coverage by category\n\n"
+    if gaps.empty?
+      io << %(<div style="margin:1.1rem 0;padding:.9rem 1.1rem;background:rgba(52,211,153,0.08);border:1px solid rgba(52,211,153,0.3);border-radius:10px;color:#34d399;font-size:.9rem">Every catalogued category detects all of its endpoints.</div>)
+    else
+      io << "**#{perfect} of #{cats.size}** categories detect every endpoint. The chart highlights the **#{gaps.size}** with gaps (worst first); the full breakdown is in the table.\n\n"
+      io << %(<div style="margin:1.1rem 0">)
+      gaps.each do |c|
+        r = c["rate"].as_f
+        io << %(<div style="display:flex;align-items:center;gap:.75rem;padding:.4rem 0">)
+        io << %(<span style="flex:0 1 10rem;font-family:var(--font-mono,ui-monospace,monospace);font-size:.82rem;color:var(--text-secondary,#9aa0bb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">#{c["category"].as_s}</span>)
+        io << %(<span style="flex:1 1 auto;min-width:3rem;height:.5rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:#{r}%;background:#{bar_color(r)}"></span></span>)
+        io << %(<span style="flex:0 0 6.5rem;text-align:right;font-size:.8rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">#{c["detected"]}/#{c["endpoints"]} · #{r}%</span>)
+        io << %(</div>)
+      end
       io << %(</div>)
     end
-    io << %(</div>)
 
-    # Data table.
+    # --- Full reference table (alphabetical, every category) ---
     io << "\n\n| Category | Endpoints | Detected | Verified | Rate |\n"
     io << "| --- | ---: | ---: | ---: | ---: |\n"
     cats.each do |c|
       io << "| `#{c["category"].as_s}` | #{c["endpoints"]} | #{c["detected"]} | #{c["verified"]} | #{c["rate"]}% |\n"
     end
-    io << "| **Total** | **#{total["endpoints"]}** | **#{total["detected"]}** | **#{total["verified"]}** | **#{total["rate"]}%** |\n"
+    io << "| **Total** | **#{endpoints}** | **#{detected}** | **#{total["verified"]}** | **#{rate}%** |\n"
 
     io << "\n_Generated #{data["generated_at"].as_s} · image `#{data["xssmaze_image"].as_s}`"
     io << " (`#{digest}`)" if digest
     io << " · run `just xssmaze-score` to refresh._\n"
-  end
-end
-
-def stat_card(label : String, value : String, sub : String, accent : String) : String
-  String.build do |io|
-    io << %(<div style="flex:1 1 9rem;min-width:8rem;padding:.7rem .9rem;background:var(--bg-surface,#11141f);border:1px solid var(--border-light,#222741);border-left:3px solid #{accent};border-radius:6px">)
-    io << %(<div style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted,#636980)">#{label}</div>)
-    io << %(<div style="font-size:1.35rem;font-weight:600;color:var(--text-primary,#e7e9f3)">#{value}</div>)
-    io << %(<div style="font-size:.75rem;color:var(--text-secondary,#9aa0bb)">#{sub}</div>) unless sub.empty?
-    io << %(</div>)
   end
 end
 
