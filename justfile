@@ -4,6 +4,7 @@ alias ds := docs-serve
 alias t := test
 alias vc := version-check
 alias vu := version-update
+alias xs := xssmaze-score
 
 # List available tasks.
 default:
@@ -58,3 +59,13 @@ test:
 [group('test')]
 test_all:
     cargo test -- --include-ignored
+
+# Benchmark detection against XSSMaze (main) and record the score in docs.
+[group('benchmark')]
+xssmaze-score: build
+    crystal run scripts/xssmaze_score.cr
+
+# Re-render the XSSMaze score page from the committed snapshot (no scanning).
+[group('benchmark')]
+xssmaze-render:
+    XSSMAZE_RENDER_ONLY=1 crystal run scripts/xssmaze_score.cr
