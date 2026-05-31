@@ -31,12 +31,6 @@ pub const CLI_MAX_WORKERS: usize = 500;
 // Default HTTP method (used by CLI and target parsing)
 pub const DEFAULT_METHOD: &str = "GET";
 
-/// clap value-parser for `--method` / `-X`. Normalises the input to
-/// uppercase so `--method get` and `--method GET` behave identically
-/// (case-sensitive comparisons downstream — e.g. `args.method !=
-/// "GET"` — used to silently break discovery), and rejects unknown
-/// or empty methods at parse time instead of letting them surface as
-/// `[POC][V][][body]` / `[POC][V][WAT][body]` garbage later.
 /// clap value-parser for `--force-waf`. Accepts the same alias set that
 /// `parse_waf_type` recognises (case-insensitive) and rejects anything
 /// else at parse time so a typo like `--force-waf cloudflair` doesn't
@@ -98,6 +92,12 @@ fn parse_limit_arg(s: &str) -> std::result::Result<usize, String> {
     Ok(n)
 }
 
+/// clap value-parser for `--method` / `-X`. Normalises the input to
+/// uppercase so `--method get` and `--method GET` behave identically
+/// (case-sensitive comparisons downstream — e.g. `args.method !=
+/// "GET"` — used to silently break discovery), and rejects unknown
+/// or empty methods at parse time instead of letting them surface as
+/// `[POC][V][][body]` / `[POC][V][WAT][body]` garbage later.
 fn parse_http_method_arg(s: &str) -> std::result::Result<String, String> {
     let trimmed = s.trim();
     if trimmed.is_empty() {

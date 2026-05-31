@@ -4,9 +4,14 @@
 //! submodules so this file stays a readable sequence of stages:
 //! - [`args`] — `ScanArgs` CLI surface, default/cap constants, value parsers
 //! - [`validation`] — numeric arg checks + input-shape heuristics
+//! - [`input`] — target resolution (input-type, file/stdin/raw-HTTP, dedup, scope filters)
 //! - [`preflight`] — content-type / CSP / WAF preflight + reqwest classification
+//! - [`analysis`] — per-target preflight + parameter-analysis loop
+//! - [`scan_loop`] — per-host scanning loop + mid-scan finding streaming
+//! - [`output`] — dry-run / only-discovery / end-of-scan result rendering
 //! - [`poc`] — curl / httpie / plain POC + finding-block rendering
 //! - [`postprocess`] — dedupe / priority / context extraction
+//! - [`logging`] — plain-mode log lines + ephemeral progress spinner
 
 use indicatif::MultiProgress;
 use std::collections::HashMap;
