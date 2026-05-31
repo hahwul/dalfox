@@ -25,7 +25,7 @@ Scope:
 
 Primary modules:
 - `src/main.rs`: CLI entrypoint, global flags, config load/init, subcommand dispatch
-- `src/cmd/scan.rs`: scan CLI args, orchestration, preflight checks, output routing
+- `src/cmd/scan/`: scan command, split into focused submodules — `mod.rs` (`run_scan` orchestrator + `ScanArgs`-independent glue), `args.rs` (`ScanArgs` + default/cap constants + value parsers), `validation.rs`, `preflight.rs`, `input.rs` (target resolution), `analysis.rs` (preflight/param loop), `scan_loop.rs` (scanning loop), `output.rs` (dry-run/only-discovery/result rendering), `poc.rs`, `postprocess.rs`, `logging.rs`
 - `src/cmd/mod.rs`: shared `error_codes` constants + `JobStatus` enum (used by server + MCP)
 - `src/config.rs`: config schema + precedence (`apply_to_scan_args_if_default`)
 - `src/scanning/`: reflection/DOM checks, AST integration, payload execution pipeline, result models
@@ -50,7 +50,7 @@ Behavioral default:
 - No subcommand => defaults to `scan` in `src/main.rs`.
 - Banner is suppressed automatically for `mcp` and for machine-readable formats (`json`, `jsonl`, `sarif`, `toml`) so stdout stays parseable.
 
-CLI exit codes (`ScanOutcome` in `src/cmd/scan.rs`):
+CLI exit codes (`ScanOutcome` in `src/cmd/scan/mod.rs`):
 - `0` Clean — scan finished, no findings
 - `1` Findings — scan finished, one or more findings
 - `2` Error — input/configuration/runtime error
@@ -60,7 +60,7 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan.rs`):
 ## Non-Negotiable Invariants
 
 1. Keep CLI/default constants centralized.
-- Source of truth: `src/cmd/scan.rs`
+- Source of truth: `src/cmd/scan/args.rs` (re-exported from `src/cmd/scan/mod.rs`)
 - Examples: `DEFAULT_TIMEOUT_SECS`, `DEFAULT_WORKERS`, `DEFAULT_ENCODERS`, `DEFAULT_METHOD`, `DEFAULT_DELAY_MS`, `DEFAULT_MAX_CONCURRENT_TARGETS`, `DEFAULT_MAX_TARGETS_PER_HOST`, `DEFAULT_WAF_MIN_CONFIDENCE`
 - CLI sanity caps also live here: `CLI_MAX_TIMEOUT_SECS`, `CLI_MAX_DELAY_MS`, `CLI_MAX_WORKERS`
 - If a default changes, align all call sites that compare against defaults.
@@ -74,7 +74,7 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan.rs`):
 
 3. Preserve output contract.
 - Output formats currently include: `plain`, `json`, `jsonl`, `markdown`, `sarif`, `toml`.
-- Keep serialization behavior in `src/scanning/result.rs` aligned with routing in `src/cmd/scan.rs`.
+- Keep serialization behavior in `src/scanning/result.rs` aligned with output routing in `src/cmd/scan/output.rs`.
 - `include_request` and `include_response` flags must remain opt-in. `--include-all` is a convenience that sets both (resolved in `src/main.rs` before `run_scan`).
 - JSON/JSONL envelope `meta` includes `target_summary` (per-target status/findings/error_code).
 - All findings include `type_description` alongside the single-letter `type` code.
@@ -112,7 +112,7 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan.rs`):
 ### Where to edit by feature
 
 - New scan flag:
-  - `src/cmd/scan.rs` (`ScanArgs` + behavior)
+  - `src/cmd/scan/args.rs` (`ScanArgs`) + behavior in `src/cmd/scan/mod.rs` (`run_scan`)
   - `src/main.rs` (default scan construction when no subcommand)
   - `src/config.rs` (`ScanConfig`, template, precedence mapping)
   - If relevant: `src/cmd/server.rs` `ScanOptions`
@@ -126,12 +126,12 @@ CLI exit codes (`ScanOutcome` in `src/cmd/scan.rs`):
 - New encoder:
   - `src/encoding/mod.rs`
   - encoder policy application path (`apply_encoders_to_payloads`)
-  - path PoC encoder logic in `src/cmd/scan.rs` (`GLOBAL_ENCODERS` usage)
+  - path PoC encoder logic in `src/cmd/scan/poc.rs` (`GLOBAL_ENCODERS` usage)
   - CLI help/docs and tests
 
 - New output format:
   - conversion in `src/scanning/result.rs`
-  - dispatch branch in `src/cmd/scan.rs`
+  - dispatch branch in `src/cmd/scan/output.rs`
   - integration tests under `tests/integration/`
 
 - Server API behavior:
