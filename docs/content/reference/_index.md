@@ -9,5 +9,6 @@ Exhaustive reference for Dalfox's CLI, config file, and environment variables. I
 - **[CLI Reference](./cli/)** — Every subcommand and flag.
 - **[Config File](./config/)** — Every key in `config.toml`.
 - **[Environment](./environment/)** — Recognised environment variables.
+- **[XSSMaze Score](./xssmaze/)** — How much of the XSSMaze lab Dalfox detects.
 
 Looking for how things work at a conceptual level? Start in the [Guide](../guide/).
