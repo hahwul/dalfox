@@ -1,0 +1,1198 @@
+{
+  "generated_at": "2026-05-31T11:00:29Z",
+  "dalfox_version": "3.0.0",
+  "xssmaze_version": "0.1.0",
+  "xssmaze_image": "ghcr.io/hahwul/xssmaze:main",
+  "xssmaze_digest": "ghcr.io/hahwul/xssmaze@sha256:0077f3084e92b49be28cb322e3b379d163e8e6db412ced103ea57c449a80454c",
+  "total": {
+    "endpoints": 1013,
+    "detected": 939,
+    "verified": 0,
+    "rate": 92.7
+  },
+  "categories": [
+    {
+      "category": "advanced",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "api",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "apidom",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "ariaattr",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "attr",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "attrctx",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "attrname",
+      "endpoints": 4,
+      "detected": 4,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "basic",
+      "endpoints": 7,
+      "detected": 7,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "booleanattr",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "browser",
+      "endpoints": 5,
+      "detected": 5,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "casemanip",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "chain",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "channel",
+      "endpoints": 4,
+      "detected": 4,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "charlimit",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "clientstate",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "clipboard",
+      "endpoints": 4,
+      "detected": 4,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "cmspattern",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "codeexec",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "commentinj",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "complexpage",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "condreflect",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "csp",
+      "endpoints": 5,
+      "detected": 5,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "cspbypass",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "css",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "csti",
+      "endpoints": 5,
+      "detected": 5,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "ctxescape",
+      "endpoints": 8,
+      "detected": 8,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "ctxv2",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "customtag",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "dashboard",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "dataattr",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "dataurl",
+      "endpoints": 4,
+      "detected": 4,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "dblenc",
+      "endpoints": 4,
+      "detected": 4,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "decode",
+      "endpoints": 4,
+      "detected": 4,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "dialog",
+      "endpoints": 5,
+      "detected": 5,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "dom",
+      "endpoints": 35,
+      "detected": 35,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "domctx",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "doublereflect",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "dragdrop",
+      "endpoints": 4,
+      "detected": 4,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "ecommerce",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "email",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "embedctx",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "encmix",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "encoding",
+      "endpoints": 8,
+      "detected": 8,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "errhandling",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "errpage",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "eventhandler",
+      "endpoints": 5,
+      "detected": 5,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "filterchain",
+      "endpoints": 8,
+      "detected": 8,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "formaction",
+      "endpoints": 4,
+      "detected": 4,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "formelement",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "fragment",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "fwoutput",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "globalattr",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "header",
+      "endpoints": 4,
+      "detected": 4,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "hidden",
+      "endpoints": 9,
+      "detected": 9,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "history",
+      "endpoints": 2,
+      "detected": 2,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "html5",
+      "endpoints": 8,
+      "detected": 8,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "import",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "inattr",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "inframe",
+      "endpoints": 4,
+      "detected": 4,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "injs",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "inlinestyle",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "inputtransform",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "jquery",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "jsctx",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "jsescape",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "json",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "jsonctx",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "latereflect",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "linkcontext",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "listiteration",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "manifest",
+      "endpoints": 1,
+      "detected": 1,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "markdown",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "mathml",
+      "endpoints": 3,
+      "detected": 3,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "mediacontext",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "metarefresh",
+      "endpoints": 4,
+      "detected": 4,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "microdata",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "misc",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "mixedmethod",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "mobserver",
+      "endpoints": 4,
+      "detected": 4,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "multiline",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "multiparam",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "multipleoutput",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "multireflect",
+      "endpoints": 8,
+      "detected": 8,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "multivector",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "mutfilter",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "mxss",
+      "endpoints": 5,
+      "detected": 5,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "nestedctx",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "nestedfilter",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "nonce",
+      "endpoints": 4,
+      "detected": 4,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "noscript",
+      "endpoints": 4,
+      "detected": 4,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "numericcontext",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "obfuscation",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "opener",
+      "endpoints": 2,
+      "detected": 2,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "partialencode",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "path",
+      "endpoints": 4,
+      "detected": 4,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "pathxss",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "payloadfilt",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "pdiff",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "polyctx",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "polyglot",
+      "endpoints": 3,
+      "detected": 3,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "popover",
+      "endpoints": 3,
+      "detected": 3,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "racecon",
+      "endpoints": 4,
+      "detected": 4,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "recfilt",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "redirectxss",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "referrer",
+      "endpoints": 2,
+      "detected": 2,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "regexbypass",
+      "endpoints": 8,
+      "detected": 8,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "regexfilt",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "reparse",
+      "endpoints": 5,
+      "detected": 5,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "replacementfilter",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "respheader",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "rwpattern",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "sanitizer",
+      "endpoints": 12,
+      "detected": 12,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "scanbounty",
+      "endpoints": 8,
+      "detected": 8,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "scriptgadget",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "semantictag",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "seoctx",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "service",
+      "endpoints": 2,
+      "detected": 2,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "shadow",
+      "endpoints": 5,
+      "detected": 5,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "slot",
+      "endpoints": 4,
+      "detected": 4,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "social",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "specialchar",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "specialtag",
+      "endpoints": 8,
+      "detected": 8,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "srcdoc",
+      "endpoints": 5,
+      "detected": 5,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "srcset",
+      "endpoints": 4,
+      "detected": 4,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "storage",
+      "endpoints": 2,
+      "detected": 2,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "stream",
+      "endpoints": 3,
+      "detected": 3,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "svg",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "svgctx",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "tablecontext",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "tagattrmix",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "template",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "timing",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "tplel",
+      "endpoints": 4,
+      "detected": 4,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "tplinject",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "truncation",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "trustedtypes",
+      "endpoints": 5,
+      "detected": 5,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "unicode",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "url",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "waf",
+      "endpoints": 8,
+      "detected": 8,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "wafv2",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "websocket",
+      "endpoints": 7,
+      "detected": 7,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "whitespace",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "worker",
+      "endpoints": 4,
+      "detected": 4,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "wrappercontext",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "xmlctx",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "bugbounty",
+      "endpoints": 10,
+      "detected": 9,
+      "verified": 0,
+      "rate": 90.0
+    },
+    {
+      "category": "prototype",
+      "endpoints": 10,
+      "detected": 9,
+      "verified": 0,
+      "rate": 90.0
+    },
+    {
+      "category": "sink",
+      "endpoints": 8,
+      "detected": 7,
+      "verified": 0,
+      "rate": 87.5
+    },
+    {
+      "category": "modern",
+      "endpoints": 32,
+      "detected": 27,
+      "verified": 0,
+      "rate": 84.4
+    },
+    {
+      "category": "ctype",
+      "endpoints": 6,
+      "detected": 5,
+      "verified": 0,
+      "rate": 83.3
+    },
+    {
+      "category": "edgefilter",
+      "endpoints": 6,
+      "detected": 5,
+      "verified": 0,
+      "rate": 83.3
+    },
+    {
+      "category": "encodingedge",
+      "endpoints": 6,
+      "detected": 5,
+      "verified": 0,
+      "rate": 83.3
+    },
+    {
+      "category": "multicontext",
+      "endpoints": 6,
+      "detected": 5,
+      "verified": 0,
+      "rate": 83.3
+    },
+    {
+      "category": "realworld",
+      "endpoints": 16,
+      "detected": 13,
+      "verified": 0,
+      "rate": 81.2
+    },
+    {
+      "category": "edge",
+      "endpoints": 8,
+      "detected": 5,
+      "verified": 0,
+      "rate": 62.5
+    },
+    {
+      "category": "headerinj",
+      "endpoints": 6,
+      "detected": 3,
+      "verified": 0,
+      "rate": 50.0
+    },
+    {
+      "category": "hpp",
+      "endpoints": 4,
+      "detected": 2,
+      "verified": 0,
+      "rate": 50.0
+    },
+    {
+      "category": "rsplit",
+      "endpoints": 4,
+      "detected": 1,
+      "verified": 0,
+      "rate": 25.0
+    },
+    {
+      "category": "stored",
+      "endpoints": 4,
+      "detected": 1,
+      "verified": 0,
+      "rate": 25.0
+    },
+    {
+      "category": "storedpat",
+      "endpoints": 6,
+      "detected": 1,
+      "verified": 0,
+      "rate": 16.7
+    },
+    {
+      "category": "callback",
+      "endpoints": 4,
+      "detected": 0,
+      "verified": 0,
+      "rate": 0.0
+    },
+    {
+      "category": "headless",
+      "endpoints": 6,
+      "detected": 0,
+      "verified": 0,
+      "rate": 0.0
+    },
+    {
+      "category": "jf",
+      "endpoints": 1,
+      "detected": 0,
+      "verified": 0,
+      "rate": 0.0
+    },
+    {
+      "category": "multipart",
+      "endpoints": 4,
+      "detected": 0,
+      "verified": 0,
+      "rate": 0.0
+    },
+    {
+      "category": "post",
+      "endpoints": 2,
+      "detected": 0,
+      "verified": 0,
+      "rate": 0.0
+    },
+    {
+      "category": "postmethod",
+      "endpoints": 6,
+      "detected": 0,
+      "verified": 0,
+      "rate": 0.0
+    },
+    {
+      "category": "realworld_input",
+      "endpoints": 8,
+      "detected": 0,
+      "verified": 0,
+      "rate": 0.0
+    },
+    {
+      "category": "redirect",
+      "endpoints": 4,
+      "detected": 0,
+      "verified": 0,
+      "rate": 0.0
+    },
+    {
+      "category": "xsleak",
+      "endpoints": 5,
+      "detected": 0,
+      "verified": 0,
+      "rate": 0.0
+    }
+  ]
+}
