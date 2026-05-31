@@ -1635,13 +1635,164 @@ body:has(.docs-layout) .site-footer {
     color: var(--text-muted);
     margin: 2.5rem 0 1rem;
 }
-.contributors-image {
+/* Contributors — signal-glitch distortion.
+   At rest the grid sits still; every ~7s it fires a ~0.45s chromatic-split
+   burst, and hovering tears it apart continuously. The red/cyan ghost layers
+   are real channel isolation (inline #cg-red / #cg-cyan SVG filters) that stay
+   hidden until a burst, then offset + slice-clip and screen-blend over the
+   clean base image so only their fringes read as chromatic aberration. */
+.cg-filters {
+    position: absolute;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+}
+.contributors-glitch {
+    position: relative;
     max-width: 760px;
     margin: 0 auto;
-}
-.contributors-image img {
-    max-width: 100%;
     border-radius: 6px;
+    overflow: hidden;
+    isolation: isolate; /* keep the screen/overlay blends off the page behind */
+}
+.cg-base {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 6px;
+    animation: cg-base-idle 7s ease-out infinite;
+}
+.cg-layer,
+.cg-scan {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    border-radius: 6px;
+}
+.cg-layer {
+    background: var(--contrib-src) center / 100% 100% no-repeat;
+    mix-blend-mode: screen;
+    opacity: 0;
+    will-change: transform, opacity, clip-path;
+}
+.cg-r {
+    filter: url(#cg-red);
+    animation: cg-r-idle 7s linear infinite;
+}
+.cg-b {
+    filter: url(#cg-cyan);
+    animation: cg-b-idle 7s linear infinite;
+}
+/* Full-colour copy that snaps a thin horizontal band sideways — the "tear" */
+.cg-slice {
+    mix-blend-mode: normal;
+    clip-path: inset(0 0 100% 0);
+    animation: cg-slice-idle 7s steps(1, end) infinite;
+}
+.cg-scan {
+    background: repeating-linear-gradient(
+        0deg,
+        rgba(139, 148, 232, 0.14) 0,
+        rgba(139, 148, 232, 0.14) 1px,
+        transparent 1px,
+        transparent 3px
+    );
+    mix-blend-mode: overlay;
+    opacity: 0;
+    will-change: opacity;
+    animation: cg-scan-idle 7s steps(1, end) infinite;
+}
+
+/* Idle: ~93.5% still, then a rapid multi-frame burst over the final ~0.45s */
+@keyframes cg-base-idle {
+    0%, 93.5%, 100% { transform: translate3d(0, 0, 0); filter: none; }
+    94.5% { transform: translate3d(2px, 0, 0); filter: brightness(1.25) contrast(1.1); }
+    96%   { transform: translate3d(-3px, 0, 0); filter: brightness(0.92); }
+    97.5% { transform: translate3d(1px, 0, 0); filter: brightness(1.15); }
+    99%   { transform: translate3d(-1px, 0, 0); filter: none; }
+}
+@keyframes cg-r-idle {
+    0%, 93.5% { opacity: 0; transform: translate3d(0, 0, 0); clip-path: inset(0 0 0 0); }
+    94%   { opacity: 0.85; transform: translate3d(-7px, 0, 0); clip-path: inset(8% 0 76% 0); }
+    95.5% { opacity: 0.85; transform: translate3d(8px, 0, 0); clip-path: inset(62% 0 12% 0); }
+    97%   { opacity: 0.85; transform: translate3d(-10px, 0, 0); clip-path: inset(36% 0 44% 0); }
+    98.5% { opacity: 0.85; transform: translate3d(4px, 0, 0); clip-path: inset(82% 0 4% 0); }
+    100%  { opacity: 0; transform: translate3d(0, 0, 0); clip-path: inset(0 0 0 0); }
+}
+@keyframes cg-b-idle {
+    0%, 93.5% { opacity: 0; transform: translate3d(0, 0, 0); clip-path: inset(0 0 0 0); }
+    94%   { opacity: 0.85; transform: translate3d(7px, 0, 0); clip-path: inset(20% 0 58% 0); }
+    95.5% { opacity: 0.85; transform: translate3d(-8px, 0, 0); clip-path: inset(48% 0 30% 0); }
+    97%   { opacity: 0.85; transform: translate3d(10px, 0, 0); clip-path: inset(4% 0 78% 0); }
+    98.5% { opacity: 0.85; transform: translate3d(-4px, 0, 0); clip-path: inset(70% 0 14% 0); }
+    100%  { opacity: 0; transform: translate3d(0, 0, 0); clip-path: inset(0 0 0 0); }
+}
+@keyframes cg-slice-idle {
+    0%, 93.5%, 100% { opacity: 0; transform: translate3d(0, 0, 0); clip-path: inset(0 0 100% 0); }
+    94%   { opacity: 1; transform: translate3d(20px, 0, 0); clip-path: inset(22% 0 71% 0); }
+    95.5% { opacity: 1; transform: translate3d(-24px, 0, 0); clip-path: inset(56% 0 37% 0); }
+    97%   { opacity: 1; transform: translate3d(15px, 0, 0); clip-path: inset(38% 0 55% 0); }
+    98.5% { opacity: 1; transform: translate3d(-13px, 0, 0); clip-path: inset(8% 0 84% 0); }
+    100%  { opacity: 0; transform: translate3d(0, 0, 0); clip-path: inset(0 0 100% 0); }
+}
+@keyframes cg-scan-idle {
+    0%, 93.5%, 100% { opacity: 0; }
+    94%   { opacity: 0.55; }
+    96.5% { opacity: 0.3; }
+    99%   { opacity: 0.55; }
+}
+
+/* Hover: drop the idle gap and tear continuously, faster and harder */
+@media (hover: hover) {
+    .contributors-glitch:hover .cg-base {
+        animation: cg-base-hover 0.42s steps(2, end) infinite;
+    }
+    .contributors-glitch:hover .cg-r {
+        animation: cg-r-hover 0.45s steps(1, end) infinite;
+    }
+    .contributors-glitch:hover .cg-b {
+        animation: cg-b-hover 0.5s steps(1, end) infinite;
+    }
+    .contributors-glitch:hover .cg-slice {
+        animation: cg-slice-hover 0.4s steps(1, end) infinite;
+    }
+    .contributors-glitch:hover .cg-scan {
+        animation: none;
+        opacity: 0.45;
+    }
+}
+@keyframes cg-base-hover {
+    0% { transform: translate3d(2px, 0, 0); filter: brightness(1.15); }
+    50% { transform: translate3d(-3px, 0, 0); filter: contrast(1.12); }
+    100% { transform: translate3d(1px, 0, 0); filter: none; }
+}
+@keyframes cg-r-hover {
+    0%   { opacity: 0.85; transform: translate3d(-7px, 0, 0); clip-path: inset(8% 0 68% 0); }
+    25%  { opacity: 0.85; transform: translate3d(8px, 0, 0); clip-path: inset(58% 0 16% 0); }
+    50%  { opacity: 0.85; transform: translate3d(-11px, 0, 0); clip-path: inset(34% 0 40% 0); }
+    75%  { opacity: 0.85; transform: translate3d(5px, 0, 0); clip-path: inset(78% 0 6% 0); }
+    100% { opacity: 0.85; transform: translate3d(-7px, 0, 0); clip-path: inset(8% 0 68% 0); }
+}
+@keyframes cg-b-hover {
+    0%   { opacity: 0.85; transform: translate3d(7px, 0, 0); clip-path: inset(22% 0 54% 0); }
+    25%  { opacity: 0.85; transform: translate3d(-9px, 0, 0); clip-path: inset(46% 0 30% 0); }
+    50%  { opacity: 0.85; transform: translate3d(11px, 0, 0); clip-path: inset(4% 0 74% 0); }
+    75%  { opacity: 0.85; transform: translate3d(-5px, 0, 0); clip-path: inset(68% 0 16% 0); }
+    100% { opacity: 0.85; transform: translate3d(7px, 0, 0); clip-path: inset(22% 0 54% 0); }
+}
+@keyframes cg-slice-hover {
+    0%   { opacity: 1; transform: translate3d(22px, 0, 0); clip-path: inset(18% 0 74% 0); }
+    25%  { opacity: 1; transform: translate3d(-26px, 0, 0); clip-path: inset(58% 0 34% 0); }
+    50%  { opacity: 1; transform: translate3d(16px, 0, 0); clip-path: inset(40% 0 52% 0); }
+    75%  { opacity: 1; transform: translate3d(-18px, 0, 0); clip-path: inset(6% 0 86% 0); }
+    100% { opacity: 1; transform: translate3d(22px, 0, 0); clip-path: inset(18% 0 74% 0); }
+}
+
+/* Respect reduced-motion: hold the clean image, no distortion */
+@media (prefers-reduced-motion: reduce) {
+    .cg-base { animation: none; }
+    .cg-layer,
+    .cg-scan { display: none; }
 }
 
 /* ==========================================================================
