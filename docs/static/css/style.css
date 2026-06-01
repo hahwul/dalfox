@@ -1450,6 +1450,91 @@ body:has(.docs-layout) .site-footer {
     border-color: var(--success);
 }
 
+/* Hero install — package-manager selector */
+.hero-install-pm {
+    position: relative;
+    flex-shrink: 0;
+}
+.hero-install-pm-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: none;
+    border: none;
+    padding: 0.1rem 0.1rem;
+    color: var(--accent);
+    font-family: inherit;
+    font-size: inherit;
+    cursor: pointer;
+    transition: color 0.15s;
+}
+.hero-install-pm-btn:hover {
+    color: var(--accent-hover);
+}
+.hero-install-pm-btn svg {
+    opacity: 0.75;
+    transition: transform 0.18s ease;
+}
+.hero-install-pm.open .hero-install-pm-btn svg {
+    transform: rotate(180deg);
+}
+.hero-install-sep {
+    align-self: stretch;
+    width: 1px;
+    margin: -0.2rem 0;
+    background: var(--ink-line);
+}
+.hero-install-pm-menu {
+    /* opens upward — the hero clips overflow, so a drop-down would be cut off */
+    position: absolute;
+    bottom: calc(100% + 0.55rem);
+    left: 0;
+    z-index: 30;
+    min-width: 160px;
+    margin: 0;
+    padding: 0.3rem;
+    list-style: none;
+    background: var(--bg-hover);
+    border: 1px solid var(--border-light);
+    border-radius: 7px;
+    box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.45);
+    opacity: 0;
+    transform: translateY(4px);
+    pointer-events: none;
+    transition:
+        opacity 0.15s ease,
+        transform 0.15s ease;
+}
+.hero-install-pm.open .hero-install-pm-menu {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+.hero-install-pm-menu li {
+    padding: 0.4rem 0.6rem;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+        background 0.12s,
+        color 0.12s;
+}
+.hero-install-pm-menu li:hover {
+    background: var(--accent-dim);
+    color: var(--text-primary);
+}
+.hero-install-pm-menu li.is-selected {
+    color: var(--accent);
+}
+.hero-install-pm-menu li.is-selected::after {
+    content: "✓";
+    float: right;
+    margin-left: 1rem;
+    opacity: 0.8;
+}
+
 /* Hero terminal */
 .hero-visual {
     min-width: 0;
