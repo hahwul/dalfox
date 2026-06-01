@@ -194,7 +194,13 @@ async fn test_check_header_discovery_blanket_echo_skips_default_probes() {
 
     let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
     let semaphore = Arc::new(Semaphore::new(1));
-    check_header_discovery(&target, &default_scan_args(), reflection_params.clone(), semaphore).await;
+    check_header_discovery(
+        &target,
+        &default_scan_args(),
+        reflection_params.clone(),
+        semaphore,
+    )
+    .await;
 
     let params = reflection_params.lock().await.clone();
     let names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
@@ -223,7 +229,13 @@ async fn test_check_header_discovery_blanket_echo_keeps_user_supplied_headers() 
 
     let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
     let semaphore = Arc::new(Semaphore::new(1));
-    check_header_discovery(&target, &default_scan_args(), reflection_params.clone(), semaphore).await;
+    check_header_discovery(
+        &target,
+        &default_scan_args(),
+        reflection_params.clone(),
+        semaphore,
+    )
+    .await;
 
     let params = reflection_params.lock().await.clone();
     assert!(
@@ -243,7 +255,13 @@ async fn test_check_header_discovery_discovers_reflected_header() {
 
     let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
     let semaphore = Arc::new(Semaphore::new(1));
-    check_header_discovery(&target, &default_scan_args(), reflection_params.clone(), semaphore).await;
+    check_header_discovery(
+        &target,
+        &default_scan_args(),
+        reflection_params.clone(),
+        semaphore,
+    )
+    .await;
 
     let params = reflection_params.lock().await.clone();
     assert!(
@@ -270,7 +288,13 @@ async fn test_check_cookie_discovery_single_cookie_branch() {
 
     let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
     let semaphore = Arc::new(Semaphore::new(1));
-    check_cookie_discovery(&target, &default_scan_args(), reflection_params.clone(), semaphore).await;
+    check_cookie_discovery(
+        &target,
+        &default_scan_args(),
+        reflection_params.clone(),
+        semaphore,
+    )
+    .await;
 
     let params = reflection_params.lock().await.clone();
     assert_eq!(params.len(), 1);
@@ -292,7 +316,13 @@ async fn test_check_cookie_discovery_multiple_cookies_branch() {
 
     let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
     let semaphore = Arc::new(Semaphore::new(1));
-    check_cookie_discovery(&target, &default_scan_args(), reflection_params.clone(), semaphore).await;
+    check_cookie_discovery(
+        &target,
+        &default_scan_args(),
+        reflection_params.clone(),
+        semaphore,
+    )
+    .await;
 
     let params = reflection_params.lock().await.clone();
     assert_eq!(params.len(), 2);
