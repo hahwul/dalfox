@@ -25,7 +25,21 @@ template = "landing"
           Star on GitHub
         </a>
       </div>
-      <div class="hero-install">
+      <div class="hero-install" data-install>
+        <div class="hero-install-pm">
+          <button class="hero-install-pm-btn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose install method">
+            <span class="hero-install-pm-label">brew</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <ul class="hero-install-pm-menu" role="listbox" aria-label="Install method">
+            <li role="option" class="is-selected" aria-selected="true" data-label="brew" data-cmd="brew install dalfox">Homebrew</li>
+            <li role="option" aria-selected="false" data-label="snap" data-cmd="sudo snap install dalfox">Snap</li>
+            <li role="option" aria-selected="false" data-label="aur" data-cmd="yay -S dalfox">Arch (AUR)</li>
+            <li role="option" aria-selected="false" data-label="nix" data-cmd="nix profile install github:hahwul/dalfox">Nix</li>
+            <li role="option" aria-selected="false" data-label="cargo" data-cmd="cargo install dalfox">Cargo</li>
+          </ul>
+        </div>
+        <span class="hero-install-sep" aria-hidden="true"></span>
         <span class="dollar">$</span>
         <code>brew install dalfox</code>
         <button class="hero-install-copy" type="button">copy</button>
