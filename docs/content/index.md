@@ -150,7 +150,8 @@ template = "landing"
   </div>
 </section>
 
-<section class="section">
+<section class="section section--modes">
+  <div class="modes-illustration" aria-hidden="true"></div>
   <div class="section-inner">
     <p class="section-eyebrow">// Modes</p>
     <h2 class="section-title">Six ways to run Dalfox</h2>
