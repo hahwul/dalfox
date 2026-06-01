@@ -1522,27 +1522,34 @@ pub async fn mine_parameters(
     semaphore: Arc<Semaphore>,
     pb: Option<ProgressBar>,
 ) {
+    // Body/JSON parameters supplied via `-d` are explicit user input, not
+    // discovery. Seed them independent of the mining flags: query params are
+    // seeded from the URL during the discovery stage, but body params have no
+    // other entry point, so gating them behind mining drops the entire
+    // POST/JSON body surface — even when `-p name:body` is given and even
+    // under `--skip-mining` / `--skip-mining-dict`. (Both probes are no-ops
+    // when `args.data` is None, so GET targets are unaffected.)
+    probe_body_params(
+        target,
+        args,
+        reflection_params.clone(),
+        semaphore.clone(),
+        pb.clone(),
+    )
+    .await;
+    probe_json_body_params(
+        target,
+        args,
+        reflection_params.clone(),
+        semaphore.clone(),
+        pb.clone(),
+    )
+    .await;
+
+    // Mining proper: discover parameters the user did NOT name.
     if !args.skip_mining {
         if !args.skip_mining_dict {
             probe_dictionary_params(
-                target,
-                args,
-                reflection_params.clone(),
-                semaphore.clone(),
-                pb.clone(),
-            )
-            .await;
-            probe_body_params(
-                target,
-                args,
-                reflection_params.clone(),
-                semaphore.clone(),
-                pb.clone(),
-            )
-            .await;
-
-            // JSON body mining (top-level keys)
-            probe_json_body_params(
                 target,
                 args,
                 reflection_params.clone(),

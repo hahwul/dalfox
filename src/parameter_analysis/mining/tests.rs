@@ -863,3 +863,79 @@ async fn test_mine_parameters_runs_dom_against_reflecting_server() {
         params.iter().map(|p| &p.name).collect::<Vec<_>>()
     );
 }
+
+#[tokio::test]
+async fn test_mine_parameters_seeds_explicit_body_params_under_skip_mining() {
+    // Regression: `--skip-mining` switches off *discovery* of parameters the
+    // user did not name, but body params supplied via `-d` are explicit input.
+    // They have no entry point other than the body probes, so skipping them
+    // dropped the entire POST/JSON body surface — even with `-p name:body`.
+    let addr = start_body_reflect_server().await;
+    let mut target =
+        parse_target(&format!("http://{}:{}/b", addr.ip(), addr.port())).expect("parse target");
+    let mut args = default_scan_args();
+    args.skip_mining = true;
+    args.method = "POST".to_string();
+    args.data = Some("user=alice&token=t".to_string());
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    mine_parameters(
+        &mut target,
+        &args,
+        reflection_params.clone(),
+        semaphore,
+        None,
+    )
+    .await;
+
+    let params = reflection_params.lock().await.clone();
+    assert!(
+        params
+            .iter()
+            .any(|p| p.location == Location::Body && (p.name == "user" || p.name == "token")),
+        "explicit -d body params must be seeded even under --skip-mining, got {:?}",
+        params
+            .iter()
+            .map(|p| (&p.name, &p.location))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_mine_parameters_seeds_explicit_body_params_under_skip_mining_dict() {
+    // `--skip-mining-dict` skips the slow dictionary brute-force but must not
+    // drop explicit `-d` body params (they used to live inside that gate).
+    let addr = start_body_reflect_server().await;
+    let mut target =
+        parse_target(&format!("http://{}:{}/b", addr.ip(), addr.port())).expect("parse target");
+    let mut args = default_scan_args();
+    args.skip_mining = false;
+    args.skip_mining_dict = true;
+    args.skip_mining_dom = true;
+    args.method = "POST".to_string();
+    args.data = Some("user=alice&token=t".to_string());
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    mine_parameters(
+        &mut target,
+        &args,
+        reflection_params.clone(),
+        semaphore,
+        None,
+    )
+    .await;
+
+    let params = reflection_params.lock().await.clone();
+    assert!(
+        params
+            .iter()
+            .any(|p| p.location == Location::Body && (p.name == "user" || p.name == "token")),
+        "explicit -d body params must be seeded even under --skip-mining-dict, got {:?}",
+        params
+            .iter()
+            .map(|p| (&p.name, &p.location))
+            .collect::<Vec<_>>()
+    );
+}
