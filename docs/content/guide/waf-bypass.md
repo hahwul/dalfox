@@ -5,7 +5,7 @@ weight = 4
 toc = true
 +++
 
-Most real targets sit behind a WAF. Dalfox fingerprints the WAF, then automatically chooses an evasion strategy — extra encoders and payload mutations tuned to that specific WAF's rules.
+Most real targets sit behind a WAF. Dalfox fingerprints the WAF, then automatically chooses an evasion strategy: extra encoders and payload mutations tuned to that specific WAF's rules.
 
 ## How it works
 
@@ -63,7 +63,7 @@ Handy when the WAF masks its headers or sits behind a CDN.
 dalfox https://target.app --waf-bypass off
 ```
 
-No extra encoders, no mutations — you get just your configured payloads.
+No extra encoders, no mutations: just your configured payloads.
 
 ### Skip the probe
 
@@ -110,7 +110,7 @@ Different WAFs fall to different tricks. A small sample:
 | **Case alternation** | `<ScRiPt>` | Case-sensitive rules |
 | **zwsp insertion** | `al​ert(1)` | Lexer-based detection |
 
-You don't configure these directly — they're selected automatically per WAF. If you want to inspect what's happening, run with `--debug`.
+You don't configure these directly; they're selected automatically per WAF. To inspect what's happening, run with `--debug`.
 
 ## Combining with encoders
 

@@ -55,7 +55,7 @@ dalfox --workers 20 https://target.app
 
 ## Formats
 
-Dalfox supports both TOML and JSON. TOML is the default — JSON is handy if you generate the file from a tool or UI.
+Dalfox supports both TOML and JSON. TOML is the default; JSON is handy if you generate the file from a tool or UI.
 
 ```toml
 # ~/.config/dalfox/config.toml
@@ -97,7 +97,7 @@ See the [Config File reference](../../reference/config/) for every key.
 
 ## Secrets
 
-API keys, bearer tokens, blind-XSS callback hostnames — keep them out of the config file if you commit it. Prefer environment variables:
+Keep API keys, bearer tokens, and blind-XSS callback hostnames out of the config file if you commit it. Prefer environment variables:
 
 ```bash
 # .env or your shell profile

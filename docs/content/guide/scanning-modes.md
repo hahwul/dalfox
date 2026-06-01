@@ -1,11 +1,11 @@
 +++
 title = "Scanning Modes"
-description = "Single URL, file batch, pipeline, stored XSS, server, and MCP — pick the mode that fits your workflow."
+description = "Single URL, file batch, pipeline, stored XSS, server, and MCP. Pick the mode that fits your workflow."
 weight = 1
 toc = true
 +++
 
-Dalfox accepts targets in several shapes. Every mode shares the same discovery, payload, and verification engine — they differ only in how you feed URLs in and where results go.
+Dalfox accepts targets in several shapes. Every mode shares the same discovery, payload, and verification engine; they differ only in how you feed URLs in and where results go.
 
 Under the hood there are four subcommands: `scan` (the scanner), `server` (long-lived REST API), `payload` (payload utilities), and `mcp` (Model Context Protocol stdio server). Everything below labelled "URL / File / Pipe / Raw HTTP / SXSS" is a *shape of input* that the `scan` subcommand handles via `--input-type`; they are not independent subcommands.
 
@@ -44,7 +44,7 @@ Comments (`#`) and blank lines are ignored. Each URL runs through the full pipel
 
 ## Pipe mode
 
-Read from `stdin` — the common case when chaining recon tools:
+Read from `stdin`, the common case when chaining recon tools:
 
 ```bash
 cat urls.txt | dalfox scan
@@ -56,7 +56,7 @@ Dalfox buffers the input, deduplicates, and scans every line as a target.
 
 ## Raw HTTP mode
 
-Captured a request in Burp, Caido, or ZAP? Save it to a file and hand it to Dalfox:
+Save a request you captured in Burp, Caido, or ZAP to a file and hand it to Dalfox:
 
 ```bash
 dalfox scan --input-type raw-http request.txt
@@ -64,7 +64,7 @@ dalfox scan --input-type raw-http request.txt
 
 The file is a standard raw HTTP request (method + path + headers + blank line + body). Dalfox preserves every header, cookie, and body parameter.
 
-For live proxy workflows (especially Caido Active Workflows) see the dedicated **[Caido integration guide](../integrations/caido/)** — it covers the exact shell pattern, the Caido boolean gotcha in If/Else nodes, and how to turn results into Findings automatically.
+For live proxy workflows (especially Caido Active Workflows) see the dedicated **[Caido integration guide](../integrations/caido/)**. It covers the exact shell pattern, the Caido boolean gotcha in If/Else nodes, and how to turn results into Findings automatically.
 
 ## Stored XSS mode (SXSS)
 

@@ -5,7 +5,7 @@ weight = 2
 toc = true
 +++
 
-Pick the installer that fits your platform. Dalfox ships as a single self-contained binary — no runtime to manage.
+Pick the installer that fits your platform. Dalfox ships as a single self-contained binary, with no runtime to manage.
 
 ## Homebrew (macOS & Linux)
 
@@ -45,7 +45,7 @@ makepkg -si
 # Run once without installing
 nix-shell -p dalfox
 
-# Nix flakes — run the latest from GitHub
+# Nix flakes: run the latest from GitHub
 nix run github:hahwul/dalfox -- scan https://example.com
 
 # Install into your profile
@@ -72,7 +72,7 @@ Grab a release archive for your OS/arch from [github.com/hahwul/dalfox/releases]
 We publish the following Linux variants per release:
 
 - `linux-x86_64` (glibc)
-- `linux-x86_64-musl` (statically linked — recommended for Alpine, Docker, and CI)
+- `linux-x86_64-musl` (statically linked, recommended for Alpine, Docker, and CI)
 - `linux-aarch64` (glibc)
 - `linux-aarch64-musl` (statically linked)
 

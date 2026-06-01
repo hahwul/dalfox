@@ -7,7 +7,7 @@ toc = true
 
 This page walks you from install to a verified finding. We'll use an intentionally vulnerable demo target so you can see real output.
 
-{{ alert(type="warning", body="Only scan targets you're authorized to test. Dalfox is a powerful tool — it fires real XSS payloads.") }}
+{{ alert(type="warning", body="Only scan targets you're authorized to test. Dalfox fires real XSS payloads.") }}
 
 ## 1. Scan a single URL
 
@@ -23,10 +23,10 @@ The first argument is the target. Dalfox auto-detects that it's a URL and runs t
 
 ## 2. Scan from a file
 
-Got a list of URLs from your crawler? Feed them in:
+Feed a list of URLs from your crawler:
 
 ```bash
-# urls.txt — one target per line
+# urls.txt, one target per line
 dalfox scan urls.txt
 ```
 
@@ -82,9 +82,9 @@ dalfox https://target.app \
 
 Dalfox sends blind-XSS payloads across every discovered parameter; if the payload fires later in an admin panel, your callback server records it.
 
-## 7. Peek before you poke
+## 7. Dry-run first
 
-Not ready to attack? Use `--dry-run` to see what Dalfox **would** scan:
+Use `--dry-run` to preview what Dalfox would scan:
 
 ```bash
 dalfox https://target.app --dry-run
@@ -98,9 +98,9 @@ Each finding is tagged:
 
 | Tag | Meaning |
 |-----|---------|
-| `[V]` | **Verified** — payload produced a real DOM element (via AST/CSS-selector match) |
-| `[A]` | **AST-detected** — static JS analysis found a source→sink flow |
-| `[R]` | **Reflected** — payload appeared in the response, but no DOM evidence |
+| `[V]` | **Verified**: payload produced a real DOM element (via AST/CSS-selector match) |
+| `[A]` | **AST-detected**: static JS analysis found a source→sink flow |
+| `[R]` | **Reflected**: payload appeared in the response, but no DOM evidence |
 
 `V` and `A` findings are actionable. `R` findings are worth a look but may be filtered further downstream.
 

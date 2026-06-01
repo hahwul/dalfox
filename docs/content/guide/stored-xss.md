@@ -19,7 +19,7 @@ Dalfox will:
 
 1. **Inject** each payload into the first URL (`post-comment`).
 2. **Retrieve** the second URL (`comments`) with a GET (configurable via `--sxss-method`).
-3. **Verify** whether the payload reflects in the retrieval response — and whether it produced a real DOM element.
+3. **Verify** whether the payload reflects in the retrieval response, and whether it produced a real DOM element.
 
 Only findings that survive both steps are reported as SXSS.
 

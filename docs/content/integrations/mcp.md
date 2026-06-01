@@ -13,7 +13,7 @@ The **Model Context Protocol** (MCP) is an open standard for letting AI clients 
 dalfox mcp
 ```
 
-The server speaks MCP over `stdin`/`stdout`. Launch it from the client — you don't run it manually in a terminal.
+The server speaks MCP over `stdin`/`stdout`. Launch it from the client; you don't run it manually in a terminal.
 
 ## Claude Desktop config
 
@@ -40,7 +40,7 @@ claude mcp add dalfox -- dalfox mcp
 
 ## Available tools
 
-Six tools are exposed. All are async and non-blocking — submit a scan, poll for results, then move on.
+Six tools are exposed. All are async and non-blocking: submit a scan, poll for results, then move on.
 
 ### `scan_with_dalfox`
 
@@ -135,7 +135,7 @@ Abort a queued or running scan:
 
 ### `delete_scan_dalfox`
 
-Permanently remove a tracked scan from memory. Only terminal scans (`done`, `error`, `cancelled`) can be deleted — running or queued scans must be cancelled first. Terminal scans are also auto-purged after 1 hour.
+Permanently remove a tracked scan from memory. Only terminal scans (`done`, `error`, `cancelled`) can be deleted; running or queued scans must be cancelled first. Terminal scans are also auto-purged after 1 hour.
 
 ```json
 { "scan_id": "9f2c…" }
@@ -165,14 +165,14 @@ Returns reachability, discovered parameters, and an estimated request count.
 3. Agent polls `get_results_dalfox` using `suggested_poll_interval_ms` from the progress object.
 4. Once `status == "done"`, the agent summarises findings and reports back to the user.
 
-Because every tool is async, the agent stays responsive — no long-running tool call blocks the conversation.
+Because every tool is async, the agent stays responsive; no long-running tool call blocks the conversation.
 
 ## Authorization & safety
 
-The MCP server enforces the same rules as the CLI: **only scan targets you're authorised to test.** Consider gating Dalfox MCP calls behind an explicit user confirmation step in your agent's system prompt — e.g., "Confirm the scope before every scan."
+The MCP server enforces the same rules as the CLI: **only scan targets you're authorised to test.** Consider gating Dalfox MCP calls behind an explicit user confirmation step in your agent's system prompt, such as "Confirm the scope before every scan."
 
 ## Troubleshooting
 
 - **Tool not showing up?** Make sure the `dalfox` binary is on the PATH the MCP client uses. For Claude Desktop on macOS, that's often just `/usr/local/bin` or `/opt/homebrew/bin`.
-- **Empty results?** Poll again — scans are async. Use `suggested_poll_interval_ms` as your cadence.
+- **Empty results?** Poll again; scans are async. Use `suggested_poll_interval_ms` as your cadence.
 - **Want logs?** Run `dalfox mcp --debug` while you're setting things up. The debug lines go to stderr so they don't pollute the MCP channel.

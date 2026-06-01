@@ -1,6 +1,6 @@
 +++
 title = "Output & Reports"
-description = "Plain, JSON, JSONL, Markdown, SARIF, TOML — and how to integrate findings with your pipeline."
+description = "Plain, JSON, JSONL, Markdown, SARIF, TOML, and how to integrate findings with your pipeline."
 weight = 6
 toc = true
 +++
@@ -62,11 +62,11 @@ Emit **only findings** on `stdout`, no logs:
 
 ```bash
 dalfox https://target.app --silence
-# Classic one-liner — pipe findings into another tool:
+# Pipe findings into another tool:
 cat urls.txt | dalfox --silence -f jsonl | jq 'select(.severity=="High")'
 ```
 
-Great for shell pipelines and cron jobs.
+Useful in shell pipelines and cron jobs.
 
 ## Streaming findings during long scans
 
@@ -96,7 +96,7 @@ dalfox https://target.app --poc-type httpie    # HTTPie
 dalfox https://target.app --poc-type http-request  # raw HTTP
 ```
 
-Default is `plain`. Handy for ticketing.
+Default is `plain`. Good for filing tickets.
 
 ## Filtering
 
@@ -126,7 +126,7 @@ Dalfox also auto-disables colour when output is redirected to a file or a non-TT
 
 ## TOML
 
-Same data shape as JSON, written as TOML — easier to skim by eye while still parsing cleanly. Findings render as a `[[results]]` array of tables:
+Same data shape as JSON, written as TOML, which is easier to skim by eye while still parsing cleanly. Findings render as a `[[results]]` array of tables:
 
 ```toml
 [[results]]
