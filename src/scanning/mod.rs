@@ -777,8 +777,14 @@ fn expand_waf_payloads(
     strategy: &crate::waf::bypass::BypassStrategy,
     stats: Option<&crate::waf::bypass::MutationStats>,
 ) -> Vec<String> {
-    let mut seen: HashSet<String> = HashSet::with_capacity(base.len());
-    let mut out: Vec<String> = Vec::with_capacity(base.len());
+    // Size both collections to the orthogonal output estimate
+    // (`N·(1+m+k)`) so the mutation/encoder passes don't repeatedly rehash
+    // and realloc — `base.len()` alone under-allocates by that whole factor.
+    let est = base
+        .len()
+        .saturating_mul(1 + strategy.mutations.len() + strategy.extra_encoders.len());
+    let mut seen: HashSet<String> = HashSet::with_capacity(est);
+    let mut out: Vec<String> = Vec::with_capacity(est);
 
     // 1. Originals (de-duplicated), kept at the front.
     for p in base {
