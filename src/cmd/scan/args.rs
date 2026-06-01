@@ -582,3 +582,131 @@ impl ScanArgs {
         }
     }
 }
+
+#[cfg(test)]
+mod arg_parser_tests {
+    use super::*;
+    use crate::cmd::scan::DEFAULT_TIMEOUT_SECS;
+
+    #[test]
+    fn force_waf_arg_normalizes_known_alias() {
+        assert_eq!(parse_force_waf_arg("  CloudFlare ").unwrap(), "cloudflare");
+        assert_eq!(parse_force_waf_arg("MODSEC").unwrap(), "modsec");
+        assert_eq!(parse_force_waf_arg("cloud-armor").unwrap(), "cloud-armor");
+    }
+
+    #[test]
+    fn force_waf_arg_rejects_unknown() {
+        let err = parse_force_waf_arg("notawaf").unwrap_err();
+        assert!(err.contains("unknown WAF"), "got: {}", err);
+    }
+
+    #[test]
+    fn limit_arg_accepts_positive() {
+        assert_eq!(parse_limit_arg("5").unwrap(), 5);
+        assert_eq!(parse_limit_arg("1").unwrap(), 1);
+    }
+
+    #[test]
+    fn limit_arg_rejects_zero() {
+        let err = parse_limit_arg("0").unwrap_err();
+        assert!(err.contains("at least 1"), "got: {}", err);
+    }
+
+    #[test]
+    fn limit_arg_rejects_non_numeric() {
+        let err = parse_limit_arg("abc").unwrap_err();
+        assert!(err.contains("positive integer"), "got: {}", err);
+    }
+
+    #[test]
+    fn http_method_arg_uppercases_and_accepts_known() {
+        for (input, expected) in [
+            ("get", "GET"),
+            ("Post", "POST"),
+            ("  put ", "PUT"),
+            ("delete", "DELETE"),
+            ("head", "HEAD"),
+            ("options", "OPTIONS"),
+            ("patch", "PATCH"),
+        ] {
+            assert_eq!(parse_http_method_arg(input).unwrap(), expected);
+        }
+    }
+
+    #[test]
+    fn http_method_arg_rejects_empty_and_unknown() {
+        assert!(
+            parse_http_method_arg("   ")
+                .unwrap_err()
+                .contains("must not be empty")
+        );
+        let err = parse_http_method_arg("TRACE").unwrap_err();
+        assert!(err.contains("unsupported HTTP method"), "got: {}", err);
+    }
+
+    #[test]
+    fn for_preflight_sets_discovery_only_shape() {
+        let args = ScanArgs::for_preflight(PreflightOptions {
+            target: "https://example.com".to_string(),
+            param: vec!["q".to_string()],
+            method: "GET".to_string(),
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            user_agent: None,
+            timeout: 15,
+            proxy: None,
+            follow_redirects: false,
+            skip_mining: true,
+            skip_discovery: false,
+            encoders: vec!["none".to_string()],
+        });
+        assert_eq!(args.targets, vec!["https://example.com".to_string()]);
+        assert_eq!(args.timeout, 15);
+        assert!(args.dry_run);
+        assert!(args.skip_xss_scanning);
+        assert!(args.skip_ast_analysis);
+        assert!(args.silence);
+        // skip_mining fans out to all three mining toggles.
+        assert!(args.skip_mining && args.skip_mining_dict && args.skip_mining_dom);
+    }
+
+    #[test]
+    fn for_preflight_clamps_out_of_range_timeout_to_default() {
+        // 0 and >=300 both fall back to the default timeout.
+        let zero = ScanArgs::for_preflight(PreflightOptions {
+            target: "https://example.com".to_string(),
+            param: vec![],
+            method: "GET".to_string(),
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            user_agent: None,
+            timeout: 0,
+            proxy: None,
+            follow_redirects: false,
+            skip_mining: false,
+            skip_discovery: false,
+            encoders: vec![],
+        });
+        assert_eq!(zero.timeout, DEFAULT_TIMEOUT_SECS);
+
+        let huge = ScanArgs::for_preflight(PreflightOptions {
+            target: "https://example.com".to_string(),
+            param: vec![],
+            method: "GET".to_string(),
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            user_agent: None,
+            timeout: 5000,
+            proxy: None,
+            follow_redirects: false,
+            skip_mining: false,
+            skip_discovery: false,
+            encoders: vec![],
+        });
+        assert_eq!(huge.timeout, DEFAULT_TIMEOUT_SECS);
+    }
+}

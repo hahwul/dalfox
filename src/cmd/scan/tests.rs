@@ -1,17 +1,25 @@
-use super::poc::{build_ast_dom_message, generate_poc};
+use super::logging::{log_dbg, log_info, log_warn, start_spinner};
+use super::output::{render_dry_run, render_only_discovery, render_results};
+use super::poc::{build_ast_dom_message, generate_poc, render_finding_block};
 use super::postprocess::{dedupe_ast_results, extract_context};
 use super::preflight::{PreflightOutcome, is_allowed_content_type, preflight_content_type};
 use super::{
     CLI_MAX_DELAY_MS, CLI_MAX_TIMEOUT_SECS, CLI_MAX_WORKERS, DEFAULT_DELAY_MS, DEFAULT_ENCODERS,
     DEFAULT_MAX_CONCURRENT_TARGETS, DEFAULT_MAX_TARGETS_PER_HOST, DEFAULT_METHOD,
-    DEFAULT_TIMEOUT_SECS, DEFAULT_WORKERS, ScanArgs, validate_numeric_args,
+    DEFAULT_TIMEOUT_SECS, DEFAULT_WORKERS, ScanArgs, ScanOutcome, ScanState, validate_numeric_args,
 };
+use crate::parameter_analysis::{InjectionContext, Location, Param};
 use crate::scanning::result::{FindingType, Result as ScanResult};
-use crate::target_parser::parse_target;
+use crate::target_parser::{Target, parse_target};
+use crate::waf::bypass::{MutationStats, MutationType};
 use axum::Router;
 use axum::http::{HeaderMap, HeaderName, HeaderValue};
 use axum::routing::get;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::sync::atomic::AtomicUsize;
 use tokio::net::TcpListener;
+use tokio::sync::Mutex;
 
 fn default_scan_args() -> ScanArgs {
     ScanArgs {
@@ -746,4 +754,911 @@ async fn test_preflight_content_type_extracts_meta_csp_when_header_missing() {
             .expect("body expected")
             .contains("http-equiv")
     );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Shared fixtures for the POC / output rendering tests below.
+// ─────────────────────────────────────────────────────────────────────────
+
+/// Minimal `Param` with sensible defaults; only `name`/`location` vary per test.
+fn make_param(name: &str, location: Location) -> Param {
+    Param {
+        name: name.to_string(),
+        value: "v".to_string(),
+        location,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+    }
+}
+
+/// A `Target` carrying the given discovered reflection params.
+fn target_with_params(url: &str, params: Vec<Param>) -> Target {
+    let mut t = parse_target(url).expect("valid target");
+    t.reflection_params = params;
+    t
+}
+
+/// Wrap targets into the `host_groups` shape the output renderers consume.
+fn host_group(targets: Vec<Target>) -> HashMap<String, Vec<Target>> {
+    let mut m = HashMap::new();
+    m.insert("host".to_string(), targets);
+    m
+}
+
+/// A `Reflected` finding with the common boilerplate filled in.
+fn reflected_result(url: &str, param: &str, payload: &str) -> ScanResult {
+    ScanResult::new(
+        FindingType::Reflected,
+        "inHTML".to_string(),
+        "GET".to_string(),
+        url.to_string(),
+        param.to_string(),
+        payload.to_string(),
+        "evidence".to_string(),
+        "CWE-79".to_string(),
+        "Info".to_string(),
+        0,
+        "msg".to_string(),
+    )
+}
+
+/// A `ScanState` with empty shared handles and the supplied results preloaded.
+fn make_scan_state(results: Vec<ScanResult>) -> ScanState {
+    ScanState {
+        results: Arc::new(Mutex::new(results)),
+        findings_count: Arc::new(AtomicUsize::new(0)),
+        skipped_targets: Arc::new(Mutex::new(HashMap::new())),
+        target_meta: Arc::new(Mutex::new(HashMap::new())),
+        target_mutation_stats: Arc::new(Mutex::new(HashMap::new())),
+        multi_pb: None,
+        preflight_idx: Arc::new(AtomicUsize::new(0)),
+        analyze_idx: Arc::new(AtomicUsize::new(0)),
+        scan_idx: Arc::new(AtomicUsize::new(0)),
+        overall_done: Arc::new(AtomicUsize::new(0)),
+        total_targets: 0,
+        spinner_allowed: false,
+        no_color: true,
+    }
+}
+
+/// Per-test temp file path (test names are unique, so paths never collide).
+fn temp_out_path(tag: &str) -> String {
+    let mut p = std::env::temp_dir();
+    p.push(format!("dalfox_cov_{}.out", tag));
+    p.to_string_lossy().into_owned()
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// poc.rs — httpie POC rendering (was entirely uncovered)
+// ─────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_generate_poc_httpie_query() {
+    let r = reflected_result("https://example.com", "q", "<x>");
+    let out = generate_poc(&r, "httpie");
+    assert!(out.starts_with("http get "), "got: {}", out);
+    assert!(out.contains("?q=%3Cx%3E"), "got: {}", out);
+}
+
+#[test]
+fn test_generate_poc_httpie_header_uses_header_arg() {
+    let mut r = reflected_result(
+        "http://example.com/",
+        "X-Custom-Header",
+        "<svg/onload=alert(1)>",
+    );
+    r.location = "Header".to_string();
+    let out = generate_poc(&r, "httpie");
+    assert!(
+        out.contains("\"X-Custom-Header:<svg/onload=alert(1)>\""),
+        "httpie header POC missing header arg: {}",
+        out
+    );
+    assert!(!out.contains("?X-Custom-Header"), "got: {}", out);
+}
+
+#[test]
+fn test_generate_poc_httpie_cookie_uses_cookie_arg() {
+    let mut r = reflected_result("http://example.com/", "Cookie", "<svg/onload=alert(1)>");
+    r.location = "Header".to_string();
+    let out = generate_poc(&r, "httpie");
+    assert!(
+        out.contains("\"Cookie:Cookie=<svg/onload=alert(1)>\""),
+        "httpie cookie POC missing cookie arg: {}",
+        out
+    );
+}
+
+#[test]
+fn test_generate_poc_httpie_body_uses_form_flag() {
+    let mut r = reflected_result(
+        "http://example.com/login",
+        "username",
+        "<svg/onload=alert(1)>",
+    );
+    r.method = "POST".to_string();
+    r.location = "Body".to_string();
+    let out = generate_poc(&r, "httpie");
+    assert!(out.starts_with("http -f post "), "got: {}", out);
+    assert!(
+        out.contains("\"username=<svg/onload=alert(1)>\""),
+        "httpie body POC missing form field: {}",
+        out
+    );
+}
+
+#[test]
+fn test_generate_poc_httpie_jsonbody() {
+    let mut r = reflected_result("http://example.com/api", "field", "<x>");
+    r.method = "POST".to_string();
+    r.location = "JsonBody".to_string();
+    let out = generate_poc(&r, "httpie");
+    assert!(out.starts_with("http post "), "got: {}", out);
+    assert!(out.contains("\"field=<x>\""), "got: {}", out);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// poc.rs — curl JsonBody / MultipartBody and escaping (were uncovered)
+// ─────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_generate_poc_curl_jsonbody_emits_json_content_type() {
+    let mut r = reflected_result("http://example.com/api", "field", "<x>");
+    r.method = "POST".to_string();
+    r.location = "JsonBody".to_string();
+    let out = generate_poc(&r, "curl");
+    assert!(
+        out.contains("-H \"Content-Type: application/json\""),
+        "curl json POC missing content-type: {}",
+        out
+    );
+    assert!(
+        out.contains("--data \"{\\\"field\\\":\\\"<x>\\\"}\""),
+        "curl json POC missing json body: {}",
+        out
+    );
+}
+
+#[test]
+fn test_generate_poc_curl_multipart_uses_data_flag() {
+    let mut r = reflected_result("http://example.com/upload", "file", "<x>");
+    r.method = "POST".to_string();
+    r.location = "MultipartBody".to_string();
+    let out = generate_poc(&r, "curl");
+    assert!(
+        out.contains("--data \"file=<x>\""),
+        "curl multipart POC missing --data: {}",
+        out
+    );
+}
+
+#[test]
+fn test_generate_poc_curl_escapes_quotes_and_backslashes() {
+    // The curl renderer escapes `"` and `\` in the payload so the shell
+    // command stays well-formed.
+    let mut r = reflected_result("http://example.com/", "X-H", "a\"b\\c");
+    r.location = "Header".to_string();
+    let out = generate_poc(&r, "curl");
+    assert!(
+        out.contains("-H \"X-H: a\\\"b\\\\c\""),
+        "curl POC did not escape quotes/backslashes: {}",
+        out
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// poc.rs — render_finding_block (full plain block; was uncovered)
+// ─────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_render_finding_block_reflected_plain() {
+    let r = reflected_result("https://example.com", "q", "<x>");
+    let block = render_finding_block(&r, "plain", false, false);
+    // Reflected → yellow POC line.
+    assert!(
+        block.contains("\x1b[33m"),
+        "missing reflected color: {}",
+        block
+    );
+    assert!(block.contains("Issue:"), "missing Issue section: {}", block);
+    assert!(block.contains("XSS payload reflected"), "got: {}", block);
+    assert!(
+        block.contains("Payload:"),
+        "missing Payload section: {}",
+        block
+    );
+    assert!(block.contains("<x>"), "missing payload text: {}", block);
+    // Payload is the last section here → closing bullet.
+    assert!(block.contains("└──"), "missing closing bullet: {}", block);
+}
+
+#[test]
+fn test_render_finding_block_verified_with_context_and_response() {
+    let mut r = reflected_result("https://example.com", "q", "PAYZ");
+    r.result_type = FindingType::Verified;
+    r.response = Some("line one\nzzzPAYZzz\nline three".to_string());
+    let block = render_finding_block(&r, "plain", false, true);
+    // Verified → red POC line.
+    assert!(
+        block.contains("\x1b[31m"),
+        "missing verified color: {}",
+        block
+    );
+    // Verified issue wording differs from Reflected.
+    assert!(
+        block.contains("XSS payload DOM object identified"),
+        "got: {}",
+        block
+    );
+    // Response contains the payload → context "Line" section is emitted.
+    assert!(block.contains("L2:"), "missing context line: {}", block);
+    // include_response → Response section with the body lines.
+    assert!(
+        block.contains("Response:"),
+        "missing Response section: {}",
+        block
+    );
+    assert!(
+        block.contains("line three"),
+        "missing response body: {}",
+        block
+    );
+}
+
+#[test]
+fn test_render_finding_block_ast_with_request() {
+    let mut r = reflected_result("https://example.com", "q", "<x>");
+    r.result_type = FindingType::AstDetected;
+    r.request = Some("GET /?q=<x> HTTP/1.1\nHost: example.com".to_string());
+    let block = render_finding_block(&r, "plain", true, false);
+    // AstDetected → magenta POC line.
+    assert!(block.contains("\x1b[35m"), "missing ast color: {}", block);
+    assert!(
+        block.contains("Request:"),
+        "missing Request section: {}",
+        block
+    );
+    assert!(
+        block.contains("Host: example.com"),
+        "missing request body: {}",
+        block
+    );
+}
+
+#[test]
+fn test_render_finding_block_curl_poc_type_has_no_ansi_on_poc_line() {
+    // Non-plain POC types are meant to be copy-pasted, so the POC line must
+    // not be wrapped in ANSI color codes.
+    let r = reflected_result("https://example.com", "q", "<x>");
+    let block = render_finding_block(&r, "curl", false, false);
+    let first_line = block.lines().next().unwrap_or("");
+    assert!(
+        first_line.starts_with("curl -X GET "),
+        "got: {}",
+        first_line
+    );
+    assert!(
+        !first_line.contains("\x1b["),
+        "curl POC line should be plain: {}",
+        first_line
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// output.rs — render_only_discovery (sync; json / jsonl / plain)
+// ─────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_render_only_discovery_plain() {
+    let target = target_with_params(
+        "https://example.com",
+        vec![
+            make_param("q", Location::Query),
+            make_param("id", Location::Path),
+        ],
+    );
+    let mut args = default_scan_args();
+    args.format = "plain".to_string();
+    let outcome = render_only_discovery(&args, &host_group(vec![target]));
+    assert!(matches!(outcome, ScanOutcome::Clean));
+}
+
+#[test]
+fn test_render_only_discovery_json() {
+    let target = target_with_params(
+        "https://example.com",
+        vec![make_param("q", Location::Query)],
+    );
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    let outcome = render_only_discovery(&args, &host_group(vec![target]));
+    assert!(matches!(outcome, ScanOutcome::Clean));
+}
+
+#[test]
+fn test_render_only_discovery_jsonl() {
+    let target = target_with_params(
+        "https://example.com",
+        vec![make_param("q", Location::Query)],
+    );
+    let mut args = default_scan_args();
+    args.format = "jsonl".to_string();
+    let outcome = render_only_discovery(&args, &host_group(vec![target]));
+    assert!(matches!(outcome, ScanOutcome::Clean));
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// output.rs — render_dry_run (async; needs ScanState)
+// ─────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_render_dry_run_plain() {
+    let mut p = make_param("q", Location::Query);
+    p.injection_context = Some(InjectionContext::Html(None));
+    let target = target_with_params(
+        "https://example.com",
+        vec![p, make_param("name", Location::Query)],
+    );
+    let mut args = default_scan_args();
+    args.format = "plain".to_string();
+    args.targets = vec!["https://example.com".to_string()];
+    let state = make_scan_state(vec![]);
+    let outcome = render_dry_run(&args, &host_group(vec![target]), &state).await;
+    assert!(matches!(outcome, ScanOutcome::Clean));
+}
+
+#[tokio::test]
+async fn test_render_dry_run_json_with_encoders() {
+    let target = target_with_params(
+        "https://example.com",
+        vec![make_param("q", Location::Query)],
+    );
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    args.targets = vec!["https://example.com".to_string()];
+    // Non-"none" encoders exercise the request-estimation expansion factor.
+    args.encoders = vec!["url".to_string(), "html".to_string()];
+    args.max_payloads_per_param = 5;
+    let state = make_scan_state(vec![]);
+    let outcome = render_dry_run(&args, &host_group(vec![target]), &state).await;
+    assert!(matches!(outcome, ScanOutcome::Clean));
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// output.rs — render_results (async; all format branches via file output)
+// ─────────────────────────────────────────────────────────────────────────
+
+async fn render_results_to_file(
+    mut args: ScanArgs,
+    results: Vec<ScanResult>,
+    urls: Vec<String>,
+    tag: &str,
+) -> String {
+    let path = temp_out_path(tag);
+    args.output = Some(path.clone());
+    let state = make_scan_state(results);
+    let _ = render_results(
+        &args,
+        &state,
+        &urls,
+        std::time::Duration::from_millis(7),
+        42,
+        false,
+    )
+    .await;
+    let content = std::fs::read_to_string(&path).expect("output file written");
+    let _ = std::fs::remove_file(&path);
+    content
+}
+
+#[tokio::test]
+async fn test_render_results_json_writes_envelope() {
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    let results = vec![reflected_result("https://example.com", "q", "<x>")];
+    let urls = vec!["https://example.com".to_string()];
+    let content = render_results_to_file(args, results, urls, "results_json").await;
+    let v: serde_json::Value = serde_json::from_str(&content).expect("valid json");
+    assert_eq!(v["meta"]["findings_count"], 1);
+    assert_eq!(v["meta"]["total_requests"], 42);
+    assert_eq!(v["findings"].as_array().unwrap().len(), 1);
+    assert_eq!(v["meta"]["target_summary"][0]["status"], "findings");
+}
+
+#[tokio::test]
+async fn test_render_results_jsonl_meta_then_findings() {
+    let mut args = default_scan_args();
+    args.format = "jsonl".to_string();
+    let results = vec![reflected_result("https://example.com", "q", "<x>")];
+    let urls = vec!["https://example.com".to_string()];
+    let content = render_results_to_file(args, results, urls, "results_jsonl").await;
+    let lines: Vec<&str> = content.lines().filter(|l| !l.is_empty()).collect();
+    assert_eq!(lines.len(), 2, "expected meta line + one finding");
+    let meta: serde_json::Value = serde_json::from_str(lines[0]).expect("meta json");
+    assert_eq!(meta["meta"]["findings_count"], 1);
+    let finding: serde_json::Value = serde_json::from_str(lines[1]).expect("finding json");
+    assert_eq!(finding["param"], "q");
+}
+
+#[tokio::test]
+async fn test_render_results_markdown() {
+    let mut args = default_scan_args();
+    args.format = "markdown".to_string();
+    let results = vec![reflected_result("https://example.com", "q", "<x>")];
+    let content = render_results_to_file(
+        args,
+        results,
+        vec!["https://example.com".to_string()],
+        "results_md",
+    )
+    .await;
+    assert!(
+        content.contains("# Dalfox Scan Results"),
+        "got: {}",
+        content
+    );
+}
+
+#[tokio::test]
+async fn test_render_results_sarif() {
+    let mut args = default_scan_args();
+    args.format = "sarif".to_string();
+    let results = vec![reflected_result("https://example.com", "q", "<x>")];
+    let content = render_results_to_file(
+        args,
+        results,
+        vec!["https://example.com".to_string()],
+        "results_sarif",
+    )
+    .await;
+    let v: serde_json::Value = serde_json::from_str(&content).expect("valid sarif json");
+    assert_eq!(v["version"], "2.1.0");
+}
+
+#[tokio::test]
+async fn test_render_results_toml() {
+    let mut args = default_scan_args();
+    args.format = "toml".to_string();
+    let results = vec![reflected_result("https://example.com", "q", "<x>")];
+    let content = render_results_to_file(
+        args,
+        results,
+        vec!["https://example.com".to_string()],
+        "results_toml",
+    )
+    .await;
+    assert!(content.contains("[[results]]"), "got: {}", content);
+}
+
+#[tokio::test]
+async fn test_render_results_plain_summary() {
+    let mut args = default_scan_args();
+    args.format = "plain".to_string();
+    let mut verified = reflected_result("https://example.com", "q", "<x>");
+    verified.result_type = FindingType::Verified;
+    let content = render_results_to_file(
+        args,
+        vec![verified],
+        vec!["https://example.com".to_string()],
+        "results_plain",
+    )
+    .await;
+    // Plain renders the per-finding POC block when streaming is disabled.
+    assert!(content.contains("[POC]"), "missing POC block: {}", content);
+}
+
+#[tokio::test]
+async fn test_render_results_default_format_branch() {
+    // An unrecognized format falls through to the "Found XSS: …" branch.
+    let mut args = default_scan_args();
+    args.format = "xml".to_string();
+    let content = render_results_to_file(
+        args,
+        vec![reflected_result("https://example.com", "q", "PAY")],
+        vec!["https://example.com".to_string()],
+        "results_default",
+    )
+    .await;
+    assert!(content.contains("Found XSS: q - PAY"), "got: {}", content);
+}
+
+#[tokio::test]
+async fn test_render_results_only_poc_filter_drops_non_matching() {
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    args.only_poc = vec!["V".to_string()]; // keep only Verified
+    let reflected = reflected_result("https://example.com", "q", "<x>");
+    let mut verified = reflected_result("https://example.com", "id", "<y>");
+    verified.result_type = FindingType::Verified;
+    let content = render_results_to_file(
+        args,
+        vec![reflected, verified],
+        vec!["https://example.com".to_string()],
+        "results_onlypoc",
+    )
+    .await;
+    let v: serde_json::Value = serde_json::from_str(&content).expect("json");
+    assert_eq!(v["meta"]["findings_count"], 1);
+    assert_eq!(v["findings"][0]["param"], "id");
+}
+
+#[tokio::test]
+async fn test_render_results_limit_truncates() {
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    args.limit = Some(1);
+    let results = vec![
+        reflected_result("https://example.com", "q", "<x>"),
+        reflected_result("https://example.com", "id", "<y>"),
+    ];
+    let content = render_results_to_file(
+        args,
+        results,
+        vec!["https://example.com".to_string()],
+        "results_limit",
+    )
+    .await;
+    let v: serde_json::Value = serde_json::from_str(&content).expect("json");
+    assert_eq!(v["meta"]["findings_count"], 1);
+}
+
+#[tokio::test]
+async fn test_render_results_includes_waf_summary() {
+    // Exercise the per-target WAF/bypass summary folding in render_results.
+    let args = {
+        let mut a = default_scan_args();
+        a.format = "json".to_string();
+        a
+    };
+    let url = "https://example.com".to_string();
+    let path = temp_out_path("results_waf");
+    let mut args = args;
+    args.output = Some(path.clone());
+
+    let state = make_scan_state(vec![reflected_result(&url, "q", "<x>")]);
+    {
+        let mut meta = state.target_meta.lock().await;
+        meta.insert(
+            url.clone(),
+            serde_json::json!({
+                "name": "ModSecurity",
+                "bypass": { "strategy": "auto" },
+            }),
+        );
+    }
+    {
+        let stats = Arc::new(MutationStats::default());
+        stats.record_variant(MutationType::SlashSeparator);
+        stats.record_request(false);
+        stats.record_request(true);
+        let mut sm = state.target_mutation_stats.lock().await;
+        sm.insert(url.clone(), stats);
+    }
+
+    let _ = render_results(
+        &args,
+        &state,
+        std::slice::from_ref(&url),
+        std::time::Duration::from_millis(1),
+        3,
+        false,
+    )
+    .await;
+    let content = std::fs::read_to_string(&path).expect("output written");
+    let _ = std::fs::remove_file(&path);
+    let v: serde_json::Value = serde_json::from_str(&content).expect("json");
+    let waf = &v["meta"]["target_summary"][0]["waf"];
+    assert_eq!(waf["name"], "ModSecurity");
+    let applied = &waf["bypass"]["mutations_applied"];
+    assert_eq!(applied[0]["type"], "SlashSeparator");
+    assert_eq!(waf["bypass"]["requests_sent"], 2);
+    assert_eq!(waf["bypass"]["requests_blocked"], 1);
+}
+
+#[tokio::test]
+async fn test_render_results_stdout_path_returns_results() {
+    // No --output → renders to stdout; the returned final_results still
+    // reflects the deduped/filtered set.
+    let args = {
+        let mut a = default_scan_args();
+        a.format = "plain".to_string();
+        a
+    };
+    let state = make_scan_state(vec![reflected_result("https://example.com", "q", "<x>")]);
+    let final_results = render_results(
+        &args,
+        &state,
+        &["https://example.com".to_string()],
+        std::time::Duration::from_millis(1),
+        1,
+        true, // stream_findings_enabled → skip per-finding re-render
+    )
+    .await;
+    assert_eq!(final_results.len(), 1);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// logging.rs — log lines + spinner gating
+// ─────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_log_helpers_emit_in_plain_mode() {
+    // format=plain + not silenced → bodies execute (output goes to stdout).
+    let mut args = default_scan_args();
+    args.format = "plain".to_string();
+    args.silence = false;
+    log_info(&args, "info line");
+    log_warn(&args, "warn line");
+    // log_dbg is gated on the global DEBUG flag, which defaults to off here;
+    // calling it exercises the early-return branch without touching globals.
+    log_dbg("debug line");
+}
+
+#[test]
+fn test_log_helpers_suppressed_when_silenced() {
+    let args = default_scan_args(); // format=json, silence=true
+    log_info(&args, "should be suppressed");
+    log_warn(&args, "should be suppressed");
+}
+
+#[test]
+fn test_start_spinner_returns_none_when_disabled() {
+    assert!(start_spinner(true, false, "label".to_string()).is_none());
+    assert!(start_spinner(false, true, "label".to_string()).is_none());
+}
+
+#[tokio::test]
+async fn test_start_spinner_runs_and_stops() {
+    let handle = start_spinner(true, true, "scanning".to_string());
+    let (stop_tx, done_rx) = handle.expect("spinner should start when allowed and enabled");
+    // Signal the spinner task to stop, then await its acknowledgement.
+    let _ = stop_tx.send(());
+    let _ = done_rx.await;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// input.rs — resolve_targets (target resolution, dedup, scope filters)
+// ─────────────────────────────────────────────────────────────────────────
+
+use super::input::resolve_targets;
+
+/// Write `content` to a per-test temp file and return its path.
+fn write_temp_file(tag: &str, content: &str) -> String {
+    let mut p = std::env::temp_dir();
+    p.push(format!("dalfox_cov_input_{}.txt", tag));
+    std::fs::write(&p, content).expect("write temp file");
+    p.to_string_lossy().into_owned()
+}
+
+#[tokio::test]
+async fn test_resolve_targets_url_basic() {
+    let mut args = default_scan_args();
+    args.input_type = "url".to_string();
+    args.targets = vec!["https://example.com/?q=1".to_string()];
+    let targets = resolve_targets(&args).await.expect("resolve ok");
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].url.as_str(), "https://example.com/?q=1");
+    // No --user-agent → user_agent is set to an empty string sentinel.
+    assert_eq!(targets[0].user_agent.as_deref(), Some(""));
+}
+
+#[tokio::test]
+async fn test_resolve_targets_url_applies_cli_overrides() {
+    let mut args = default_scan_args();
+    args.input_type = "url".to_string();
+    args.targets = vec!["https://example.com/".to_string()];
+    args.method = "POST".to_string();
+    args.headers = vec!["X-Test: 1".to_string(), ": noname".to_string()];
+    args.cookies = vec!["sid=abc".to_string()];
+    args.user_agent = Some("dalfox-ua".to_string());
+    args.data = Some("a=b".to_string());
+    let targets = resolve_targets(&args).await.expect("resolve ok");
+    assert_eq!(targets.len(), 1);
+    let t = &targets[0];
+    assert_eq!(t.method, "POST");
+    assert_eq!(t.data.as_deref(), Some("a=b"));
+    // Empty-named header is dropped; X-Test + appended User-Agent remain.
+    assert!(t.headers.iter().any(|(n, v)| n == "X-Test" && v == "1"));
+    assert!(t.headers.iter().any(|(n, _)| n == "User-Agent"));
+    assert_eq!(t.user_agent.as_deref(), Some("dalfox-ua"));
+    assert_eq!(t.cookies, vec![("sid".to_string(), "abc".to_string())]);
+}
+
+#[tokio::test]
+async fn test_resolve_targets_dedupes_identical() {
+    let mut args = default_scan_args();
+    args.input_type = "url".to_string();
+    args.targets = vec![
+        "https://example.com/".to_string(),
+        "https://example.com/".to_string(),
+    ];
+    let targets = resolve_targets(&args).await.expect("resolve ok");
+    assert_eq!(targets.len(), 1, "identical url+method should dedupe");
+}
+
+#[tokio::test]
+async fn test_resolve_targets_file_skips_blanks_and_comments() {
+    let path = write_temp_file(
+        "file_list",
+        "https://a.example.com/\n# a comment\n\nhttps://b.example.com/\n",
+    );
+    let mut args = default_scan_args();
+    args.input_type = "file".to_string();
+    args.targets = vec![path];
+    let targets = resolve_targets(&args).await.expect("resolve ok");
+    assert_eq!(targets.len(), 2);
+}
+
+#[tokio::test]
+async fn test_resolve_targets_file_without_path_errors() {
+    let mut args = default_scan_args();
+    args.input_type = "file".to_string();
+    args.targets = vec![];
+    assert!(matches!(
+        resolve_targets(&args).await,
+        Err(ScanOutcome::Error)
+    ));
+}
+
+#[tokio::test]
+async fn test_resolve_targets_file_missing_errors() {
+    let mut args = default_scan_args();
+    args.input_type = "file".to_string();
+    args.targets = vec!["/nonexistent/dalfox/path/xyz.txt".to_string()];
+    assert!(matches!(
+        resolve_targets(&args).await,
+        Err(ScanOutcome::Error)
+    ));
+}
+
+#[tokio::test]
+async fn test_resolve_targets_invalid_input_type_errors() {
+    let mut args = default_scan_args();
+    args.input_type = "bogus".to_string();
+    args.targets = vec!["https://example.com/".to_string()];
+    assert!(matches!(
+        resolve_targets(&args).await,
+        Err(ScanOutcome::Error)
+    ));
+}
+
+#[tokio::test]
+async fn test_resolve_targets_raw_http_literal() {
+    let mut args = default_scan_args();
+    args.input_type = "raw-http".to_string();
+    args.targets = vec!["GET /path?q=1 HTTP/1.1\r\nHost: example.com\r\n\r\n".to_string()];
+    let targets = resolve_targets(&args).await.expect("resolve ok");
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].url.host_str(), Some("example.com"));
+    assert_eq!(targets[0].method, "GET");
+}
+
+#[tokio::test]
+async fn test_resolve_targets_raw_http_invalid_errors() {
+    let mut args = default_scan_args();
+    args.input_type = "raw-http".to_string();
+    // Looks raw-ish but missing a parseable request line / host.
+    args.targets = vec!["NOTAMETHOD ?? HTTP/1.1\r\n\r\n".to_string()];
+    assert!(matches!(
+        resolve_targets(&args).await,
+        Err(ScanOutcome::Error)
+    ));
+}
+
+#[tokio::test]
+async fn test_resolve_targets_include_url_filter() {
+    let mut args = default_scan_args();
+    args.input_type = "url".to_string();
+    args.targets = vec![
+        "https://example.com/api/v1".to_string(),
+        "https://example.com/home".to_string(),
+    ];
+    args.include_url = vec![".*/api/.*".to_string()];
+    let targets = resolve_targets(&args).await.expect("resolve ok");
+    assert_eq!(targets.len(), 1);
+    assert!(targets[0].url.as_str().contains("/api/"));
+}
+
+#[tokio::test]
+async fn test_resolve_targets_exclude_url_filter() {
+    let mut args = default_scan_args();
+    args.input_type = "url".to_string();
+    args.targets = vec![
+        "https://example.com/admin".to_string(),
+        "https://example.com/home".to_string(),
+    ];
+    args.exclude_url = vec![".*admin.*".to_string()];
+    let targets = resolve_targets(&args).await.expect("resolve ok");
+    assert_eq!(targets.len(), 1);
+    assert!(!targets[0].url.as_str().contains("admin"));
+}
+
+#[tokio::test]
+async fn test_resolve_targets_scope_filter_emptying_all_errors() {
+    let mut args = default_scan_args();
+    args.input_type = "url".to_string();
+    args.targets = vec!["https://example.com/home".to_string()];
+    args.include_url = vec!["this-matches-nothing".to_string()];
+    assert!(matches!(
+        resolve_targets(&args).await,
+        Err(ScanOutcome::Error)
+    ));
+}
+
+#[tokio::test]
+async fn test_resolve_targets_out_of_scope_domain_filter() {
+    let mut args = default_scan_args();
+    args.input_type = "url".to_string();
+    args.targets = vec![
+        "https://keep.example.com/".to_string(),
+        "https://evil.com/".to_string(),
+    ];
+    args.out_of_scope = vec!["evil.com".to_string()];
+    let targets = resolve_targets(&args).await.expect("resolve ok");
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].url.host_str(), Some("keep.example.com"));
+}
+
+#[tokio::test]
+async fn test_resolve_targets_out_of_scope_file() {
+    let path = write_temp_file("oos", "evil.com\n# comment\n");
+    let mut args = default_scan_args();
+    args.input_type = "url".to_string();
+    args.targets = vec![
+        "https://keep.example.com/".to_string(),
+        "https://evil.com/".to_string(),
+    ];
+    args.out_of_scope_file = Some(path);
+    let targets = resolve_targets(&args).await.expect("resolve ok");
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].url.host_str(), Some("keep.example.com"));
+}
+
+#[tokio::test]
+async fn test_resolve_targets_cookie_from_raw_file() {
+    let path = write_temp_file(
+        "cookie_raw",
+        "GET / HTTP/1.1\r\nHost: example.com\r\nCookie: sid=abc; foo=bar\r\n\r\n",
+    );
+    let mut args = default_scan_args();
+    args.input_type = "url".to_string();
+    args.targets = vec!["https://example.com/".to_string()];
+    args.cookie_from_raw = Some(path);
+    let targets = resolve_targets(&args).await.expect("resolve ok");
+    assert_eq!(targets.len(), 1);
+    let cookies = &targets[0].cookies;
+    assert!(cookies.iter().any(|(k, v)| k == "sid" && v == "abc"));
+    assert!(cookies.iter().any(|(k, v)| k == "foo" && v == "bar"));
+}
+
+#[tokio::test]
+async fn test_resolve_targets_parse_error_errors() {
+    let mut args = default_scan_args();
+    args.input_type = "url".to_string();
+    // A scheme that parse_target_with_method can't turn into a usable target.
+    args.targets = vec!["http://".to_string()];
+    assert!(matches!(
+        resolve_targets(&args).await,
+        Err(ScanOutcome::Error)
+    ));
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// mod.rs — emit_error (structured stderr error for each format)
+// ─────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_emit_error_renders_all_format_branches() {
+    // emit_error writes to stderr; we just exercise each format branch so a
+    // formatting regression (e.g. a serde panic) would surface here.
+    super::emit_error("json", crate::cmd::error_codes::NO_TARGETS, "no targets");
+    super::emit_error("jsonl", crate::cmd::error_codes::PARSE_ERROR, "bad parse");
+    super::emit_error("plain", crate::cmd::error_codes::FILE_READ_ERROR, "io fail");
 }
