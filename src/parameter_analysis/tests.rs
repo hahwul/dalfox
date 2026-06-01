@@ -766,6 +766,77 @@ fn test_filter_params_invalid_filter_format() {
     assert_eq!(filtered[0].name, "sort");
 }
 
+fn bare_param(name: &str, location: Location) -> Param {
+    Param {
+        name: name.to_string(),
+        value: String::new(),
+        location,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+    }
+}
+
+#[test]
+fn test_ensure_explicit_params_synthesizes_missing_targets() {
+    let target = parse_target("https://example.com/?present=1").unwrap();
+    // Discovery seeded only `present`; the other explicit targets were dropped
+    // (e.g. a --skip-* flag suppressed their phase).
+    let mut params = vec![bare_param("present", Location::Query)];
+    let specs = vec![
+        "present:query".to_string(),      // already seeded → not duplicated
+        "id:query".to_string(),           // synthesized
+        "X-Api-Token:header".to_string(), // synthesized
+        "sid:cookie".to_string(),         // synthesized (Header location)
+    ];
+    ensure_explicit_params(&mut params, &specs, &target);
+
+    assert_eq!(
+        params.iter().filter(|p| p.name == "present").count(),
+        1,
+        "existing target must not be duplicated"
+    );
+    assert!(
+        params
+            .iter()
+            .any(|p| p.name == "id" && p.location == Location::Query)
+    );
+    assert!(
+        params
+            .iter()
+            .any(|p| p.name == "X-Api-Token" && p.location == Location::Header)
+    );
+    assert!(
+        params
+            .iter()
+            .any(|p| p.name == "sid" && p.location == Location::Header)
+    );
+}
+
+#[test]
+fn test_ensure_explicit_params_skips_unsynthesizable_specs() {
+    let target = parse_target("https://example.com").unwrap();
+    let mut params: Vec<Param> = vec![];
+    // name-only (ambiguous), path (positional), fragment (never scanned)
+    let specs = vec![
+        "foo".to_string(),
+        "seg:path".to_string(),
+        "h:fragment".to_string(),
+    ];
+    ensure_explicit_params(&mut params, &specs, &target);
+    assert!(
+        params.is_empty(),
+        "name-only / path / fragment specs must not be synthesized, got {:?}",
+        params.iter().map(|p| &p.name).collect::<Vec<_>>()
+    );
+}
+
 fn default_scan_args() -> ScanArgs {
     ScanArgs {
         input_type: "url".to_string(),

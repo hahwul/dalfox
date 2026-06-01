@@ -800,6 +800,10 @@ pub async fn analyze_parameters(
     }
     if !args.param.is_empty() {
         params = filter_params(params, &args.param, target);
+        // Discovery/mining may have been skipped for the location an explicit
+        // `-p name:type` targets; synthesize those so a named injection point
+        // is always tested regardless of `--skip-*` flags.
+        ensure_explicit_params(&mut params, &args.param, target);
     }
     target.reflection_params = params;
 
@@ -851,6 +855,28 @@ pub async fn analyze_parameters(
     }
 }
 
+/// The `-p name:<type>` label for a param's location, matching the `-p`
+/// spec grammar. `Location::Header` resolves to `"cookie"` when the name is one
+/// of the target's cookies, else `"header"`. Single source of truth shared by
+/// `filter_params` and `ensure_explicit_params`.
+fn param_type_label(p: &Param, target: &Target) -> &'static str {
+    match p.location {
+        Location::Query => "query",
+        Location::Body => "body",
+        Location::JsonBody => "json",
+        Location::MultipartBody => "multipart",
+        Location::Path => "path",
+        Location::Fragment => "fragment",
+        Location::Header => {
+            if target.cookies.iter().any(|(n, _)| n == &p.name) {
+                "cookie"
+            } else {
+                "header"
+            }
+        }
+    }
+}
+
 fn filter_params(params: Vec<Param>, param_specs: &[String], target: &Target) -> Vec<Param> {
     if param_specs.is_empty() {
         return params;
@@ -860,47 +886,72 @@ fn filter_params(params: Vec<Param>, param_specs: &[String], target: &Target) ->
         .into_iter()
         .filter(|p| {
             for spec in param_specs {
-                if spec.contains(':') {
-                    let parts: Vec<&str> = spec.split(':').collect();
-                    if parts.len() >= 2 {
-                        let name = parts[0];
-                        let type_str = parts[1];
-                        if p.name == name {
-                            let param_type = match p.location {
-                                Location::Query => "query",
-                                Location::Body => "body",
-                                Location::JsonBody => "json",
-                                Location::MultipartBody => "multipart",
-                                Location::Path => "path",
-                                Location::Fragment => "fragment",
-                                Location::Header => {
-                                    if target.cookies.iter().any(|(n, _)| n == &p.name) {
-                                        "cookie"
-                                    } else {
-                                        "header"
-                                    }
-                                }
-                            };
-                            if param_type == type_str {
-                                return true;
-                            }
-                        }
-                    } else {
-                        // Invalid format, treat as name only
-                        if p.name == *spec {
-                            return true;
-                        }
-                    }
-                } else {
-                    // 이름만 지정
-                    if p.name == *spec {
+                // "name:type" → match name + location; extra colons are ignored
+                // (parts[0]/parts[1]). A bare "name" matches any location.
+                let parts: Vec<&str> = spec.split(':').collect();
+                if parts.len() >= 2 {
+                    if p.name == parts[0] && param_type_label(p, target) == parts[1] {
                         return true;
                     }
+                } else if p.name == *spec {
+                    return true;
                 }
             }
             false
         })
         .collect()
+}
+
+/// Guarantee that every explicit `-p name:<type>` injection point is present
+/// in `params`, synthesizing any that discovery/mining did not seed.
+///
+/// `-p` is otherwise just a *filter* over discovered params, so a `--skip-*`
+/// flag that suppresses the phase which would have seeded a location silently
+/// drops the operator's explicit target (the #1044 / #1045 bug class). This is
+/// the general guard: a named target is always tested, whatever was skipped.
+///
+/// Synthesized params carry no `injection_context` (scanning then uses the
+/// context-agnostic fallback payloads) and no special-char profile (the active
+/// probing stage fills that in). `path` and `fragment` are excluded: path
+/// segments are positional (`path_segment_N`, not name-addressable) and
+/// fragments are never sent to the server, so neither can be seeded by name.
+fn ensure_explicit_params(params: &mut Vec<Param>, param_specs: &[String], target: &Target) {
+    for spec in param_specs {
+        // Parse "name:type" as parts[0]/parts[1] to match `filter_params`.
+        let parts: Vec<&str> = spec.split(':').collect();
+        let (name, type_str) = match parts.as_slice() {
+            [name, ty, ..] if !name.is_empty() => (*name, *ty),
+            _ => continue, // name-only → filtering, nothing to synthesize
+        };
+        let location = match type_str {
+            "query" => Location::Query,
+            "body" => Location::Body,
+            "json" => Location::JsonBody,
+            "multipart" => Location::MultipartBody,
+            "header" | "cookie" => Location::Header,
+            _ => continue,
+        };
+        let already = params
+            .iter()
+            .any(|p| p.name == name && param_type_label(p, target) == type_str);
+        if already {
+            continue;
+        }
+        params.push(Param {
+            name: name.to_string(),
+            value: String::new(),
+            location,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            pre_encoding_pipeline: None,
+            wire_name: None,
+            form_action_url: None,
+            form_origin_url: None,
+            framework_sink: None,
+        });
+    }
 }
 
 #[cfg(test)]
