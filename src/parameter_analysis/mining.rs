@@ -20,7 +20,7 @@ use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::{DelimiterType, InjectionContext, Location, Param};
 use crate::payload::mining::GF_PATTERNS_PARAMS;
 use crate::target_parser::Target;
-use indicatif::ProgressBar;
+use crate::utils::shimmer::ShimmerSpinner;
 use scraper;
 use std::sync::Arc;
 
@@ -457,7 +457,7 @@ pub async fn probe_dictionary_params(
     args: &ScanArgs,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
-    pb: Option<ProgressBar>,
+    pb: Option<ShimmerSpinner>,
 ) {
     let arc_target = Arc::new(target.clone());
     let silence = args.silence;
@@ -810,7 +810,7 @@ pub async fn probe_body_params(
     args: &ScanArgs,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
-    pb: Option<ProgressBar>,
+    pb: Option<ShimmerSpinner>,
 ) {
     let arc_target = Arc::new(target.clone());
     let silence = args.silence;
@@ -1025,7 +1025,7 @@ pub async fn probe_response_id_params(
     args: &ScanArgs,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
-    pb: Option<ProgressBar>,
+    pb: Option<ShimmerSpinner>,
 ) {
     let arc_target = Arc::new(target.clone());
     let silence = args.silence;
@@ -1280,7 +1280,7 @@ pub async fn probe_json_body_params(
     args: &ScanArgs,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
-    pb: Option<ProgressBar>,
+    pb: Option<ShimmerSpinner>,
 ) {
     let arc_target = Arc::new(target.clone());
     let silence = args.silence;
@@ -1529,7 +1529,7 @@ pub async fn probe_multipart_params(
     args: &ScanArgs,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
-    pb: Option<ProgressBar>,
+    pb: Option<ShimmerSpinner>,
 ) {
     let Some(data) = &args.data else {
         return;
@@ -1651,7 +1651,7 @@ pub async fn mine_parameters(
     args: &ScanArgs,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
-    pb: Option<ProgressBar>,
+    pb: Option<ShimmerSpinner>,
 ) {
     // Body/JSON parameters supplied via `-d` are explicit user input, not
     // discovery. Seed them independent of the mining flags: query params are

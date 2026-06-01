@@ -756,14 +756,30 @@ pub async fn analyze_parameters(
     multi_pb: Option<Arc<MultiProgress>>,
 ) {
     let pb = if let Some(ref mp) = multi_pb {
-        let pb = mp.add(ProgressBar::new_spinner());
-        pb.set_style(
+        let bar = mp.add(ProgressBar::new_spinner());
+        // The message changes as mining moves between sources, and indicatif
+        // can't feed the live `{msg}` to a custom key, so the text lives in a
+        // shared cell that `{wave}` shimmers and `ShimmerSpinner::set_message`
+        // updates. Reserve 2 cols (glyph + space) so a long URL truncates
+        // instead of wrapping. The steady tick advances the shimmer.
+        let label = std::sync::Arc::new(std::sync::Mutex::new(format!(
+            "Analyzing parameters for {}",
+            target.url
+        )));
+        bar.set_style(
             ProgressStyle::default_spinner()
-                .template("{spinner:.green} {msg}")
-                .expect("valid progress style template"),
+                .template("{spinner:.cyan} {wave}")
+                .expect("valid progress style template")
+                .tick_chars(crate::utils::shimmer::TICK_CHARS)
+                .with_key(
+                    "wave",
+                    crate::utils::shimmer::wave_tracker_shared(label.clone(), 2),
+                ),
         );
-        pb.set_message(format!("Analyzing parameters for {}", target.url));
-        Some(pb)
+        bar.enable_steady_tick(std::time::Duration::from_millis(
+            crate::utils::shimmer::FRAME_MS as u64,
+        ));
+        Some(crate::utils::shimmer::ShimmerSpinner::new(bar, label))
     } else {
         None
     };
@@ -851,7 +867,11 @@ pub async fn analyze_parameters(
     }
 
     if let Some(pb) = pb {
-        pb.finish_with_message(format!("Completed analyzing parameters for {}", target.url));
+        crate::scanning::finish_scan_bar(
+            pb.bar(),
+            console::style("✓").green().to_string(),
+            format!("Completed analyzing parameters for {}", target.url),
+        );
     }
 }
 

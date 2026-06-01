@@ -28,6 +28,19 @@ pub fn stdout_is_tty() -> bool {
     std::io::IsTerminal::is_terminal(&std::io::stdout())
 }
 
+/// Current terminal width in columns, falling back to 80 when the size can't
+/// be queried (not a TTY, or the ioctl failed). The hand-rolled spinner /
+/// ticker use this to truncate their line so a long URL never wraps — a
+/// wrapped line breaks the `\r` redraw and strands a row of debris behind
+/// the cursor.
+#[inline]
+pub fn term_cols() -> usize {
+    console::Term::stdout()
+        .size_checked()
+        .map(|(_, cols)| cols as usize)
+        .unwrap_or(80)
+}
+
 /// Strip ANSI CSI sequences (`\x1b[…m`, `\x1b[…K`, etc.) from `s`.
 /// Conservative: only consumes sequences starting `ESC [` followed by
 /// `0-9;` parameters and a final byte in `0x40..=0x7E`. Anything else

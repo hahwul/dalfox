@@ -45,6 +45,14 @@ pub(crate) fn log_dbg(msg: &str) {
 /// The carriage-return + erase-line redraw pattern is only useful on a real
 /// terminal; in a log file it leaves `\r⠋ preflight: ...\r⠙` strings — hence
 /// the `spinner_allowed` gate the caller computes once from stdout-is-tty.
+///
+/// The label is painted with the shared metallic [`shimmer`] (a bright band
+/// sweeping across silver text) and led by an accent-colored spinner glyph.
+/// Each frame is truncated to the live terminal width and terminated with
+/// `\x1b[K` (erase-to-end-of-line), so a long URL can never wrap onto a
+/// second row — wrapping would desync the `\r` redraw and strand debris.
+///
+/// [`shimmer`]: crate::utils::shimmer
 pub(crate) fn start_spinner(
     spinner_allowed: bool,
     enabled: bool,
@@ -56,17 +64,23 @@ pub(crate) fn start_spinner(
     let (tx, mut rx) = oneshot::channel::<()>();
     let (done_tx, done_rx) = oneshot::channel::<()>();
     tokio::spawn(async move {
-        let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-        let mut i = 0usize;
+        use crate::utils::shimmer;
+        let mut phase = 0usize;
         loop {
+            // Reserve 2 columns for the glyph + its trailing space; truncate
+            // the label (display-width aware, with an ellipsis) so the whole
+            // line fits on one row. `\x1b[K` clears any leftover from a
+            // previous, longer frame without a full-line repaint flicker.
+            let budget = crate::utils::term::term_cols().saturating_sub(2).max(8);
+            let visible = console::truncate_str(&label, budget, "…");
             crate::cprint!(
-                "\r\x1b[38;5;247m{} {}\x1b[0m",
-                frames[i % frames.len()],
-                label
+                "\r{} {}\x1b[K",
+                shimmer::spin_glyph(phase),
+                shimmer::shimmer(visible.as_ref(), phase)
             );
             let _ = io::stdout().flush();
             tokio::select! {
-                _ = tokio::time::sleep(Duration::from_millis(80)) => {},
+                _ = tokio::time::sleep(Duration::from_millis(shimmer::FRAME_MS as u64)) => {},
                 _ = &mut rx => {
                     crate::cprint!("\r\x1b[2K\r");
                     let _ = io::stdout().flush();
@@ -74,7 +88,7 @@ pub(crate) fn start_spinner(
                     break;
                 }
             }
-            i = (i + 1) % frames.len();
+            phase = phase.wrapping_add(1);
         }
     });
     Some((tx, done_rx))

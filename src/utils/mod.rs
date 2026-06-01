@@ -9,6 +9,7 @@ pub mod banner;
 pub mod fs;
 pub mod http;
 pub mod scan_id;
+pub mod shimmer;
 pub mod term;
 
 // Re-export banner helpers at `crate::utils::*`
