@@ -46,6 +46,26 @@ fn json_key_regex() -> &'static regex::Regex {
     })
 }
 
+/// Names the operator explicitly targeted with `-p name:<wanted>` (e.g.
+/// `-p Referer:header`, `-p sid:cookie`, `-p file:multipart`). These are
+/// explicit injection points, so callers probe them even when the matching
+/// `--skip-reflection-*` sweep (or the mining phase) is disabled — mirroring
+/// how `-d` body params are honored under `--skip-mining`.
+pub(crate) fn explicit_param_names(param_specs: &[String], wanted: &str) -> Vec<String> {
+    param_specs
+        .iter()
+        .filter_map(|spec| {
+            // Parse "name:type" the same way `filter_params` does (parts[0] /
+            // parts[1]) so the two never disagree on what was targeted.
+            let parts: Vec<&str> = spec.split(':').collect();
+            match parts.as_slice() {
+                [name, ty, ..] if *ty == wanted && !name.is_empty() => Some(name.to_string()),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
 pub async fn check_discovery(
     target: &mut Target,
     args: &ScanArgs,
@@ -54,12 +74,13 @@ pub async fn check_discovery(
 ) {
     if !args.skip_discovery {
         check_query_discovery(target, reflection_params.clone(), semaphore.clone()).await;
-        if !args.skip_reflection_header {
-            check_header_discovery(target, reflection_params.clone(), semaphore.clone()).await;
-        }
-        if !args.skip_reflection_cookie {
-            check_cookie_discovery(target, reflection_params.clone(), semaphore.clone()).await;
-        }
+        // The header/cookie reflection *sweeps* are gated by
+        // `--skip-reflection-header` / `--skip-reflection-cookie`, but a
+        // header/cookie named explicitly via `-p name:header` / `:cookie` is an
+        // explicit injection point and is probed regardless. That gating now
+        // lives inside each function (see `explicit_param_names`).
+        check_header_discovery(target, args, reflection_params.clone(), semaphore.clone()).await;
+        check_cookie_discovery(target, args, reflection_params.clone(), semaphore.clone()).await;
         // Path discovery (respects --skip-reflection-path)
         if !args.skip_reflection_path {
             check_path_discovery(target, reflection_params.clone(), semaphore.clone()).await;
@@ -693,6 +714,7 @@ async fn detect_blanket_header_echo(target: &Target) -> bool {
 
 pub async fn check_header_discovery(
     target: &Target,
+    args: &ScanArgs,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
 ) {
@@ -702,34 +724,52 @@ pub async fn check_header_discovery(
 
     let mut handles = vec![];
 
-    // Build a set of header names to test: explicit headers + common probes
+    // Headers to test, in priority order of "explicitness":
+    //   1. `-H` headers the user supplied (always)
+    //   2. headers the user named via `-p name:header` (always — explicit
+    //      injection points, honored even under --skip-reflection-header)
+    //   3. the common-probe sweep (only when reflection-header discovery is on)
     let mut headers_to_test: Vec<(String, String)> = target
         .headers
         .iter()
         .map(|(k, v)| (k.clone(), v.clone()))
         .collect();
-    let existing_names: std::collections::HashSet<String> = headers_to_test
+    let mut existing_names: std::collections::HashSet<String> = headers_to_test
         .iter()
         .map(|(k, _)| k.to_ascii_lowercase())
         .collect();
 
-    // Differential check: skip the default probe list when the target
-    // echoes any header name. User-supplied headers still get probed
-    // because the operator explicitly asked for them.
-    let blanket_echo = detect_blanket_header_echo(target).await;
-    if blanket_echo {
-        if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-            eprintln!(
-                "[DBG] blanket header echo detected (guard reflected); skipping {} common header probes",
-                COMMON_PROBE_HEADERS.len()
-            );
+    for name in explicit_param_names(&args.param, "header") {
+        if existing_names.insert(name.to_ascii_lowercase()) {
+            headers_to_test.push((name, String::new()));
         }
-    } else {
-        for &hdr in COMMON_PROBE_HEADERS {
-            if !existing_names.contains(&hdr.to_ascii_lowercase()) {
-                headers_to_test.push((hdr.to_string(), String::new()));
+    }
+
+    // The blanket common-header sweep is the only part gated by
+    // `--skip-reflection-header`. Explicitly-named headers above are not.
+    if !args.skip_reflection_header {
+        // Differential check: skip the default probe list when the target
+        // echoes any header name. User-supplied headers still get probed
+        // because the operator explicitly asked for them.
+        let blanket_echo = detect_blanket_header_echo(target).await;
+        if blanket_echo {
+            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!(
+                    "[DBG] blanket header echo detected (guard reflected); skipping {} common header probes",
+                    COMMON_PROBE_HEADERS.len()
+                );
+            }
+        } else {
+            for &hdr in COMMON_PROBE_HEADERS {
+                if existing_names.insert(hdr.to_ascii_lowercase()) {
+                    headers_to_test.push((hdr.to_string(), String::new()));
+                }
             }
         }
+    }
+
+    if headers_to_test.is_empty() {
+        return;
     }
 
     for (header_name, header_value) in &headers_to_test {
@@ -995,6 +1035,7 @@ pub async fn check_path_discovery(
 
 pub async fn check_cookie_discovery(
     target: &Target,
+    args: &ScanArgs,
     reflection_params: Arc<Mutex<Vec<Param>>>,
     semaphore: Arc<Semaphore>,
 ) {
@@ -1004,7 +1045,21 @@ pub async fn check_cookie_discovery(
 
     let mut handles = vec![];
 
+    // Under `--skip-reflection-cookie` the blanket sweep over supplied cookies
+    // is off, but cookies named explicitly via `-p name:cookie` are explicit
+    // injection points and still get probed.
+    let explicit_only: Option<Vec<String>> = if args.skip_reflection_cookie {
+        Some(explicit_param_names(&args.param, "cookie"))
+    } else {
+        None
+    };
+
     for (cookie_name, cookie_value) in &target.cookies {
+        if let Some(ref allow) = explicit_only
+            && !allow.iter().any(|n| n == cookie_name)
+        {
+            continue;
+        }
         let client_clone = client.clone();
         let url = target.url.clone();
         let cookies = target.cookies.clone();

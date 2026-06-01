@@ -194,7 +194,13 @@ async fn test_check_header_discovery_blanket_echo_skips_default_probes() {
 
     let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
     let semaphore = Arc::new(Semaphore::new(1));
-    check_header_discovery(&target, reflection_params.clone(), semaphore).await;
+    check_header_discovery(
+        &target,
+        &default_scan_args(),
+        reflection_params.clone(),
+        semaphore,
+    )
+    .await;
 
     let params = reflection_params.lock().await.clone();
     let names: Vec<&str> = params.iter().map(|p| p.name.as_str()).collect();
@@ -223,7 +229,13 @@ async fn test_check_header_discovery_blanket_echo_keeps_user_supplied_headers() 
 
     let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
     let semaphore = Arc::new(Semaphore::new(1));
-    check_header_discovery(&target, reflection_params.clone(), semaphore).await;
+    check_header_discovery(
+        &target,
+        &default_scan_args(),
+        reflection_params.clone(),
+        semaphore,
+    )
+    .await;
 
     let params = reflection_params.lock().await.clone();
     assert!(
@@ -243,7 +255,13 @@ async fn test_check_header_discovery_discovers_reflected_header() {
 
     let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
     let semaphore = Arc::new(Semaphore::new(1));
-    check_header_discovery(&target, reflection_params.clone(), semaphore).await;
+    check_header_discovery(
+        &target,
+        &default_scan_args(),
+        reflection_params.clone(),
+        semaphore,
+    )
+    .await;
 
     let params = reflection_params.lock().await.clone();
     assert!(
@@ -270,7 +288,13 @@ async fn test_check_cookie_discovery_single_cookie_branch() {
 
     let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
     let semaphore = Arc::new(Semaphore::new(1));
-    check_cookie_discovery(&target, reflection_params.clone(), semaphore).await;
+    check_cookie_discovery(
+        &target,
+        &default_scan_args(),
+        reflection_params.clone(),
+        semaphore,
+    )
+    .await;
 
     let params = reflection_params.lock().await.clone();
     assert_eq!(params.len(), 1);
@@ -292,12 +316,89 @@ async fn test_check_cookie_discovery_multiple_cookies_branch() {
 
     let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
     let semaphore = Arc::new(Semaphore::new(1));
-    check_cookie_discovery(&target, reflection_params.clone(), semaphore).await;
+    check_cookie_discovery(
+        &target,
+        &default_scan_args(),
+        reflection_params.clone(),
+        semaphore,
+    )
+    .await;
 
     let params = reflection_params.lock().await.clone();
     assert_eq!(params.len(), 2);
     assert!(params.iter().any(|p| p.name == "session"));
     assert!(params.iter().any(|p| p.name == "theme"));
+}
+
+#[tokio::test]
+async fn test_check_header_discovery_explicit_param_survives_skip_flag() {
+    // Regression: `-p Name:header` is an explicit injection point and must be
+    // probed even under `--skip-reflection-header`, which only disables the
+    // blanket common-header sweep — not operator-named headers.
+    let addr = start_discovery_mock_server().await;
+    let target = parse_target(&format!("http://{}/reflect?q=1", addr)).unwrap();
+    let mut args = default_scan_args();
+    args.skip_reflection_header = true;
+    args.param = vec!["X-Reflect-Me:header".to_string()];
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(Semaphore::new(1));
+    check_header_discovery(&target, &args, reflection_params.clone(), semaphore).await;
+
+    let params = reflection_params.lock().await.clone();
+    assert!(
+        params
+            .iter()
+            .any(|p| p.name == "X-Reflect-Me" && p.location == Location::Header),
+        "explicit -p X-Reflect-Me:header must be probed under --skip-reflection-header, got {:?}",
+        params.iter().map(|p| &p.name).collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_check_header_discovery_skip_flag_without_explicit_is_noop() {
+    // Control: with the sweep off and nothing explicit, no headers are probed.
+    let addr = start_discovery_mock_server().await;
+    let target = parse_target(&format!("http://{}/reflect?q=1", addr)).unwrap();
+    let mut args = default_scan_args();
+    args.skip_reflection_header = true;
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(Semaphore::new(1));
+    check_header_discovery(&target, &args, reflection_params.clone(), semaphore).await;
+    assert!(reflection_params.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn test_check_cookie_discovery_explicit_param_survives_skip_flag() {
+    // Regression: `-p name:cookie` is probed even under
+    // `--skip-reflection-cookie`; other supplied cookies stay suppressed.
+    let addr = start_discovery_mock_server().await;
+    let mut target = parse_target(&format!("http://{}/reflect", addr)).unwrap();
+    target
+        .cookies
+        .push(("session".to_string(), "abc".to_string()));
+    target
+        .cookies
+        .push(("theme".to_string(), "dark".to_string()));
+    target.delay = 1;
+    let mut args = default_scan_args();
+    args.skip_reflection_cookie = true;
+    args.param = vec!["session:cookie".to_string()];
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(Semaphore::new(1));
+    check_cookie_discovery(&target, &args, reflection_params.clone(), semaphore).await;
+
+    let params = reflection_params.lock().await.clone();
+    assert!(
+        params.iter().any(|p| p.name == "session"),
+        "explicit -p session:cookie must be probed under --skip-reflection-cookie"
+    );
+    assert!(
+        !params.iter().any(|p| p.name == "theme"),
+        "non-explicit cookie must stay suppressed under --skip-reflection-cookie"
+    );
 }
 
 #[tokio::test]

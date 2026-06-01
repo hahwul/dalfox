@@ -939,3 +939,108 @@ async fn test_mine_parameters_seeds_explicit_body_params_under_skip_mining_dict(
             .collect::<Vec<_>>()
     );
 }
+
+async fn reflect_raw_body_handler(body: axum::body::Bytes) -> Html<String> {
+    // Echo the raw request body. A multipart/form-data body carries each text
+    // field's value verbatim, so the probe marker shows up in the response.
+    Html(format!(
+        "<html><body>{}</body></html>",
+        String::from_utf8_lossy(&body)
+    ))
+}
+
+async fn start_raw_body_reflect_server() -> SocketAddr {
+    let app = Router::new().route("/r", axum::routing::post(reflect_raw_body_handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind listener");
+    let addr = listener.local_addr().expect("listener addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+    addr
+}
+
+#[tokio::test]
+async fn test_probe_multipart_params_seeds_explicit_field() {
+    // `-p file:multipart` is a known multipart sink. Before, MultipartBody
+    // params were only seeded from discovered HTML forms, so this explicit
+    // injection point had no entry point. Now `-d` + `-p :multipart` seeds it.
+    let addr = start_raw_body_reflect_server().await;
+    let target =
+        parse_target(&format!("http://{}:{}/r", addr.ip(), addr.port())).expect("parse target");
+    let mut args = default_scan_args();
+    args.method = "POST".to_string();
+    args.data = Some("file=a&other=b".to_string());
+    args.param = vec!["file:multipart".to_string()];
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    probe_multipart_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+
+    let params = reflection_params.lock().await.clone();
+    assert!(
+        params
+            .iter()
+            .any(|p| p.name == "file" && p.location == Location::MultipartBody),
+        "explicit -p file:multipart must seed a MultipartBody param, got {:?}",
+        params
+            .iter()
+            .map(|p| (&p.name, &p.location))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[tokio::test]
+async fn test_probe_multipart_params_noop_without_multipart_spec() {
+    // Multipart is opt-in: with `-d` but no `-p :multipart`, this is a no-op
+    // (we don't re-send every body as multipart).
+    let target = parse_target("http://127.0.0.1:1").expect("parse target");
+    let mut args = default_scan_args();
+    args.data = Some("file=a".to_string());
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(1));
+    probe_multipart_params(&target, &args, reflection_params.clone(), semaphore, None).await;
+    assert!(reflection_params.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn test_mine_parameters_multipart_survives_same_named_body_param() {
+    // `-d file=a -p file:multipart`: `probe_body_params` seeds `file` as a Body
+    // param from the same `-d`, but the multipart slot must still be seeded —
+    // otherwise the `-p file:multipart` location filter drops the Body entry
+    // and nothing is left to scan.
+    let addr = start_raw_body_reflect_server().await;
+    let mut target =
+        parse_target(&format!("http://{}:{}/r", addr.ip(), addr.port())).expect("parse target");
+    let mut args = default_scan_args();
+    args.skip_mining = true;
+    args.method = "POST".to_string();
+    args.data = Some("file=a".to_string());
+    args.param = vec!["file:multipart".to_string()];
+
+    let reflection_params = Arc::new(Mutex::new(Vec::<Param>::new()));
+    let semaphore = Arc::new(tokio::sync::Semaphore::new(2));
+    mine_parameters(
+        &mut target,
+        &args,
+        reflection_params.clone(),
+        semaphore,
+        None,
+    )
+    .await;
+
+    let params = reflection_params.lock().await.clone();
+    assert!(
+        params
+            .iter()
+            .any(|p| p.name == "file" && p.location == Location::MultipartBody),
+        "multipart slot for `file` must be seeded even when a Body `file` exists, got {:?}",
+        params
+            .iter()
+            .map(|p| (&p.name, &p.location))
+            .collect::<Vec<_>>()
+    );
+}
