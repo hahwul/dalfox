@@ -1770,6 +1770,48 @@ body:has(.docs-layout) .site-footer {
     gap: 0.65rem;
     margin-top: 1rem;
 }
+/* Atmospheric night-scene backdrop for the modes section.
+   The fox-and-moon illustration drifts in from the right, masked into a soft
+   vignette so the moon glows beside the heading while the left text column and
+   the section's edges dissolve cleanly into the navy-ink base. */
+.section--modes {
+    overflow: hidden;
+}
+.section--modes .section-inner {
+    position: relative;
+    z-index: 1;
+}
+.modes-illustration {
+    position: absolute;
+    top: -1px;
+    right: 0;
+    bottom: -1px;
+    width: 58%;
+    z-index: 0;
+    pointer-events: none;
+    background-image: url('/images/illust2.webp');
+    background-position: 62% 38%;
+    background-size: cover;
+    background-repeat: no-repeat;
+    opacity: 0.26;
+    filter: saturate(0.9) contrast(1.02);
+    /* Single elliptical reveal centred on the moon — fades on every edge so no
+       hard rectangle shows, and protects the heading column on the left. */
+    mask-image: radial-gradient(
+        ellipse 80% 86% at 70% 44%,
+        black 28%,
+        rgba(0, 0, 0, 0.52) 56%,
+        rgba(0, 0, 0, 0.16) 80%,
+        transparent 96%
+    );
+    -webkit-mask-image: radial-gradient(
+        ellipse 80% 86% at 70% 44%,
+        black 28%,
+        rgba(0, 0, 0, 0.52) 56%,
+        rgba(0, 0, 0, 0.16) 80%,
+        transparent 96%
+    );
+}
 .mode {
     padding: 1rem 0.85rem;
     background: var(--bg-content);
@@ -2115,6 +2157,10 @@ body:has(.docs-layout) .site-footer {
     .modes {
         grid-template-columns: repeat(3, 1fr);
     }
+    .modes-illustration {
+        width: 70%;
+        opacity: 0.2;
+    }
     .how-steps {
         grid-template-columns: 1fr;
     }
@@ -2175,6 +2221,13 @@ body:has(.docs-layout) .site-footer {
     }
     .modes {
         grid-template-columns: repeat(2, 1fr);
+    }
+    /* On phones the heading wraps tall and fills the row, so keep the scene as
+       a faint top-right wash that never competes with the text. */
+    .modes-illustration {
+        width: 88%;
+        opacity: 0.14;
+        background-position: 70% 22%;
     }
     .footer-inner {
         flex-direction: column;
