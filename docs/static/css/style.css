@@ -2235,11 +2235,37 @@ body:has(.docs-layout) .site-footer {
         grid-template-columns: 1fr;
         gap: 2.5rem;
     }
-    /* Hide the full illustration treatment below 1024px.
-       The rich "cover the headline" version only makes sense in true two-column desktop.
-       In the awkward intermediate sizes it ends up looking isolated in the middle. */
+    /* Below 1024px the layout collapses to a single column, so the rich
+       "cover the headline from the right" treatment no longer fits. Instead of
+       hiding the scene, switch it to a full-bleed cover that fills the whole
+       hero — bleeding past every edge so no rectangular border of the webp is
+       ever visible — and fade it with a soft vertical mask so the headline and
+       copy stay readable on top. */
     .hero-illustration {
-        display: none;
+        display: block;
+        background-position: center 30%;
+        background-size: cover;
+        opacity: 0.16;
+        mask-image: linear-gradient(
+            to bottom,
+            transparent 0%,
+            rgba(0, 0, 0, 0.45) 20%,
+            black 48%,
+            black 74%,
+            rgba(0, 0, 0, 0.35) 92%,
+            transparent 100%
+        );
+        -webkit-mask-image: linear-gradient(
+            to bottom,
+            transparent 0%,
+            rgba(0, 0, 0, 0.45) 20%,
+            black 48%,
+            black 74%,
+            rgba(0, 0, 0, 0.35) 92%,
+            transparent 100%
+        );
+        mask-composite: add;
+        -webkit-mask-composite: source-over;
     }
     .features-grid {
         grid-template-columns: repeat(2, 1fr);
