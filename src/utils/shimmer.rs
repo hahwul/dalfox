@@ -151,7 +151,8 @@ pub fn wave_tracker(
 ) -> impl Fn(&indicatif::ProgressState, &mut dyn std::fmt::Write) + Send + Sync + Clone + 'static {
     move |state, w| {
         let phase = (state.elapsed().as_millis() / FRAME_MS) as usize;
-        let avail = crate::utils::term::term_cols()
+        // indicatif draws to stderr, so measure stderr (see `term_cols_stderr`).
+        let avail = crate::utils::term::term_cols_stderr()
             .saturating_sub(reserve)
             .max(6);
         let shown = console::truncate_str(&label, avail, "…");
@@ -172,7 +173,8 @@ pub fn wave_tracker_shared(
     move |state, w| {
         let phase = (state.elapsed().as_millis() / FRAME_MS) as usize;
         let text = label.lock().map(|g| g.clone()).unwrap_or_default();
-        let avail = crate::utils::term::term_cols()
+        // indicatif draws to stderr, so measure stderr (see `term_cols_stderr`).
+        let avail = crate::utils::term::term_cols_stderr()
             .saturating_sub(reserve)
             .max(6);
         let shown = console::truncate_str(&text, avail, "…");
@@ -287,6 +289,23 @@ mod tests {
         for phase in 0..40 {
             assert_eq!(crate::utils::term::strip_ansi(&shimmer(text, phase)), text);
         }
+    }
+
+    #[test]
+    fn shimmer_spinner_set_message_updates_shared_cell() {
+        // The whole analyzer-shimmer feature rests on `set_message` writing
+        // through to the cell that `{wave}` reads. `ProgressBar::hidden()`
+        // needs no TTY, so this stays a pure unit test.
+        let sp = ShimmerSpinner::new(
+            indicatif::ProgressBar::hidden(),
+            Arc::new(Mutex::new("Analyzing…".to_string())),
+        );
+        assert_eq!(&*sp.label_cell().lock().unwrap(), "Analyzing…");
+        sp.set_message("Mining dictionary parameters");
+        assert_eq!(
+            &*sp.label_cell().lock().unwrap(),
+            "Mining dictionary parameters"
+        );
     }
 
     #[test]

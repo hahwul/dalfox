@@ -951,6 +951,14 @@ fn build_scan_progress_bar(
 /// a status glyph (green `✓` / yellow `⚠`), the elapsed time, then the final
 /// message — replacing the wave rather than printing alongside it.
 pub(crate) fn finish_scan_bar(pb: &ProgressBar, prefix: String, msg: String) {
+    // Keep the completion line on one row too. The finished template is
+    // `{prefix} [elapsed] {msg}` — ~13 cols of furniture before `{msg}` — so
+    // trim the message to the leftover stderr width. It's a one-shot render
+    // (no `\r` redraw), but a wrapped completion line still reads ragged.
+    let avail = crate::utils::term::term_cols_stderr()
+        .saturating_sub(14)
+        .max(8);
+    let msg = console::truncate_str(&msg, avail, "…").into_owned();
     // Set the prefix + message *before* swapping the style: the in-progress
     // template ignores both slots, so this stays invisible until the style
     // swap, which then renders the final line in one shot. Doing it the other
