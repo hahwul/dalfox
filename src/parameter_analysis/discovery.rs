@@ -55,8 +55,13 @@ pub(crate) fn explicit_param_names(param_specs: &[String], wanted: &str) -> Vec<
     param_specs
         .iter()
         .filter_map(|spec| {
-            let (name, ty) = spec.split_once(':')?;
-            (ty == wanted && !name.is_empty()).then(|| name.to_string())
+            // Parse "name:type" the same way `filter_params` does (parts[0] /
+            // parts[1]) so the two never disagree on what was targeted.
+            let parts: Vec<&str> = spec.split(':').collect();
+            match parts.as_slice() {
+                [name, ty, ..] if *ty == wanted && !name.is_empty() => Some(name.to_string()),
+                _ => None,
+            }
         })
         .collect()
 }
