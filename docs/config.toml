@@ -301,22 +301,21 @@ emoji = false         # If true, convert emoji shortcodes (e.g. :smile:) to emoj
 # Auto-generate Open Graph preview images for social sharing
 # Images are created for pages without a custom `image` in front matter
 
-# [og.auto_image]
-# enabled = true
-# background = "#1a1a2e"
-# text_color = "#ffffff"
-# accent_color = "#e94560"
-# font_size = 48
-# logo = "static/logo.png"
-# logo_position = "bottom-left"  # bottom-left, bottom-right, top-left, top-right
-# output_dir = "og-images"
-# show_title = true
-# style = "default"              # default, dots, grid, diagonal, gradient, waves, minimal
-# pattern_opacity = 0.15
-# pattern_scale = 1.0
-# background_image = ""          # Background image file path (embedded as base64)
-# overlay_opacity = 0.5
-# format = "svg"                 # svg or png
+[og.auto_image]
+enabled = true
+background = "#070811"                          # site dark navy — overlaid over the illustration
+text_color = "#e7e9f3"                          # site primary text
+accent_color = "#8b94e8"                        # site accent (periwinkle)
+font_size = 52
+logo = "static/images/logo_solo.png"
+logo_position = "bottom-left"                   # bottom-left, bottom-right, top-left, top-right
+output_dir = "og-images"
+show_title = true
+style = "editorial"                             # clean type + subtle panel, harmonizes with artistic backgrounds
+text_panel = 0.45                               # soft gradient panel behind the title for readability
+background_image = "static/images/illust2-og.jpg" # fox-and-moon backdrop (JPG: PNG rasterizer can't decode WebP)
+overlay_opacity = 0.58                           # darken the illustration into a faint backdrop so text stays legible
+format = "png"                                  # PNG so social platforms actually render og:image (SVG is unsupported)
 
 # =============================================================================
 # Deployment (Optional)
