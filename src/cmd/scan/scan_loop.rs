@@ -140,15 +140,25 @@ pub(crate) async fn run_scan_loop(
                 let req_start = crate::REQUEST_COUNT.load(Ordering::Relaxed);
                 pb.set_style(
                     indicatif::ProgressStyle::default_bar()
-                        .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} ({req_per_sec}, ETA {eta}) Overall scanning")
+                        .template("{spinner:.cyan} [{elapsed_precise}] [{bar:28.45/238}] {pos:>5}/{len:5} · {req_per_sec} · {wave}")
                         .expect("valid progress bar template")
+                        .tick_chars(crate::utils::shimmer::TICK_CHARS)
                         .with_key(
                             "req_per_sec",
                             crate::scanning::req_per_sec_tracker(req_start),
                         )
-                        .progress_chars("#>-"),
+                        .with_key(
+                            "wave",
+                            crate::utils::shimmer::wave_tracker(
+                                "Overall scanning".to_string(),
+                                crate::utils::shimmer::BAR_WAVE_RESERVE,
+                            ),
+                        )
+                        .progress_chars("█▉▊▋▌▍▎▏░"),
                 );
-                pb.enable_steady_tick(Duration::from_millis(120));
+                pb.enable_steady_tick(Duration::from_millis(
+                    crate::utils::shimmer::FRAME_MS as u64,
+                ));
                 Some(Arc::new(pb))
             } else {
                 None
@@ -259,7 +269,11 @@ pub(crate) async fn run_scan_loop(
             }
 
             if let Some(pb) = overall_pb {
-                pb.finish_with_message(format!("All scanning completed for {}", host));
+                crate::scanning::finish_scan_bar(
+                    &pb,
+                    console::style("✓").green().to_string(),
+                    format!("All scanning completed for {}", host),
+                );
             }
         });
         group_handles.push(group_handle);

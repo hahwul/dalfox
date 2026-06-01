@@ -914,19 +914,63 @@ fn build_scan_progress_bar(
     // found, payload skipped), which inflated the rate (e.g. 11.5k/s on
     // a 5k-payload scan that finished in 0.4s). See req_per_sec_tracker
     // for the displayed semantics and caveats.
+    //
+    // The trailing `{wave}` paints "Scanning <url>" with the shared metallic
+    // shimmer, re-evaluated on every steady tick from the bar's elapsed time
+    // (no extra timer task). `finish_scan_bar` swaps in a `{msg}` style at the
+    // end so the completion line replaces the wave instead of duplicating it.
     let req_start = crate::REQUEST_COUNT.load(Ordering::Relaxed);
     pb.set_style(
         ProgressStyle::default_bar()
             .template(
-                "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos:>7}/{len:7} ({req_per_sec}, ETA {eta}) {msg}",
+                "{spinner:.cyan} [{elapsed_precise}] [{bar:28.45/238}] {pos:>5}/{len:5} · {req_per_sec} · {wave}",
             )
             .expect("valid progress bar template")
+            .tick_chars(crate::utils::shimmer::TICK_CHARS)
             .with_key("req_per_sec", req_per_sec_tracker(req_start))
-            .progress_chars("#>-"),
+            .with_key(
+                "wave",
+                crate::utils::shimmer::wave_tracker(
+                    format!("Scanning {}", target.url),
+                    crate::utils::shimmer::BAR_WAVE_RESERVE,
+                ),
+            )
+            .progress_chars("█▉▊▋▌▍▎▏░"),
     );
-    pb.enable_steady_tick(Duration::from_millis(120));
-    pb.set_message(format!("Scanning {}", target.url));
+    pb.enable_steady_tick(Duration::from_millis(
+        crate::utils::shimmer::FRAME_MS as u64,
+    ));
     Some(pb)
+}
+
+/// Render `pb` in its terminal "done" state and stop it.
+///
+/// The in-progress style paints the label through a `{wave}` shimmer and has
+/// no `{msg}` slot, so a plain `finish_with_message` would never show the
+/// completion text. Swap in a compact `{prefix} [elapsed] {msg}` style first:
+/// a status glyph (green `✓` / yellow `⚠`), the elapsed time, then the final
+/// message — replacing the wave rather than printing alongside it.
+pub(crate) fn finish_scan_bar(pb: &ProgressBar, prefix: String, msg: String) {
+    // Keep the completion line on one row too. The finished template is
+    // `{prefix} [elapsed] {msg}` — ~13 cols of furniture before `{msg}` — so
+    // trim the message to the leftover stderr width. It's a one-shot render
+    // (no `\r` redraw), but a wrapped completion line still reads ragged.
+    let avail = crate::utils::term::term_cols_stderr()
+        .saturating_sub(14)
+        .max(8);
+    let msg = console::truncate_str(&msg, avail, "…").into_owned();
+    // Set the prefix + message *before* swapping the style: the in-progress
+    // template ignores both slots, so this stays invisible until the style
+    // swap, which then renders the final line in one shot. Doing it the other
+    // way round flashes a `✓ [elapsed]` frame with an empty message first.
+    pb.set_prefix(prefix);
+    pb.set_message(msg);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{prefix} [{elapsed_precise}] {msg}")
+            .expect("valid finish template"),
+    );
+    pb.finish();
 }
 
 /// Log WAF block statistics gathered during the scan (debug builds only).
@@ -1656,7 +1700,11 @@ pub async fn run_scanning(
         // Check cancellation before spawning next param task
         if ctx.cancelled() {
             if let Some(ref pb) = pb {
-                pb.finish_with_message(format!("Cancelled scanning {}", target.url));
+                finish_scan_bar(
+                    pb,
+                    console::style("⚠").yellow().to_string(),
+                    format!("Cancelled scanning {}", target.url),
+                );
             }
             break;
         }
@@ -1672,7 +1720,11 @@ pub async fn run_scanning(
         // Early stop if global limit reached
         if ctx.limit_reached() {
             if let Some(ref pb) = pb {
-                pb.finish_with_message(format!("Completed scanning {}", target.url));
+                finish_scan_bar(
+                    pb,
+                    console::style("✓").green().to_string(),
+                    format!("Completed scanning {}", target.url),
+                );
             }
             return;
         }
@@ -1699,7 +1751,11 @@ pub async fn run_scanning(
     collapse_target_results(&results, &findings_count, target).await;
 
     if let Some(pb) = pb {
-        pb.finish_with_message(format!("Completed scanning {}", target.url));
+        finish_scan_bar(
+            &pb,
+            console::style("✓").green().to_string(),
+            format!("Completed scanning {}", target.url),
+        );
     }
 }
 

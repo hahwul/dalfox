@@ -28,6 +28,34 @@ pub fn stdout_is_tty() -> bool {
     std::io::IsTerminal::is_terminal(&std::io::stdout())
 }
 
+/// Width in columns of `term`, falling back to 80 when the size can't be
+/// queried (not a TTY, or the ioctl failed).
+#[inline]
+fn cols_of(term: console::Term) -> usize {
+    term.size_checked()
+        .map(|(_, cols)| cols as usize)
+        .unwrap_or(80)
+}
+
+/// Current **stdout** terminal width in columns. The hand-rolled spinner /
+/// overall ticker use this to truncate their line so a long URL never wraps —
+/// a wrapped line breaks the `\r` redraw and strands a row of debris behind
+/// the cursor. They write to stdout, so stdout is the stream to measure.
+#[inline]
+pub fn term_cols() -> usize {
+    cols_of(console::Term::stdout())
+}
+
+/// Current **stderr** terminal width in columns. indicatif renders its
+/// progress bars to stderr, so the `{wave}` shimmer truncation must measure
+/// stderr — measuring stdout would pick the wrong width (or the 80-col
+/// fallback) whenever stdout is piped while stderr is a TTY, e.g.
+/// `dalfox scan … | tee log`.
+#[inline]
+pub fn term_cols_stderr() -> usize {
+    cols_of(console::Term::stderr())
+}
+
 /// Strip ANSI CSI sequences (`\x1b[…m`, `\x1b[…K`, etc.) from `s`.
 /// Conservative: only consumes sequences starting `ESC [` followed by
 /// `0-9;` parameters and a final byte in `0x40..=0x7E`. Anything else

@@ -502,6 +502,7 @@ dependencies = [
  "base64",
  "chrono",
  "clap",
+ "console",
  "hex",
  "indicatif",
  "oxc_allocator",

@@ -385,23 +385,28 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         let (tx, mut rx) = oneshot::channel::<()>();
         let (done_tx, done_rx) = oneshot::channel::<()>();
         tokio::spawn(async move {
-            let frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-            let mut i = 0usize;
+            use crate::utils::shimmer;
+            let mut phase = 0usize;
             loop {
                 let done = overall_done_clone.load(Ordering::Relaxed);
                 let percent = (done * 100) / std::cmp::max(1, total_targets_copy);
                 let findings = findings_count_clone.load(Ordering::Relaxed);
+                let text = format!(
+                    "overall  {done}/{total_targets_copy} targets · {percent}% · {findings} findings"
+                );
+                // Truncate to the terminal width (reserving the glyph + space)
+                // and clear to EOL so the metallic line never wraps onto a
+                // second row, which would desync the `\r` redraw.
+                let budget = crate::utils::term::term_cols().saturating_sub(2).max(8);
+                let visible = console::truncate_str(&text, budget, "…");
                 crate::cprint!(
-                    "\r\x1b[38;5;247m{} overall: targets={}  done={}  progress={}%  findings={}\x1b[0m",
-                    frames[i % frames.len()],
-                    total_targets_copy,
-                    done,
-                    percent,
-                    findings
+                    "\r{} {}\x1b[K",
+                    shimmer::spin_glyph(phase),
+                    shimmer::shimmer(visible.as_ref(), phase)
                 );
                 let _ = io::stdout().flush();
                 tokio::select! {
-                    _ = tokio::time::sleep(Duration::from_millis(120)) => {},
+                    _ = tokio::time::sleep(Duration::from_millis(shimmer::FRAME_MS as u64)) => {},
                     _ = &mut rx => {
                         // clear the line and exit
                         crate::cprint!("\r\x1b[2K\r");
@@ -410,7 +415,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
                         break;
                     }
                 }
-                i = (i + 1) % frames.len();
+                phase = phase.wrapping_add(1);
             }
         });
         Some((tx, done_rx))
