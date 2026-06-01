@@ -152,36 +152,66 @@ end
 # Scanning.
 # ---------------------------------------------------------------------------
 
-# Build the dalfox argument list for one maze, pointing it at the catalog's
-# declared injection point. Mining is skipped (the endpoint is known) while
-# discovery/reflection checks stay on so header/path cases still resolve.
-def build_args(maze : Maze, out_file : String) : Array(String)
-  args = ["scan", BASE_URL + maze.url,
+# Body (POST) params declared by the catalog, minus the path sentinel and any
+# request-header injection points.
+def body_params(maze : Maze) : Array(String)
+  return [] of String unless maze.method == "POST"
+  maze.params.reject { |p| p == ":path" || HEADER_PARAMS.includes?(p) }
+end
+
+# Compose the scan URL. The catalog's `params` are advisory — for several
+# categories they are a generic `query` placeholder while the real injection
+# point lives elsewhere (a differently-named query key, a header, the path).
+# Rather than trust them, we let dalfox's own discovery test every query key in
+# the URL. We only need to ensure each query-style catalog param is actually
+# present so there is something to discover; some endpoints (e.g. `redirect`)
+# declare a param the bare URL omits.
+def scan_url(maze : Maze) : String
+  base = BASE_URL + maze.url
+  return base if maze.method == "POST" # body params are seeded via -d
+  existing = (URI.parse(maze.url).query || "")
+    .split('&', remove_empty: true)
+    .map { |kv| kv.split('=', 2).first }
+  missing = maze.params.reject do |p|
+    p == ":path" || HEADER_PARAMS.includes?(p) || existing.includes?(p)
+  end
+  return base if missing.empty?
+  sep = maze.url.includes?('?') ? "&" : "?"
+  base + sep + missing.map { |p| "#{p}=a" }.join("&")
+end
+
+# Build the dalfox argument list for one maze. Mining is skipped (the endpoint
+# is known) while discovery/reflection checks stay on so query / header / path
+# cases all resolve. We deliberately do *not* force `-p name:query`: a wrong
+# placeholder name would suppress the other vectors discovery finds on its own.
+# Header injection points, which discovery does not surface, are targeted
+# explicitly. `json_body` swaps the POST body encoding for the retry pass.
+def build_args(maze : Maze, out_file : String, json_body : Bool) : Array(String)
+  args = ["scan", scan_url(maze),
           "--format", "json", "-o", out_file,
           "-S", "--no-color", "--skip-mining",
           "--timeout", "7", "--scan-timeout", "40"]
   args.push("-X", maze.method) if maze.method != "GET"
 
-  body_params = [] of String
   maze.params.each do |p|
-    next if p == ":path" # default path reflection covers this
-    if HEADER_PARAMS.includes?(p)
-      args.push("-p", "#{p}:header")
-    elsif maze.method == "POST"
-      args.push("-p", "#{p}:body")
-      body_params << p
+    args.push("-p", "#{p}:header") if HEADER_PARAMS.includes?(p)
+  end
+
+  bp = body_params(maze)
+  unless bp.empty?
+    if json_body
+      args.push("-d", "{" + bp.map { |p| %("#{p}":"a") }.join(",") + "}")
     else
-      args.push("-p", "#{p}:query")
+      args.push("-d", bp.map { |p| "#{p}=a" }.join("&"))
     end
   end
-  args.push("-d", body_params.map { |p| "#{p}=a" }.join("&")) unless body_params.empty?
   args
 end
 
-# Scan one maze. Returns {detected, verified}.
-def scan(maze : Maze) : {Bool, Bool}
+# Run dalfox once with the given body encoding. Returns {detected, verified}.
+def run_dalfox(maze : Maze, json_body : Bool) : {Bool, Bool}
   out_file = File.tempname("dalfox-xssmaze", ".json")
-  args = build_args(maze, out_file)
+  args = build_args(maze, out_file, json_body)
   status = Process.run(DALFOX_BIN, args,
     output: Process::Redirect::Close,
     error: Process::Redirect::Close)
@@ -192,6 +222,16 @@ def scan(maze : Maze) : {Bool, Bool}
   {detected, verified}
 ensure
   File.delete(out_file) if out_file && File.exists?(out_file)
+end
+
+# Scan one maze. Returns {detected, verified}. The catalog does not record
+# whether a POST endpoint reads urlencoded or JSON, so POST bodies are tried as
+# a form first and re-tried as JSON only if the form pass finds nothing.
+def scan(maze : Maze) : {Bool, Bool}
+  detected, verified = run_dalfox(maze, false)
+  return {detected, verified} if detected
+  return {detected, verified} if body_params(maze).empty?
+  run_dalfox(maze, true)
 end
 
 def parse_findings(out_file : String) : Array(JSON::Any)

@@ -1,14 +1,14 @@
 {
-  "generated_at": "2026-05-31T11:00:29Z",
+  "generated_at": "2026-06-01T00:49:45Z",
   "dalfox_version": "3.0.0",
-  "xssmaze_version": "0.1.0",
+  "xssmaze_version": "0.2.0",
   "xssmaze_image": "ghcr.io/hahwul/xssmaze:main",
-  "xssmaze_digest": "ghcr.io/hahwul/xssmaze@sha256:0077f3084e92b49be28cb322e3b379d163e8e6db412ced103ea57c449a80454c",
+  "xssmaze_digest": "ghcr.io/hahwul/xssmaze@sha256:0e1ae9af7cfff1dfabdc20b11761dbcddcc023b60aa7f2314953ea5368db6193",
   "total": {
     "endpoints": 1013,
-    "detected": 939,
+    "detected": 995,
     "verified": 0,
-    "rate": 92.7
+    "rate": 98.2
   },
   "categories": [
     {
@@ -78,6 +78,20 @@
       "category": "browser",
       "endpoints": 5,
       "detected": 5,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "bugbounty",
+      "endpoints": 10,
+      "detected": 10,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "callback",
+      "endpoints": 4,
+      "detected": 4,
       "verified": 0,
       "rate": 100.0
     },
@@ -201,6 +215,13 @@
       "rate": 100.0
     },
     {
+      "category": "ctype",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
       "category": "customtag",
       "endpoints": 6,
       "detected": 6,
@@ -281,6 +302,13 @@
       "category": "ecommerce",
       "endpoints": 6,
       "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "edge",
+      "endpoints": 8,
+      "detected": 8,
       "verified": 0,
       "rate": 100.0
     },
@@ -383,6 +411,20 @@
       "rate": 100.0
     },
     {
+      "category": "headerinj",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "headless",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
       "category": "hidden",
       "endpoints": 9,
       "detected": 9,
@@ -393,6 +435,13 @@
       "category": "history",
       "endpoints": 2,
       "detected": 2,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "hpp",
+      "endpoints": 4,
+      "detected": 4,
       "verified": 0,
       "rate": 100.0
     },
@@ -565,6 +614,13 @@
       "rate": 100.0
     },
     {
+      "category": "multicontext",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
       "category": "multiline",
       "endpoints": 6,
       "detected": 6,
@@ -575,6 +631,13 @@
       "category": "multiparam",
       "endpoints": 6,
       "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "multipart",
+      "endpoints": 4,
+      "detected": 4,
       "verified": 0,
       "rate": 100.0
     },
@@ -719,6 +782,20 @@
       "rate": 100.0
     },
     {
+      "category": "post",
+      "endpoints": 2,
+      "detected": 2,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "postmethod",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
       "category": "racecon",
       "endpoints": 4,
       "detected": 4,
@@ -726,9 +803,30 @@
       "rate": 100.0
     },
     {
+      "category": "realworld",
+      "endpoints": 16,
+      "detected": 16,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "realworld_input",
+      "endpoints": 8,
+      "detected": 8,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
       "category": "recfilt",
       "endpoints": 6,
       "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "redirect",
+      "endpoints": 4,
+      "detected": 4,
       "verified": 0,
       "rate": 100.0
     },
@@ -778,6 +876,13 @@
       "category": "respheader",
       "endpoints": 6,
       "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "rsplit",
+      "endpoints": 4,
+      "detected": 4,
       "verified": 0,
       "rate": 100.0
     },
@@ -838,6 +943,13 @@
       "rate": 100.0
     },
     {
+      "category": "sink",
+      "endpoints": 8,
+      "detected": 8,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
       "category": "slot",
       "endpoints": 4,
       "detected": 4,
@@ -883,6 +995,13 @@
       "category": "storage",
       "endpoints": 2,
       "detected": 2,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "stored",
+      "endpoints": 4,
+      "detected": 4,
       "verified": 0,
       "rate": 100.0
     },
@@ -1027,13 +1146,6 @@
       "rate": 100.0
     },
     {
-      "category": "bugbounty",
-      "endpoints": 10,
-      "detected": 9,
-      "verified": 0,
-      "rate": 90.0
-    },
-    {
       "category": "prototype",
       "endpoints": 10,
       "detected": 9,
@@ -1041,25 +1153,11 @@
       "rate": 90.0
     },
     {
-      "category": "sink",
-      "endpoints": 8,
-      "detected": 7,
-      "verified": 0,
-      "rate": 87.5
-    },
-    {
       "category": "modern",
       "endpoints": 32,
-      "detected": 27,
+      "detected": 28,
       "verified": 0,
-      "rate": 84.4
-    },
-    {
-      "category": "ctype",
-      "endpoints": 6,
-      "detected": 5,
-      "verified": 0,
-      "rate": 83.3
+      "rate": 87.5
     },
     {
       "category": "edgefilter",
@@ -1076,55 +1174,6 @@
       "rate": 83.3
     },
     {
-      "category": "multicontext",
-      "endpoints": 6,
-      "detected": 5,
-      "verified": 0,
-      "rate": 83.3
-    },
-    {
-      "category": "realworld",
-      "endpoints": 16,
-      "detected": 13,
-      "verified": 0,
-      "rate": 81.2
-    },
-    {
-      "category": "edge",
-      "endpoints": 8,
-      "detected": 5,
-      "verified": 0,
-      "rate": 62.5
-    },
-    {
-      "category": "headerinj",
-      "endpoints": 6,
-      "detected": 3,
-      "verified": 0,
-      "rate": 50.0
-    },
-    {
-      "category": "hpp",
-      "endpoints": 4,
-      "detected": 2,
-      "verified": 0,
-      "rate": 50.0
-    },
-    {
-      "category": "rsplit",
-      "endpoints": 4,
-      "detected": 1,
-      "verified": 0,
-      "rate": 25.0
-    },
-    {
-      "category": "stored",
-      "endpoints": 4,
-      "detected": 1,
-      "verified": 0,
-      "rate": 25.0
-    },
-    {
       "category": "storedpat",
       "endpoints": 6,
       "detected": 1,
@@ -1132,57 +1181,8 @@
       "rate": 16.7
     },
     {
-      "category": "callback",
-      "endpoints": 4,
-      "detected": 0,
-      "verified": 0,
-      "rate": 0.0
-    },
-    {
-      "category": "headless",
-      "endpoints": 6,
-      "detected": 0,
-      "verified": 0,
-      "rate": 0.0
-    },
-    {
       "category": "jf",
       "endpoints": 1,
-      "detected": 0,
-      "verified": 0,
-      "rate": 0.0
-    },
-    {
-      "category": "multipart",
-      "endpoints": 4,
-      "detected": 0,
-      "verified": 0,
-      "rate": 0.0
-    },
-    {
-      "category": "post",
-      "endpoints": 2,
-      "detected": 0,
-      "verified": 0,
-      "rate": 0.0
-    },
-    {
-      "category": "postmethod",
-      "endpoints": 6,
-      "detected": 0,
-      "verified": 0,
-      "rate": 0.0
-    },
-    {
-      "category": "realworld_input",
-      "endpoints": 8,
-      "detected": 0,
-      "verified": 0,
-      "rate": 0.0
-    },
-    {
-      "category": "redirect",
-      "endpoints": 4,
       "detected": 0,
       "verified": 0,
       "rate": 0.0
