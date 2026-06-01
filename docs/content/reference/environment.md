@@ -40,6 +40,6 @@ XDG_CONFIG_HOME=./.config dalfox scan https://target.app
 
 A few things that *look* like they should be environment variables but aren't:
 
-- **Proxy.** Use `--proxy` or `proxy` in config — Dalfox doesn't read `HTTP_PROXY`/`HTTPS_PROXY` to avoid accidental traffic interception.
+- **Proxy.** Use `--proxy` or `proxy` in config; Dalfox doesn't read `HTTP_PROXY`/`HTTPS_PROXY` to avoid accidental traffic interception.
 - **Timeout, workers, format.** CLI flag or config only.
 - **Debug.** Pass `--debug` on the command line or set `debug = true` in config.

@@ -6,7 +6,7 @@ toc = true
 aliases = ["/page/running/caido/"]
 +++
 
-Dalfox works great inside [Caido](https://caido.io) workflows. You can feed every interesting request (or selected traffic) straight into Dalfox's engine and turn findings into Caido Findings with one click.
+Dalfox works well inside [Caido](https://caido.io) workflows. You can feed every interesting request (or selected traffic) straight into Dalfox's engine and turn findings into Caido Findings with one click.
 
 This page covers the current recommended pattern (v3) and the common "bool gotcha" that trips up workflow authors.
 
@@ -129,4 +129,4 @@ See the [Scanning Modes](../guide/scanning-modes/#raw-http-mode) page for the ca
 - [Scanning Modes – Raw HTTP](../guide/scanning-modes/#raw-http-mode)
 - [Output & Reports](../guide/output/)
 - [WAF Bypass](../guide/waf-bypass/)
-- GitHub Discussion [#992 (comment)](https://github.com/hahwul/dalfox/discussions/992#discussion-10115370) — original community report with the Caido If/Else boolean workaround script and `--no-color` suggestion
+- GitHub Discussion [#992 (comment)](https://github.com/hahwul/dalfox/discussions/992#discussion-10115370): original community report with the Caido If/Else boolean workaround script and `--no-color` suggestion

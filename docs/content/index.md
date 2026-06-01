@@ -13,7 +13,7 @@ template = "landing"
         before it hunts you.
       </h1>
       <p class="hero-desc">
-        <strong>Dalfox</strong> is a powerful open-source XSS scanner and automation utility. Reflected, Stored, DOM-based — discovered, verified, and reported with AST-level precision across every parameter in your app.
+        <strong>Dalfox</strong> is a powerful open-source XSS scanner and automation utility. Reflected, Stored, DOM-based: discovered, verified, and reported with AST-level precision across every parameter in your app.
       </p>
       <div class="hero-actions">
         <a href="./getting-started/" class="btn btn-primary">
@@ -101,7 +101,7 @@ template = "landing"
   <div class="section-inner">
     <p class="section-eyebrow">// Capabilities</p>
     <h2 class="section-title">Everything you need to catch cross-site scripting</h2>
-    <p class="section-desc">From a single URL to full pipelines, Dalfox adapts to how you work — CLI, file batch, pipe, server mode, or MCP. Every finding is parsed, verified, and reported with context you can act on.</p>
+    <p class="section-desc">From a single URL to full pipelines, Dalfox adapts to how you work: CLI, file batch, pipe, server mode, or MCP. Every finding is parsed, verified, and reported with context you can act on.</p>
     <div class="features-grid">
       <div class="feature-cell wide">
         <div class="feature-icon">
@@ -121,7 +121,7 @@ template = "landing"
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
         </div>
         <h3>Parameter intelligence</h3>
-        <p>Mining, static analysis, BAV testing, and context-aware charset probing — every parameter gets a full attack profile.</p>
+        <p>Mining, static analysis, BAV testing, and context-aware charset probing give every parameter a full attack profile.</p>
       </div>
       <div class="feature-cell">
         <div class="feature-icon">
@@ -149,7 +149,7 @@ template = "landing"
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
         </div>
         <h3>Reports you can ship</h3>
-        <p>Export to the format your workflow speaks — from terse CLI output to SARIF for GitHub code scanning.</p>
+        <p>Export to the format your workflow speaks, from terse CLI output to SARIF for GitHub code scanning.</p>
         <div class="feature-tags">
           <span class="feature-tag">JSON</span>
           <span class="feature-tag">JSONL</span>
@@ -203,7 +203,7 @@ template = "landing"
   <div class="section-inner">
     <p class="section-eyebrow">// Workflow</p>
     <h2 class="section-title">From install to verified finding in three steps</h2>
-    <p class="section-desc">Dalfox is designed to drop into whatever you already have — no fancy setup, no heavy orchestration.</p>
+    <p class="section-desc">Dalfox is designed to drop into whatever you already have. No fancy setup, no heavy orchestration.</p>
     <div class="how-steps">
       <div class="how-step">
         <h3>Install</h3>

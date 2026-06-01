@@ -5,7 +5,7 @@ weight = 3
 toc = true
 +++
 
-Dalfox ships with a curated, context-aware payload library. Most of the time you don't need to think about it — the engine picks the right payloads for each injection context. This page covers what's built in and how to extend it.
+Dalfox ships with a curated, context-aware payload library. Most of the time you don't need to think about it. The engine picks the right payloads for each injection context. This page covers what's built in and how to extend it.
 
 ## Payload families
 
@@ -27,7 +27,7 @@ Each payload template carries a marker (`class={CLASS}` or `id={ID}`) so the ver
 
 ## Context-aware selection
 
-During discovery Dalfox classifies each parameter by **injection context** — where the reflected value lands:
+During discovery Dalfox classifies each parameter by **injection context**, the place where its reflected value lands:
 
 - HTML body → HTML/attribute-breakout payloads
 - Inside a quoted attribute → attribute-breakout payloads
@@ -64,7 +64,7 @@ Defaults: `url,html`. If you add `none` to the list, Dalfox sends only the raw p
 
 ## Custom payloads
 
-Have your own list? One payload per line:
+Provide your own list, one payload per line:
 
 ```bash
 dalfox https://target.app --custom-payload mypayloads.txt
@@ -107,8 +107,8 @@ dalfox https://target.app \
   --custom-alert-type str
 ```
 
-- `--custom-alert-value` — value passed to `alert`/`prompt`/`confirm` (default `1`).
-- `--custom-alert-type` — `none` keeps the original function, `str` wraps the value in quotes.
+- `--custom-alert-value`: value passed to `alert`/`prompt`/`confirm` (default `1`).
+- `--custom-alert-type`: `none` keeps the original function, `str` wraps the value in quotes.
 
 ## Blind XSS
 
@@ -124,10 +124,10 @@ Custom blind templates:
 dalfox https://target.app \
   -b https://your-callback.example \
   --custom-blind-xss-payload blind-templates.txt
-# each line may contain {} — replaced with the callback URL
+# each line may contain {} (replaced with the callback URL)
 ```
 
-## HPP — Parameter Pollution
+## HTTP Parameter Pollution (HPP)
 
 Some filters only inspect the *first* occurrence of a parameter. Dalfox can duplicate parameters to slip a payload into the second slot:
 
@@ -149,7 +149,7 @@ Useful for research; slower for production pipelines.
 
 | Flag | Effect |
 |------|--------|
-| `--skip-xss-scanning` | Only discover and probe — no payload injection |
+| `--skip-xss-scanning` | Discover and probe only; no payload injection |
 | `--skip-ast-analysis` | Skip AST-based DOM-XSS detection |
 
 ## Next

@@ -32,7 +32,7 @@ If `--api-key` is set (or `DALFOX_API_KEY` is exported), every request must incl
 X-API-KEY: change-me
 ```
 
-If you don't set an API key, the server accepts unauthenticated requests — bind to `127.0.0.1` in that case.
+If you don't set an API key, the server accepts unauthenticated requests; bind to `127.0.0.1` in that case.
 
 ### CORS
 

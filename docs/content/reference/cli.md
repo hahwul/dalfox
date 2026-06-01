@@ -67,7 +67,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--stream-findings` | — | false | Emit each finding the moment it is verified instead of after the end-of-scan summary (plain format only; auto-disabled with `--output`, `--limit`, `--only-poc`) |
 | `--poc-type` | — | `plain` | `plain`, `curl`, `httpie`, `http-request` |
 | `--limit` | — | — | Cap total results shown |
-| `--limit-result-type` | — | `all` | `all`, `v`, `r`, `a` — which types count toward `--limit` |
+| `--limit-result-type` | — | `all` | Which types count toward `--limit`: `all`, `v`, `r`, `a` |
 | `--only-poc` | — | — | Comma-separated filter: `v`, `r`, `a` |
 
 ### Target shaping
@@ -117,7 +117,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
 | `--timeout` | — | `10` | Per-request timeout in seconds (network only; does not bound total scan time) |
-| `--scan-timeout` | — | `0` | Hard wall-clock cap per target for the scan stage (post-preflight), in seconds. Aborts a target once exceeded — useful when many sequential phases each pay the per-request `--timeout` cost against a partially-hung endpoint. `0` disables. |
+| `--scan-timeout` | — | `0` | Hard wall-clock cap per target for the scan stage (post-preflight), in seconds. Aborts a target once exceeded; useful when many sequential phases each pay the per-request `--timeout` cost against a partially-hung endpoint. `0` disables. |
 | `--delay` | — | `0` | Delay between requests (ms) |
 | `--proxy` | — | — | Proxy URL (`http://`, `socks5://`) |
 | `--follow-redirects` | `-F` | false | Follow 3xx responses |
