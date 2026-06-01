@@ -659,6 +659,130 @@ fn test_hoist_angle_free_payloads_no_op_without_block() {
     assert_eq!(hoisted, original, "non-angle invalids must not reorder");
 }
 
+// ── expand_waf_payloads: orthogonal mutation/encoder expansion ───────
+
+#[test]
+fn test_expand_waf_payloads_keeps_axes_orthogonal_no_cross_product() {
+    use crate::waf::bypass::{BypassStrategy, MutationType};
+    let base = vec!["<script>alert(1)</script>".to_string()];
+    let strategy = BypassStrategy {
+        extra_encoders: vec!["url".to_string()],
+        mutations: vec![MutationType::CaseAlternation],
+        extra_delay_hint_ms: 0,
+    };
+    let out = expand_waf_payloads(&base, &strategy, None);
+
+    // The raw mutation is present, un-encoded.
+    let mutated = crate::waf::bypass::apply_mutations(&base, &[MutationType::CaseAlternation], 1)
+        .into_iter()
+        .find(|p| p != &base[0])
+        .expect("case-alternation should produce a variant");
+    assert!(out.contains(&mutated), "raw mutation must be present");
+
+    // The url-encoded *original* is present.
+    let enc = crate::encoding::url_encode(&base[0]);
+    assert!(out.contains(&enc), "encoded original must be present");
+
+    // But the cross product encode(mutate(p)) must NOT be generated.
+    let cross = crate::encoding::url_encode(&mutated);
+    assert!(
+        !out.contains(&cross),
+        "encode(mutation) cross product must not be emitted"
+    );
+}
+
+#[test]
+fn test_expand_waf_payloads_ordering_originals_then_mutations_then_encoders() {
+    use crate::waf::bypass::{BypassStrategy, MutationType};
+    let base = vec!["<svg onload=alert(1)>".to_string()];
+    let strategy = BypassStrategy {
+        extra_encoders: vec!["url".to_string()],
+        mutations: vec![MutationType::SlashSeparator],
+        extra_delay_hint_ms: 0,
+    };
+    let out = expand_waf_payloads(&base, &strategy, None);
+
+    assert_eq!(out[0], base[0], "original must come first");
+    let slash = "<svg/onload=alert(1)>".to_string();
+    let enc = crate::encoding::url_encode(&base[0]);
+    let i_slash = out
+        .iter()
+        .position(|p| p == &slash)
+        .expect("raw mutation present");
+    let i_enc = out
+        .iter()
+        .position(|p| p == &enc)
+        .expect("encoder variant present");
+    assert!(
+        i_slash < i_enc,
+        "raw mutation must precede encoder variants (got slash@{i_slash}, enc@{i_enc})"
+    );
+}
+
+#[test]
+fn test_expand_waf_payloads_records_mutation_telemetry() {
+    use crate::waf::bypass::{BypassStrategy, MutationStats, MutationType};
+    let base = vec!["<svg onload=alert(1)>".to_string()];
+    let strategy = BypassStrategy {
+        extra_encoders: vec![],
+        mutations: vec![MutationType::SlashSeparator],
+        extra_delay_hint_ms: 0,
+    };
+    let stats = MutationStats::default();
+    let _ = expand_waf_payloads(&base, &strategy, Some(&stats));
+    let snap = stats.snapshot();
+    assert_eq!(
+        snap.variants.get(&MutationType::SlashSeparator).copied(),
+        Some(1),
+        "the applied mutation must be recorded once"
+    );
+}
+
+#[test]
+fn test_expand_waf_payloads_reduces_request_count_vs_cross_product() {
+    use crate::waf::bypass::{BypassStrategy, MutationType};
+    // Demonstrates the request-volume win: the orthogonal expansion is
+    // strictly smaller than the old multiply-everything cross product.
+    let base = vec![
+        "<script>alert(1)</script>".to_string(),
+        "<svg onload=alert(1)>".to_string(),
+    ];
+    let strategy = BypassStrategy {
+        extra_encoders: vec!["url".to_string(), "2url".to_string(), "unicode".to_string()],
+        mutations: vec![
+            MutationType::HtmlCommentSplit,
+            MutationType::CaseAlternation,
+            MutationType::BacktickParens,
+        ],
+        extra_delay_hint_ms: 0,
+    };
+    let new = expand_waf_payloads(&base, &strategy, None);
+
+    // Old behavior: mutate first, then encode the *whole* set.
+    let mutated = crate::waf::bypass::apply_mutations(
+        &base,
+        &strategy.mutations,
+        MAX_WAF_MUTATION_VARIANTS_PER_PAYLOAD,
+    );
+    let old = crate::encoding::apply_encoders_to_payloads(&mutated, &strategy.extra_encoders);
+
+    assert!(
+        new.len() < old.len(),
+        "orthogonal expansion ({}) must send fewer payloads than the cross product ({})",
+        new.len(),
+        old.len()
+    );
+}
+
+#[test]
+fn test_expand_waf_payloads_empty_strategy_dedups_originals() {
+    use crate::waf::bypass::BypassStrategy;
+    let base = vec!["<x>".to_string(), "<x>".to_string(), "<y>".to_string()];
+    let strategy = BypassStrategy::default();
+    let out = expand_waf_payloads(&base, &strategy, None);
+    assert_eq!(out, vec!["<x>".to_string(), "<y>".to_string()]);
+}
+
 #[test]
 fn test_get_fallback_reflection_payloads_none_encoder_keeps_raw_only() {
     let mut args = default_scan_args();

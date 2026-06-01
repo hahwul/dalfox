@@ -746,6 +746,82 @@ fn build_shared_payloads(target: &Target) -> Vec<String> {
     shared
 }
 
+/// Expand a parameter's base payload set into its WAF-bypass variants,
+/// keeping the two bypass axes orthogonal instead of multiplying them.
+///
+/// Output order (front to back), de-duplicated while preserving first
+/// occurrence:
+///   1. the originals — cheapest, browser-native; they reflect first so a
+///      param whose base shape isn't filtered short-circuits immediately;
+///   2. raw structural mutations (`<scr<!---->ipt>`, `<ScRiPt>`, …) — the
+///      highest-probability WAF bypass that needs no server-side decode,
+///      front-loaded so an actively-blocking WAF surfaces a working bypass
+///      before we spend requests on the heavier encoder variants;
+///   3. encoder variants of the originals (`%3C…`, fullwidth, zwsp, …) —
+///      transport-style evasion that relies on the app decoding the wire
+///      bytes back into an executable payload.
+///
+/// Crucially this does *not* emit `encode(mutate(p))`: cross-encoding a
+/// structural mutation buries its bypass under transport encoding and needs
+/// both an app-side decode *and* browser tolerance of the mutated shape — a
+/// compound condition that rarely lands while costing one request apiece.
+/// Skipping it shrinks the per-param request count from `N·(1+m)·(1+k)` to
+/// `N·(1+m+k)` with no loss of reach on either axis.
+///
+/// `stats`, when present, records each generated mutation variant against
+/// its `MutationType` for `target_summary.waf.bypass.mutations_applied[]`
+/// (counted pre-dedup against the encoder set, matching the prior
+/// "did the mutation apply" semantics).
+fn expand_waf_payloads(
+    base: &[String],
+    strategy: &crate::waf::bypass::BypassStrategy,
+    stats: Option<&crate::waf::bypass::MutationStats>,
+) -> Vec<String> {
+    let mut seen: HashSet<String> = HashSet::with_capacity(base.len());
+    let mut out: Vec<String> = Vec::with_capacity(base.len());
+
+    // 1. Originals (de-duplicated), kept at the front.
+    for p in base {
+        if seen.insert(p.clone()) {
+            out.push(p.clone());
+        }
+    }
+
+    // 2. Raw structural mutations — no transport encoding applied.
+    if !strategy.mutations.is_empty() {
+        let tagged = crate::waf::bypass::apply_mutations_tagged(
+            base,
+            &strategy.mutations,
+            MAX_WAF_MUTATION_VARIANTS_PER_PAYLOAD,
+        );
+        for (p, origin) in tagged {
+            // `None` is the unmodified base, already emitted in step 1.
+            if let Some(m) = origin {
+                if let Some(stats) = stats {
+                    stats.record_variant(m);
+                }
+                if seen.insert(p.clone()) {
+                    out.push(p);
+                }
+            }
+        }
+    }
+
+    // 3. Encoder variants of the originals. `apply_encoders_to_payloads`
+    //    re-emits each original as the first variant of its base; those
+    //    collide with step 1 and are dropped by `seen`, leaving only the
+    //    genuinely encoded forms.
+    if !strategy.extra_encoders.is_empty() {
+        for v in crate::encoding::apply_encoders_to_payloads(base, &strategy.extra_encoders) {
+            if seen.insert(v.clone()) {
+                out.push(v);
+            }
+        }
+    }
+
+    out
+}
+
 /// === Stage 4: Payload Generation — build per-parameter payload sets ===
 ///
 /// For each (non-fragment) reflection parameter, build a [`ParamPayloadJob`]
@@ -789,56 +865,18 @@ fn generate_param_jobs(
         reflection_payloads.extend(shared_payloads.iter().cloned());
         dom_payloads.extend(shared_payloads.iter().cloned());
 
-        // Apply WAF bypass mutations and extra encoders if WAF was detected
+        // Apply WAF bypass expansion if a WAF was detected. The two bypass
+        // axes are kept orthogonal rather than multiplied together (see
+        // `expand_waf_payloads`): structural mutations are sent raw and
+        // encoder variants are applied to the originals only, so we never
+        // emit the low-yield `encode(mutate(p))` cross product. The tagged
+        // mutation pass still feeds `record_variant`, which powers the
+        // per-target effectiveness counter in
+        // target_summary.waf.bypass.mutations_applied[].
         if let Some(strategy) = waf_strategy {
-            // Apply mutations (capped per base payload to prevent explosion).
-            // Use the tagged variant so we can attribute each generated
-            // variant to its mutation type — record_variant feeds the
-            // per-target effectiveness counter that surfaces in
-            // target_summary.waf.bypass.mutations_applied[].
-            if !strategy.mutations.is_empty() {
-                let stats = target.mutation_stats.as_ref();
-                let tagged_reflect = crate::waf::bypass::apply_mutations_tagged(
-                    &reflection_payloads,
-                    &strategy.mutations,
-                    MAX_WAF_MUTATION_VARIANTS_PER_PAYLOAD,
-                );
-                reflection_payloads = tagged_reflect
-                    .into_iter()
-                    .map(|(p, origin)| {
-                        if let (Some(stats), Some(m)) = (stats, origin) {
-                            stats.record_variant(m);
-                        }
-                        p
-                    })
-                    .collect();
-                let tagged_dom = crate::waf::bypass::apply_mutations_tagged(
-                    &dom_payloads,
-                    &strategy.mutations,
-                    MAX_WAF_MUTATION_VARIANTS_PER_PAYLOAD,
-                );
-                dom_payloads = tagged_dom
-                    .into_iter()
-                    .map(|(p, origin)| {
-                        if let (Some(stats), Some(m)) = (stats, origin) {
-                            stats.record_variant(m);
-                        }
-                        p
-                    })
-                    .collect();
-            }
-
-            // Apply extra WAF bypass encoders to payloads
-            if !strategy.extra_encoders.is_empty() {
-                reflection_payloads = crate::encoding::apply_encoders_to_payloads(
-                    &reflection_payloads,
-                    &strategy.extra_encoders,
-                );
-                dom_payloads = crate::encoding::apply_encoders_to_payloads(
-                    &dom_payloads,
-                    &strategy.extra_encoders,
-                );
-            }
+            let stats = target.mutation_stats.as_deref();
+            reflection_payloads = expand_waf_payloads(&reflection_payloads, strategy, stats);
+            dom_payloads = expand_waf_payloads(&dom_payloads, strategy, stats);
         }
 
         // Adaptive prune + reorder: when active probing recorded that the
