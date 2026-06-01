@@ -1020,3 +1020,25 @@ async fn test_analyze_parameters_with_skip_flags_finishes_cleanly() {
     analyze_parameters(&mut target, &args, None).await;
     assert!(target.reflection_params.is_empty());
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Pure char-classification helpers (cases not covered above)
+// ─────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn test_extract_reflected_segment_none_without_markers() {
+    // The no-marker branch (early `?` returns) wasn't exercised before.
+    assert_eq!(extract_reflected_segment("no markers here"), None);
+}
+
+#[test]
+fn test_char_reflected_in_segment_detects_raw_encoded_and_percent() {
+    // Raw character.
+    assert!(char_reflected_in_segment("abc<def", '<'));
+    // HTML-entity variant.
+    assert!(char_reflected_in_segment("abc&lt;def", '<'));
+    // Percent-encoded (case-insensitive): '<' == 0x3C.
+    assert!(char_reflected_in_segment("abc%3cdef", '<'));
+    // Absent entirely.
+    assert!(!char_reflected_in_segment("abcdef", '<'));
+}

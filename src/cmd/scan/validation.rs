@@ -163,3 +163,59 @@ pub(crate) fn looks_like_target_list_filename(s: &str) -> bool {
         })
         .unwrap_or(false)
 }
+
+#[cfg(test)]
+mod input_shape_tests {
+    use super::*;
+
+    #[test]
+    fn domain_matches_exact_and_case_insensitive() {
+        assert!(domain_matches_pattern("evil.com", "evil.com"));
+        assert!(domain_matches_pattern("EVIL.com", "evil.COM"));
+        assert!(!domain_matches_pattern("notevil.com", "evil.com"));
+    }
+
+    #[test]
+    fn domain_matches_wildcard_subdomain_boundary() {
+        assert!(domain_matches_pattern("sub.example.com", "*.example.com"));
+        assert!(domain_matches_pattern("a.b.example.com", "*.example.com"));
+        // Bare apex also matches the `*.` form.
+        assert!(domain_matches_pattern("example.com", "*.example.com"));
+        // Must respect the label boundary — `notexample.com` is not a subdomain.
+        assert!(!domain_matches_pattern("notexample.com", "*.example.com"));
+    }
+
+    #[test]
+    fn url_input_recognizes_schemes_and_hosts() {
+        assert!(looks_like_url_input("https://example.com/x"));
+        assert!(looks_like_url_input("example.com"));
+        assert!(looks_like_url_input("api.target.app/foo"));
+        assert!(looks_like_url_input("127.0.0.1"));
+        assert!(looks_like_url_input("example.com:8080"));
+        assert!(looks_like_url_input("[::1]:80"));
+    }
+
+    #[test]
+    fn url_input_rejects_paths_and_garbage() {
+        assert!(!looks_like_url_input(""));
+        assert!(!looks_like_url_input("./local"));
+        assert!(!looks_like_url_input("../local"));
+        assert!(!looks_like_url_input("/etc/hosts"));
+        assert!(!looks_like_url_input("~/list"));
+        assert!(!looks_like_url_input("has space.com"));
+        assert!(!looks_like_url_input("nodot"));
+        assert!(!looks_like_url_input(".."));
+        assert!(!looks_like_url_input(".config"));
+    }
+
+    #[test]
+    fn target_list_filename_detects_known_extensions() {
+        assert!(looks_like_target_list_filename("urls.txt"));
+        assert!(looks_like_target_list_filename("data.csv"));
+        assert!(looks_like_target_list_filename("out.JSONL"));
+        assert!(looks_like_target_list_filename("req.HTTP"));
+        // A bare host has no recognized list extension.
+        assert!(!looks_like_target_list_filename("example.com"));
+        assert!(!looks_like_target_list_filename("noext"));
+    }
+}

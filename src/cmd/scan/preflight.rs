@@ -349,3 +349,31 @@ fn parse_waf_type(s: &str) -> crate::waf::WafType {
         other => crate::waf::WafType::Unknown(other.to_string()),
     }
 }
+
+#[cfg(test)]
+mod waf_type_tests {
+    use super::parse_waf_type;
+    use crate::waf::WafType;
+
+    #[test]
+    fn parses_known_waf_aliases_case_insensitively() {
+        assert_eq!(parse_waf_type("CloudFlare"), WafType::Cloudflare);
+        assert_eq!(parse_waf_type("cf"), WafType::Cloudflare);
+        assert_eq!(parse_waf_type("aws-waf"), WafType::AwsWaf);
+        assert_eq!(parse_waf_type("incapsula"), WafType::Imperva);
+        assert_eq!(parse_waf_type("modsec"), WafType::ModSecurity);
+        assert_eq!(parse_waf_type("crs"), WafType::OwaspCrs);
+        assert_eq!(parse_waf_type("f5-bigip"), WafType::F5BigIp);
+        assert_eq!(parse_waf_type("forti"), WafType::FortiWeb);
+        assert_eq!(parse_waf_type("cloud-armor"), WafType::CloudArmor);
+        assert_eq!(parse_waf_type("wordfence"), WafType::Wordfence);
+    }
+
+    #[test]
+    fn parses_unknown_waf_as_unknown_variant() {
+        assert_eq!(
+            parse_waf_type("SomethingElse"),
+            WafType::Unknown("somethingelse".to_string())
+        );
+    }
+}
