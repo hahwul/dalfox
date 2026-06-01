@@ -1,17 +1,19 @@
 /* ==========================================================================
    Dalfox Documentation — Dark theme
-   Brand: #30365e (deep indigo)
+   Brand: #31365e (deep indigo)
+   Aesthetic: 東洋風 — ink lines (墨線), window lattice (窓), calm paper surfaces.
+   Refined lines & surfaces over a navy-ink dark base, referencing kami.tw93.fun.
    ========================================================================== */
 
 :root {
     /* Brand */
-    --brand: #30365e;
+    --brand: #31365e;
     --brand-2: #3d4477;
     --brand-3: #5a63a8;
     --accent: #8b94e8;
     --accent-hover: #b4bbf0;
     --accent-dim: rgba(139, 148, 232, 0.1);
-    --brand-glow: rgba(48, 54, 94, 0.45);
+    --brand-glow: rgba(49, 54, 94, 0.45);
 
     /* Backgrounds — navy-tinted dark */
     --bg-body: #070811;
@@ -30,6 +32,20 @@
     /* Borders */
     --border: #161a28;
     --border-light: #222741;
+
+    /* ----- 東洋風 ornament tokens -----------------------------------------
+       Ink hairlines (墨線) derived from the periwinkle accent so every rule
+       reads as a single drawn line rather than a heavy box. The window-frame
+       brackets (窓枠) and seal-mark accents reuse these. */
+    --ink-line: rgba(180, 187, 240, 0.12);
+    --ink-line-soft: rgba(180, 187, 240, 0.06);
+    --ink-line-strong: rgba(180, 187, 240, 0.28);
+    --bracket: rgba(139, 148, 232, 0.45);
+    --bracket-dim: rgba(139, 148, 232, 0.22);
+    /* faint paper grain + lattice motifs, applied at very low opacity */
+    --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+    --seigaiha: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='30' viewBox='0 0 60 30'%3E%3Cg fill='none' stroke='%238b94e8' stroke-width='1'%3E%3Cpath d='M0 30a15 15 0 0 1 30 0a15 15 0 0 1 30 0'/%3E%3Cpath d='M-30 30a15 15 0 0 1 30 0a15 15 0 0 1 30 0' opacity='0.6'/%3E%3Cpath d='M30 30a15 15 0 0 1 30 0' opacity='0.6'/%3E%3C/g%3E%3C/svg%3E");
+    --asanoha: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='96' viewBox='0 0 56 96'%3E%3Cg fill='none' stroke='%238b94e8' stroke-width='0.8'%3E%3Cpath d='M28 0v24M28 24L7 36M28 24l21 12M28 24v24M28 48L7 36M28 48l21 12M28 48v24M28 72L7 60M28 72l21 12M28 96v-24M7 12v24M49 12v24M7 60v24M49 60v24M0 24l7 12M56 24l-7 12M0 72l7-12M56 72l-7-12'/%3E%3C/g%3E%3C/svg%3E");
 
     /* Status */
     --info-bg: rgba(96, 165, 250, 0.07);
@@ -70,9 +86,29 @@ body {
     font-size: 15px;
     line-height: 1.7;
     color: var(--text-primary);
-    background: var(--bg-body);
+    /* Layered ink surface: a faint top glow over the navy base. The paper
+       grain (紙) lives on body::before so its opacity stays controllable. */
+    background-color: var(--bg-body);
+    background-image: radial-gradient(
+        ellipse 80% 50% at 50% -10%,
+        rgba(49, 54, 94, 0.32),
+        transparent 60%
+    );
+    background-attachment: fixed;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+}
+/* The grain is decorative only — keep it whisper-quiet. */
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: var(--paper-grain);
+    background-size: 200px 200px;
+    opacity: 0.025;
+    mix-blend-mode: screen;
 }
 ::selection {
     background: var(--brand-3);
@@ -105,7 +141,16 @@ body {
     background: rgba(7, 8, 17, 0.85);
     backdrop-filter: saturate(180%) blur(18px);
     -webkit-backdrop-filter: saturate(180%) blur(18px);
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid transparent;
+    /* Ink hairline that fades at both ends, like a brushed rule (界線). */
+    border-image: linear-gradient(
+            90deg,
+            transparent,
+            var(--ink-line-strong) 18%,
+            var(--ink-line-strong) 82%,
+            transparent
+        )
+        1;
     z-index: 200;
 }
 .header-inner {
@@ -286,7 +331,15 @@ body {
     width: var(--sidebar-w);
     height: calc(100vh - var(--header-h));
     background: var(--bg-sidebar);
-    border-right: 1px solid var(--border);
+    border-right: 1px solid transparent;
+    /* Vertical ink rule that softens toward the bottom. */
+    border-image: linear-gradient(
+            180deg,
+            var(--ink-line-strong),
+            var(--ink-line) 55%,
+            transparent
+        )
+        1;
     overflow-y: auto;
     padding: 1.5rem 0 2rem;
     z-index: 150;
@@ -340,11 +393,29 @@ body {
 }
 .sidebar-links a.active {
     color: var(--text-primary);
-    background: var(--accent-dim);
+    background: linear-gradient(
+        90deg,
+        var(--accent-dim),
+        transparent 85%
+    );
     font-weight: 500;
     border-left-color: var(--accent);
     padding-left: calc(0.85rem - 2px);
     border-radius: 0 5px 5px 0;
+    position: relative;
+}
+/* A small seal-mark (印) glowing at the active rail. */
+.sidebar-links a.active::before {
+    content: "";
+    position: absolute;
+    left: -1px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 2px;
+    height: 1.1rem;
+    border-radius: 2px;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
 }
 
 /* ==========================================================================
@@ -381,10 +452,32 @@ body {
     font-weight: 700;
     margin: 2.75rem 0 1rem;
     padding-bottom: 0.5rem;
-    border-bottom: 1px solid var(--border);
+    /* Ink-fade rule: a drawn line that thins out to the right (墨の掠れ). */
+    border-bottom: 1px solid transparent;
+    border-image: linear-gradient(
+            90deg,
+            var(--ink-line-strong),
+            var(--ink-line) 45%,
+            transparent 90%
+        )
+        1;
     letter-spacing: -0.015em;
     color: var(--text-primary);
     scroll-margin-top: calc(var(--header-h) + 1rem);
+    position: relative;
+    padding-left: 0.9rem;
+}
+/* Brush accent (筆) that starts each section heading. */
+.docs-article h2::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.15em;
+    bottom: 0.55rem;
+    width: 3px;
+    border-radius: 3px;
+    background: linear-gradient(180deg, var(--accent), var(--brand-3));
+    box-shadow: 0 0 10px var(--accent-dim);
 }
 .docs-article h3 {
     font-size: 1.12rem;
@@ -393,6 +486,20 @@ body {
     color: var(--text-primary);
     letter-spacing: -0.01em;
     scroll-margin-top: calc(var(--header-h) + 1rem);
+    position: relative;
+    padding-left: 0.9rem;
+}
+/* A small diamond seal-mark (◇) before sub-headings. */
+.docs-article h3::before {
+    content: "";
+    position: absolute;
+    left: 0.1rem;
+    top: 0.62em;
+    width: 5px;
+    height: 5px;
+    background: var(--accent);
+    transform: rotate(45deg);
+    opacity: 0.8;
 }
 .docs-article h4 {
     font-size: 0.95rem;
@@ -410,14 +517,22 @@ body {
 .docs-article a {
     color: var(--accent);
     text-decoration: none;
-    border-bottom: 1px dashed transparent;
+    /* Underline drawn as a stroke that grows from the left on hover. */
+    background-image: linear-gradient(
+        var(--accent-hover),
+        var(--accent-hover)
+    );
+    background-repeat: no-repeat;
+    background-position: 0 100%;
+    background-size: 0% 1px;
+    padding-bottom: 1px;
     transition:
-        color 0.15s,
-        border-color 0.15s;
+        color 0.2s,
+        background-size 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
 .docs-article a:hover {
     color: var(--accent-hover);
-    border-bottom-color: var(--accent-hover);
+    background-size: 100% 1px;
 }
 .docs-article strong {
     color: var(--text-primary);
@@ -451,16 +566,45 @@ body {
     border: 1px solid var(--border);
 }
 
-/* Code blocks */
+/* Code blocks — framed like a window pane (窓) with corner brackets. */
 .docs-article pre {
-    background: var(--bg-code);
-    padding: 1rem 1.25rem;
+    background:
+        linear-gradient(
+            180deg,
+            rgba(139, 148, 232, 0.04),
+            transparent 64px
+        ),
+        var(--bg-code);
+    padding: 1.1rem 1.3rem;
     border-radius: 8px;
     overflow-x: auto;
     margin: 0 0 1.25rem;
-    border: 1px solid var(--border-light);
+    border: 1px solid var(--ink-line);
     line-height: 1.6;
     position: relative;
+}
+.docs-article pre::before,
+.docs-article pre::after {
+    content: "";
+    position: absolute;
+    width: 11px;
+    height: 11px;
+    pointer-events: none;
+    opacity: 0.6;
+}
+.docs-article pre::before {
+    top: 7px;
+    left: 7px;
+    border-top: 1.5px solid var(--bracket);
+    border-left: 1.5px solid var(--bracket);
+    border-top-left-radius: 3px;
+}
+.docs-article pre::after {
+    bottom: 7px;
+    right: 7px;
+    border-bottom: 1.5px solid var(--bracket);
+    border-right: 1.5px solid var(--bracket);
+    border-bottom-right-radius: 3px;
 }
 .docs-article pre code {
     background: none;
@@ -471,14 +615,30 @@ body {
     font-family: var(--font-mono);
 }
 
-/* Blockquote */
+/* Blockquote — a quiet panel marked with a corner bracket (「) like a
+   traditional pull-quote. */
 .docs-article blockquote {
-    border-left: 3px solid var(--accent);
-    padding: 0.6rem 1.1rem;
+    position: relative;
+    border-left: 2px solid var(--accent);
+    padding: 0.7rem 1.1rem 0.7rem 1.6rem;
     margin: 1.25rem 0;
-    background: var(--bg-surface);
+    background: linear-gradient(
+        90deg,
+        var(--accent-dim),
+        var(--bg-surface) 40%
+    );
     border-radius: 0 6px 6px 0;
     color: var(--text-secondary);
+}
+.docs-article blockquote::before {
+    content: "\300C"; /* 「 — East-Asian opening corner bracket */
+    position: absolute;
+    top: -0.15rem;
+    left: 0.45rem;
+    font-size: 1.2rem;
+    line-height: 1;
+    color: var(--accent);
+    opacity: 0.55;
 }
 .docs-article blockquote p:last-child {
     margin-bottom: 0;
@@ -490,15 +650,20 @@ body {
     border-collapse: collapse;
     margin: 0 0 1.5rem;
     font-size: 0.88rem;
-    border: 1px solid var(--border);
+    border: 1px solid var(--ink-line);
     border-radius: 6px;
     overflow: hidden;
 }
 .docs-article th {
     text-align: left;
     padding: 0.65rem 0.85rem;
-    background: var(--bg-surface);
-    border-bottom: 1px solid var(--border-light);
+    /* Ink band header with an accent-tinted base rule. */
+    background: linear-gradient(
+        180deg,
+        var(--bg-hover),
+        var(--bg-surface)
+    );
+    border-bottom: 1px solid var(--ink-line-strong);
     color: var(--text-primary);
     font-weight: 600;
     font-size: 0.78rem;
@@ -507,7 +672,7 @@ body {
 }
 .docs-article td {
     padding: 0.6rem 0.85rem;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--ink-line-soft);
     color: var(--text-secondary);
     vertical-align: top;
 }
@@ -515,7 +680,7 @@ body {
     border-bottom: none;
 }
 .docs-article tr:hover td {
-    background: var(--bg-surface);
+    background: var(--accent-dim);
 }
 
 .docs-article img {
@@ -524,10 +689,39 @@ body {
     border-radius: 6px;
     margin: 0.5rem 0;
 }
+/* Divider — an ink rule split by a small lozenge seal (◇) at the centre. */
 .docs-article hr {
     border: none;
-    border-top: 1px solid var(--border);
-    margin: 2rem 0;
+    height: 1.4rem;
+    margin: 2.75rem 0;
+    position: relative;
+}
+.docs-article hr::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        var(--ink-line-strong) 28%,
+        var(--ink-line-strong) 72%,
+        transparent
+    );
+}
+.docs-article hr::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 7px;
+    height: 7px;
+    transform: translate(-50%, -50%) rotate(45deg);
+    background: var(--bg-body);
+    border: 1px solid var(--accent);
+    box-shadow: 0 0 0 5px var(--bg-body);
 }
 
 /* ==========================================================================
@@ -540,7 +734,8 @@ body {
     padding: 0.85rem 1rem;
     border-radius: 6px;
     margin: 1.25rem 0;
-    border-left: 3px solid;
+    border: 1px solid var(--ink-line);
+    border-left: 2px solid;
     font-size: 0.88rem;
     line-height: 1.6;
 }
@@ -586,24 +781,54 @@ ul.section-list li {
     margin: 0;
 }
 ul.section-list a {
+    position: relative;
     display: block;
-    padding: 0.8rem 1rem;
+    padding: 0.85rem 1.1rem;
     background: var(--bg-surface);
-    border: 1px solid var(--border);
+    border: 1px solid var(--ink-line);
     border-radius: 7px;
     color: var(--text-primary);
     text-decoration: none;
     font-weight: 500;
     font-size: 0.92rem;
     transition:
-        border-color 0.15s,
-        background 0.15s,
-        transform 0.15s;
+        border-color 0.18s,
+        background 0.18s,
+        transform 0.18s;
+}
+/* Window-frame corner brackets that ink in on hover. */
+ul.section-list a::before,
+ul.section-list a::after {
+    content: "";
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+}
+ul.section-list a::before {
+    top: 6px;
+    left: 6px;
+    border-top: 1.5px solid var(--bracket);
+    border-left: 1.5px solid var(--bracket);
+    border-top-left-radius: 3px;
+}
+ul.section-list a::after {
+    bottom: 6px;
+    right: 6px;
+    border-bottom: 1.5px solid var(--bracket);
+    border-right: 1.5px solid var(--bracket);
+    border-bottom-right-radius: 3px;
 }
 ul.section-list a:hover {
-    border-color: var(--brand-3);
+    border-color: var(--bracket-dim);
     background: var(--bg-hover);
     transform: translateX(2px);
+}
+ul.section-list a:hover::before,
+ul.section-list a:hover::after {
+    opacity: 0.7;
 }
 
 /* Pagination */
@@ -648,7 +873,14 @@ nav.pagination a:hover {
 .docs-footer {
     margin-top: 4rem;
     padding-top: 1.5rem;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid transparent;
+    border-image: linear-gradient(
+            90deg,
+            var(--ink-line-strong),
+            var(--ink-line) 50%,
+            transparent 92%
+        )
+        1;
     color: var(--text-muted);
     font-size: 0.8rem;
     display: flex;
@@ -787,9 +1019,26 @@ nav.pagination a:hover {
    Site footer
    ========================================================================== */
 .site-footer {
-    border-top: 1px solid var(--border);
+    position: relative;
+    border-top: 1px solid var(--ink-line);
     padding: 2.5rem 2rem;
     background: var(--bg-sidebar);
+}
+/* Seigaiha (青海波) wave band cresting along the top edge of the footer. */
+.site-footer::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 30px;
+    background-image: var(--seigaiha);
+    background-size: 60px 30px;
+    background-repeat: repeat-x;
+    opacity: 0.14;
+    pointer-events: none;
+    mask-image: linear-gradient(90deg, transparent, #000 30%, #000 70%, transparent);
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 30%, #000 70%, transparent);
 }
 .footer-mark {
     text-align: center;
@@ -875,7 +1124,7 @@ body:has(.docs-layout) .site-footer {
     position: relative;
     padding: 5.5rem 2rem 4.5rem;
     overflow: hidden;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--ink-line);
 }
 .hero::before {
     content: "";
@@ -895,25 +1144,25 @@ body:has(.docs-layout) .site-footer {
     pointer-events: none;
     z-index: 0;
 }
+/* Traditional hemp-leaf lattice (麻の葉) behind the hero, masked to a soft
+   centre so it reads as woven paper rather than a hard grid. */
 .hero::after {
     content: "";
     position: absolute;
     inset: 0;
-    background-image:
-        linear-gradient(var(--border) 1px, transparent 1px),
-        linear-gradient(90deg, var(--border) 1px, transparent 1px);
-    background-size: 64px 64px;
+    background-image: var(--asanoha);
+    background-size: 56px 96px;
     mask-image: radial-gradient(
         ellipse at center,
         rgba(0, 0, 0, 0.4) 0%,
-        transparent 60%
+        transparent 62%
     );
     -webkit-mask-image: radial-gradient(
         ellipse at center,
         rgba(0, 0, 0, 0.4) 0%,
-        transparent 60%
+        transparent 62%
     );
-    opacity: 0.45;
+    opacity: 0.16;
     pointer-events: none;
     z-index: 0;
 }
@@ -1344,7 +1593,7 @@ body:has(.docs-layout) .site-footer {
 
 /* Stats bar */
 .stats-bar {
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--ink-line);
     background: var(--bg-sidebar);
     padding: 1.75rem 2rem;
 }
@@ -1366,7 +1615,12 @@ body:has(.docs-layout) .site-footer {
     top: 10%;
     bottom: 10%;
     width: 1px;
-    background: var(--border);
+    background: linear-gradient(
+        180deg,
+        transparent,
+        var(--ink-line-strong),
+        transparent
+    );
 }
 .stat-value {
     display: block;
@@ -1392,8 +1646,22 @@ body:has(.docs-layout) .site-footer {
 
 /* Section scaffolding */
 .section {
+    position: relative;
     padding: 6rem 2rem;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--ink-line);
+}
+/* Lozenge seal centred on each section divider. */
+.section::after {
+    content: "";
+    position: absolute;
+    bottom: -4px;
+    left: 50%;
+    width: 7px;
+    height: 7px;
+    transform: translateX(-50%) rotate(45deg);
+    background: var(--bg-body);
+    border: 1px solid var(--bracket-dim);
+    box-shadow: 0 0 0 5px var(--bg-body);
 }
 .section-inner {
     max-width: 1100px;
@@ -1430,8 +1698,8 @@ body:has(.docs-layout) .site-footer {
     display: grid;
     grid-template-columns: repeat(3, 1fr);
     gap: 1px;
-    background: var(--border);
-    border: 1px solid var(--border);
+    background: var(--ink-line);
+    border: 1px solid var(--ink-line);
     border-radius: 10px;
     overflow: hidden;
 }
@@ -1587,7 +1855,7 @@ body:has(.docs-layout) .site-footer {
     padding: 5rem 2rem 6rem;
     position: relative;
     overflow: hidden;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 1px solid var(--ink-line);
 }
 .cta-section::before {
     content: "";
@@ -1947,7 +2215,14 @@ body:has(.docs-layout) .site-footer {
     display: flex;
     flex-direction: column;
     padding-left: 1.25rem;
-    border-left: 1px solid var(--border);
+    border-left: 1px solid transparent;
+    border-image: linear-gradient(
+            180deg,
+            var(--ink-line-strong),
+            var(--ink-line) 60%,
+            transparent
+        )
+        1;
     margin-top: 0.25rem;
 }
 .toc-title {
