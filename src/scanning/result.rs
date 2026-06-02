@@ -19,6 +19,11 @@ pub enum FindingType {
     /// was not confirmed.
     #[serde(rename = "R")]
     Reflected,
+    /// Informational — a non-exploitable observation, e.g. an outdated or
+    /// known-vulnerable JavaScript library (CWE-1104). Not an XSS finding;
+    /// excluded from XSS-only dedup/collapse logic.
+    #[serde(rename = "I")]
+    Informational,
 }
 
 impl FindingType {
@@ -28,6 +33,7 @@ impl FindingType {
             FindingType::Verified => "V",
             FindingType::AstDetected => "A",
             FindingType::Reflected => "R",
+            FindingType::Informational => "I",
         }
     }
 
@@ -37,6 +43,7 @@ impl FindingType {
             FindingType::Verified => "Verified",
             FindingType::AstDetected => "AST-Detected",
             FindingType::Reflected => "Reflected",
+            FindingType::Informational => "Informational",
         }
     }
 
@@ -49,6 +56,9 @@ impl FindingType {
             }
             FindingType::Reflected => {
                 "Reflected XSS - payload appears in HTTP response but DOM execution not confirmed"
+            }
+            FindingType::Informational => {
+                "Informational - outdated or known-vulnerable component, not an exploitable XSS"
             }
         }
     }

@@ -1,0 +1,27 @@
+# Outdated / known-vulnerable JS library detection benchmark (issue #1074).
+#
+# The page serves a library <script> tag in the initial response; the scanner's
+# preflight body is scanned for known-vulnerable versions, emitting an
+# informational (CWE-1104) finding. The reflected `{input}` lands in a
+# <textarea> (a safe, non-executing context) so these cases isolate the library
+# finding from any XSS finding.
+#
+# IDs use the 9100+ block to stay clear of the existing realworld corpus.
+
+[[case]]
+id = 9101
+name = "vuln_lib_jquery_1_7_2"
+description = "Serves jQuery 1.7.2 (known-vulnerable) -> informational finding expected"
+handler_type = "realworld"
+reflection = "<script src=\"/static/js/jquery-1.7.2.min.js\"></script><textarea>{input}</textarea>"
+expected_detection = true
+category = "vuln_lib"
+
+[[case]]
+id = 9102
+name = "current_lib_jquery_3_7_1"
+description = "Serves current jQuery 3.7.1 -> no library finding"
+handler_type = "realworld"
+reflection = "<script src=\"/static/js/jquery-3.7.1.min.js\"></script><textarea>{input}</textarea>"
+expected_detection = false
+category = "vuln_lib"

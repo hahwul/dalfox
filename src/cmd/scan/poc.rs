@@ -253,12 +253,44 @@ fn render_httpie_poc(result: &crate::scanning::result::Result, attack_url: &str)
 /// isn't emitted twice with different shapes (the old streamer printed
 /// just the POC line, then end-of-scan re-emitted POC + tree, leaving
 /// users with a duplicated POC URL).
+/// Render an informational finding (no payload/parameter): a single tagged
+/// summary line plus an evidence sub-line. Cyan in `plain`, uncolored otherwise.
+fn render_informational_block(result: &crate::scanning::result::Result, poc_type: &str) -> String {
+    let tag = if result.inject_type.is_empty() {
+        "Informational".to_string()
+    } else {
+        result.inject_type.clone()
+    };
+    let line = format!("[INF][{}] {} | {}", tag, result.data, result.message_str);
+    let mut output = String::new();
+    if poc_type == "plain" {
+        output.push_str(&format!("\x1b[36m{}\x1b[0m\n", line.trim_end()));
+    } else {
+        output.push_str(line.trim_end());
+        output.push('\n');
+    }
+    if !result.evidence.is_empty() {
+        output.push_str(&format!(
+            "  \x1b[90m└──\x1b[0m \x1b[38;5;247m{}\x1b[0m\n",
+            result.evidence
+        ));
+    }
+    output
+}
+
 pub(crate) fn render_finding_block(
     result: &crate::scanning::result::Result,
     poc_type: &str,
     include_request: bool,
     include_response: bool,
 ) -> String {
+    // Informational findings (e.g. outdated/vulnerable libraries) have no
+    // payload/parameter, so the payload-oriented POC block below doesn't apply —
+    // render a compact, self-contained line instead.
+    if result.result_type == FindingType::Informational {
+        return render_informational_block(result, poc_type);
+    }
+
     let mut output = String::new();
 
     let poc_line = generate_poc(result, poc_type);
@@ -271,6 +303,8 @@ pub(crate) fn render_finding_block(
             FindingType::Verified => format!("\x1b[31m{}\x1b[0m", trimmed),
             FindingType::Reflected => format!("\x1b[33m{}\x1b[0m", trimmed),
             FindingType::AstDetected => format!("\x1b[35m{}\x1b[0m", trimmed),
+            // Unreachable (early-returned above) but required for exhaustiveness.
+            FindingType::Informational => trimmed.to_string(),
         }
     } else {
         trimmed.to_string()
