@@ -7,6 +7,11 @@ on:
         description: "Version to publish (e.g., 3.0.0)"
         required: true
         type: string
+      pkgrel:
+        description: "Package release (bump for packaging-only fixes; 1 for a new version)"
+        required: false
+        default: "1"
+        type: string
   workflow_run:
     workflows: ["Release"]
     types: [completed]
@@ -21,7 +26,10 @@ jobs:
       - name: Checkout source code
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && format('v{0}', github.event.inputs.version) || github.event.workflow_run.head_branch }}
+          # On manual dispatch, read the (possibly hotfixed) PKGBUILD from the
+          # branch the workflow runs on (e.g. main) rather than the release tag,
+          # so packaging-only fixes can ship to AUR without cutting a release.
+          ref: ${{ github.event_name == 'workflow_dispatch' && github.ref_name || github.event.workflow_run.head_branch }}
 
       - name: Get Version
         id: get_version
@@ -37,8 +45,9 @@ jobs:
 
       - name: Update PKGBUILD version
         run: |
+          PKGREL="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.pkgrel || '1' }}"
           sed -i "s/^pkgver=.*/pkgver=${{ env.VERSION }}/" aur/PKGBUILD
-          sed -i "s/^pkgrel=.*/pkgrel=1/" aur/PKGBUILD
+          sed -i "s/^pkgrel=.*/pkgrel=${PKGREL}/" aur/PKGBUILD
           cat aur/PKGBUILD
 
       - name: Publish to AUR
