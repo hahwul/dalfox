@@ -1039,13 +1039,18 @@ nav.pagination a:hover {
     line-height: 0;
 }
 .hahwul-img {
+    display: inline-block;
     width: 80px;
-    height: auto;
-    filter: grayscale(100%) brightness(0.5);
-    transition: filter 0.3s ease;
+    height: 80px;
+    /* Recolor the logo to match the footer text by using its alpha as a mask
+       and filling with the muted text token (the raster itself is white). */
+    background-color: var(--text-muted);
+    -webkit-mask: url("../images/hahwul.webp") center / contain no-repeat;
+            mask: url("../images/hahwul.webp") center / contain no-repeat;
+    transition: background-color 0.3s ease;
 }
 .hahwul-img:hover {
-    filter: grayscale(0%) brightness(1.1);
+    background-color: var(--text-primary);
 }
 .footer-love {
     margin-top: 0.85rem;
