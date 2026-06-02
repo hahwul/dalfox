@@ -3,14 +3,30 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  {% if not env("HWARO_DEV", default="") %}
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  {% endif %}
   <meta name="description" content="{{ page.description | e }}">
+  <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#31365e">
   <title>{{ page.title | e }} · {{ site.title | e }}</title>
   {{ og_all_tags }}
   {{ hreflang_tags }}
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+  <link rel="canonical" href="{{ seo.canonical_url }}">
+  <link rel="alternate" type="application/rss+xml" title="{{ site.title | e }}" href="{{ base_url }}/rss.xml">
+  {% if page.url == "/" %}
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"SoftwareApplication","name":"Dalfox","applicationCategory":"SecurityApplication","operatingSystem":"macOS, Linux, Windows","description":"Powerful open-source XSS scanner and automation utility — reflected, stored, DOM-based with AST-level verification.","url":"{{ base_url }}/","downloadUrl":"https://github.com/hahwul/dalfox/releases","softwareHelp":"{{ base_url }}/getting-started/","license":"https://opensource.org/licenses/MIT","isAccessibleForFree":true,"codeRepository":"https://github.com/hahwul/dalfox","author":{"@type":"Person","name":"hahwul","url":"https://www.hahwul.com"},"offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
+  {% else %}
+  {{ jsonld }}
+  {% endif %}
+  <link rel="stylesheet" href="{{ base_url }}/css/fonts.css">
   <link rel="stylesheet" href="{{ base_url }}/css/style.css">
   <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
   <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
@@ -22,6 +38,7 @@
   {{ auto_includes_css }}
 </head>
 <body data-section="{{ page.section }}">
+  <a class="skip-link" href="#main">Skip to content</a>
   <header class="site-header">
     <div class="header-inner">
       <div class="header-left">
@@ -39,7 +56,7 @@
         </nav>
       </div>
       <div class="header-right">
-        <button class="search-trigger" onclick="openSearch()" title="Search">
+        <button class="search-trigger" type="button" title="Search">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
           <span>Search</span>
           <kbd>⌘K</kbd>

@@ -1,0 +1,7 @@
+# Security policy for the Dalfox project (https://dalfox.hahwul.com).
+# Full policy and supported versions: https://github.com/hahwul/dalfox/blob/main/SECURITY.md
+Contact: https://github.com/hahwul/dalfox/security/advisories/new
+Contact: mailto:hahwul@gmail.com
+Preferred-Languages: en, ko
+Canonical: https://dalfox.hahwul.com/.well-known/security.txt
+Policy: https://github.com/hahwul/dalfox/blob/main/SECURITY.md

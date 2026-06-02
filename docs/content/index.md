@@ -235,7 +235,7 @@ template = "landing"
     </div>
     <p class="contributors-label">Thanks to our contributors</p>
     <div class="contributors" role="img" aria-label="Dalfox contributors">
-      <img src="https://github.com/hahwul/dalfox/raw/main/docs/static/images/CONTRIBUTORS.svg" alt="Dalfox contributors" loading="lazy">
+      <img src="/images/CONTRIBUTORS.svg" alt="Dalfox contributors" loading="lazy">
     </div>
   </div>
 </section>

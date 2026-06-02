@@ -2352,3 +2352,25 @@ body:has(.docs-layout) .site-footer {
         gap: 0;
     }
 }
+
+/* Skip-to-content link — off-screen until it receives keyboard focus. */
+.skip-link {
+    position: absolute;
+    left: 8px;
+    top: -48px;
+    z-index: 1000;
+    padding: 8px 14px;
+    background: var(--brand);
+    color: var(--text-primary);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    font: 600 0.85rem/1 var(--font-sans);
+    text-decoration: none;
+    transition: top 0.15s ease;
+}
+
+.skip-link:focus {
+    top: 8px;
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}

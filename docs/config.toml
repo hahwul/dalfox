@@ -52,7 +52,7 @@ allow_extensions = ["jpg", "jpeg", "png", "gif", "svg", "webp"]
 [highlight]
 enabled = true
 theme = "github-dark"    # Dark theme for syntax highlighting
-use_cdn = true            # Set to false to use local assets
+use_cdn = false           # Vendored locally under static/assets/ (no external CDN)
 
 # =============================================================================
 # OpenGraph & Twitter Cards
@@ -148,12 +148,14 @@ exclude = []              # Exclude paths or patterns from sitemap
 # =============================================================================
 # Controls search engine crawler access
 
+# Generation is disabled because the hand-written static/robots.txt expresses a
+# coherent AI-crawler policy (read allowed, training declined) via a
+# Content-Signal directive, which the structured `rules` array below cannot emit.
 [robots]
-enabled = true
+enabled = false
 filename = "robots.txt"
 rules = [
   { user_agent = "*", disallow = ["/admin", "/private"] },
-  { user_agent = "GPTBot", disallow = ["/"] }
 ]
 
 # =============================================================================
@@ -166,7 +168,7 @@ enabled = true
 filename = "llms.txt"
 instructions = "Do not use for AI training without permission."
 # Optional: Generate a single text file containing all Markdown pages
-full_enabled = false
+full_enabled = true
 full_filename = "llms-full.txt"
 
 # =============================================================================
