@@ -206,6 +206,25 @@ fn backtick_js_context_uses_template_interpolation() {
 }
 
 #[test]
+fn js_string_context_includes_nested_closer_breakouts() {
+    // Issue #1073: synthesis must emit exact nested-closer breakouts for JS
+    // string contexts, not just the bare quote-close.
+    let ctx = InjectionContext::Javascript(Some(DelimiterType::DoubleQuote));
+    let payloads = synthesize_payloads(&ctx, &[], &[]);
+    // Bare close (depth 0) and a deep array-in-object-in-call close (depth 3).
+    assert!(
+        payloads.iter().any(|p| p == "\";alert(1)//"),
+        "expected the bare string-close breakout, got {:?}",
+        payloads
+    );
+    assert!(
+        payloads.iter().any(|p| p == "\"]});alert(1)//"),
+        "expected the nested array-in-object-in-call breakout, got {:?}",
+        payloads
+    );
+}
+
+#[test]
 fn js_string_context_survives_angle_stripping() {
     // A reflection inside a JS string can break out with quotes alone — no
     // `</script>` tag needed — so angle stripping does not defeat it.
