@@ -5,19 +5,18 @@ use serde_json::Value;
 #[test]
 fn test_sarif_schema_compliance() {
     // Create a comprehensive result with all possible fields
-    let mut result = ScanResult::new(
-        dalfox::scanning::result::FindingType::Verified,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com/test?param=value".to_string(),
-        "param".to_string(),
-        "<script>alert('XSS')</script>".to_string(),
-        "Script tag found in HTML response".to_string(),
-        "CWE-79".to_string(),
-        "High".to_string(),
-        606,
-        "Cross-site scripting vulnerability detected".to_string(),
-    );
+    let mut result = ScanResult::builder(dalfox::scanning::result::FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com/test?param=value")
+        .param("param")
+        .payload("<script>alert('XSS')</script>")
+        .evidence("Script tag found in HTML response")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("Cross-site scripting vulnerability detected")
+        .build();
 
     result.request = Some("GET /test?param=value HTTP/1.1\nHost: example.com".to_string());
     result.response = Some("HTTP/1.1 200 OK\nContent-Type: text/html\n\n<html></html>".to_string());
@@ -187,19 +186,18 @@ fn test_sarif_severity_to_level_mapping() {
     ];
 
     for (severity, expected_level) in test_cases {
-        let result = ScanResult::new(
-            dalfox::scanning::result::FindingType::Verified,
-            "inHTML".to_string(),
-            "GET".to_string(),
-            "https://example.com".to_string(),
-            "param".to_string(),
-            "payload".to_string(),
-            "".to_string(),
-            "CWE-79".to_string(),
-            severity.to_string(),
-            1,
-            "test".to_string(),
-        );
+        let result = ScanResult::builder(dalfox::scanning::result::FindingType::Verified)
+            .inject_type("inHTML")
+            .method("GET")
+            .data("https://example.com")
+            .param("param")
+            .payload("payload")
+            .evidence("")
+            .cwe("CWE-79")
+            .severity(severity.to_string())
+            .message_id(1)
+            .message_str("test")
+            .build();
 
         let sarif = ScanResult::results_to_sarif(&[result], false, false);
         let json: Value = serde_json::from_str(&sarif).unwrap();
@@ -215,19 +213,18 @@ fn test_sarif_severity_to_level_mapping() {
 
 #[test]
 fn test_sarif_message_with_evidence() {
-    let result = ScanResult::new(
-        dalfox::scanning::result::FindingType::Verified,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "q".to_string(),
-        "payload".to_string(),
-        "Found unescaped output".to_string(),
-        "CWE-79".to_string(),
-        "High".to_string(),
-        606,
-        "XSS detected".to_string(),
-    );
+    let result = ScanResult::builder(dalfox::scanning::result::FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("q")
+        .payload("payload")
+        .evidence("Found unescaped output")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("XSS detected")
+        .build();
 
     let sarif = ScanResult::results_to_sarif(&[result], false, false);
     let json: Value = serde_json::from_str(&sarif).unwrap();
@@ -249,19 +246,18 @@ fn test_sarif_message_with_evidence() {
 
 #[test]
 fn test_sarif_partial_fingerprints() {
-    let result = ScanResult::new(
-        dalfox::scanning::result::FindingType::Verified,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "q".to_string(),
-        "payload".to_string(),
-        "".to_string(),
-        "CWE-79".to_string(),
-        "High".to_string(),
-        12345,
-        "test".to_string(),
-    );
+    let result = ScanResult::builder(dalfox::scanning::result::FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("q")
+        .payload("payload")
+        .evidence("")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(12345)
+        .message_str("test")
+        .build();
 
     let sarif = ScanResult::results_to_sarif(&[result], false, false);
     let json: Value = serde_json::from_str(&sarif).unwrap();
@@ -288,19 +284,18 @@ fn test_sarif_partial_fingerprints() {
 
 #[test]
 fn test_sarif_rule_metadata() {
-    let result = ScanResult::new(
-        dalfox::scanning::result::FindingType::Verified,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "q".to_string(),
-        "payload".to_string(),
-        "".to_string(),
-        "CWE-79".to_string(),
-        "High".to_string(),
-        1,
-        "test".to_string(),
-    );
+    let result = ScanResult::builder(dalfox::scanning::result::FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("q")
+        .payload("payload")
+        .evidence("")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(1)
+        .message_str("test")
+        .build();
 
     let sarif = ScanResult::results_to_sarif(&[result], false, false);
     let json: Value = serde_json::from_str(&sarif).unwrap();

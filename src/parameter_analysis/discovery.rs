@@ -556,7 +556,7 @@ pub async fn check_query_discovery(
     // send a purely numeric marker to detect filters that strip a-zA-Z.
     // This catches injection points like `<script>#{input.gsub(/[a-zA-Z]/, "")}</script>`.
     {
-        let numeric_marker = "90197752"; // unique numeric-only probe
+        let numeric_marker = crate::scanning::check_reflection::NUMERIC_PROBE_MARKER;
         for (name, value) in target.url.query_pairs() {
             let name = name.to_string();
             if discovered_names.contains(&name) {

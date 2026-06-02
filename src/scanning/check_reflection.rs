@@ -28,6 +28,25 @@ pub use crate::encoding::pre_encoding::apply_pre_encoding;
 /// Maximum number of iterative URL-decode passes when building payload variants.
 const MAX_URL_DECODE_ITERATIONS: usize = 4;
 
+/// Purely numeric reflection probe. Sent for parameters that showed no
+/// reflection with the normal alphanumeric markers, to catch injection
+/// points behind letter-stripping filters (e.g. `gsub(/[a-zA-Z]/, "")`),
+/// which would erase a normal marker but leave digits intact. Shared with
+/// `parameter_analysis::discovery` so both probe paths stay in sync.
+pub const NUMERIC_PROBE_MARKER: &str = "90197752";
+
+/// Consecutive WAF block responses (HTTP 403/406/429/503) tolerated before
+/// adaptive backoff engages. Below this, blocks are assumed transient.
+const WAF_BACKOFF_THRESHOLD: u32 = 3;
+/// Maximum exponential-backoff escalation step. Caps the doubling so the
+/// raw delay plateaus at `WAF_BACKOFF_BASE_MS << WAF_BACKOFF_MAX_ESCALATION`
+/// before the absolute `WAF_BACKOFF_CAP_MS` ceiling is applied.
+const WAF_BACKOFF_MAX_ESCALATION: u32 = 4;
+/// Base backoff delay (milliseconds), doubled once per escalation step.
+const WAF_BACKOFF_BASE_MS: u64 = 2000;
+/// Absolute ceiling (milliseconds) on a single adaptive-backoff sleep.
+const WAF_BACKOFF_CAP_MS: u64 = 30_000;
+
 /// Check whether *all* occurrences of `payload` in `html` fall inside safe tags
 /// (textarea, noscript, style, xmp, plaintext, title).  If the payload appears
 /// at least once outside a safe tag, returns `false`.
@@ -1233,10 +1252,11 @@ async fn fetch_injection_response_with_client(
             if is_waf_block {
                 let consecutive = crate::tick_waf_block();
                 // Apply adaptive backoff when consecutive blocks exceed threshold
-                if consecutive >= 3 {
-                    let escalation = (consecutive - 3).min(4) as u64;
-                    let backoff_ms = 2000u64 * (1u64 << escalation);
-                    let backoff_ms = backoff_ms.min(30_000);
+                if consecutive >= WAF_BACKOFF_THRESHOLD {
+                    let escalation =
+                        (consecutive - WAF_BACKOFF_THRESHOLD).min(WAF_BACKOFF_MAX_ESCALATION);
+                    let backoff_ms = WAF_BACKOFF_BASE_MS * (1u64 << escalation);
+                    let backoff_ms = backoff_ms.min(WAF_BACKOFF_CAP_MS);
                     sleep(Duration::from_millis(backoff_ms)).await;
                 }
             } else {
@@ -1350,60 +1370,51 @@ async fn fetch_injection_response_with_client(
     }
 }
 
+/// Inject `payload`, then classify reflection in the response.
+///
+/// Pass `Some(client)` to reuse a pooled HTTP client (MCP / REST runners);
+/// pass `None` on the CLI path to build a default client per request from
+/// the target. Returns the reflection kind (suppressed to `None` when the
+/// match lands only in a known-safe context) together with the response
+/// body, or `(None, None)` when no response was obtained.
+pub async fn check_reflection_with_response(
+    client: Option<&Client>,
+    target: &Target,
+    param: &Param,
+    payload: &str,
+    args: &crate::cmd::scan::ScanArgs,
+) -> (Option<ReflectionKind>, Option<String>) {
+    let text = match client {
+        Some(client) => {
+            fetch_injection_response_with_client(client, target, param, payload, args).await
+        }
+        None => fetch_injection_response(target, param, payload, args).await,
+    };
+    if let Some(text) = text {
+        let kind = classify_reflection(&text, payload);
+        let kind = match kind {
+            Some(_) if is_in_safe_context_decoded(&text, payload) => None,
+            other => other,
+        };
+        (kind, Some(text))
+    } else {
+        (None, None)
+    }
+}
+
+/// Convenience wrapper over [`check_reflection_with_response`] that discards
+/// the body and reports only whether a (non-safe-context) reflection was
+/// found. Always builds a default client (CLI path).
 pub async fn check_reflection(
     target: &Target,
     param: &Param,
     payload: &str,
     args: &crate::cmd::scan::ScanArgs,
 ) -> bool {
-    if let Some(text) = fetch_injection_response(target, param, payload, args).await {
-        match classify_reflection(&text, payload) {
-            Some(_) if is_in_safe_context_decoded(&text, payload) => false,
-            Some(_) => true,
-            None => false,
-        }
-    } else {
-        false
-    }
-}
-
-pub async fn check_reflection_with_response(
-    target: &Target,
-    param: &Param,
-    payload: &str,
-    args: &crate::cmd::scan::ScanArgs,
-) -> (Option<ReflectionKind>, Option<String>) {
-    if let Some(text) = fetch_injection_response(target, param, payload, args).await {
-        let kind = classify_reflection(&text, payload);
-        let kind = match kind {
-            Some(_) if is_in_safe_context_decoded(&text, payload) => None,
-            other => other,
-        };
-        (kind, Some(text))
-    } else {
-        (None, None)
-    }
-}
-
-pub async fn check_reflection_with_response_client(
-    client: &Client,
-    target: &Target,
-    param: &Param,
-    payload: &str,
-    args: &crate::cmd::scan::ScanArgs,
-) -> (Option<ReflectionKind>, Option<String>) {
-    if let Some(text) =
-        fetch_injection_response_with_client(client, target, param, payload, args).await
-    {
-        let kind = classify_reflection(&text, payload);
-        let kind = match kind {
-            Some(_) if is_in_safe_context_decoded(&text, payload) => None,
-            other => other,
-        };
-        (kind, Some(text))
-    } else {
-        (None, None)
-    }
+    check_reflection_with_response(None, target, param, payload, args)
+        .await
+        .0
+        .is_some()
 }
 
 /// HPP reflection check: send a request using a pre-built HPP URL (with duplicate params)

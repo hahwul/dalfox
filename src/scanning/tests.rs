@@ -81,19 +81,7 @@ fn integration_scan_args(skip_xss: bool) -> crate::cmd::scan::ScanArgs {
 }
 
 fn make_result(ft: FindingType) -> crate::scanning::result::Result {
-    crate::scanning::result::Result::new(
-        ft,
-        String::new(),
-        String::new(),
-        String::new(),
-        String::new(),
-        String::new(),
-        String::new(),
-        String::new(),
-        String::new(),
-        0,
-        String::new(),
-    )
+    crate::scanning::result::Result::builder(ft).build()
 }
 
 #[test]
@@ -241,19 +229,16 @@ fn make_typed_param_result_for(
     inject: &str,
     data: &str,
 ) -> crate::scanning::result::Result {
-    crate::scanning::result::Result::new(
-        ft,
-        inject.to_string(),
-        "GET".to_string(),
-        data.to_string(),
-        param.to_string(),
-        "PAY".to_string(),
-        String::new(),
-        "CWE-79".to_string(),
-        "Info".to_string(),
-        606,
-        String::new(),
-    )
+    crate::scanning::result::Result::builder(ft)
+        .inject_type(inject)
+        .method("GET")
+        .data(data)
+        .param(param)
+        .payload("PAY")
+        .cwe("CWE-79")
+        .severity("Info")
+        .message_id(606)
+        .build()
 }
 
 #[test]

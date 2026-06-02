@@ -3,19 +3,18 @@ use serde_json;
 
 #[test]
 fn test_result_creation() {
-    let result = Result::new(
-        FindingType::Verified,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com?q=test".to_string(),
-        "q".to_string(),
-        "<script>alert(1)</script>".to_string(),
-        "Found script tag".to_string(),
-        "CWE-79".to_string(),
-        "High".to_string(),
-        606,
-        "XSS detected".to_string(),
-    );
+    let result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com?q=test")
+        .param("q")
+        .payload("<script>alert(1)</script>")
+        .evidence("Found script tag")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("XSS detected")
+        .build();
 
     assert_eq!(result.result_type, FindingType::Verified);
     assert_eq!(result.inject_type, "inHTML");
@@ -34,19 +33,18 @@ fn test_result_creation() {
 
 #[test]
 fn test_result_creation_with_request_response() {
-    let mut result = Result::new(
-        FindingType::Verified,
-        "inJS".to_string(),
-        "POST".to_string(),
-        "https://example.com".to_string(),
-        "data".to_string(),
-        "alert(1)".to_string(),
-        "JavaScript execution".to_string(),
-        "CWE-79".to_string(),
-        "Medium".to_string(),
-        200,
-        "Potential XSS".to_string(),
-    );
+    let mut result = Result::builder(FindingType::Verified)
+        .inject_type("inJS")
+        .method("POST")
+        .data("https://example.com")
+        .param("data")
+        .payload("alert(1)")
+        .evidence("JavaScript execution")
+        .cwe("CWE-79")
+        .severity("Medium")
+        .message_id(200)
+        .message_str("Potential XSS")
+        .build();
 
     result.request = Some("POST / HTTP/1.1\nHost: example.com\n\nkey=value".to_string());
     result.response = Some("HTTP/1.1 200 OK\n\n<html>alert(1)</html>".to_string());
@@ -61,19 +59,18 @@ fn test_result_creation_with_request_response() {
 
 #[test]
 fn test_result_serialization() {
-    let result = Result::new(
-        FindingType::Verified,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "query".to_string(),
-        "payload".to_string(),
-        "evidence".to_string(),
-        "CWE-79".to_string(),
-        "High".to_string(),
-        606,
-        "message".to_string(),
-    );
+    let result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("query")
+        .payload("payload")
+        .evidence("evidence")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("message")
+        .build();
 
     let json = serde_json::to_string(&result).unwrap();
     assert!(json.contains("\"type\":\"V\""));
@@ -158,33 +155,31 @@ fn test_result_deserialization_ast_detected() {
 
 #[test]
 fn test_result_different_types() {
-    let reflected = Result::new(
-        FindingType::Reflected,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "param".to_string(),
-        "test".to_string(),
-        "Reflected".to_string(),
-        "CWE-79".to_string(),
-        "Info".to_string(),
-        200,
-        "Parameter reflected".to_string(),
-    );
+    let reflected = Result::builder(FindingType::Reflected)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("param")
+        .payload("test")
+        .evidence("Reflected")
+        .cwe("CWE-79")
+        .severity("Info")
+        .message_id(200)
+        .message_str("Parameter reflected")
+        .build();
 
-    let vulnerable = Result::new(
-        FindingType::Verified,
-        "inJS".to_string(),
-        "POST".to_string(),
-        "https://example.com".to_string(),
-        "data".to_string(),
-        "alert(1)".to_string(),
-        "Executed".to_string(),
-        "CWE-79".to_string(),
-        "High".to_string(),
-        200,
-        "XSS confirmed".to_string(),
-    );
+    let vulnerable = Result::builder(FindingType::Verified)
+        .inject_type("inJS")
+        .method("POST")
+        .data("https://example.com")
+        .param("data")
+        .payload("alert(1)")
+        .evidence("Executed")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(200)
+        .message_str("XSS confirmed")
+        .build();
 
     assert_eq!(reflected.result_type, FindingType::Reflected);
     assert_eq!(reflected.severity, "Info");
@@ -196,37 +191,35 @@ fn test_result_different_types() {
 #[test]
 fn test_result_edge_cases() {
     // Empty strings (except result_type which is now an enum)
-    let result = Result::new(
-        FindingType::Reflected,
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        "".to_string(),
-        0,
-        "".to_string(),
-    );
+    let result = Result::builder(FindingType::Reflected)
+        .inject_type("")
+        .method("")
+        .data("")
+        .param("")
+        .payload("")
+        .evidence("")
+        .cwe("")
+        .severity("")
+        .message_id(0)
+        .message_str("")
+        .build();
 
     assert_eq!(result.result_type, FindingType::Reflected);
     assert_eq!(result.message_id, 0);
 
     // Special characters
-    let result = Result::new(
-        FindingType::Verified,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "param".to_string(),
-        "<>\"'&".to_string(),
-        "Special chars".to_string(),
-        "CWE-79".to_string(),
-        "High".to_string(),
-        200,
-        "Test".to_string(),
-    );
+    let result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("param")
+        .payload("<>\"'&")
+        .evidence("Special chars")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(200)
+        .message_str("Test")
+        .build();
 
     assert_eq!(result.payload, "<>\"'&");
     let json = serde_json::to_string(&result).unwrap();
@@ -236,33 +229,31 @@ fn test_result_edge_cases() {
 
 #[test]
 fn test_results_to_markdown() {
-    let result1 = Result::new(
-        FindingType::Verified,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com?q=test".to_string(),
-        "q".to_string(),
-        "<script>alert(1)</script>".to_string(),
-        "Found script tag".to_string(),
-        "CWE-79".to_string(),
-        "High".to_string(),
-        606,
-        "XSS detected".to_string(),
-    );
+    let result1 = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com?q=test")
+        .param("q")
+        .payload("<script>alert(1)</script>")
+        .evidence("Found script tag")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("XSS detected")
+        .build();
 
-    let result2 = Result::new(
-        FindingType::Reflected,
-        "inJS".to_string(),
-        "POST".to_string(),
-        "https://example.com/api".to_string(),
-        "data".to_string(),
-        "alert(2)".to_string(),
-        "Reflected in JS".to_string(),
-        "CWE-79".to_string(),
-        "Medium".to_string(),
-        200,
-        "Reflection found".to_string(),
-    );
+    let result2 = Result::builder(FindingType::Reflected)
+        .inject_type("inJS")
+        .method("POST")
+        .data("https://example.com/api")
+        .param("data")
+        .payload("alert(2)")
+        .evidence("Reflected in JS")
+        .cwe("CWE-79")
+        .severity("Medium")
+        .message_id(200)
+        .message_str("Reflection found")
+        .build();
 
     let results = vec![result1, result2];
     let markdown = Result::results_to_markdown(&results, false, false);
@@ -294,19 +285,18 @@ fn test_results_to_markdown() {
 
 #[test]
 fn test_results_to_markdown_with_request_response() {
-    let mut result = Result::new(
-        FindingType::Verified,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "test".to_string(),
-        "<x>".to_string(),
-        "test evidence".to_string(),
-        "CWE-79".to_string(),
-        "High".to_string(),
-        606,
-        "XSS".to_string(),
-    );
+    let mut result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("test")
+        .payload("<x>")
+        .evidence("test evidence")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("XSS")
+        .build();
 
     result.request = Some("GET /?test=%3Cx%3E HTTP/1.1\nHost: example.com".to_string());
     result.response =
@@ -336,19 +326,18 @@ fn test_results_to_markdown_empty() {
 
 #[test]
 fn test_results_to_sarif_basic() {
-    let result = Result::new(
-        FindingType::Verified,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com?q=test".to_string(),
-        "q".to_string(),
-        "<script>alert(1)</script>".to_string(),
-        "Found script tag".to_string(),
-        "CWE-79".to_string(),
-        "High".to_string(),
-        606,
-        "XSS detected".to_string(),
-    );
+    let result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com?q=test")
+        .param("q")
+        .payload("<script>alert(1)</script>")
+        .evidence("Found script tag")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("XSS detected")
+        .build();
 
     let results = vec![result];
     let sarif = Result::results_to_sarif(&results, false, false);
@@ -389,19 +378,18 @@ fn test_results_to_sarif_basic() {
 #[test]
 fn test_results_to_sarif_fingerprint_stable_across_payload_variants() {
     let mk = |payload: &str, data: &str| {
-        Result::new(
-            FindingType::Reflected,
-            "inHTML".to_string(),
-            "GET".to_string(),
-            data.to_string(),
-            "q".to_string(),
-            payload.to_string(),
-            "".to_string(),
-            "CWE-79".to_string(),
-            "Info".to_string(),
-            606,
-            "X".to_string(),
-        )
+        Result::builder(FindingType::Reflected)
+            .inject_type("inHTML")
+            .method("GET")
+            .data(data.to_string())
+            .param("q")
+            .payload(payload.to_string())
+            .evidence("")
+            .cwe("CWE-79")
+            .severity("Info")
+            .message_id(606)
+            .message_str("X")
+            .build()
     };
     let a = mk("<svg/onload=alert(1)>", "https://h/s?q=%3Csvg%3E");
     let b = mk("<img src=x onerror=alert(1)>", "https://h/s?q=%3Cimg%3E");
@@ -422,19 +410,18 @@ fn test_results_to_sarif_fingerprint_stable_across_payload_variants() {
 #[test]
 fn test_results_to_sarif_fingerprint_distinct_for_different_targets() {
     let mk = |data: &str, param: &str| {
-        Result::new(
-            FindingType::Verified,
-            "inHTML".to_string(),
-            "GET".to_string(),
-            data.to_string(),
-            param.to_string(),
-            "p".to_string(),
-            "".to_string(),
-            "CWE-79".to_string(),
-            "High".to_string(),
-            606,
-            "X".to_string(),
-        )
+        Result::builder(FindingType::Verified)
+            .inject_type("inHTML")
+            .method("GET")
+            .data(data.to_string())
+            .param(param.to_string())
+            .payload("p")
+            .evidence("")
+            .cwe("CWE-79")
+            .severity("High")
+            .message_id(606)
+            .message_str("X")
+            .build()
     };
     let a = Result::results_to_sarif(&[mk("https://h/a?q=x", "q")], false, false);
     let b = Result::results_to_sarif(&[mk("https://h/b?q=x", "q")], false, false);
@@ -450,19 +437,18 @@ fn test_results_to_sarif_fingerprint_distinct_for_different_targets() {
 
 #[test]
 fn test_results_to_sarif_with_request_response() {
-    let mut result = Result::new(
-        FindingType::Verified,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "test".to_string(),
-        "<x>".to_string(),
-        "test evidence".to_string(),
-        "CWE-79".to_string(),
-        "High".to_string(),
-        606,
-        "XSS".to_string(),
-    );
+    let mut result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("test")
+        .payload("<x>")
+        .evidence("test evidence")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("XSS")
+        .build();
 
     result.request = Some("GET /?test=%3Cx%3E HTTP/1.1\nHost: example.com".to_string());
     result.response =
@@ -480,47 +466,44 @@ fn test_results_to_sarif_with_request_response() {
 
 #[test]
 fn test_results_to_sarif_severity_levels() {
-    let high = Result::new(
-        FindingType::Verified,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "p1".to_string(),
-        "payload".to_string(),
-        "".to_string(),
-        "CWE-79".to_string(),
-        "High".to_string(),
-        1,
-        "High severity".to_string(),
-    );
+    let high = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("p1")
+        .payload("payload")
+        .evidence("")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(1)
+        .message_str("High severity")
+        .build();
 
-    let medium = Result::new(
-        FindingType::Verified,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "p2".to_string(),
-        "payload".to_string(),
-        "".to_string(),
-        "CWE-79".to_string(),
-        "Medium".to_string(),
-        2,
-        "Medium severity".to_string(),
-    );
+    let medium = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("p2")
+        .payload("payload")
+        .evidence("")
+        .cwe("CWE-79")
+        .severity("Medium")
+        .message_id(2)
+        .message_str("Medium severity")
+        .build();
 
-    let low = Result::new(
-        FindingType::Reflected,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "p3".to_string(),
-        "payload".to_string(),
-        "".to_string(),
-        "CWE-79".to_string(),
-        "Low".to_string(),
-        3,
-        "Low severity".to_string(),
-    );
+    let low = Result::builder(FindingType::Reflected)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("p3")
+        .payload("payload")
+        .evidence("")
+        .cwe("CWE-79")
+        .severity("Low")
+        .message_id(3)
+        .message_str("Low severity")
+        .build();
 
     // Test each severity level mapping
     let sarif_high = Result::results_to_sarif(&[high], false, false);
@@ -545,19 +528,18 @@ fn test_results_to_sarif_empty() {
 
 #[test]
 fn test_results_to_toml() {
-    let result = Result::new(
-        FindingType::Verified,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com?q=test".to_string(),
-        "q".to_string(),
-        "<script>alert(1)</script>".to_string(),
-        "Found script tag".to_string(),
-        "CWE-79".to_string(),
-        "High".to_string(),
-        606,
-        "XSS detected".to_string(),
-    );
+    let result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com?q=test")
+        .param("q")
+        .payload("<script>alert(1)</script>")
+        .evidence("Found script tag")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("XSS detected")
+        .build();
 
     let results = vec![result];
     let toml_output = Result::results_to_toml(&results, false, false);
@@ -573,19 +555,18 @@ fn test_results_to_toml() {
 
 #[test]
 fn test_results_to_sarif_valid_json() {
-    let result = Result::new(
-        FindingType::Verified,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "q".to_string(),
-        "payload".to_string(),
-        "evidence".to_string(),
-        "CWE-79".to_string(),
-        "High".to_string(),
-        606,
-        "message".to_string(),
-    );
+    let result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("q")
+        .payload("payload")
+        .evidence("evidence")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("message")
+        .build();
 
     let results = vec![result];
     let sarif = Result::results_to_sarif(&results, false, false);
@@ -608,19 +589,18 @@ fn test_results_to_sarif_valid_json() {
 
 #[test]
 fn test_to_json_value_respects_include_flags() {
-    let mut result = Result::new(
-        FindingType::Verified,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "q".to_string(),
-        "payload".to_string(),
-        "evidence".to_string(),
-        "CWE-79".to_string(),
-        "High".to_string(),
-        1,
-        "message".to_string(),
-    );
+    let mut result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("q")
+        .payload("payload")
+        .evidence("evidence")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(1)
+        .message_str("message")
+        .build();
     result.request = Some("GET / HTTP/1.1".to_string());
     result.response = Some("HTTP/1.1 200 OK".to_string());
 
@@ -641,19 +621,18 @@ fn test_to_json_value_respects_include_flags() {
 
 #[test]
 fn test_results_to_json_compact_and_jsonl() {
-    let mut result = Result::new(
-        FindingType::Reflected,
-        "inJS".to_string(),
-        "POST".to_string(),
-        "https://example.com/api".to_string(),
-        "data".to_string(),
-        "alert(1)".to_string(),
-        "reflected".to_string(),
-        "CWE-79".to_string(),
-        "Medium".to_string(),
-        2,
-        "reflection".to_string(),
-    );
+    let mut result = Result::builder(FindingType::Reflected)
+        .inject_type("inJS")
+        .method("POST")
+        .data("https://example.com/api")
+        .param("data")
+        .payload("alert(1)")
+        .evidence("reflected")
+        .cwe("CWE-79")
+        .severity("Medium")
+        .message_id(2)
+        .message_str("reflection")
+        .build();
     result.request = Some("POST /api HTTP/1.1".to_string());
 
     let results = vec![result];

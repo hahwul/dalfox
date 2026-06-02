@@ -89,36 +89,109 @@ pub struct Result {
 }
 
 impl Result {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new(
-        result_type: FindingType,
-        inject_type: String,
-        method: String,
-        data: String,
-        param: String,
-        payload: String,
-        evidence: String,
-        cwe: String,
-        severity: String,
-        message_id: u32,
-        message_str: String,
-    ) -> Self {
-        Self {
-            result_type,
-            inject_type,
-            method,
-            data,
-            param,
-            payload,
-            evidence,
-            cwe,
-            severity,
-            message_id,
-            message_str,
-            location: String::new(),
-            request: None,
-            response: None,
+    /// Start building a finding. `result_type` is the only required field;
+    /// every other field starts empty (`""` / `0` / `None`) and is filled in
+    /// with the chained setters on [`ResultBuilder`], finishing with
+    /// [`ResultBuilder::build`].
+    ///
+    /// Replaces the former 11-argument `Result::new`, which tripped
+    /// `clippy::too_many_arguments`. The `location` / `request` / `response`
+    /// fields remain public and are set directly on the built value when a
+    /// caller needs them (often conditionally).
+    pub fn builder(result_type: FindingType) -> ResultBuilder {
+        ResultBuilder {
+            inner: Result {
+                result_type,
+                inject_type: String::new(),
+                method: String::new(),
+                data: String::new(),
+                param: String::new(),
+                payload: String::new(),
+                evidence: String::new(),
+                cwe: String::new(),
+                severity: String::new(),
+                message_id: 0,
+                message_str: String::new(),
+                location: String::new(),
+                request: None,
+                response: None,
+            },
         }
+    }
+}
+
+/// Fluent builder for [`Result`]. Each setter consumes and returns `self` so
+/// calls chain; setters take `impl Into<String>` so both `&str` and `String`
+/// work at the call site.
+#[derive(Debug, Clone)]
+pub struct ResultBuilder {
+    inner: Result,
+}
+
+impl ResultBuilder {
+    /// Injection technique label (e.g. `"inHTML-URL"`, `"DOM-XSS"`).
+    pub fn inject_type(mut self, v: impl Into<String>) -> Self {
+        self.inner.inject_type = v.into();
+        self
+    }
+
+    /// HTTP method used for the request that produced the finding.
+    pub fn method(mut self, v: impl Into<String>) -> Self {
+        self.inner.method = v.into();
+        self
+    }
+
+    /// Request data / URL associated with the finding.
+    pub fn data(mut self, v: impl Into<String>) -> Self {
+        self.inner.data = v.into();
+        self
+    }
+
+    /// Name of the affected parameter.
+    pub fn param(mut self, v: impl Into<String>) -> Self {
+        self.inner.param = v.into();
+        self
+    }
+
+    /// The payload that triggered the finding.
+    pub fn payload(mut self, v: impl Into<String>) -> Self {
+        self.inner.payload = v.into();
+        self
+    }
+
+    /// Human-readable evidence string.
+    pub fn evidence(mut self, v: impl Into<String>) -> Self {
+        self.inner.evidence = v.into();
+        self
+    }
+
+    /// CWE identifier (e.g. `"CWE-79"`).
+    pub fn cwe(mut self, v: impl Into<String>) -> Self {
+        self.inner.cwe = v.into();
+        self
+    }
+
+    /// Severity label (e.g. `"High"`, `"Medium"`).
+    pub fn severity(mut self, v: impl Into<String>) -> Self {
+        self.inner.severity = v.into();
+        self
+    }
+
+    /// Numeric message identifier.
+    pub fn message_id(mut self, v: u32) -> Self {
+        self.inner.message_id = v;
+        self
+    }
+
+    /// Message string shown to the user.
+    pub fn message_str(mut self, v: impl Into<String>) -> Self {
+        self.inner.message_str = v.into();
+        self
+    }
+
+    /// Finalize the builder into a [`Result`].
+    pub fn build(self) -> Result {
+        self.inner
     }
 }
 

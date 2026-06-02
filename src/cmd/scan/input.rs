@@ -23,7 +23,7 @@ pub(crate) async fn resolve_targets(
     // bounded` enforce the cap during the read itself, so a pseudo-
     // file that lies about its size (`/dev/zero` reports 0 bytes via
     // metadata) is still stopped.
-    const MAX_TARGET_LIST_BYTES: u64 = 256 << 20; // 256 MiB
+    const MAX_TARGET_LIST_BYTES: u64 = crate::utils::fs::MAX_FILE_READ_BYTES;
 
     // Auto-detect raw-http on positional args. Read each candidate
     // file *once* into a cache so the later "auto" branch can reuse
