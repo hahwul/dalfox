@@ -1,7 +1,7 @@
 use clap::{Parser, Subcommand};
 
 use dalfox::cmd::scan::ScanOutcome;
-use dalfox::{DEBUG, cmd, config, mcp, utils};
+use dalfox::{DEBUG, cmd, config, mcp, server, utils};
 
 #[derive(Parser)]
 #[command(name = "dalfox")]
@@ -54,7 +54,7 @@ enum Commands {
     /// Scan targets for XSS
     Scan(cmd::scan::ScanArgs),
     /// Run API/server mode
-    Server(cmd::server::ServerArgs),
+    Server(server::ServerArgs),
     /// Manage or enumerate payloads
     Payload(cmd::payload::PayloadArgs),
     /// Run MCP stdio server (Model Context Protocol) exposing Dalfox tools
@@ -318,7 +318,7 @@ async fn main() {
                 outcome = cmd::scan::run_scan(&args).await;
             }
             Commands::Server(args) => {
-                cmd::server::run_server(args).await;
+                server::run_server(args).await;
                 outcome = ScanOutcome::Clean;
             }
             Commands::Payload(args) => {

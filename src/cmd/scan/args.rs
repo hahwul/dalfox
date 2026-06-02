@@ -22,7 +22,7 @@ pub const DEFAULT_MAX_TARGETS_PER_HOST: usize = 100;
 /// `--waf-min-confidence 0.0` to keep every match.
 pub const DEFAULT_WAF_MIN_CONFIDENCE: f32 = 0.3;
 // Sanity caps for CLI scan args. The server uses tighter caps in
-// crate::cmd::job; CLI users may legitimately want longer timeouts for
+// crate::job; CLI users may legitimately want longer timeouts for
 // slow targets but values past these almost always indicate a typo or a
 // stale config file with stray zeros.
 pub const CLI_MAX_TIMEOUT_SECS: u64 = 3600;

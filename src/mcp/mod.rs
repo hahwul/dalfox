@@ -39,12 +39,12 @@ use rmcp::{
 };
 
 use crate::{
-    cmd::JobStatus,
-    cmd::job::{
-        AbortOnDrop, JOB_RETENTION_SECS, Job, MAX_DELAY_MS, MAX_TIMEOUT_SECS, MAX_WORKERS, now_ms,
-        parse_job_status, purge_expired_jobs as purge_jobs_map, send_reachability_probe,
-    },
     cmd::scan::ScanArgs,
+    job::{
+        AbortOnDrop, JOB_RETENTION_SECS, Job, JobStatus, MAX_DELAY_MS, MAX_TIMEOUT_SECS,
+        MAX_WORKERS, now_ms, parse_job_status, purge_expired_jobs as purge_jobs_map,
+        send_reachability_probe,
+    },
     parameter_analysis::analyze_parameters,
     scanning::result::{Result as ScanResult, SanitizedResult},
     target_parser::parse_target,
@@ -112,7 +112,7 @@ struct JobSnapshot {
     status: JobStatus,
     target_url: String,
     results: Option<Arc<Vec<SanitizedResult>>>,
-    progress: crate::cmd::job::JobProgress,
+    progress: crate::job::JobProgress,
     error_message: Option<String>,
     queued_at_ms: i64,
     started_at_ms: Option<i64>,
