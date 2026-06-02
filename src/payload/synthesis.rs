@@ -271,10 +271,33 @@ pub fn synthesize_payloads(
     let class = crate::scanning::markers::class_marker();
     let id = crate::scanning::markers::id_marker();
 
+    // Candidate templates, highest-confidence first.
+    let mut templates: Vec<String> = Vec::new();
+    // Issue #1073: for a reflection inside a JS string, lead with nested-closer
+    // breakouts (`"]});…`) that `js_breakout` computes for the common nesting
+    // shapes (call / array / object, depth 0-3), so sinks the bare quote-close
+    // cannot escape are still reached. This is a *fixed* set, not derived from
+    // the observed script prefix — per-prefix computation would need a per-param
+    // carrier and is a follow-up — so at any given site only the depth-matching
+    // closer is executable JS; the others still reflect and are reported as [R].
+    // Every breakout is gated by `allows_str` below like any other template.
+    if let InjectionContext::Javascript(Some(delim)) = context {
+        let quote = match delim {
+            DelimiterType::SingleQuote => Some('\''),
+            DelimiterType::DoubleQuote => Some('"'),
+            DelimiterType::Backtick => Some('`'),
+            DelimiterType::Comment => None,
+        };
+        if let Some(q) = quote {
+            templates.extend(crate::payload::js_breakout::breakout_templates(q));
+        }
+    }
+    templates.extend(templates_for(context).into_iter().map(String::from));
+
     let mut out: Vec<String> = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
-    'outer: for template in templates_for(context) {
+    'outer: for template in &templates {
         for func in JS_FUNCS {
             let payload = template
                 .replace("{JS}", func)
