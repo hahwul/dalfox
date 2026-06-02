@@ -89,6 +89,9 @@ impl Target {
     }
 
     pub fn build_client(&self) -> Result<Client, Box<dyn std::error::Error>> {
+        // Library consumers may build clients without going through `main()`,
+        // so make sure the ring crypto provider is installed first.
+        crate::ensure_crypto_provider();
         let key = self.client_cache_key();
         // Fast path: return a cached Client if one matches the key.
         if let Ok(guard) = client_cache().lock()

@@ -93,6 +93,7 @@ pub struct RemoteFetchOptions {
 
 /// Build a reqwest Client with the given remote fetch options (timeout, proxy).
 fn build_remote_client(opts: &RemoteFetchOptions) -> Result<Client, Box<dyn std::error::Error>> {
+    crate::ensure_crypto_provider();
     let mut builder = Client::builder()
         .timeout(Duration::from_secs(
             opts.timeout_secs.unwrap_or(DEFAULT_TIMEOUT_SECS),
@@ -174,6 +175,7 @@ pub async fn init_remote_payloads(providers: &[String]) -> Result<(), Box<dyn st
         return Ok(());
     }
 
+    crate::ensure_crypto_provider();
     let client = Client::builder()
         .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
         .danger_accept_invalid_certs(true)
@@ -209,6 +211,7 @@ pub async fn init_remote_wordlists(providers: &[String]) -> Result<(), Box<dyn s
         return Ok(());
     }
 
+    crate::ensure_crypto_provider();
     let client = Client::builder()
         .timeout(Duration::from_secs(DEFAULT_TIMEOUT_SECS))
         .danger_accept_invalid_certs(true)

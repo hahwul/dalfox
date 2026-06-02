@@ -143,6 +143,7 @@ fn test_build_preflight_request_get_sets_range_and_headers() {
     target.user_agent = Some("Dalfox-Test-UA".to_string());
     target.cookies = vec![("sid".to_string(), "abc".to_string())];
 
+    crate::ensure_crypto_provider();
     let client = reqwest::Client::new();
     let req = build_preflight_request(&client, &target, false, Some(128))
         .build()
@@ -179,6 +180,7 @@ fn test_build_preflight_request_get_sets_range_and_headers() {
 #[test]
 fn test_build_preflight_request_head_ignores_range() {
     let target = parse_target("https://example.com/path").unwrap();
+    crate::ensure_crypto_provider();
     let client = reqwest::Client::new();
     let req = build_preflight_request(&client, &target, true, Some(128))
         .build()
