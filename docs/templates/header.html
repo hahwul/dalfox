@@ -3,10 +3,16 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <!-- CSP is delivered via <meta> because GitHub Pages cannot set response
-       headers. frame-ancestors / HSTS / X-Content-Type-Options therefore cannot
-       be enforced here (they are header-only) and are intentionally omitted. -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'; upgrade-insecure-requests">
+  {% if not env("HWARO_DEV", default="") %}
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  {% endif %}
   <meta name="description" content="{{ page.description | e }}">
   <meta name="color-scheme" content="dark">
   <meta name="theme-color" content="#31365e">
