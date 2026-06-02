@@ -8,6 +8,7 @@ url="https://github.com/hahwul/dalfox"
 license=('MIT')
 depends=('gcc-libs')
 makedepends=('cargo')
+options=(!lto)
 source=("$pkgname-$pkgver.tar.gz::https://github.com/hahwul/dalfox/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP')
 
