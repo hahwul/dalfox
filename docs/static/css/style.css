@@ -330,15 +330,8 @@ body::before {
     width: var(--sidebar-w);
     height: calc(100vh - var(--header-h));
     background: var(--bg-sidebar);
-    border-right: 1px solid transparent;
-    /* Vertical ink rule that softens toward the bottom. */
-    border-image: linear-gradient(
-            180deg,
-            var(--ink-line-strong),
-            var(--ink-line) 55%,
-            transparent
-        )
-        1;
+    /* Explicit full-height divider rule against the content column. */
+    border-right: 1px solid var(--border-light);
     overflow-y: auto;
     padding: 1.5rem 0 2rem;
     z-index: 150;
