@@ -7,6 +7,30 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The previous Go implementation lives on the [`v2` branch](https://github.com/hahwul/dalfox/tree/v2)
 and continues to receive security backports per [SECURITY.md](./SECURITY.md).
 
+## 3.0.1
+
+A maintenance release focused on scan-accuracy fixes, lighter WAF handling, and broader packaging.
+
+### Added
+
+* **DOM-XSS Coverage**: AST analysis now recognizes jQuery `$()`/`jQuery()` selector-to-HTML sinks, dynamic `import()` execution sinks, and `fetch()`/`XMLHttpRequest` response sources.
+* **WAF Fingerprints**: Added NetScaler and cookie-based signatures and generalized the bypass mutations shared across vendors.
+* **Packaging**: Added native `.deb`/`.rpm` packages (`cargo-deb` + `cargo-generate-rpm`), musl binaries (`x86_64-musl`, `aarch64-musl`), and Snapcraft and AUR distribution.
+
+### Changed
+
+* **WAF Bypass Performance**: Made WAF bypass payload expansion orthogonal to avoid combinatorial blow-up during scanning.
+* **Progress UI**: Animated the scan spinner and progress bars with a metallic shimmer.
+
+### Fixed
+
+* Explicit `-p` targets are now always tested, regardless of `--skip-*` flags.
+* Explicit `-p` header/cookie/multipart injection points are honored.
+* Explicit `-d` body params are tested under `--skip-mining`/`--skip-mining-dict` (XSSMaze detection 92.7% → 98.2%).
+* Workers shut down gracefully instead of panicking on a closed semaphore.
+* `--custom-payload` content is validated up front rather than only checking that the file exists.
+* Release tooling no longer truncates `aur/PKGBUILD` during version bumps.
+
 ## 3.0.0
 
 Dalfox v3 is a complete rewrite in Rust, replacing the legacy Go implementation (now on the `v2` branch) with an asynchronous architecture and a modern CLI structure.
