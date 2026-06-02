@@ -23,6 +23,9 @@ jobs:
     permissions:
       contents: write # Required to upload release assets
     strategy:
+      # Keep building every target even if one fails, so a single
+      # target (e.g. a broken .deb) never cancels the others' uploads.
+      fail-fast: false
       matrix:
         include:
           # Linux targets
@@ -104,64 +107,8 @@ jobs:
             cargo build --verbose --release --target ${{ matrix.target }}
           fi
 
-      # --- Debian / RPM packaging (only for glibc Linux targets) ---
-      - name: Install cargo-deb and cargo-generate-rpm
-        if: |
-          matrix.target == 'x86_64-unknown-linux-gnu' ||
-          matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          cargo install cargo-deb --locked
-          cargo install cargo-generate-rpm --locked
-
-      # Copy the cross-compiled binary to the default location that cargo-deb expects
-      - name: Prepare binary for packaging tools
-        if: |
-          matrix.target == 'x86_64-unknown-linux-gnu' ||
-          matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          mkdir -p target/release
-          cp "target/${{ matrix.target }}/release/dalfox" target/release/dalfox
-
-      - name: Build Debian package
-        if: |
-          matrix.target == 'x86_64-unknown-linux-gnu' ||
-          matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          cargo deb --no-build
-
-      - name: Build RPM package
-        if: |
-          matrix.target == 'x86_64-unknown-linux-gnu' ||
-          matrix.target == 'aarch64-unknown-linux-gnu'
-        run: |
-          cargo generate-rpm --target ${{ matrix.target }}
-
-      - name: Rename and checksum packages
-        if: |
-          matrix.target == 'x86_64-unknown-linux-gnu' ||
-          matrix.target == 'aarch64-unknown-linux-gnu'
-        shell: bash
-        run: |
-          cd target/${{ matrix.target }}/release
-
-          # Rename .deb
-          for deb in *.deb; do
-            if [ -f "$deb" ]; then
-              mv "$deb" "dalfox-$VERSION-linux-${{ matrix.build }}.deb"
-            fi
-          done
-
-          # Rename .rpm
-          for rpm in *.rpm; do
-            if [ -f "$rpm" ]; then
-              mv "$rpm" "dalfox-$VERSION-linux-${{ matrix.build }}.rpm"
-            fi
-          done
-
-          # Create checksums
-          shasum -a 256 *.deb *.rpm 2>/dev/null | sed 's|  |  |' > /tmp/pkg-checksums.txt || true
-          mv /tmp/pkg-checksums.txt . 2>/dev/null || true
-      # ---------------------------------------------------------------
+      # Build and upload the binary archive first, so a packaging-tool
+      # failure (.deb/.rpm) can never block the primary release artifact.
       - name: Build archive
         shell: bash
         run: |
@@ -169,11 +116,11 @@ jobs:
           dirname="$binary_name-$VERSION-${{ matrix.build }}"
           mkdir "$dirname"
 
-          # Move the appropriate binary into the archive directory
+          # Copy (not move) the binary so the Debian/RPM steps can still find it
           if [ "${{ matrix.os }}" = "windows-latest" ]; then
-            mv "target/${{ matrix.target }}/release/$binary_name.exe" "$dirname"
+            cp "target/${{ matrix.target }}/release/$binary_name.exe" "$dirname"
           else
-            mv "target/${{ matrix.target }}/release/$binary_name" "$dirname"
+            cp "target/${{ matrix.target }}/release/$binary_name" "$dirname"
           fi
 
           # Create the appropriate archive format for each OS
@@ -200,6 +147,57 @@ jobs:
             ${{ env.ASSET }}
             ${{ env.ASSET }}.sha256
 
+      # --- Debian / RPM packaging (only for glibc Linux targets) ---
+      - name: Install cargo-deb and cargo-generate-rpm
+        if: |
+          matrix.target == 'x86_64-unknown-linux-gnu' ||
+          matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          cargo install cargo-deb --locked
+          cargo install cargo-generate-rpm --locked
+
+      # Copy the cross-compiled binary to the default location the packaging tools expect
+      - name: Prepare binary for packaging tools
+        if: |
+          matrix.target == 'x86_64-unknown-linux-gnu' ||
+          matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          mkdir -p target/release
+          cp "target/${{ matrix.target }}/release/dalfox" target/release/dalfox
+
+      - name: Build Debian package
+        if: |
+          matrix.target == 'x86_64-unknown-linux-gnu' ||
+          matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          cargo deb --no-build
+
+      - name: Build RPM package
+        if: |
+          matrix.target == 'x86_64-unknown-linux-gnu' ||
+          matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          cargo generate-rpm --target ${{ matrix.target }}
+
+      # cargo-deb writes to target/debian/, cargo-generate-rpm to
+      # target/<target>/generate-rpm/ — collect both into target/packages/.
+      - name: Rename and checksum packages
+        if: |
+          matrix.target == 'x86_64-unknown-linux-gnu' ||
+          matrix.target == 'aarch64-unknown-linux-gnu'
+        shell: bash
+        run: |
+          mkdir -p target/packages
+          deb=$(find target/debian -name '*.deb' | head -n1)
+          rpm=$(find "target/${{ matrix.target }}/generate-rpm" -name '*.rpm' | head -n1)
+          deb_name="dalfox-$VERSION-${{ matrix.build }}.deb"
+          rpm_name="dalfox-$VERSION-${{ matrix.build }}.rpm"
+          cp "$deb" "target/packages/$deb_name"
+          cp "$rpm" "target/packages/$rpm_name"
+          cd target/packages
+          shasum -a 256 "$deb_name" > "$deb_name.sha256"
+          shasum -a 256 "$rpm_name" > "$rpm_name.sha256"
+
       - name: Upload Debian and RPM packages
         if: |
           (github.event_name == 'release' || github.event.inputs.upload == 'true') &&
@@ -207,7 +205,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: |
-            target/${{ matrix.target }}/release/dalfox-*.deb
-            target/${{ matrix.target }}/release/dalfox-*.rpm
-            target/${{ matrix.target }}/release/dalfox-*.deb.sha256
-            target/${{ matrix.target }}/release/dalfox-*.rpm.sha256
+            target/packages/*.deb
+            target/packages/*.rpm
+            target/packages/*.deb.sha256
+            target/packages/*.rpm.sha256
