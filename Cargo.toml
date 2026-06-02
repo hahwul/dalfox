@@ -6,6 +6,8 @@ rust-version = "1.93"
 authors = ["hahwul"]
 description = "Dalfox is a powerful open-source XSS scanner and utility focused on automation"
 license = "MIT"
+homepage = "https://github.com/hahwul/dalfox"
+repository = "https://github.com/hahwul/dalfox"
 
 [dependencies]
 clap = { version = "4.0", features = ["derive", "env"] }
@@ -44,8 +46,6 @@ strip = "symbols"
 maintainer = "hahwul <hahwul@gmail.com>"
 copyright = "2024, hahwul"
 license-file = "LICENSE.txt"
-homepage = "https://github.com/hahwul/dalfox"
-description = "Powerful open-source XSS scanner"
 extended-description = """Dalfox is a powerful open-source XSS scanner and automation utility.
 It supports reflected, stored, and DOM-based XSS discovery with AST-backed verification."""
 depends = ["ca-certificates"]
