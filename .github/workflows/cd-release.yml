@@ -143,6 +143,9 @@ jobs:
         if: github.event_name == 'release' || github.event.inputs.upload == 'true'
         uses: softprops/action-gh-release@v3
         with:
+          # Pin the target release so manual workflow_dispatch runs (where
+          # github.ref is a branch, not a tag) still upload to VERSION.
+          tag_name: ${{ env.VERSION }}
           files: |-
             ${{ env.ASSET }}
             ${{ env.ASSET }}.sha256
@@ -204,6 +207,7 @@ jobs:
           (matrix.target == 'x86_64-unknown-linux-gnu' || matrix.target == 'aarch64-unknown-linux-gnu')
         uses: softprops/action-gh-release@v3
         with:
+          tag_name: ${{ env.VERSION }}
           files: |
             target/packages/*.deb
             target/packages/*.rpm
