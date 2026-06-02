@@ -1402,10 +1402,12 @@ pub async fn check_reflection_with_response(
     }
 }
 
-/// Convenience wrapper over [`check_reflection_with_response`] that discards
-/// the body and reports only whether a (non-safe-context) reflection was
-/// found. Always builds a default client (CLI path).
-pub async fn check_reflection(
+/// Test-only convenience wrapper over [`check_reflection_with_response`]:
+/// discards the body and reports only whether a (non-safe-context) reflection
+/// was found, always building a default client. Production code calls
+/// [`check_reflection_with_response`] directly with a pooled client.
+#[cfg(test)]
+async fn check_reflection(
     target: &Target,
     param: &Param,
     payload: &str,
