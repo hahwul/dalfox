@@ -46,6 +46,29 @@ fn template_literal_expression() {
     assert_eq!(compute_js_breakout("`hello "), "`");
 }
 
+#[test]
+fn covers_scanner_state_edges() {
+    // Standalone / mismatched closers in code position are no-ops (never pop the
+    // wrong opener), leaving nothing to close.
+    assert_eq!(compute_js_breakout("}}])"), "");
+    // `)` must not pop a `[`; both stay open.
+    assert_eq!(compute_js_breakout("(["), "])");
+    assert_eq!(compute_js_breakout("([)"), "])");
+
+    // Single-quoted string: escaped quote keeps it open; a real quote closes it.
+    assert_eq!(compute_js_breakout("'a\\'b'"), ""); // opened and closed
+    assert_eq!(compute_js_breakout("x='a\\'"), "'"); // escaped quote -> still open
+
+    // Template literal: escaped backtick keeps it open; a real backtick closes.
+    assert_eq!(compute_js_breakout("`a\\`b`"), ""); // opened and closed
+
+    // Block comment that terminates, then an open call after it.
+    assert_eq!(compute_js_breakout("/* x */ foo("), ")");
+
+    // Ending inside a line comment must emit a newline to escape it.
+    assert_eq!(compute_js_breakout("x // foo"), "\n");
+}
+
 // ===== oxc-validated correctness =====
 //
 // The decisive proof, browser-free: reconstruct `prefix + breakout +
