@@ -33,6 +33,26 @@ waf_type = "Cloudflare"
 confidence = 0.95
 evidence_label = "Server: cloudflare"
 
+[[header]]
+header = "cf-mitigated"
+waf_type = "Cloudflare"
+confidence = 0.85
+evidence_label = "cf-mitigated header (challenge/block)"
+
+[[header]]
+header = "set-cookie"
+value_contains = "__cf_bm"
+waf_type = "Cloudflare"
+confidence = 0.9
+evidence_label = "__cf_bm bot-management cookie"
+
+[[header]]
+header = "set-cookie"
+value_contains = "__cfduid"
+waf_type = "Cloudflare"
+confidence = 0.7
+evidence_label = "__cfduid cookie (legacy Cloudflare)"
+
 # AWS WAF / CloudFront
 [[header]]
 header = "x-amzn-requestid"
@@ -51,6 +71,13 @@ header = "x-amzn-waf-action"
 waf_type = "AwsWaf"
 confidence = 0.95
 evidence_label = "x-amzn-waf-action header"
+
+[[header]]
+header = "set-cookie"
+value_contains = "aws-waf-token"
+waf_type = "AwsWaf"
+confidence = 0.9
+evidence_label = "aws-waf-token cookie (challenge/CAPTCHA)"
 
 # Akamai
 [[header]]
@@ -72,6 +99,27 @@ waf_type = "Akamai"
 confidence = 0.8
 evidence_label = "x-akamai-session-info header"
 
+[[header]]
+header = "set-cookie"
+value_contains = "ak_bmsc"
+waf_type = "Akamai"
+confidence = 0.85
+evidence_label = "ak_bmsc Bot Manager cookie"
+
+[[header]]
+header = "set-cookie"
+value_contains = "_abck"
+waf_type = "Akamai"
+confidence = 0.8
+evidence_label = "_abck Bot Manager cookie"
+
+[[header]]
+header = "set-cookie"
+value_contains = "bm_sz"
+waf_type = "Akamai"
+confidence = 0.7
+evidence_label = "bm_sz Bot Manager cookie"
+
 # Imperva / Incapsula
 [[header]]
 header = "x-cdn"
@@ -91,6 +139,27 @@ header = "x-cdn-forward"
 waf_type = "Imperva"
 confidence = 0.6
 evidence_label = "x-cdn-forward header"
+
+[[header]]
+header = "set-cookie"
+value_contains = "incap_ses"
+waf_type = "Imperva"
+confidence = 0.9
+evidence_label = "incap_ses session cookie"
+
+[[header]]
+header = "set-cookie"
+value_contains = "visid_incap"
+waf_type = "Imperva"
+confidence = 0.9
+evidence_label = "visid_incap visitor cookie"
+
+[[header]]
+header = "set-cookie"
+value_contains = "nlbi_"
+waf_type = "Imperva"
+confidence = 0.7
+evidence_label = "nlbi_ load-balancing cookie (Imperva)"
 
 # ModSecurity
 [[header]]
@@ -140,6 +209,13 @@ header = "x-wa-info"
 waf_type = "F5BigIp"
 confidence = 0.7
 evidence_label = "x-wa-info header"
+
+[[header]]
+header = "set-cookie"
+value_contains = "bigipserver"
+waf_type = "F5BigIp"
+confidence = 0.85
+evidence_label = "BIGipServer persistence cookie"
 
 # Barracuda
 [[header]]
@@ -214,6 +290,40 @@ value_contains = "varnish"
 waf_type = "Fastly"
 confidence = 0.5
 evidence_label = "Via: varnish (possibly Fastly)"
+
+# Citrix NetScaler (AppFirewall)
+# NetScaler rewrites the `Connection` header into a scrambled form
+# (`nnCoection` / `Cneonction`) — a long-standing, pathognomonic
+# fingerprint also used by Nmap's http-waf-fingerprint and wafw00f.
+# Presence alone is strong evidence; no benign stack emits these names.
+[[header]]
+header = "nnCoection"
+waf_type = "Citrix"
+confidence = 0.9
+evidence_label = "nnCoection scrambled Connection header (NetScaler)"
+
+[[header]]
+header = "Cneonction"
+waf_type = "Citrix"
+confidence = 0.9
+evidence_label = "Cneonction scrambled Connection header (NetScaler)"
+
+[[header]]
+header = "set-cookie"
+value_contains = "citrix_ns_id"
+waf_type = "Citrix"
+confidence = 0.9
+evidence_label = "citrix_ns_id cookie (NetScaler)"
+
+# Anchored with `=` so it keys on the cookie *name* `ns_af`, not the bare
+# token: an unanchored `ns_af` substring-matches benign cookies such as
+# `columns_affinity=…` and misattributes them to NetScaler.
+[[header]]
+header = "set-cookie"
+value_contains = "ns_af="
+waf_type = "Citrix"
+confidence = 0.85
+evidence_label = "ns_af AppFirewall cookie (NetScaler)"
 
 
 # ── Body rules ──────────────────────────────────────────────────────────

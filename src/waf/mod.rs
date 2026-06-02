@@ -33,6 +33,10 @@ pub enum WafType {
     CloudArmor,
     Fastly,
     Wordfence,
+    /// Citrix NetScaler (AppFirewall). Fingerprinted by its scrambled
+    /// `Connection` header (`nnCoection` / `Cneonction`) and `citrix_ns_id`
+    /// / `ns_af` persistence cookies.
+    Citrix,
     Unknown(String),
 }
 
@@ -53,6 +57,7 @@ impl std::fmt::Display for WafType {
             WafType::CloudArmor => write!(f, "Google Cloud Armor"),
             WafType::Fastly => write!(f, "Fastly"),
             WafType::Wordfence => write!(f, "Wordfence"),
+            WafType::Citrix => write!(f, "Citrix NetScaler"),
             WafType::Unknown(hint) => write!(f, "Unknown ({})", hint),
         }
     }
@@ -148,6 +153,7 @@ fn parse_waf_type_from_rule(name: &str) -> WafType {
         "CloudArmor" => WafType::CloudArmor,
         "Fastly" => WafType::Fastly,
         "Wordfence" => WafType::Wordfence,
+        "Citrix" => WafType::Citrix,
         other => WafType::Unknown(other.to_string()),
     }
 }
@@ -178,25 +184,32 @@ pub fn fingerprint_from_response(
     let mut result = WafDetectionResult::default();
 
     // ── Header-based detection ──────────────────────────────────────
+    // Iterate `get_all` rather than `get` so repeated headers are each
+    // checked: `set-cookie` is emitted once per cookie, and `get` would
+    // only see the first — masking the WAF persistence/bot cookies
+    // (`__cf_bm`, `incap_ses`, `_abck`, `citrix_ns_id`, …) that many
+    // vendors are most reliably fingerprinted by. `via` can likewise
+    // carry multiple proxy hops. For the common single-value header the
+    // iterator yields exactly one item, so there's no extra cost.
     for rule in &rules().headers {
-        if let Some(val) = headers.get(rule.header.as_str()) {
-            let matched = match rule.value_contains.as_deref() {
+        let matched = headers.get_all(rule.header.as_str()).iter().any(|val| {
+            match rule.value_contains.as_deref() {
                 None => true,
                 Some(substr) => val
                     .to_str()
                     .ok()
                     .is_some_and(|v| v.to_ascii_lowercase().contains(substr)),
-            };
-            if matched {
-                merge_fingerprint(
-                    &mut result,
-                    WafFingerprint {
-                        waf_type: parse_waf_type_from_rule(&rule.waf_type),
-                        confidence: rule.confidence,
-                        evidence: rule.evidence_label.clone(),
-                    },
-                );
             }
+        });
+        if matched {
+            merge_fingerprint(
+                &mut result,
+                WafFingerprint {
+                    waf_type: parse_waf_type_from_rule(&rule.waf_type),
+                    confidence: rule.confidence,
+                    evidence: rule.evidence_label.clone(),
+                },
+            );
         }
     }
 

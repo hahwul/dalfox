@@ -346,6 +346,7 @@ fn parse_waf_type(s: &str) -> crate::waf::WafType {
         "cloudarmor" | "cloud-armor" | "gcp" => crate::waf::WafType::CloudArmor,
         "fastly" => crate::waf::WafType::Fastly,
         "wordfence" => crate::waf::WafType::Wordfence,
+        "citrix" | "netscaler" => crate::waf::WafType::Citrix,
         other => crate::waf::WafType::Unknown(other.to_string()),
     }
 }
@@ -367,6 +368,8 @@ mod waf_type_tests {
         assert_eq!(parse_waf_type("forti"), WafType::FortiWeb);
         assert_eq!(parse_waf_type("cloud-armor"), WafType::CloudArmor);
         assert_eq!(parse_waf_type("wordfence"), WafType::Wordfence);
+        assert_eq!(parse_waf_type("netscaler"), WafType::Citrix);
+        assert_eq!(parse_waf_type("Citrix"), WafType::Citrix);
     }
 
     #[test]
