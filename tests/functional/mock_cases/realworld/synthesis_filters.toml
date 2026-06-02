@@ -1,0 +1,76 @@
+# Filter-constrained synthesis benchmark (issue #1075).
+#
+# These cases drive the *realworld* handler, which is the only one that applies
+# the `filter` chain server-side before reflecting. Each case is genuinely
+# exploitable only with a payload shaped to the surviving character set —
+# exactly what the generative synthesis engine produces.
+#
+# (Synthesis's no-false-positive guarantee — that it emits nothing when no
+# executing payload can survive, and never uses a blocked character — is proven
+# directly by the unit tests `everything_blocked_yields_nothing` and
+# `obeys_filter_for_assorted_blocked_sets`. A functional negative case cannot
+# isolate it here because the scanner's base64 encoder turns any payload into an
+# all-alphanumeric string that reflects as inert text under permissive filters,
+# which is pre-existing, synthesis-independent behavior.)
+#
+# IDs use the 9000+ block to stay clear of the existing realworld corpus.
+
+[[case]]
+id = 9001
+name = "synth_attr_dq_strip_angles"
+description = "Double-quoted attribute value, server strips < and >. Needs stay-in-tag event injection."
+handler_type = "realworld"
+reflection = "<input type=text value=\"{input}\">"
+filter = "remove_angles"
+expected_detection = true
+category = "synthesis"
+
+[[case]]
+id = 9002
+name = "synth_attr_sq_strip_angles"
+description = "Single-quoted attribute value, server strips < and >."
+handler_type = "realworld"
+reflection = "<input type=text value='{input}'>"
+filter = "remove_angles"
+expected_detection = true
+category = "synthesis"
+
+[[case]]
+id = 9003
+name = "synth_html_strip_parens"
+description = "HTML text context, server strips ( and ). Needs a backtick-call execution primitive."
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+filter = "remove_parens"
+expected_detection = true
+category = "synthesis"
+
+[[case]]
+id = 9004
+name = "synth_attr_dq_strip_angles_and_parens"
+description = "Attribute value with BOTH < > and ( ) stripped — the catalog has no marker-carrying payload that survives; synthesis builds a backtick event injection."
+handler_type = "realworld"
+reflection = "<input value=\"{input}\">"
+filter = "remove_angles|remove_parens"
+expected_detection = true
+category = "synthesis"
+
+[[case]]
+id = 9005
+name = "synth_html_strip_quotes"
+description = "HTML text context, server strips both quote characters."
+handler_type = "realworld"
+reflection = "<div>{input}</div>"
+filter = "remove_quotes"
+expected_detection = true
+category = "synthesis"
+
+[[case]]
+id = 9006
+name = "synth_href_encode_angles_protocol"
+description = "href value with < > entity-encoded; a javascript: URL (no angles) still executes."
+handler_type = "realworld"
+reflection = "<a href=\"{input}\">link</a>"
+filter = "encode_angles"
+expected_detection = true
+category = "synthesis"

@@ -341,10 +341,27 @@ pub fn generate_adaptive_payloads(
     let adaptive_encoders =
         crate::encoding::generate_adaptive_encodings(invalid_specials, valid_specials);
 
+    // Issue #1075: filter-constrained generative synthesis. Build payloads from
+    // building blocks gated on exactly which characters this parameter's
+    // server-side filter reflects unchanged, and emit them *before* the broad
+    // catalog so the scan loop's first-hit-wins ordering tries the shapes most
+    // likely to execute against this specific filter first. Synthesized
+    // payloads only use surviving characters, so they are sent raw — encoding
+    // exists to smuggle *blocked* characters, which synthesis avoids by
+    // construction.
+    let synthesized =
+        crate::payload::synthesis::synthesize_payloads(context, invalid_specials, valid_specials);
+
     // Apply adaptive encoders with pre-allocated capacity
-    let estimated_cap = filtered_payloads.len() * (2 + adaptive_encoders.len());
+    let estimated_cap =
+        (synthesized.len() + filtered_payloads.len()) * (2 + adaptive_encoders.len());
     let mut out = Vec::with_capacity(estimated_cap);
     let mut seen = std::collections::HashSet::with_capacity(estimated_cap);
+    for p in synthesized {
+        if seen.insert(p.clone()) {
+            out.push(p);
+        }
+    }
     for p in &filtered_payloads {
         // Original - insert reference to avoid clone when already seen
         if seen.insert(p.clone()) {
