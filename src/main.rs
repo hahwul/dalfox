@@ -1,3 +1,8 @@
+/*
+Code by @hahwul
+Happy hacking :D
+*/
+
 use clap::{Parser, Subcommand};
 
 use dalfox::cmd::scan::ScanOutcome;
