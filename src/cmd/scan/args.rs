@@ -354,8 +354,8 @@ pub struct ScanArgs {
     pub max_targets_per_host: usize,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Specify payload encoders to use (comma-separated). Options: none, url, 2url, 3url, 4url, html, base64. Default: url,html
-    #[arg(short = 'e', long, value_delimiter = ',', default_values = &["url", "html"], value_parser = clap::builder::PossibleValuesParser::new(["none", "url", "2url", "3url", "4url", "html", "base64"]))]
+    /// Specify payload encoders to use (comma-separated). Options: none, url, 2url, 3url, 4url, html, htmlpad, base64, unicode, zwsp. Default: url,html
+    #[arg(short = 'e', long, value_delimiter = ',', default_values = &["url", "html"], value_parser = clap::builder::PossibleValuesParser::new(["none", "url", "2url", "3url", "4url", "html", "htmlpad", "base64", "unicode", "zwsp"]))]
     pub encoders: Vec<String>,
 
     #[clap(help_heading = "XSS SCANNING")]
@@ -589,6 +589,28 @@ impl ScanArgs {
 mod arg_parser_tests {
     use super::*;
     use crate::cmd::scan::DEFAULT_TIMEOUT_SECS;
+
+    #[test]
+    fn encoders_arg_accepts_all_implemented_encoders() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(flatten)]
+            scan: ScanArgs,
+        }
+
+        // Regression for #1069: the clap allowlist must accept every encoder the
+        // engine implements, including htmlpad, unicode, and zwsp.
+        let cli = TestCli::try_parse_from([
+            "dalfox",
+            "https://example.com",
+            "-e",
+            "htmlpad,unicode,zwsp",
+        ])
+        .expect("encoders htmlpad,unicode,zwsp should be accepted");
+        assert_eq!(cli.scan.encoders, vec!["htmlpad", "unicode", "zwsp"]);
+    }
 
     #[test]
     fn force_waf_arg_normalizes_known_alias() {
