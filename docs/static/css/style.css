@@ -44,7 +44,6 @@
     --bracket-dim: rgba(139, 148, 232, 0.22);
     /* faint paper grain + lattice motifs, applied at very low opacity */
     --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
-    --seigaiha: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='30' viewBox='0 0 60 30'%3E%3Cg fill='none' stroke='%238b94e8' stroke-width='1'%3E%3Cpath d='M0 30a15 15 0 0 1 30 0a15 15 0 0 1 30 0'/%3E%3Cpath d='M-30 30a15 15 0 0 1 30 0a15 15 0 0 1 30 0' opacity='0.6'/%3E%3Cpath d='M30 30a15 15 0 0 1 30 0' opacity='0.6'/%3E%3C/g%3E%3C/svg%3E");
     --asanoha: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='96' viewBox='0 0 56 96'%3E%3Cg fill='none' stroke='%238b94e8' stroke-width='0.8'%3E%3Cpath d='M28 0v24M28 24L7 36M28 24l21 12M28 24v24M28 48L7 36M28 48l21 12M28 48v24M28 72L7 60M28 72l21 12M28 96v-24M7 12v24M49 12v24M7 60v24M49 60v24M0 24l7 12M56 24l-7 12M0 72l7-12M56 72l-7-12'/%3E%3C/g%3E%3C/svg%3E");
 
     /* Status */
@@ -1024,21 +1023,20 @@ nav.pagination a:hover {
     padding: 2.5rem 2rem;
     background: var(--bg-sidebar);
 }
-/* Seigaiha (青海波) wave band cresting along the top edge of the footer. */
+/* Lozenge seal centred on the footer's top divider — mirrors `.section::after`
+   so the footer reads as the final panel in the same sequence of dividers. */
 .site-footer::before {
     content: "";
     position: absolute;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 30px;
-    background-image: var(--seigaiha);
-    background-size: 60px 30px;
-    background-repeat: repeat-x;
-    opacity: 0.14;
+    top: -4px;
+    left: 50%;
+    width: 7px;
+    height: 7px;
+    transform: translateX(-50%) rotate(45deg);
+    background: var(--bg-body);
+    border: 1px solid var(--bracket-dim);
+    box-shadow: 0 0 0 5px var(--bg-body);
     pointer-events: none;
-    mask-image: linear-gradient(90deg, transparent, #000 30%, #000 70%, transparent);
-    -webkit-mask-image: linear-gradient(90deg, transparent, #000 30%, #000 70%, transparent);
 }
 .footer-mark {
     text-align: center;
@@ -2005,8 +2003,38 @@ body:has(.docs-layout) .site-footer {
     opacity: 0.7;
     pointer-events: none;
 }
+/* illust3 night-scene backdrop behind the call to action (like the hero and
+   modes scenes). Sits under the radial brand glow and the copy. */
+.cta-illustration {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image: url('/images/illust3.webp');
+    background-position: center 32%;
+    background-size: cover;
+    background-repeat: no-repeat;
+    opacity: 0.16;
+    filter: saturate(0.9) contrast(1.02);
+    /* Soft elliptical reveal so no hard rectangle of the webp ever shows. */
+    mask-image: radial-gradient(
+        ellipse 72% 82% at 50% 42%,
+        black 22%,
+        rgba(0, 0, 0, 0.5) 55%,
+        rgba(0, 0, 0, 0.16) 80%,
+        transparent 96%
+    );
+    -webkit-mask-image: radial-gradient(
+        ellipse 72% 82% at 50% 42%,
+        black 22%,
+        rgba(0, 0, 0, 0.5) 55%,
+        rgba(0, 0, 0, 0.16) 80%,
+        transparent 96%
+    );
+}
 .cta-inner {
     position: relative;
+    z-index: 1;
     max-width: 760px;
     margin: 0 auto;
     text-align: center;
@@ -2039,164 +2067,30 @@ body:has(.docs-layout) .site-footer {
     color: var(--text-muted);
     margin: 2.5rem 0 1rem;
 }
-/* Contributors — signal-glitch distortion.
-   At rest the grid sits still; every ~7s it fires a ~0.45s chromatic-split
-   burst, and hovering tears it apart continuously. The red/cyan ghost layers
-   are real channel isolation (inline #cg-red / #cg-cyan SVG filters) that stay
-   hidden until a burst, then offset + slice-clip and screen-blend over the
-   clean base image so only their fringes read as chromatic aberration. */
-.cg-filters {
-    position: absolute;
-    width: 0;
-    height: 0;
-    overflow: hidden;
-}
-.contributors-glitch {
-    position: relative;
+/* Contributors — clean avatar wall, no distortion. */
+.contributors {
     max-width: 760px;
     margin: 0 auto;
     border-radius: 6px;
     overflow: hidden;
-    isolation: isolate; /* keep the screen/overlay blends off the page behind */
 }
-.cg-base {
+.contributors img {
     display: block;
     width: 100%;
     height: auto;
     border-radius: 6px;
-    animation: cg-base-idle 7s ease-out infinite;
-}
-.cg-layer,
-.cg-scan {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    border-radius: 6px;
-}
-.cg-layer {
-    background: var(--contrib-src) center / 100% 100% no-repeat;
-    mix-blend-mode: screen;
-    opacity: 0;
-    will-change: transform, opacity, clip-path;
-}
-.cg-r {
-    filter: url(#cg-red);
-    animation: cg-r-idle 7s linear infinite;
-}
-.cg-b {
-    filter: url(#cg-cyan);
-    animation: cg-b-idle 7s linear infinite;
-}
-/* Full-colour copy that snaps a thin horizontal band sideways — the "tear" */
-.cg-slice {
-    mix-blend-mode: normal;
-    clip-path: inset(0 0 100% 0);
-    animation: cg-slice-idle 7s steps(1, end) infinite;
-}
-.cg-scan {
-    background: repeating-linear-gradient(
-        0deg,
-        rgba(139, 148, 232, 0.14) 0,
-        rgba(139, 148, 232, 0.14) 1px,
-        transparent 1px,
-        transparent 3px
-    );
-    mix-blend-mode: overlay;
-    opacity: 0;
-    will-change: opacity;
-    animation: cg-scan-idle 7s steps(1, end) infinite;
 }
 
-/* Idle: ~93.5% still, then a rapid multi-frame burst over the final ~0.45s */
-@keyframes cg-base-idle {
-    0%, 93.5%, 100% { transform: translate3d(0, 0, 0); filter: none; }
-    94.5% { transform: translate3d(2px, 0, 0); filter: brightness(1.25) contrast(1.1); }
-    96%   { transform: translate3d(-3px, 0, 0); filter: brightness(0.92); }
-    97.5% { transform: translate3d(1px, 0, 0); filter: brightness(1.15); }
-    99%   { transform: translate3d(-1px, 0, 0); filter: none; }
-}
-@keyframes cg-r-idle {
-    0%, 93.5% { opacity: 0; transform: translate3d(0, 0, 0); clip-path: inset(0 0 0 0); }
-    94%   { opacity: 0.85; transform: translate3d(-7px, 0, 0); clip-path: inset(8% 0 76% 0); }
-    95.5% { opacity: 0.85; transform: translate3d(8px, 0, 0); clip-path: inset(62% 0 12% 0); }
-    97%   { opacity: 0.85; transform: translate3d(-10px, 0, 0); clip-path: inset(36% 0 44% 0); }
-    98.5% { opacity: 0.85; transform: translate3d(4px, 0, 0); clip-path: inset(82% 0 4% 0); }
-    100%  { opacity: 0; transform: translate3d(0, 0, 0); clip-path: inset(0 0 0 0); }
-}
-@keyframes cg-b-idle {
-    0%, 93.5% { opacity: 0; transform: translate3d(0, 0, 0); clip-path: inset(0 0 0 0); }
-    94%   { opacity: 0.85; transform: translate3d(7px, 0, 0); clip-path: inset(20% 0 58% 0); }
-    95.5% { opacity: 0.85; transform: translate3d(-8px, 0, 0); clip-path: inset(48% 0 30% 0); }
-    97%   { opacity: 0.85; transform: translate3d(10px, 0, 0); clip-path: inset(4% 0 78% 0); }
-    98.5% { opacity: 0.85; transform: translate3d(-4px, 0, 0); clip-path: inset(70% 0 14% 0); }
-    100%  { opacity: 0; transform: translate3d(0, 0, 0); clip-path: inset(0 0 0 0); }
-}
-@keyframes cg-slice-idle {
-    0%, 93.5%, 100% { opacity: 0; transform: translate3d(0, 0, 0); clip-path: inset(0 0 100% 0); }
-    94%   { opacity: 1; transform: translate3d(20px, 0, 0); clip-path: inset(22% 0 71% 0); }
-    95.5% { opacity: 1; transform: translate3d(-24px, 0, 0); clip-path: inset(56% 0 37% 0); }
-    97%   { opacity: 1; transform: translate3d(15px, 0, 0); clip-path: inset(38% 0 55% 0); }
-    98.5% { opacity: 1; transform: translate3d(-13px, 0, 0); clip-path: inset(8% 0 84% 0); }
-    100%  { opacity: 0; transform: translate3d(0, 0, 0); clip-path: inset(0 0 100% 0); }
-}
-@keyframes cg-scan-idle {
-    0%, 93.5%, 100% { opacity: 0; }
-    94%   { opacity: 0.55; }
-    96.5% { opacity: 0.3; }
-    99%   { opacity: 0.55; }
-}
-
-/* Hover: drop the idle gap and tear continuously, faster and harder */
-@media (hover: hover) {
-    .contributors-glitch:hover .cg-base {
-        animation: cg-base-hover 0.42s steps(2, end) infinite;
-    }
-    .contributors-glitch:hover .cg-r {
-        animation: cg-r-hover 0.45s steps(1, end) infinite;
-    }
-    .contributors-glitch:hover .cg-b {
-        animation: cg-b-hover 0.5s steps(1, end) infinite;
-    }
-    .contributors-glitch:hover .cg-slice {
-        animation: cg-slice-hover 0.4s steps(1, end) infinite;
-    }
-    .contributors-glitch:hover .cg-scan {
-        animation: none;
-        opacity: 0.45;
-    }
-}
-@keyframes cg-base-hover {
-    0% { transform: translate3d(2px, 0, 0); filter: brightness(1.15); }
-    50% { transform: translate3d(-3px, 0, 0); filter: contrast(1.12); }
-    100% { transform: translate3d(1px, 0, 0); filter: none; }
-}
-@keyframes cg-r-hover {
-    0%   { opacity: 0.85; transform: translate3d(-7px, 0, 0); clip-path: inset(8% 0 68% 0); }
-    25%  { opacity: 0.85; transform: translate3d(8px, 0, 0); clip-path: inset(58% 0 16% 0); }
-    50%  { opacity: 0.85; transform: translate3d(-11px, 0, 0); clip-path: inset(34% 0 40% 0); }
-    75%  { opacity: 0.85; transform: translate3d(5px, 0, 0); clip-path: inset(78% 0 6% 0); }
-    100% { opacity: 0.85; transform: translate3d(-7px, 0, 0); clip-path: inset(8% 0 68% 0); }
-}
-@keyframes cg-b-hover {
-    0%   { opacity: 0.85; transform: translate3d(7px, 0, 0); clip-path: inset(22% 0 54% 0); }
-    25%  { opacity: 0.85; transform: translate3d(-9px, 0, 0); clip-path: inset(46% 0 30% 0); }
-    50%  { opacity: 0.85; transform: translate3d(11px, 0, 0); clip-path: inset(4% 0 74% 0); }
-    75%  { opacity: 0.85; transform: translate3d(-5px, 0, 0); clip-path: inset(68% 0 16% 0); }
-    100% { opacity: 0.85; transform: translate3d(7px, 0, 0); clip-path: inset(22% 0 54% 0); }
-}
-@keyframes cg-slice-hover {
-    0%   { opacity: 1; transform: translate3d(22px, 0, 0); clip-path: inset(18% 0 74% 0); }
-    25%  { opacity: 1; transform: translate3d(-26px, 0, 0); clip-path: inset(58% 0 34% 0); }
-    50%  { opacity: 1; transform: translate3d(16px, 0, 0); clip-path: inset(40% 0 52% 0); }
-    75%  { opacity: 1; transform: translate3d(-18px, 0, 0); clip-path: inset(6% 0 86% 0); }
-    100% { opacity: 1; transform: translate3d(22px, 0, 0); clip-path: inset(18% 0 74% 0); }
-}
-
-/* Respect reduced-motion: hold the clean image, no distortion */
-@media (prefers-reduced-motion: reduce) {
-    .cg-base { animation: none; }
-    .cg-layer,
-    .cg-scan { display: none; }
+/* ==========================================================================
+   Community section
+   ========================================================================== */
+/* "Thanks to the community" panel sitting just above the call to action.
+   Reuses the `.section` divider rhythm and seal. */
+.community-links {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
 }
 
 /* ==========================================================================
@@ -2348,6 +2242,9 @@ body:has(.docs-layout) .site-footer {
         width: 88%;
         opacity: 0.14;
         background-position: 70% 22%;
+    }
+    .cta-illustration {
+        opacity: 0.1;
     }
     .footer-inner {
         flex-direction: column;

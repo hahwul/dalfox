@@ -224,7 +224,24 @@ template = "landing"
   </div>
 </section>
 
+<section class="section section--community">
+  <div class="section-inner">
+    <p class="section-eyebrow">// Community</p>
+    <h2 class="section-title">Built in the open, by hunters everywhere</h2>
+    <p class="section-desc">Dalfox is shaped by the people who run it. Open an issue, send a pull request, or trade payloads with the community. Every contribution sharpens the hunt.</p>
+    <div class="community-links">
+      <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" class="btn btn-secondary" target="_blank" rel="noopener">Contributing guide</a>
+      <a href="https://github.com/hahwul/dalfox/issues" class="btn btn-ghost" target="_blank" rel="noopener">Browse open issues →</a>
+    </div>
+    <p class="contributors-label">Thanks to our contributors</p>
+    <div class="contributors" role="img" aria-label="Dalfox contributors">
+      <img src="https://github.com/hahwul/dalfox/raw/main/docs/static/images/CONTRIBUTORS.svg" alt="Dalfox contributors" loading="lazy">
+    </div>
+  </div>
+</section>
+
 <section class="cta-section">
+  <div class="cta-illustration" aria-hidden="true"></div>
   <div class="cta-inner">
     <h2 class="cta-title">Ready to hunt?</h2>
     <p class="cta-desc">Thousands of scans, zero fuss. Star the repo, read the docs, or drop Dalfox in your next recon loop.</p>
@@ -232,23 +249,6 @@ template = "landing"
       <a href="./getting-started/installation/" class="btn btn-primary">Install Dalfox</a>
       <a href="./reference/cli/" class="btn btn-secondary">CLI Reference</a>
       <a href="https://github.com/hahwul/dalfox" class="btn btn-ghost" target="_blank" rel="noopener">GitHub →</a>
-    </div>
-    <p class="contributors-label">Thanks to our contributors</p>
-    <svg class="cg-filters" width="0" height="0" aria-hidden="true" focusable="false">
-      <filter id="cg-red" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
-        <feColorMatrix type="matrix" values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0"/>
-      </filter>
-      <filter id="cg-cyan" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
-        <feColorMatrix type="matrix" values="0 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0"/>
-      </filter>
-    </svg>
-    <div class="contributors-glitch" role="img" aria-label="Dalfox contributors"
-         style="--contrib-src: url('https://github.com/hahwul/dalfox/raw/main/docs/static/images/CONTRIBUTORS.svg')">
-      <img class="cg-base" src="https://github.com/hahwul/dalfox/raw/main/docs/static/images/CONTRIBUTORS.svg" alt="" aria-hidden="true" loading="lazy">
-      <span class="cg-layer cg-r" aria-hidden="true"></span>
-      <span class="cg-layer cg-b" aria-hidden="true"></span>
-      <span class="cg-layer cg-slice" aria-hidden="true"></span>
-      <span class="cg-scan" aria-hidden="true"></span>
     </div>
   </div>
 </section>
