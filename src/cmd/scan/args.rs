@@ -67,12 +67,14 @@ fn parse_force_waf_arg(s: &str) -> std::result::Result<String, String> {
         "gcp",
         "fastly",
         "wordfence",
+        "citrix",
+        "netscaler",
     ];
     if known.contains(&lower.as_str()) {
         Ok(lower)
     } else {
         Err(format!(
-            "unknown WAF '{}' (use one of: cloudflare, aws, akamai, imperva, modsecurity, owasp-crs, sucuri, f5, barracuda, fortiweb, azure, cloudarmor, fastly, wordfence)",
+            "unknown WAF '{}' (use one of: cloudflare, aws, akamai, imperva, modsecurity, owasp-crs, sucuri, f5, barracuda, fortiweb, azure, cloudarmor, fastly, wordfence, citrix)",
             s
         ))
     }
@@ -593,6 +595,8 @@ mod arg_parser_tests {
         assert_eq!(parse_force_waf_arg("  CloudFlare ").unwrap(), "cloudflare");
         assert_eq!(parse_force_waf_arg("MODSEC").unwrap(), "modsec");
         assert_eq!(parse_force_waf_arg("cloud-armor").unwrap(), "cloud-armor");
+        assert_eq!(parse_force_waf_arg("NetScaler").unwrap(), "netscaler");
+        assert_eq!(parse_force_waf_arg("citrix").unwrap(), "citrix");
     }
 
     #[test]

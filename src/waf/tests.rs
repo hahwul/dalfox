@@ -182,6 +182,7 @@ fn rules_toml_loads_and_covers_all_waf_families() {
         "CloudArmor",
         "Fastly",
         "Wordfence",
+        "Citrix",
     ] {
         assert!(
             waf_names.contains(expected),
@@ -462,6 +463,7 @@ fn test_display_waf_types() {
         format!("{}", WafType::Unknown("test".to_string())),
         "Unknown (test)"
     );
+    assert_eq!(format!("{}", WafType::Citrix), "Citrix NetScaler");
 }
 
 #[test]
@@ -488,4 +490,107 @@ fn test_owasp_crs_plus_modsecurity_dual_detect() {
     // Should detect both ModSecurity engine and OWASP CRS ruleset
     assert!(result.waf_types().contains(&&WafType::OwaspCrs));
     assert!(result.waf_types().contains(&&WafType::ModSecurity));
+}
+
+/// Like `make_headers` but uses `append`, so repeated keys (notably
+/// multiple `set-cookie` lines) all survive — mirroring how reqwest
+/// exposes a real multi-cookie response.
+fn make_headers_appending(pairs: &[(&str, &str)]) -> HeaderMap {
+    let mut map = HeaderMap::new();
+    for (k, v) in pairs {
+        map.append(
+            HeaderName::from_bytes(k.as_bytes()).unwrap(),
+            HeaderValue::from_str(v).unwrap(),
+        );
+    }
+    map
+}
+
+#[test]
+fn test_netscaler_detection_by_scrambled_connection_header() {
+    // `nnCoection` / `Cneonction` are NetScaler's mangled `Connection`
+    // header — a pathognomonic fingerprint no benign stack emits.
+    let headers = make_headers(&[("nnCoection", "close")]);
+    let result = fingerprint_from_response(&headers, None, 200);
+    assert!(result.waf_types().contains(&&WafType::Citrix));
+    assert!(result.primary().unwrap().confidence >= 0.9);
+}
+
+#[test]
+fn test_netscaler_detection_by_cookie() {
+    let headers = make_headers(&[("set-cookie", "citrix_ns_id=0a1b2c; Path=/; Secure")]);
+    let result = fingerprint_from_response(&headers, None, 200);
+    assert!(result.waf_types().contains(&&WafType::Citrix));
+}
+
+#[test]
+fn test_netscaler_af_cookie_anchored_to_name() {
+    // The `ns_af` rule keys on the cookie name (`ns_af=`), so the real
+    // AppFirewall cookie fires...
+    let waf = make_headers(&[("set-cookie", "ns_af=abcdef; Path=/")]);
+    assert!(
+        fingerprint_from_response(&waf, None, 200)
+            .waf_types()
+            .contains(&&WafType::Citrix)
+    );
+    // ...but a benign cookie that merely *contains* the substring `ns_af`
+    // (e.g. `columns_affinity`) must not be misattributed to NetScaler.
+    let benign = make_headers(&[("set-cookie", "columns_affinity=name,date; Path=/")]);
+    assert!(
+        !fingerprint_from_response(&benign, None, 200)
+            .waf_types()
+            .contains(&&WafType::Citrix),
+        "unanchored ns_af substring would false-positive on columns_affinity"
+    );
+}
+
+#[test]
+fn test_cloudflare_detection_by_cf_bm_cookie() {
+    let headers = make_headers(&[("set-cookie", "__cf_bm=token; path=/; Secure")]);
+    let result = fingerprint_from_response(&headers, None, 200);
+    assert!(result.waf_types().contains(&&WafType::Cloudflare));
+}
+
+#[test]
+fn test_imperva_detection_by_incap_cookie() {
+    let headers = make_headers(&[("set-cookie", "incap_ses_42_123=deadbeef; path=/")]);
+    let result = fingerprint_from_response(&headers, None, 200);
+    assert!(result.waf_types().contains(&&WafType::Imperva));
+}
+
+#[test]
+fn test_akamai_detection_by_bot_manager_cookie() {
+    let headers = make_headers(&[("set-cookie", "_abck=ABC~0~xyz; path=/")]);
+    let result = fingerprint_from_response(&headers, None, 200);
+    assert!(result.waf_types().contains(&&WafType::Akamai));
+}
+
+#[test]
+fn test_aws_waf_detection_by_token_cookie() {
+    let headers = make_headers(&[("set-cookie", "aws-waf-token=00000000-0000; Path=/")]);
+    let result = fingerprint_from_response(&headers, None, 200);
+    assert!(result.waf_types().contains(&&WafType::AwsWaf));
+}
+
+#[test]
+fn test_f5_detection_by_bigip_cookie() {
+    let headers = make_headers(&[("set-cookie", "BIGipServerpool_web=12345.6789.0000; path=/")]);
+    let result = fingerprint_from_response(&headers, None, 200);
+    assert!(result.waf_types().contains(&&WafType::F5BigIp));
+}
+
+#[test]
+fn test_multivalued_set_cookie_all_checked() {
+    // A benign session cookie precedes the WAF cookie. `HeaderMap::get`
+    // sees only the first value; detection must iterate every Set-Cookie
+    // (via `get_all`) to fire on the second.
+    let headers = make_headers_appending(&[
+        ("set-cookie", "sessionid=abc123; Path=/; HttpOnly"),
+        ("set-cookie", "incap_ses_42_123=deadbeef; Path=/"),
+    ]);
+    let result = fingerprint_from_response(&headers, None, 200);
+    assert!(
+        result.waf_types().contains(&&WafType::Imperva),
+        "second Set-Cookie (incap_ses) must be detected via get_all"
+    );
 }
