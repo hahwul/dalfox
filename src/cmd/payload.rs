@@ -58,7 +58,9 @@ fn print_summary() {
     println!("- Use scanning to apply payloads: dalfox scan <target>");
     println!("- Add your own payloads with: --custom-payload <file>");
     println!("- Only test custom payloads with: --only-custom-payload");
-    println!("- Control encoder variants with: -e none,url,2url,3url,4url,html,base64");
+    println!(
+        "- Control encoder variants with: -e none,url,2url,3url,4url,html,htmlpad,base64,unicode,zwsp"
+    );
 }
 
 /// Fetch payloads from a remote provider and print one per line.
