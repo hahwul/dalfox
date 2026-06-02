@@ -618,15 +618,15 @@ pub(crate) fn hydrate_preflight_target(
                 .collect()
         })
         .unwrap_or_default();
+    // Reuse the shared cookie splitter so preflight parses the `cookie`
+    // option exactly like `run_scan_job` / `/scan` does — both trim
+    // whitespace around each `name=value` pair. The earlier inline version
+    // here left `=`-adjacent whitespace in, so the same cookie option could
+    // produce different cookies on the preflight vs. scan paths.
     t.cookies = opts
         .cookie
         .as_ref()
-        .map(|c| {
-            c.split(';')
-                .filter_map(|p| p.trim().split_once('='))
-                .map(|(k, v)| (k.to_string(), v.to_string()))
-                .collect()
-        })
+        .map(|c| split_cookie_pairs(c))
         .unwrap_or_default();
     t.data = opts.data.clone();
     Ok(t)

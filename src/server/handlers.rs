@@ -492,13 +492,19 @@ pub(crate) async fn cancel_scan_handler(
                     job.finished_at_ms = Some(now_ms());
                 }
             }
+            // Release the jobs lock before serializing the response, the same
+            // way the purge branch above does — otherwise the scan task (and
+            // every other handler) is blocked on the mutex while we build
+            // CORS headers and JSON for this one reply.
+            let target_url = job.target_url.clone();
+            drop(jobs);
             log(&state, "JOB", &format!("cancelled id={}", id));
             let resp = ApiResponse {
                 code: 200,
                 msg: "ok".to_string(),
                 data: Some(serde_json::json!({
                     "scan_id": id,
-                    "target": job.target_url,
+                    "target": target_url,
                     "cancelled": true,
                     "previous_status": previous_status
                 })),
@@ -506,6 +512,7 @@ pub(crate) async fn cancel_scan_handler(
             make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
         }
         None => {
+            drop(jobs);
             let resp = ApiResponse::<serde_json::Value> {
                 code: 404,
                 msg: "not found".to_string(),
