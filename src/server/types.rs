@@ -1,0 +1,155 @@
+//! Request/response data types and server configuration for the HTTP API.
+
+use super::*;
+
+#[derive(Args)]
+pub struct ServerArgs {
+    /// Port to run the server on
+    #[clap(help_heading = "SERVER")]
+    #[arg(short, long, default_value = "6664")]
+    pub port: u16,
+
+    /// Host to bind the server to
+    #[clap(help_heading = "SERVER")]
+    #[arg(short = 'H', long, default_value = "127.0.0.1")]
+    pub host: String,
+
+    /// API key required in X-API-KEY header (or set via DALFOX_API_KEY). Leave empty to disable auth.
+    #[clap(help_heading = "SERVER")]
+    #[arg(long = "api-key")]
+    pub api_key: Option<String>,
+
+    /// Path to a log file to also write logs (plain text, no ANSI colors)
+    #[clap(help_heading = "SERVER")]
+    #[arg(long = "log-file")]
+    pub log_file: Option<String>,
+
+    /// Comma-separated list of allowed origins for CORS. Supports:
+    /// - "*" (match all)
+    /// - exact origins (http://localhost:3000)
+    /// - "regex:<pattern>" for regex
+    #[clap(help_heading = "CORS")]
+    #[arg(
+        long = "allowed-origins",
+        help = "Comma-separated list of allowed origins for CORS.\nSupports:\n  - \"*\" wildcard (match all)\n  - exact origins (http://localhost:3000)\n  - \"regex:<pattern>\" for regex",
+        long_help = "Comma-separated list of allowed origins for CORS.\nSupports:\n  - \"*\" wildcard (match all)\n  - exact origins (http://localhost:3000)\n  - \"regex:<pattern>\" for regex"
+    )]
+    pub allowed_origins: Option<String>,
+
+    /// Allow JSONP responses (wrap JSON in callback())
+    #[clap(help_heading = "JSONP")]
+    #[arg(long = "jsonp")]
+    pub jsonp: bool,
+
+    /// JSONP callback parameter name (default: callback)
+    #[clap(help_heading = "JSONP")]
+    #[arg(long = "callback-param-name", default_value = "callback")]
+    pub callback_param_name: String,
+
+    /// CORS allow methods (comma-separated). Default: GET,POST,OPTIONS,PUT,PATCH,DELETE
+    #[clap(help_heading = "CORS")]
+    #[arg(long = "cors-allow-methods")]
+    pub cors_allow_methods: Option<String>,
+
+    /// CORS allow headers (comma-separated). Default: Content-Type,X-API-KEY,Authorization
+    #[clap(help_heading = "CORS")]
+    #[arg(long = "cors-allow-headers")]
+    pub cors_allow_headers: Option<String>,
+}
+
+#[derive(Clone)]
+pub(crate) struct AppState {
+    pub(crate) api_key: Option<String>,
+    pub(crate) jobs: Arc<Mutex<HashMap<String, Job>>>,
+    // optional log file path (plain logs only; no ANSI color codes)
+    pub(crate) log_file: Option<String>,
+    // raw allowed origins as provided (after split)
+    pub(crate) allowed_origins: Option<Vec<String>>,
+    // compiled regex patterns derived from allowed_origins entries starting with "regex:" or with wildcard '*'
+    pub(crate) allowed_origin_regexes: Vec<regex::Regex>,
+    // whether '*' was included explicitly
+    pub(crate) allow_all_origins: bool,
+    // CORS response headers config
+    pub(crate) allow_methods: String,
+    pub(crate) allow_headers: String,
+    // JSONP
+    pub(crate) jsonp_enabled: bool,
+    pub(crate) callback_param_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(crate) struct ApiResponse<T> {
+    pub(crate) code: i32,
+    pub(crate) msg: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) data: Option<T>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct ScanRequest {
+    pub(crate) url: String,
+    #[serde(default)]
+    pub(crate) options: Option<ScanOptions>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct ScanOptions {
+    pub(crate) cookie: Option<String>,
+    pub(crate) worker: Option<usize>,
+    pub(crate) delay: Option<u64>,
+    pub(crate) timeout: Option<u64>,
+    pub(crate) blind: Option<String>,
+    pub(crate) header: Option<Vec<String>>,
+    pub(crate) method: Option<String>,
+    pub(crate) data: Option<String>,
+    pub(crate) user_agent: Option<String>,
+    pub(crate) encoders: Option<Vec<String>>,
+    pub(crate) remote_payloads: Option<Vec<String>>,
+    pub(crate) remote_wordlists: Option<Vec<String>>,
+    pub(crate) include_request: Option<bool>,
+    pub(crate) include_response: Option<bool>,
+    /// Webhook URL to POST scan results to upon completion.
+    pub(crate) callback_url: Option<String>,
+    /// Specific parameters to test. Supports location hints via "name:location" syntax.
+    pub(crate) param: Option<Vec<String>>,
+    /// HTTP/SOCKS proxy URL.
+    pub(crate) proxy: Option<String>,
+    /// Follow HTTP redirects (3xx).
+    pub(crate) follow_redirects: Option<bool>,
+    /// Skip parameter mining (DOM and dictionary-based discovery).
+    pub(crate) skip_mining: Option<bool>,
+    /// Skip initial parameter discovery from HTML.
+    pub(crate) skip_discovery: Option<bool>,
+    /// Enable deep scan mode (test all payloads even after finding XSS).
+    pub(crate) deep_scan: Option<bool>,
+    /// Skip AST-based JavaScript analysis.
+    pub(crate) skip_ast_analysis: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ResultPayload {
+    /// The original target URL submitted for scanning.
+    pub(crate) target: String,
+    pub(crate) status: JobStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) results: Option<Vec<SanitizedResult>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) error_message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) progress: Option<ProgressPayload>,
+    pub(crate) queued_at_ms: i64,
+    pub(crate) started_at_ms: Option<i64>,
+    pub(crate) finished_at_ms: Option<i64>,
+    pub(crate) duration_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct ProgressPayload {
+    pub(crate) params_total: u32,
+    pub(crate) params_tested: u32,
+    pub(crate) requests_sent: u64,
+    pub(crate) findings_so_far: u64,
+    pub(crate) estimated_completion_pct: u32,
+    /// Recommended delay (ms) before next poll; 0 when done/cancelled.
+    pub(crate) suggested_poll_interval_ms: u64,
+}

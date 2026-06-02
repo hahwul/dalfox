@@ -61,10 +61,12 @@
 pub mod cmd;
 pub mod config;
 pub mod encoding;
+pub mod job;
 pub mod mcp;
 pub mod parameter_analysis;
 pub mod payload;
 pub mod scanning;
+pub mod server;
 pub mod target_parser;
 pub mod utils;
 pub mod waf;

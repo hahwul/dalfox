@@ -1,18 +1,44 @@
-//! Shared job-lifecycle primitives for the REST server and MCP runtime.
+//! Shared job-lifecycle domain for the REST server and MCP runtime.
 //!
 //! Both interfaces track asynchronous scans in an in-memory `HashMap<String, Job>`
 //! with identical requirements: status transitions, progress counters, retention
 //! TTL, reachability probing that respects the scan's HTTP config, and bounds
 //! validation on scan options. This module owns those pieces so the two
-//! interfaces stay in lockstep.
+//! interfaces stay in lockstep. It lives at the crate root (rather than under
+//! `cmd`) because it is a subsystem shared by `server` and `mcp`, not a command.
 
 use std::collections::HashMap;
+use std::fmt;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64};
 
-use crate::cmd::JobStatus;
+use serde::{Deserialize, Serialize};
+
 use crate::scanning::result::SanitizedResult;
 use crate::target_parser::Target;
+
+/// Status of an asynchronous scan job (used by both REST server and MCP).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum JobStatus {
+    Queued,
+    Running,
+    Done,
+    Error,
+    Cancelled,
+}
+
+impl fmt::Display for JobStatus {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Queued => write!(f, "queued"),
+            Self::Running => write!(f, "running"),
+            Self::Done => write!(f, "done"),
+            Self::Error => write!(f, "error"),
+            Self::Cancelled => write!(f, "cancelled"),
+        }
+    }
+}
 
 /// How long terminal jobs (done/error/cancelled) are retained in memory before
 /// being auto-purged. Prevents unbounded growth in long-running processes.

@@ -63,3 +63,47 @@ fn test_purge_expired_jobs_removes_old_terminal_jobs() {
         "active job must never be purged"
     );
 }
+
+#[test]
+fn job_status_display_matches_lowercase_variant_name() {
+    assert_eq!(JobStatus::Queued.to_string(), "queued");
+    assert_eq!(JobStatus::Running.to_string(), "running");
+    assert_eq!(JobStatus::Done.to_string(), "done");
+    assert_eq!(JobStatus::Error.to_string(), "error");
+    assert_eq!(JobStatus::Cancelled.to_string(), "cancelled");
+}
+
+/// The Display impl and the `#[serde(rename_all = "lowercase")]`
+/// representation must agree — REST and MCP clients parse the JSON
+/// form, and CLI logs print the Display form. Drift between them
+/// would silently break consumers that compare the two strings.
+#[test]
+fn job_status_serde_matches_display() {
+    let variants = [
+        JobStatus::Queued,
+        JobStatus::Running,
+        JobStatus::Done,
+        JobStatus::Error,
+        JobStatus::Cancelled,
+    ];
+    for v in variants {
+        let json = serde_json::to_string(&v).unwrap();
+        // serde_json wraps the variant name in quotes.
+        assert_eq!(json, format!("\"{}\"", v));
+        let round: JobStatus = serde_json::from_str(&json).unwrap();
+        assert_eq!(round, v);
+    }
+}
+
+#[test]
+fn job_status_deserializes_from_lowercase_string() {
+    let s: JobStatus = serde_json::from_str("\"queued\"").unwrap();
+    assert_eq!(s, JobStatus::Queued);
+    let s: JobStatus = serde_json::from_str("\"cancelled\"").unwrap();
+    assert_eq!(s, JobStatus::Cancelled);
+}
+
+#[test]
+fn job_status_rejects_unknown_variant() {
+    assert!(serde_json::from_str::<JobStatus>("\"finished\"").is_err());
+}
