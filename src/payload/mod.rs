@@ -1,5 +1,6 @@
 pub mod mining;
 pub mod remote;
+pub mod synthesis;
 pub mod xss_blind;
 pub mod xss_csp_bypass;
 pub mod xss_dom_clobbering;

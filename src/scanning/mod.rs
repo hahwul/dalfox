@@ -869,6 +869,42 @@ fn generate_param_jobs(
         };
         let mut dom_payloads = get_dom_payloads(param, args).unwrap_or_else(|_| vec![]);
 
+        // Issue #1075: prepend filter-constrained synthesized payloads to the
+        // reflection set when active probing produced a character profile for
+        // this parameter. (Non-JS DOM payloads receive synthesis separately
+        // inside `get_dom_payloads` → `generate_adaptive_payloads`; JS-context
+        // DOM payloads use the dedicated script-breakout set instead.) Placing
+        // them first lets the first-hit-wins reflection loop try shapes built
+        // for this exact filter before the broad catalog, lifting detection on
+        // custom filters; under non-`--deep-scan` runs that ordering can also
+        // cut requests by hitting earlier.
+        //
+        // Note: with an explicit small `--max-payloads-per-param` (< the synth
+        // count), the truncation below can evict the catalog entirely in favour
+        // of these higher-signal synthesized payloads — intentional, since the
+        // user asked for few payloads and these are the ones most likely to fire.
+        if let Some(context) = &param.injection_context
+            && (param.invalid_specials.is_some() || param.valid_specials.is_some())
+        {
+            let invalid = param.invalid_specials.as_deref().unwrap_or_default();
+            let valid = param.valid_specials.as_deref().unwrap_or_default();
+            let synthesized =
+                crate::payload::synthesis::synthesize_payloads(context, invalid, valid);
+            if !synthesized.is_empty() {
+                let mut seen: std::collections::HashSet<String> =
+                    std::collections::HashSet::with_capacity(
+                        synthesized.len() + reflection_payloads.len(),
+                    );
+                let mut merged = Vec::with_capacity(synthesized.len() + reflection_payloads.len());
+                for p in synthesized.into_iter().chain(reflection_payloads) {
+                    if seen.insert(p.clone()) {
+                        merged.push(p);
+                    }
+                }
+                reflection_payloads = merged;
+            }
+        }
+
         // Append shared payloads (CSP bypass + tech-specific)
         reflection_payloads.extend(shared_payloads.iter().cloned());
         dom_payloads.extend(shared_payloads.iter().cloned());

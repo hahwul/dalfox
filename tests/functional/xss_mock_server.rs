@@ -2465,3 +2465,131 @@ async fn test_realworld_xss_by_category() {
         overall_rate * 100.0
     );
 }
+
+/// End-to-end effectiveness + cost benchmark for filter-constrained payload
+/// synthesis (issue #1075).
+///
+/// Drives the real scanner against the `synthesis_filters.toml` corpus, whose
+/// cases apply a server-side character filter and reflect into a context that
+/// is only exploitable with a payload shaped to the surviving character set.
+/// Reports per-case detection and HTTP request count, and asserts that the
+/// filtered, only-shaped-payload-works cases are detected at a high rate —
+/// i.e. synthesis lifts real end-to-end detection on custom filters.
+///
+/// Request count is reported as informational context, not asserted: these
+/// runs use `deep_scan` (exhaustive — every payload is sent even after a hit),
+/// so the figure is dominated by the catalog × encoder cross-product, not by
+/// the ≤48 payloads synthesis prepends. Synthesis's own cost and bounded size
+/// are proven by the `synthesis_is_fast_and_bounded` unit test; its
+/// no-false-positive property by `everything_blocked_yields_nothing` /
+/// `obeys_filter_for_assorted_blocked_sets`.
+#[tokio::test]
+#[ignore = "benchmark: issue #1075 filter-constrained synthesis effectiveness + request cost"]
+async fn test_synthesis_filter_effectiveness_v2() {
+    use std::sync::atomic::Ordering;
+
+    dalfox::ensure_crypto_provider();
+    let (addr, _state) = start_mock_server_v2().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let file = mock_case_loader::get_mock_cases_base_dir()
+        .join("realworld")
+        .join("synthesis_filters.toml");
+    let cases = mock_case_loader::load_mock_cases_from_file(&file)
+        .expect("synthesis_filters.toml should load");
+    assert!(!cases.is_empty(), "expected synthesis benchmark cases");
+
+    let mut positives = 0usize;
+    let mut positives_detected = 0usize;
+    let mut total_requests = 0u64;
+    // For the angles+parens gap case we additionally require that the finding be
+    // *attributable to synthesis*: a verified backtick-call payload that is free
+    // of `<`, `>`, `(`, `)`. The static catalog cannot express such a
+    // marker-carrying shape (its attribute event handlers all use `alert(1)` or
+    // tag breakouts), so a [V] of this form proves synthesis closed the gap.
+    const GAP_CASE_ID: u32 = 9004;
+    let mut gap_synthesis_attributed = false;
+    let start = std::time::Instant::now();
+
+    println!(
+        "\n{:<6} {:<40} {:<24} {:>8} {:>7}",
+        "id", "case", "filter", "detected", "reqs"
+    );
+    println!("{}", "-".repeat(90));
+
+    for case in &cases {
+        let config = ScanTestConfig {
+            url_suffix: format!("/{}?query=seed", case.id),
+            param: vec![],
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            method: "GET".to_string(),
+            skip_reflection_header: true,
+            skip_reflection_cookie: true,
+            skip_reflection_path: true,
+        };
+
+        let results = run_scan_test(addr, "realworld/query", case.id, config).await;
+        // run_scan resets REQUEST_COUNT at the start of each single-target run,
+        // so this reading is this case's request cost.
+        let reqs = dalfox::REQUEST_COUNT.load(Ordering::Relaxed);
+        total_requests += reqs;
+        let detected = !results.is_empty();
+
+        if case.id == GAP_CASE_ID {
+            gap_synthesis_attributed = results.iter().any(|f| {
+                let is_verified = f.get("type").and_then(|t| t.as_str()) == Some("V");
+                let payload = f.get("payload").and_then(|p| p.as_str()).unwrap_or("");
+                is_verified
+                    && payload.contains("alert`1`")
+                    && !payload.contains(['<', '>', '(', ')'])
+            });
+        }
+
+        println!(
+            "{:<6} {:<40} {:<24} {:>8} {:>7}",
+            case.id,
+            case.name,
+            case.filter.clone().unwrap_or_default(),
+            detected,
+            reqs
+        );
+
+        if case.expected_detection {
+            positives += 1;
+            if detected {
+                positives_detected += 1;
+            }
+        }
+    }
+
+    let elapsed = start.elapsed();
+    println!("{}", "-".repeat(90));
+    println!(
+        "synthesis benchmark: {}/{} filtered cases detected · gap case synthesis-attributed: {} · {} total reqs across {} cases · {:?}",
+        positives_detected,
+        positives,
+        gap_synthesis_attributed,
+        total_requests,
+        cases.len(),
+        elapsed
+    );
+
+    assert!(positives > 0, "benchmark needs at least one positive case");
+    let rate = positives_detected as f64 / positives as f64;
+    assert!(
+        rate >= 0.80,
+        "synthesis positive detection rate {:.0}% below 80% ({}/{})",
+        rate * 100.0,
+        positives_detected,
+        positives
+    );
+    // The decisive assertion: the angles+parens gap case is detected via a
+    // verified payload only synthesis can produce.
+    assert!(
+        gap_synthesis_attributed,
+        "gap case #{} was not detected via a synthesis-attributable verified payload",
+        GAP_CASE_ID
+    );
+}
