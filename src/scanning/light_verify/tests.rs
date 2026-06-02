@@ -13,6 +13,15 @@ use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use tokio::time::{Duration, sleep};
 
+/// reqwest is built with `rustls-no-provider`, so the ring crypto provider
+/// must be installed before the first `Client::build()` or it panics.
+/// Production installs it in `main()` / the pooled builders; these unit tests
+/// construct bare clients, so route them through this helper.
+fn test_client() -> Client {
+    crate::ensure_crypto_provider();
+    Client::new()
+}
+
 #[derive(Clone)]
 struct TestState {
     class_marker: String,
@@ -155,7 +164,7 @@ async fn test_verify_dom_xss_light_raw_reflection_without_marker_evidence() {
     let target = make_target(addr, "/reflect", None, None);
     let param = make_param(Location::Query, "q");
     let payload = "<script>alert(1)</script>";
-    let client = Client::new();
+    let client = test_client();
 
     let (verified, response, note) =
         verify_dom_xss_light_with_client(&client, &target, &param, payload).await;
@@ -175,7 +184,7 @@ async fn test_verify_dom_xss_light_marker_element_present_without_payload() {
     let target = make_target(addr, "/marker-only", None, None);
     let param = make_param(Location::Query, "q");
     let payload = format!("<div class=\"{}\">injected</div>", marker);
-    let client = Client::new();
+    let client = test_client();
 
     let (verified, response, note) =
         verify_dom_xss_light_with_client(&client, &target, &param, &payload).await;
@@ -192,7 +201,7 @@ async fn test_verify_dom_xss_light_sets_csp_hint_when_inline_handlers_blocked() 
     let target = make_target(addr, "/csp", None, None);
     let param = make_param(Location::Query, "q");
     let payload = format!("payload-{}", marker);
-    let client = Client::new();
+    let client = test_client();
 
     let (verified, response, note) =
         verify_dom_xss_light_with_client(&client, &target, &param, &payload).await;
@@ -214,7 +223,7 @@ async fn test_verify_dom_xss_light_returns_none_response_on_request_failure() {
     target.timeout = 1;
     let param = make_param(Location::Query, "q");
     let payload = "x";
-    let client = Client::new();
+    let client = test_client();
 
     let (verified, response, note) =
         verify_dom_xss_light_with_client(&client, &target, &param, payload).await;
@@ -231,6 +240,7 @@ async fn test_verify_dom_xss_light_redirection() {
     let target = make_target(addr, "/redirect", None, None);
     let param = make_param(Location::Query, "q");
     let payload = format!("<img class=\"{}\" src=x onerror=1>", marker);
+    crate::ensure_crypto_provider();
     let client = Client::builder()
         .redirect(reqwest::redirect::Policy::none())
         .build()
@@ -251,7 +261,7 @@ async fn test_verify_dom_xss_light_location_header() {
     let target = make_target(addr, "/header", None, None);
     let param = make_param(Location::Header, "X-XSS");
     let payload = format!("<img class=\"{}\" src=x onerror=1>", marker);
-    let client = Client::new();
+    let client = test_client();
 
     let (verified, response, note) =
         verify_dom_xss_light_with_client(&client, &target, &param, &payload).await;
@@ -268,7 +278,7 @@ async fn test_verify_dom_xss_light_location_body() {
     let target = make_target(addr, "/body", Some("POST"), Some("q=seed"));
     let param = make_param(Location::Body, "q");
     let payload = format!("<img class=\"{}\" src=x onerror=1>", marker);
-    let client = Client::new();
+    let client = test_client();
 
     let (verified, response, _note) =
         verify_dom_xss_light_with_client(&client, &target, &param, &payload).await;
@@ -284,7 +294,7 @@ async fn test_verify_dom_xss_light_location_json_body() {
     let target = make_target(addr, "/json", Some("POST"), Some("{\"q\":\"seed\"}"));
     let param = make_param(Location::JsonBody, "q");
     let payload = format!("<img class=\"{}\" src=x onerror=1>", marker);
-    let client = Client::new();
+    let client = test_client();
 
     let (verified, response, _note) =
         verify_dom_xss_light_with_client(&client, &target, &param, &payload).await;
@@ -300,7 +310,7 @@ async fn test_verify_dom_xss_light_location_multipart_body() {
     let target = make_target(addr, "/multipart", Some("POST"), Some("q=seed"));
     let param = make_param(Location::MultipartBody, "q");
     let payload = format!("<img class=\"{}\" src=x onerror=1>", marker);
-    let client = Client::new();
+    let client = test_client();
 
     let (verified, response, _note) =
         verify_dom_xss_light_with_client(&client, &target, &param, &payload).await;

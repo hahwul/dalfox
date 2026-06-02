@@ -1642,6 +1642,7 @@ async fn test_header_reflection_v2() {
         let header_name_lc = header_name.to_ascii_lowercase();
 
         // Simple functional check: server reflects the header value (transformed)
+        dalfox::ensure_crypto_provider();
         let client = reqwest::Client::new();
         let url = format!("http://{}:{}/header/{}", addr.ip(), addr.port(), case_id);
         let resp = client
@@ -1762,6 +1763,7 @@ async fn test_body_reflection_v2() {
         let param_name = case.param_name.as_deref().unwrap_or("query");
 
         // Simple functional check: server reflects the body param (transformed)
+        dalfox::ensure_crypto_provider();
         let client = reqwest::Client::new();
         let url = format!("http://{}:{}/body/{}", addr.ip(), addr.port(), case_id);
         let form = [(param_name.to_string(), "seed".to_string())];
@@ -1789,6 +1791,7 @@ async fn test_header_reflection_diverse_xss_contexts_v2() {
     // Representative header contexts: raw/script/attribute/js-string/style/encoded.
     let case_ids = vec![1, 9, 23, 32, 35, 41, 46, 49];
     let mut failed = Vec::new();
+    dalfox::ensure_crypto_provider();
     let client = reqwest::Client::new();
 
     for case_id in case_ids {
@@ -1834,6 +1837,7 @@ async fn test_header_reflection_advanced_xss_coverage_v2() {
     let case_ids = vec![42, 43, 45, 47, 48, 50, 34, 40];
     let mut reflected_count = 0usize;
     let mut mismatches = Vec::new();
+    dalfox::ensure_crypto_provider();
     let client = reqwest::Client::new();
 
     for case_id in case_ids {
@@ -2094,6 +2098,7 @@ async fn test_body_reflection_diverse_xss_contexts_v2() {
 
     let case_ids = vec![1, 9, 11, 14, 18, 21, 26, 31, 33];
     let mut failed = Vec::new();
+    dalfox::ensure_crypto_provider();
     let client = reqwest::Client::new();
 
     for case_id in case_ids {
@@ -2139,6 +2144,7 @@ async fn test_body_reflection_advanced_xss_coverage_v2() {
     let case_ids = vec![27, 28, 29, 30, 32, 34, 35, 36];
     let mut reflected_count = 0usize;
     let mut mismatches = Vec::new();
+    dalfox::ensure_crypto_provider();
     let client = reqwest::Client::new();
 
     for case_id in case_ids {

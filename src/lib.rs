@@ -79,6 +79,26 @@ pub static WAF_CONSECUTIVE_BLOCKS: std::sync::atomic::AtomicU32 =
     std::sync::atomic::AtomicU32::new(0);
 pub static NO_COLOR: AtomicBool = AtomicBool::new(false);
 
+/// Install the process-wide rustls crypto provider (ring).
+///
+/// reqwest is built with the `rustls-no-provider` feature so it bundles no
+/// crypto backend; we supply ring's instead of the default aws-lc-rs because
+/// aws-lc-sys fails to link on several distros (AUR, musl, …; see #1061).
+/// reqwest resolves the provider via `CryptoProvider::get_default()` when a
+/// `Client` is built, so this must run before the first client is constructed
+/// — it is called from `main()` and from every pooled client builder.
+///
+/// Idempotent and thread-safe: the first caller installs the provider, the
+/// rest are no-ops. If a downstream library consumer already installed a
+/// provider of their own, `install_default` returns `Err` and we leave their
+/// choice untouched.
+pub fn ensure_crypto_provider() {
+    static INSTALL: std::sync::Once = std::sync::Once::new();
+    INSTALL.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
 tokio::task_local! {
     /// Per-scan request counter, set by the MCP runner so concurrent scans
     /// don't pollute each other's progress tallies. Callers use

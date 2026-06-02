@@ -77,6 +77,11 @@ use dalfox::utils::fs::read_bounded;
 
 #[tokio::main]
 async fn main() {
+    // Install the rustls crypto provider (ring) before anything builds a
+    // reqwest Client. reqwest uses `rustls-no-provider`, so without this the
+    // first Client::build() panics with "no crypto provider configured".
+    dalfox::ensure_crypto_provider();
+
     // Exit cleanly when a downstream consumer (e.g. `head`, `grep -q`) closes
     // the pipe. Rust ignores SIGPIPE by default, so the next `println!` panics
     // inside the stdio shim with `failed printing to stdout: Broken pipe` and
