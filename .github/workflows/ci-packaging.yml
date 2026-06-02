@@ -1,0 +1,83 @@
+---
+name: Packaging Build
+# Source-build gates for the distro packaging paths that the default CI
+# (glibc + GNU ld on ubuntu/macos/windows) never exercises. These would have
+# caught #1061, where aws-lc-sys failed to link under Arch's rust toolchain
+# (lld). Each job builds dalfox from source the way a downstream packager
+# does, then smoke-runs the binary.
+on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - "**/*.rs"
+      - aur/PKGBUILD
+      - snap/snapcraft.yaml
+      - .github/workflows/ci-packaging.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - Cargo.toml
+      - Cargo.lock
+      - "**/*.rs"
+      - aur/PKGBUILD
+      - snap/snapcraft.yaml
+      - .github/workflows/ci-packaging.yml
+  workflow_dispatch:
+env:
+  CARGO_TERM_COLOR: always
+jobs:
+  arch-aur:
+    name: AUR source build (Arch, lld)
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    # Reproduces the reporter's environment from #1061: Arch's rust package
+    # linking with lld. We run the same cargo invocation the AUR PKGBUILD
+    # uses, against this PR's working tree. We deliberately do NOT call
+    # makepkg: its source=() points at the published v<pkgver> release
+    # tarball, so it would build the released source instead of this PR.
+    env:
+      # Force the lld link path the AUR failure surfaced under, so any
+      # regression of the aws-lc-sys class fails here too.
+      RUSTFLAGS: "-C link-arg=-fuse-ld=lld"
+    steps:
+      - name: Install toolchain
+        run: pacman -Syu --noconfirm --needed base-devel rust git lld
+      - uses: actions/checkout@v6
+      - name: Build like the AUR PKGBUILD
+        run: |
+          cargo fetch --locked
+          cargo build --frozen --release --all-features
+      - name: Smoke test the binary
+        run: ./target/release/dalfox --version
+
+  musl:
+    name: Static musl build
+    runs-on: ubuntu-latest
+    # musl is where C-FFI crates (the aws-lc-sys class) most often break, so a
+    # static build is a cheap canary that the dependency graph stays
+    # pure-Rust / musl-friendly.
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - name: Install musl tools
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+      - name: Build (static musl)
+        run: cargo build --locked --release --target x86_64-unknown-linux-musl
+      - name: Smoke test the binary
+        run: ./target/x86_64-unknown-linux-musl/release/dalfox --version
+
+  snap:
+    name: Snap source build
+    runs-on: ubuntu-latest
+    # Builds snap/snapcraft.yaml the way the Snap Store does (snapcraft + LXD),
+    # validating the amd64 source build before publish. The arm64/armhf/i386
+    # entries in snapcraft.yaml build only on a matching host, so they are
+    # covered separately via `snapcraft remote-build` at release time.
+    steps:
+      - uses: actions/checkout@v6
+      - name: Build snap
+        uses: snapcore/action-build@v1
