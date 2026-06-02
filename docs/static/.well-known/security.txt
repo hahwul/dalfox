@@ -2,7 +2,6 @@
 # Full policy and supported versions: https://github.com/hahwul/dalfox/blob/main/SECURITY.md
 Contact: https://github.com/hahwul/dalfox/security/advisories/new
 Contact: mailto:hahwul@gmail.com
-Expires: 2027-06-01T00:00:00.000Z
 Preferred-Languages: en, ko
 Canonical: https://dalfox.hahwul.com/.well-known/security.txt
 Policy: https://github.com/hahwul/dalfox/blob/main/SECURITY.md
