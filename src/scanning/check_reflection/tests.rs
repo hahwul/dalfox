@@ -234,7 +234,7 @@ async fn test_check_reflection_with_response_early_return_when_skip() {
     let param = make_param();
     let mut args = default_scan_args();
     args.skip_xss_scanning = true;
-    let res = check_reflection_with_response(&target, &param, "PAY", &args).await;
+    let res = check_reflection_with_response(None, &target, &param, "PAY", &args).await;
     assert_eq!(
         res,
         (None, None),
@@ -743,7 +743,7 @@ async fn test_check_reflection_suppresses_inert_js_string_apos_reflection() {
     let param = make_param();
     let args = default_scan_args();
 
-    let (kind, body) = check_reflection_with_response(&target, &param, payload, &args).await;
+    let (kind, body) = check_reflection_with_response(None, &target, &param, payload, &args).await;
     assert_eq!(
         kind, None,
         "apos-encoded JS-string reflection should be classified inert (no R)"
@@ -774,7 +774,7 @@ async fn test_check_reflection_detects_form_urlencoded_response_runtime() {
     let param = make_param();
     let args = default_scan_args();
 
-    let (kind, body) = check_reflection_with_response(&target, &param, payload, &args).await;
+    let (kind, body) = check_reflection_with_response(None, &target, &param, payload, &args).await;
     assert_eq!(kind, Some(ReflectionKind::UrlDecoded));
     assert!(
         body.unwrap_or_default()
@@ -807,7 +807,7 @@ async fn test_check_reflection_with_response_demotes_safe_html_entity_reflection
     let param = make_param();
     let args = default_scan_args();
 
-    let (kind, body) = check_reflection_with_response(&target, &param, payload, &args).await;
+    let (kind, body) = check_reflection_with_response(None, &target, &param, payload, &args).await;
     assert_eq!(
         kind, None,
         "safe-context entity reflection must not produce a reflection kind"
@@ -826,7 +826,7 @@ async fn test_check_reflection_with_response_not_reflected() {
     let param = make_param();
     let args = default_scan_args();
 
-    let (kind, body) = check_reflection_with_response(&target, &param, payload, &args).await;
+    let (kind, body) = check_reflection_with_response(None, &target, &param, payload, &args).await;
     assert_eq!(kind, None);
     assert!(
         body.is_some(),
@@ -950,7 +950,7 @@ async fn test_check_reflection_with_response_handles_json_raw_reflection() {
     let param = make_param();
     let args = default_scan_args();
 
-    let (kind, body) = check_reflection_with_response(&target, &param, payload, &args).await;
+    let (kind, body) = check_reflection_with_response(None, &target, &param, payload, &args).await;
     assert_eq!(kind, Some(ReflectionKind::Raw));
     assert!(body.unwrap_or_default().contains("echo"));
 }
@@ -1415,7 +1415,8 @@ async fn test_path_reflection_suppressed_on_non_html_content_type() {
     let args = default_scan_args();
 
     let (kind, _body) =
-        check_reflection_with_response(&target, &param, "<script>alert(1)</script>", &args).await;
+        check_reflection_with_response(None, &target, &param, "<script>alert(1)</script>", &args)
+            .await;
     assert_eq!(
         kind, None,
         "path-injection reflection on application/javascript should be suppressed"

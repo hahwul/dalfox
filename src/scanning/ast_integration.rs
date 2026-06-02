@@ -723,22 +723,23 @@ pub fn run_initial_ast_dom_analysis(
             } else {
                 format!("{description} (검증 필요) [경량 확인: 파라미터 없음]")
             };
-            let mut ast_result = crate::scanning::result::Result::new(
+            let mut ast_result = crate::scanning::result::Result::builder(
                 crate::scanning::result::FindingType::AstDetected,
-                "DOM-XSS".to_string(),
-                target_method.to_string(),
-                poc_url,
-                "-".to_string(),
-                payload,
-                format!(
-                    "{}:{}:{} - {} (Source: {}, Sink: {})",
-                    target_url, vuln.line, vuln.column, description, vuln.source, vuln.sink
-                ),
-                "CWE-79".to_string(),
-                "Medium".to_string(),
-                0,
-                message,
-            );
+            )
+            .inject_type("DOM-XSS")
+            .method(target_method.to_string())
+            .data(poc_url)
+            .param("-")
+            .payload(payload)
+            .evidence(format!(
+                "{}:{}:{} - {} (Source: {}, Sink: {})",
+                target_url, vuln.line, vuln.column, description, vuln.source, vuln.sink
+            ))
+            .cwe("CWE-79")
+            .severity("Medium")
+            .message_id(0)
+            .message_str(message)
+            .build();
             if self_bootstrap_verified {
                 ast_result.result_type = crate::scanning::result::FindingType::Verified;
                 ast_result.severity = "High".to_string();

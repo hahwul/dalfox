@@ -3,19 +3,18 @@ use dalfox::scanning::result::Result as ScanResult;
 
 #[test]
 fn test_sarif_output_basic_structure() {
-    let result = ScanResult::new(
-        dalfox::scanning::result::FindingType::Verified,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com?q=test".to_string(),
-        "q".to_string(),
-        "<script>alert(1)</script>".to_string(),
-        "XSS script tag found".to_string(),
-        "CWE-79".to_string(),
-        "High".to_string(),
-        606,
-        "XSS vulnerability detected".to_string(),
-    );
+    let result = ScanResult::builder(dalfox::scanning::result::FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com?q=test")
+        .param("q")
+        .payload("<script>alert(1)</script>")
+        .evidence("XSS script tag found")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("XSS vulnerability detected")
+        .build();
 
     let results = vec![result];
     let sarif = ScanResult::results_to_sarif(&results, false, false);
@@ -72,33 +71,31 @@ fn test_sarif_output_basic_structure() {
 
 #[test]
 fn test_sarif_output_multiple_results() {
-    let result1 = ScanResult::new(
-        dalfox::scanning::result::FindingType::Verified,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com?q=test1".to_string(),
-        "q".to_string(),
-        "<img src=x onerror=alert(1)>".to_string(),
-        "XSS in image tag".to_string(),
-        "CWE-79".to_string(),
-        "High".to_string(),
-        606,
-        "XSS detected".to_string(),
-    );
+    let result1 = ScanResult::builder(dalfox::scanning::result::FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com?q=test1")
+        .param("q")
+        .payload("<img src=x onerror=alert(1)>")
+        .evidence("XSS in image tag")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("XSS detected")
+        .build();
 
-    let result2 = ScanResult::new(
-        dalfox::scanning::result::FindingType::Reflected,
-        "inJS".to_string(),
-        "POST".to_string(),
-        "https://example.com/api".to_string(),
-        "callback".to_string(),
-        "alert(2)".to_string(),
-        "Reflection in JavaScript".to_string(),
-        "CWE-79".to_string(),
-        "Medium".to_string(),
-        200,
-        "Reflection found".to_string(),
-    );
+    let result2 = ScanResult::builder(dalfox::scanning::result::FindingType::Reflected)
+        .inject_type("inJS")
+        .method("POST")
+        .data("https://example.com/api")
+        .param("callback")
+        .payload("alert(2)")
+        .evidence("Reflection in JavaScript")
+        .cwe("CWE-79")
+        .severity("Medium")
+        .message_id(200)
+        .message_str("Reflection found")
+        .build();
 
     let results = vec![result1, result2];
     let sarif = ScanResult::results_to_sarif(&results, false, false);
@@ -130,19 +127,18 @@ fn test_sarif_output_multiple_results() {
 
 #[test]
 fn test_sarif_output_with_request_response() {
-    let mut result = ScanResult::new(
-        dalfox::scanning::result::FindingType::Verified,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com?test=xss".to_string(),
-        "test".to_string(),
-        "<x>".to_string(),
-        "test evidence".to_string(),
-        "CWE-79".to_string(),
-        "High".to_string(),
-        606,
-        "XSS".to_string(),
-    );
+    let mut result = ScanResult::builder(dalfox::scanning::result::FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com?test=xss")
+        .param("test")
+        .payload("<x>")
+        .evidence("test evidence")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("XSS")
+        .build();
 
     result.request =
         Some("GET /?test=%3Cx%3E HTTP/1.1\nHost: example.com\nUser-Agent: Dalfox".to_string());
@@ -187,19 +183,18 @@ fn test_sarif_output_with_request_response() {
 
 #[test]
 fn test_sarif_output_locations() {
-    let result = ScanResult::new(
-        dalfox::scanning::result::FindingType::Verified,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com/path?param=value".to_string(),
-        "param".to_string(),
-        "<script>alert(1)</script>".to_string(),
-        "Evidence text".to_string(),
-        "CWE-79".to_string(),
-        "High".to_string(),
-        606,
-        "XSS found".to_string(),
-    );
+    let result = ScanResult::builder(dalfox::scanning::result::FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com/path?param=value")
+        .param("param")
+        .payload("<script>alert(1)</script>")
+        .evidence("Evidence text")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("XSS found")
+        .build();
 
     let results = vec![result];
     let sarif = ScanResult::results_to_sarif(&results, false, false);
@@ -229,19 +224,18 @@ fn test_sarif_output_locations() {
 
 #[test]
 fn test_sarif_output_properties() {
-    let result = ScanResult::new(
-        dalfox::scanning::result::FindingType::Verified,
-        "inJS".to_string(),
-        "POST".to_string(),
-        "https://example.com".to_string(),
-        "data".to_string(),
-        "alert(1)".to_string(),
-        "Test evidence".to_string(),
-        "CWE-79".to_string(),
-        "Medium".to_string(),
-        200,
-        "Test message".to_string(),
-    );
+    let result = ScanResult::builder(dalfox::scanning::result::FindingType::Verified)
+        .inject_type("inJS")
+        .method("POST")
+        .data("https://example.com")
+        .param("data")
+        .payload("alert(1)")
+        .evidence("Test evidence")
+        .cwe("CWE-79")
+        .severity("Medium")
+        .message_id(200)
+        .message_str("Test message")
+        .build();
 
     let results = vec![result];
     let sarif = ScanResult::results_to_sarif(&results, false, false);
@@ -288,19 +282,18 @@ fn test_sarif_severity_mappings() {
     ];
 
     for (severity, expected_level) in test_cases {
-        let result = ScanResult::new(
-            dalfox::scanning::result::FindingType::Verified,
-            "inHTML".to_string(),
-            "GET".to_string(),
-            "https://example.com".to_string(),
-            "param".to_string(),
-            "payload".to_string(),
-            "".to_string(),
-            "CWE-79".to_string(),
-            severity.to_string(),
-            1,
-            format!("{} severity test", severity),
-        );
+        let result = ScanResult::builder(dalfox::scanning::result::FindingType::Verified)
+            .inject_type("inHTML")
+            .method("GET")
+            .data("https://example.com")
+            .param("param")
+            .payload("payload")
+            .evidence("")
+            .cwe("CWE-79")
+            .severity(severity.to_string())
+            .message_id(1)
+            .message_str(format!("{} severity test", severity))
+            .build();
 
         let results = vec![result];
         let sarif = ScanResult::results_to_sarif(&results, false, false);

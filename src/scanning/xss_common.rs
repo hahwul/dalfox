@@ -392,7 +392,7 @@ pub fn load_custom_payloads(path: &str) -> Result<Vec<String>, Box<dyn std::erro
     // *something* in every failure mode so operators can debug.
     let content = crate::utils::fs::read_bounded(
         std::path::Path::new(path),
-        256 << 20, // 256 MiB budget
+        crate::utils::fs::MAX_FILE_READ_BYTES,
         "custom payload list",
     )
     .map_err(|e| {

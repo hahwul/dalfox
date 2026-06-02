@@ -10,6 +10,14 @@
 use std::io::Read;
 use std::path::Path;
 
+/// Default hard cap for bounded file/stdin reads: 256 MiB. Generous enough
+/// for legitimate target lists, wordlists, and custom-payload files, while
+/// cutting `/dev/zero`, runaway pipes, and gigabyte misclassified blobs to a
+/// fast, clear error instead of OOM-ing the process. Shared by the
+/// target-list, mining-wordlist, and custom-payload read paths so the limit
+/// has a single source of truth. See [`read_bounded`] / [`read_stdin_bounded`].
+pub const MAX_FILE_READ_BYTES: u64 = 256 << 20;
+
 /// Read a UTF-8 file with a hard byte cap. Refuses non-regular files
 /// (a symlink that resolves to a regular file is fine, since
 /// `metadata()` follows symlinks). Returns `Err` when the cap is hit

@@ -13,7 +13,7 @@ fn build_blind_payloads(callback_url: &str, custom_template_path: Option<&str>) 
     if let Some(path) = custom_template_path {
         match crate::utils::fs::read_bounded(
             std::path::Path::new(path),
-            256 << 20, // 256 MiB budget
+            crate::utils::fs::MAX_FILE_READ_BYTES,
             "custom blind XSS template",
         ) {
             Ok(content) => {

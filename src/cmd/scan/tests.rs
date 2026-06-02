@@ -260,19 +260,18 @@ fn test_extract_context_none() {
 
 #[test]
 fn test_dedupe_ast_results_prefers_verified_variant() {
-    let mut ast_a = ScanResult::new(
-        FindingType::AstDetected,
-        "DOM-XSS".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "q".to_string(),
-        "<img src=x onerror=alert(1)>".to_string(),
-        "https://example.com:1:1 - desc (Source: location.search, Sink: innerHTML)".to_string(),
-        "CWE-79".to_string(),
-        "Medium".to_string(),
-        0,
-        "desc (검증 필요) [경량 확인: 미검증]".to_string(),
-    );
+    let mut ast_a = ScanResult::builder(FindingType::AstDetected)
+        .inject_type("DOM-XSS")
+        .method("GET")
+        .data("https://example.com")
+        .param("q")
+        .payload("<img src=x onerror=alert(1)>")
+        .evidence("https://example.com:1:1 - desc (Source: location.search, Sink: innerHTML)")
+        .cwe("CWE-79")
+        .severity("Medium")
+        .message_id(0)
+        .message_str("desc (검증 필요) [경량 확인: 미검증]")
+        .build();
     ast_a.request = Some("GET /?q=... HTTP/1.1".to_string());
 
     let mut ast_v = ast_a.clone();
@@ -290,32 +289,30 @@ fn test_dedupe_ast_results_prefers_verified_variant() {
 fn test_dedupe_ast_results_collapses_cross_stage_duplicates() {
     let evidence =
         "https://example.com:3:9 - DOM-based XSS via location.search to innerHTML (Source: location.search, Sink: innerHTML)".to_string();
-    let ast_preflight = ScanResult::new(
-        FindingType::AstDetected,
-        "DOM-XSS".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "-".to_string(),
-        "<img src=x onerror=alert(1) class=dlxaaa111>".to_string(),
-        evidence.clone(),
-        "CWE-79".to_string(),
-        "Medium".to_string(),
-        0,
-        "preflight".to_string(),
-    );
-    let mut ast_param_verified = ScanResult::new(
-        FindingType::Verified,
-        "DOM-XSS".to_string(),
-        "GET".to_string(),
-        "https://example.com/?q=%3Cimg...%3E".to_string(),
-        "q".to_string(),
-        "<img src=x onerror=alert(1) class=dlxaaa111>".to_string(),
-        evidence,
-        "CWE-79".to_string(),
-        "High".to_string(),
-        0,
-        "verified".to_string(),
-    );
+    let ast_preflight = ScanResult::builder(FindingType::AstDetected)
+        .inject_type("DOM-XSS")
+        .method("GET")
+        .data("https://example.com")
+        .param("-")
+        .payload("<img src=x onerror=alert(1) class=dlxaaa111>")
+        .evidence(evidence.clone())
+        .cwe("CWE-79")
+        .severity("Medium")
+        .message_id(0)
+        .message_str("preflight")
+        .build();
+    let mut ast_param_verified = ScanResult::builder(FindingType::Verified)
+        .inject_type("DOM-XSS")
+        .method("GET")
+        .data("https://example.com/?q=%3Cimg...%3E")
+        .param("q")
+        .payload("<img src=x onerror=alert(1) class=dlxaaa111>")
+        .evidence(evidence)
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(0)
+        .message_str("verified")
+        .build();
     ast_param_verified.request = Some("GET /?q=... HTTP/1.1".to_string());
 
     let deduped = dedupe_ast_results(vec![ast_preflight, ast_param_verified.clone()]);
@@ -326,19 +323,18 @@ fn test_dedupe_ast_results_collapses_cross_stage_duplicates() {
 
 #[test]
 fn test_dedupe_ast_results_keeps_non_ast_entries() {
-    let r1 = ScanResult::new(
-        FindingType::Reflected,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "q".to_string(),
-        "PAY".to_string(),
-        "e1".to_string(),
-        "CWE-79".to_string(),
-        "Info".to_string(),
-        606,
-        "m1".to_string(),
-    );
+    let r1 = ScanResult::builder(FindingType::Reflected)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("q")
+        .payload("PAY")
+        .evidence("e1")
+        .cwe("CWE-79")
+        .severity("Info")
+        .message_id(606)
+        .message_str("m1")
+        .build();
     let r2 = r1.clone();
     let deduped = dedupe_ast_results(vec![r1, r2]);
     assert_eq!(deduped.len(), 2);
@@ -346,19 +342,18 @@ fn test_dedupe_ast_results_keeps_non_ast_entries() {
 
 #[test]
 fn test_generate_poc_plain_query() {
-    let r = ScanResult::new(
-        FindingType::Reflected,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "q".to_string(),
-        "<x>".to_string(),
-        "evidence".to_string(),
-        "CWE-79".to_string(),
-        "Info".to_string(),
-        0,
-        "msg".to_string(),
-    );
+    let r = ScanResult::builder(FindingType::Reflected)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("q")
+        .payload("<x>")
+        .evidence("evidence")
+        .cwe("CWE-79")
+        .severity("Info")
+        .message_id(0)
+        .message_str("msg")
+        .build();
     let out = generate_poc(&r, "plain");
     assert!(out.contains("[POC][R][GET][inHTML]"));
     assert!(out.contains("?q=%3Cx%3E"));
@@ -366,19 +361,18 @@ fn test_generate_poc_plain_query() {
 
 #[test]
 fn test_generate_poc_curl() {
-    let r = ScanResult::new(
-        FindingType::Reflected,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "q".to_string(),
-        "<x>".to_string(),
-        "evidence".to_string(),
-        "CWE-79".to_string(),
-        "Info".to_string(),
-        0,
-        "msg".to_string(),
-    );
+    let r = ScanResult::builder(FindingType::Reflected)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("q")
+        .payload("<x>")
+        .evidence("evidence")
+        .cwe("CWE-79")
+        .severity("Info")
+        .message_id(0)
+        .message_str("msg")
+        .build();
     let out = generate_poc(&r, "curl");
     assert!(out.starts_with("curl -X GET "));
     assert!(out.contains("?q=%3Cx%3E"));
@@ -386,19 +380,18 @@ fn test_generate_poc_curl() {
 
 #[test]
 fn test_generate_poc_http_request_prefers_request_block() {
-    let mut r = ScanResult::new(
-        FindingType::Reflected,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "q".to_string(),
-        "<x>".to_string(),
-        "evidence".to_string(),
-        "CWE-79".to_string(),
-        "Info".to_string(),
-        0,
-        "msg".to_string(),
-    );
+    let mut r = ScanResult::builder(FindingType::Reflected)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("q")
+        .payload("<x>")
+        .evidence("evidence")
+        .cwe("CWE-79")
+        .severity("Info")
+        .message_id(0)
+        .message_str("msg")
+        .build();
     r.request = Some("GET / HTTP/1.1\nHost: example.com".to_string());
     let out = generate_poc(&r, "http-request");
     assert!(out.contains("GET / HTTP/1.1"));
@@ -410,19 +403,18 @@ fn test_generate_poc_plain_header_does_not_synthesize_query() {
     // rendered as `?X-Custom-Header=<svg…>` (an invented query param),
     // which couldn't reproduce the finding. The plain POC must now leave
     // the URL untouched and tag the line with `[hdr]`.
-    let mut r = ScanResult::new(
-        FindingType::Reflected,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "http://example.com/".to_string(),
-        "X-Custom-Header".to_string(),
-        "<svg/onload=alert(1)>".to_string(),
-        "evidence".to_string(),
-        "CWE-79".to_string(),
-        "Info".to_string(),
-        0,
-        "msg".to_string(),
-    );
+    let mut r = ScanResult::builder(FindingType::Reflected)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("http://example.com/")
+        .param("X-Custom-Header")
+        .payload("<svg/onload=alert(1)>")
+        .evidence("evidence")
+        .cwe("CWE-79")
+        .severity("Info")
+        .message_id(0)
+        .message_str("msg")
+        .build();
     r.location = "Header".to_string();
     let out = generate_poc(&r, "plain");
     assert!(
@@ -440,19 +432,18 @@ fn test_generate_poc_plain_header_does_not_synthesize_query() {
 
 #[test]
 fn test_generate_poc_curl_header_uses_dash_h_flag() {
-    let mut r = ScanResult::new(
-        FindingType::Reflected,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "http://example.com/".to_string(),
-        "X-Custom-Header".to_string(),
-        "<svg/onload=alert(1)>".to_string(),
-        "evidence".to_string(),
-        "CWE-79".to_string(),
-        "Info".to_string(),
-        0,
-        "msg".to_string(),
-    );
+    let mut r = ScanResult::builder(FindingType::Reflected)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("http://example.com/")
+        .param("X-Custom-Header")
+        .payload("<svg/onload=alert(1)>")
+        .evidence("evidence")
+        .cwe("CWE-79")
+        .severity("Info")
+        .message_id(0)
+        .message_str("msg")
+        .build();
     r.location = "Header".to_string();
     let out = generate_poc(&r, "curl");
     assert!(
@@ -465,19 +456,18 @@ fn test_generate_poc_curl_header_uses_dash_h_flag() {
 
 #[test]
 fn test_generate_poc_cookie_uses_cookie_tag_and_dash_b() {
-    let mut r = ScanResult::new(
-        FindingType::Reflected,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "http://example.com/".to_string(),
-        "Cookie".to_string(),
-        "<svg/onload=alert(1)>".to_string(),
-        "evidence".to_string(),
-        "CWE-79".to_string(),
-        "Info".to_string(),
-        0,
-        "msg".to_string(),
-    );
+    let mut r = ScanResult::builder(FindingType::Reflected)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("http://example.com/")
+        .param("Cookie")
+        .payload("<svg/onload=alert(1)>")
+        .evidence("evidence")
+        .cwe("CWE-79")
+        .severity("Info")
+        .message_id(0)
+        .message_str("msg")
+        .build();
     r.location = "Header".to_string();
     let plain = generate_poc(&r, "plain");
     assert!(
@@ -495,19 +485,18 @@ fn test_generate_poc_cookie_uses_cookie_tag_and_dash_b() {
 
 #[test]
 fn test_generate_poc_body_emits_data_flag() {
-    let mut r = ScanResult::new(
-        FindingType::Reflected,
-        "inHTML".to_string(),
-        "POST".to_string(),
-        "http://example.com/login".to_string(),
-        "username".to_string(),
-        "<svg/onload=alert(1)>".to_string(),
-        "evidence".to_string(),
-        "CWE-79".to_string(),
-        "Info".to_string(),
-        0,
-        "msg".to_string(),
-    );
+    let mut r = ScanResult::builder(FindingType::Reflected)
+        .inject_type("inHTML")
+        .method("POST")
+        .data("http://example.com/login")
+        .param("username")
+        .payload("<svg/onload=alert(1)>")
+        .evidence("evidence")
+        .cwe("CWE-79")
+        .severity("Info")
+        .message_id(0)
+        .message_str("msg")
+        .build();
     r.location = "Body".to_string();
     let plain = generate_poc(&r, "plain");
     assert!(
@@ -533,19 +522,18 @@ fn test_generate_poc_query_unchanged_when_location_empty() {
     // Older Result producers don't set `location` yet. The plain POC must
     // stay byte-identical to the pre-bug-5 format so unrelated downstream
     // parsers (CI, reporting scripts) don't break.
-    let r = ScanResult::new(
-        FindingType::Reflected,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "q".to_string(),
-        "<x>".to_string(),
-        "evidence".to_string(),
-        "CWE-79".to_string(),
-        "Info".to_string(),
-        0,
-        "msg".to_string(),
-    );
+    let r = ScanResult::builder(FindingType::Reflected)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("q")
+        .payload("<x>")
+        .evidence("evidence")
+        .cwe("CWE-79")
+        .severity("Info")
+        .message_id(0)
+        .message_str("msg")
+        .build();
     let out = generate_poc(&r, "plain");
     assert!(
         out.contains("[POC][R][GET][inHTML]"),
@@ -557,57 +545,54 @@ fn test_generate_poc_query_unchanged_when_location_empty() {
 
 #[test]
 fn test_generate_poc_path_segment_append() {
-    let r = ScanResult::new(
-        FindingType::Reflected,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://ex.com/foo/bar".to_string(),
-        "path_segment_1".to_string(),
-        "PAY".to_string(),
-        "evidence".to_string(),
-        "CWE-79".to_string(),
-        "Info".to_string(),
-        0,
-        "msg".to_string(),
-    );
+    let r = ScanResult::builder(FindingType::Reflected)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://ex.com/foo/bar")
+        .param("path_segment_1")
+        .payload("PAY")
+        .evidence("evidence")
+        .cwe("CWE-79")
+        .severity("Info")
+        .message_id(0)
+        .message_str("msg")
+        .build();
     let out = generate_poc(&r, "plain");
     assert!(out.contains("https://ex.com/foo/bar/PAY"));
 }
 
 #[test]
 fn test_generate_poc_http_request_without_request_falls_back_to_url() {
-    let r = ScanResult::new(
-        FindingType::Reflected,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "q".to_string(),
-        "<x>".to_string(),
-        "evidence".to_string(),
-        "CWE-79".to_string(),
-        "Info".to_string(),
-        0,
-        "msg".to_string(),
-    );
+    let r = ScanResult::builder(FindingType::Reflected)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("q")
+        .payload("<x>")
+        .evidence("evidence")
+        .cwe("CWE-79")
+        .severity("Info")
+        .message_id(0)
+        .message_str("msg")
+        .build();
     let out = generate_poc(&r, "http-request");
     assert!(out.contains("https://example.com?q=%3Cx%3E"));
 }
 
 #[test]
 fn test_generate_poc_unknown_type_defaults_to_plain_format() {
-    let r = ScanResult::new(
-        FindingType::Reflected,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        "https://example.com".to_string(),
-        "q".to_string(),
-        "PAY".to_string(),
-        "evidence".to_string(),
-        "CWE-79".to_string(),
-        "Info".to_string(),
-        0,
-        "msg".to_string(),
-    );
+    let r = ScanResult::builder(FindingType::Reflected)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("q")
+        .payload("PAY")
+        .evidence("evidence")
+        .cwe("CWE-79")
+        .severity("Info")
+        .message_id(0)
+        .message_str("msg")
+        .build();
     let out = generate_poc(&r, "custom");
     assert!(out.starts_with("[POC][R][GET][inHTML]"));
 }
@@ -615,19 +600,18 @@ fn test_generate_poc_unknown_type_defaults_to_plain_format() {
 #[test]
 fn test_generate_poc_path_segment_selective_encoding_for_special_chars() {
     let payload = "A B#?%".to_string();
-    let r = ScanResult::new(
-        FindingType::Reflected,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        format!("https://ex.com/base/{}", payload),
-        "path_segment_2".to_string(),
-        payload,
-        "evidence".to_string(),
-        "CWE-79".to_string(),
-        "Info".to_string(),
-        0,
-        "msg".to_string(),
-    );
+    let r = ScanResult::builder(FindingType::Reflected)
+        .inject_type("inHTML")
+        .method("GET")
+        .data(format!("https://ex.com/base/{}", payload))
+        .param("path_segment_2")
+        .payload(payload)
+        .evidence("evidence")
+        .cwe("CWE-79")
+        .severity("Info")
+        .message_id(0)
+        .message_str("msg")
+        .build();
     let out = generate_poc(&r, "plain");
     assert!(out.contains("A%20B%23%3F%25"));
 }
@@ -794,19 +778,18 @@ fn host_group(targets: Vec<Target>) -> HashMap<String, Vec<Target>> {
 
 /// A `Reflected` finding with the common boilerplate filled in.
 fn reflected_result(url: &str, param: &str, payload: &str) -> ScanResult {
-    ScanResult::new(
-        FindingType::Reflected,
-        "inHTML".to_string(),
-        "GET".to_string(),
-        url.to_string(),
-        param.to_string(),
-        payload.to_string(),
-        "evidence".to_string(),
-        "CWE-79".to_string(),
-        "Info".to_string(),
-        0,
-        "msg".to_string(),
-    )
+    ScanResult::builder(FindingType::Reflected)
+        .inject_type("inHTML")
+        .method("GET")
+        .data(url.to_string())
+        .param(param.to_string())
+        .payload(payload.to_string())
+        .evidence("evidence")
+        .cwe("CWE-79")
+        .severity("Info")
+        .message_id(0)
+        .message_str("msg")
+        .build()
 }
 
 /// A `ScanState` with empty shared handles and the supplied results preloaded.

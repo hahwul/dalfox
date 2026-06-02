@@ -36,7 +36,7 @@ pub mod xss_common;
 use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::Param;
 use crate::scanning::check_dom_verification::check_dom_verification_with_client;
-use crate::scanning::check_reflection::check_reflection_with_response_client;
+use crate::scanning::check_reflection::check_reflection_with_response;
 use crate::scanning::result::FindingType;
 use crate::target_parser::Target;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -464,14 +464,16 @@ async fn run_ast_dom_analysis(
                 let base = crate::scanning::url_inject::effective_query_base(&target.url, param);
                 crate::scanning::url_inject::build_injected_url(&base, param, &payload)
             };
-            let mut ast_result = crate::scanning::result::Result::new(
-                FindingType::AstDetected,
-                "DOM-XSS".to_string(),
-                crate::scanning::url_inject::effective_method(&target.method, param),
-                result_url.clone(),
-                param.name.clone(),
-                payload.clone(),
-                format!(
+            let mut ast_result = crate::scanning::result::Result::builder(FindingType::AstDetected)
+                .inject_type("DOM-XSS")
+                .method(crate::scanning::url_inject::effective_method(
+                    &target.method,
+                    param,
+                ))
+                .data(result_url.clone())
+                .param(param.name.clone())
+                .payload(payload.clone())
+                .evidence(format!(
                     "{}:{}:{} - {} (Source: {}, Sink: {})",
                     target.url.as_str(),
                     vuln.line,
@@ -479,12 +481,12 @@ async fn run_ast_dom_analysis(
                     description,
                     vuln.source,
                     vuln.sink
-                ),
-                "CWE-79".to_string(),
-                "Medium".to_string(),
-                0,
-                format!("{} (검증 필요)", description),
-            );
+                ))
+                .cwe("CWE-79")
+                .severity("Medium")
+                .message_id(0)
+                .message_str(format!("{} (검증 필요)", description))
+                .build();
             ast_result.location = format!("{:?}", param.location);
             if !source_uses_url_surface {
                 ast_result.request = Some(build_request_text(target, param, &payload));
@@ -1220,7 +1222,7 @@ impl ScanWorkerCtx {
         let mut probe_response_text: Option<String> = None;
         for pp in probe_payloads {
             let (kind, response_text) =
-                check_reflection_with_response_client(client, &self.target, param, pp, &self.args)
+                check_reflection_with_response(Some(client), &self.target, param, pp, &self.args)
                     .await;
             if kind.is_some() {
                 probe_reflected = true;
@@ -1263,9 +1265,9 @@ impl ScanWorkerCtx {
         // If probe found no reflection, try a numeric-only probe to detect
         // letter-stripping filters (e.g., /[a-zA-Z]/ removal).
         if !probe_reflected {
-            let numeric_probe = "90197752";
-            let (kind, _) = check_reflection_with_response_client(
-                client,
+            let numeric_probe = crate::scanning::check_reflection::NUMERIC_PROBE_MARKER;
+            let (kind, _) = check_reflection_with_response(
+                Some(client),
                 &self.target,
                 param,
                 numeric_probe,
@@ -1316,8 +1318,8 @@ impl ScanWorkerCtx {
                     state.reflection_found_locally = true;
                     (None, None)
                 } else {
-                    check_reflection_with_response_client(
-                        self.client.as_ref(),
+                    check_reflection_with_response(
+                        Some(self.client.as_ref()),
                         &self.target,
                         param,
                         &reflection_payload,
@@ -1452,23 +1454,25 @@ impl ScanWorkerCtx {
                     // Template-shaped payloads (`{{…}}`) further refine the
                     // label to `*-CSTI` so users can tell client-side
                     // template injection apart from generic HTML reflection.
-                    let mut result = crate::scanning::result::Result::new(
-                        finding_type,
-                        inject_type_for_payload_with_sink(
+                    let mut result = crate::scanning::result::Result::builder(finding_type)
+                        .inject_type(inject_type_for_payload_with_sink(
                             self.args.sxss,
                             &reflection_payload,
                             param.framework_sink.as_deref(),
-                        ),
-                        crate::scanning::url_inject::effective_method(&self.target.method, param),
-                        result_url,
-                        param.name.clone(),
-                        reflection_payload.clone(),
-                        summary,
-                        "CWE-79".to_string(),
-                        severity,
-                        606,
-                        poc_msg,
-                    );
+                        ))
+                        .method(crate::scanning::url_inject::effective_method(
+                            &self.target.method,
+                            param,
+                        ))
+                        .data(result_url)
+                        .param(param.name.clone())
+                        .payload(reflection_payload.clone())
+                        .evidence(summary)
+                        .cwe("CWE-79")
+                        .severity(severity)
+                        .message_id(606)
+                        .message_str(poc_msg)
+                        .build();
                     result.location = format!("{:?}", param.location);
                     result.request =
                         Some(build_request_text(&self.target, param, &reflection_payload));
@@ -1564,29 +1568,33 @@ impl ScanWorkerCtx {
                         })
                         .map_or("DOM evidence", |k| k.label());
 
-                    let mut result = crate::scanning::result::Result::new(
-                        FindingType::Verified, // DOM-verified => Vulnerability
-                        inject_type_for_payload_with_sink(
-                            self.args.sxss,
-                            &dom_payload,
-                            param.framework_sink.as_deref(),
-                        ),
-                        crate::scanning::url_inject::effective_method(&self.target.method, param),
-                        result_url,
-                        param.name.clone(),
-                        dom_payload.clone(),
-                        format!(
-                            "DOM verification successful for param {} ({})",
-                            param.name, evidence_label
-                        ),
-                        "CWE-79".to_string(),
-                        "High".to_string(),
-                        606,
-                        format!(
-                            "Triggered XSS Payload ({}): {}={}",
-                            evidence_label, param.name, dom_payload
-                        ),
-                    );
+                    // DOM-verified => Vulnerability
+                    let mut result =
+                        crate::scanning::result::Result::builder(FindingType::Verified)
+                            .inject_type(inject_type_for_payload_with_sink(
+                                self.args.sxss,
+                                &dom_payload,
+                                param.framework_sink.as_deref(),
+                            ))
+                            .method(crate::scanning::url_inject::effective_method(
+                                &self.target.method,
+                                param,
+                            ))
+                            .data(result_url)
+                            .param(param.name.clone())
+                            .payload(dom_payload.clone())
+                            .evidence(format!(
+                                "DOM verification successful for param {} ({})",
+                                param.name, evidence_label
+                            ))
+                            .cwe("CWE-79")
+                            .severity("High")
+                            .message_id(606)
+                            .message_str(format!(
+                                "Triggered XSS Payload ({}): {}={}",
+                                evidence_label, param.name, dom_payload
+                            ))
+                            .build();
                     result.location = format!("{:?}", param.location);
                     result.request = Some(build_request_text(&self.target, param, &dom_payload));
                     result.response = response_text;
@@ -1652,25 +1660,25 @@ impl ScanWorkerCtx {
                         };
                         let reflection_note = reflection_kind_note(kind);
 
-                        let mut result = crate::scanning::result::Result::new(
-                            FindingType::Reflected,
-                            "inHTML-HPP".to_string(),
-                            self.target.method.clone(),
-                            hpp_url.clone(),
-                            param.name.clone(),
-                            hpp_payload.clone(),
-                            format!(
-                                "HPP bypass: reflected XSS for param {} (position={}, {})",
-                                param.name, pos_label, reflection_note
-                            ),
-                            "CWE-79".to_string(),
-                            "Medium".to_string(),
-                            606,
-                            format!(
-                                "[R] HPP Bypass ({}): {}={} (position={})",
-                                reflection_note, param.name, hpp_payload, pos_label
-                            ),
-                        );
+                        let mut result =
+                            crate::scanning::result::Result::builder(FindingType::Reflected)
+                                .inject_type("inHTML-HPP")
+                                .method(self.target.method.clone())
+                                .data(hpp_url.clone())
+                                .param(param.name.clone())
+                                .payload(hpp_payload.clone())
+                                .evidence(format!(
+                                    "HPP bypass: reflected XSS for param {} (position={}, {})",
+                                    param.name, pos_label, reflection_note
+                                ))
+                                .cwe("CWE-79")
+                                .severity("Medium")
+                                .message_id(606)
+                                .message_str(format!(
+                                    "[R] HPP Bypass ({}): {}={} (position={})",
+                                    reflection_note, param.name, hpp_payload, pos_label
+                                ))
+                                .build();
                         result.location = format!("{:?}", param.location);
                         result.response = response_text;
                         self.stream_finding(&result);
