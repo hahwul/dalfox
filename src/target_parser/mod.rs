@@ -322,6 +322,13 @@ mod tests {
     // scopes its assertions to a timeout value no other test uses, so foreign
     // inserts (which carry different timeouts) can't perturb the count. This
     // makes the cache tests safe to run concurrently with no shared lock.
+    //
+    // Timeouts reserved for these tests' cache keys. The isolation guarantee
+    // rests on no other test building a Client with one of these values, so
+    // keep them unique to this module and do not reuse them elsewhere.
+    const REUSE_TIMEOUT: u64 = 60_001;
+    const DISTINCT_TIMEOUT_A: u64 = 60_002;
+    const DISTINCT_TIMEOUT_B: u64 = 60_003;
 
     /// Count cached Clients whose key carries `timeout`. Scoping by a
     /// per-test-unique timeout isolates the measurement from any other test
@@ -338,7 +345,7 @@ mod tests {
     #[test]
     fn test_client_cache_reuses_for_same_key() {
         let mut t = parse_target("http://example.com").unwrap();
-        t.timeout = 60_001; // unique to this test
+        t.timeout = REUSE_TIMEOUT;
         t.follow_redirects = false;
         t.proxy = None;
         let _ = t.build_client().unwrap();
@@ -354,9 +361,9 @@ mod tests {
     #[test]
     fn test_client_cache_separates_distinct_keys() {
         let mut a = parse_target("http://example.com").unwrap();
-        a.timeout = 60_002; // unique to this test
+        a.timeout = DISTINCT_TIMEOUT_A;
         let mut b = parse_target("http://example.com").unwrap();
-        b.timeout = 60_003; // distinct key, also unique to this test
+        b.timeout = DISTINCT_TIMEOUT_B; // distinct key
         let _ = a.build_client().unwrap();
         let _ = b.build_client().unwrap();
         let _ = a.build_client().unwrap();
