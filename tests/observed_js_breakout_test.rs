@@ -22,6 +22,7 @@ use axum::extract::Query;
 use axum::response::Html;
 use axum::routing::get;
 use dalfox::cmd::scan::{ScanArgs, run_scan};
+use dalfox::parameter_analysis::analyze_parameters;
 use std::collections::HashMap;
 use tokio::net::TcpListener;
 
@@ -166,4 +167,180 @@ async fn observed_breakout_detects_nested_object_script_context() {
             .map(|f| f.get("payload").cloned())
             .collect::<Vec<_>>()
     );
+}
+
+/// Reflect every non-sentinel query value AND the raw request body (where each
+/// probe's marker lands, whether form-encoded `b=MARKER` or JSON `{"k":"MARKER"}`)
+/// into the response, and serve a POST form. Skipping the `dlfx_` sentinel names
+/// keeps the reflect-everything collapse from firing, so each per-route
+/// discovery/mining `Param` constructor actually runs on its own marker probe.
+/// Used to exercise the `js_breakout` carrier on the body / JSON / form /
+/// response-id routes (mirrors `escaped_quote_probe_test`'s constructor coverage).
+async fn reflect_non_sentinel_handler(
+    uri: axum::extract::OriginalUri,
+    body: String,
+) -> Html<String> {
+    let mut parts: Vec<String> = Vec::new();
+    for pair in uri.0.query().unwrap_or("").split('&') {
+        let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+        if !v.is_empty() && !k.contains("dlfx_") {
+            parts.push(v.to_string());
+        }
+    }
+    if !body.is_empty() {
+        // Reflect the raw body verbatim — the marker is in it for both the
+        // form-encoded and JSON probes.
+        parts.push(body);
+    }
+    let joined = parts.join(" ");
+    // Strip the chars that would break the surrounding div/script so the marker
+    // reflects cleanly (detection only needs the marker present).
+    let safe: String = joined
+        .chars()
+        .filter(|c| !matches!(c, '<' | '>' | '\'' | '"'))
+        .collect();
+    Html(format!(
+        "<html><body><div id=out>{safe}</div>\
+         <script>var o = {{id: 'static'}};</script>\
+         <form method=\"post\" action=\"/x\"><input name=\"fld\" value=\"\"></form>\
+         </body></html>"
+    ))
+}
+
+/// Drive a full scan with mining enabled over the body, response-id and form
+/// routes so the `js_breakout` per-parameter carrier is populated on each — the
+/// HTTP-driven `Param` constructors the pure unit tests can't reach. No
+/// assertion on findings; exercising the constructors without panic (and
+/// covering the carrier wiring) is the goal.
+#[tokio::test]
+async fn observed_breakout_carrier_covers_mining_and_form_routes() {
+    dalfox::ensure_crypto_provider();
+
+    let app = Router::new()
+        .route(
+            "/",
+            get(reflect_non_sentinel_handler).post(reflect_non_sentinel_handler),
+        )
+        .route(
+            "/x",
+            get(reflect_non_sentinel_handler).post(reflect_non_sentinel_handler),
+        );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().unwrap();
+    let _server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let url = format!("http://127.0.0.1:{}/?q=seed&id=seed", addr.port());
+    let out = std::env::temp_dir().join(format!("dlfx_obs_cov_{}.json", addr.port()));
+    let mut args = base_args(url, out.to_string_lossy().to_string());
+    // Enable mining (dict + dom). The reflect-everything mock drives the dict
+    // probe to the sustained-reflection EWMA collapse, exercising the collapse
+    // post-processing that carries `js_breakout` on the synthetic 'any' param.
+    args.skip_mining = false;
+    args.skip_mining_dict = false;
+    args.skip_mining_dom = false;
+    args.skip_reflection_header = false;
+    args.skip_reflection_cookie = false;
+    args.skip_reflection_path = false;
+    // 16+ reflecting body params trip the body-probe EWMA collapse too.
+    let body: String = (0..18)
+        .map(|i| format!("p{i}=seed"))
+        .collect::<Vec<_>>()
+        .join("&");
+    args.data = Some(body);
+    args.skip_xss_scanning = true;
+
+    run_scan(&args).await;
+    let _ = std::fs::remove_file(&out);
+}
+
+/// Drive form discovery so the POST-form `Param` constructor (and its
+/// `js_breakout` carrier) runs: a page with a `<form method=post action=/x>`
+/// whose action endpoint reflects the POST body.
+#[tokio::test]
+async fn observed_breakout_carrier_covers_form_route() {
+    dalfox::ensure_crypto_provider();
+
+    let app = Router::new()
+        .route(
+            "/",
+            get(reflect_non_sentinel_handler).post(reflect_non_sentinel_handler),
+        )
+        .route(
+            "/x",
+            get(reflect_non_sentinel_handler).post(reflect_non_sentinel_handler),
+        );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().unwrap();
+    let _server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let url = format!("http://127.0.0.1:{}/?q=seed", addr.port());
+    let mut target = dalfox::target_parser::parse_target(&url).expect("parse target");
+    let mut args = base_args(url.clone(), String::new());
+    args.output = None;
+    args.skip_mining = true;
+    args.skip_xss_scanning = true;
+
+    analyze_parameters(&mut target, &args, None).await;
+
+    // The form's `fld` input reflects via POST to its action URL, so form
+    // discovery must surface a Body param carrying the form action URL.
+    assert!(
+        target
+            .reflection_params
+            .iter()
+            .any(|p| p.form_action_url.is_some()),
+        "form discovery should surface a form-action Body param; got {:?}",
+        target
+            .reflection_params
+            .iter()
+            .map(|p| (&p.name, &p.location))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Same intent as above for the JSON-body route: a JSON `-d` payload makes the
+/// JSON-body probe construct its `Param` (and its `js_breakout` carrier).
+#[tokio::test]
+async fn observed_breakout_carrier_covers_json_body_route() {
+    dalfox::ensure_crypto_provider();
+
+    let app = Router::new().route(
+        "/",
+        get(reflect_non_sentinel_handler).post(reflect_non_sentinel_handler),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().unwrap();
+    let _server = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
+    let url = format!("http://127.0.0.1:{}/", addr.port());
+    let out = std::env::temp_dir().join(format!("dlfx_obs_json_{}.json", addr.port()));
+    let mut args = base_args(url, out.to_string_lossy().to_string());
+    args.skip_mining = false;
+    args.skip_mining_dict = true;
+    args.skip_mining_dom = true;
+    args.method = "POST".to_string();
+    // 16+ reflecting JSON fields trip the JSON-body-probe EWMA collapse, which
+    // carries `js_breakout` on the synthetic 'any' JSON param.
+    let json: String = format!(
+        "{{{}}}",
+        (0..18)
+            .map(|i| format!("\"p{i}\":\"seed\""))
+            .collect::<Vec<_>>()
+            .join(",")
+    );
+    args.data = Some(json);
+    args.headers = vec!["Content-Type: application/json".to_string()];
+    args.skip_xss_scanning = true;
+
+    run_scan(&args).await;
+    let _ = std::fs::remove_file(&out);
 }
