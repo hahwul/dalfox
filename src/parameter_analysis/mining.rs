@@ -109,6 +109,7 @@ fn make_any_query_param(text: &str) -> Param {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: detect_js_breakout(text),
     }
 }
 
@@ -185,6 +186,68 @@ pub fn detect_injection_context(text: &str) -> InjectionContext {
     }
     let open = crate::scanning::markers::open_marker();
     detect_injection_context_with_marker(text, open)
+}
+
+/// Compute the exact JS breakout closer (issue #1073 follow-up) from the
+/// *observed* response when a probe marker reflects inside an inline `<script>`
+/// body. Returns the minimal closer sequence — produced by
+/// [`crate::payload::js_breakout::compute_js_breakout`] over the real script
+/// source from the enclosing `<script>` content start up to the reflection
+/// point — that escapes the open string and every unbalanced `([{` so a
+/// following `;<payload>//` reaches executable statement position.
+///
+/// This is the per-parameter carrier the synthesis layer consumes to emit a
+/// breakout matched to the *site's actual nesting* rather than only the fixed
+/// depth-0–3 catalog. Returns `None` when the marker is not inside an inline
+/// `<script>` body (the script-tag requirement scopes this to script contexts,
+/// not event-handler/attribute JS), when no marker is present, or when the
+/// observed prefix already sits at statement position (empty closer) — every
+/// such case falls back to the fixed catalog, so the result is strictly
+/// additive and never removes coverage.
+///
+/// Mirrors `detect_injection_context`'s marker selection (inner marker
+/// preferred, open marker fallback) so the closer is computed for the same
+/// reflection the context classifier anchored on. Uses raw response slicing
+/// (inline `<script>` content is CDATA-like, not HTML-entity-decoded by the
+/// browser), so the prefix matches the JS source the browser actually parses.
+pub fn detect_js_breakout(text: &str) -> Option<String> {
+    let inner = crate::scanning::markers::inner_marker();
+    let marker = if text.contains(inner) {
+        inner
+    } else {
+        crate::scanning::markers::open_marker()
+    };
+    detect_js_breakout_with_marker(text, marker)
+}
+
+/// `detect_js_breakout` with a caller-supplied marker string (mirrors
+/// `detect_injection_context_with_marker`). Used by probes that inject a
+/// non-standard marker, e.g. the numeric-only discovery probe.
+pub fn detect_js_breakout_with_marker(text: &str, marker: &str) -> Option<String> {
+    let mp = text.find(marker)?;
+    // Find the enclosing inline `<script …>` opening tag before the reflection.
+    // `<script` (case-insensitive) never matches a closing `</script>` tag (the
+    // char after `<` is `/`, not `s`), so `rfind` lands on a real opener.
+    let lower_before = text[..mp].to_ascii_lowercase();
+    let open_tag = lower_before.rfind("<script")?;
+    // Script content begins just after the `>` that ends the opening tag.
+    let gt = text[open_tag..mp].find('>')?;
+    let content_start = open_tag + gt + 1;
+    let prefix = &text[content_start..mp];
+    // Guard the multi-`<script>` edge: if a `</script>` closes between this
+    // opener and the marker, the marker isn't inside this script body — bail to
+    // the fixed catalog rather than computing a bogus closer.
+    if prefix.to_ascii_lowercase().contains("</script") {
+        return None;
+    }
+    let closer = crate::payload::js_breakout::compute_js_breakout(prefix);
+    // An empty closer means the prefix already sits at statement position; the
+    // raw-JS catalog templates handle that, so carry nothing.
+    if closer.is_empty() {
+        None
+    } else {
+        Some(closer)
+    }
 }
 
 /// Like `detect_injection_context` but uses a caller-supplied marker string.
@@ -664,6 +727,7 @@ pub async fn probe_dictionary_params(
                                 form_origin_url: None,
                                 framework_sink: None,
                                 escaped_specials: None,
+                                js_breakout: None,
                             });
                             if !silence {
                                 eprintln!(
@@ -704,6 +768,7 @@ pub async fn probe_dictionary_params(
                                     form_origin_url: None,
                                     framework_sink: None,
                                     escaped_specials: None,
+                                    js_breakout: detect_js_breakout(&text),
                                 });
                                 if !silence {
                                     eprintln!(
@@ -789,6 +854,7 @@ pub async fn probe_dictionary_params(
                 form_origin_url: None,
                 framework_sink: None,
                 escaped_specials: None,
+                js_breakout: orig.js_breakout.clone(),
             });
         } else {
             guard.push(Param {
@@ -805,6 +871,7 @@ pub async fn probe_dictionary_params(
                 form_origin_url: None,
                 framework_sink: None,
                 escaped_specials: None,
+                js_breakout: None,
             });
         }
     }
@@ -924,6 +991,7 @@ pub async fn probe_body_params(
                                 form_origin_url: None,
                                 framework_sink: None,
                                 escaped_specials: None,
+                                js_breakout: detect_js_breakout(&text),
                             });
                             if !silence {
                                 eprintln!(
@@ -1004,6 +1072,7 @@ pub async fn probe_body_params(
                     form_origin_url: None,
                     framework_sink: None,
                     escaped_specials: None,
+                    js_breakout: orig.js_breakout.clone(),
                 });
             } else {
                 guard.push(Param {
@@ -1022,6 +1091,7 @@ pub async fn probe_body_params(
                     form_origin_url: None,
                     framework_sink: None,
                     escaped_specials: None,
+                    js_breakout: None,
                 });
             }
         }
@@ -1183,6 +1253,7 @@ pub async fn probe_response_id_params(
                                     form_origin_url: None,
                                     framework_sink: None,
                                     escaped_specials: None,
+                                    js_breakout: detect_js_breakout(&text),
                                 });
                                 if !silence {
                                     eprintln!(
@@ -1262,6 +1333,7 @@ pub async fn probe_response_id_params(
                     form_origin_url: None,
                     framework_sink: None,
                     escaped_specials: None,
+                    js_breakout: orig.js_breakout.clone(),
                 });
             } else {
                 guard.push(Param {
@@ -1280,6 +1352,7 @@ pub async fn probe_response_id_params(
                     form_origin_url: None,
                     framework_sink: None,
                     escaped_specials: None,
+                    js_breakout: None,
                 });
             }
         }
@@ -1428,6 +1501,7 @@ pub async fn probe_json_body_params(
                             form_origin_url: None,
                             framework_sink: None,
                             escaped_specials: None,
+                            js_breakout: detect_js_breakout(&text),
                         });
                         if !silence {
                             eprintln!(
@@ -1508,6 +1582,7 @@ pub async fn probe_json_body_params(
                 form_origin_url: None,
                 framework_sink: None,
                 escaped_specials: None,
+                js_breakout: orig.js_breakout.clone(),
             });
         } else {
             guard.push(Param {
@@ -1524,6 +1599,7 @@ pub async fn probe_json_body_params(
                 form_origin_url: None,
                 framework_sink: None,
                 escaped_specials: None,
+                js_breakout: None,
             });
         }
     }
@@ -1642,6 +1718,7 @@ pub async fn probe_multipart_params(
                     form_origin_url: None,
                     framework_sink: None,
                     escaped_specials: None,
+                    js_breakout: detect_js_breakout(&text),
                 });
             }
             drop(permit);

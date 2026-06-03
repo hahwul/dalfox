@@ -649,6 +649,7 @@ async fn test_check_path_discovery_skips_existing_segment() {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     }]));
 
     let semaphore = Arc::new(Semaphore::new(1));
@@ -716,6 +717,7 @@ fn test_dedupe_collapses_same_name_location_pair() {
             form_origin_url: None,
             framework_sink: None,
             escaped_specials: None,
+            js_breakout: None,
         },
         Param {
             name: "query".to_string(),
@@ -731,6 +733,7 @@ fn test_dedupe_collapses_same_name_location_pair() {
             form_origin_url: None,
             framework_sink: None,
             escaped_specials: None,
+            js_breakout: None,
         },
     ];
     dedupe_reflection_params(&mut params);
@@ -767,6 +770,7 @@ fn test_dedupe_keeps_different_locations_distinct() {
             form_origin_url: None,
             framework_sink: None,
             escaped_specials: None,
+            js_breakout: None,
         },
         Param {
             name: "q".to_string(),
@@ -782,6 +786,7 @@ fn test_dedupe_keeps_different_locations_distinct() {
             form_origin_url: None,
             framework_sink: None,
             escaped_specials: None,
+            js_breakout: None,
         },
     ];
     dedupe_reflection_params(&mut params);
@@ -805,6 +810,7 @@ fn test_dedupe_is_noop_for_unique_entries() {
             form_origin_url: None,
             framework_sink: None,
             escaped_specials: None,
+            js_breakout: None,
         },
         Param {
             name: "b".to_string(),
@@ -820,6 +826,7 @@ fn test_dedupe_is_noop_for_unique_entries() {
             form_origin_url: None,
             framework_sink: None,
             escaped_specials: None,
+            js_breakout: None,
         },
     ];
     let before = params.clone();

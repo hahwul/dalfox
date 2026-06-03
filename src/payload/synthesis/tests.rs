@@ -44,7 +44,7 @@ fn produces_payloads_for_every_context_when_unfiltered() {
         InjectionContext::Css(Some(DelimiterType::DoubleQuote)),
     ];
     for ctx in contexts {
-        let payloads = synthesize_payloads(&ctx, &[], &[], &[]);
+        let payloads = synthesize_payloads(&ctx, &[], &[], &[], None);
         assert!(
             !payloads.is_empty(),
             "expected synthesized payloads for {:?}",
@@ -61,7 +61,7 @@ fn output_is_capped_and_deduped() {
         InjectionContext::Attribute(Some(DelimiterType::DoubleQuote)),
         InjectionContext::Javascript(Some(DelimiterType::SingleQuote)),
     ] {
-        let payloads = synthesize_payloads(&ctx, &[], &[], &[]);
+        let payloads = synthesize_payloads(&ctx, &[], &[], &[], None);
         assert!(
             payloads.len() <= MAX_SYNTHESIZED,
             "cap exceeded for {:?}",
@@ -101,7 +101,7 @@ fn obeys_filter_for_assorted_blocked_sets() {
     ];
     for invalid in blocked_sets {
         for ctx in &contexts {
-            let payloads = synthesize_payloads(ctx, invalid, &[], &[]);
+            let payloads = synthesize_payloads(ctx, invalid, &[], &[], None);
             assert_obeys_filter(&payloads, invalid);
         }
     }
@@ -117,7 +117,7 @@ fn everything_blocked_yields_nothing() {
         InjectionContext::Attribute(Some(DelimiterType::DoubleQuote)),
         InjectionContext::Javascript(Some(DelimiterType::SingleQuote)),
     ] {
-        let payloads = synthesize_payloads(&ctx, ALL_SPECIALS, &[], &[]);
+        let payloads = synthesize_payloads(&ctx, ALL_SPECIALS, &[], &[], None);
         assert!(payloads.is_empty(), "expected empty for {:?}", ctx);
     }
 }
@@ -126,7 +126,7 @@ fn everything_blocked_yields_nothing() {
 fn html_text_context_needs_angles() {
     // HTML element-content reflection can only execute by injecting a tag, so a
     // filter that strips `<` defeats synthesis here.
-    let payloads = synthesize_payloads(&html(), &['<'], &[], &[]);
+    let payloads = synthesize_payloads(&html(), &['<'], &[], &[], None);
     assert!(
         payloads.is_empty(),
         "HTML text context should yield nothing when `<` is stripped, got {:?}",
@@ -139,7 +139,7 @@ fn attribute_context_survives_angle_stripping() {
     // The key win: a quoted-attribute reflection stays exploitable without
     // `<`/`>` via stay-in-tag event injection.
     let ctx = InjectionContext::Attribute(Some(DelimiterType::DoubleQuote));
-    let payloads = synthesize_payloads(&ctx, &['<', '>'], &[], &[]);
+    let payloads = synthesize_payloads(&ctx, &['<', '>'], &[], &[], None);
     assert!(
         !payloads.is_empty(),
         "attribute context should still synthesize angle-free payloads"
@@ -166,7 +166,7 @@ fn paren_blocked_falls_back_to_backtick_call() {
     // With `(`/`)` stripped, the only surviving execution primitive is the
     // tagged-template call `alert`1``.
     let ctx = InjectionContext::Attribute(Some(DelimiterType::DoubleQuote));
-    let payloads = synthesize_payloads(&ctx, &['(', ')'], &[], &[]);
+    let payloads = synthesize_payloads(&ctx, &['(', ')'], &[], &[], None);
     assert!(!payloads.is_empty());
     assert_obeys_filter(&payloads, &['(', ')']);
     assert!(
@@ -186,7 +186,7 @@ fn single_quote_attr_needs_the_quote() {
     // stripped, synthesis bows out (escaped-quote handling is tracked
     // separately).
     let ctx = InjectionContext::Attribute(Some(DelimiterType::SingleQuote));
-    let payloads = synthesize_payloads(&ctx, &['\''], &[], &[]);
+    let payloads = synthesize_payloads(&ctx, &['\''], &[], &[], None);
     assert!(
         payloads.is_empty(),
         "single-quote attribute with `'` stripped should yield nothing, got {:?}",
@@ -197,7 +197,7 @@ fn single_quote_attr_needs_the_quote() {
 #[test]
 fn backtick_js_context_uses_template_interpolation() {
     let ctx = InjectionContext::Javascript(Some(DelimiterType::Backtick));
-    let payloads = synthesize_payloads(&ctx, &[], &[], &[]);
+    let payloads = synthesize_payloads(&ctx, &[], &[], &[], None);
     assert!(
         payloads.iter().any(|p| p.contains("${alert(1)}")),
         "expected `${{alert(1)}}` interpolation, got {:?}",
@@ -210,7 +210,7 @@ fn js_string_context_includes_nested_closer_breakouts() {
     // Issue #1073: synthesis must emit exact nested-closer breakouts for JS
     // string contexts, not just the bare quote-close.
     let ctx = InjectionContext::Javascript(Some(DelimiterType::DoubleQuote));
-    let payloads = synthesize_payloads(&ctx, &[], &[], &[]);
+    let payloads = synthesize_payloads(&ctx, &[], &[], &[], None);
     // Bare close (depth 0) and a deep array-in-object-in-call close (depth 3).
     assert!(
         payloads.iter().any(|p| p == "\";alert(1)//"),
@@ -229,7 +229,7 @@ fn js_string_context_survives_angle_stripping() {
     // A reflection inside a JS string can break out with quotes alone — no
     // `</script>` tag needed — so angle stripping does not defeat it.
     let ctx = InjectionContext::Javascript(Some(DelimiterType::SingleQuote));
-    let payloads = synthesize_payloads(&ctx, &['<', '>'], &[], &[]);
+    let payloads = synthesize_payloads(&ctx, &['<', '>'], &[], &[], None);
     assert!(!payloads.is_empty());
     assert!(
         payloads.iter().any(|p| p.starts_with('\'')),
@@ -249,7 +249,7 @@ fn high_confidence_payloads_carry_a_marker() {
         InjectionContext::Attribute(Some(DelimiterType::DoubleQuote)),
         InjectionContext::Css(None),
     ] {
-        let payloads = synthesize_payloads(&ctx, &[], &[], &[]);
+        let payloads = synthesize_payloads(&ctx, &[], &[], &[], None);
         assert!(
             payloads
                 .iter()
@@ -266,7 +266,7 @@ fn high_confidence_payloads_carry_a_marker() {
 fn html_lead_payload_is_the_most_reliable_shape() {
     // Confidence ordering: the first HTML candidate should be the auto-firing
     // svg/onload tag.
-    let payloads = synthesize_payloads(&html(), &[], &[], &[]);
+    let payloads = synthesize_payloads(&html(), &[], &[], &[], None);
     assert!(
         payloads[0].starts_with("<svg onload=alert(1)"),
         "unexpected lead payload: {:?}",
@@ -277,7 +277,7 @@ fn html_lead_payload_is_the_most_reliable_shape() {
 #[test]
 fn attribute_url_context_includes_protocol_payload() {
     let ctx = InjectionContext::AttributeUrl(Some(DelimiterType::DoubleQuote));
-    let payloads = synthesize_payloads(&ctx, &[], &[], &[]);
+    let payloads = synthesize_payloads(&ctx, &[], &[], &[], None);
     assert!(
         payloads.iter().any(|p| p.contains("javascript:alert(1)")),
         "expected a javascript: protocol payload, got {:?}",
@@ -288,7 +288,7 @@ fn attribute_url_context_includes_protocol_payload() {
 #[test]
 fn empty_profile_matches_no_filtering() {
     // No probe data → nothing is "blocked" → full-strength synthesis.
-    let payloads = synthesize_payloads(&html(), &[], &[], &[]);
+    let payloads = synthesize_payloads(&html(), &[], &[], &[], None);
     assert!(payloads.len() > 5);
 }
 
@@ -299,7 +299,7 @@ fn escaped_quote_js_context_emits_backslash_breakout() {
     let ctx = InjectionContext::Javascript(Some(DelimiterType::DoubleQuote));
 
     // No escaped signal → only the raw quote-close breakout.
-    let plain = synthesize_payloads(&ctx, &[], &[], &[]);
+    let plain = synthesize_payloads(&ctx, &[], &[], &[], None);
     assert!(plain.iter().any(|p| p == "\";alert(1)//"));
     assert!(
         !plain.iter().any(|p| p == "\\\";alert(1)//"),
@@ -309,7 +309,7 @@ fn escaped_quote_js_context_emits_backslash_breakout() {
     // Escaped signal for `"` → emit ONLY the backslash-prefixed breakouts; the
     // raw quote-close is inert under escaping, so it is dropped (keeping the cap
     // free for the marker-carrying `</script>` template).
-    let escaped = synthesize_payloads(&ctx, &[], &[], &['"']);
+    let escaped = synthesize_payloads(&ctx, &[], &[], &['"'], None);
     assert!(
         escaped.iter().any(|p| p == "\\\";alert(1)//"),
         "expected the escaped breakout `\\\";alert(1)//`, got {escaped:?}"
@@ -329,6 +329,81 @@ fn escaped_quote_js_context_emits_backslash_breakout() {
         escaped.iter().any(|p| p.contains("</script>")),
         "expected the marker-carrying </script> breakout to survive the cap"
     );
+}
+
+#[test]
+fn observed_breakout_reaches_shape_beyond_fixed_catalog() {
+    // Issue #1073 follow-up: an observed-prefix breakout for nesting the fixed
+    // depth-0–3 catalog does NOT enumerate (`g([[{k:"…` → close `"}]])`) is both
+    // emitted and placed first (highest confidence).
+    let ctx = InjectionContext::Javascript(Some(DelimiterType::DoubleQuote));
+    let observed = "\"}]])"; // close: " } ] ] )
+    let with_prefix = synthesize_payloads(&ctx, &[], &[], &[], Some(observed));
+    assert_eq!(
+        with_prefix.first().map(String::as_str),
+        Some("\"}]]);alert(1)//"),
+        "observed breakout must be emitted first, got {with_prefix:?}"
+    );
+    // Without the observed prefix the fixed catalog never produces this closer,
+    // proving the new payload is genuinely prefix-derived (added coverage).
+    let without = synthesize_payloads(&ctx, &[], &[], &[], None);
+    assert!(
+        !without.iter().any(|p| p == "\"}]]);alert(1)//"),
+        "the fixed catalog must not already cover this deep nesting"
+    );
+}
+
+#[test]
+fn observed_breakout_dedups_against_catalog() {
+    // When the observed closer coincides with a fixed-catalog shape it must not
+    // duplicate — it just moves to the front.
+    let ctx = InjectionContext::Javascript(Some(DelimiterType::DoubleQuote));
+    let observed = "\"]})"; // also produced by the `({k:[` catalog shell
+    let out = synthesize_payloads(&ctx, &[], &[], &[], Some(observed));
+    assert_eq!(out.first().map(String::as_str), Some("\"]});alert(1)//"));
+    let n = out.iter().filter(|p| *p == "\"]});alert(1)//").count();
+    assert_eq!(
+        n, 1,
+        "the coinciding breakout must appear exactly once, got {out:?}"
+    );
+}
+
+#[test]
+fn observed_breakout_escaped_prepends_backslash() {
+    // #1072 interaction: under a server that escapes the delimiter, the observed
+    // breakout leads with a backslash like the escaped catalog set, so the
+    // server's own escaping turns it into a real string break.
+    let ctx = InjectionContext::Javascript(Some(DelimiterType::DoubleQuote));
+    let out = synthesize_payloads(&ctx, &[], &[], &['"'], Some("\"}]])"));
+    assert!(
+        out.iter().any(|p| p == "\\\"}]]);alert(1)//"),
+        "expected backslash-prefixed observed breakout, got {out:?}"
+    );
+}
+
+#[test]
+fn observed_breakout_respects_filter() {
+    // The observed breakout is filter-gated like every other payload: a blocked
+    // structural char drops it (no unusable payload, no FP), and the rest still
+    // synthesize.
+    let ctx = InjectionContext::Javascript(Some(DelimiterType::DoubleQuote));
+    let out = synthesize_payloads(&ctx, &[']'], &[], &[], Some("\"}]])"));
+    assert_obeys_filter(&out, &[']']);
+    assert!(
+        !out.iter().any(|p| p.contains(']')),
+        "blocked `]` must not appear in any synthesized payload, got {out:?}"
+    );
+    assert!(!out.is_empty(), "other payloads must still synthesize");
+}
+
+#[test]
+fn observed_breakout_none_is_purely_additive() {
+    // Regression guard: passing None reproduces the prior behavior — the fixed
+    // depth-0 and nested catalog breakouts are still present unchanged.
+    let ctx = InjectionContext::Javascript(Some(DelimiterType::DoubleQuote));
+    let out = synthesize_payloads(&ctx, &[], &[], &[], None);
+    assert!(out.iter().any(|p| p == "\";alert(1)//"));
+    assert!(out.iter().any(|p| p == "\"]});alert(1)//"));
 }
 
 // ===================================================================
@@ -472,7 +547,7 @@ fn synthesis_closes_catalog_coverage_gaps() {
         let mut catalog = crate::scanning::xss_common::generate_dynamic_payloads(ctx);
         catalog.sort();
         catalog.dedup();
-        let synth = synthesize_payloads(ctx, blocked, &[], &[]);
+        let synth = synthesize_payloads(ctx, blocked, &[], &[], None);
 
         // Net-new = synthesized payloads the catalog does not already contain.
         // This is the coverage synthesis genuinely *adds*, not an artifact of
@@ -542,7 +617,7 @@ fn synthesis_is_fast_and_bounded() {
     for _ in 0..iterations {
         for ctx in &contexts {
             for blocked in blocked_sets {
-                let out = synthesize_payloads(ctx, blocked, &[], &[]);
+                let out = synthesize_payloads(ctx, blocked, &[], &[], None);
                 assert!(out.len() <= MAX_SYNTHESIZED);
                 produced += out.len();
             }

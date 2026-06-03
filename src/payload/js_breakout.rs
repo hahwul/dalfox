@@ -15,15 +15,23 @@
 //! common nesting shapes, which the synthesis engine emits for JS string
 //! contexts.
 //!
+//! [`compute_js_breakout`] is run two ways: by [`breakout_templates`] on the
+//! known-clean [`NESTING_SHELLS`] to derive the fixed depth-0–3 catalog, and —
+//! the issue #1073 follow-up — on the *real* observed inline-`<script>` source
+//! at scan time via [`crate::parameter_analysis::detect_js_breakout`], whose
+//! closer is carried per-parameter and emitted first by synthesis.
+//!
 //! Limitation — regex literals: `/` is only ever read as division or a comment
 //! start, never as a regex-literal delimiter. A prefix containing a regex
-//! (`x.test(/)/)`, `s.replace(/}{/, …)`) can therefore mis-balance the stack and
-//! yield a *wrong* closer — not merely a missing one. This is currently dormant:
-//! [`compute_js_breakout`] is only ever run on the known-clean [`NESTING_SHELLS`]
-//! by [`breakout_templates`]; it is NOT yet fed real observed script prefixes
-//! (that wiring is a follow-up that also needs a per-parameter carrier).
-//! Disambiguating regex-vs-division needs token-level context and is out of
-//! scope here. Either way the synthesis path always falls back to the catalog.
+//! (`x.test(/)/)`, `s.replace(/}{/, …)`) *before* the injection point can
+//! therefore mis-balance the stack and yield a *wrong* closer — not merely a
+//! missing one. Disambiguating regex-vs-division needs token-level context and
+//! is out of scope here. This is non-regressing by construction: a wrong closer
+//! only produces an inert payload (it reflects but does not parse to an
+//! executable position), promotion to [V] is execution/marker-verified so an
+//! inert payload can never become a false positive, and synthesis always *also*
+//! emits the fixed catalog as a fallback — so the observed-prefix closer is
+//! strictly additive over the prior fixed-only behavior.
 
 /// A structural opener tracked on the scan stack.
 #[derive(Clone, Copy, PartialEq)]

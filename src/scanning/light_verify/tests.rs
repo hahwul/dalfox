@@ -42,6 +42,7 @@ fn make_param(loc: Location, name: &str) -> Param {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     }
 }
 

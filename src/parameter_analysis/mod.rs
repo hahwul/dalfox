@@ -143,6 +143,21 @@ pub struct Param {
     /// quote-escape probe in `active_probe_param` (issue #1072).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub escaped_specials: Option<Vec<char>>,
+    /// Exact JS breakout closer computed from the *observed* inline-`<script>`
+    /// source between the enclosing script's content start and this parameter's
+    /// reflection point (issue #1073 follow-up). For a reflection nested inside
+    /// e.g. `foo({ bar: [ "…" ] })` this carries `"]})` — the minimal sequence
+    /// that closes the open string and every unbalanced `([{` to reach an
+    /// executable statement position. Computed once at detection time (where the
+    /// response body is available) via
+    /// [`crate::payload::js_breakout::compute_js_breakout`] and consumed by
+    /// payload synthesis, which emits the matching breakout *first* (highest
+    /// confidence) ahead of the fixed depth-0–3 catalog. `None` when the
+    /// reflection is not inside an inline `<script>` body, or when the observed
+    /// prefix already sits at statement position (nothing to close) — in which
+    /// case synthesis falls back to the fixed catalog exactly as before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub js_breakout: Option<String>,
 }
 
 impl Param {
@@ -449,6 +464,7 @@ async fn send_probe_request_for_param(
                     form_origin_url: None,
                     framework_sink: None,
                     escaped_specials: None,
+                    js_breakout: None,
                 },
                 payload,
             );
@@ -1111,6 +1127,7 @@ fn ensure_explicit_params(params: &mut Vec<Param>, param_specs: &[String], targe
             form_origin_url: None,
             framework_sink: None,
             escaped_specials: None,
+            js_breakout: None,
         });
     }
 }

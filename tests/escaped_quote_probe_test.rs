@@ -44,6 +44,7 @@ fn js_dq_param() -> Param {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     }
 }
 

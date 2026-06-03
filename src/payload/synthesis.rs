@@ -262,11 +262,20 @@ fn templates_for(context: &InjectionContext) -> Vec<&'static str> {
 /// only in backslash-escaped form (`"` → `\"`). For a JS-string context whose
 /// delimiter is escaped, synthesis leads with a backslash-prefixed breakout
 /// (`\";…`), which the server's own escaping turns into a working string break.
+/// `observed_js_breakout` (issue #1073 follow-up) is the exact breakout closer
+/// computed from the *real* inline-`<script>` source observed at this
+/// parameter's reflection point (see [`crate::parameter_analysis::Param::js_breakout`]).
+/// When present for a JS context, synthesis emits the matching breakout *first*
+/// — ahead of the fixed depth-0–3 catalog — so a site whose nesting the fixed
+/// shells don't cover (deeper or unusual nesting) is still reached. It is
+/// strictly additive: the fixed catalog still follows as a fallback, and the
+/// observed closer dedupes against it when they coincide.
 pub fn synthesize_payloads(
     context: &InjectionContext,
     invalid_specials: &[char],
     valid_specials: &[char],
     escaped_specials: &[char],
+    observed_js_breakout: Option<&str>,
 ) -> Vec<String> {
     // `valid_specials` is accepted for symmetry with `generate_adaptive_payloads`
     // and forward use (e.g. confidence weighting); gating is expressed purely as
@@ -280,20 +289,34 @@ pub fn synthesize_payloads(
     // Candidate templates, highest-confidence first.
     let mut templates: Vec<String> = Vec::new();
     // Issue #1073: for a reflection inside a JS string, lead with nested-closer
-    // breakouts (`"]});…`) that `js_breakout` computes for the common nesting
-    // shapes (call / array / object, depth 0-3), so sinks the bare quote-close
-    // cannot escape are still reached. This is a *fixed* set, not derived from
-    // the observed script prefix — per-prefix computation would need a per-param
-    // carrier and is a follow-up — so at any given site only the depth-matching
-    // closer is executable JS; the others still reflect and are reported as [R].
-    // Every breakout is gated by `allows_str` below like any other template.
-    if let InjectionContext::Javascript(Some(delim)) = context {
+    // breakouts (`"]});…`) that escape the open string and any unbalanced
+    // `([{` so sinks the bare quote-close cannot reach are still executed.
+    // `observed_js_breakout` (when present) is the closer computed from the
+    // *real* script prefix at this exact site — the per-parameter carrier
+    // follow-up — and is emitted first. The fixed depth-0–3 catalog
+    // (`breakout_templates`) always follows as a fallback for sites without an
+    // observed prefix, so coverage is strictly additive and the two dedupe when
+    // they coincide. Every breakout is gated by `allows_str` below like any
+    // other template.
+    if let InjectionContext::Javascript(delim) = context {
         let quote = match delim {
-            DelimiterType::SingleQuote => Some('\''),
-            DelimiterType::DoubleQuote => Some('"'),
-            DelimiterType::Backtick => Some('`'),
-            DelimiterType::Comment => None,
+            Some(DelimiterType::SingleQuote) => Some('\''),
+            Some(DelimiterType::DoubleQuote) => Some('"'),
+            Some(DelimiterType::Backtick) => Some('`'),
+            Some(DelimiterType::Comment) | None => None,
         };
+        // Issue #1073 follow-up: lead with the breakout computed from the real
+        // observed script prefix at this exact site, so nesting the fixed shells
+        // don't cover is still escaped. Emitted before the catalog (highest
+        // confidence) and deduped against it. When the delimiter is one the
+        // server backslash-escapes (#1072), prepend a `\` like the escaped
+        // catalog set, so the server's own escaping turns our quote into a real
+        // string break (`\"]});…` → `\\"]});…` → literal `\` + closing quote).
+        if let Some(closer) = observed_js_breakout {
+            let escaped = quote.is_some_and(|q| escaped_specials.contains(&q));
+            let lead = if escaped { "\\" } else { "" };
+            templates.push(format!("{lead}{closer};{{JS}}//"));
+        }
         if let Some(q) = quote {
             // Issue #1072: when the server backslash-escapes this delimiter the
             // raw nested breakout is *inert* (`"]});…` → `\"]});…`), so emit the
