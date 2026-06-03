@@ -24,18 +24,6 @@ fn client_cache() -> &'static Mutex<HashMap<ClientCacheKey, Client>> {
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-#[cfg(test)]
-fn client_cache_len_for_tests() -> usize {
-    client_cache().lock().map(|g| g.len()).unwrap_or(0)
-}
-
-#[cfg(test)]
-fn reset_client_cache_for_tests() {
-    if let Ok(mut guard) = client_cache().lock() {
-        guard.clear();
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Target {
     pub url: Url,
@@ -326,48 +314,54 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
 mod tests {
     use super::*;
 
-    // The client cache is process-global; these tests mutate it via
-    // `reset_client_cache_for_tests()` / `build_client()`. Resetting
-    // before/after is not enough on its own: when the two cache tests run
-    // concurrently, one test's reset can clear the cache mid-assertion in the
-    // other (observed as a `len 0 -> 1` flake). Serialize them with a shared
-    // lock so each runs its build/reset sequence in isolation.
-    static CACHE_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    // The client cache is process-global and shared with every other test in
+    // this binary that builds a Client (e.g. the WAF tests). Asserting on the
+    // cache's *total* length is therefore racy: a concurrent test can insert
+    // an entry between two measurements, which previously surfaced as a
+    // `same key must reuse: left 1, right 2` flake. Each test below instead
+    // scopes its assertions to a timeout value no other test uses, so foreign
+    // inserts (which carry different timeouts) can't perturb the count. This
+    // makes the cache tests safe to run concurrently with no shared lock.
 
-    /// Cache returns the same Client on the second call with an equal key,
-    /// and a fresh entry for a different key. Tests run serially via
-    /// `--test-threads=1` is not assumed; we reset before/after to avoid
-    /// cross-test pollution.
+    /// Count cached Clients whose key carries `timeout`. Scoping by a
+    /// per-test-unique timeout isolates the measurement from any other test
+    /// that builds a Client into the same process-global cache.
+    fn cache_entries_with_timeout(timeout: u64) -> usize {
+        client_cache()
+            .lock()
+            .map(|g| g.keys().filter(|(t, _, _)| *t == timeout).count())
+            .unwrap_or(0)
+    }
+
+    /// Building twice with the same key reuses the cached Client instead of
+    /// creating a second entry.
     #[test]
     fn test_client_cache_reuses_for_same_key() {
-        let _guard = CACHE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        reset_client_cache_for_tests();
         let mut t = parse_target("http://example.com").unwrap();
-        t.timeout = 7;
+        t.timeout = 60_001; // unique to this test
         t.follow_redirects = false;
         t.proxy = None;
         let _ = t.build_client().unwrap();
-        let len_after_first = client_cache_len_for_tests();
+        let after_first = cache_entries_with_timeout(t.timeout);
         let _ = t.build_client().unwrap();
-        let len_after_second = client_cache_len_for_tests();
-        assert_eq!(len_after_first, len_after_second, "same key must reuse");
-        assert!(len_after_first >= 1);
-        reset_client_cache_for_tests();
+        let after_second = cache_entries_with_timeout(t.timeout);
+        assert_eq!(after_first, after_second, "same key must reuse");
+        assert_eq!(after_first, 1, "exactly one entry for the shared key");
     }
 
+    /// Two targets differing only in an input that affects Client
+    /// construction (here, timeout) occupy two distinct cache entries.
     #[test]
     fn test_client_cache_separates_distinct_keys() {
-        let _guard = CACHE_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        reset_client_cache_for_tests();
         let mut a = parse_target("http://example.com").unwrap();
-        a.timeout = 7;
+        a.timeout = 60_002; // unique to this test
         let mut b = parse_target("http://example.com").unwrap();
-        b.timeout = 13; // different key
+        b.timeout = 60_003; // distinct key, also unique to this test
         let _ = a.build_client().unwrap();
         let _ = b.build_client().unwrap();
         let _ = a.build_client().unwrap();
-        assert_eq!(client_cache_len_for_tests(), 2);
-        reset_client_cache_for_tests();
+        assert_eq!(cache_entries_with_timeout(a.timeout), 1);
+        assert_eq!(cache_entries_with_timeout(b.timeout), 1);
     }
 
     #[test]
