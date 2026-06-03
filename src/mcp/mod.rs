@@ -549,6 +549,11 @@ pub struct ScanWithDalfoxParams {
     #[serde(default)]
     pub skip_ast_analysis: bool,
 
+    /// Also report outdated / known-vulnerable JS libraries (informational,
+    /// CWE-1104, 0 extra requests). Default: false
+    #[serde(default)]
+    pub detect_outdated_libs: bool,
+
     /// Blind XSS callback URL (e.g., your Burp Collaborator or interact.sh URL).
     #[serde(default)]
     pub blind_callback_url: Option<String>,
@@ -706,6 +711,7 @@ Final results (via get_results_dalfox) include finding type \
             skip_discovery,
             deep_scan,
             skip_ast_analysis,
+            detect_outdated_libs,
             blind_callback_url,
             workers,
         } = params;
@@ -780,6 +786,7 @@ Final results (via get_results_dalfox) include finding type \
         // request file) is intentionally not honoured on the MCP path —
         // see the comment on `ScanWithDalfoxParams::cookies` for the reason.
         let scan_args = Arc::new(ScanArgs {
+            detect_outdated_libs,
             input_type: "url".to_string(),
             format: "json".to_string(),
             targets: vec![target.clone()],

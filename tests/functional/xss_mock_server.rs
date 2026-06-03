@@ -1030,6 +1030,7 @@ async fn run_scan_test(
     let out_path_str = out_path.to_string_lossy().to_string();
 
     let args = ScanArgs {
+        detect_outdated_libs: false,
         input_type: "url".to_string(),
         format: "json".to_string(),
         targets: vec![target],
@@ -1150,6 +1151,7 @@ async fn run_discovery_once(opts: DiscoveryOpts) -> bool {
     target.workers = 10;
 
     let args = ScanArgs {
+        detect_outdated_libs: false,
         input_type: "url".to_string(),
         format: "json".to_string(),
         targets: vec![url.clone()],
@@ -2604,7 +2606,7 @@ async fn test_synthesis_filter_effectiveness_v2() {
 /// forces `deep_scan=true`, which skips that preflight path) and
 /// `skip_xss_scanning`/`skip_ast_analysis` to isolate the informational
 /// library finding. Returns the findings array.
-async fn run_libscan(addr: SocketAddr, case_id: u32) -> Vec<serde_json::Value> {
+async fn run_libscan(addr: SocketAddr, case_id: u32, detect_libs: bool) -> Vec<serde_json::Value> {
     let target = format!(
         "http://{}:{}/realworld/query/{}?query=seed",
         addr.ip(),
@@ -2620,6 +2622,8 @@ async fn run_libscan(addr: SocketAddr, case_id: u32) -> Vec<serde_json::Value> {
     let out_path_str = out_path.to_string_lossy().to_string();
 
     let args = ScanArgs {
+        // The opt-in outdated-library detector is gated by this flag.
+        detect_outdated_libs: detect_libs,
         input_type: "url".to_string(),
         format: "json".to_string(),
         targets: vec![target],
@@ -2719,8 +2723,18 @@ async fn test_vuln_library_detection_v2() {
             && f.get("inject_type").and_then(|t| t.as_str()) == Some("OutdatedComponent")
     };
 
-    // Vulnerable jQuery 1.7.2 -> informational finding naming the version + a CVE.
-    let vuln = run_libscan(addr, 9101).await;
+    // Opt-in default OFF: without --detect-outdated-libs, even the vulnerable
+    // jQuery 1.7.2 page yields NO library finding (dalfox stays focused on XSS).
+    let off = run_libscan(addr, 9101, false).await;
+    assert!(
+        !off.iter().any(is_outdated_lib),
+        "outdated-lib detection must be OFF by default, got {off:?}"
+    );
+    println!("[#9101 off] no outdated-lib finding without the flag (correct)");
+
+    // With --detect-outdated-libs: vulnerable jQuery 1.7.2 -> informational
+    // finding naming the version + a CVE.
+    let vuln = run_libscan(addr, 9101, true).await;
     let lib_finding = vuln.iter().find(|f| is_outdated_lib(f)).unwrap_or_else(|| {
         panic!("expected an OutdatedComponent finding for jQuery 1.7.2, got {vuln:?}")
     });
@@ -2742,8 +2756,8 @@ async fn test_vuln_library_detection_v2() {
     );
     println!("[#9101] outdated-lib finding: {evidence}");
 
-    // Current jQuery 3.7.1 -> NO library finding.
-    let safe = run_libscan(addr, 9102).await;
+    // Current jQuery 3.7.1 (flag on) -> NO library finding.
+    let safe = run_libscan(addr, 9102, true).await;
     assert!(
         !safe.iter().any(is_outdated_lib),
         "current jQuery must not yield an OutdatedComponent finding, got {safe:?}"

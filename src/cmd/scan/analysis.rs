@@ -455,10 +455,13 @@ pub(crate) async fn run_preflight_and_analysis(
                 }
 
                 // Outdated / known-vulnerable JS library detection (issue #1074).
-                // Emits informational (CWE-1104) findings from the initial
-                // response, once per target. Borrows the body so the AST block
-                // below can still consume it.
-                if let Some(body) = preflight_response_body.as_deref() {
+                // OPT-IN (`--detect-outdated-libs`, default off): dalfox's default
+                // output is verified XSS, so this informational (CWE-1104) add-on
+                // is gated behind a flag. Emits once per target from the initial
+                // response; borrows the body so the AST block below can still use it.
+                if args_clone.detect_outdated_libs
+                    && let Some(body) = preflight_response_body.as_deref()
+                {
                     let lib_findings = crate::scanning::vuln_libs::library_findings(
                         crate::scanning::vuln_libs::detect_vulnerable_libraries(body),
                         target.url.as_str(),

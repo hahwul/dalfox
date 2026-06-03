@@ -3,6 +3,7 @@ use std::sync::atomic::Ordering;
 
 fn default_scan_args() -> crate::cmd::scan::ScanArgs {
     crate::cmd::scan::ScanArgs {
+        detect_outdated_libs: false,
         input_type: "auto".to_string(),
         format: "plain".to_string(),
         output: None,
@@ -142,6 +143,7 @@ fn full_scan_config() -> ScanConfig {
         sxss_method: Some("POST".to_string()),
         sxss_retries: Some(12),
         skip_ast_analysis: Some(true),
+        detect_outdated_libs: Some(true),
         hpp: Some(false),
         waf_bypass: Some("auto".to_string()),
         skip_waf_probe: Some(false),
@@ -476,6 +478,7 @@ fn test_apply_to_scan_args_if_default_maps_all_supported_fields() {
     assert_eq!(args.sxss_method, "POST");
     assert_eq!(args.sxss_retries, 12);
     assert!(args.skip_ast_analysis);
+    assert!(args.detect_outdated_libs);
 }
 
 #[test]

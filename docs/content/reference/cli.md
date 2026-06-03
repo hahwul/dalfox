@@ -153,6 +153,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--max-payloads-per-param` | — | `0` | Cap payloads tested per parameter (`0` = no cap) |
 | `--skip-ast-analysis` | — | false | Skip AST DOM-XSS |
 | `--hpp` | — | false | HTTP Parameter Pollution |
+| `--detect-outdated-libs` | — | false | Also report outdated / known-vulnerable JS libraries (informational, CWE-1104; 0 extra requests) |
 
 ### WAF
 

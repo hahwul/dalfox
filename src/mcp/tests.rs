@@ -44,6 +44,7 @@ fn default_scan_params(target: &str) -> ScanWithDalfoxParams {
         skip_discovery: false,
         deep_scan: false,
         skip_ast_analysis: false,
+        detect_outdated_libs: false,
         blind_callback_url: None,
         workers: 1,
     }
@@ -51,6 +52,7 @@ fn default_scan_params(target: &str) -> ScanWithDalfoxParams {
 
 fn default_scan_args(target: &str) -> ScanArgs {
     ScanArgs {
+        detect_outdated_libs: false,
         input_type: "url".to_string(),
         format: "json".to_string(),
         targets: vec![target.to_string()],
@@ -241,6 +243,7 @@ async fn test_scan_with_dalfox_queues_and_can_be_queried() {
         timeout: 1,
         delay: 0,
         follow_redirects: false,
+        detect_outdated_libs: true,
         ..default_scan_params("http://127.0.0.1:1/?q=a")
     };
     let resp = mcp
