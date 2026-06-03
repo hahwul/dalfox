@@ -288,6 +288,7 @@ pub async fn check_fragment_discovery(target: &Target, reflection_params: Arc<Mu
             form_action_url: None,
             form_origin_url: None,
             framework_sink: None,
+            escaped_specials: None,
         });
     }
 }
@@ -318,6 +319,7 @@ pub async fn check_query_discovery(
             form_action_url: None,
             form_origin_url: None,
             framework_sink: None,
+            escaped_specials: None,
         };
         let url_str = build_injected_url(&target.url, &tmp_param, test_value);
         let url = url::Url::parse(&url_str).expect("build_injected_url produces valid URL");
@@ -374,6 +376,7 @@ pub async fn check_query_discovery(
                         form_action_url: None,
                         form_origin_url: None,
                         framework_sink: None,
+                        escaped_specials: None,
                     });
                 } else if let Ok(text) = resp.text().await
                     && crate::scanning::markers::classify_probe_reflection(&text).detected()
@@ -397,6 +400,7 @@ pub async fn check_query_discovery(
                         form_action_url: None,
                         form_origin_url: None,
                         framework_sink,
+                        escaped_specials: None,
                     });
                 }
             }
@@ -466,6 +470,7 @@ pub async fn check_query_discovery(
                     form_action_url: None,
                     form_origin_url: None,
                     framework_sink: None,
+                    escaped_specials: None,
                 });
                 break; // Found working encoding, no need to try more
             }
@@ -544,6 +549,7 @@ pub async fn check_query_discovery(
                     form_action_url: None,
                     form_origin_url: None,
                     framework_sink: None,
+                    escaped_specials: None,
                 });
             }
             if target.delay > 0 {
@@ -575,6 +581,7 @@ pub async fn check_query_discovery(
                 form_action_url: None,
                 form_origin_url: None,
                 framework_sink: None,
+                escaped_specials: None,
             };
             let url_str = build_injected_url(&target.url, &tmp_param, numeric_marker);
             let url = url::Url::parse(&url_str).expect("valid URL");
@@ -605,6 +612,7 @@ pub async fn check_query_discovery(
                     form_action_url: None,
                     form_origin_url: None,
                     framework_sink: None,
+                    escaped_specials: None,
                 });
             }
             if target.delay > 0 {
@@ -642,6 +650,7 @@ pub async fn check_query_discovery(
                 form_action_url: None,
                 form_origin_url: None,
                 framework_sink: None,
+                escaped_specials: None,
             });
         }
         if target.delay > 0 {
@@ -819,6 +828,7 @@ pub async fn check_header_discovery(
                     form_action_url: None,
                     form_origin_url: None,
                     framework_sink,
+                    escaped_specials: None,
                 });
             }
             if delay > 0 {
@@ -1004,6 +1014,7 @@ pub async fn check_path_discovery(
                             form_action_url: None,
                             form_origin_url: None,
                             framework_sink: None,
+                            escaped_specials: None,
                         });
                     }
                 }
@@ -1113,6 +1124,7 @@ pub async fn check_cookie_discovery(
                     form_action_url: None,
                     form_origin_url: None,
                     framework_sink: None,
+                    escaped_specials: None,
                 });
             }
             if delay > 0 {
@@ -1270,6 +1282,7 @@ pub async fn check_form_discovery(
                         form_action_url: Some(form_url.to_string()),
                         form_origin_url: Some(target.url.to_string()),
                         framework_sink: None,
+                        escaped_specials: None,
                     });
                 }
                 if target.delay > 0 {
@@ -1340,6 +1353,7 @@ pub async fn check_form_discovery(
                         form_action_url: Some(form_url.to_string()),
                         form_origin_url: Some(target.url.to_string()),
                         framework_sink: None,
+                        escaped_specials: None,
                     });
                 }
                 if target.delay > 0 {
@@ -1384,6 +1398,7 @@ pub async fn check_form_discovery(
                         form_action_url: Some(form_url.to_string()),
                         form_origin_url: Some(target.url.to_string()),
                         framework_sink: None,
+                        escaped_specials: None,
                     });
                 }
                 if target.delay > 0 {
@@ -1429,6 +1444,7 @@ pub async fn check_form_discovery(
                         form_action_url: Some(form_url.to_string()),
                         form_origin_url: Some(target.url.to_string()),
                         framework_sink: None,
+                        escaped_specials: None,
                     });
                 }
             }
@@ -1511,6 +1527,7 @@ pub async fn check_form_discovery(
                             form_action_url: Some(target.url.to_string()),
                             form_origin_url: Some(target.url.to_string()),
                             framework_sink: None,
+                            escaped_specials: None,
                         });
                     }
                     if target.delay > 0 {
@@ -1585,6 +1602,7 @@ pub async fn check_form_discovery(
                             form_action_url: Some(target.url.to_string()),
                             form_origin_url: Some(target.url.to_string()),
                             framework_sink: None,
+                            escaped_specials: None,
                         });
                     }
                     if target.delay > 0 {

@@ -569,6 +569,7 @@ async fn test_collapse_to_any_query_param_keeps_non_query_and_replaces_query() {
             form_action_url: None,
             form_origin_url: None,
             framework_sink: None,
+            escaped_specials: None,
         },
         Param {
             name: "q_old_2".into(),
@@ -583,6 +584,7 @@ async fn test_collapse_to_any_query_param_keeps_non_query_and_replaces_query() {
             form_action_url: None,
             form_origin_url: None,
             framework_sink: None,
+            escaped_specials: None,
         },
         Param {
             name: "h".into(),
@@ -597,6 +599,7 @@ async fn test_collapse_to_any_query_param_keeps_non_query_and_replaces_query() {
             form_action_url: None,
             form_origin_url: None,
             framework_sink: None,
+            escaped_specials: None,
         },
     ];
     let params = Arc::new(Mutex::new(initial));

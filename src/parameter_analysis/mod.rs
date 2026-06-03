@@ -134,6 +134,15 @@ pub struct Param {
     /// framework-sink reflections apart from generic attribute echo.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub framework_sink: Option<String>,
+    /// Special characters that reflect back only in *escaped* form — the server
+    /// inserts a backslash before them (e.g. `"` → `\"`, the classic
+    /// JS-string-escaping filter). Distinct from `valid_specials` (reflected
+    /// raw) and `invalid_specials` (stripped/encoded): an escaped quote *is*
+    /// present in the response but cannot break out raw, so payload synthesis
+    /// uses a backslash-prefixed breakout (`\";…`) instead. Populated by the
+    /// quote-escape probe in `active_probe_param` (issue #1072).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub escaped_specials: Option<Vec<char>>,
 }
 
 impl Param {
@@ -439,6 +448,7 @@ async fn send_probe_request_for_param(
                     form_action_url: None,
                     form_origin_url: None,
                     framework_sink: None,
+                    escaped_specials: None,
                 },
                 payload,
             );
@@ -535,6 +545,112 @@ fn char_reflected_in_segment(segment: &str, c: char) -> bool {
 /// one request per parameter — the dominant request-count reducer at scan
 /// time.
 ///
+/// Sentinels that bracket each quote in the quote-escape probe (issue #1072).
+/// Alphanumeric so a character filter won't strip them, and distinct so the
+/// reflected slice belonging to each quote is unambiguous. Probe value shape:
+/// `OPEN + A + " + B + ' + C + CLOSE`.
+const ESC_SENT_A: &str = "eqaq7z";
+const ESC_SENT_B: &str = "eqbq7z";
+const ESC_SENT_C: &str = "eqcq7z";
+const ESC_SENT_D: &str = "eqdq7z";
+
+/// Return the substring of `hay` strictly between the first occurrence of `a`
+/// and the next occurrence of `b` after it.
+fn slice_between<'a>(hay: &'a str, a: &str, b: &str) -> Option<&'a str> {
+    let start = hay.find(a)? + a.len();
+    let rest = &hay[start..];
+    let end = rest.find(b)?;
+    Some(&rest[..end])
+}
+
+/// True when `slice` ends with `quote` preceded by an ODD number of
+/// backslashes — i.e. the quote is backslash-*escaped* (`\"`), not a real
+/// closing quote. An even run (`\\"`, a literal backslash then a real quote)
+/// is NOT escaped, so this rejects the doubled-backslash false positive.
+fn quote_is_backslash_escaped(slice: &str, quote: char) -> bool {
+    match slice.rfind(quote) {
+        Some(pos) => {
+            slice[..pos]
+                .chars()
+                .rev()
+                .take_while(|c| *c == '\\')
+                .count()
+                % 2
+                == 1
+        }
+        None => false,
+    }
+}
+
+/// Pure classifier for the quote-escape probe. The probe reflects as
+/// `A <dq> B <sq> C <bs> D`, where each `<…>` is the (possibly transformed)
+/// region for `"`, `'` and a lone `\`. A quote is reported escaped only when
+/// (1) the server leaves a backslash RAW (`<bs>` == `\`) — the `\";…` bypass
+/// needs our injected `\` to survive; a server that doubles backslashes
+/// (`\` → `\\`) would re-escape it and neutralise the breakout — AND (2) the
+/// quote came back with an odd-length backslash prefix (genuinely escaped).
+fn classify_escaped_quotes(segment: &str) -> Vec<char> {
+    // Precondition: backslash must pass through unchanged.
+    let backslash_raw = slice_between(segment, ESC_SENT_C, ESC_SENT_D).is_some_and(|bs| bs == "\\");
+    if !backslash_raw {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    if slice_between(segment, ESC_SENT_A, ESC_SENT_B)
+        .is_some_and(|dq| quote_is_backslash_escaped(dq, '"'))
+    {
+        out.push('"');
+    }
+    if slice_between(segment, ESC_SENT_B, ESC_SENT_C)
+        .is_some_and(|sq| quote_is_backslash_escaped(sq, '\''))
+    {
+        out.push('\'');
+    }
+    out
+}
+
+/// The quote-escape probe value: `OPEN + A "B 'C \D + CLOSE`. Sentinels bracket
+/// the two quotes and a lone backslash so each reflected region is unambiguous.
+fn escape_probe_value() -> String {
+    format!(
+        "{}{}\"{}'{}\\{}{}",
+        crate::scanning::markers::open_marker(),
+        ESC_SENT_A,
+        ESC_SENT_B,
+        ESC_SENT_C,
+        ESC_SENT_D,
+        crate::scanning::markers::close_marker()
+    )
+}
+
+/// Pure: from a probe response `body`, extract the reflected segment and report
+/// which of the `valid` quotes came back backslash-escaped. Returns `None` when
+/// the probe didn't reflect (no segment), distinct from an empty vec (reflected
+/// but nothing escaped).
+fn escaped_quotes_from_response(body: &str, valid: &[char]) -> Option<Vec<char>> {
+    let seg = extract_reflected_segment(body)?;
+    let mut escaped = classify_escaped_quotes(seg);
+    // Only report quotes that were confirmed reflected at all.
+    escaped.retain(|q| valid.contains(q));
+    Some(escaped)
+}
+
+/// Send one quote-escape probe for `param` and classify which valid quotes
+/// reflect back backslash-escaped. Returns `None` if the probe didn't reflect.
+async fn detect_escaped_quotes_via_probe(
+    client: &reqwest::Client,
+    target: &Target,
+    param: &Param,
+    valid: &[char],
+    semaphore: &Arc<Semaphore>,
+) -> Option<Vec<char>> {
+    let payload = crate::encoding::pre_encoding::apply_param_encoding(&escape_probe_value(), param);
+    let permit = semaphore.acquire().await.expect("acquire semaphore permit");
+    let resp = send_probe_request_for_param(client, target, param, &payload).await;
+    drop(permit);
+    escaped_quotes_from_response(resp.as_deref()?, valid)
+}
+
 /// Coverage safety net: if the batched probe is reflected but **no** char
 /// survives in the reflected segment (likely the server's WAF tripped on the
 /// dense special-char payload, while individual chars would pass), the
@@ -646,8 +762,28 @@ pub async fn active_probe_param(
     }
 
     let iv = invalid.clone();
-    param.valid_specials = Some(valid);
+    param.valid_specials = Some(valid.clone());
     param.invalid_specials = Some(invalid);
+
+    // Issue #1072: quote-escape detection. A quote that reflects back only in
+    // *escaped* form (`"` → `\"`, the classic JS-string-escaping filter) is
+    // "valid" by raw presence but cannot break out of a JS string raw — synthesis
+    // needs a backslash-prefixed breakout (`\";…`) instead. We only probe in JS
+    // string contexts: in an HTML attribute a stray backslash before the quote is
+    // inert, so the naive breakout already works there and the extra request would
+    // be pure waste.
+    if matches!(
+        param.injection_context,
+        Some(InjectionContext::Javascript(Some(
+            DelimiterType::SingleQuote | DelimiterType::DoubleQuote
+        )))
+    ) && (valid.contains(&'"') || valid.contains(&'\''))
+        && let Some(escaped) =
+            detect_escaped_quotes_via_probe(&client, target, &param, &valid, &semaphore).await
+        && !escaped.is_empty()
+    {
+        param.escaped_specials = Some(escaped);
+    }
 
     // If '<' is invalid and no pre_encoding is set, try double/triple URL encoding
     // to detect servers that multi-decode input (e.g. double URL decode).
@@ -854,9 +990,13 @@ pub async fn analyze_parameters(
                 .invalid_specials
                 .as_ref()
                 .map_or_else(|| "-".to_string(), |v| v.iter().collect::<String>());
+            let escaped = p
+                .escaped_specials
+                .as_ref()
+                .map_or_else(|| "-".to_string(), |v| v.iter().collect::<String>());
             let line = format!(
-                "[param-analysis] name={} type={:?} reflected=true context={:?} valid_specials=\"{}\" invalid_specials=\"{}\"",
-                p.name, p.location, p.injection_context, valid, invalid
+                "[param-analysis] name={} type={:?} reflected=true context={:?} valid_specials=\"{}\" invalid_specials=\"{}\" escaped_specials=\"{}\"",
+                p.name, p.location, p.injection_context, valid, invalid, escaped
             );
             if let Some(ref pb) = pb {
                 pb.println(line);
@@ -970,6 +1110,7 @@ fn ensure_explicit_params(params: &mut Vec<Param>, param_specs: &[String], targe
             form_action_url: None,
             form_origin_url: None,
             framework_sink: None,
+            escaped_specials: None,
         });
     }
 }

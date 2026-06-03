@@ -108,6 +108,7 @@ fn make_any_query_param(text: &str) -> Param {
         form_action_url: None,
         form_origin_url: None,
         framework_sink: None,
+        escaped_specials: None,
     }
 }
 
@@ -662,6 +663,7 @@ pub async fn probe_dictionary_params(
                                 form_action_url: None,
                                 form_origin_url: None,
                                 framework_sink: None,
+                                escaped_specials: None,
                             });
                             if !silence {
                                 eprintln!(
@@ -701,6 +703,7 @@ pub async fn probe_dictionary_params(
                                     form_action_url: None,
                                     form_origin_url: None,
                                     framework_sink: None,
+                                    escaped_specials: None,
                                 });
                                 if !silence {
                                     eprintln!(
@@ -785,6 +788,7 @@ pub async fn probe_dictionary_params(
                 form_action_url: None,
                 form_origin_url: None,
                 framework_sink: None,
+                escaped_specials: None,
             });
         } else {
             guard.push(Param {
@@ -800,6 +804,7 @@ pub async fn probe_dictionary_params(
                 form_action_url: None,
                 form_origin_url: None,
                 framework_sink: None,
+                escaped_specials: None,
             });
         }
     }
@@ -918,6 +923,7 @@ pub async fn probe_body_params(
                                 form_action_url: None,
                                 form_origin_url: None,
                                 framework_sink: None,
+                                escaped_specials: None,
                             });
                             if !silence {
                                 eprintln!(
@@ -997,6 +1003,7 @@ pub async fn probe_body_params(
                     form_action_url: None,
                     form_origin_url: None,
                     framework_sink: None,
+                    escaped_specials: None,
                 });
             } else {
                 guard.push(Param {
@@ -1014,6 +1021,7 @@ pub async fn probe_body_params(
                     form_action_url: None,
                     form_origin_url: None,
                     framework_sink: None,
+                    escaped_specials: None,
                 });
             }
         }
@@ -1174,6 +1182,7 @@ pub async fn probe_response_id_params(
                                     form_action_url: None,
                                     form_origin_url: None,
                                     framework_sink: None,
+                                    escaped_specials: None,
                                 });
                                 if !silence {
                                     eprintln!(
@@ -1252,6 +1261,7 @@ pub async fn probe_response_id_params(
                     form_action_url: None,
                     form_origin_url: None,
                     framework_sink: None,
+                    escaped_specials: None,
                 });
             } else {
                 guard.push(Param {
@@ -1269,6 +1279,7 @@ pub async fn probe_response_id_params(
                     form_action_url: None,
                     form_origin_url: None,
                     framework_sink: None,
+                    escaped_specials: None,
                 });
             }
         }
@@ -1416,6 +1427,7 @@ pub async fn probe_json_body_params(
                             form_action_url: None,
                             form_origin_url: None,
                             framework_sink: None,
+                            escaped_specials: None,
                         });
                         if !silence {
                             eprintln!(
@@ -1495,6 +1507,7 @@ pub async fn probe_json_body_params(
                 form_action_url: None,
                 form_origin_url: None,
                 framework_sink: None,
+                escaped_specials: None,
             });
         } else {
             guard.push(Param {
@@ -1510,6 +1523,7 @@ pub async fn probe_json_body_params(
                 form_action_url: None,
                 form_origin_url: None,
                 framework_sink: None,
+                escaped_specials: None,
             });
         }
     }
@@ -1627,6 +1641,7 @@ pub async fn probe_multipart_params(
                     form_action_url: None,
                     form_origin_url: None,
                     framework_sink: None,
+                    escaped_specials: None,
                 });
             }
             drop(permit);

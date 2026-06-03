@@ -1,0 +1,18 @@
+# Escaped-quote breakout benchmark (issue #1072).
+#
+# The reflection lands inside a double-quoted JavaScript string, and the server
+# backslash-escapes quotes (`"` -> `\"`) — the classic JS-string-escaping filter.
+# A naive `";…` breakout is neutralised (`\";…`, inert); only the escaped-quote
+# breakout `\";…` works (the server's own escaping turns it into `\\"` — a
+# literal backslash then a real closing quote). The active-probe quote-escape
+# detector flags the escaped delimiter so synthesis emits the working form.
+
+[[case]]
+id = 9201
+name = "js_string_escaped_quotes"
+description = "Reflection in a double-quoted JS string with backslash-escaped quotes; needs a \\\"; escaped breakout"
+handler_type = "realworld"
+reflection = "<script>var cfg = \"{input}\";</script>"
+filter = "escape_quotes"
+expected_detection = true
+category = "escaped_quote"

@@ -223,3 +223,65 @@ fn generated_templates_execute_for_their_nesting() {
         );
     }
 }
+
+// ===== Issue #1072: escaped-quote breakouts (server escapes `"` -> `\"`) =====
+
+/// Model the mock server's `escape_quotes` filter: backslash-escape JS quotes.
+fn escape_quotes(s: &str) -> String {
+    s.replace('"', "\\\"").replace('\'', "\\'")
+}
+
+#[test]
+fn escaped_breakout_templates_are_backslash_prefixed() {
+    for q in ['"', '\''] {
+        let normal = breakout_templates(q);
+        let escaped = escaped_breakout_templates(q);
+        assert_eq!(normal.len(), escaped.len());
+        for (n, e) in normal.iter().zip(escaped.iter()) {
+            assert_eq!(
+                *e,
+                format!("\\{n}"),
+                "escaped template must be backslash-prefixed"
+            );
+            assert!(e.contains("{JS}"));
+        }
+    }
+}
+
+#[test]
+fn escaped_breakout_executes_under_escaping_where_naive_fails() {
+    // Reflection inside a double-quoted JS string at several nesting depths.
+    // The server escapes our `"` -> `\"`. The naive quote-close is neutralised;
+    // the backslash-prefixed escaped breakout converts the server's own escaping
+    // into a real string break. Proven via oxc, no browser.
+    let cases = [
+        ("var x = \"", "\";"),
+        ("search(\"", "\");"),
+        ("var a = [\"", "\"];"),
+        ("foo({ bar: [ \"", "\" ] });"),
+        // single-quote string contexts
+        ("var y = '", "';"),
+        ("g('", "');"),
+    ];
+    for (prefix, suffix) in cases {
+        let closer = compute_js_breakout(prefix);
+        let naive = format!("{closer};alert(1)//");
+        let escaped = format!("\\{closer};alert(1)//");
+
+        // Naive payload, after the server escapes its quote, stays inside the
+        // string -> alert does NOT reach top level.
+        let naive_code = format!("{prefix}{}{suffix}", escape_quotes(&naive));
+        assert!(
+            !alert_reaches_top_level(&naive_code),
+            "naive breakout unexpectedly executed under escaping: {naive_code:?}"
+        );
+
+        // Escaped payload, after the server escapes its quote, yields `\\\"`
+        // (literal backslash + real closing quote) -> alert reaches top level.
+        let esc_code = format!("{prefix}{}{suffix}", escape_quotes(&escaped));
+        assert!(
+            alert_reaches_top_level(&esc_code),
+            "escaped breakout failed to execute under escaping: {esc_code:?}"
+        );
+    }
+}

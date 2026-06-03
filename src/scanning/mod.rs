@@ -889,8 +889,11 @@ fn generate_param_jobs(
         {
             let invalid = param.invalid_specials.as_deref().unwrap_or_default();
             let valid = param.valid_specials.as_deref().unwrap_or_default();
+            // #1072: escaped-quote signal (JS string contexts) drives synthesis
+            // to emit backslash-prefixed breakouts that survive server escaping.
+            let escaped = param.escaped_specials.as_deref().unwrap_or_default();
             let synthesized =
-                crate::payload::synthesis::synthesize_payloads(context, invalid, valid);
+                crate::payload::synthesis::synthesize_payloads(context, invalid, valid, escaped);
             if !synthesized.is_empty() {
                 let mut seen: std::collections::HashSet<String> =
                     std::collections::HashSet::with_capacity(

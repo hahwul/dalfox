@@ -257,10 +257,16 @@ fn templates_for(context: &InjectionContext) -> Vec<&'static str> {
 /// `--custom-alert-value` substitution is not applied (consistent with the
 /// existing adaptive-payload path, and immaterial to detection since promotion
 /// to [V] is marker-based, not alert-value based).
+///
+/// `escaped_specials` (issue #1072) lists quote characters the server reflects
+/// only in backslash-escaped form (`"` → `\"`). For a JS-string context whose
+/// delimiter is escaped, synthesis leads with a backslash-prefixed breakout
+/// (`\";…`), which the server's own escaping turns into a working string break.
 pub fn synthesize_payloads(
     context: &InjectionContext,
     invalid_specials: &[char],
     valid_specials: &[char],
+    escaped_specials: &[char],
 ) -> Vec<String> {
     // `valid_specials` is accepted for symmetry with `generate_adaptive_payloads`
     // and forward use (e.g. confidence weighting); gating is expressed purely as
@@ -289,7 +295,20 @@ pub fn synthesize_payloads(
             DelimiterType::Comment => None,
         };
         if let Some(q) = quote {
-            templates.extend(crate::payload::js_breakout::breakout_templates(q));
+            // Issue #1072: when the server backslash-escapes this delimiter the
+            // raw nested breakout is *inert* (`"]});…` → `\"]});…`), so emit the
+            // backslash-prefixed nested breakouts instead — the server's escaping
+            // converts those into a real string break (`\";…` → `\\";…` → literal
+            // `\` + closing quote). Emitting one set (not both raw+escaped) keeps
+            // the synthesis cap free for the marker-carrying `</script>` template
+            // (which works under escaping regardless). The static `JS_*_TEMPLATES`
+            // below still provide the depth-0 forms. A non-escaping delimiter
+            // keeps the raw nested set.
+            if escaped_specials.contains(&q) {
+                templates.extend(crate::payload::js_breakout::escaped_breakout_templates(q));
+            } else {
+                templates.extend(crate::payload::js_breakout::breakout_templates(q));
+            }
         }
     }
     templates.extend(templates_for(context).into_iter().map(String::from));
