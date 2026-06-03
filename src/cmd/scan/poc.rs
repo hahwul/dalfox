@@ -397,3 +397,6 @@ pub(crate) fn render_finding_block(
 
     output
 }
+
+#[cfg(test)]
+mod tests;

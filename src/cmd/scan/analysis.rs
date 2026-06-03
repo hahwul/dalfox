@@ -454,33 +454,11 @@ pub(crate) async fn run_preflight_and_analysis(
                 // response, once per target. Borrows the body so the AST block
                 // below can still consume it.
                 if let Some(body) = preflight_response_body.as_deref() {
-                    let lib_findings: Vec<crate::scanning::result::Result> =
-                        crate::scanning::vuln_libs::detect_vulnerable_libraries(body)
-                            .into_iter()
-                            .map(|v| {
-                                crate::scanning::result::Result::builder(
-                                    crate::scanning::result::FindingType::Informational,
-                                )
-                                .inject_type("OutdatedComponent")
-                                .method(target.method.clone())
-                                .data(target.url.to_string())
-                                .cwe("CWE-1104")
-                                .severity(v.severity)
-                                .message_id(1104)
-                                .message_str(format!(
-                                    "Outdated JavaScript library: {} {}",
-                                    v.library, v.version
-                                ))
-                                .evidence(format!(
-                                    "{} {} is known-vulnerable ({}); upgrade to >= {}",
-                                    v.library,
-                                    v.version,
-                                    v.advisories.join(", "),
-                                    v.fixed_in
-                                ))
-                                .build()
-                            })
-                            .collect();
+                    let lib_findings = crate::scanning::vuln_libs::library_findings(
+                        crate::scanning::vuln_libs::detect_vulnerable_libraries(body),
+                        target.url.as_str(),
+                        &target.method,
+                    );
                     if !lib_findings.is_empty() {
                         let added = lib_findings.len();
                         let mut guard = results_clone.lock().await;

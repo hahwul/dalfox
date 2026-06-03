@@ -156,3 +156,117 @@ fn dedups_repeated_same_version() {
     let count = libs(body).iter().filter(|v| v.library == "jQuery").count();
     assert_eq!(count, 1, "same (lib, version) must be reported once");
 }
+
+#[test]
+fn library_findings_builds_informational_results() {
+    use crate::scanning::result::FindingType;
+    let vulns = detect_vulnerable_libraries(r#"<script src="/jquery-1.7.2.min.js"></script>"#);
+    assert!(!vulns.is_empty());
+    let findings = library_findings(vulns, "https://t.example/page", "GET");
+    let f = findings.first().expect("one finding");
+    assert_eq!(f.result_type, FindingType::Informational);
+    assert_eq!(f.inject_type, "OutdatedComponent");
+    assert_eq!(f.cwe, "CWE-1104");
+    assert_eq!(f.method, "GET");
+    assert_eq!(f.data, "https://t.example/page");
+    assert_eq!(f.severity, "Medium");
+    assert_ne!(
+        f.message_id, 0,
+        "must avoid the message_id==0 AST-dedup path"
+    );
+    assert!(f.message_str.contains("jQuery 1.7.2"));
+    assert!(f.evidence.contains("CVE-") && f.evidence.contains("upgrade to >= 3.5.0"));
+    // Payload/param-free (so POC synthesis is bypassed).
+    assert!(f.payload.is_empty() && f.param.is_empty());
+}
+
+#[test]
+fn library_findings_empty_for_no_vulns() {
+    assert!(library_findings(vec![], "https://t.example", "GET").is_empty());
+}
+
+#[test]
+fn detects_jquery_ui_from_src() {
+    let body = r#"<script src="/js/jquery-ui-1.11.4.min.js"></script>"#;
+    let ui = libs(body)
+        .into_iter()
+        .find(|v| v.library == "jQuery UI")
+        .expect("old jQuery UI should be flagged");
+    assert_eq!(ui.version, "1.11.4");
+    assert!(ui.advisories.iter().any(|a| a == "CVE-2022-31160"));
+}
+
+#[test]
+fn detects_handlebars_from_src_and_inline() {
+    let from_src = libs(r#"<script src="/vendor/handlebars-4.0.5.min.js"></script>"#);
+    assert!(
+        from_src
+            .iter()
+            .any(|v| v.library == "Handlebars" && v.version == "4.0.5" && v.severity == "High"),
+        "got {from_src:?}"
+    );
+    let from_inline = libs("<script>/* Handlebars.js v4.0.5 */</script>");
+    assert!(
+        from_inline
+            .iter()
+            .any(|v| v.library == "Handlebars" && v.version == "4.0.5"),
+        "inline Handlebars banner should be detected, got {from_inline:?}"
+    );
+}
+
+#[test]
+fn detects_moment_from_src_and_inline() {
+    let from_src = libs(r#"<script src="/js/moment-2.20.1.min.js"></script>"#);
+    assert!(
+        from_src
+            .iter()
+            .any(|v| v.library == "Moment.js" && v.version == "2.20.1"),
+        "got {from_src:?}"
+    );
+    let from_inline = libs("//! moment.js\n//! version : 2.20.1\n//! authors");
+    assert!(
+        from_inline
+            .iter()
+            .any(|v| v.library == "Moment.js" && v.version == "2.20.1"),
+        "inline Moment banner should be detected, got {from_inline:?}"
+    );
+}
+
+#[test]
+fn detects_angularjs_from_inline_version() {
+    let body = r#"<script>angular.module('a'); angular.version = {full: "1.5.8"};</script>"#;
+    assert!(
+        libs(body)
+            .iter()
+            .any(|v| v.library == "AngularJS" && v.version == "1.5.8"),
+        "inline AngularJS version should be detected"
+    );
+}
+
+#[test]
+fn detects_bootstrap_from_inline_banner() {
+    let body = "<script>/*! Bootstrap v3.3.7 (https://getbootstrap.com) */</script>";
+    assert!(
+        libs(body)
+            .iter()
+            .any(|v| v.library == "Bootstrap" && v.version == "3.3.7"),
+        "inline Bootstrap banner should be detected"
+    );
+}
+
+#[test]
+fn current_libraries_across_dataset_are_safe() {
+    // A modern stack must produce zero findings (guards against over-broad ranges).
+    let body = r#"
+        <script src="/jquery-ui-1.13.2.min.js"></script>
+        <script src="/handlebars-4.7.8.min.js"></script>
+        <script src="/moment-2.29.4.min.js"></script>
+        <script src="/lodash-4.17.21.min.js"></script>
+        <script src="/bootstrap-5.3.0.min.js"></script>
+    "#;
+    assert!(
+        libs(body).is_empty(),
+        "modern stack flagged: {:?}",
+        libs(body)
+    );
+}

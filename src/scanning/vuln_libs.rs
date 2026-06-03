@@ -312,5 +312,42 @@ pub fn detect_vulnerable_libraries(body: &str) -> Vec<VulnLib> {
     out
 }
 
+/// Turn detected vulnerable libraries into informational [`crate::scanning::result::Result`]
+/// findings for `target_url` (CWE-1104, `OutdatedComponent`). Each finding is
+/// payload-/parameter-free and carries the advisories + suggested upgrade in its
+/// evidence. `message_id` is a non-zero sentinel so these never enter the
+/// `message_id == 0` AST-dedup path.
+pub fn library_findings(
+    vulns: Vec<VulnLib>,
+    target_url: &str,
+    method: &str,
+) -> Vec<crate::scanning::result::Result> {
+    use crate::scanning::result::{FindingType, Result};
+    vulns
+        .into_iter()
+        .map(|v| {
+            Result::builder(FindingType::Informational)
+                .inject_type("OutdatedComponent")
+                .method(method)
+                .data(target_url)
+                .cwe("CWE-1104")
+                .severity(v.severity)
+                .message_id(1104)
+                .message_str(format!(
+                    "Outdated JavaScript library: {} {}",
+                    v.library, v.version
+                ))
+                .evidence(format!(
+                    "{} {} is known-vulnerable ({}); upgrade to >= {}",
+                    v.library,
+                    v.version,
+                    v.advisories.join(", "),
+                    v.fixed_in
+                ))
+                .build()
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests;
