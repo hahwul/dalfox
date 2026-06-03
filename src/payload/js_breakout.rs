@@ -205,5 +205,22 @@ pub fn breakout_templates(quote: char) -> Vec<String> {
     out
 }
 
+/// Like [`breakout_templates`] but for a JS string whose delimiter the server
+/// backslash-escapes (`"` → `\"`, issue #1072). Each template is the normal
+/// breakout with a leading `\`: injecting `\"]});…` means the server escapes our
+/// `"` to `\"`, so the source becomes `\\"]});…` — a literal backslash followed
+/// by a *real* closing quote that reaches statement position. The leading `\` is
+/// gated by `allows_str` in the synthesis layer like any other character.
+///
+/// Only meaningful for `'` / `"` delimiters — the quote-escape probe never flags
+/// a backtick (a template literal isn't closed by `\``), so synthesis never
+/// calls this with one.
+pub fn escaped_breakout_templates(quote: char) -> Vec<String> {
+    breakout_templates(quote)
+        .into_iter()
+        .map(|t| format!("\\{t}"))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests;

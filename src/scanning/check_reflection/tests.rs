@@ -32,6 +32,7 @@ fn make_param() -> Param {
         form_action_url: None,
         form_origin_url: None,
         framework_sink: None,
+        escaped_specials: None,
     }
 }
 

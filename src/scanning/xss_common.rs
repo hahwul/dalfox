@@ -349,8 +349,15 @@ pub fn generate_adaptive_payloads(
     // payloads only use surviving characters, so they are sent raw — encoding
     // exists to smuggle *blocked* characters, which synthesis avoids by
     // construction.
-    let synthesized =
-        crate::payload::synthesis::synthesize_payloads(context, invalid_specials, valid_specials);
+    // Escaped-quote handling (#1072) is JS-string-context-only, and this path is
+    // reached for non-JS contexts (JS DOM payloads use the dedicated breakout
+    // set), so there is no escaped signal to thread here.
+    let synthesized = crate::payload::synthesis::synthesize_payloads(
+        context,
+        invalid_specials,
+        valid_specials,
+        &[],
+    );
 
     // Apply adaptive encoders with pre-allocated capacity
     let estimated_cap =

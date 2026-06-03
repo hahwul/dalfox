@@ -759,6 +759,7 @@ fn make_param(name: &str, location: Location) -> Param {
         form_action_url: None,
         form_origin_url: None,
         framework_sink: None,
+        escaped_specials: None,
     }
 }
 

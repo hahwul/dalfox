@@ -145,6 +145,10 @@ fn apply_filter(input: &str, filter_chain: &str) -> String {
             "encode_quotes" => result.replace('"', "&quot;").replace('\'', "&#39;"),
             "encode_double_quotes" => result.replace('"', "&quot;"),
             "encode_single_quotes" => result.replace('\'', "&#39;"),
+            // Backslash-escape quotes, JavaScript-string style (`"` -> `\"`). The
+            // classic JS-string-escaping filter that the #1072 escaped-quote
+            // breakout defeats.
+            "escape_quotes" => result.replace('"', "\\\"").replace('\'', "\\'"),
             // WAF simulation filters
             "waf_basic" => {
                 if RE_WAF_BASIC.is_match(&result) {
@@ -2745,4 +2749,49 @@ async fn test_vuln_library_detection_v2() {
         "current jQuery must not yield an OutdatedComponent finding, got {safe:?}"
     );
     println!("[#9102] current jQuery: no outdated-lib finding (correct)");
+}
+
+/// End-to-end test for escaped-quote-aware breakout (issue #1072). The endpoint
+/// reflects into a double-quoted JS string and backslash-escapes quotes; only a
+/// `\";…` breakout (which the active-probe quote-escape detector unlocks) works.
+/// We assert a finding carries a backslash-quote breakout payload — a shape no
+/// catalog entry produces, so it is attributable to the #1072 synthesis path.
+#[tokio::test]
+#[ignore = "functional: issue #1072 escaped-quote-aware breakout"]
+async fn test_escaped_quote_breakout_v2() {
+    dalfox::ensure_crypto_provider();
+    let (addr, _state) = start_mock_server_v2().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let config = ScanTestConfig {
+        url_suffix: "/9201?query=seed".to_string(),
+        param: vec![],
+        data: None,
+        headers: vec![],
+        cookies: vec![],
+        method: "GET".to_string(),
+        skip_reflection_header: true,
+        skip_reflection_cookie: true,
+        skip_reflection_path: true,
+    };
+    let findings = run_scan_test(addr, "realworld/query", 9201, config).await;
+
+    // Backslash-quote breakout (`\";…` / `\']…`), raw or URL-encoded
+    // (%5C = `\`, %22 = `"`, %27 = `'`).
+    let escaped_attributed = findings.iter().any(|f| {
+        let p = f
+            .get("payload")
+            .and_then(|p| p.as_str())
+            .unwrap_or("")
+            .to_lowercase();
+        p.starts_with("\\\"")
+            || p.starts_with("\\'")
+            || p.contains("%5c%22")
+            || p.contains("%5c%27")
+    });
+    assert!(
+        escaped_attributed,
+        "expected a #1072 escaped-quote breakout payload, got {findings:?}"
+    );
+    println!("[#9201] escaped-quote breakout attributed to #1072 synthesis");
 }

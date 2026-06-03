@@ -20,6 +20,7 @@ fn mock_mine_parameters(_target: &mut Target, _args: &ScanArgs) {
         form_action_url: None,
         form_origin_url: None,
         framework_sink: None,
+        escaped_specials: None,
     });
 }
 
@@ -283,6 +284,7 @@ fn test_probe_body_params_mock() {
         form_action_url: None,
         form_origin_url: None,
         framework_sink: None,
+        escaped_specials: None,
     });
 
     assert!(!target.reflection_params.is_empty());
@@ -310,6 +312,7 @@ fn test_check_header_discovery_mock() {
         form_action_url: None,
         form_origin_url: None,
         framework_sink: None,
+        escaped_specials: None,
     });
 
     assert!(!target.reflection_params.is_empty());
@@ -337,6 +340,7 @@ fn test_check_cookie_discovery_mock() {
         form_action_url: None,
         form_origin_url: None,
         framework_sink: None,
+        escaped_specials: None,
     });
 
     assert!(!target.reflection_params.is_empty());
@@ -589,6 +593,7 @@ fn test_filter_params_by_name_and_type() {
             form_action_url: None,
             form_origin_url: None,
             framework_sink: None,
+            escaped_specials: None,
         },
         Param {
             name: "sort".to_string(),
@@ -603,6 +608,7 @@ fn test_filter_params_by_name_and_type() {
             form_action_url: None,
             form_origin_url: None,
             framework_sink: None,
+            escaped_specials: None,
         },
         Param {
             name: "id".to_string(),
@@ -617,6 +623,7 @@ fn test_filter_params_by_name_and_type() {
             form_action_url: None,
             form_origin_url: None,
             framework_sink: None,
+            escaped_specials: None,
         },
         Param {
             name: "session".to_string(),
@@ -631,6 +638,7 @@ fn test_filter_params_by_name_and_type() {
             form_action_url: None,
             form_origin_url: None,
             framework_sink: None,
+            escaped_specials: None,
         },
     ];
 
@@ -677,6 +685,7 @@ fn test_filter_params_multiple_filters() {
             form_action_url: None,
             form_origin_url: None,
             framework_sink: None,
+            escaped_specials: None,
         },
         Param {
             name: "id".to_string(),
@@ -691,6 +700,7 @@ fn test_filter_params_multiple_filters() {
             form_action_url: None,
             form_origin_url: None,
             framework_sink: None,
+            escaped_specials: None,
         },
         Param {
             name: "session".to_string(),
@@ -705,6 +715,7 @@ fn test_filter_params_multiple_filters() {
             form_action_url: None,
             form_origin_url: None,
             framework_sink: None,
+            escaped_specials: None,
         },
     ];
 
@@ -735,6 +746,7 @@ fn test_filter_params_empty_filters() {
         form_action_url: None,
         form_origin_url: None,
         framework_sink: None,
+        escaped_specials: None,
     }];
 
     // Empty filters should return all params
@@ -758,6 +770,7 @@ fn test_filter_params_invalid_filter_format() {
         form_action_url: None,
         form_origin_url: None,
         framework_sink: None,
+        escaped_specials: None,
     }];
 
     // Invalid filter format (too many colons) should be treated as name only
@@ -780,6 +793,7 @@ fn bare_param(name: &str, location: Location) -> Param {
         form_action_url: None,
         form_origin_url: None,
         framework_sink: None,
+        escaped_specials: None,
     }
 }
 
@@ -944,6 +958,7 @@ fn probe_param(name: &str, location: Location) -> Param {
         form_action_url: None,
         form_origin_url: None,
         framework_sink: None,
+        escaped_specials: None,
     }
 }
 
@@ -1112,4 +1127,111 @@ fn test_char_reflected_in_segment_detects_raw_encoded_and_percent() {
     assert!(char_reflected_in_segment("abc%3cdef", '<'));
     // Absent entirely.
     assert!(!char_reflected_in_segment("abcdef", '<'));
+}
+
+// ===== Issue #1072: quote-escape classification =====
+
+/// Build the reflected segment of an escape probe: `A <dq> B <sq> C <bs> D`,
+/// optionally wrapped in surrounding noise to prove the slice extraction is
+/// robust. `bs` is the region for the lone backslash (`\` raw, `\\` doubled).
+fn esc_segment(dq: &str, sq: &str, bs: &str, prefix: &str, suffix: &str) -> String {
+    format!("{prefix}{ESC_SENT_A}{dq}{ESC_SENT_B}{sq}{ESC_SENT_C}{bs}{ESC_SENT_D}{suffix}")
+}
+
+#[test]
+fn classify_escaped_quotes_intact_is_empty() {
+    // No escaping: quotes raw, backslash raw.
+    let seg = esc_segment("\"", "'", "\\", "", "");
+    assert!(classify_escaped_quotes(&seg).is_empty());
+}
+
+#[test]
+fn classify_escaped_quotes_detects_both() {
+    // Classic JS-string-escaping server: `\"` and `\'`, backslash passes raw.
+    let seg = esc_segment("\\\"", "\\'", "\\", "", "");
+    let r = classify_escaped_quotes(&seg);
+    assert!(r.contains(&'"'), "expected \" escaped, got {r:?}");
+    assert!(r.contains(&'\''), "expected ' escaped, got {r:?}");
+}
+
+#[test]
+fn classify_escaped_quotes_detects_only_double() {
+    // Only the double quote is escaped (single reflected raw).
+    let seg = esc_segment("\\\"", "'", "\\", "<div id=out>", "</div>");
+    assert_eq!(classify_escaped_quotes(&seg), vec!['"']);
+}
+
+#[test]
+fn classify_escaped_quotes_rejects_doubled_backslash_server() {
+    // A server that ALSO escapes backslashes (`\` -> `\\`) would re-escape our
+    // injected `\`, neutralising the `\";…` bypass — so even though the quotes
+    // come back `\"`/`\'`, we must NOT report them escaped.
+    let seg = esc_segment("\\\"", "\\'", "\\\\", "", "");
+    assert!(
+        classify_escaped_quotes(&seg).is_empty(),
+        "must not flag escaped when backslash is doubled"
+    );
+}
+
+#[test]
+fn classify_escaped_quotes_even_backslash_run_is_a_real_quote() {
+    // `\\"` is a literal backslash followed by a *real* closing quote (even run),
+    // not an escaped quote — must not be flagged.
+    let seg = esc_segment("\\\\\"", "'", "\\", "", "");
+    assert!(!classify_escaped_quotes(&seg).contains(&'"'));
+}
+
+#[test]
+fn classify_escaped_quotes_missing_sentinels_is_empty() {
+    // If the segment doesn't contain the sentinels (probe not reflected), no
+    // false positives.
+    assert!(classify_escaped_quotes("nothing here").is_empty());
+}
+
+#[test]
+fn escape_probe_value_has_sentinels_and_quotes() {
+    let p = escape_probe_value();
+    assert!(p.contains(ESC_SENT_A) && p.contains(ESC_SENT_D));
+    assert!(p.contains('"') && p.contains('\'') && p.contains('\\'));
+}
+
+#[test]
+fn escaped_quotes_from_response_extracts_classifies_and_filters() {
+    use crate::scanning::markers::{close_marker, open_marker};
+    // A full response with the escape probe reflected inside a JS string, both
+    // quotes server-escaped (`\"`, `\'`) and the lone backslash passing raw.
+    let body = format!(
+        "<html><script>var x=\"{}{}\\\"{}\\'{}\\{}{}\";</script></html>",
+        open_marker(),
+        ESC_SENT_A,
+        ESC_SENT_B,
+        ESC_SENT_C,
+        ESC_SENT_D,
+        close_marker()
+    );
+    // Both quotes valid → both reported escaped.
+    let both = escaped_quotes_from_response(&body, &['"', '\'']).unwrap();
+    assert!(both.contains(&'"') && both.contains(&'\''), "got {both:?}");
+    // Filtered to the valid set: only `"`.
+    assert_eq!(
+        escaped_quotes_from_response(&body, &['"']).unwrap(),
+        vec!['"']
+    );
+    // No probe reflected at all → None (distinct from an empty vec).
+    assert!(escaped_quotes_from_response("<html>nothing</html>", &['"']).is_none());
+}
+
+#[test]
+fn quote_is_backslash_escaped_counts_odd_run() {
+    assert!(quote_is_backslash_escaped("\\\"", '"')); // \"  -> escaped (1)
+    assert!(!quote_is_backslash_escaped("\"", '"')); // "    -> raw (0)
+    assert!(!quote_is_backslash_escaped("\\\\\"", '"')); // \\" -> real quote (2)
+    assert!(quote_is_backslash_escaped("\\\\\\\"", '"')); // \\\" -> escaped (3)
+}
+
+#[test]
+fn slice_between_extracts_region() {
+    assert_eq!(slice_between("aXXbYYc", "XX", "YY"), Some("b"));
+    assert_eq!(slice_between("aXXbYYc", "ZZ", "YY"), None);
+    assert_eq!(slice_between("aXXb", "XX", "YY"), None);
 }
