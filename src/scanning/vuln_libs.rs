@@ -207,6 +207,35 @@ static COMPILED: LazyLock<Vec<CompiledLib>> = LazyLock::new(|| {
         .collect()
 });
 
+/// `<script src="…">` source URLs and inline `<script>…</script>` bodies are
+/// the only places a *loaded* library version is meaningful. Matching the raw
+/// response body would also flag versions mentioned in prose, link text,
+/// download `href`s, comments, or non-JS filenames (false positives), so
+/// detection is scoped to these two via `script_haystacks`.
+static SCRIPT_SRC_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r#"(?i)<script\b[^>]*\bsrc\s*=\s*["']?([^"'>\s]+)"#).unwrap());
+static SCRIPT_INLINE_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?is)<script\b(?:\s[^>]*)?>(.*?)</script>").unwrap());
+
+/// Extract the script-context haystacks from `body`: `(src URLs joined, inline
+/// script bodies joined)`. url-patterns match only the former, inline-patterns
+/// only the latter.
+fn script_haystacks(body: &str) -> (String, String) {
+    let urls = SCRIPT_SRC_RE
+        .captures_iter(body)
+        .filter_map(|c| c.get(1))
+        .map(|m| m.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    let inline = SCRIPT_INLINE_RE
+        .captures_iter(body)
+        .filter_map(|c| c.get(1))
+        .map(|m| m.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
+    (urls, inline)
+}
+
 /// Parse a dotted version into numeric components, truncating any non-numeric
 /// suffix on each component (`"1.7.2-rc1"` → `[1, 7, 2]`).
 fn parse_version(v: &str) -> Vec<u64> {
@@ -290,14 +319,20 @@ pub fn detect_vulnerable_libraries(body: &str) -> Vec<VulnLib> {
     let mut out: Vec<VulnLib> = Vec::new();
     let mut seen: HashSet<(String, String)> = HashSet::new();
 
+    // Scope matching to script context (avoids prose/href/comment false positives).
+    let (url_hay, inline_hay) = script_haystacks(body);
+
     for lib in COMPILED.iter() {
         let mut versions: Vec<String> = Vec::new();
-        for re in lib.url_res.iter().chain(lib.inline_res.iter()) {
-            for cap in re.captures_iter(body) {
-                // First non-empty capture group is the version (inline patterns
-                // may use alternation with two groups).
-                if let Some(v) = (1..cap.len()).find_map(|i| cap.get(i)).map(|m| m.as_str()) {
-                    versions.push(v.to_string());
+        // url-patterns over <script src> URLs; inline-patterns over inline bodies.
+        for (res, hay) in [(&lib.url_res, &url_hay), (&lib.inline_res, &inline_hay)] {
+            for re in res {
+                for cap in re.captures_iter(hay) {
+                    // First non-empty capture group is the version (inline patterns
+                    // may use alternation with two groups).
+                    if let Some(v) = (1..cap.len()).find_map(|i| cap.get(i)).map(|m| m.as_str()) {
+                        versions.push(v.to_string());
+                    }
                 }
             }
         }

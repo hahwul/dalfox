@@ -142,6 +142,53 @@ fn bootstrap_4_introduced_bound_respected() {
 }
 
 #[test]
+fn prose_mention_is_not_flagged() {
+    // A library + version named in body text (not a loaded script) must NOT be
+    // reported — it isn't a loaded dependency.
+    let body = "<html><body><p>We migrated our UI from Bootstrap 3.3.7 \
+                and jQuery 1.7.2 to a modern stack last year.</p></body></html>";
+    assert!(
+        libs(body).is_empty(),
+        "prose mention flagged: {:?}",
+        libs(body)
+    );
+}
+
+#[test]
+fn download_href_is_not_flagged() {
+    // A version in a download link / anchor href is not a loaded script.
+    let body = r#"<a href="/downloads/jquery-1.7.2.min.js">Download jQuery 1.7.2</a>"#;
+    assert!(
+        libs(body).is_empty(),
+        "href mention flagged: {:?}",
+        libs(body)
+    );
+}
+
+#[test]
+fn html_comment_mention_is_not_flagged() {
+    let body = "<!-- TODO: upgrade from angular 1.5.8, see changelog --><div>x</div>";
+    assert!(
+        libs(body).is_empty(),
+        "comment mention flagged: {:?}",
+        libs(body)
+    );
+}
+
+#[test]
+fn inline_script_banner_is_still_flagged() {
+    // The version inside an inline <script> (a real loaded banner) must still fire.
+    let body = "<script>/*! Bootstrap v3.3.7 (https://getbootstrap.com) */ var a=1;</script>";
+    assert!(
+        libs(body)
+            .iter()
+            .any(|v| v.library == "Bootstrap" && v.version == "3.3.7"),
+        "inline banner should still be flagged, got {:?}",
+        libs(body)
+    );
+}
+
+#[test]
 fn no_libraries_in_plain_page() {
     let found = libs("<html><body><h1>hello</h1></body></html>");
     assert!(found.is_empty(), "got {:?}", found);
@@ -223,7 +270,7 @@ fn detects_moment_from_src_and_inline() {
             .any(|v| v.library == "Moment.js" && v.version == "2.20.1"),
         "got {from_src:?}"
     );
-    let from_inline = libs("//! moment.js\n//! version : 2.20.1\n//! authors");
+    let from_inline = libs("<script>//! moment.js\n//! version : 2.20.1\n//! authors</script>");
     assert!(
         from_inline
             .iter()
