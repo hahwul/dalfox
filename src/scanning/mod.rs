@@ -43,7 +43,7 @@ use crate::target_parser::Target;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, Semaphore};
 
@@ -1150,6 +1150,9 @@ struct ScanWorkerCtx {
     cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
     finding_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::scanning::result::Result>>,
     semaphore: Arc<Semaphore>,
+    /// Live per-parameter completion counter (see `run_scanning`'s
+    /// `params_done`). Bumped once per finished parameter worker.
+    params_done: Option<Arc<AtomicU32>>,
 }
 
 impl ScanWorkerCtx {
@@ -1749,6 +1752,12 @@ pub async fn run_scanning(
     findings_count: Arc<AtomicUsize>,
     cancel: Option<Arc<std::sync::atomic::AtomicBool>>,
     finding_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::scanning::result::Result>>,
+    // Live "parameters finished" counter for async front-ends (REST server,
+    // MCP). Each per-parameter worker bumps it on completion so pollers see
+    // `params_tested` climb during the scan instead of staying pinned at 0
+    // until the very end. `None` for the CLI, which renders its own
+    // indicatif progress bar from `total_tasks` instead.
+    params_done: Option<Arc<AtomicU32>>,
 ) {
     // Short-circuit scanning when skip_xss_scanning is enabled (e.g., in unit tests)
     if args.skip_xss_scanning {
@@ -1792,6 +1801,7 @@ pub async fn run_scanning(
         cancel: cancel.clone(),
         finding_tx: finding_tx.clone(),
         semaphore: semaphore.clone(),
+        params_done: params_done.clone(),
     };
 
     // === Stage 5 & 6: spawn one worker per parameter (Reflection + DOM) ===
@@ -1814,7 +1824,13 @@ pub async fn run_scanning(
         };
         if already_found && !args.deep_scan {
             // Skip further testing for this param if reflection or DOM XSS
-            // already found and not deep scanning
+            // already found and not deep scanning. This param *was* exercised
+            // (the finding came from its probe/AST pass), so count it toward
+            // the live progress counter — otherwise `params_tested` would
+            // permanently under-report it on a cancelled scan.
+            if let Some(done) = &ctx.params_done {
+                done.fetch_add(1, Ordering::Relaxed);
+            }
             continue;
         }
         // Early stop if global limit reached
@@ -1833,6 +1849,13 @@ pub async fn run_scanning(
         let handle = tokio::spawn(async move {
             ctx.scan_param(param_clone, reflection_payloads, dom_payloads)
                 .await;
+            // Bump the live completion counter after this parameter is fully
+            // processed (covers every `scan_param` exit path, including the
+            // non-reflective early return), so async front-ends observe
+            // `params_tested` advancing as each worker finishes.
+            if let Some(done) = &ctx.params_done {
+                done.fetch_add(1, Ordering::Relaxed);
+            }
         });
         handles.push(handle);
     }

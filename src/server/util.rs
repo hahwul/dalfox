@@ -40,8 +40,28 @@ pub(crate) async fn purge_expired_jobs(state: &AppState) {
     purge_jobs_map(&mut jobs, JOB_RETENTION_SECS);
 }
 
-pub(crate) fn make_scan_id(s: &str) -> String {
-    crate::utils::make_scan_id(s)
+/// Parse an optional numeric query parameter, distinguishing "absent" (→
+/// `Ok(None)`, use the default) from "present but unparseable" (→ `Err`).
+/// GET /scan used to swallow `?timeout=abc` / `?worker=-5` via
+/// `.and_then(|s| s.parse().ok())`, silently dropping the caller's override
+/// and running with the default — while `?timeout=0` was correctly rejected.
+/// This makes the bad-input handling consistent: a malformed value is a 400,
+/// not a silent fallback.
+pub(crate) fn parse_num_query<T>(
+    params: &HashMap<String, String>,
+    key: &str,
+) -> Result<Option<T>, String>
+where
+    T: std::str::FromStr,
+{
+    match params.get(key) {
+        Some(raw) => raw
+            .trim()
+            .parse::<T>()
+            .map(Some)
+            .map_err(|_| format!("{} must be a non-negative integer (got '{}')", key, raw)),
+        None => Ok(None),
+    }
 }
 
 /// Split the server's HTTP-style `Cookie` header value (`a=b; c=d`) into

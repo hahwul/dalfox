@@ -15,7 +15,7 @@ pub mod term;
 // Re-export banner helpers at `crate::utils::*`
 pub use banner::print_banner_once;
 // Re-export scan_id helpers at `crate::utils::*`
-pub use scan_id::{make_scan_id, short_scan_id};
+pub use scan_id::{make_scan_id, make_unique_scan_id, short_scan_id};
 // Re-export http helpers at `crate::utils::*`
 pub use http::{
     apply_header_overrides, apply_headers_ua_cookies, build_preflight_request, build_request,

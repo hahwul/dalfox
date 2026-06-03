@@ -1,6 +1,32 @@
 use super::*;
 
 #[test]
+fn test_has_http_scheme() {
+    // Accepts http/https, case-insensitively, after trimming.
+    for ok in [
+        "http://example.com",
+        "https://example.com/p?q=1",
+        "HTTP://EXAMPLE.COM",
+        "HtTpS://x",
+        "  http://x  ",
+    ] {
+        assert!(has_http_scheme(ok), "should accept {:?}", ok);
+    }
+    // Rejects other schemes, bare hosts, and empties.
+    for bad in [
+        "ftp://x",
+        "file:///etc/passwd",
+        "javascript:alert(1)",
+        "example.com",
+        "",
+        "   ",
+        "httpx://x",
+    ] {
+        assert!(!has_http_scheme(bad), "should reject {:?}", bad);
+    }
+}
+
+#[test]
 fn test_parse_job_status_round_trip() {
     for status in [
         JobStatus::Queued,

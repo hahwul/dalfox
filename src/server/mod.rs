@@ -36,8 +36,8 @@ pub(crate) use serde::{Deserialize, Serialize};
 pub(crate) use crate::cmd::scan::ScanArgs;
 pub(crate) use crate::job::{
     AbortOnDrop, JOB_RETENTION_SECS, Job, JobProgress, JobStatus, MAX_DELAY_MS, MAX_TIMEOUT_SECS,
-    MAX_WORKERS, now_ms, parse_job_status, purge_expired_jobs as purge_jobs_map,
-    send_reachability_probe,
+    MAX_WORKERS, has_http_scheme, now_ms, parse_job_status, purge_expired_jobs as purge_jobs_map,
+    send_reachability_probe, unreachable_error_message,
 };
 pub(crate) use crate::parameter_analysis::analyze_parameters;
 pub(crate) use crate::scanning::result::{Result as ScanResult, SanitizedResult};

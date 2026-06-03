@@ -137,7 +137,7 @@ fn parse_result_json(result: &CallToolResult) -> serde_json::Value {
 
 #[test]
 fn test_make_scan_id_shape() {
-    let a = DalfoxMcp::make_scan_id("https://example.com");
+    let a = crate::utils::make_scan_id("https://example.com");
     assert_eq!(a.len(), 64);
     assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
 }
@@ -223,6 +223,99 @@ async fn test_run_job_sets_error_on_parse_failure() {
     assert!(
         job.error_message.as_ref().unwrap().contains("parse_target"),
         "error_message should describe the failure"
+    );
+}
+
+#[tokio::test]
+async fn test_run_job_sets_error_on_unreachable_target() {
+    // A parseable but unreachable target must end as Error with a
+    // connection-failed message, mirroring preflight_dalfox — not finish
+    // `done` with 0 findings, which a client can't tell apart from
+    // "scanned, no XSS".
+    let mcp = DalfoxMcp::new();
+    let scan_id = "job-unreachable".to_string();
+    {
+        let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
+        jobs.insert(scan_id.clone(), test_job(JobStatus::Queued, None));
+    }
+
+    let mut args = default_scan_args("http://127.0.0.1:1/");
+    args.targets = vec!["http://127.0.0.1:1/".to_string()];
+    args.timeout = 2;
+    mcp.run_job(scan_id.clone(), Arc::new(args)).await;
+
+    let jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
+    let job = jobs.get(&scan_id).expect("job exists");
+    assert_eq!(job.status, JobStatus::Error);
+    assert!(
+        job.error_message
+            .as_deref()
+            .is_some_and(|m| m.contains("unreachable") && m.contains("CONNECTION_FAILED")),
+        "expected connection-failed error message, got {:?}",
+        job.error_message
+    );
+}
+
+#[tokio::test]
+async fn test_run_job_dispatches_blind_xss_when_callback_set() {
+    // Regression: MCP previously accepted `blind_callback_url` but never
+    // invoked blind_scanning (silent no-op). blind_scanning emits one extra
+    // probe per query/body/header/cookie param, all counted in
+    // `progress.requests_sent`, so a scan with a callback URL must issue
+    // strictly more requests than the same scan without one.
+    use axum::{Router, response::Html, routing::get};
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::atomic::Ordering::Relaxed;
+
+    async fn ok() -> Html<&'static str> {
+        Html("<html><body>ok</body></html>")
+    }
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind blind target listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let app = Router::new().route("/", get(ok)).route("/{*rest}", get(ok));
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+    let url = format!("http://{}/?a=1&b=2&c=3", addr);
+
+    async fn run_count(mcp: &DalfoxMcp, id: &str, url: &str, blind: Option<String>) -> u64 {
+        {
+            let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
+            jobs.insert(id.to_string(), test_job(JobStatus::Queued, None));
+        }
+        let progress = {
+            let jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
+            jobs.get(id).expect("job").progress.clone()
+        };
+        let mut args = default_scan_args(url);
+        args.targets = vec![url.to_string()];
+        args.skip_mining = true;
+        args.skip_mining_dict = true;
+        args.skip_mining_dom = true;
+        args.skip_ast_analysis = true;
+        args.encoders = vec!["none".to_string()];
+        args.blind_callback_url = blind;
+        mcp.run_job(id.to_string(), Arc::new(args)).await;
+        progress.requests_sent.load(Relaxed)
+    }
+
+    let mcp = DalfoxMcp::new();
+    let without = run_count(&mcp, "blind-off", &url, None).await;
+    let with = run_count(
+        &mcp,
+        "blind-on",
+        &url,
+        Some("http://callback.example/hook".to_string()),
+    )
+    .await;
+    assert!(
+        with > without,
+        "blind_callback_url must trigger extra blind-XSS probes: with={} without={}",
+        with,
+        without
     );
 }
 

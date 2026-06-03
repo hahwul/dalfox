@@ -39,10 +39,25 @@ pub(crate) async fn start_scan_handler(
         }
     };
 
-    if req.url.trim().is_empty() {
+    // Trim once and use the trimmed value throughout (validation, scan_id,
+    // stored target, dispatch) so whitespace variants stay consistent.
+    let url = req.url.trim().to_string();
+    if url.is_empty() {
         let resp = ApiResponse::<serde_json::Value> {
             code: 400,
             msg: "url is required".to_string(),
+            data: None,
+        };
+        return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+    }
+    // Require an http(s) scheme, matching /preflight and the MCP scan tool.
+    // Without this, a garbage target (e.g. "ftp://x" or a bare host) was
+    // queued and "scanned", silently finishing as `done` with 0 findings —
+    // indistinguishable from a real target that simply had no XSS.
+    if !has_http_scheme(&url) {
+        let resp = ApiResponse::<serde_json::Value> {
+            code: 400,
+            msg: "url must start with http:// or https://".to_string(),
             data: None,
         };
         return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
@@ -61,9 +76,12 @@ pub(crate) async fn start_scan_handler(
     let include_response = opts.include_response.unwrap_or(false);
     let callback_url = opts.callback_url.clone();
 
-    let id = make_scan_id(&req.url);
-    {
+    // Reserve a unique scan_id and insert the queued job under one lock so a
+    // same-target resubmission in the same nanosecond can't clobber an
+    // in-flight job (see make_scan_id's nonce). Regenerate on collision.
+    let id = {
         let mut jobs = state.jobs.lock().await;
+        let id = crate::utils::make_unique_scan_id(&url, |id| jobs.contains_key(id));
         jobs.insert(
             id.clone(),
             Job {
@@ -73,19 +91,20 @@ pub(crate) async fn start_scan_handler(
                 progress: JobProgress::default(),
                 cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
                 error_message: None,
-                target_url: req.url.clone(),
+                target_url: url.clone(),
                 queued_at_ms: now_ms(),
                 started_at_ms: None,
                 finished_at_ms: None,
             },
         );
-    }
-    log(&state, "JOB", &format!("queued id={} url={}", id, req.url));
+        id
+    };
+    log(&state, "JOB", &format!("queued id={} url={}", id, url));
 
     spawn_scan_task(
         state.clone(),
         id.clone(),
-        req.url.clone(),
+        url.clone(),
         opts,
         include_request,
         include_response,
@@ -94,7 +113,7 @@ pub(crate) async fn start_scan_handler(
     let resp = ApiResponse::<serde_json::Value> {
         code: 200,
         msg: "ok".to_string(),
-        data: Some(serde_json::json!({ "scan_id": id, "target": req.url })),
+        data: Some(serde_json::json!({ "scan_id": id, "target": url })),
     };
     make_api_response(&state, &headers, &params, StatusCode::OK, &resp)
 }
@@ -234,11 +253,28 @@ pub(crate) async fn get_scan_handler(
 
     purge_expired_jobs(&state).await;
 
-    let url = params.get("url").cloned().unwrap_or_default();
-    if url.trim().is_empty() {
+    // Trim once and use the trimmed value throughout, so whitespace variants
+    // of the same URL validate, hash to the same scan_id, and store the same
+    // target consistently.
+    let url = params
+        .get("url")
+        .cloned()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if url.is_empty() {
         let resp = ApiResponse::<serde_json::Value> {
             code: 400,
             msg: "url is required".to_string(),
+            data: None,
+        };
+        return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+    }
+    // Require an http(s) scheme, matching POST /scan, /preflight, and MCP.
+    if !has_http_scheme(&url) {
+        let resp = ApiResponse::<serde_json::Value> {
+            code: 400,
+            msg: "url must start with http:// or https://".to_string(),
             data: None,
         };
         return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
@@ -266,9 +302,23 @@ pub(crate) async fn get_scan_handler(
             .collect()
     };
     let cookie = params.get("cookie").cloned();
-    let worker = params.get("worker").and_then(|s| s.parse::<usize>().ok());
-    let delay = params.get("delay").and_then(|s| s.parse::<u64>().ok());
-    let timeout = params.get("timeout").and_then(|s| s.parse::<u64>().ok());
+    // A present-but-unparseable numeric query param is a 400, not a silent
+    // fallback to the default (which is what `.parse().ok()` used to do).
+    let (worker, delay, timeout): (Option<usize>, Option<u64>, Option<u64>) = match (
+        parse_num_query::<usize>(&params, "worker"),
+        parse_num_query::<u64>(&params, "delay"),
+        parse_num_query::<u64>(&params, "timeout"),
+    ) {
+        (Ok(w), Ok(d), Ok(t)) => (w, d, t),
+        (Err(msg), ..) | (_, Err(msg), _) | (.., Err(msg)) => {
+            let resp = ApiResponse::<serde_json::Value> {
+                code: 400,
+                msg,
+                data: None,
+            };
+            return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+        }
+    };
     let blind = params.get("blind").cloned();
     let method = params
         .get("method")
@@ -341,9 +391,10 @@ pub(crate) async fn get_scan_handler(
     }
 
     let callback_url = opts.callback_url.clone();
-    let id = make_scan_id(&url);
-    {
+    // Reserve a unique scan_id under one lock (see POST /scan).
+    let id = {
         let mut jobs = state.jobs.lock().await;
+        let id = crate::utils::make_unique_scan_id(&url, |id| jobs.contains_key(id));
         jobs.insert(
             id.clone(),
             Job {
@@ -359,7 +410,8 @@ pub(crate) async fn get_scan_handler(
                 finished_at_ms: None,
             },
         );
-    }
+        id
+    };
     log(&state, "JOB", &format!("queued id={} url={}", id, url));
 
     let id_for_resp = id.clone();
@@ -678,9 +730,7 @@ pub(crate) async fn preflight_handler(
     };
 
     let target_url = req.url.trim().to_string();
-    if target_url.is_empty()
-        || !(target_url.starts_with("http://") || target_url.starts_with("https://"))
-    {
+    if target_url.is_empty() || !has_http_scheme(&target_url) {
         let resp = ApiResponse::<serde_json::Value> {
             code: 400,
             msg: "url must start with http:// or https://".to_string(),

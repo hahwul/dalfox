@@ -205,6 +205,14 @@ queued → running → done
 
 Terminal states (`done`, `error`, `cancelled`) are sticky.
 
+A target that can't be connected to (DNS failure, connection refused, TLS
+error, timeout) ends as `error` with an `error_message` of
+`target unreachable: connection failed (CONNECTION_FAILED)` — not `done` with
+zero findings, so you can tell "scanned, nothing found" apart from "never
+reached the host." Use `POST /preflight` first if you want to check
+reachability without launching a scan. The `url` must start with `http://` or
+`https://`; any other scheme is rejected with `400` (same as `/preflight`).
+
 ## Running under systemd
 
 ```ini
@@ -233,3 +241,14 @@ sudo systemctl enable --now dalfox
 - **Always set `--api-key`** on a remote bind.
 - **Keep the API key out of logs.** Dalfox does not log it, but reverse proxies might.
 - **Put it behind TLS** (nginx, Caddy, Traefik) if you expose it over a network.
+- **`callback_url` and the scan target are server-side requests.** Dalfox is a
+  URL scanner: it dials whatever target you submit, and on completion it POSTs
+  the result JSON to `callback_url`. Only `http(s)` schemes are dialed, but the
+  *host* is not filtered — loopback, link-local (e.g. cloud metadata at
+  `169.254.169.254`), and private addresses are all reachable. On an
+  unauthenticated bind this is a server-side request forgery + exfiltration
+  primitive for anyone who can submit a scan, so set `--api-key` and restrict
+  egress when exposing the API to untrusted callers.
+- **`--jsonp` makes `GET` endpoints readable cross-origin** via `<script>`,
+  which is not subject to the CORS allow-list. Enable it only when you intend
+  that, and pair it with `--api-key`.

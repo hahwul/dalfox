@@ -378,6 +378,17 @@ pub(crate) async fn run_scan_job(
         }
     };
 
+    // Reachability gate. A parseable-but-unreachable target (connection
+    // refused, DNS failure, TLS error, timeout) otherwise runs the full
+    // pipeline and finishes `done` with 0 findings — indistinguishable from
+    // "scanned, found no XSS". /preflight already probes reachability and
+    // returns reachable:false; mirror that here so /scan clients can tell the
+    // two apart. Any HTTP response (including 4xx/5xx) counts as reachable.
+    if !send_reachability_probe(&target).await {
+        mark_job_error(&state, &job_id, &url, unreachable_error_message()).await;
+        return;
+    }
+
     // Per-job WAF consecutive-block counter so one scan's WAF backoff doesn't
     // throttle an unrelated scan.
     //
@@ -471,6 +482,10 @@ pub(crate) async fn run_scan_job(
                         findings_count.clone(),
                         Some(cancel_flag.clone()),
                         None,
+                        // Feed the live per-parameter completion counter so
+                        // GET /scan/{id} reports `params_tested` climbing
+                        // during the scan instead of staying at 0 until done.
+                        Some(progress.params_tested.clone()),
                     )
                     .await;
                 })
@@ -554,9 +569,19 @@ pub(crate) async fn run_scan_job(
 }
 
 /// POST the scan-completion payload to the configured webhook, if any.
-/// Only `http`/`https` URLs are dialed (mitigates SSRF via odd schemes such
-/// as `file://`). The status string is the same one we put in the response
-/// payload (`"done"` or `"cancelled"`) so downstream consumers can branch
+///
+/// Only `http`/`https` URLs are dialed, which blocks non-network schemes such
+/// as `file://`. NOTE: this is *not* a host-based SSRF guard — the callback
+/// host is whatever the scan submitter supplied, so loopback, link-local
+/// (e.g. cloud metadata at 169.254.169.254), and RFC1918 addresses are all
+/// reachable, and the full result JSON is POSTed there. This is inherent to
+/// the server being a URL scanner (the scan target itself is unrestricted in
+/// the same way), so host filtering is intentionally left to deployment: run
+/// `dalfox server` with `--api-key` and appropriate network egress controls
+/// when exposing it to untrusted submitters.
+///
+/// The status string is the same one we put in the response payload
+/// (`"done"` / `"cancelled"` / `"error"`) so downstream consumers can branch
 /// on it without re-deriving terminal state.
 pub(crate) async fn send_terminal_webhook(
     state: &AppState,

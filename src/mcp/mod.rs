@@ -42,8 +42,8 @@ use crate::{
     cmd::scan::ScanArgs,
     job::{
         AbortOnDrop, JOB_RETENTION_SECS, Job, JobStatus, MAX_DELAY_MS, MAX_TIMEOUT_SECS,
-        MAX_WORKERS, now_ms, parse_job_status, purge_expired_jobs as purge_jobs_map,
-        send_reachability_probe,
+        MAX_WORKERS, has_http_scheme, now_ms, parse_job_status,
+        purge_expired_jobs as purge_jobs_map, send_reachability_probe, unreachable_error_message,
     },
     parameter_analysis::analyze_parameters,
     scanning::result::{Result as ScanResult, SanitizedResult},
@@ -211,10 +211,6 @@ impl DalfoxMcp {
         }
     }
 
-    fn make_scan_id(s: &str) -> String {
-        crate::utils::make_scan_id(s)
-    }
-
     fn log(level: &str, msg: &str) {
         let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
         eprintln!("[{}] [{}] {}", ts, level, msg);
@@ -307,6 +303,18 @@ impl DalfoxMcp {
             }
         };
 
+        // Reachability gate, mirroring preflight_dalfox and the REST server:
+        // a parseable-but-unreachable target otherwise finishes `done` with 0
+        // findings, which a client can't distinguish from "scanned, no XSS".
+        // Any HTTP response (incl. 4xx/5xx) counts as reachable; only a
+        // connection-level failure trips this.
+        if !send_reachability_probe(&target).await {
+            let msg = unreachable_error_message();
+            Self::log("ERR", &msg);
+            mark_job_error_sync(&self.jobs, &scan_id, msg);
+            return;
+        }
+
         // Per-job WAF consecutive-block counter so one scan's WAF backoff
         // doesn't throttle an unrelated scan. The request counter is the
         // public `progress.requests_sent` field itself — scoping it directly
@@ -342,6 +350,22 @@ impl DalfoxMcp {
             .scope(progress.requests_sent.clone(), async {
                 crate::WAF_CONSECUTIVE_BLOCKS_JOB
                     .scope(job_waf_consecutive.clone(), async {
+                        // Dispatch blind-XSS probes when a callback URL was
+                        // supplied. MCP exposes `blind_callback_url` in its
+                        // scan schema and wires it into ScanArgs, but the
+                        // execution path never invoked blind_scanning — so the
+                        // documented option was a silent no-op, diverging from
+                        // both the CLI and the REST server (which call this
+                        // here). run_scanning does not cover blind scanning.
+                        if let Some(callback_url) = &scan_args.blind_callback_url {
+                            crate::scanning::blind_scanning(
+                                &target,
+                                callback_url,
+                                scan_args.custom_blind_xss_payload.as_deref(),
+                            )
+                            .await;
+                        }
+
                         // Initial AST DOM-XSS pass on the GET response so MCP
                         // scans match CLI for targets where the vulnerability
                         // lives entirely in JS (location.hash → innerHTML
@@ -387,6 +411,11 @@ impl DalfoxMcp {
                             findings_count.clone(),
                             Some(cancel_flag.clone()),
                             None,
+                            // Feed the live per-parameter completion counter
+                            // so get_results_dalfox reports `params_tested`
+                            // (and estimated_completion_pct) advancing during
+                            // the scan instead of staying at 0 until done.
+                            Some(progress.params_tested.clone()),
                         )
                         .await;
                     })
@@ -723,7 +752,7 @@ Final results (via get_results_dalfox) include finding type \
                 None,
             ));
         }
-        if !(target.starts_with("http://") || target.starts_with("https://")) {
+        if !has_http_scheme(&target) {
             return Err(ErrorData::invalid_params(
                 "target must start with http:// or https:// (example: \"https://example.com/page?q=test\")",
                 None,
@@ -758,12 +787,20 @@ Final results (via get_results_dalfox) include finding type \
             ));
         }
 
-        let scan_id = Self::make_scan_id(&target);
-
-        {
+        // Reserve a unique scan_id and insert the queued job under a single
+        // lock. `make_scan_id` mixes in a nanosecond nonce, so collisions are
+        // already vanishingly rare — but two same-target submissions landing
+        // in the same nanosecond would otherwise have the second `insert`
+        // silently clobber the first job (the original scan keeps running but
+        // its entry is replaced, so its poller starts seeing a different
+        // scan's results). Regenerating on collision makes the guarantee
+        // explicit and cheap.
+        let scan_id = {
             let mut jobs = self.jobs.lock().expect("jobs mutex poisoned");
-            jobs.insert(scan_id.clone(), Job::new_queued(target.clone()));
-        }
+            let id = crate::utils::make_unique_scan_id(&target, |id| jobs.contains_key(id));
+            jobs.insert(id.clone(), Job::new_queued(target.clone()));
+            id
+        };
 
         Self::log(
             "JOB",
@@ -1142,7 +1179,7 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
                 None,
             ));
         }
-        if !(target_url.starts_with("http://") || target_url.starts_with("https://")) {
+        if !has_http_scheme(&target_url) {
             return Err(ErrorData::invalid_params(
                 "target must start with http:// or https:// (example: \"https://example.com/page?q=test\")",
                 None,

@@ -120,6 +120,16 @@ Response (done):
 }
 ```
 
+`progress.estimated_completion_pct` and `params_tested` advance live as each
+discovered parameter finishes (they no longer sit at 0 until the scan ends), so
+they are usable for pacing polls — honor `suggested_poll_interval_ms`.
+
+If the target can't be reached (DNS failure, connection refused, TLS error,
+timeout) the scan ends as `status: "error"` with `error_message` containing
+`CONNECTION_FAILED`, rather than `done` with an empty `results` — the same
+distinction `preflight_dalfox` reports via `reachable: false`. The `target`
+must start with `http://` or `https://`.
+
 ### `list_scans_dalfox`
 
 List every tracked scan. Optional filter:

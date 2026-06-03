@@ -223,6 +223,9 @@ pub(crate) async fn run_scan_loop(
                             findings_count_target,
                             Some(cancel_flag_inner.clone()),
                             finding_tx_target,
+                            // CLI renders its own indicatif progress bar; no
+                            // external params_tested counter to feed.
+                            None,
                         );
                         // Honor --scan-timeout as a hard wall-clock cap per
                         // target. When a slow endpoint streams a partial body
