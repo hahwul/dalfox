@@ -121,6 +121,13 @@ struct DomXssVisitor<'a> {
     /// set is pushed/popped as the promise-chain driver enters and leaves
     /// each callback so the binding never leaks past its callback.
     response_object_vars: HashSet<String>,
+    /// Nesting depth of conditional/loop/switch/try branch bodies currently
+    /// being walked. The analysis is flow-insensitive, so taint is a *union*
+    /// over paths: it is always added, but only *cleared* on an unconditional
+    /// reassignment (`branch_depth == 0`). Clearing inside a branch would
+    /// wrongly drop taint set on a sibling path — e.g.
+    /// `if (c) out = taint; else out = 'x'; sink(out)`.
+    branch_depth: u32,
 }
 
 // Module-level DOM source/sink/sanitizer constants
@@ -513,6 +520,7 @@ impl<'a> DomXssVisitor<'a> {
             script_element_vars: HashSet::new(),
             script_element_ids: HashSet::new(),
             response_object_vars: HashSet::new(),
+            branch_depth: 0,
         }
     }
 
@@ -1930,16 +1938,22 @@ impl<'a> DomXssVisitor<'a> {
             }
             Statement::IfStatement(if_stmt) => {
                 self.walk_expression(&if_stmt.test);
+                // Branch bodies are conditional: suppress detaint inside them.
+                self.branch_depth += 1;
                 self.walk_statement(&if_stmt.consequent);
                 if let Some(alt) = &if_stmt.alternate {
                     self.walk_statement(alt);
                 }
+                self.branch_depth -= 1;
             }
             Statement::WhileStatement(while_stmt) => {
                 self.walk_expression(&while_stmt.test);
+                self.branch_depth += 1;
                 self.walk_statement(&while_stmt.body);
+                self.branch_depth -= 1;
             }
             Statement::ForStatement(for_stmt) => {
+                // `init` runs unconditionally; `update`/`body` are conditional.
                 if let Some(ForStatementInit::VariableDeclaration(var_decl)) = &for_stmt.init {
                     for decl in &var_decl.declarations {
                         self.walk_variable_declarator(decl);
@@ -1948,10 +1962,12 @@ impl<'a> DomXssVisitor<'a> {
                 if let Some(test) = &for_stmt.test {
                     self.walk_expression(test);
                 }
+                self.branch_depth += 1;
                 if let Some(update) = &for_stmt.update {
                     self.walk_expression(update);
                 }
                 self.walk_statement(&for_stmt.body);
+                self.branch_depth -= 1;
             }
             Statement::FunctionDeclaration(func_decl) => {
                 // Parameterized functions are primarily handled through summaries/call sites.
@@ -1997,14 +2013,19 @@ impl<'a> DomXssVisitor<'a> {
             }
             Statement::SwitchStatement(switch_stmt) => {
                 self.walk_expression(&switch_stmt.discriminant);
+                self.branch_depth += 1;
                 for case in &switch_stmt.cases {
                     if let Some(test) = &case.test {
                         self.walk_expression(test);
                     }
                     self.walk_statements(&case.consequent);
                 }
+                self.branch_depth -= 1;
             }
             Statement::TryStatement(try_stmt) => {
+                // `catch`/`finally` are conditional; the `try` block may also
+                // abort partway, so treat the whole construct as a branch.
+                self.branch_depth += 1;
                 self.walk_statements(&try_stmt.block.body);
                 if let Some(handler) = &try_stmt.handler {
                     self.walk_statements(&handler.body.body);
@@ -2012,6 +2033,7 @@ impl<'a> DomXssVisitor<'a> {
                 if let Some(finalizer) = &try_stmt.finalizer {
                     self.walk_statements(&finalizer.body);
                 }
+                self.branch_depth -= 1;
             }
             _ => {}
         }
@@ -3131,6 +3153,25 @@ impl<'a> DomXssVisitor<'a> {
                     if let Some(source) = right_source.clone() {
                         self.var_aliases.insert(target_name.to_string(), source);
                     }
+                } else if self.branch_depth == 0 {
+                    // Reassigning a previously-tainted variable to a clean or
+                    // sanitized value clears its taint — e.g.
+                    // `x = location.hash; x = DOMPurify.sanitize(x)` or
+                    // `x = "static"`. Without this the flow-insensitive walker
+                    // keeps the stale taint and reports a false positive at any
+                    // later sink that reads `x`. This mirrors the
+                    // `instance_classes` / `bound_function_aliases` clears just
+                    // above. Because the walker runs top-to-bottom, a sink that
+                    // consumed the tainted value *before* this reassignment was
+                    // already reported, so confirmed flows are not lost.
+                    //
+                    // Only clear at `branch_depth == 0` (unconditional
+                    // reassignment). Taint is a union over paths, so a clean
+                    // assignment inside one conditional branch must not drop
+                    // taint set on a sibling branch
+                    // (`if (c) out = taint; else out = 'x'; sink(out)`).
+                    self.tainted_vars.remove(target_name);
+                    self.var_aliases.remove(target_name);
                 }
 
                 if self.is_assignment_sink_property(target_name) && right_tainted {

@@ -770,3 +770,68 @@ Reflect.apply(el.insertAdjacentHTML, el, ['beforeend', DOMPurify.sanitize(locati
 </html>
 """
 expected_detection = false
+
+# --- Reassignment-detaint cases: taint must clear when an already-tainted
+# variable is reassigned to a clean / sanitized value before reaching the sink.
+# These are genuinely safe (the value at the sink is a constant or a sanitized
+# result). A flow-insensitive engine that only ever ADDS taint and never clears
+# it on reassignment reports them as false positives. ---
+
+[[case]]
+id = 1441
+name = "reassign_tainted_to_literal_safe"
+description = "Tainted var reassigned to a string literal before the sink is safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="out"></div>
+<script>
+var x = location.hash.substring(1);
+x = "static safe content";
+document.getElementById('out').innerHTML = x;
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1442
+name = "reassign_tainted_to_sanitized_safe"
+description = "Tainted var reassigned to its DOMPurify-sanitized form before the sink is safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="out"></div>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@2.4.0/dist/purify.min.js"></script>
+<script>
+var x = location.search.substring(1);
+x = DOMPurify.sanitize(x);
+document.getElementById('out').innerHTML = x;
+</script>
+</body>
+</html>
+"""
+expected_detection = false
+
+[[case]]
+id = 1443
+name = "reassign_tainted_to_clean_var_safe"
+description = "Tainted var overwritten by a clean variable before the sink is safe"
+handler_type = "dom_xss"
+reflection = """
+<html>
+<body>
+<div id="out"></div>
+<script>
+var src = location.hash.substring(1);
+var safe = "constant value";
+src = safe;
+document.getElementById('out').innerHTML = src;
+</script>
+</body>
+</html>
+"""
+expected_detection = false
