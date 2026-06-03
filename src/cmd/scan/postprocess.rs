@@ -27,6 +27,9 @@ fn result_priority(result: &Result) -> u8 {
         FindingType::Verified => 3,
         FindingType::AstDetected => 2,
         FindingType::Reflected => 1,
+        // Informational findings never enter the AST-dedup path (message_id != 0);
+        // this arm exists only for match exhaustiveness.
+        FindingType::Informational => 0,
     };
     let severity_score = match result.severity.as_str() {
         "High" => 3,

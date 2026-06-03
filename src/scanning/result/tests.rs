@@ -2,6 +2,26 @@ use super::*;
 use serde_json;
 
 #[test]
+fn informational_finding_type_labels_and_serde() {
+    assert_eq!(FindingType::Informational.short(), "I");
+    assert_eq!(FindingType::Informational.description(), "Informational");
+    assert!(
+        FindingType::Informational
+            .long_description()
+            .contains("Informational")
+    );
+    // Serializes to the compact "I" tag and round-trips.
+    let r = Result::builder(FindingType::Informational)
+        .inject_type("OutdatedComponent")
+        .cwe("CWE-1104")
+        .build();
+    let json = serde_json::to_string(&r).unwrap();
+    assert!(json.contains("\"type\":\"I\""), "json: {json}");
+    let back: Result = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.result_type, FindingType::Informational);
+}
+
+#[test]
 fn test_result_creation() {
     let result = Result::builder(FindingType::Verified)
         .inject_type("inHTML")

@@ -30,6 +30,7 @@ pub mod result;
 pub mod selectors;
 pub mod tech_detect;
 pub mod url_inject;
+pub mod vuln_libs;
 pub mod xss_blind;
 pub mod xss_common;
 

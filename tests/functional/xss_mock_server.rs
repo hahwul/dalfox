@@ -2593,3 +2593,156 @@ async fn test_synthesis_filter_effectiveness_v2() {
         GAP_CASE_ID
     );
 }
+
+/// Run a library-detection-only scan against a realworld case id. Uses
+/// `deep_scan=false` (so the preflight body — where vuln-lib detection lives,
+/// alongside tech detection and initial AST — actually runs; `run_scan_test`
+/// forces `deep_scan=true`, which skips that preflight path) and
+/// `skip_xss_scanning`/`skip_ast_analysis` to isolate the informational
+/// library finding. Returns the findings array.
+async fn run_libscan(addr: SocketAddr, case_id: u32) -> Vec<serde_json::Value> {
+    let target = format!(
+        "http://{}:{}/realworld/query/{}?query=seed",
+        addr.ip(),
+        addr.port(),
+        case_id
+    );
+    let out_path = std::env::temp_dir().join(format!(
+        "dalfox_libscan_{}_{}_{}.json",
+        case_id,
+        addr.ip(),
+        addr.port()
+    ));
+    let out_path_str = out_path.to_string_lossy().to_string();
+
+    let args = ScanArgs {
+        input_type: "url".to_string(),
+        format: "json".to_string(),
+        targets: vec![target],
+        param: vec![],
+        data: None,
+        headers: vec![],
+        cookies: vec![],
+        method: "GET".to_string(),
+        user_agent: None,
+        cookie_from_raw: None,
+        include_url: vec![],
+        exclude_url: vec![],
+        ignore_param: vec![],
+        out_of_scope: vec![],
+        out_of_scope_file: None,
+        mining_dict_word: None,
+        skip_mining: true,
+        skip_mining_dict: true,
+        skip_mining_dom: true,
+        only_discovery: false,
+        skip_discovery: false,
+        skip_reflection_header: true,
+        skip_reflection_cookie: true,
+        skip_reflection_path: true,
+        timeout: 5,
+        scan_timeout: 0,
+        delay: 0,
+        proxy: None,
+        follow_redirects: false,
+        ignore_return: vec![],
+        output: Some(out_path_str.clone()),
+        include_request: false,
+        include_response: false,
+        include_all: false,
+        no_color: true,
+        silence: true,
+        dry_run: false,
+        stream_findings: false,
+        poc_type: "plain".to_string(),
+        limit: None,
+        limit_result_type: "all".to_string(),
+        only_poc: vec![],
+        workers: 4,
+        max_concurrent_targets: 4,
+        max_targets_per_host: 100,
+        encoders: vec![],
+        custom_blind_xss_payload: None,
+        blind_callback_url: None,
+        custom_payload: None,
+        only_custom_payload: false,
+        inject_marker: None,
+        custom_alert_value: "1".to_string(),
+        custom_alert_type: "none".to_string(),
+        // Library detection runs in the analysis/preflight phase; skipping the
+        // XSS and AST passes keeps the run fast and isolates the lib finding.
+        skip_xss_scanning: true,
+        deep_scan: false,
+        sxss: false,
+        sxss_url: None,
+        sxss_method: "GET".to_string(),
+        sxss_retries: 3,
+        skip_ast_analysis: true,
+        hpp: false,
+        waf_bypass: "off".to_string(),
+        skip_waf_probe: true,
+        force_waf: None,
+        waf_evasion: false,
+        waf_min_confidence: 0.0,
+        remote_payloads: vec![],
+        remote_wordlists: vec![],
+        max_payloads_per_param: 0,
+    };
+
+    scan::run_scan(&args).await;
+
+    let content = std::fs::read_to_string(&out_path).expect("scan should write JSON output file");
+    let v: serde_json::Value = serde_json::from_str(&content).expect("output should be valid JSON");
+    v["findings"]
+        .as_array()
+        .expect("json should have a 'findings' array")
+        .clone()
+}
+
+/// End-to-end test for outdated/known-vulnerable JS library detection
+/// (issue #1074). A page serving a known-vulnerable jQuery must yield an
+/// informational `OutdatedComponent` finding; a page serving a current version
+/// must not.
+#[tokio::test]
+#[ignore = "functional: issue #1074 outdated/vulnerable JS library detection"]
+async fn test_vuln_library_detection_v2() {
+    dalfox::ensure_crypto_provider();
+    let (addr, _state) = start_mock_server_v2().await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let is_outdated_lib = |f: &serde_json::Value| {
+        f.get("type").and_then(|t| t.as_str()) == Some("I")
+            && f.get("inject_type").and_then(|t| t.as_str()) == Some("OutdatedComponent")
+    };
+
+    // Vulnerable jQuery 1.7.2 -> informational finding naming the version + a CVE.
+    let vuln = run_libscan(addr, 9101).await;
+    let lib_finding = vuln.iter().find(|f| is_outdated_lib(f)).unwrap_or_else(|| {
+        panic!("expected an OutdatedComponent finding for jQuery 1.7.2, got {vuln:?}")
+    });
+    let evidence = lib_finding
+        .get("evidence")
+        .and_then(|e| e.as_str())
+        .unwrap_or("");
+    assert!(
+        evidence.contains("jQuery") && evidence.contains("1.7.2"),
+        "evidence should name jQuery 1.7.2: {evidence:?}"
+    );
+    assert!(
+        evidence.contains("CVE-"),
+        "evidence should cite an advisory: {evidence:?}"
+    );
+    assert_eq!(
+        lib_finding.get("cwe").and_then(|c| c.as_str()),
+        Some("CWE-1104")
+    );
+    println!("[#9101] outdated-lib finding: {evidence}");
+
+    // Current jQuery 3.7.1 -> NO library finding.
+    let safe = run_libscan(addr, 9102).await;
+    assert!(
+        !safe.iter().any(is_outdated_lib),
+        "current jQuery must not yield an OutdatedComponent finding, got {safe:?}"
+    );
+    println!("[#9102] current jQuery: no outdated-lib finding (correct)");
+}

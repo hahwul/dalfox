@@ -449,6 +449,24 @@ pub(crate) async fn run_preflight_and_analysis(
                     let _ = done_rx.await;
                 }
 
+                // Outdated / known-vulnerable JS library detection (issue #1074).
+                // Emits informational (CWE-1104) findings from the initial
+                // response, once per target. Borrows the body so the AST block
+                // below can still consume it.
+                if let Some(body) = preflight_response_body.as_deref() {
+                    let lib_findings = crate::scanning::vuln_libs::library_findings(
+                        crate::scanning::vuln_libs::detect_vulnerable_libraries(body),
+                        target.url.as_str(),
+                        &target.method,
+                    );
+                    if !lib_findings.is_empty() {
+                        let added = lib_findings.len();
+                        let mut guard = results_clone.lock().await;
+                        guard.extend(lib_findings);
+                        findings_count_clone.fetch_add(added, Ordering::Relaxed);
+                    }
+                }
+
                 // Run AST-based DOM XSS analysis on the initial response
                 // (enabled by default). The helper is shared with the
                 // server (`dalfox server`) and MCP (`scan_with_dalfox`)
