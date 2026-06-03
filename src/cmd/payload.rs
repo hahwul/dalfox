@@ -47,6 +47,7 @@ fn print_summary() {
     println!("----------------");
     println!("Provide a selector to list payloads. Examples:");
     println!("  dalfox payload event-handlers");
+    println!("  dalfox payload useful-tags");
     println!("  dalfox payload payloadbox");
     println!("  dalfox payload portswigger");
     println!("  dalfox payload uri-scheme\n");
