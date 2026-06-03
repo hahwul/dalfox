@@ -94,7 +94,15 @@ Use this before expensive scans when the user is concerned about request volume.
 ## Error Handling in MCP
 
 - Out-of-range numbers → `invalid_params` with exact message.
+- Non-`http(s)` target → `invalid_params` (rejected before queueing).
 - Unreachable target in preflight → `reachable: false` + `error_code`.
+- Unreachable target in `scan_with_dalfox` → terminal `status: "error"` with
+  `error_message` containing `CONNECTION_FAILED` (not `done` with empty
+  results), so "unreachable" is distinguishable from "no findings".
+- `blind_callback_url` triggers blind-XSS probes on the scan path (parity with
+  the CLI and REST server).
+- `progress.params_tested` / `estimated_completion_pct` advance live as each
+  parameter finishes; use them with `suggested_poll_interval_ms` for pacing.
 - Use the shared error codes from `cmd::error_codes` (see `results.md`).
 
 ## Recommended Agent Loop (MCP)

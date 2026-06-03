@@ -941,6 +941,7 @@ async fn test_xss_scanning_get_query() {
         Arc::new(AtomicUsize::new(0)),
         None,
         None,
+        None,
     )
     .await;
 
@@ -1037,6 +1038,7 @@ async fn test_xss_scanning_post_body() {
         None,
         None,
         Arc::new(AtomicUsize::new(0)),
+        None,
         None,
         None,
     )
@@ -1153,6 +1155,7 @@ async fn test_run_scanning_with_reflection_params() {
         Arc::new(AtomicUsize::new(0)),
         None,
         None,
+        None,
     )
     .await;
 }
@@ -1227,6 +1230,7 @@ async fn test_run_scanning_realworld_level1_shape_promotes_to_verified() {
         Arc::new(AtomicUsize::new(0)),
         None,
         None,
+        None,
     )
     .await;
 
@@ -1258,6 +1262,73 @@ async fn test_run_scanning_realworld_level1_shape_promotes_to_verified() {
             || m.contains("JS-context AST")),
         "V finding must carry a DomEvidenceKind label from classify_dom_evidence; got {:?}",
         labels
+    );
+}
+
+#[tokio::test]
+async fn test_run_scanning_increments_params_done_counter() {
+    // Each per-parameter worker must bump the live `params_done` counter once
+    // on completion — including the non-reflective early-return path — so the
+    // REST server and MCP can report `params_tested` climbing during a scan
+    // instead of pinning it at 0 until the very end. The target reflects
+    // nothing, so every worker takes the "no reflection, skip payloads" path;
+    // the counter must still reach the param count.
+    use axum::{Router, response::Html, routing::get};
+    use std::net::{Ipv4Addr, SocketAddr};
+    use tokio::time::{Duration, sleep};
+    async fn ok_handler() -> Html<String> {
+        Html("<html><body>no reflection here</body></html>".to_string())
+    }
+    let app = Router::new().route("/", get(ok_handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let url = format!("http://{}/?a=1&b=2&c=3", addr);
+    let mut target = parse_target(&url).expect("parse_target");
+    target.reflection_params.clear();
+    for name in ["a", "b", "c"] {
+        target.reflection_params.push(Param {
+            name: name.to_string(),
+            value: "1".to_string(),
+            location: Location::Query,
+            injection_context: Some(InjectionContext::Html(None)),
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            pre_encoding_pipeline: None,
+            wire_name: None,
+            form_action_url: None,
+            form_origin_url: None,
+            framework_sink: None,
+            escaped_specials: None,
+            js_breakout: None,
+        });
+    }
+
+    let params_done = Arc::new(std::sync::atomic::AtomicU32::new(0));
+    run_scanning(
+        &target,
+        Arc::new(integration_scan_args(false)),
+        Arc::new(Mutex::new(Vec::new())),
+        None,
+        None,
+        Arc::new(AtomicUsize::new(0)),
+        None,
+        None,
+        Some(params_done.clone()),
+    )
+    .await;
+
+    assert_eq!(
+        params_done.load(std::sync::atomic::Ordering::Relaxed),
+        3,
+        "every parameter worker must increment params_done exactly once"
     );
 }
 
@@ -1347,6 +1418,7 @@ async fn test_run_scanning_empty_params() {
         None,
         None,
         Arc::new(AtomicUsize::new(0)),
+        None,
         None,
         None,
     )

@@ -137,7 +137,7 @@ fn parse_result_json(result: &CallToolResult) -> serde_json::Value {
 
 #[test]
 fn test_make_scan_id_shape() {
-    let a = DalfoxMcp::make_scan_id("https://example.com");
+    let a = crate::utils::make_scan_id("https://example.com");
     assert_eq!(a.len(), 64);
     assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
 }
@@ -223,6 +223,36 @@ async fn test_run_job_sets_error_on_parse_failure() {
     assert!(
         job.error_message.as_ref().unwrap().contains("parse_target"),
         "error_message should describe the failure"
+    );
+}
+
+#[tokio::test]
+async fn test_run_job_sets_error_on_unreachable_target() {
+    // A parseable but unreachable target must end as Error with a
+    // connection-failed message, mirroring preflight_dalfox — not finish
+    // `done` with 0 findings, which a client can't tell apart from
+    // "scanned, no XSS".
+    let mcp = DalfoxMcp::new();
+    let scan_id = "job-unreachable".to_string();
+    {
+        let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
+        jobs.insert(scan_id.clone(), test_job(JobStatus::Queued, None));
+    }
+
+    let mut args = default_scan_args("http://127.0.0.1:1/");
+    args.targets = vec!["http://127.0.0.1:1/".to_string()];
+    args.timeout = 2;
+    mcp.run_job(scan_id.clone(), Arc::new(args)).await;
+
+    let jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
+    let job = jobs.get(&scan_id).expect("job exists");
+    assert_eq!(job.status, JobStatus::Error);
+    assert!(
+        job.error_message
+            .as_deref()
+            .is_some_and(|m| m.contains("unreachable") && m.contains("CONNECTION_FAILED")),
+        "expected connection-failed error message, got {:?}",
+        job.error_message
     );
 }
 

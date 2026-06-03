@@ -31,6 +31,10 @@ Runs an async HTTP API (axum) that exposes the same scanning engine.
 
 Jobs are in-memory only. Same `queued / running / done / error / cancelled` lifecycle as MCP.
 
+`POST`/`GET /scan` require an `http(s)` `url` (other schemes → `400`, like `/preflight`). An unreachable target ends as `error` (message contains `CONNECTION_FAILED`), not `done` with zero findings. `GET /scan` numeric query params (`worker`/`delay`/`timeout`) that are present but unparseable → `400` rather than silently using the default. `progress.params_tested` advances live during the scan.
+
+**Webhook/SSRF**: `callback_url` (and the scan target itself) are dialed server-side with no host filtering — loopback/link-local/private hosts are reachable. Set `--api-key` and restrict egress on untrusted binds. `--jsonp` exposes GET endpoints cross-origin (bypasses the CORS allow-list); enable deliberately.
+
 **Authentication**: when `--api-key` is set, every mutating endpoint requires the key. Read endpoints can be open or also protected depending on deployment choice.
 
 **JSONP**: only works for GET endpoints and requires the callback parameter. The server is strict about the callback name to avoid XSS in the JSONP wrapper itself.

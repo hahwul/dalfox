@@ -168,6 +168,18 @@ impl<T> Drop for AbortOnDrop<T> {
 ///
 /// Used by preflight reachability probes so the result reflects what a real
 /// scan would see, not what a default reqwest client sees.
+/// The `error_message` recorded when a scan target can't be connected to.
+/// Shared by the REST server and MCP so the client-facing string — which
+/// callers grep to tell "unreachable" apart from "scanned, no findings" —
+/// has a single source of truth. Carries the `CONNECTION_FAILED` code that
+/// `/preflight` already returns in its `error_code` field.
+pub fn unreachable_error_message() -> String {
+    format!(
+        "target unreachable: connection failed ({})",
+        crate::cmd::error_codes::CONNECTION_FAILED
+    )
+}
+
 pub async fn send_reachability_probe(target: &Target) -> bool {
     let client = target.build_client_or_default();
     let mut req = client.request(target.parse_method(), target.url.clone());

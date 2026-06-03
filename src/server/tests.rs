@@ -131,7 +131,7 @@ fn test_check_api_key_variants() {
 
 #[test]
 fn test_make_and_short_scan_id_shape() {
-    let id = make_scan_id("https://example.com");
+    let id = crate::utils::make_scan_id("https://example.com");
     assert_eq!(id.len(), 64);
     assert!(id.chars().all(|c| c.is_ascii_hexdigit()));
     assert_eq!(crate::utils::short_scan_id(&id).len(), 7);
@@ -562,7 +562,7 @@ async fn test_start_scan_handler_success_creates_queued_job() {
         HeaderMap::new(),
         Query(Map::new()),
         Ok(Json(ScanRequest {
-            url: "not-a-valid-target".to_string(),
+            url: "http://127.0.0.1:1/".to_string(),
             options: Some(ScanOptions {
                 include_request: Some(true),
                 include_response: Some(true),
@@ -607,7 +607,7 @@ async fn test_start_scan_handler_success_jsonp_response() {
         HeaderMap::new(),
         Query(q),
         Ok(Json(ScanRequest {
-            url: "still-not-valid-target".to_string(),
+            url: "http://127.0.0.1:1/".to_string(),
             options: None,
         })),
     )
@@ -673,7 +673,7 @@ async fn test_get_scan_handler_success_parses_query_options_and_jsonp() {
     let state = make_state(None, None, false, true, "cb");
     let mut params = Map::new();
     params.insert("cb".to_string(), "getCb".to_string());
-    params.insert("url".to_string(), "bad-target-for-fast-fail".to_string());
+    params.insert("url".to_string(), "http://127.0.0.1:1/".to_string());
     params.insert("header".to_string(), "X-A:1,Invalid,X-B:2".to_string());
     params.insert("encoders".to_string(), "url,html,base64".to_string());
     params.insert("worker".to_string(), "3".to_string());
@@ -1187,7 +1187,7 @@ async fn test_get_result_handler_jsonp_done_branch() {
 async fn test_get_scan_handler_success_plain_json_defaults() {
     let state = make_state(None, None, false, false, "cb");
     let mut params = Map::new();
-    params.insert("url".to_string(), "still-invalid-for-fast-fail".to_string());
+    params.insert("url".to_string(), "http://127.0.0.1:1/".to_string());
 
     let resp = get_scan_handler(State(state.clone()), HeaderMap::new(), Query(params))
         .await
@@ -1495,6 +1495,130 @@ async fn test_get_scan_handler_rejects_out_of_range_delay() {
         .await
         .into_response();
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_start_scan_handler_rejects_non_http_url() {
+    // POST /scan must reject a non-http(s) target with a 400, matching
+    // /preflight and the MCP scan tool — instead of queueing it and
+    // silently finishing `done` with 0 findings.
+    let state = make_state(None, None, false, false, "cb");
+    for bad in [
+        "ftp://x",
+        "file:///etc/passwd",
+        "example.com",
+        "javascript:alert(1)",
+    ] {
+        let resp = start_scan_handler(
+            State(state.clone()),
+            HeaderMap::new(),
+            Query(Map::new()),
+            Ok(Json(ScanRequest {
+                url: bad.to_string(),
+                options: None,
+            })),
+        )
+        .await
+        .into_response();
+        assert_eq!(
+            resp.status(),
+            StatusCode::BAD_REQUEST,
+            "POST /scan should reject non-http(s) url {:?}",
+            bad
+        );
+        let body = response_body_string(resp).await;
+        assert!(
+            body.contains("must start with http"),
+            "expected scheme error for {:?}, got {}",
+            bad,
+            body
+        );
+    }
+    // No jobs should have been queued for any of the rejected targets.
+    assert!(state.jobs.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn test_get_scan_handler_rejects_non_http_url() {
+    // GET /scan must enforce the same http(s) scheme check as POST /scan.
+    let state = make_state(None, None, false, false, "cb");
+    let mut params = Map::new();
+    params.insert("url".to_string(), "ftp://x".to_string());
+    let resp = get_scan_handler(State(state.clone()), HeaderMap::new(), Query(params))
+        .await
+        .into_response();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+    let body = response_body_string(resp).await;
+    assert!(body.contains("must start with http"));
+    assert!(state.jobs.lock().await.is_empty());
+}
+
+#[tokio::test]
+async fn test_get_scan_handler_rejects_unparseable_numeric_query() {
+    // A present-but-unparseable numeric query param is a 400, not a silent
+    // fallback to the default. (`?timeout=0` is already rejected by range
+    // validation; this covers the non-numeric / negative class.)
+    for (key, val) in [("timeout", "abc"), ("worker", "-5"), ("delay", "1.5")] {
+        let state = make_state(None, None, false, false, "cb");
+        let mut params = Map::new();
+        params.insert("url".to_string(), "http://example.com".to_string());
+        params.insert(key.to_string(), val.to_string());
+        let resp = get_scan_handler(State(state.clone()), HeaderMap::new(), Query(params))
+            .await
+            .into_response();
+        assert_eq!(
+            resp.status(),
+            StatusCode::BAD_REQUEST,
+            "GET /scan should reject {}={}",
+            key,
+            val
+        );
+        let body = response_body_string(resp).await;
+        assert!(
+            body.contains(key),
+            "error should name the offending field {}, got {}",
+            key,
+            body
+        );
+        assert!(state.jobs.lock().await.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn test_run_scan_job_unreachable_target_sets_error() {
+    // A parseable but unreachable target (connection refused) must end as
+    // Error with a connection-failed message — not `done` with 0 findings,
+    // which a client cannot distinguish from "scanned, no XSS". Mirrors
+    // /preflight's reachable:false / CONNECTION_FAILED behavior.
+    let state = make_state(None, None, false, false, "cb");
+    let id = "unreachable-scan".to_string();
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert(id.clone(), test_job(JobStatus::Queued, None, ""));
+    }
+    run_scan_job(
+        state.clone(),
+        id.clone(),
+        "http://127.0.0.1:1/".to_string(),
+        ScanOptions {
+            timeout: Some(2),
+            ..ScanOptions::default()
+        },
+        false,
+        false,
+    )
+    .await;
+
+    let jobs = state.jobs.lock().await;
+    let job = jobs.get(&id).expect("job should exist");
+    assert_eq!(job.status, JobStatus::Error);
+    assert!(
+        job.error_message
+            .as_deref()
+            .is_some_and(|m| m.contains("unreachable") && m.contains("CONNECTION_FAILED")),
+        "expected connection-failed error message, got {:?}",
+        job.error_message
+    );
 }
 
 #[tokio::test]
