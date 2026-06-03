@@ -42,8 +42,8 @@ use crate::{
     cmd::scan::ScanArgs,
     job::{
         AbortOnDrop, JOB_RETENTION_SECS, Job, JobStatus, MAX_DELAY_MS, MAX_TIMEOUT_SECS,
-        MAX_WORKERS, now_ms, parse_job_status, purge_expired_jobs as purge_jobs_map,
-        send_reachability_probe, unreachable_error_message,
+        MAX_WORKERS, has_http_scheme, now_ms, parse_job_status,
+        purge_expired_jobs as purge_jobs_map, send_reachability_probe, unreachable_error_message,
     },
     parameter_analysis::analyze_parameters,
     scanning::result::{Result as ScanResult, SanitizedResult},
@@ -752,7 +752,7 @@ Final results (via get_results_dalfox) include finding type \
                 None,
             ));
         }
-        if !(target.starts_with("http://") || target.starts_with("https://")) {
+        if !has_http_scheme(&target) {
             return Err(ErrorData::invalid_params(
                 "target must start with http:// or https:// (example: \"https://example.com/page?q=test\")",
                 None,
@@ -1179,7 +1179,7 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
                 None,
             ));
         }
-        if !(target_url.starts_with("http://") || target_url.starts_with("https://")) {
+        if !has_http_scheme(&target_url) {
             return Err(ErrorData::invalid_params(
                 "target must start with http:// or https:// (example: \"https://example.com/page?q=test\")",
                 None,

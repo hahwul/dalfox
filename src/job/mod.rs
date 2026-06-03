@@ -168,6 +168,19 @@ impl<T> Drop for AbortOnDrop<T> {
 ///
 /// Used by preflight reachability probes so the result reflects what a real
 /// scan would see, not what a default reqwest client sees.
+/// True when `url` (after trimming) carries an `http`/`https` scheme. The
+/// scheme is matched case-insensitively because URI schemes are
+/// case-insensitive (RFC 3986 §3.1) and `parse_target` already lowercases the
+/// scheme — so `HTTP://x` is a valid target the scanner would otherwise dial.
+/// Shared by the REST server (`/scan`, `/preflight`) and the MCP scan/preflight
+/// tools so the accepted-target contract is identical everywhere. Allocation-
+/// and panic-free (byte-prefix compare, never slices on a char boundary).
+pub fn has_http_scheme(url: &str) -> bool {
+    let b = url.trim().as_bytes();
+    let starts_with = |p: &[u8]| b.len() >= p.len() && b[..p.len()].eq_ignore_ascii_case(p);
+    starts_with(b"http://") || starts_with(b"https://")
+}
+
 /// The `error_message` recorded when a scan target can't be connected to.
 /// Shared by the REST server and MCP so the client-facing string — which
 /// callers grep to tell "unreachable" apart from "scanned, no findings" —

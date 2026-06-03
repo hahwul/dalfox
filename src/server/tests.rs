@@ -111,6 +111,37 @@ async fn start_slow_target_server() -> SocketAddr {
     addr
 }
 
+/// Echoes every query-param value back into the HTML body so
+/// `analyze_parameters` classifies each as a reflection param — giving a
+/// scan with `params_total > 0` to exercise the live `params_tested` counter.
+async fn target_reflect_handler(Query(q): Query<Map<String, String>>) -> impl IntoResponse {
+    let mut body = String::from("<html><body>");
+    for (k, v) in &q {
+        body.push_str(&format!("<div>{k}={v}</div>"));
+    }
+    body.push_str("</body></html>");
+    (
+        StatusCode::OK,
+        [("content-type", "text/html; charset=utf-8")],
+        body,
+    )
+}
+
+async fn start_reflecting_target_server() -> SocketAddr {
+    let app = Router::new()
+        .route("/", any(target_reflect_handler))
+        .route("/{*rest}", any(target_reflect_handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind reflecting target listener");
+    let addr = listener.local_addr().expect("reflecting target local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    addr
+}
+
 #[test]
 fn test_check_api_key_variants() {
     let state_no_key = make_state(None, None, false, false, "callback");
@@ -907,6 +938,54 @@ async fn test_run_scan_job_populates_live_request_counter() {
     assert_eq!(
         params_tested, params_total,
         "params_tested should equal params_total after completion"
+    );
+}
+
+#[tokio::test]
+async fn test_run_scan_job_wires_live_params_tested_counter() {
+    // End-to-end at the server layer: run_scan_job must thread the live
+    // `params_done` counter into run_scanning so `progress.params_tested`
+    // reflects the discovered parameters. Against a reflecting target with
+    // three query params, the scan should discover >= 2 and end with
+    // params_tested == params_total (the live increments + the natural-
+    // completion store agree). The per-worker live mechanism itself is
+    // covered by scanning::tests::test_run_scanning_increments_params_done_counter.
+    let addr = start_reflecting_target_server().await;
+    let state = make_state(None, None, false, false, "cb");
+    let id = "params-tested-wiring".to_string();
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert(id.clone(), test_job(JobStatus::Queued, None, ""));
+    }
+    let opts = ScanOptions {
+        skip_mining: Some(true),
+        worker: Some(4),
+        encoders: Some(vec!["none".to_string()]),
+        ..ScanOptions::default()
+    };
+    let progress = {
+        let jobs = state.jobs.lock().await;
+        jobs.get(&id).expect("job").progress.clone()
+    };
+    let url = format!("http://{}/?a=1&b=2&c=3", addr);
+    let run = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        run_scan_job(state.clone(), id.clone(), url, opts, false, false),
+    )
+    .await;
+    assert!(run.is_ok(), "scan should finish in time");
+
+    use std::sync::atomic::Ordering::Relaxed;
+    let total = progress.params_total.load(Relaxed);
+    let tested = progress.params_tested.load(Relaxed);
+    assert!(
+        total >= 2,
+        "reflecting target with 3 query params should discover >= 2, got {}",
+        total
+    );
+    assert_eq!(
+        tested, total,
+        "server must feed the live params_done counter so params_tested reaches params_total"
     );
 }
 
