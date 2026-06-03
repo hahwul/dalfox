@@ -780,6 +780,7 @@ Final results (via get_results_dalfox) include finding type \
         // request file) is intentionally not honoured on the MCP path —
         // see the comment on `ScanWithDalfoxParams::cookies` for the reason.
         let scan_args = Arc::new(ScanArgs {
+            detect_outdated_libs: false,
             input_type: "url".to_string(),
             format: "json".to_string(),
             targets: vec![target.clone()],

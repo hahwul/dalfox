@@ -224,6 +224,7 @@ pub(crate) async fn run_scan_job(
     };
 
     let args = ScanArgs {
+        detect_outdated_libs: false,
         input_type: "url".to_string(),
         format: "json".to_string(),
         output: None,

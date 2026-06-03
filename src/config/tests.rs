@@ -3,6 +3,7 @@ use std::sync::atomic::Ordering;
 
 fn default_scan_args() -> crate::cmd::scan::ScanArgs {
     crate::cmd::scan::ScanArgs {
+        detect_outdated_libs: false,
         input_type: "auto".to_string(),
         format: "plain".to_string(),
         output: None,

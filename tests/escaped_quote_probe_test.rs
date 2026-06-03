@@ -155,6 +155,7 @@ async fn analyze_parameters_covers_discovery_constructors_and_debug_line() {
     target.cookies = vec![("sid".to_string(), "seed".to_string())];
 
     let args = ScanArgs {
+        detect_outdated_libs: false,
         input_type: "url".to_string(),
         format: "json".to_string(),
         targets: vec![url.clone()],
@@ -266,6 +267,7 @@ async fn run_scan_inject_marker_covers_marker_param_constructors() {
     let out = std::env::temp_dir().join(format!("dlfx_marker_{}.json", addr.port()));
 
     let args = ScanArgs {
+        detect_outdated_libs: false,
         input_type: "url".to_string(),
         format: "json".to_string(),
         targets: vec![url],

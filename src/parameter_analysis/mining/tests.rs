@@ -7,6 +7,7 @@ use tokio::time::{Duration, sleep};
 
 fn default_scan_args() -> ScanArgs {
     ScanArgs {
+        detect_outdated_libs: false,
         input_type: "url".to_string(),
         format: "json".to_string(),
         targets: vec!["http://127.0.0.1:1".to_string()],

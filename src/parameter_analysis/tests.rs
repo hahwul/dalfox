@@ -28,6 +28,7 @@ fn mock_mine_parameters(_target: &mut Target, _args: &ScanArgs) {
 fn test_analyze_parameters_with_mock_mining() {
     let mut target = parse_target("https://example.com").unwrap();
     let args = ScanArgs {
+        detect_outdated_libs: false,
         input_type: "auto".to_string(),
         format: "json".to_string(),
         targets: vec!["https://example.com".to_string()],
@@ -117,6 +118,7 @@ fn test_analyze_parameters_with_mock_mining() {
 fn test_analyze_parameters_skip_mining() {
     let target = parse_target("https://example.com").unwrap();
     let _args = ScanArgs {
+        detect_outdated_libs: false,
         input_type: "auto".to_string(),
         format: "json".to_string(),
         targets: vec!["https://example.com".to_string()],
@@ -198,6 +200,7 @@ fn test_analyze_parameters_skip_mining() {
 fn test_probe_body_params_mock() {
     let mut target = parse_target("https://example.com").unwrap();
     let _args = ScanArgs {
+        detect_outdated_libs: false,
         input_type: "auto".to_string(),
         format: "json".to_string(),
         targets: vec!["https://example.com".to_string()],
@@ -351,6 +354,7 @@ fn test_check_cookie_discovery_mock() {
 fn test_cookie_from_raw() {
     let mut target = parse_target("https://example.com").unwrap();
     let args = ScanArgs {
+        detect_outdated_libs: false,
         input_type: "auto".to_string(),
         format: "json".to_string(),
         targets: vec!["https://example.com".to_string()],
@@ -453,6 +457,7 @@ fn test_cookie_from_raw() {
 fn test_cookie_from_raw_no_file() {
     let mut target = parse_target("https://example.com").unwrap();
     let args = ScanArgs {
+        detect_outdated_libs: false,
         input_type: "auto".to_string(),
         format: "json".to_string(),
         targets: vec!["https://example.com".to_string()],
@@ -853,6 +858,7 @@ fn test_ensure_explicit_params_skips_unsynthesizable_specs() {
 
 fn default_scan_args() -> ScanArgs {
     ScanArgs {
+        detect_outdated_libs: false,
         input_type: "url".to_string(),
         format: "json".to_string(),
         targets: vec!["http://127.0.0.1:0".to_string()],

@@ -449,6 +449,13 @@ pub struct ScanArgs {
     #[arg(long)]
     pub hpp: bool,
 
+    #[clap(help_heading = "XSS SCANNING")]
+    /// Also report outdated / known-vulnerable JS libraries (informational,
+    /// CWE-1104). Off by default: dalfox focuses on verified XSS; this is an
+    /// opt-in retire.js-style add-on that inspects <script> tags (0 extra requests).
+    #[arg(long)]
+    pub detect_outdated_libs: bool,
+
     #[clap(help_heading = "WAF")]
     /// WAF bypass mode: auto (detect+bypass), force (use --force-waf), off (detect-only; no payload mutations). Default: auto
     #[arg(long, default_value = "auto", value_parser = clap::builder::PossibleValuesParser::new(["auto", "force", "off"]))]
@@ -512,6 +519,7 @@ impl ScanArgs {
             DEFAULT_TIMEOUT_SECS
         };
         ScanArgs {
+            detect_outdated_libs: false,
             input_type: "url".to_string(),
             format: "json".to_string(),
             targets: vec![opts.target],

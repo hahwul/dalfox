@@ -51,6 +51,7 @@ fn default_scan_params(target: &str) -> ScanWithDalfoxParams {
 
 fn default_scan_args(target: &str) -> ScanArgs {
     ScanArgs {
+        detect_outdated_libs: false,
         input_type: "url".to_string(),
         format: "json".to_string(),
         targets: vec![target.to_string()],
