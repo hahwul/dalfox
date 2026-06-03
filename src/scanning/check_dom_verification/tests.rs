@@ -33,6 +33,7 @@ fn make_param() -> Param {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     }
 }
 
@@ -418,6 +419,7 @@ async fn test_check_dom_verification_injects_header_params() {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     };
     let args = default_scan_args();
 
@@ -452,6 +454,7 @@ async fn test_check_dom_verification_injects_cookie_params() {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     };
     let args = default_scan_args();
 
@@ -488,6 +491,7 @@ async fn test_check_dom_verification_injects_form_body_params() {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     };
     let args = default_scan_args();
 
@@ -525,6 +529,7 @@ async fn test_check_dom_verification_injects_json_body_params() {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     };
     let args = default_scan_args();
 

@@ -21,6 +21,7 @@ fn mock_mine_parameters(_target: &mut Target, _args: &ScanArgs) {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     });
 }
 
@@ -288,6 +289,7 @@ fn test_probe_body_params_mock() {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     });
 
     assert!(!target.reflection_params.is_empty());
@@ -316,6 +318,7 @@ fn test_check_header_discovery_mock() {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     });
 
     assert!(!target.reflection_params.is_empty());
@@ -344,6 +347,7 @@ fn test_check_cookie_discovery_mock() {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     });
 
     assert!(!target.reflection_params.is_empty());
@@ -599,6 +603,7 @@ fn test_filter_params_by_name_and_type() {
             form_origin_url: None,
             framework_sink: None,
             escaped_specials: None,
+            js_breakout: None,
         },
         Param {
             name: "sort".to_string(),
@@ -614,6 +619,7 @@ fn test_filter_params_by_name_and_type() {
             form_origin_url: None,
             framework_sink: None,
             escaped_specials: None,
+            js_breakout: None,
         },
         Param {
             name: "id".to_string(),
@@ -629,6 +635,7 @@ fn test_filter_params_by_name_and_type() {
             form_origin_url: None,
             framework_sink: None,
             escaped_specials: None,
+            js_breakout: None,
         },
         Param {
             name: "session".to_string(),
@@ -644,6 +651,7 @@ fn test_filter_params_by_name_and_type() {
             form_origin_url: None,
             framework_sink: None,
             escaped_specials: None,
+            js_breakout: None,
         },
     ];
 
@@ -691,6 +699,7 @@ fn test_filter_params_multiple_filters() {
             form_origin_url: None,
             framework_sink: None,
             escaped_specials: None,
+            js_breakout: None,
         },
         Param {
             name: "id".to_string(),
@@ -706,6 +715,7 @@ fn test_filter_params_multiple_filters() {
             form_origin_url: None,
             framework_sink: None,
             escaped_specials: None,
+            js_breakout: None,
         },
         Param {
             name: "session".to_string(),
@@ -721,6 +731,7 @@ fn test_filter_params_multiple_filters() {
             form_origin_url: None,
             framework_sink: None,
             escaped_specials: None,
+            js_breakout: None,
         },
     ];
 
@@ -752,6 +763,7 @@ fn test_filter_params_empty_filters() {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     }];
 
     // Empty filters should return all params
@@ -776,6 +788,7 @@ fn test_filter_params_invalid_filter_format() {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     }];
 
     // Invalid filter format (too many colons) should be treated as name only
@@ -799,6 +812,7 @@ fn bare_param(name: &str, location: Location) -> Param {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     }
 }
 
@@ -965,6 +979,7 @@ fn probe_param(name: &str, location: Location) -> Param {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     }
 }
 

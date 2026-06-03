@@ -352,11 +352,15 @@ pub fn generate_adaptive_payloads(
     // Escaped-quote handling (#1072) is JS-string-context-only, and this path is
     // reached for non-JS contexts (JS DOM payloads use the dedicated breakout
     // set), so there is no escaped signal to thread here.
+    // This path serves non-JS DOM/attribute contexts; the observed-prefix JS
+    // breakout (#1073) is threaded through the reflection-phase synthesis call
+    // in `scanning::mod`, which has the carrying `Param`. No prefix here.
     let synthesized = crate::payload::synthesis::synthesize_payloads(
         context,
         invalid_specials,
         valid_specials,
         &[],
+        None,
     );
 
     // Apply adaptive encoders with pre-allocated capacity

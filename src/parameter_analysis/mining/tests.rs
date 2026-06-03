@@ -162,6 +162,96 @@ fn test_detect_injection_context_script_backtick_wins_over_earlier_quote() {
 }
 
 #[test]
+fn test_detect_js_breakout_bare_double_quote_string() {
+    // Reflection inside a plain double-quoted JS string: the closer is just the
+    // quote that returns to statement position.
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!("<script>var x = \"{}\";</script>", marker);
+    assert_eq!(detect_js_breakout(&body).as_deref(), Some("\""));
+}
+
+#[test]
+fn test_detect_js_breakout_nested_call_array_object() {
+    // The motivating case from issue #1073: a reflection nested inside an open
+    // string, array, object and call. The exact closer derived from the *real*
+    // observed prefix must close all of them: `"` then `]` `}` `)`.
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!("<script>foo({{ bar: [ \"{}\" ] }});</script>", marker);
+    assert_eq!(detect_js_breakout(&body).as_deref(), Some("\"]})"));
+}
+
+#[test]
+fn test_detect_js_breakout_uses_observed_prefix_not_fixed_shell() {
+    // A nesting shape the fixed depth-0–3 catalog does NOT enumerate
+    // (array-of-array-of-object inside a call) — only an observed-prefix
+    // computation reaches it, proving the wiring is prefix-derived.
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!("<script>g([[{{k:\"{}\"}}]]);</script>", marker);
+    // open: ( [ [ { "  -> close: " } ] ] )
+    assert_eq!(detect_js_breakout(&body).as_deref(), Some("\"}]])"));
+}
+
+#[test]
+fn test_detect_js_breakout_template_literal() {
+    // Inside a backtick template literal the closer is the backtick.
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!("<script>tag(`hi {}`);</script>", marker);
+    assert_eq!(detect_js_breakout(&body).as_deref(), Some("`)"));
+}
+
+#[test]
+fn test_detect_js_breakout_none_outside_script() {
+    // A reflection in HTML text (not inside <script>) has no JS breakout — the
+    // script-tag requirement scopes the carrier to inline-script contexts.
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!("<div>{}</div>", marker);
+    assert_eq!(detect_js_breakout(&body), None);
+}
+
+#[test]
+fn test_detect_js_breakout_none_at_statement_position() {
+    // Marker already at statement position (raw JS, no open string/structure):
+    // empty closer -> None, so synthesis falls back to the raw-JS catalog.
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!("<script>var x = 1; {}</script>", marker);
+    assert_eq!(detect_js_breakout(&body), None);
+}
+
+#[test]
+fn test_detect_js_breakout_none_after_closing_script() {
+    // Marker sits AFTER a closed <script> (between scripts). The </script>
+    // guard rejects it rather than computing a bogus closer from the prior
+    // script body.
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!("<script>var a = 1;</script><div>{}</div>", marker);
+    assert_eq!(detect_js_breakout(&body), None);
+}
+
+#[test]
+fn test_detect_js_breakout_with_marker_custom() {
+    // The explicit-marker variant used by the numeric-only discovery probe.
+    let body = "<script>h([\"4815162342\"]);</script>";
+    // prefix `h(["` opens ( [ and the string → close `"` `]` `)`.
+    assert_eq!(
+        detect_js_breakout_with_marker(body, "4815162342").as_deref(),
+        Some("\"])")
+    );
+}
+
+#[test]
+fn test_detect_js_breakout_picks_innermost_script_opener() {
+    // With an earlier closed <script> and a second open one containing the
+    // marker, `rfind("<script")` lands on the second opener, so the prefix is
+    // local to the script the marker actually lives in.
+    let marker = crate::scanning::markers::open_marker();
+    let body = format!(
+        "<script>var done = true;</script>\n<script>obj({{a:\"{}\"</script>",
+        marker
+    );
+    assert_eq!(detect_js_breakout(&body).as_deref(), Some("\"})"));
+}
+
+#[test]
 fn test_detect_injection_context_attribute_double_quote() {
     let marker = crate::scanning::markers::open_marker();
     let body = format!("<img alt=\"{}\">", marker);
@@ -571,6 +661,7 @@ async fn test_collapse_to_any_query_param_keeps_non_query_and_replaces_query() {
             form_origin_url: None,
             framework_sink: None,
             escaped_specials: None,
+            js_breakout: None,
         },
         Param {
             name: "q_old_2".into(),
@@ -586,6 +677,7 @@ async fn test_collapse_to_any_query_param_keeps_non_query_and_replaces_query() {
             form_origin_url: None,
             framework_sink: None,
             escaped_specials: None,
+            js_breakout: None,
         },
         Param {
             name: "h".into(),
@@ -601,6 +693,7 @@ async fn test_collapse_to_any_query_param_keeps_non_query_and_replaces_query() {
             form_origin_url: None,
             framework_sink: None,
             escaped_specials: None,
+            js_breakout: None,
         },
     ];
     let params = Arc::new(Mutex::new(initial));

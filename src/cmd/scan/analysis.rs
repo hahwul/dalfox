@@ -348,6 +348,7 @@ pub(crate) async fn run_preflight_and_analysis(
                                 form_origin_url: None,
                                 framework_sink: None,
                                 escaped_specials: None,
+                                js_breakout: None,
                             });
                         }
                     }
@@ -374,6 +375,7 @@ pub(crate) async fn run_preflight_and_analysis(
                                             form_origin_url: None,
                                             framework_sink: None,
                                             escaped_specials: None,
+                                            js_breakout: None,
                                         });
                                     }
                                 }
@@ -397,6 +399,7 @@ pub(crate) async fn run_preflight_and_analysis(
                                         form_origin_url: None,
                                         framework_sink: None,
                                         escaped_specials: None,
+                                        js_breakout: None,
                                     });
                                 }
                             }
@@ -420,6 +423,7 @@ pub(crate) async fn run_preflight_and_analysis(
                                 form_origin_url: None,
                                 framework_sink: None,
                                 escaped_specials: None,
+                                js_breakout: None,
                             });
                         }
                     }
@@ -441,6 +445,7 @@ pub(crate) async fn run_preflight_and_analysis(
                                 form_origin_url: None,
                                 framework_sink: None,
                                 escaped_specials: None,
+                                js_breakout: None,
                             });
                         }
                     }

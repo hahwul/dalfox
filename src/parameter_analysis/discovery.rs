@@ -18,7 +18,7 @@
 
 use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::{
-    Location, Param, classify_special_chars, detect_injection_context,
+    Location, Param, classify_special_chars, detect_injection_context, detect_js_breakout,
 };
 use crate::scanning::url_inject::build_injected_url;
 use crate::target_parser::Target;
@@ -175,6 +175,12 @@ pub(crate) fn dedupe_reflection_params(params: &mut Vec<Param>) {
             if base.injection_context.is_none() && other.injection_context.is_some() {
                 base.injection_context = other.injection_context.clone();
             }
+            // Keep the observed-prefix JS breakout (#1073) when only one probe
+            // landed inside a `<script>`, mirroring the injection_context merge
+            // above so the per-parameter carrier survives dedup.
+            if base.js_breakout.is_none() && other.js_breakout.is_some() {
+                base.js_breakout = other.js_breakout.clone();
+            }
             if base.framework_sink.is_none() && other.framework_sink.is_some() {
                 base.framework_sink = other.framework_sink.clone();
             }
@@ -289,6 +295,7 @@ pub async fn check_fragment_discovery(target: &Target, reflection_params: Arc<Mu
             form_origin_url: None,
             framework_sink: None,
             escaped_specials: None,
+            js_breakout: None,
         });
     }
 }
@@ -320,6 +327,7 @@ pub async fn check_query_discovery(
             form_origin_url: None,
             framework_sink: None,
             escaped_specials: None,
+            js_breakout: None,
         };
         let url_str = build_injected_url(&target.url, &tmp_param, test_value);
         let url = url::Url::parse(&url_str).expect("build_injected_url produces valid URL");
@@ -377,6 +385,7 @@ pub async fn check_query_discovery(
                         form_origin_url: None,
                         framework_sink: None,
                         escaped_specials: None,
+                        js_breakout: None,
                     });
                 } else if let Ok(text) = resp.text().await
                     && crate::scanning::markers::classify_probe_reflection(&text).detected()
@@ -401,6 +410,7 @@ pub async fn check_query_discovery(
                         form_origin_url: None,
                         framework_sink,
                         escaped_specials: None,
+                        js_breakout: detect_js_breakout(&text),
                     });
                 }
             }
@@ -471,6 +481,7 @@ pub async fn check_query_discovery(
                     form_origin_url: None,
                     framework_sink: None,
                     escaped_specials: None,
+                    js_breakout: detect_js_breakout(&text),
                 });
                 break; // Found working encoding, no need to try more
             }
@@ -550,6 +561,7 @@ pub async fn check_query_discovery(
                     form_origin_url: None,
                     framework_sink: None,
                     escaped_specials: None,
+                    js_breakout: detect_js_breakout(&text),
                 });
             }
             if target.delay > 0 {
@@ -582,6 +594,7 @@ pub async fn check_query_discovery(
                 form_origin_url: None,
                 framework_sink: None,
                 escaped_specials: None,
+                js_breakout: None,
             };
             let url_str = build_injected_url(&target.url, &tmp_param, numeric_marker);
             let url = url::Url::parse(&url_str).expect("valid URL");
@@ -613,6 +626,10 @@ pub async fn check_query_discovery(
                     form_origin_url: None,
                     framework_sink: None,
                     escaped_specials: None,
+                    js_breakout: crate::parameter_analysis::mining::detect_js_breakout_with_marker(
+                        &text,
+                        numeric_marker,
+                    ),
                 });
             }
             if target.delay > 0 {
@@ -651,6 +668,7 @@ pub async fn check_query_discovery(
                 form_origin_url: None,
                 framework_sink: None,
                 escaped_specials: None,
+                js_breakout: detect_js_breakout(&text),
             });
         }
         if target.delay > 0 {
@@ -829,6 +847,7 @@ pub async fn check_header_discovery(
                     form_origin_url: None,
                     framework_sink,
                     escaped_specials: None,
+                    js_breakout: detect_js_breakout(&text),
                 });
             }
             if delay > 0 {
@@ -1015,6 +1034,7 @@ pub async fn check_path_discovery(
                             form_origin_url: None,
                             framework_sink: None,
                             escaped_specials: None,
+                            js_breakout: detect_js_breakout(&text),
                         });
                     }
                 }
@@ -1125,6 +1145,7 @@ pub async fn check_cookie_discovery(
                     form_origin_url: None,
                     framework_sink: None,
                     escaped_specials: None,
+                    js_breakout: detect_js_breakout(&text),
                 });
             }
             if delay > 0 {
@@ -1283,6 +1304,7 @@ pub async fn check_form_discovery(
                         form_origin_url: Some(target.url.to_string()),
                         framework_sink: None,
                         escaped_specials: None,
+                        js_breakout: detect_js_breakout(&text),
                     });
                 }
                 if target.delay > 0 {
@@ -1354,6 +1376,7 @@ pub async fn check_form_discovery(
                         form_origin_url: Some(target.url.to_string()),
                         framework_sink: None,
                         escaped_specials: None,
+                        js_breakout: detect_js_breakout(&text),
                     });
                 }
                 if target.delay > 0 {
@@ -1399,6 +1422,7 @@ pub async fn check_form_discovery(
                         form_origin_url: Some(target.url.to_string()),
                         framework_sink: None,
                         escaped_specials: None,
+                        js_breakout: detect_js_breakout(&text),
                     });
                 }
                 if target.delay > 0 {
@@ -1445,6 +1469,7 @@ pub async fn check_form_discovery(
                         form_origin_url: Some(target.url.to_string()),
                         framework_sink: None,
                         escaped_specials: None,
+                        js_breakout: detect_js_breakout(&text),
                     });
                 }
             }
@@ -1528,6 +1553,7 @@ pub async fn check_form_discovery(
                             form_origin_url: Some(target.url.to_string()),
                             framework_sink: None,
                             escaped_specials: None,
+                            js_breakout: detect_js_breakout(&text),
                         });
                     }
                     if target.delay > 0 {
@@ -1603,6 +1629,7 @@ pub async fn check_form_discovery(
                             form_origin_url: Some(target.url.to_string()),
                             framework_sink: None,
                             escaped_specials: None,
+                            js_breakout: detect_js_breakout(&text),
                         });
                     }
                     if target.delay > 0 {

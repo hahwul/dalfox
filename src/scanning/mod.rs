@@ -892,8 +892,16 @@ fn generate_param_jobs(
             // #1072: escaped-quote signal (JS string contexts) drives synthesis
             // to emit backslash-prefixed breakouts that survive server escaping.
             let escaped = param.escaped_specials.as_deref().unwrap_or_default();
-            let synthesized =
-                crate::payload::synthesis::synthesize_payloads(context, invalid, valid, escaped);
+            // #1073 follow-up: the breakout computed from this site's observed
+            // inline-<script> prefix, emitted ahead of the fixed catalog.
+            let observed_breakout = param.js_breakout.as_deref();
+            let synthesized = crate::payload::synthesis::synthesize_payloads(
+                context,
+                invalid,
+                valid,
+                escaped,
+                observed_breakout,
+            );
             if !synthesized.is_empty() {
                 let mut seen: std::collections::HashSet<String> =
                     std::collections::HashSet::with_capacity(

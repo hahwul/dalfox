@@ -365,6 +365,7 @@ fn mock_add_reflection_param(target: &mut Target, name: &str, location: Location
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     });
 }
 
@@ -459,6 +460,7 @@ fn test_get_dom_payloads_javascript_context_returns_breakout_payloads() {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     };
     let args = default_scan_args();
     let payloads = get_dom_payloads(&param, &args).expect("dom payload generation");
@@ -488,6 +490,7 @@ fn test_get_dom_payloads_html_context_includes_encoded_variants() {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     };
     let args = default_scan_args();
     let payloads = get_dom_payloads(&param, &args).expect("dom payload generation");
@@ -513,6 +516,7 @@ fn test_get_dom_payloads_unknown_context_falls_back_even_with_only_custom() {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     };
     let mut args = default_scan_args();
     args.only_custom_payload = true;
@@ -811,6 +815,7 @@ fn test_build_request_text_query_contains_headers_and_cookies() {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     };
 
     let request = build_request_text(&target, &param, "PAYLOAD");
@@ -839,6 +844,7 @@ fn test_build_request_text_path_segment_injection() {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     };
 
     let request = build_request_text(&target, &param, "hello world");
@@ -1058,6 +1064,7 @@ async fn test_run_scanning_with_reflection_params() {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     });
 
     let args = crate::cmd::scan::ScanArgs {
@@ -1206,6 +1213,7 @@ async fn test_run_scanning_realworld_level1_shape_promotes_to_verified() {
         form_origin_url: None,
         framework_sink: None,
         escaped_specials: None,
+        js_breakout: None,
     });
 
     let args = Arc::new(integration_scan_args(false));
