@@ -291,6 +291,9 @@ pub(crate) async fn get_scan_handler(
     let skip_discovery = params.get("skip_discovery").is_some_and(|s| s == "true");
     let deep_scan = params.get("deep_scan").is_some_and(|s| s == "true");
     let skip_ast_analysis = params.get("skip_ast_analysis").is_some_and(|s| s == "true");
+    let detect_outdated_libs = params
+        .get("detect_outdated_libs")
+        .is_some_and(|s| s == "true");
 
     let opts = ScanOptions {
         cookie,
@@ -325,6 +328,7 @@ pub(crate) async fn get_scan_handler(
         skip_discovery: Some(skip_discovery),
         deep_scan: Some(deep_scan),
         skip_ast_analysis: Some(skip_ast_analysis),
+        detect_outdated_libs: Some(detect_outdated_libs),
     };
 
     if let Err(msg) = validate_scan_options(&opts) {

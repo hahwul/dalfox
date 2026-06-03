@@ -184,12 +184,16 @@ Returns version, `auth_required`, and the list of supported endpoints. Good for 
     "skip_mining": false,
     "skip_discovery": false,
     "deep_scan": false,
-    "skip_ast_analysis": false
+    "skip_ast_analysis": false,
+    "detect_outdated_libs": false
   }
 }
 ```
 
 Fields mirror the CLI flags. See the [CLI reference](../../reference/cli/) for meaning and defaults.
+`detect_outdated_libs` is opt-in (default `false`): set it `true` to also report
+outdated / known-vulnerable JS libraries as informational `[I]` findings
+(CWE-1104, 0 extra requests). The same key works as a `GET /scan` query parameter.
 
 ## Job lifecycle
 

@@ -692,6 +692,7 @@ async fn test_get_scan_handler_success_parses_query_options_and_jsonp() {
         "remote_wordlists".to_string(),
         "unknown-provider".to_string(),
     );
+    params.insert("detect_outdated_libs".to_string(), "true".to_string());
 
     let resp = get_scan_handler(State(state.clone()), HeaderMap::new(), Query(params))
         .await
@@ -946,6 +947,8 @@ async fn test_run_scan_job_success_marks_done() {
         skip_discovery: None,
         deep_scan: None,
         skip_ast_analysis: None,
+        // Exercise the ON path: opts -> job_runner -> ScanArgs -> analysis gate.
+        detect_outdated_libs: Some(true),
     };
 
     let run = tokio::time::timeout(
