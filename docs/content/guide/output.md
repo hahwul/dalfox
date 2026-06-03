@@ -36,7 +36,7 @@ Every finding includes:
 
 | Field | Example | Meaning |
 |-------|---------|---------|
-| `type` | `V`, `A`, `R` | Verified / AST-detected / Reflected |
+| `type` | `V`, `A`, `R`, `I` | Verified / AST-detected / Reflected / Informational |
 | `type_description` | `"Verified"` | Human label |
 | `inject_type` | `"inHTML"` | Context (`inHTML`, `inAttr`, `inJS`, …) |
 | `method` | `"GET"` | HTTP method |
@@ -46,6 +46,14 @@ Every finding includes:
 | `cwe` | `"CWE-79"` | Standard CWE |
 | `severity` | `"High"` | High / Medium / Low / Info |
 | `message_str` | `"XSS found"` | Short message |
+
+`V` / `A` / `R` are XSS findings. `I` (**Informational**) is a non-exploitable
+observation — currently only **outdated / known-vulnerable JS libraries**
+(`inject_type: "OutdatedComponent"`, `CWE-1104`), rendered as a compact
+`[INF]` line with no payload/parameter. It is **opt-in**: Dalfox focuses on
+verified XSS by default, so library reporting is off unless you pass
+`--detect-outdated-libs` (it adds **0 extra requests** — it inspects the
+preflight response's `<script>` tags). Filter it out with `--only-poc v,a,r`.
 
 Optionally include the full request/response:
 

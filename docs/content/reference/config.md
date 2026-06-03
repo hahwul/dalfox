@@ -95,6 +95,7 @@ sxss = false
 # sxss_url = "https://target.app/retrieval"
 sxss_method = "GET"
 skip_ast_analysis = false
+detect_outdated_libs = false
 hpp = false
 
 # WAF
@@ -205,6 +206,7 @@ debug = false
 | `sxss_retries` | int | `3` | Retries when fetching the retrieval URL |
 | `max_payloads_per_param` | int | `0` | Cap payloads tested per parameter (`0` = no cap) |
 | `skip_ast_analysis` | bool | `false` | Skip AST DOM-XSS |
+| `detect_outdated_libs` | bool | `false` | Also report outdated / known-vulnerable JS libraries (informational, CWE-1104; 0 extra requests) |
 | `hpp` | bool | `false` | HTTP Parameter Pollution |
 
 ### WAF
