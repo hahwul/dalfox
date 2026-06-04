@@ -664,3 +664,127 @@ fn test_results_to_json_compact_and_jsonl() {
     assert!(jsonl.contains("\"type\":\"R\""));
     assert!(jsonl.ends_with('\n'));
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tests for scan metadata envelope in non-JSON formats (issue #1093)
+// ─────────────────────────────────────────────────────────────────────────
+
+fn mk_meta() -> ScanMetadata {
+    ScanMetadata {
+        dalfox_version: "1.2.3-test".to_string(),
+        targets: vec![
+            "https://example.com".to_string(),
+            "https://ex2.com".to_string(),
+        ],
+        scan_duration_ms: 1234,
+        total_requests: 42,
+        findings_count: 1,
+        target_summary: vec![
+            serde_json::json!({
+                "target": "https://example.com",
+                "status": "findings",
+                "findings_count": 1,
+                "waf": {
+                    "detected": [
+                        {"type": "Cloudflare", "confidence": 95, "evidence": "cf-ray header"}
+                    ]
+                }
+            }),
+            serde_json::json!({
+                "target": "https://ex2.com",
+                "status": "skipped",
+                "findings_count": 0,
+                "error_code": "CONNECTION_FAILED"
+            }),
+        ],
+    }
+}
+
+#[test]
+fn test_results_to_markdown_with_meta() {
+    let result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com?q=test")
+        .param("q")
+        .payload("<script>alert(1)</script>")
+        .evidence("")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("XSS")
+        .build();
+    let results = vec![result];
+    let md = Result::results_to_markdown_with_meta(&results, false, false, Some(&mk_meta()));
+
+    assert!(md.contains("## Scan Metadata"));
+    assert!(md.contains("| **Dalfox Version** | 1.2.3-test |"));
+    assert!(md.contains("| **Scan Duration** | 1234 ms |"));
+    assert!(md.contains("| **Total Requests** | 42 |"));
+    assert!(md.contains("### Target Summary"));
+    assert!(md.contains("| https://example.com | findings | 1 | Cloudflare |"));
+    assert!(md.contains("| https://ex2.com | skipped (CONNECTION_FAILED) | 0 | none |"));
+    // still has the findings summary
+    assert!(md.contains("## Summary"));
+    assert!(md.contains("**Total Findings**: 1"));
+}
+
+#[test]
+fn test_results_to_toml_with_meta() {
+    let result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("q")
+        .payload("x")
+        .evidence("")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(1)
+        .message_str("x")
+        .build();
+    let results = vec![result];
+    let toml = Result::results_to_toml_with_meta(&results, false, false, Some(&mk_meta()));
+
+    // meta table present, mirroring json envelope
+    assert!(toml.contains("[meta]"));
+    assert!(toml.contains("dalfox_version = \"1.2.3-test\""));
+    assert!(toml.contains("scan_duration_ms = 1234"));
+    assert!(toml.contains("total_requests = 42"));
+    assert!(toml.contains("[[results]]"));
+    // target_summary carried
+    assert!(toml.contains("target_summary"));
+    assert!(toml.contains("Cloudflare"));
+}
+
+#[test]
+fn test_results_to_sarif_with_meta() {
+    let result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("q")
+        .payload("p")
+        .evidence("")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(1)
+        .message_str("x")
+        .build();
+    let results = vec![result];
+    let sarif = Result::results_to_sarif_with_meta(&results, false, false, Some(&mk_meta()));
+
+    let v: serde_json::Value = serde_json::from_str(&sarif).expect("valid");
+
+    // run.properties has the envelope
+    let run_props = &v["runs"][0]["properties"];
+    assert_eq!(run_props["dalfox_version"], "1.2.3-test");
+    assert_eq!(run_props["total_requests"], 42);
+    assert!(run_props["target_summary"].is_array());
+
+    // driver.properties also has it (for GitHub code scanning etc)
+    let driver_props = &v["runs"][0]["tool"]["driver"]["properties"];
+    assert_eq!(driver_props["scan_duration_ms"], 1234);
+    assert_eq!(driver_props["findings_count"], 1);
+    assert!(driver_props.get("waf").is_none()); // waf is inside target_summary entries
+}

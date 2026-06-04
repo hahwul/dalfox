@@ -7,6 +7,12 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The previous Go implementation lives on the [`v2` branch](https://github.com/hahwul/dalfox/tree/v2)
 and continues to receive security backports per [SECURITY.md](./SECURITY.md).
 
+## Unreleased
+
+### Added
+
+* **Structured outputs (SARIF / Markdown / TOML)**: The scan metadata envelope (`meta` with `dalfox_version`, `targets`, `scan_duration_ms`, `total_requests`, `findings_count`, `target_summary` including per-target WAF/bypass info) is now included for parity with JSON/JSONL. SARIF surfaces it under `runs[].properties` and `tool.driver.properties`; Markdown renders summary tables; TOML adds a `[meta]` table. Fixes [#1093](https://github.com/hahwul/dalfox/issues/1093).
+
 ## 3.0.2
 
 A packaging and source-build release: installing from source — AUR, `cargo install`, and musl — now links cleanly, and the broken v3.0.1 release pipeline is repaired so every platform artifact ships.

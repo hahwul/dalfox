@@ -352,22 +352,49 @@ pub(crate) async fn render_results(
         }
         out
     } else if args.format == "markdown" {
-        crate::scanning::result::Result::results_to_markdown(
+        let meta = crate::scanning::result::ScanMetadata {
+            dalfox_version: env!("CARGO_PKG_VERSION").to_string(),
+            targets: args.targets.clone(),
+            scan_duration_ms: scan_elapsed.as_millis() as u64,
+            total_requests,
+            findings_count: display_results.len(),
+            target_summary: target_summary.clone(),
+        };
+        crate::scanning::result::Result::results_to_markdown_with_meta(
             display_results,
             args.include_request,
             args.include_response,
+            Some(&meta),
         )
     } else if args.format == "sarif" {
-        crate::scanning::result::Result::results_to_sarif(
+        let meta = crate::scanning::result::ScanMetadata {
+            dalfox_version: env!("CARGO_PKG_VERSION").to_string(),
+            targets: args.targets.clone(),
+            scan_duration_ms: scan_elapsed.as_millis() as u64,
+            total_requests,
+            findings_count: display_results.len(),
+            target_summary: target_summary.clone(),
+        };
+        crate::scanning::result::Result::results_to_sarif_with_meta(
             display_results,
             args.include_request,
             args.include_response,
+            Some(&meta),
         )
     } else if args.format == "toml" {
-        crate::scanning::result::Result::results_to_toml(
+        let meta = crate::scanning::result::ScanMetadata {
+            dalfox_version: env!("CARGO_PKG_VERSION").to_string(),
+            targets: args.targets.clone(),
+            scan_duration_ms: scan_elapsed.as_millis() as u64,
+            total_requests,
+            findings_count: display_results.len(),
+            target_summary: target_summary.clone(),
+        };
+        crate::scanning::result::Result::results_to_toml_with_meta(
             display_results,
             args.include_request,
             args.include_response,
+            Some(&meta),
         )
     } else if args.format == "plain" {
         let mut output = String::new();

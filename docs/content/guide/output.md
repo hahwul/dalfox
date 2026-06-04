@@ -64,6 +64,25 @@ dalfox ... --include-request
 dalfox ... --include-response
 ```
 
+## Scan metadata envelope
+
+JSON, JSONL, SARIF, TOML, and Markdown outputs now all carry the same scan-level metadata envelope (previously JSON/JSONL only; see [#1093](https://github.com/hahwul/dalfox/issues/1093)):
+
+- `dalfox_version`
+- `targets` (the input targets)
+- `scan_duration_ms`
+- `total_requests`
+- `findings_count`
+- `target_summary[]` — per-target status, findings count, error_code (if skipped), and WAF/bypass details when detected
+
+In **SARIF** the envelope is duplicated under `runs[0].properties` and `runs[0].tool.driver.properties` so GitHub code scanning and other consumers retain context.
+
+In **TOML** it appears as a top-level `[meta]` table (findings under `[[results]]`).
+
+In **Markdown** it is rendered as human-readable tables (`## Scan Metadata` + `### Target Summary`) above the findings summary.
+
+Plain text output remains findings-focused only.
+
 ## Silence mode
 
 Emit **only findings** on `stdout`, no logs:
@@ -134,9 +153,17 @@ Dalfox also auto-disables colour when output is redirected to a file or a non-TT
 
 ## TOML
 
-Same data shape as JSON, written as TOML, which is easier to skim by eye while still parsing cleanly. Findings render as a `[[results]]` array of tables:
+Same data shape as JSON (plus top-level `[meta]` envelope for parity with other formats), written as TOML. Findings render as a `[[results]]` array of tables:
 
 ```toml
+[meta]
+dalfox_version = "3.x"
+targets = ["https://target.app"]
+scan_duration_ms = 1234
+total_requests = 87
+findings_count = 1
+target_summary = [{ target = "https://target.app", status = "findings", findings_count = 1 }]
+
 [[results]]
 type = "V"
 type_description = "Verified"
