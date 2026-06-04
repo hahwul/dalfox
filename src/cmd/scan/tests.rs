@@ -1191,8 +1191,15 @@ async fn test_render_results_markdown() {
         content
     );
     // meta envelope now included (issue #1093)
-    assert!(content.contains("## Scan Metadata"), "missing scan meta in md: {}", content);
-    assert!(content.contains("Total Requests"), "md should have Total Requests row");
+    assert!(
+        content.contains("## Scan Metadata"),
+        "missing scan meta in md: {}",
+        content
+    );
+    assert!(
+        content.contains("Total Requests"),
+        "md should have Total Requests row"
+    );
     assert!(content.contains("7 ms"), "uses the 7ms passed to render");
 }
 
@@ -1233,7 +1240,11 @@ async fn test_render_results_toml() {
     .await;
     assert!(content.contains("[[results]]"), "got: {}", content);
     // meta envelope as [meta] table (issue #1093)
-    assert!(content.contains("[meta]"), "missing [meta] in toml: {}", content);
+    assert!(
+        content.contains("[meta]"),
+        "missing [meta] in toml: {}",
+        content
+    );
     assert!(content.contains("scan_duration_ms = 7"));
     assert!(content.contains("total_requests = 42"));
     assert!(content.contains("target_summary"));

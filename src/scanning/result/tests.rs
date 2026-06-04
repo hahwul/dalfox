@@ -672,7 +672,10 @@ fn test_results_to_json_compact_and_jsonl() {
 fn mk_meta() -> ScanMetadata {
     ScanMetadata {
         dalfox_version: "1.2.3-test".to_string(),
-        targets: vec!["https://example.com".to_string(), "https://ex2.com".to_string()],
+        targets: vec![
+            "https://example.com".to_string(),
+            "https://ex2.com".to_string(),
+        ],
         scan_duration_ms: 1234,
         total_requests: 42,
         findings_count: 1,
@@ -692,7 +695,7 @@ fn mk_meta() -> ScanMetadata {
                 "status": "skipped",
                 "findings_count": 0,
                 "error_code": "CONNECTION_FAILED"
-            })
+            }),
         ],
     }
 }

@@ -440,11 +440,15 @@ impl Result {
             out.push_str("| Field | Value |\n");
             out.push_str("|-------|-------|\n");
             let _ = writeln!(out, "| **Dalfox Version** | {} |", m.dalfox_version);
-            let _ = writeln!(out, "| **Targets** | {} |", m.targets.join(", ").replace('|', "\\|"));
+            let _ = writeln!(
+                out,
+                "| **Targets** | {} |",
+                m.targets.join(", ").replace('|', "\\|")
+            );
             let _ = writeln!(out, "| **Scan Duration** | {} ms |", m.scan_duration_ms);
             let _ = writeln!(out, "| **Total Requests** | {} |", m.total_requests);
             let _ = writeln!(out, "| **Findings Count** | {} |", m.findings_count);
-            out.push_str("\n");
+            out.push('\n');
 
             // Per-target summary table (includes status, findings_count, WAF when present)
             if !m.target_summary.is_empty() {
@@ -454,8 +458,12 @@ impl Result {
                 for t in &m.target_summary {
                     let tgt = t.get("target").and_then(|v| v.as_str()).unwrap_or("?");
                     let st = t.get("status").and_then(|v| v.as_str()).unwrap_or("?");
-                    let fc = t.get("findings_count").and_then(|v| v.as_u64()).unwrap_or(0);
-                    let status_cell = if let Some(ec) = t.get("error_code").and_then(|e| e.as_str()) {
+                    let fc = t
+                        .get("findings_count")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let status_cell = if let Some(ec) = t.get("error_code").and_then(|e| e.as_str())
+                    {
                         format!("{} ({})", st, ec)
                     } else {
                         st.to_string()
@@ -465,12 +473,19 @@ impl Result {
                         // plus optional "bypass". Support legacy test mock shape {detected: bool, name} too.
                         if let Some(dets) = w.get("detected").and_then(|d| d.as_array()) {
                             if !dets.is_empty() {
-                                dets[0].get("type").and_then(|ty| ty.as_str()).unwrap_or("detected").to_string()
+                                dets[0]
+                                    .get("type")
+                                    .and_then(|ty| ty.as_str())
+                                    .unwrap_or("detected")
+                                    .to_string()
                             } else {
                                 "none".to_string()
                             }
                         } else if w.get("detected").and_then(|d| d.as_bool()).unwrap_or(false) {
-                            w.get("name").and_then(|n| n.as_str()).unwrap_or("detected").to_string()
+                            w.get("name")
+                                .and_then(|n| n.as_str())
+                                .unwrap_or("detected")
+                                .to_string()
                         } else {
                             "none".to_string()
                         }
@@ -481,12 +496,12 @@ impl Result {
                         out,
                         "| {} | {} | {} | {} |",
                         tgt.replace('|', "\\|"),
-                        status_cell,
+                        status_cell.replace('|', "\\|"),
                         fc,
                         waf_str.replace('|', "\\|")
                     );
                 }
-                out.push_str("\n");
+                out.push('\n');
             }
         }
 
