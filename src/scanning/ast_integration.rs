@@ -719,9 +719,9 @@ pub fn run_initial_ast_dom_analysis(
             let message = if let Some(hint) =
                 build_dom_xss_manual_poc_hint(target_url, &vuln.source, &payload)
             {
-                format!("{description} (검증 필요) [manual POC: {hint}]")
+                format!("{description} (needs runtime confirmation) [manual POC: {hint}]")
             } else {
-                format!("{description} (검증 필요) [경량 확인: 파라미터 없음]")
+                format!("{description} (needs runtime confirmation) [light check: no parameter]")
             };
             let mut ast_result = crate::scanning::result::Result::builder(
                 crate::scanning::result::FindingType::AstDetected,
@@ -743,8 +743,10 @@ pub fn run_initial_ast_dom_analysis(
             if self_bootstrap_verified {
                 ast_result.result_type = crate::scanning::result::FindingType::Verified;
                 ast_result.severity = "High".to_string();
-                ast_result.message_str =
-                    format!("{} [정적 self-bootstrap 확인]", ast_result.message_str);
+                ast_result.message_str = format!(
+                    "{} [static self-bootstrap confirmed]",
+                    ast_result.message_str
+                );
             }
             out.push(ast_result);
         }
