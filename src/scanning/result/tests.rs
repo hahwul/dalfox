@@ -276,7 +276,7 @@ fn test_results_to_markdown() {
         .build();
 
     let results = vec![result1, result2];
-    let markdown = Result::results_to_markdown(&results, false, false);
+    let markdown = Result::results_to_markdown(&results, false, false, None);
 
     // Check header
     assert!(markdown.contains("# Dalfox Scan Results"));
@@ -323,7 +323,7 @@ fn test_results_to_markdown_with_request_response() {
         Some("HTTP/1.1 200 OK\nContent-Type: text/html\n\n<html><x></html>".to_string());
 
     let results = vec![result];
-    let markdown = Result::results_to_markdown(&results, true, true);
+    let markdown = Result::results_to_markdown(&results, true, true, None);
 
     // Check request and response sections
     assert!(markdown.contains("**Request:**"));
@@ -336,7 +336,7 @@ fn test_results_to_markdown_with_request_response() {
 #[test]
 fn test_results_to_markdown_empty() {
     let results: Vec<Result> = vec![];
-    let markdown = Result::results_to_markdown(&results, false, false);
+    let markdown = Result::results_to_markdown(&results, false, false, None);
 
     assert!(markdown.contains("# Dalfox Scan Results"));
     assert!(markdown.contains("**Total Findings**: 0"));
@@ -360,7 +360,7 @@ fn test_results_to_sarif_basic() {
         .build();
 
     let results = vec![result];
-    let sarif = Result::results_to_sarif(&results, false, false);
+    let sarif = Result::results_to_sarif(&results, false, false, None);
 
     // Verify SARIF structure
     assert!(sarif.contains("\"version\": \"2.1.0\""));
@@ -413,8 +413,8 @@ fn test_results_to_sarif_fingerprint_stable_across_payload_variants() {
     };
     let a = mk("<svg/onload=alert(1)>", "https://h/s?q=%3Csvg%3E");
     let b = mk("<img src=x onerror=alert(1)>", "https://h/s?q=%3Cimg%3E");
-    let sarif_a = Result::results_to_sarif(&[a], false, false);
-    let sarif_b = Result::results_to_sarif(&[b], false, false);
+    let sarif_a = Result::results_to_sarif(&[a], false, false, None);
+    let sarif_b = Result::results_to_sarif(&[b], false, false, None);
     let extract_fp = |s: &str| -> String {
         let key = "\"vulnIdentity/v1\": \"";
         let i = s.find(key).expect("fingerprint key present");
@@ -443,8 +443,8 @@ fn test_results_to_sarif_fingerprint_distinct_for_different_targets() {
             .message_str("X")
             .build()
     };
-    let a = Result::results_to_sarif(&[mk("https://h/a?q=x", "q")], false, false);
-    let b = Result::results_to_sarif(&[mk("https://h/b?q=x", "q")], false, false);
+    let a = Result::results_to_sarif(&[mk("https://h/a?q=x", "q")], false, false, None);
+    let b = Result::results_to_sarif(&[mk("https://h/b?q=x", "q")], false, false, None);
     let extract_fp = |s: &str| -> String {
         let key = "\"vulnIdentity/v1\": \"";
         let i = s.find(key).expect("fingerprint key present");
@@ -475,7 +475,7 @@ fn test_results_to_sarif_with_request_response() {
         Some("HTTP/1.1 200 OK\nContent-Type: text/html\n\n<html><x></html>".to_string());
 
     let results = vec![result];
-    let sarif = Result::results_to_sarif(&results, true, true);
+    let sarif = Result::results_to_sarif(&results, true, true, None);
 
     // Verify request and response are included in properties
     assert!(sarif.contains("\"request\""));
@@ -526,20 +526,20 @@ fn test_results_to_sarif_severity_levels() {
         .build();
 
     // Test each severity level mapping
-    let sarif_high = Result::results_to_sarif(&[high], false, false);
+    let sarif_high = Result::results_to_sarif(&[high], false, false, None);
     assert!(sarif_high.contains("\"level\": \"error\""));
 
-    let sarif_medium = Result::results_to_sarif(&[medium], false, false);
+    let sarif_medium = Result::results_to_sarif(&[medium], false, false, None);
     assert!(sarif_medium.contains("\"level\": \"warning\""));
 
-    let sarif_low = Result::results_to_sarif(&[low], false, false);
+    let sarif_low = Result::results_to_sarif(&[low], false, false, None);
     assert!(sarif_low.contains("\"level\": \"note\""));
 }
 
 #[test]
 fn test_results_to_sarif_empty() {
     let results: Vec<Result> = vec![];
-    let sarif = Result::results_to_sarif(&results, false, false);
+    let sarif = Result::results_to_sarif(&results, false, false, None);
 
     // Should still be valid SARIF with empty results array
     assert!(sarif.contains("\"version\": \"2.1.0\""));
@@ -562,7 +562,7 @@ fn test_results_to_toml() {
         .build();
 
     let results = vec![result];
-    let toml_output = Result::results_to_toml(&results, false, false);
+    let toml_output = Result::results_to_toml(&results, false, false, None);
 
     assert!(toml_output.contains("type = \"V\""));
     assert!(toml_output.contains("inject_type = \"inHTML\""));
@@ -589,7 +589,7 @@ fn test_results_to_sarif_valid_json() {
         .build();
 
     let results = vec![result];
-    let sarif = Result::results_to_sarif(&results, false, false);
+    let sarif = Result::results_to_sarif(&results, false, false, None);
 
     // Should be valid JSON
     let parsed: serde_json::Result<serde_json::Value> = serde_json::from_str(&sarif);
@@ -663,4 +663,112 @@ fn test_results_to_json_compact_and_jsonl() {
     let jsonl = Result::results_to_jsonl(&results, true, false);
     assert!(jsonl.contains("\"type\":\"R\""));
     assert!(jsonl.ends_with('\n'));
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Tests for scan metadata envelope in non-JSON formats (issue #1093)
+// ─────────────────────────────────────────────────────────────────────────
+
+fn mk_meta() -> ScanMetadata {
+    ScanMetadata {
+        dalfox_version: "1.2.3-test".to_string(),
+        targets: vec!["https://example.com".to_string(), "https://ex2.com".to_string()],
+        scan_duration_ms: 1234,
+        total_requests: 42,
+        findings_count: 1,
+        target_summary: vec![serde_json::json!({
+            "target": "https://example.com",
+            "status": "findings",
+            "findings_count": 1,
+            "waf": { "detected": true, "name": "Cloudflare" }
+        })],
+    }
+}
+
+#[test]
+fn test_results_to_markdown_with_meta() {
+    let result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com?q=test")
+        .param("q")
+        .payload("<script>alert(1)</script>")
+        .evidence("")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(606)
+        .message_str("XSS")
+        .build();
+    let results = vec![result];
+    let md = Result::results_to_markdown(&results, false, false, Some(&mk_meta()));
+
+    assert!(md.contains("## Scan Metadata"));
+    assert!(md.contains("| **Dalfox Version** | 1.2.3-test |"));
+    assert!(md.contains("| **Scan Duration** | 1234 ms |"));
+    assert!(md.contains("| **Total Requests** | 42 |"));
+    assert!(md.contains("### Target Summary"));
+    assert!(md.contains("| https://example.com | findings | 1 | Cloudflare |"));
+    // still has the findings summary
+    assert!(md.contains("## Summary"));
+    assert!(md.contains("**Total Findings**: 1"));
+}
+
+#[test]
+fn test_results_to_toml_with_meta() {
+    let result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("q")
+        .payload("x")
+        .evidence("")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(1)
+        .message_str("x")
+        .build();
+    let results = vec![result];
+    let toml = Result::results_to_toml(&results, false, false, Some(&mk_meta()));
+
+    // meta table present, mirroring json envelope
+    assert!(toml.contains("[meta]"));
+    assert!(toml.contains("dalfox_version = \"1.2.3-test\""));
+    assert!(toml.contains("scan_duration_ms = 1234"));
+    assert!(toml.contains("total_requests = 42"));
+    assert!(toml.contains("[[results]]"));
+    // target_summary carried
+    assert!(toml.contains("target_summary"));
+    assert!(toml.contains("Cloudflare"));
+}
+
+#[test]
+fn test_results_to_sarif_with_meta() {
+    let result = Result::builder(FindingType::Verified)
+        .inject_type("inHTML")
+        .method("GET")
+        .data("https://example.com")
+        .param("q")
+        .payload("p")
+        .evidence("")
+        .cwe("CWE-79")
+        .severity("High")
+        .message_id(1)
+        .message_str("x")
+        .build();
+    let results = vec![result];
+    let sarif = Result::results_to_sarif(&results, false, false, Some(&mk_meta()));
+
+    let v: serde_json::Value = serde_json::from_str(&sarif).expect("valid");
+
+    // run.properties has the envelope
+    let run_props = &v["runs"][0]["properties"];
+    assert_eq!(run_props["dalfox_version"], "1.2.3-test");
+    assert_eq!(run_props["total_requests"], 42);
+    assert!(run_props["target_summary"].is_array());
+
+    // driver.properties also has it (for GitHub code scanning etc)
+    let driver_props = &v["runs"][0]["tool"]["driver"]["properties"];
+    assert_eq!(driver_props["scan_duration_ms"], 1234);
+    assert_eq!(driver_props["findings_count"], 1);
+    assert!(driver_props.get("waf").is_none()); // waf is inside target_summary entries
 }

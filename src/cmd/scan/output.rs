@@ -352,22 +352,49 @@ pub(crate) async fn render_results(
         }
         out
     } else if args.format == "markdown" {
+        let meta = crate::scanning::result::ScanMetadata {
+            dalfox_version: env!("CARGO_PKG_VERSION").to_string(),
+            targets: args.targets.clone(),
+            scan_duration_ms: scan_elapsed.as_millis() as u64,
+            total_requests,
+            findings_count: display_results.len(),
+            target_summary: target_summary.clone(),
+        };
         crate::scanning::result::Result::results_to_markdown(
             display_results,
             args.include_request,
             args.include_response,
+            Some(&meta),
         )
     } else if args.format == "sarif" {
+        let meta = crate::scanning::result::ScanMetadata {
+            dalfox_version: env!("CARGO_PKG_VERSION").to_string(),
+            targets: args.targets.clone(),
+            scan_duration_ms: scan_elapsed.as_millis() as u64,
+            total_requests,
+            findings_count: display_results.len(),
+            target_summary: target_summary.clone(),
+        };
         crate::scanning::result::Result::results_to_sarif(
             display_results,
             args.include_request,
             args.include_response,
+            Some(&meta),
         )
     } else if args.format == "toml" {
+        let meta = crate::scanning::result::ScanMetadata {
+            dalfox_version: env!("CARGO_PKG_VERSION").to_string(),
+            targets: args.targets.clone(),
+            scan_duration_ms: scan_elapsed.as_millis() as u64,
+            total_requests,
+            findings_count: display_results.len(),
+            target_summary: target_summary.clone(),
+        };
         crate::scanning::result::Result::results_to_toml(
             display_results,
             args.include_request,
             args.include_response,
+            Some(&meta),
         )
     } else if args.format == "plain" {
         let mut output = String::new();

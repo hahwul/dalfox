@@ -1190,6 +1190,10 @@ async fn test_render_results_markdown() {
         "got: {}",
         content
     );
+    // meta envelope now included (issue #1093)
+    assert!(content.contains("## Scan Metadata"), "missing scan meta in md: {}", content);
+    assert!(content.contains("Total Requests"), "md should have Total Requests row");
+    assert!(content.contains("7 ms"), "uses the 7ms passed to render");
 }
 
 #[tokio::test]
@@ -1206,6 +1210,13 @@ async fn test_render_results_sarif() {
     .await;
     let v: serde_json::Value = serde_json::from_str(&content).expect("valid sarif json");
     assert_eq!(v["version"], "2.1.0");
+    // meta envelope carried into run.properties and driver.properties (issue #1093)
+    let run_props = &v["runs"][0]["properties"];
+    assert_eq!(run_props["total_requests"], 42);
+    assert_eq!(run_props["scan_duration_ms"], 7);
+    assert!(run_props["target_summary"].is_array());
+    let drv_props = &v["runs"][0]["tool"]["driver"]["properties"];
+    assert_eq!(drv_props["dalfox_version"], env!("CARGO_PKG_VERSION"));
 }
 
 #[tokio::test]
@@ -1221,6 +1232,11 @@ async fn test_render_results_toml() {
     )
     .await;
     assert!(content.contains("[[results]]"), "got: {}", content);
+    // meta envelope as [meta] table (issue #1093)
+    assert!(content.contains("[meta]"), "missing [meta] in toml: {}", content);
+    assert!(content.contains("scan_duration_ms = 7"));
+    assert!(content.contains("total_requests = 42"));
+    assert!(content.contains("target_summary"));
 }
 
 #[tokio::test]

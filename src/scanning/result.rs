@@ -230,6 +230,19 @@ pub struct SanitizedResult {
     pub response: Option<String>,
 }
 
+/// Scan-level metadata envelope, previously only surfaced for JSON/JSONL.
+/// Now also threaded into SARIF (run.properties + driver.properties),
+/// Markdown (as additional summary tables), and TOML (as `[meta]` table).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ScanMetadata {
+    pub dalfox_version: String,
+    pub targets: Vec<String>,
+    pub scan_duration_ms: u64,
+    pub total_requests: u64,
+    pub findings_count: usize,
+    pub target_summary: Vec<serde_json::Value>,
+}
+
 impl Result {
     pub fn to_sanitized(&self, include_request: bool, include_response: bool) -> SanitizedResult {
         SanitizedResult {
@@ -308,6 +321,17 @@ impl Result {
         obj
     }
 
+    fn make_scan_meta_value(meta: &ScanMetadata) -> serde_json::Value {
+        serde_json::json!({
+            "dalfox_version": &meta.dalfox_version,
+            "targets": &meta.targets,
+            "scan_duration_ms": meta.scan_duration_ms,
+            "total_requests": meta.total_requests,
+            "findings_count": meta.findings_count,
+            "target_summary": &meta.target_summary,
+        })
+    }
+
     /// Serialize a slice of Result into JSON array string. Set pretty=true for pretty-printed JSON.
     pub fn results_to_json(
         results: &[Result],
@@ -343,14 +367,18 @@ impl Result {
         out
     }
 
-    /// Serialize a slice of Result into Markdown string.
+    /// Serialize a slice of Result into TOML string. When meta is Some, a `[meta]`
+    /// table is included (mirroring the JSON envelope); otherwise only `results`.
     pub fn results_to_toml(
         results: &[Result],
         include_request: bool,
         include_response: bool,
+        meta: Option<&ScanMetadata>,
     ) -> String {
         #[derive(Serialize)]
         struct TomlWrapper {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            meta: Option<serde_json::Value>,
             results: Vec<SanitizedResult>,
         }
 
@@ -359,7 +387,11 @@ impl Result {
             .map(|r| r.to_sanitized(include_request, include_response))
             .collect();
 
-        let wrapper = TomlWrapper { results: sanitized };
+        let meta_val = meta.map(Self::make_scan_meta_value);
+        let wrapper = TomlWrapper {
+            meta: meta_val,
+            results: sanitized,
+        };
         toml::to_string(&wrapper).unwrap_or_else(|_| "".to_string())
     }
 
@@ -367,12 +399,56 @@ impl Result {
         results: &[Result],
         include_request: bool,
         include_response: bool,
+        meta: Option<&ScanMetadata>,
     ) -> String {
         use std::fmt::Write;
         let mut out = String::with_capacity(results.len() * 512 + 256);
 
         // Add header
         out.push_str("# Dalfox Scan Results\n\n");
+
+        // Inject scan metadata envelope when provided (for parity with JSON/JSONL)
+        if let Some(m) = meta {
+            out.push_str("## Scan Metadata\n\n");
+            out.push_str("| Field | Value |\n");
+            out.push_str("|-------|-------|\n");
+            let _ = writeln!(out, "| **Dalfox Version** | {} |", m.dalfox_version);
+            let _ = writeln!(out, "| **Targets** | {} |", m.targets.join(", ").replace('|', "\\|"));
+            let _ = writeln!(out, "| **Scan Duration** | {} ms |", m.scan_duration_ms);
+            let _ = writeln!(out, "| **Total Requests** | {} |", m.total_requests);
+            let _ = writeln!(out, "| **Findings Count** | {} |", m.findings_count);
+            out.push_str("\n");
+
+            // Per-target summary table (includes status, findings_count, WAF when present)
+            if !m.target_summary.is_empty() {
+                out.push_str("### Target Summary\n\n");
+                out.push_str("| Target | Status | Findings | WAF |\n");
+                out.push_str("|--------|--------|----------|-----|\n");
+                for t in &m.target_summary {
+                    let tgt = t.get("target").and_then(|v| v.as_str()).unwrap_or("?");
+                    let st = t.get("status").and_then(|v| v.as_str()).unwrap_or("?");
+                    let fc = t.get("findings_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let waf_str = if let Some(w) = t.get("waf") {
+                        if w.get("detected").and_then(|d| d.as_bool()).unwrap_or(false) {
+                            w.get("name").and_then(|n| n.as_str()).unwrap_or("detected").to_string()
+                        } else {
+                            "none".to_string()
+                        }
+                    } else {
+                        "none".to_string()
+                    };
+                    let _ = writeln!(
+                        out,
+                        "| {} | {} | {} | {} |",
+                        tgt.replace('|', "\\|"),
+                        st,
+                        fc,
+                        waf_str.replace('|', "\\|")
+                    );
+                }
+                out.push_str("\n");
+            }
+        }
 
         // Add summary
         let v_count = results
@@ -458,6 +534,7 @@ impl Result {
         results: &[Result],
         include_request: bool,
         include_response: bool,
+        meta: Option<&ScanMetadata>,
     ) -> String {
         use serde_json::json;
 
@@ -552,40 +629,52 @@ impl Result {
             })
             .collect();
 
+        // Build driver, optionally with scan meta under its properties (per issue #1093)
+        let mut driver = json!({
+            "name": "Dalfox",
+            "informationUri": "https://github.com/hahwul/dalfox",
+            "version": env!("CARGO_PKG_VERSION"),
+            "rules": [{
+                "id": "dalfox/cwe-79",
+                "name": "CrossSiteScripting",
+                "shortDescription": {
+                    "text": "Cross-site Scripting (XSS)"
+                },
+                "fullDescription": {
+                    "text": "The application reflects user input in HTML responses without proper encoding, allowing attackers to inject malicious scripts."
+                },
+                "help": {
+                    "text": "Ensure all user input is properly encoded before being rendered in HTML context. Use context-aware output encoding based on where the data is placed (HTML body, attributes, JavaScript, CSS, or URL)."
+                },
+                "defaultConfiguration": {
+                    "level": "error"
+                },
+                "properties": {
+                    "tags": ["security", "xss", "injection"],
+                    "precision": "high"
+                }
+            }]
+        });
+        if let Some(m) = meta {
+            driver["properties"] = Self::make_scan_meta_value(m);
+        }
+
+        // Build run object, optionally with scan meta under run.properties
+        let mut run = json!({
+            "tool": {
+                "driver": driver
+            },
+            "results": sarif_results
+        });
+        if let Some(m) = meta {
+            run["properties"] = Self::make_scan_meta_value(m);
+        }
+
         // Build SARIF document
         let sarif = json!({
             "version": "2.1.0",
             "$schema": "https://raw.githubusercontent.com/oasis-tcs/sarif-spec/master/Schemata/sarif-schema-2.1.0.json",
-            "runs": [{
-                "tool": {
-                    "driver": {
-                        "name": "Dalfox",
-                        "informationUri": "https://github.com/hahwul/dalfox",
-                        "version": env!("CARGO_PKG_VERSION"),
-                        "rules": [{
-                            "id": "dalfox/cwe-79",
-                            "name": "CrossSiteScripting",
-                            "shortDescription": {
-                                "text": "Cross-site Scripting (XSS)"
-                            },
-                            "fullDescription": {
-                                "text": "The application reflects user input in HTML responses without proper encoding, allowing attackers to inject malicious scripts."
-                            },
-                            "help": {
-                                "text": "Ensure all user input is properly encoded before being rendered in HTML context. Use context-aware output encoding based on where the data is placed (HTML body, attributes, JavaScript, CSS, or URL)."
-                            },
-                            "defaultConfiguration": {
-                                "level": "error"
-                            },
-                            "properties": {
-                                "tags": ["security", "xss", "injection"],
-                                "precision": "high"
-                            }
-                        }]
-                    }
-                },
-                "results": sarif_results
-            }]
+            "runs": [run]
         });
 
         serde_json::to_string_pretty(&sarif).unwrap_or_else(|_| "{}".to_string())

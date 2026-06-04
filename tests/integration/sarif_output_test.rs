@@ -17,7 +17,7 @@ fn test_sarif_output_basic_structure() {
         .build();
 
     let results = vec![result];
-    let sarif = ScanResult::results_to_sarif(&results, false, false);
+    let sarif = ScanResult::results_to_sarif(&results, false, false, None);
 
     // Parse as JSON to verify structure
     let json: serde_json::Value = serde_json::from_str(&sarif).expect("SARIF should be valid JSON");
@@ -98,7 +98,7 @@ fn test_sarif_output_multiple_results() {
         .build();
 
     let results = vec![result1, result2];
-    let sarif = ScanResult::results_to_sarif(&results, false, false);
+    let sarif = ScanResult::results_to_sarif(&results, false, false, None);
 
     let json: serde_json::Value = serde_json::from_str(&sarif).expect("SARIF should be valid JSON");
 
@@ -147,7 +147,7 @@ fn test_sarif_output_with_request_response() {
     );
 
     let results = vec![result];
-    let sarif = ScanResult::results_to_sarif(&results, true, true);
+    let sarif = ScanResult::results_to_sarif(&results, true, true, None);
 
     let json: serde_json::Value = serde_json::from_str(&sarif).expect("SARIF should be valid JSON");
 
@@ -197,7 +197,7 @@ fn test_sarif_output_locations() {
         .build();
 
     let results = vec![result];
-    let sarif = ScanResult::results_to_sarif(&results, false, false);
+    let sarif = ScanResult::results_to_sarif(&results, false, false, None);
 
     let json: serde_json::Value = serde_json::from_str(&sarif).expect("SARIF should be valid JSON");
 
@@ -238,7 +238,7 @@ fn test_sarif_output_properties() {
         .build();
 
     let results = vec![result];
-    let sarif = ScanResult::results_to_sarif(&results, false, false);
+    let sarif = ScanResult::results_to_sarif(&results, false, false, None);
 
     let json: serde_json::Value = serde_json::from_str(&sarif).expect("SARIF should be valid JSON");
 
@@ -257,7 +257,7 @@ fn test_sarif_output_properties() {
 #[test]
 fn test_sarif_empty_results() {
     let results: Vec<ScanResult> = vec![];
-    let sarif = ScanResult::results_to_sarif(&results, false, false);
+    let sarif = ScanResult::results_to_sarif(&results, false, false, None);
 
     let json: serde_json::Value = serde_json::from_str(&sarif).expect("SARIF should be valid JSON");
 
@@ -296,7 +296,7 @@ fn test_sarif_severity_mappings() {
             .build();
 
         let results = vec![result];
-        let sarif = ScanResult::results_to_sarif(&results, false, false);
+        let sarif = ScanResult::results_to_sarif(&results, false, false, None);
 
         let json: serde_json::Value =
             serde_json::from_str(&sarif).expect("SARIF should be valid JSON");
