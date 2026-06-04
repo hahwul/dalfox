@@ -271,14 +271,14 @@ fn test_dedupe_ast_results_prefers_verified_variant() {
         .cwe("CWE-79")
         .severity("Medium")
         .message_id(0)
-        .message_str("desc (검증 필요) [경량 확인: 미검증]")
+        .message_str("desc (needs runtime confirmation) [light check: unverified]")
         .build();
     ast_a.request = Some("GET /?q=... HTTP/1.1".to_string());
 
     let mut ast_v = ast_a.clone();
     ast_v.result_type = FindingType::Verified;
     ast_v.severity = "High".to_string();
-    ast_v.message_str = "desc (검증 필요) [경량 확인: 검증됨]".to_string();
+    ast_v.message_str = "desc (needs runtime confirmation) [light check: verified]".to_string();
 
     let deduped = dedupe_ast_results(vec![ast_a, ast_v]);
     assert_eq!(deduped.len(), 1);
@@ -627,7 +627,7 @@ fn test_build_ast_dom_message_keeps_url_source_wording() {
     );
     assert_eq!(
         message,
-        "DOM-based XSS via location.hash to innerHTML (검증 필요) [경량 확인: 파라미터 없음]"
+        "DOM-based XSS via location.hash to innerHTML (needs runtime confirmation) [light check: no parameter]"
     );
 }
 
@@ -680,7 +680,7 @@ fn test_build_ast_dom_message_keeps_pathname_wording() {
     );
     assert_eq!(
         message,
-        "DOM-based XSS via location.pathname to document.write (검증 필요) [경량 확인: 파라미터 없음]"
+        "DOM-based XSS via location.pathname to document.write (needs runtime confirmation) [light check: no parameter]"
     );
 }
 

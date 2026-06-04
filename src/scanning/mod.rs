@@ -486,7 +486,7 @@ async fn run_ast_dom_analysis(
                 .cwe("CWE-79")
                 .severity("Medium")
                 .message_id(0)
-                .message_str(format!("{} (검증 필요)", description))
+                .message_str(format!("{} (needs runtime confirmation)", description))
                 .build();
             ast_result.location = format!("{:?}", param.location);
             if !source_uses_url_surface {
@@ -508,14 +508,18 @@ async fn run_ast_dom_analysis(
             if verified {
                 ast_result.result_type = FindingType::Verified;
                 ast_result.severity = "High".to_string();
-                ast_result.message_str = format!("{} [경량 확인: 검증됨]", ast_result.message_str);
+                ast_result.message_str =
+                    format!("{} [light check: verified]", ast_result.message_str);
             } else if self_bootstrap_verified {
                 ast_result.result_type = FindingType::Verified;
                 ast_result.severity = "High".to_string();
-                ast_result.message_str =
-                    format!("{} [정적 self-bootstrap 확인]", ast_result.message_str);
+                ast_result.message_str = format!(
+                    "{} [static self-bootstrap confirmed]",
+                    ast_result.message_str
+                );
             } else {
-                ast_result.message_str = format!("{} [경량 확인: 미검증]", ast_result.message_str);
+                ast_result.message_str =
+                    format!("{} [light check: unverified]", ast_result.message_str);
             }
             results.push(ast_result);
         }

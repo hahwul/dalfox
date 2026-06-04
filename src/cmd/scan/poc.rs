@@ -25,9 +25,9 @@ pub(crate) fn build_ast_dom_message(
     if let Some(hint) =
         crate::scanning::ast_integration::build_dom_xss_manual_poc_hint(target_url, source, payload)
     {
-        format!("{description} (검증 필요) [manual POC: {hint}]")
+        format!("{description} (needs runtime confirmation) [manual POC: {hint}]")
     } else {
-        format!("{description} (검증 필요) [경량 확인: 파라미터 없음]")
+        format!("{description} (needs runtime confirmation) [light check: no parameter]")
     }
 }
 
