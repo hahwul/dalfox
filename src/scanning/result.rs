@@ -367,9 +367,22 @@ impl Result {
         out
     }
 
-    /// Serialize a slice of Result into TOML string. When meta is Some, a `[meta]`
-    /// table is included (mirroring the JSON envelope); otherwise only `results`.
+    /// Serialize a slice of Result into TOML string.
+    ///
+    /// For backward compatibility (public API surface under `dalfox::scanning::result`),
+    /// the 3-argument form omits the scan metadata envelope (equivalent to `meta=None`).
+    /// Use the `_with_meta` variant to carry `ScanMetadata` (targets, duration, WAF in
+    /// `target_summary`, etc.) for parity with the JSON/JSONL render path.
     pub fn results_to_toml(
+        results: &[Result],
+        include_request: bool,
+        include_response: bool,
+    ) -> String {
+        Self::results_to_toml_with_meta(results, include_request, include_response, None)
+    }
+
+    /// Serialize ... with optional scan metadata (see `results_to_toml`).
+    pub fn results_to_toml_with_meta(
         results: &[Result],
         include_request: bool,
         include_response: bool,
@@ -395,7 +408,21 @@ impl Result {
         toml::to_string(&wrapper).unwrap_or_else(|_| "".to_string())
     }
 
+    /// Serialize a slice of Result into Markdown string.
+    ///
+    /// For backward compatibility (public API surface under `dalfox::scanning::result`),
+    /// the 3-argument form omits the scan metadata envelope (equivalent to `meta=None`).
+    /// Use the `_with_meta` variant to include `## Scan Metadata` + target summary tables.
     pub fn results_to_markdown(
+        results: &[Result],
+        include_request: bool,
+        include_response: bool,
+    ) -> String {
+        Self::results_to_markdown_with_meta(results, include_request, include_response, None)
+    }
+
+    /// Serialize ... with optional scan metadata (see `results_to_markdown`).
+    pub fn results_to_markdown_with_meta(
         results: &[Result],
         include_request: bool,
         include_response: bool,
@@ -428,8 +455,21 @@ impl Result {
                     let tgt = t.get("target").and_then(|v| v.as_str()).unwrap_or("?");
                     let st = t.get("status").and_then(|v| v.as_str()).unwrap_or("?");
                     let fc = t.get("findings_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let status_cell = if let Some(ec) = t.get("error_code").and_then(|e| e.as_str()) {
+                        format!("{} ({})", st, ec)
+                    } else {
+                        st.to_string()
+                    };
                     let waf_str = if let Some(w) = t.get("waf") {
-                        if w.get("detected").and_then(|d| d.as_bool()).unwrap_or(false) {
+                        // Real shape (from analysis.rs + render_results): "detected": [{ "type": "..", "confidence": N, ...}, ...]
+                        // plus optional "bypass". Support legacy test mock shape {detected: bool, name} too.
+                        if let Some(dets) = w.get("detected").and_then(|d| d.as_array()) {
+                            if !dets.is_empty() {
+                                dets[0].get("type").and_then(|ty| ty.as_str()).unwrap_or("detected").to_string()
+                            } else {
+                                "none".to_string()
+                            }
+                        } else if w.get("detected").and_then(|d| d.as_bool()).unwrap_or(false) {
                             w.get("name").and_then(|n| n.as_str()).unwrap_or("detected").to_string()
                         } else {
                             "none".to_string()
@@ -441,7 +481,7 @@ impl Result {
                         out,
                         "| {} | {} | {} | {} |",
                         tgt.replace('|', "\\|"),
-                        st,
+                        status_cell,
                         fc,
                         waf_str.replace('|', "\\|")
                     );
@@ -530,7 +570,20 @@ impl Result {
 
     /// Serialize a slice of Result into SARIF v2.1.0 format string.
     /// SARIF (Static Analysis Results Interchange Format) is a standard format for static analysis tools.
+    ///
+    /// For backward compatibility (public API surface under `dalfox::scanning::result`),
+    /// the 3-argument form omits the scan metadata envelope. Use the `_with_meta` variant
+    /// to populate `run.properties` + `tool.driver.properties` (recommended for CI/code-scanning).
     pub fn results_to_sarif(
+        results: &[Result],
+        include_request: bool,
+        include_response: bool,
+    ) -> String {
+        Self::results_to_sarif_with_meta(results, include_request, include_response, None)
+    }
+
+    /// Serialize ... with optional scan metadata (see `results_to_sarif`).
+    pub fn results_to_sarif_with_meta(
         results: &[Result],
         include_request: bool,
         include_response: bool,

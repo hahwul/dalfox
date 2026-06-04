@@ -22,7 +22,7 @@ fn test_sarif_schema_compliance() {
     result.response = Some("HTTP/1.1 200 OK\nContent-Type: text/html\n\n<html></html>".to_string());
 
     let results = vec![result];
-    let sarif = ScanResult::results_to_sarif(&results, true, true, None);
+    let sarif = ScanResult::results_to_sarif(&results, true, true);
 
     // Parse the SARIF output
     let json: Value = serde_json::from_str(&sarif).expect("SARIF output should be valid JSON");
@@ -199,7 +199,7 @@ fn test_sarif_severity_to_level_mapping() {
             .message_str("test")
             .build();
 
-        let sarif = ScanResult::results_to_sarif(&[result], false, false, None);
+        let sarif = ScanResult::results_to_sarif(&[result], false, false);
         let json: Value = serde_json::from_str(&sarif).unwrap();
 
         let actual_level = json["runs"][0]["results"][0]["level"].as_str().unwrap();
@@ -226,7 +226,7 @@ fn test_sarif_message_with_evidence() {
         .message_str("XSS detected")
         .build();
 
-    let sarif = ScanResult::results_to_sarif(&[result], false, false, None);
+    let sarif = ScanResult::results_to_sarif(&[result], false, false);
     let json: Value = serde_json::from_str(&sarif).unwrap();
 
     let message = json["runs"][0]["results"][0]["message"]["text"]
@@ -259,7 +259,7 @@ fn test_sarif_partial_fingerprints() {
         .message_str("test")
         .build();
 
-    let sarif = ScanResult::results_to_sarif(&[result], false, false, None);
+    let sarif = ScanResult::results_to_sarif(&[result], false, false);
     let json: Value = serde_json::from_str(&sarif).unwrap();
 
     let fingerprints = &json["runs"][0]["results"][0]["partialFingerprints"];
@@ -297,7 +297,7 @@ fn test_sarif_rule_metadata() {
         .message_str("test")
         .build();
 
-    let sarif = ScanResult::results_to_sarif(&[result], false, false, None);
+    let sarif = ScanResult::results_to_sarif(&[result], false, false);
     let json: Value = serde_json::from_str(&sarif).unwrap();
 
     let rule = &json["runs"][0]["tool"]["driver"]["rules"][0];

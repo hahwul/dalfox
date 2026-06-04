@@ -360,7 +360,7 @@ pub(crate) async fn render_results(
             findings_count: display_results.len(),
             target_summary: target_summary.clone(),
         };
-        crate::scanning::result::Result::results_to_markdown(
+        crate::scanning::result::Result::results_to_markdown_with_meta(
             display_results,
             args.include_request,
             args.include_response,
@@ -375,7 +375,7 @@ pub(crate) async fn render_results(
             findings_count: display_results.len(),
             target_summary: target_summary.clone(),
         };
-        crate::scanning::result::Result::results_to_sarif(
+        crate::scanning::result::Result::results_to_sarif_with_meta(
             display_results,
             args.include_request,
             args.include_response,
@@ -390,7 +390,7 @@ pub(crate) async fn render_results(
             findings_count: display_results.len(),
             target_summary: target_summary.clone(),
         };
-        crate::scanning::result::Result::results_to_toml(
+        crate::scanning::result::Result::results_to_toml_with_meta(
             display_results,
             args.include_request,
             args.include_response,

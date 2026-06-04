@@ -276,7 +276,7 @@ fn test_results_to_markdown() {
         .build();
 
     let results = vec![result1, result2];
-    let markdown = Result::results_to_markdown(&results, false, false, None);
+    let markdown = Result::results_to_markdown(&results, false, false);
 
     // Check header
     assert!(markdown.contains("# Dalfox Scan Results"));
@@ -323,7 +323,7 @@ fn test_results_to_markdown_with_request_response() {
         Some("HTTP/1.1 200 OK\nContent-Type: text/html\n\n<html><x></html>".to_string());
 
     let results = vec![result];
-    let markdown = Result::results_to_markdown(&results, true, true, None);
+    let markdown = Result::results_to_markdown(&results, true, true);
 
     // Check request and response sections
     assert!(markdown.contains("**Request:**"));
@@ -336,7 +336,7 @@ fn test_results_to_markdown_with_request_response() {
 #[test]
 fn test_results_to_markdown_empty() {
     let results: Vec<Result> = vec![];
-    let markdown = Result::results_to_markdown(&results, false, false, None);
+    let markdown = Result::results_to_markdown(&results, false, false);
 
     assert!(markdown.contains("# Dalfox Scan Results"));
     assert!(markdown.contains("**Total Findings**: 0"));
@@ -360,7 +360,7 @@ fn test_results_to_sarif_basic() {
         .build();
 
     let results = vec![result];
-    let sarif = Result::results_to_sarif(&results, false, false, None);
+    let sarif = Result::results_to_sarif(&results, false, false);
 
     // Verify SARIF structure
     assert!(sarif.contains("\"version\": \"2.1.0\""));
@@ -413,8 +413,8 @@ fn test_results_to_sarif_fingerprint_stable_across_payload_variants() {
     };
     let a = mk("<svg/onload=alert(1)>", "https://h/s?q=%3Csvg%3E");
     let b = mk("<img src=x onerror=alert(1)>", "https://h/s?q=%3Cimg%3E");
-    let sarif_a = Result::results_to_sarif(&[a], false, false, None);
-    let sarif_b = Result::results_to_sarif(&[b], false, false, None);
+    let sarif_a = Result::results_to_sarif(&[a], false, false);
+    let sarif_b = Result::results_to_sarif(&[b], false, false);
     let extract_fp = |s: &str| -> String {
         let key = "\"vulnIdentity/v1\": \"";
         let i = s.find(key).expect("fingerprint key present");
@@ -443,8 +443,8 @@ fn test_results_to_sarif_fingerprint_distinct_for_different_targets() {
             .message_str("X")
             .build()
     };
-    let a = Result::results_to_sarif(&[mk("https://h/a?q=x", "q")], false, false, None);
-    let b = Result::results_to_sarif(&[mk("https://h/b?q=x", "q")], false, false, None);
+    let a = Result::results_to_sarif(&[mk("https://h/a?q=x", "q")], false, false);
+    let b = Result::results_to_sarif(&[mk("https://h/b?q=x", "q")], false, false);
     let extract_fp = |s: &str| -> String {
         let key = "\"vulnIdentity/v1\": \"";
         let i = s.find(key).expect("fingerprint key present");
@@ -475,7 +475,7 @@ fn test_results_to_sarif_with_request_response() {
         Some("HTTP/1.1 200 OK\nContent-Type: text/html\n\n<html><x></html>".to_string());
 
     let results = vec![result];
-    let sarif = Result::results_to_sarif(&results, true, true, None);
+    let sarif = Result::results_to_sarif(&results, true, true);
 
     // Verify request and response are included in properties
     assert!(sarif.contains("\"request\""));
@@ -526,20 +526,20 @@ fn test_results_to_sarif_severity_levels() {
         .build();
 
     // Test each severity level mapping
-    let sarif_high = Result::results_to_sarif(&[high], false, false, None);
+    let sarif_high = Result::results_to_sarif(&[high], false, false);
     assert!(sarif_high.contains("\"level\": \"error\""));
 
-    let sarif_medium = Result::results_to_sarif(&[medium], false, false, None);
+    let sarif_medium = Result::results_to_sarif(&[medium], false, false);
     assert!(sarif_medium.contains("\"level\": \"warning\""));
 
-    let sarif_low = Result::results_to_sarif(&[low], false, false, None);
+    let sarif_low = Result::results_to_sarif(&[low], false, false);
     assert!(sarif_low.contains("\"level\": \"note\""));
 }
 
 #[test]
 fn test_results_to_sarif_empty() {
     let results: Vec<Result> = vec![];
-    let sarif = Result::results_to_sarif(&results, false, false, None);
+    let sarif = Result::results_to_sarif(&results, false, false);
 
     // Should still be valid SARIF with empty results array
     assert!(sarif.contains("\"version\": \"2.1.0\""));
@@ -562,7 +562,7 @@ fn test_results_to_toml() {
         .build();
 
     let results = vec![result];
-    let toml_output = Result::results_to_toml(&results, false, false, None);
+    let toml_output = Result::results_to_toml(&results, false, false);
 
     assert!(toml_output.contains("type = \"V\""));
     assert!(toml_output.contains("inject_type = \"inHTML\""));
@@ -589,7 +589,7 @@ fn test_results_to_sarif_valid_json() {
         .build();
 
     let results = vec![result];
-    let sarif = Result::results_to_sarif(&results, false, false, None);
+    let sarif = Result::results_to_sarif(&results, false, false);
 
     // Should be valid JSON
     let parsed: serde_json::Result<serde_json::Value> = serde_json::from_str(&sarif);
@@ -676,12 +676,24 @@ fn mk_meta() -> ScanMetadata {
         scan_duration_ms: 1234,
         total_requests: 42,
         findings_count: 1,
-        target_summary: vec![serde_json::json!({
-            "target": "https://example.com",
-            "status": "findings",
-            "findings_count": 1,
-            "waf": { "detected": true, "name": "Cloudflare" }
-        })],
+        target_summary: vec![
+            serde_json::json!({
+                "target": "https://example.com",
+                "status": "findings",
+                "findings_count": 1,
+                "waf": {
+                    "detected": [
+                        {"type": "Cloudflare", "confidence": 95, "evidence": "cf-ray header"}
+                    ]
+                }
+            }),
+            serde_json::json!({
+                "target": "https://ex2.com",
+                "status": "skipped",
+                "findings_count": 0,
+                "error_code": "CONNECTION_FAILED"
+            })
+        ],
     }
 }
 
@@ -700,7 +712,7 @@ fn test_results_to_markdown_with_meta() {
         .message_str("XSS")
         .build();
     let results = vec![result];
-    let md = Result::results_to_markdown(&results, false, false, Some(&mk_meta()));
+    let md = Result::results_to_markdown_with_meta(&results, false, false, Some(&mk_meta()));
 
     assert!(md.contains("## Scan Metadata"));
     assert!(md.contains("| **Dalfox Version** | 1.2.3-test |"));
@@ -708,6 +720,7 @@ fn test_results_to_markdown_with_meta() {
     assert!(md.contains("| **Total Requests** | 42 |"));
     assert!(md.contains("### Target Summary"));
     assert!(md.contains("| https://example.com | findings | 1 | Cloudflare |"));
+    assert!(md.contains("| https://ex2.com | skipped (CONNECTION_FAILED) | 0 | none |"));
     // still has the findings summary
     assert!(md.contains("## Summary"));
     assert!(md.contains("**Total Findings**: 1"));
@@ -728,7 +741,7 @@ fn test_results_to_toml_with_meta() {
         .message_str("x")
         .build();
     let results = vec![result];
-    let toml = Result::results_to_toml(&results, false, false, Some(&mk_meta()));
+    let toml = Result::results_to_toml_with_meta(&results, false, false, Some(&mk_meta()));
 
     // meta table present, mirroring json envelope
     assert!(toml.contains("[meta]"));
@@ -756,7 +769,7 @@ fn test_results_to_sarif_with_meta() {
         .message_str("x")
         .build();
     let results = vec![result];
-    let sarif = Result::results_to_sarif(&results, false, false, Some(&mk_meta()));
+    let sarif = Result::results_to_sarif_with_meta(&results, false, false, Some(&mk_meta()));
 
     let v: serde_json::Value = serde_json::from_str(&sarif).expect("valid");
 

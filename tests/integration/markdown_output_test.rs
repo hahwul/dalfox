@@ -17,7 +17,7 @@ fn test_markdown_output_single_result() {
         .build();
 
     let results = vec![result];
-    let markdown = ScanResult::results_to_markdown(&results, false, false, None);
+    let markdown = ScanResult::results_to_markdown(&results, false, false);
 
     // Verify main sections exist
     assert!(markdown.contains("# Dalfox Scan Results"));
@@ -68,7 +68,7 @@ fn test_markdown_output_multiple_results() {
         .build();
 
     let results = vec![result1, result2];
-    let markdown = ScanResult::results_to_markdown(&results, false, false, None);
+    let markdown = ScanResult::results_to_markdown(&results, false, false);
 
     // Verify summary counts
     assert!(markdown.contains("**Total Findings**: 2"));
@@ -105,7 +105,7 @@ fn test_markdown_output_with_request_response() {
     );
 
     let results = vec![result];
-    let markdown = ScanResult::results_to_markdown(&results, true, true, None);
+    let markdown = ScanResult::results_to_markdown(&results, true, true);
 
     // Verify request section is included
     assert!(markdown.contains("**Request:**"));
@@ -137,7 +137,7 @@ fn test_markdown_output_without_request_response() {
     result.response = Some("HTTP/1.1 200 OK".to_string());
 
     let results = vec![result];
-    let markdown = ScanResult::results_to_markdown(&results, false, false, None);
+    let markdown = ScanResult::results_to_markdown(&results, false, false);
 
     // Verify request/response are NOT included when flags are false
     assert!(!markdown.contains("**Request:**"));
@@ -162,7 +162,7 @@ fn test_markdown_output_special_characters() {
         .build();
 
     let results = vec![result];
-    let markdown = ScanResult::results_to_markdown(&results, false, false, None);
+    let markdown = ScanResult::results_to_markdown(&results, false, false);
 
     // Verify pipe characters are properly escaped in payload and evidence
     assert!(markdown.contains("payload\\|with\\|pipes"));
@@ -174,7 +174,7 @@ fn test_markdown_output_special_characters() {
 #[test]
 fn test_markdown_output_empty_results() {
     let results: Vec<ScanResult> = vec![];
-    let markdown = ScanResult::results_to_markdown(&results, false, false, None);
+    let markdown = ScanResult::results_to_markdown(&results, false, false);
 
     // Verify empty results still produce valid markdown
     assert!(markdown.contains("# Dalfox Scan Results"));
