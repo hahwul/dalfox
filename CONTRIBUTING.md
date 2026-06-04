@@ -20,7 +20,7 @@ just dev      # cargo run
 just test     # unit + integration tests
 ```
 
-Before opening a PR, please run `cargo fmt`, `cargo clippy`, and `just test`.
+Before opening a PR, please run `just fix` (runs `cargo fmt` + `cargo clippy --fix`) and `just test`.
 
 ## Reporting Issues
 

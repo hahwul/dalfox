@@ -1,6 +1,7 @@
 alias b := build
 alias d := dev
 alias ds := docs-serve
+alias f := fix
 alias t := test
 alias vc := version-check
 alias vu := version-update
@@ -35,10 +36,11 @@ docs-serve:
 docs-dependencies:
     brew install hahwul/hwaro/hwaro
 
-#[group('development')]
-#fix:
-#    cargo fmt
-#    cargo clippy --fix --allow-dirty
+# Format code and apply clippy suggestions.
+[group('build')]
+fix:
+    cargo fmt
+    cargo clippy --fix --allow-dirty
 
 # Report dalfox version across Cargo.toml, Cargo.lock, flake.nix, snap.
 [group('release')]
