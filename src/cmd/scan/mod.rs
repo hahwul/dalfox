@@ -40,9 +40,11 @@ mod scan_loop;
 mod validation;
 
 pub use args::{
-    CLI_MAX_DELAY_MS, CLI_MAX_TIMEOUT_SECS, CLI_MAX_WORKERS, DEFAULT_DELAY_MS, DEFAULT_ENCODERS,
+    CLI_MAX_DELAY_MS, CLI_MAX_RATE_LIMIT, CLI_MAX_RETRIES, CLI_MAX_RETRY_DELAY_MS,
+    CLI_MAX_TIMEOUT_SECS, CLI_MAX_WORKERS, DEFAULT_DELAY_MS, DEFAULT_ENCODERS,
     DEFAULT_MAX_CONCURRENT_TARGETS, DEFAULT_MAX_TARGETS_PER_HOST, DEFAULT_METHOD,
-    DEFAULT_TIMEOUT_SECS, DEFAULT_WAF_MIN_CONFIDENCE, DEFAULT_WORKERS, PreflightOptions, ScanArgs,
+    DEFAULT_RATE_LIMIT, DEFAULT_RETRIES, DEFAULT_RETRY_DELAY_MS, DEFAULT_TIMEOUT_SECS,
+    DEFAULT_WAF_MIN_CONFIDENCE, DEFAULT_WORKERS, PreflightOptions, ScanArgs,
 };
 pub(crate) use logging::{log_dbg, log_info, log_warn};
 pub(crate) use validation::validate_numeric_args;
@@ -170,6 +172,12 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         }
         return ScanOutcome::Error;
     }
+
+    // Install the process-wide request rate limiter (`--rate-limit`, req/sec;
+    // 0 = unlimited). Shared across every worker and target so the aggregate
+    // outbound rate stays bounded regardless of fan-out. Done before any
+    // requests go out (preflight included). Idempotent across CLI invocations.
+    crate::install_rate_limiter(args.rate_limit);
 
     // `--limit-result-type` only affects which finding types count
     // toward `--limit`; without `--limit` it is a no-op. Dogfood

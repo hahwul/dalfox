@@ -70,7 +70,7 @@ async fn pre_collapse_query_probe(client: &reqwest::Client, target: &Target) -> 
             url,
             target.data.clone(),
         );
-        crate::tick_request_count();
+        crate::record_outbound_request().await;
         let resp = req.send().await.ok()?;
         let location_has_marker = resp.status().is_redirection()
             && resp
@@ -671,8 +671,8 @@ pub async fn probe_dictionary_params(
                     data.clone(),
                 );
 
+                crate::record_outbound_request().await;
                 let resp = request.send().await;
-                crate::tick_request_count();
 
                 let mut discovered: Option<Param> = None;
                 if let Ok(r) = resp {
@@ -962,8 +962,8 @@ pub async fn probe_body_params(
                 )];
                 let request = crate::utils::apply_header_overrides(base, &overrides);
 
+                crate::record_outbound_request().await;
                 let resp = request.send().await;
-                crate::tick_request_count();
 
                 let mut discovered: Option<Param> = None;
                 if let Ok(r) = resp
@@ -1118,8 +1118,8 @@ pub async fn probe_response_id_params(
         target.data.clone(),
     );
 
+    crate::record_outbound_request().await;
     let __resp = base_request.send().await;
-    crate::tick_request_count();
     if let Ok(resp) = __resp
         && !resp.status().is_server_error()
         && let Ok(text) = resp.text().await
@@ -1213,8 +1213,8 @@ pub async fn probe_response_id_params(
                     crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
                 // Prepare optional discovered Param container for batched return
                 let mut discovered: Option<Param> = None;
+                crate::record_outbound_request().await;
                 let __resp = request.send().await;
-                crate::tick_request_count();
                 if let Ok(resp) = __resp {
                     // Skip 5xx error responses — debug pages often reflect params
                     if resp.status().is_server_error() {
@@ -1472,8 +1472,8 @@ pub async fn probe_json_body_params(
             let overrides = vec![("Content-Type".to_string(), "application/json".to_string())];
             let request = crate::utils::apply_header_overrides(base, &overrides);
 
+            crate::record_outbound_request().await;
             let resp = request.send().await;
-            crate::tick_request_count();
 
             let mut discovered: Option<Param> = None;
             if let Ok(r) = resp
@@ -1692,7 +1692,7 @@ pub async fn probe_multipart_params(
                 None,
             )
             .multipart(form);
-            crate::tick_request_count();
+            crate::record_outbound_request().await;
 
             let mut discovered: Option<Param> = None;
             if let Ok(r) = request.send().await

@@ -771,7 +771,7 @@ async fn verify_sxss_dom(
             let check_request =
                 crate::utils::build_request(client, target, method, sxss_url.clone(), None);
 
-            crate::tick_request_count();
+            crate::record_outbound_request().await;
             if let Ok(resp) = check_request.send().await {
                 let headers = resp.headers().clone();
                 let ct = headers
@@ -866,12 +866,19 @@ pub async fn check_dom_verification_with_client(
 
     let inject_request = build_inject_request(client, target, param, &encoded_payload);
 
-    // Send the injection request (with rate-limit retry)
+    // Send the injection request. send_with_retry acquires a --rate-limit
+    // permit and applies the --retries / --retry-delay policy internally.
     crate::tick_request_count();
-    let inject_resp = crate::utils::send_with_retry(inject_request, 3, 5000).await;
+    let inject_resp =
+        crate::utils::send_with_retry(inject_request, args.retries, args.retry_delay).await;
 
-    if target.delay > 0 {
-        sleep(Duration::from_millis(target.delay)).await;
+    let pause = crate::utils::rate_limit::inter_request_pause(
+        target.delay,
+        target.waf_extra_delay_ms,
+        args.waf_evasion,
+    );
+    if !pause.is_zero() {
+        sleep(pause).await;
     }
 
     if args.sxss {

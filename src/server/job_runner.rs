@@ -317,6 +317,9 @@ pub(crate) async fn run_scan_job(
         skip_waf_probe: false,
         force_waf: None,
         waf_evasion: false,
+        rate_limit: 0,
+        retries: 0,
+        retry_delay: 1000,
         waf_min_confidence: crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE,
         remote_payloads: opts.remote_payloads.clone().unwrap_or_default(),
         remote_wordlists: opts.remote_wordlists.clone().unwrap_or_default(),
@@ -429,8 +432,9 @@ pub(crate) async fn run_scan_job(
         }
     }));
 
-    crate::REQUEST_COUNT_JOB
-        .scope(progress.requests_sent.clone(), async {
+    crate::with_job_rate_limiter(
+        args.rate_limit,
+        crate::REQUEST_COUNT_JOB.scope(progress.requests_sent.clone(), async {
             crate::WAF_CONSECUTIVE_BLOCKS_JOB
                 .scope(job_waf_consecutive.clone(), async {
                     if let Some(callback_url) = &args.blind_callback_url {
@@ -496,8 +500,9 @@ pub(crate) async fn run_scan_job(
                     .await;
                 })
                 .await;
-        })
-        .await;
+        }),
+    )
+    .await;
 
     drop(findings_updater);
 

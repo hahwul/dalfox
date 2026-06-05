@@ -287,60 +287,205 @@ pub fn build_preflight_request(
     rb
 }
 
-/// Send a request with automatic retry on rate-limiting (HTTP 429) responses.
+/// Absolute ceiling on any single retry backoff sleep (ms), applied to both
+/// the exponential backoff and a server-supplied `Retry-After`.
+const BACKOFF_CAP_MS: u64 = 30_000;
+/// Cap on the exponential-backoff shift so `base << attempt` can't overflow
+/// or explode before [`BACKOFF_CAP_MS`] clamps it (2^5 = 32× the base).
+const BACKOFF_SHIFT_CAP: u32 = 5;
+/// HTTP 429 is always retried this many times regardless of `--retries`,
+/// preserving the long-standing rate-limit resilience. `--retries` governs
+/// the *additional*, opt-in retrying of 5xx and transient transport errors.
+const MAX_429_RETRIES: u32 = 3;
+
+/// Exponential backoff for retry attempt `attempt` (0-based): `base`,
+/// `2·base`, `4·base`, … capped at [`BACKOFF_CAP_MS`].
+fn next_backoff_ms(base_ms: u64, attempt: u32) -> u64 {
+    let base = base_ms.max(1);
+    base.saturating_mul(1u64 << attempt.min(BACKOFF_SHIFT_CAP))
+        .min(BACKOFF_CAP_MS)
+}
+
+/// Was a failed send caused by a transient transport condition worth
+/// retrying (timeout or connection error) rather than a fatal one (TLS,
+/// malformed URL, …)?
+fn is_transient_error(e: &reqwest::Error) -> bool {
+    e.is_timeout() || e.is_connect()
+}
+
+/// Parse a `Retry-After` header expressed in integer seconds into ms.
+/// Returns `None` for absent or non-integer (HTTP-date) values, in which
+/// case the caller falls back to exponential backoff.
+fn parse_retry_after_ms(headers: &reqwest::header::HeaderMap) -> Option<u64> {
+    headers
+        .get("retry-after")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.trim().parse::<u64>().ok())
+        .map(|secs| secs.saturating_mul(1000))
+}
+
+/// Network-decoupled outcome of a single send attempt, so the retry policy
+/// can be unit-tested without a live server.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SendOutcome {
+    /// A completed response carrying this status code.
+    Status(u16),
+    /// The send failed with a transient transport error (timeout / connect).
+    TransientError,
+    /// The send failed with a non-retryable transport error.
+    FatalError,
+}
+
+/// Retries already spent, tracked separately so the always-on 429 budget and
+/// the opt-in transient (5xx / network) budget don't cannibalize each other.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub(crate) struct RetryState {
+    /// HTTP 429 retries consumed.
+    pub rl_done: u32,
+    /// Transient (5xx / network / timeout) retries consumed.
+    pub tr_done: u32,
+}
+
+/// What [`decide_retry`] tells the send loop to do next.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RetryDecision {
+    /// Stop and return the result to the caller.
+    Stop,
+    /// Sleep `ms` then retry; `rate_limited` records whether this consumed a
+    /// 429 retry (vs. a transient one) so the loop advances the right budget.
+    Sleep { ms: u64, rate_limited: bool },
+}
+
+/// Pure retry policy. Given one attempt's `outcome`, the retries already
+/// spent (`state`), the user's transient-retry budget
+/// (`max_transient_retries` from `--retries`), the backoff `base_delay_ms`
+/// (`--retry-delay`), and any parsed `Retry-After`, decide whether and how
+/// long to wait before retrying.
 ///
-/// Respects the `Retry-After` header if present (capped at `max_retry_delay_ms`).
-/// Falls back to exponential backoff: 1s, 2s, 4s.
-/// Returns the response after successful send or after exhausting retries.
+/// * HTTP 429 is always retried up to [`MAX_429_RETRIES`], honoring
+///   `Retry-After` when present — this is the historical behavior and is
+///   independent of `--retries`.
+/// * HTTP 5xx and transient transport errors are retried only up to
+///   `max_transient_retries`, which defaults to 0 (off) so the default scan
+///   behaves exactly as before.
+pub(crate) fn decide_retry(
+    outcome: SendOutcome,
+    state: RetryState,
+    max_transient_retries: u32,
+    base_delay_ms: u64,
+    retry_after_ms: Option<u64>,
+) -> RetryDecision {
+    match outcome {
+        SendOutcome::Status(429) if state.rl_done < MAX_429_RETRIES => {
+            let ms = retry_after_ms
+                .unwrap_or_else(|| next_backoff_ms(base_delay_ms, state.rl_done))
+                .min(BACKOFF_CAP_MS);
+            RetryDecision::Sleep {
+                ms,
+                rate_limited: true,
+            }
+        }
+        SendOutcome::Status(code)
+            if (500..=599).contains(&code) && state.tr_done < max_transient_retries =>
+        {
+            RetryDecision::Sleep {
+                ms: next_backoff_ms(base_delay_ms, state.tr_done),
+                rate_limited: false,
+            }
+        }
+        SendOutcome::TransientError if state.tr_done < max_transient_retries => {
+            RetryDecision::Sleep {
+                ms: next_backoff_ms(base_delay_ms, state.tr_done),
+                rate_limited: false,
+            }
+        }
+        _ => RetryDecision::Stop,
+    }
+}
+
+/// Send a request, honoring the active rate limiter and retrying retryable
+/// failures with exponential backoff.
+///
+/// Before *each* attempt (including retries) a permit is acquired from the
+/// process-wide / per-job rate limiter (`crate::rate_limit_acquire`) so the
+/// aggregate request rate stays under `--rate-limit`.
+///
+/// Retry behavior (see [`decide_retry`]):
+/// * HTTP 429 → always retried (up to [`MAX_429_RETRIES`]), honoring
+///   `Retry-After`.
+/// * HTTP 5xx and transient transport errors (timeouts, connection resets)
+///   → retried up to `max_transient_retries` (from `--retries`; 0 disables,
+///   the default). `base_delay_ms` (`--retry-delay`) seeds the exponential
+///   backoff, which is capped at [`BACKOFF_CAP_MS`].
+///
+/// Returns the final response or transport error after success or after the
+/// applicable retry budget is exhausted. If the request body was streamed
+/// (not clonable) the first response/error is returned without retrying.
 pub async fn send_with_retry(
     request_builder: RequestBuilder,
-    max_retries: u32,
-    max_retry_delay_ms: u64,
+    max_transient_retries: u32,
+    base_delay_ms: u64,
 ) -> Result<reqwest::Response, reqwest::Error> {
-    // reqwest::RequestBuilder is not Clone, so we must try_clone before sending.
-    // If cloning fails, just send once without retry capability.
-    let mut attempts = 0u32;
+    // reqwest::RequestBuilder is not Clone, so we try_clone before each send;
+    // a streamed body yields None and we fall back to a single attempt.
+    let mut state = RetryState::default();
     let mut current_rb = request_builder;
 
     loop {
+        // Throttle every attempt so retries also count against --rate-limit.
+        crate::rate_limit_acquire().await;
+
         let next_rb = current_rb.try_clone();
-        let resp = current_rb.send().await?;
+        let result = current_rb.send().await;
 
-        if resp.status().as_u16() != 429 || attempts >= max_retries {
-            return Ok(resp);
-        }
-
-        // Parse Retry-After header (seconds)
-        let wait_ms = resp
-            .headers()
-            .get("retry-after")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse::<u64>().ok())
-            .map_or_else(
-                || {
-                    // Exponential backoff: 1s, 2s, 4s
-                    (1000 * (1u64 << attempts.min(3))).min(max_retry_delay_ms)
-                },
-                |secs| (secs * 1000).min(max_retry_delay_ms),
-            );
-
-        let Some(rb) = next_rb else {
-            // Cannot retry (request body was streamed), return the 429
-            return Ok(resp);
+        let (outcome, retry_after) = match &result {
+            Ok(resp) => {
+                let code = resp.status().as_u16();
+                let ra = if code == 429 {
+                    parse_retry_after_ms(resp.headers())
+                } else {
+                    None
+                };
+                (SendOutcome::Status(code), ra)
+            }
+            Err(e) => {
+                let kind = if is_transient_error(e) {
+                    SendOutcome::TransientError
+                } else {
+                    SendOutcome::FatalError
+                };
+                (kind, None)
+            }
         };
 
-        if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-            eprintln!(
-                "[rate-limit] HTTP 429 received, retry {}/{} after {}ms",
-                attempts + 1,
-                max_retries,
-                wait_ms
-            );
+        match decide_retry(
+            outcome,
+            state,
+            max_transient_retries,
+            base_delay_ms,
+            retry_after,
+        ) {
+            RetryDecision::Stop => return result,
+            RetryDecision::Sleep { ms, rate_limited } => {
+                let Some(rb) = next_rb else {
+                    // Body was streamed; can't replay the request.
+                    return result;
+                };
+                if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                    eprintln!(
+                        "[retry] {:?} -> waiting {}ms before retry (429:{} transient:{})",
+                        outcome, ms, state.rl_done, state.tr_done
+                    );
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+                if rate_limited {
+                    state.rl_done += 1;
+                } else {
+                    state.tr_done += 1;
+                }
+                current_rb = rb;
+            }
         }
-
-        tokio::time::sleep(std::time::Duration::from_millis(wait_ms)).await;
-        current_rb = rb;
-        attempts += 1;
     }
 }
 
