@@ -671,8 +671,8 @@ pub async fn probe_dictionary_params(
                     data.clone(),
                 );
 
-                let resp = request.send().await;
                 crate::record_outbound_request().await;
+                let resp = request.send().await;
 
                 let mut discovered: Option<Param> = None;
                 if let Ok(r) = resp {
@@ -962,8 +962,8 @@ pub async fn probe_body_params(
                 )];
                 let request = crate::utils::apply_header_overrides(base, &overrides);
 
-                let resp = request.send().await;
                 crate::record_outbound_request().await;
+                let resp = request.send().await;
 
                 let mut discovered: Option<Param> = None;
                 if let Ok(r) = resp
@@ -1118,8 +1118,8 @@ pub async fn probe_response_id_params(
         target.data.clone(),
     );
 
-    let __resp = base_request.send().await;
     crate::record_outbound_request().await;
+    let __resp = base_request.send().await;
     if let Ok(resp) = __resp
         && !resp.status().is_server_error()
         && let Ok(text) = resp.text().await
@@ -1213,8 +1213,8 @@ pub async fn probe_response_id_params(
                     crate::utils::build_request(&client_clone, &target_clone, m, url, data.clone());
                 // Prepare optional discovered Param container for batched return
                 let mut discovered: Option<Param> = None;
-                let __resp = request.send().await;
                 crate::record_outbound_request().await;
+                let __resp = request.send().await;
                 if let Ok(resp) = __resp {
                     // Skip 5xx error responses — debug pages often reflect params
                     if resp.status().is_server_error() {
@@ -1472,8 +1472,8 @@ pub async fn probe_json_body_params(
             let overrides = vec![("Content-Type".to_string(), "application/json".to_string())];
             let request = crate::utils::apply_header_overrides(base, &overrides);
 
-            let resp = request.send().await;
             crate::record_outbound_request().await;
+            let resp = request.send().await;
 
             let mut discovered: Option<Param> = None;
             if let Ok(r) = resp
