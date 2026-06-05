@@ -74,6 +74,9 @@ fn default_scan_args() -> crate::cmd::scan::ScanArgs {
         skip_waf_probe: false,
         force_waf: None,
         waf_evasion: false,
+        rate_limit: 0,
+        retries: 0,
+        retry_delay: 1000,
         waf_min_confidence: 0.0,
         targets: vec![],
     }
@@ -120,6 +123,9 @@ fn full_scan_config() -> ScanConfig {
         timeout: Some(21),
         scan_timeout: Some(45),
         delay: Some(123),
+        rate_limit: Some(25),
+        retries: Some(4),
+        retry_delay: Some(750),
         proxy: Some("http://127.0.0.1:8080".to_string()),
         follow_redirects: Some(true),
         ignore_return: Some(vec![403, 404]),
@@ -287,6 +293,9 @@ fn test_apply_to_scan_args_overwrites_present_fields() {
     assert!(args.skip_mining_dom);
     assert_eq!(args.timeout, 21);
     assert_eq!(args.delay, 123);
+    assert_eq!(args.rate_limit, 25);
+    assert_eq!(args.retries, 4);
+    assert_eq!(args.retry_delay, 750);
     assert_eq!(args.proxy.as_deref(), Some("http://127.0.0.1:8080"));
     assert!(args.follow_redirects);
     assert_eq!(args.workers, 7);
@@ -451,6 +460,9 @@ fn test_apply_to_scan_args_if_default_maps_all_supported_fields() {
     assert_eq!(args.timeout, 21);
     assert_eq!(args.scan_timeout, 45);
     assert_eq!(args.delay, 123);
+    assert_eq!(args.rate_limit, 25);
+    assert_eq!(args.retries, 4);
+    assert_eq!(args.retry_delay, 750);
     assert_eq!(args.proxy.as_deref(), Some("http://127.0.0.1:8080"));
     assert!(args.follow_redirects);
     assert_eq!(args.workers, 7);

@@ -2,7 +2,10 @@
 //! validation, the URL-vs-file-path tiebreak, target-list extension
 //! detection, and out-of-scope domain matching. Pure functions, no I/O.
 
-use super::args::{CLI_MAX_DELAY_MS, CLI_MAX_TIMEOUT_SECS, CLI_MAX_WORKERS, ScanArgs};
+use super::args::{
+    CLI_MAX_DELAY_MS, CLI_MAX_RATE_LIMIT, CLI_MAX_RETRIES, CLI_MAX_RETRY_DELAY_MS,
+    CLI_MAX_TIMEOUT_SECS, CLI_MAX_WORKERS, ScanArgs,
+};
 
 /// Check if a domain matches an out-of-scope pattern.
 /// Supports simple wildcard: `*.example.com` matches `sub.example.com` but not `notexample.com`.
@@ -67,6 +70,33 @@ pub(crate) fn validate_numeric_args(
             format!(
                 "--delay must be at most {} ms (got {})",
                 CLI_MAX_DELAY_MS, args.delay
+            ),
+        ));
+    }
+    if args.rate_limit > CLI_MAX_RATE_LIMIT {
+        return Err((
+            crate::cmd::error_codes::INVALID_INPUT_TYPE,
+            format!(
+                "--rate-limit must be at most {} req/sec (got {}); use 0 for unlimited",
+                CLI_MAX_RATE_LIMIT, args.rate_limit
+            ),
+        ));
+    }
+    if args.retries > CLI_MAX_RETRIES {
+        return Err((
+            crate::cmd::error_codes::INVALID_INPUT_TYPE,
+            format!(
+                "--retries must be at most {} (got {})",
+                CLI_MAX_RETRIES, args.retries
+            ),
+        ));
+    }
+    if args.retry_delay > CLI_MAX_RETRY_DELAY_MS {
+        return Err((
+            crate::cmd::error_codes::INVALID_INPUT_TYPE,
+            format!(
+                "--retry-delay must be at most {} ms (got {})",
+                CLI_MAX_RETRY_DELAY_MS, args.retry_delay
             ),
         ));
     }

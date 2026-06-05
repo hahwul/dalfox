@@ -70,6 +70,9 @@ skip_mining_dom = false
 timeout = 10
 scan_timeout = 0
 delay = 0
+rate_limit = 0
+retries = 0
+retry_delay = 1000
 # proxy = "http://127.0.0.1:8080"
 follow_redirects = false
 ignore_return = []
@@ -172,7 +175,10 @@ debug = false
 |-----|------|---------|-------------|
 | `timeout` | int | `10` | Request timeout (seconds) |
 | `scan_timeout` | int | `0` | Hard wall-clock cap per target for the scan stage (post-preflight) in seconds. 0 disables. |
-| `delay` | int | `0` | Inter-request delay (ms) |
+| `delay` | int | `0` | Inter-request delay (ms), per worker |
+| `rate_limit` | int | `0` | Global request rate cap (req/sec) shared across all workers/targets; `0` = unlimited |
+| `retries` | int | `0` | Retry 5xx / transient transport errors this many times (`0` = off; 429 always retried) |
+| `retry_delay` | int | `1000` | Base backoff (ms) between `retries` attempts (exponential) |
 | `proxy` | string | — | Proxy URL |
 | `follow_redirects` | bool | `false` | Follow 3xx responses |
 | `ignore_return` | array | `[]` | HTTP status codes to ignore |
@@ -216,7 +222,7 @@ debug = false
 | `waf_bypass` | string | `"auto"` | `auto`, `force`, `off` |
 | `skip_waf_probe` | bool | `false` | Skip active fingerprinting |
 | `force_waf` | string | — | WAF name when `waf_bypass = "force"` |
-| `waf_evasion` | bool | `false` | Auto-throttle on WAF detection |
+| `waf_evasion` | bool | `false` | Adaptive evasion on WAF detection: randomized jitter + escalating cooldown on block clusters (pairs with `rate_limit`) |
 | `waf_min_confidence` | float | `0.3` | Drop fingerprints below this confidence (0.0–1.0); default suppresses weak matches |
 
 ### Logging

@@ -138,6 +138,9 @@ pub async fn verify_dom_xss_light_with_client(
     };
 
     let mut note: Option<String> = None;
+    // Honor --rate-limit on this verification re-request without changing the
+    // historical request tally (this path intentionally does not tick).
+    crate::rate_limit_acquire().await;
     if let Ok(resp) = request.send().await {
         // Browsers do not render the body of a 3xx response, so any apparent
         // reflection/marker evidence inside that body cannot be exploited.

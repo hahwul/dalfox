@@ -1164,12 +1164,22 @@ async fn fetch_injection_response_with_client(
         }
     };
 
-    // Send the injection request (with rate-limit retry)
-    let inject_resp = crate::utils::send_with_retry(inject_request, 3, 5000).await;
+    // Send the injection request. send_with_retry acquires a --rate-limit
+    // permit and applies the --retries / --retry-delay policy internally.
+    let inject_resp =
+        crate::utils::send_with_retry(inject_request, args.retries, args.retry_delay).await;
     crate::tick_request_count();
 
-    if target.delay > 0 {
-        sleep(Duration::from_millis(target.delay)).await;
+    // Adaptive inter-request pause: user --delay plus the detected WAF's
+    // pacing hint, randomized with jitter under --waf-evasion so the cadence
+    // isn't a fixed interval a WAF can lock onto.
+    let pause = crate::utils::rate_limit::inter_request_pause(
+        target.delay,
+        target.waf_extra_delay_ms,
+        args.waf_evasion,
+    );
+    if !pause.is_zero() {
+        sleep(pause).await;
     }
 
     // For Stored XSS, check reflection on auto-resolved URLs with retry logic.
@@ -1212,7 +1222,7 @@ async fn fetch_injection_response_with_client(
                 let check_request =
                     crate::utils::build_request(client, target, method, sxss_url.clone(), None);
 
-                crate::tick_request_count();
+                crate::record_outbound_request().await;
                 if let Ok(resp) = check_request.send().await
                     && let Ok(text) = resp.text().await
                     && !text.is_empty()
@@ -1251,12 +1261,20 @@ async fn fetch_injection_response_with_client(
                 || status_code == 503;
             if is_waf_block {
                 let consecutive = crate::tick_waf_block();
-                // Apply adaptive backoff when consecutive blocks exceed threshold
+                // Apply adaptive cooldown when consecutive blocks exceed the
+                // threshold — the "cooldown pause" half of --waf-evasion.
                 if consecutive >= WAF_BACKOFF_THRESHOLD {
                     let escalation =
                         (consecutive - WAF_BACKOFF_THRESHOLD).min(WAF_BACKOFF_MAX_ESCALATION);
                     let backoff_ms = WAF_BACKOFF_BASE_MS * (1u64 << escalation);
-                    let backoff_ms = backoff_ms.min(WAF_BACKOFF_CAP_MS);
+                    let mut backoff_ms = backoff_ms.min(WAF_BACKOFF_CAP_MS);
+                    // Under --waf-evasion, scatter the cooldown by up to +50% so
+                    // the backoff itself isn't a fixed, fingerprintable interval.
+                    if args.waf_evasion {
+                        backoff_ms = backoff_ms.saturating_add(
+                            crate::utils::rate_limit::fast_jitter(backoff_ms / 2 + 1),
+                        );
+                    }
                     sleep(Duration::from_millis(backoff_ms)).await;
                 }
             } else {
@@ -1445,11 +1463,17 @@ pub async fn check_reflection_with_hpp_url(
         target.data.clone(),
     );
 
-    let inject_resp = crate::utils::send_with_retry(inject_request, 3, 5000).await;
+    let inject_resp =
+        crate::utils::send_with_retry(inject_request, args.retries, args.retry_delay).await;
     crate::tick_request_count();
 
-    if target.delay > 0 {
-        tokio::time::sleep(Duration::from_millis(target.delay)).await;
+    let pause = crate::utils::rate_limit::inter_request_pause(
+        target.delay,
+        target.waf_extra_delay_ms,
+        args.waf_evasion,
+    );
+    if !pause.is_zero() {
+        tokio::time::sleep(pause).await;
     }
 
     if let Ok(resp) = inject_resp {

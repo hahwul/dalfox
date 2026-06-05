@@ -166,7 +166,7 @@ pub(crate) async fn preflight_content_type(
         attempt += 1;
         let request_builder =
             crate::utils::build_preflight_request(&client, target, true, Some(8192));
-        crate::tick_request_count();
+        crate::record_outbound_request().await;
         match request_builder.send().await {
             Ok(r) => break r,
             Err(e) => {
@@ -240,7 +240,7 @@ pub(crate) async fn preflight_content_type(
     // Always fetch a small body for CSP parsing and AST analysis
     let mut response_body: Option<String> = None;
     let get_req = crate::utils::build_preflight_request(&client, target, false, Some(8192));
-    crate::tick_request_count();
+    crate::record_outbound_request().await;
     if let Ok(get_resp) = get_req.send().await {
         let get_status = get_resp.status().as_u16();
         let get_headers = get_resp.headers().clone();

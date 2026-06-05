@@ -75,11 +75,20 @@ Still uses header-based passive detection, but no provocation requests. Use when
 
 ### Evasion throttle
 
-When a WAF is detected, `--waf-evasion` automatically slows Dalfox to `workers=1` and `delay=3000ms` so you don't trip rate limiters:
+When a WAF is detected, `--waf-evasion` switches Dalfox to **adaptive timing** instead of a blunt slowdown: it randomizes the inter-request interval (jitter) so the cadence can't be fingerprinted, and escalates a cooldown pause whenever it sees a cluster of blocked responses (403/406/429/503). The per-WAF pacing hint is also applied automatically on detection, even without the flag.
 
 ```bash
 dalfox https://target.app --waf-evasion
 ```
+
+For a hard ceiling on the request rate — independent of WAF detection and shared across **all** workers and targets — combine it with `--rate-limit` (requests/second). This is the right knob when scanning behind a shared IP or against an edge WAF with a global threshold, since `--delay` only spaces a single worker:
+
+```bash
+# At most 15 requests/second across the whole scan, with adaptive evasion
+dalfox https://target.app --rate-limit 15 --waf-evasion
+```
+
+Transient failures (5xx, timeouts, connection resets) can be retried with `--retries` / `--retry-delay`; HTTP 429 is always retried with `Retry-After` honored.
 
 ### Filter weak fingerprints
 
