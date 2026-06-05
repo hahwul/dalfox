@@ -362,6 +362,32 @@ mod job_scope_tests {
     }
 
     #[tokio::test]
+    async fn with_job_scopes_rebinds_rate_limiter_across_spawn() {
+        // The limiter arm: a per-job rate limiter bound via with_job_rate_limiter
+        // must be visible inside the re-scoped worker (so rate_limit_acquire
+        // throttles against the job budget), while a bare spawn loses it.
+        // Deterministic — checks scope presence, not throttling timing.
+        let (with, without) = with_job_rate_limiter(5, async {
+            let scopes = JobScopes::capture();
+            let with = tokio::spawn(with_job_scopes(scopes, async {
+                RATE_LIMITER_JOB.try_with(|_| ()).is_ok()
+            }))
+            .await
+            .unwrap();
+            let without = tokio::spawn(async { RATE_LIMITER_JOB.try_with(|_| ()).is_ok() })
+                .await
+                .unwrap();
+            (with, without)
+        })
+        .await;
+        assert!(with, "re-scoped worker must see the per-job rate limiter");
+        assert!(
+            !without,
+            "bare spawn must not inherit the rate-limiter scope"
+        );
+    }
+
+    #[tokio::test]
     async fn capture_is_empty_and_passes_through_outside_any_job_scope() {
         // The CLI path: no per-job scope bound, so capture() is empty and
         // with_job_scopes is a transparent pass-through (no boxing).

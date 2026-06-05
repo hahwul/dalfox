@@ -2340,6 +2340,42 @@ async fn test_list_scans_rejects_unparseable_limit() {
     assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
 }
 
+#[tokio::test]
+async fn test_get_result_exposes_progress_for_error_jobs() {
+    // F10: an Error job still surfaces its progress block (params discovered
+    // before the failure) plus error_message, with a terminal poll interval of
+    // 0 — not an opaque error with no progress.
+    let state = make_state(None, None, false, false, "cb");
+    {
+        let mut jobs = state.jobs.lock().await;
+        let mut job = test_job(JobStatus::Error, None, "http://x/");
+        job.error_message = Some("boom".to_string());
+        job.progress
+            .params_total
+            .store(4, std::sync::atomic::Ordering::Relaxed);
+        job.progress
+            .params_tested
+            .store(1, std::sync::atomic::Ordering::Relaxed);
+        jobs.insert("errored".to_string(), job);
+    }
+    let resp = get_result_handler(
+        State(state.clone()),
+        HeaderMap::new(),
+        Path("errored".to_string()),
+        Query(Map::new()),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = response_body_string(resp).await;
+    let parsed: serde_json::Value = serde_json::from_str(&body).expect("json");
+    assert_eq!(parsed["data"]["status"], "error");
+    assert_eq!(parsed["data"]["error_message"], "boom");
+    assert_eq!(parsed["data"]["progress"]["params_total"], 4);
+    assert_eq!(parsed["data"]["progress"]["params_tested"], 1);
+    assert_eq!(parsed["data"]["progress"]["suggested_poll_interval_ms"], 0);
+}
+
 #[test]
 fn test_parse_bool_query_accepts_common_truthy_forms() {
     // F13: 1/true/yes/on (any case, trimmed) are truthy; everything else false.
