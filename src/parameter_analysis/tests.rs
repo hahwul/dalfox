@@ -1274,3 +1274,115 @@ fn slice_between_extracts_region() {
     assert_eq!(slice_between("aXXbYYc", "ZZ", "YY"), None);
     assert_eq!(slice_between("aXXb", "XX", "YY"), None);
 }
+
+/// Integration: an AWS-WAF-style inspection-window facade. Only the first 100
+/// bytes of the value are inspected; a `<`/`>` there blocks the whole request
+/// (403, no reflection), but the full value reflects raw — so a vector pushed
+/// past the window slips through (xssmaze `waf-facade/level2`). `active_probe_param`
+/// must detect this via the window-overflow probe: reclassify the angle
+/// brackets as valid and record the `wafpad` pre-encoding so payloads are sent
+/// past the window.
+#[tokio::test]
+async fn active_probe_detects_inspection_window_waf_and_sets_wafpad() {
+    use axum::{Router, extract::Query, http::StatusCode, response::IntoResponse, routing::get};
+    use std::collections::HashMap;
+    use std::net::Ipv4Addr;
+    use tokio::time::{Duration, sleep};
+
+    async fn window_waf(Query(p): Query<HashMap<String, String>>) -> impl IntoResponse {
+        let v = p.get("x").cloned().unwrap_or_default();
+        let window: String = v.chars().take(100).collect();
+        if window.contains('<') || window.contains('>') {
+            // Branded block page — note it does NOT echo the value.
+            (
+                StatusCode::FORBIDDEN,
+                "<h1>403 ERROR</h1> Request blocked by AWS WAF".to_string(),
+            )
+        } else {
+            // Reflects the full value raw (markers + specials intact).
+            (
+                StatusCode::OK,
+                format!("<html><body><div class='results'>{v}</div></body></html>"),
+            )
+        }
+    }
+
+    let app = Router::new().route("/cat", get(window_waf));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let target = parse_target(&format!("http://{addr}/cat?x=1")).unwrap();
+    let res = active_probe_param(
+        &target,
+        probe_param("x", Location::Query),
+        Arc::new(Semaphore::new(8)),
+    )
+    .await;
+
+    assert_eq!(
+        res.pre_encoding.as_deref(),
+        Some("wafpad"),
+        "size-limited inspection window should set the window-pad pre-encoding"
+    );
+    let valid = res.valid_specials.clone().unwrap_or_default();
+    assert!(
+        valid.contains(&'<') && valid.contains(&'>'),
+        "angle brackets must be reclassified valid once pushed past the window; got {valid:?}"
+    );
+}
+
+/// Counter-case: a WAF that blocks `<`/`>` *anywhere* in the value (no size
+/// window) must NOT be mistaken for an inspection-window WAF. The batched probe
+/// is blocked (None arm), the window-overflow probe is *also* blocked (padding
+/// can't help), so `window_overflow_probe` returns `None` and no `wafpad` is
+/// set — guarding against a false bypass.
+#[tokio::test]
+async fn active_probe_does_not_set_wafpad_for_position_independent_block() {
+    use axum::{Router, extract::Query, http::StatusCode, response::IntoResponse, routing::get};
+    use std::collections::HashMap;
+    use std::net::Ipv4Addr;
+    use tokio::time::{Duration, sleep};
+
+    async fn block_anywhere(Query(p): Query<HashMap<String, String>>) -> impl IntoResponse {
+        let v = p.get("x").cloned().unwrap_or_default();
+        // Inspect the WHOLE value, not a leading window — padding never helps.
+        if v.contains('<') || v.contains('>') {
+            (StatusCode::FORBIDDEN, "<h1>403</h1> blocked".to_string())
+        } else {
+            (
+                StatusCode::OK,
+                format!("<html><body><div class='results'>{v}</div></body></html>"),
+            )
+        }
+    }
+
+    let app = Router::new().route("/cat", get(block_anywhere));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let target = parse_target(&format!("http://{addr}/cat?x=1")).unwrap();
+    let res = active_probe_param(
+        &target,
+        probe_param("x", Location::Query),
+        Arc::new(Semaphore::new(8)),
+    )
+    .await;
+
+    assert_ne!(
+        res.pre_encoding.as_deref(),
+        Some("wafpad"),
+        "genuine filtering (stripping past any window) must not be treated as window-limited"
+    );
+}

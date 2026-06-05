@@ -1432,11 +1432,18 @@ impl ScanWorkerCtx {
                     // discovery, so the PoC URL points at the actual sink.
                     let base =
                         crate::scanning::url_inject::effective_query_base(&self.target.url, param);
-                    let result_url = crate::scanning::url_inject::build_injected_url(
-                        &base,
-                        param,
+                    // Build the PoC URL from the *as-sent* payload (pre-encoding
+                    // applied — base64 / multi-URL / WAF window-pad) so the
+                    // reported URL actually reproduces the finding.
+                    // `build_injected_url` preserves existing %-encoding, matching
+                    // the dedicated reflection-check PoC path. No-op for the common
+                    // case (no pre-encoding → payload unchanged).
+                    let poc_payload = crate::encoding::pre_encoding::apply_param_encoding(
                         &reflection_payload,
+                        param,
                     );
+                    let result_url =
+                        crate::scanning::url_inject::build_injected_url(&base, param, &poc_payload);
 
                     let reflection_note = reflection_kind_note(kind);
 
@@ -1608,8 +1615,12 @@ impl ScanWorkerCtx {
                     // when the param came from form discovery.
                     let base =
                         crate::scanning::url_inject::effective_query_base(&self.target.url, param);
+                    // PoC URL from the as-sent payload (see reflection path above)
+                    // so window-pad / base64 / multi-URL findings reproduce.
+                    let poc_payload =
+                        crate::encoding::pre_encoding::apply_param_encoding(&dom_payload, param);
                     let result_url =
-                        crate::scanning::url_inject::build_injected_url(&base, param, &dom_payload);
+                        crate::scanning::url_inject::build_injected_url(&base, param, &poc_payload);
 
                     // Determine which evidence path proved exploitability
                     // so the V finding's message reflects the route.

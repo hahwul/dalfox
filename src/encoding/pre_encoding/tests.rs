@@ -45,11 +45,37 @@ fn test_pre_encoding_type_roundtrip() {
         PreEncodingType::DoubleBase64,
         PreEncodingType::DoubleUrl,
         PreEncodingType::TripleUrl,
+        PreEncodingType::WafWindowPad,
     ] {
         let s = enc.as_str();
         let parsed = PreEncodingType::parse(s).unwrap();
         assert_eq!(&parsed, enc);
     }
+}
+
+#[test]
+fn test_waf_window_pad_prepends_inert_prefix() {
+    // The WAF inspection-window-overflow transform prepends a benign filler so
+    // the real vector lands past a size-limited WAF inspection window. The
+    // original payload must survive verbatim as a suffix (so reflection / DOM
+    // matching against the raw payload still works), and the prefix must carry
+    // no HTML/JS metacharacters that could shift the reflection context.
+    let payload = "<svg onload=alert(1)>";
+    let out = apply_pre_encoding(payload, &Some("wafpad".to_string()));
+
+    let pad = waf_window_pad();
+    assert_eq!(pad.len(), WAF_WINDOW_PAD_LEN);
+    assert_eq!(out, format!("{pad}{payload}"));
+    assert!(
+        out.ends_with(payload),
+        "raw payload must survive as a suffix"
+    );
+    assert!(
+        out.len() > WAF_WINDOW_PAD_LEN,
+        "padded payload must exceed the inspection window"
+    );
+    // The pad itself must be context-inert.
+    assert!(!pad.contains(['<', '>', '"', '\'', '&', '/', '=', ';', '(', ')']));
 }
 
 #[test]
