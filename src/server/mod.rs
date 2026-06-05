@@ -35,8 +35,9 @@ pub(crate) use serde::{Deserialize, Serialize};
 
 pub(crate) use crate::cmd::scan::ScanArgs;
 pub(crate) use crate::job::{
-    AbortOnDrop, JOB_RETENTION_SECS, Job, JobProgress, JobStatus, MAX_DELAY_MS, MAX_TIMEOUT_SECS,
-    MAX_WORKERS, has_http_scheme, now_ms, parse_job_status, purge_expired_jobs as purge_jobs_map,
+    AbortOnDrop, JOB_RETENTION_SECS, Job, JobProgress, JobStatus, MAX_DELAY_MS,
+    MAX_SCAN_TIMEOUT_SECS, MAX_TIMEOUT_SECS, MAX_WORKERS, effective_scan_timeout, has_http_scheme,
+    now_ms, parse_job_status, purge_expired_jobs as purge_jobs_map, run_within_scan_budget,
     send_reachability_probe, unreachable_error_message,
 };
 pub(crate) use crate::parameter_analysis::analyze_parameters;
@@ -137,6 +138,7 @@ pub async fn run_server(args: ServerArgs) {
         allow_headers,
         jsonp_enabled: args.jsonp,
         callback_param_name: args.callback_param_name.clone(),
+        scan_timeout: args.scan_timeout,
     };
 
     let app = Router::new()

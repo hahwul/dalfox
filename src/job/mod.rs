@@ -50,6 +50,10 @@ pub const MAX_TIMEOUT_SECS: u64 = 299;
 pub const MAX_DELAY_MS: u64 = 9999;
 /// Maximum worker count accepted via scan options (inclusive).
 pub const MAX_WORKERS: usize = 500;
+/// Maximum whole-scan wall-clock budget accepted via scan options (inclusive,
+/// 24h). `0` always means "no budget" (unbounded). The ceiling only exists to
+/// reject obvious typos; a real long-running deep scan can still set hours.
+pub const MAX_SCAN_TIMEOUT_SECS: u64 = 86_400;
 
 /// Current unix time in milliseconds (UTC).
 pub fn now_ms() -> i64 {
@@ -191,6 +195,62 @@ pub fn unreachable_error_message() -> String {
         "target unreachable: connection failed ({})",
         crate::cmd::error_codes::CONNECTION_FAILED
     )
+}
+
+/// Resolve the effective whole-scan wall-clock budget (seconds) for a job from
+/// a per-request value and an optional server-side cap.
+///
+/// - `0` means "no budget" (unbounded), matching the CLI's `--scan-timeout 0`.
+/// - When the server sets a cap (`Some(c)` with `c > 0`) it is an *upper bound*:
+///   a request may ask for a shorter budget but cannot raise it past the cap or
+///   disable it (a requested `0` is clamped up to the cap). This lets an
+///   operator bound every submitted scan regardless of what an (authenticated)
+///   client requests, without breaking the unbounded default when no cap is set.
+///
+/// Shared by the REST server (per-request option + `--scan-timeout` cap) and the
+/// MCP scan tool (per-call value, no server cap) so the budget semantics match.
+pub fn effective_scan_timeout(requested: Option<u64>, server_cap: Option<u64>) -> u64 {
+    match (requested, server_cap.filter(|c| *c > 0)) {
+        (Some(r), Some(cap)) => {
+            if r == 0 {
+                cap
+            } else {
+                r.min(cap)
+            }
+        }
+        (Some(r), None) => r,
+        (None, Some(cap)) => cap,
+        (None, None) => 0,
+    }
+}
+
+/// Drive `fut` to completion, but abort it after `budget_secs` of wall-clock
+/// time when `budget_secs > 0`. On expiry the shared `cancel` flag is set — so
+/// any scan workers still in flight wind down at their next cancellation
+/// checkpoint, exactly as a user-initiated cancel would — and `true` is
+/// returned. `budget_secs == 0` disables the cap and always returns `false`.
+///
+/// Used by the REST server and MCP runners to bound a single scan's total
+/// runtime; the CLI enforces the same `--scan-timeout` budget in its scan loop.
+/// Wrapping (rather than only setting the cancel flag from a watchdog) is what
+/// bounds phases that don't poll the flag — discovery, mining, and the initial
+/// AST fetch — so a slow target can't keep a scan alive past its budget there.
+pub async fn run_within_scan_budget<F>(budget_secs: u64, cancel: &Arc<AtomicBool>, fut: F) -> bool
+where
+    F: std::future::Future<Output = ()>,
+{
+    if budget_secs == 0 {
+        fut.await;
+        return false;
+    }
+    let budget = std::time::Duration::from_secs(budget_secs);
+    match tokio::time::timeout(budget, fut).await {
+        Ok(()) => false,
+        Err(_elapsed) => {
+            cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+            true
+        }
+    }
 }
 
 pub async fn send_reachability_probe(target: &Target) -> bool {

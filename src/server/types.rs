@@ -24,6 +24,14 @@ pub struct ServerArgs {
     #[arg(long = "log-file")]
     pub log_file: Option<String>,
 
+    /// Server-wide cap on each scan's total wall-clock runtime, in seconds
+    /// (0 or unset = unbounded). Applied to every submitted scan: a request's
+    /// own scan_timeout may be shorter but cannot exceed or disable this cap.
+    /// Bounds long/deep scans so a single target can't pin a worker indefinitely.
+    #[clap(help_heading = "SERVER")]
+    #[arg(long = "scan-timeout")]
+    pub scan_timeout: Option<u64>,
+
     /// Comma-separated list of allowed origins for CORS. Supports:
     /// - "*" (match all)
     /// - exact origins (http://localhost:3000)
@@ -75,6 +83,9 @@ pub(crate) struct AppState {
     // JSONP
     pub(crate) jsonp_enabled: bool,
     pub(crate) callback_param_name: String,
+    // Server-wide cap on per-scan wall-clock runtime (seconds). `None`/`Some(0)`
+    // leaves scans unbounded unless a request supplies its own scan_timeout.
+    pub(crate) scan_timeout: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,6 +137,10 @@ pub(crate) struct ScanOptions {
     pub(crate) skip_ast_analysis: Option<bool>,
     /// Also report outdated / known-vulnerable JS libraries (informational, CWE-1104).
     pub(crate) detect_outdated_libs: Option<bool>,
+    /// Whole-scan wall-clock budget in seconds (0 = unbounded). When the server
+    /// was started with `--scan-timeout`, that value caps this one — a request
+    /// may ask for a shorter budget but cannot exceed or disable the cap.
+    pub(crate) scan_timeout: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]

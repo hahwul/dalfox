@@ -54,6 +54,7 @@ Submit a scan. Returns immediately.
   "headers": ["Authorization: Bearer token"],
   "encoders": ["url", "html"],
   "timeout": 10,
+  "scan_timeout": 0,
   "workers": 50,
   "blind_callback_url": "https://callback.example",
   "deep_scan": false,
@@ -65,6 +66,12 @@ Submit a scan. Returns immediately.
 `detect_outdated_libs` is opt-in (default `false`): set it `true` to also emit
 informational `[I]` findings for outdated / known-vulnerable JS libraries
 (CWE-1104, 0 extra requests). Left off, the scan reports only XSS.
+
+`scan_timeout` is the whole-scan wall-clock budget in seconds (default `0` =
+unbounded), distinct from the per-request `timeout`. When it trips, the scan
+stops, keeps any partial findings, and settles as `cancelled` with an
+`error_message` mentioning `scan_timeout`. Set it to bound long or `deep_scan`
+runs so an agent's poll loop is guaranteed to terminate.
 
 Response:
 
