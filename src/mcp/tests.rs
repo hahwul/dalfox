@@ -48,6 +48,7 @@ fn default_scan_params(target: &str) -> ScanWithDalfoxParams {
         detect_outdated_libs: false,
         blind_callback_url: None,
         workers: 1,
+        rate_limit: 0,
     }
 }
 
@@ -978,6 +979,22 @@ async fn test_scan_with_dalfox_accepts_workers_at_max() {
     mcp.scan_with_dalfox(Parameters(params))
         .await
         .expect("workers == MAX_WORKERS must be accepted");
+}
+
+#[tokio::test]
+async fn test_scan_with_dalfox_accepts_rate_limit() {
+    // F2: a per-call rate_limit is accepted and the scan queues normally.
+    let mcp = DalfoxMcp::new();
+    let params = ScanWithDalfoxParams {
+        rate_limit: 5,
+        ..default_scan_params("http://127.0.0.1:1/?q=a")
+    };
+    let resp = mcp
+        .scan_with_dalfox(Parameters(params))
+        .await
+        .expect("scan with rate_limit must queue");
+    let payload = parse_result_json(&resp);
+    assert_eq!(payload["status"], "queued");
 }
 
 #[tokio::test]

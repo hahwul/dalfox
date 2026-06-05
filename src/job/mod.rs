@@ -55,6 +55,69 @@ pub const MAX_WORKERS: usize = 500;
 /// reject obvious typos; a real long-running deep scan can still set hours.
 pub const MAX_SCAN_TIMEOUT_SECS: u64 = 86_400;
 
+/// Cap on the number of distinct parameters a single async (server/MCP) scan
+/// will test. `analyze_parameters` can discover/mine a very large parameter set
+/// on a hostile or sprawling target, and scanning fans out O(params × payloads)
+/// worker tasks — so an uncapped count amplifies CPU / memory / outbound load
+/// from one submission. Beyond this the candidate set is truncated with a log.
+pub const MAX_DISCOVERED_PARAMS: usize = 512;
+
+/// Default ceiling on concurrently active (queued + running) scans for the MCP
+/// runtime, which — unlike the REST server's `--max-concurrent-scans` — has no
+/// config surface. Submissions past this are rejected so an agent loop can't
+/// grow the job map / blocking pool without bound.
+pub const MAX_ACTIVE_SCANS_MCP: usize = 100;
+
+/// Resolve the effective per-scan request-rate limit (requests/second) from a
+/// per-request value and an optional server-side cap.
+///
+/// - `0` means "no limit" (unlimited), matching the CLI's `--rate-limit 0`.
+/// - When the server sets a cap (`Some(c)` with `c > 0`) it is an *upper bound*
+///   on outbound RPS: a request may ask for a lower rate but cannot raise it
+///   past the cap or disable it (a requested `0` is clamped down to the cap).
+///   This lets an operator bound the load every submitted scan can put on a
+///   target, regardless of what an (authenticated) client requests.
+pub fn effective_rate_limit(requested: Option<u32>, server_cap: Option<u32>) -> u32 {
+    match (requested, server_cap.filter(|c| *c > 0)) {
+        (Some(r), Some(cap)) => {
+            if r == 0 {
+                cap
+            } else {
+                r.min(cap)
+            }
+        }
+        (Some(r), None) => r,
+        (None, Some(cap)) => cap,
+        (None, None) => 0,
+    }
+}
+
+/// Truncate a target's discovered parameter set to [`MAX_DISCOVERED_PARAMS`],
+/// returning how many were dropped (0 if already under the cap). Shared by the
+/// REST server, MCP, and both preflight paths so every async front-end bounds
+/// the per-scan fan-out identically. Callers should log when the return is > 0.
+pub fn cap_reflection_params(target: &mut Target) -> usize {
+    let n = target.reflection_params.len();
+    if n > MAX_DISCOVERED_PARAMS {
+        target.reflection_params.truncate(MAX_DISCOVERED_PARAMS);
+        n - MAX_DISCOVERED_PARAMS
+    } else {
+        0
+    }
+}
+
+/// Split an HTTP-style `Cookie` header value (`a=b; c=d`) into `(name, value)`
+/// pairs, trimming whitespace around each pair and around the `=`. Shared by the
+/// REST server and the MCP scan/preflight paths so a multi-cookie value parses
+/// identically everywhere (a single `split_once('=')` would fold `; c=d` into
+/// the first value and leave `=`-adjacent whitespace in).
+pub fn split_cookie_pairs(raw: &str) -> Vec<(String, String)> {
+    raw.split(';')
+        .filter_map(|p| p.trim().split_once('='))
+        .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+        .collect()
+}
+
 /// Current unix time in milliseconds (UTC).
 pub fn now_ms() -> i64 {
     chrono::Utc::now().timestamp_millis()

@@ -167,6 +167,7 @@ Returns version, `auth_required`, and the list of supported endpoints. Good for 
     "worker": 50,
     "delay": 0,
     "timeout": 10,
+    "rate_limit": 0,
     "scan_timeout": 0,
     "blind": "https://callback.interact.sh",
     "method": "POST",
@@ -196,14 +197,28 @@ Fields mirror the CLI flags. See the [CLI reference](../../reference/cli/) for m
 outdated / known-vulnerable JS libraries as informational `[I]` findings
 (CWE-1104, 0 extra requests). The same key works as a `GET /scan` query parameter.
 
+`rate_limit` caps the scan's outbound requests/second (`0` = unlimited, the
+default), enforced across all worker tasks. The server-wide `--rate-limit` flag
+is an upper bound: a request may ask for a lower rate but cannot exceed or
+disable it.
+
 `scan_timeout` is the whole-scan wall-clock budget in seconds (default `0` =
 unbounded), distinct from the per-request `timeout`. When the budget is reached
 the scan stops, keeps whatever partial findings it gathered, and settles as
 `cancelled` with an `error_message` that mentions `scan_timeout` (so you can tell
-a timeout apart from a client-issued cancel). Start the server with
-`--scan-timeout <secs>` to cap **every** submitted scan: a request may ask for a
-shorter budget but cannot exceed or disable the server cap — useful for bounding
-long or `deep_scan` jobs so one target can't pin a worker indefinitely.
+a timeout apart from a client-issued cancel). The server-wide `--scan-timeout`
+flag caps every submitted scan the same way `--rate-limit` does.
+
+### Server flags worth setting
+
+- `--rate-limit <rps>` — cap every scan's outbound request rate (protects targets).
+- `--scan-timeout <secs>` — hard wall-clock budget per scan; bounds long or
+  `deep_scan` jobs so one target can't pin a worker indefinitely.
+- `--max-concurrent-scans <n>` — reject new submissions with `503` once `n`
+  scans are queued/running (default `100`, `0` = unlimited). Bounds memory and
+  the blocking pool against a flood of submissions.
+- `--max-body-bytes <n>` — explicit request-body cap for `POST /scan` and
+  `/preflight` (default `1048576` = 1 MiB); oversized bodies get `413`.
 
 ## Job lifecycle
 

@@ -28,7 +28,10 @@ fn make_state(
         allow_headers: "Content-Type,X-API-KEY,Authorization".to_string(),
         jsonp_enabled: jsonp,
         callback_param_name: cb_name.to_string(),
+        rate_limit: None,
         scan_timeout: None,
+        // 0 = unlimited so existing tests aren't rejected by the concurrency cap.
+        max_concurrent_scans: 0,
     }
 }
 
@@ -1071,6 +1074,7 @@ async fn test_run_scan_job_success_marks_done() {
         skip_ast_analysis: None,
         // Exercise the ON path: opts -> job_runner -> ScanArgs -> analysis gate.
         detect_outdated_libs: Some(true),
+        rate_limit: None,
         scan_timeout: None,
     };
 
@@ -1407,7 +1411,10 @@ async fn test_run_server_returns_on_invalid_bind_address() {
         host: "not a valid host".to_string(),
         api_key: None,
         log_file: None,
+        rate_limit: None,
         scan_timeout: None,
+        max_concurrent_scans: 100,
+        max_body_bytes: 1_048_576,
         allowed_origins: None,
         jsonp: false,
         callback_param_name: "callback".to_string(),
@@ -1429,7 +1436,10 @@ async fn test_run_server_returns_on_bind_failure_after_state_build() {
         host: Ipv4Addr::LOCALHOST.to_string(),
         api_key: Some("server-key".to_string()),
         log_file: None,
+        rate_limit: None,
         scan_timeout: None,
+        max_concurrent_scans: 100,
+        max_body_bytes: 1_048_576,
         allowed_origins: Some(
             "*,regex:^https://.*\\.example\\.com$,https://*.corp.local".to_string(),
         ),
@@ -2398,4 +2408,114 @@ async fn test_cancel_scan_handler_purge_deletes_terminal_job() {
 
     let jobs = state.jobs.lock().await;
     assert!(!jobs.contains_key("done-purge"));
+}
+
+#[tokio::test]
+async fn test_start_scan_handler_503_when_at_capacity() {
+    // F3: with max_concurrent_scans=1 and one active (Running) job, a new
+    // submission is rejected with 503 and no job is queued.
+    let mut state = make_state(None, None, false, false, "callback");
+    state.max_concurrent_scans = 1;
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert(
+            "active-1".to_string(),
+            test_job(JobStatus::Running, None, "http://busy/"),
+        );
+    }
+    let resp = start_scan_handler(
+        State(state.clone()),
+        HeaderMap::new(),
+        Query(Map::new()),
+        Ok(Json(ScanRequest {
+            url: "http://example.com".to_string(),
+            options: None,
+        })),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
+    let body = response_body_string(resp).await;
+    assert!(body.contains("at capacity"), "got {body}");
+    // No new job queued — still just the one we seeded.
+    assert_eq!(state.jobs.lock().await.len(), 1);
+}
+
+#[test]
+fn test_sanitize_log_message_escapes_crlf() {
+    // F11: clean strings are passed through unchanged (borrowed)...
+    assert_eq!(sanitize_log_message("clean line").as_ref(), "clean line");
+    // ...but CR/LF that could forge a log line are escaped, tab preserved.
+    let forged = sanitize_log_message("http://x/\n[2026] [ERR] forged\r");
+    assert!(
+        !forged.contains('\n') && !forged.contains('\r'),
+        "got {forged}"
+    );
+    assert!(forged.contains("\\n") && forged.contains("\\r"));
+    assert!(sanitize_log_message("a\tb").contains('\t'));
+}
+
+#[tokio::test]
+async fn test_list_scans_rejects_unparseable_limit() {
+    // F12: a present-but-unparseable pagination value is a 400, matching GET
+    // /scan rather than the old silent "return everything" fallback.
+    let state = make_state(None, None, false, false, "cb");
+    let mut params = Map::new();
+    params.insert("limit".to_string(), "abc".to_string());
+    let resp = list_scans_handler(State(state), HeaderMap::new(), Query(params))
+        .await
+        .into_response();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_get_result_exposes_progress_for_error_jobs() {
+    // F10: an Error job still surfaces its progress block (params discovered
+    // before the failure) plus error_message, with a terminal poll interval of
+    // 0 — not an opaque error with no progress.
+    let state = make_state(None, None, false, false, "cb");
+    {
+        let mut jobs = state.jobs.lock().await;
+        let mut job = test_job(JobStatus::Error, None, "http://x/");
+        job.error_message = Some("boom".to_string());
+        job.progress
+            .params_total
+            .store(4, std::sync::atomic::Ordering::Relaxed);
+        job.progress
+            .params_tested
+            .store(1, std::sync::atomic::Ordering::Relaxed);
+        jobs.insert("errored".to_string(), job);
+    }
+    let resp = get_result_handler(
+        State(state.clone()),
+        HeaderMap::new(),
+        Path("errored".to_string()),
+        Query(Map::new()),
+    )
+    .await
+    .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = response_body_string(resp).await;
+    let parsed: serde_json::Value = serde_json::from_str(&body).expect("json");
+    assert_eq!(parsed["data"]["status"], "error");
+    assert_eq!(parsed["data"]["error_message"], "boom");
+    assert_eq!(parsed["data"]["progress"]["params_total"], 4);
+    assert_eq!(parsed["data"]["progress"]["params_tested"], 1);
+    assert_eq!(parsed["data"]["progress"]["suggested_poll_interval_ms"], 0);
+}
+
+#[test]
+fn test_parse_bool_query_accepts_common_truthy_forms() {
+    // F13: 1/true/yes/on (any case, trimmed) are truthy; everything else false.
+    for v in ["1", "true", "TRUE", "yes", "on", "  True  "] {
+        let mut p = Map::new();
+        p.insert("flag".to_string(), v.to_string());
+        assert!(parse_bool_query(&p, "flag"), "should accept {v:?}");
+    }
+    for v in ["0", "false", "no", "off", "", "2"] {
+        let mut p = Map::new();
+        p.insert("flag".to_string(), v.to_string());
+        assert!(!parse_bool_query(&p, "flag"), "should reject {v:?}");
+    }
+    assert!(!parse_bool_query(&Map::new(), "absent"));
 }

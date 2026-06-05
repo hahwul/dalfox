@@ -24,6 +24,13 @@ pub struct ServerArgs {
     #[arg(long = "log-file")]
     pub log_file: Option<String>,
 
+    /// Server-wide cap on each scan's outbound request rate (requests/second;
+    /// 0 or unset = unlimited). Applied to every submitted scan: a request's
+    /// own `rate_limit` may be lower but cannot exceed or disable this cap.
+    #[clap(help_heading = "SERVER")]
+    #[arg(long = "rate-limit")]
+    pub rate_limit: Option<u32>,
+
     /// Server-wide cap on each scan's total wall-clock runtime, in seconds
     /// (0 or unset = unbounded). Applied to every submitted scan: a request's
     /// own scan_timeout may be shorter but cannot exceed or disable this cap.
@@ -31,6 +38,20 @@ pub struct ServerArgs {
     #[clap(help_heading = "SERVER")]
     #[arg(long = "scan-timeout")]
     pub scan_timeout: Option<u64>,
+
+    /// Maximum number of concurrently active (queued + running) scans. Once the
+    /// cap is hit, new submissions get HTTP 503 until a slot frees. 0 disables
+    /// the cap (unbounded). Bounds memory + the blocking-pool against a flood
+    /// of submissions.
+    #[clap(help_heading = "SERVER")]
+    #[arg(long = "max-concurrent-scans", default_value_t = 100)]
+    pub max_concurrent_scans: usize,
+
+    /// Maximum accepted request-body size (bytes) for POST /scan and /preflight.
+    /// Replaces axum's implicit 2 MiB default with an explicit, documented bound.
+    #[clap(help_heading = "SERVER")]
+    #[arg(long = "max-body-bytes", default_value_t = 1_048_576)]
+    pub max_body_bytes: usize,
 
     /// Comma-separated list of allowed origins for CORS. Supports:
     /// - "*" (match all)
@@ -83,9 +104,14 @@ pub(crate) struct AppState {
     // JSONP
     pub(crate) jsonp_enabled: bool,
     pub(crate) callback_param_name: String,
+    // Server-wide per-scan request-rate cap (RPS). None/Some(0) leaves scans
+    // unbounded unless a request supplies its own rate_limit.
+    pub(crate) rate_limit: Option<u32>,
     // Server-wide cap on per-scan wall-clock runtime (seconds). `None`/`Some(0)`
     // leaves scans unbounded unless a request supplies its own scan_timeout.
     pub(crate) scan_timeout: Option<u64>,
+    // Max concurrent (queued + running) scans; 0 = unlimited.
+    pub(crate) max_concurrent_scans: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -137,6 +163,9 @@ pub(crate) struct ScanOptions {
     pub(crate) skip_ast_analysis: Option<bool>,
     /// Also report outdated / known-vulnerable JS libraries (informational, CWE-1104).
     pub(crate) detect_outdated_libs: Option<bool>,
+    /// Per-scan outbound request rate (requests/second; 0 = unlimited). Capped
+    /// by the server's `--rate-limit` when set.
+    pub(crate) rate_limit: Option<u32>,
     /// Whole-scan wall-clock budget in seconds (0 = unbounded). When the server
     /// was started with `--scan-timeout`, that value caps this one — a request
     /// may ask for a shorter budget but cannot exceed or disable the cap.

@@ -633,7 +633,7 @@ impl ScanArgs {
             rate_limit: 0,
             retries: 0,
             retry_delay: 1000,
-            waf_min_confidence: 0.0,
+            waf_min_confidence: DEFAULT_WAF_MIN_CONFIDENCE,
             remote_payloads: vec![],
             remote_wordlists: vec![],
         }

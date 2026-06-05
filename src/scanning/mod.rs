@@ -1746,6 +1746,18 @@ impl ScanWorkerCtx {
     }
 }
 
+/// Outcome of a `run_scanning` call. Currently carries only the number of
+/// per-parameter worker tasks that panicked. The CLI ignores it (it returns it
+/// as a statement value); the REST server and MCP runners inspect
+/// `worker_panics` so a scan that lost workers to a panic can be surfaced as a
+/// partial/failed result instead of being silently reported `done` — a worker
+/// panic means the param's findings are incomplete, indistinguishable from
+/// "scanned, found nothing" otherwise.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ScanRunReport {
+    pub worker_panics: usize,
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn run_scanning(
     target: &Target,
@@ -1762,10 +1774,10 @@ pub async fn run_scanning(
     // until the very end. `None` for the CLI, which renders its own
     // indicatif progress bar from `total_tasks` instead.
     params_done: Option<Arc<AtomicU32>>,
-) {
+) -> ScanRunReport {
     // Short-circuit scanning when skip_xss_scanning is enabled (e.g., in unit tests)
     if args.skip_xss_scanning {
-        return;
+        return ScanRunReport::default();
     }
     let arc_target = Arc::new(target.clone());
     let shared_client = Arc::new(arc_target.build_client_or_default());
@@ -1810,6 +1822,14 @@ pub async fn run_scanning(
 
     // === Stage 5 & 6: spawn one worker per parameter (Reflection + DOM) ===
     let mut handles = vec![];
+    // Capture the per-job task-local scopes (request counter, WAF backoff, rate
+    // limiter) bound by the REST/MCP runners. `tokio::spawn` does NOT inherit
+    // task-locals, so each worker re-enters them via `with_job_scopes`;
+    // otherwise the injection-phase requests (the bulk of the scan) would bump
+    // only the process-wide globals — under-counting per-job `requests_sent`
+    // and leaking one scan's WAF backoff into unrelated concurrent scans. No-op
+    // on the CLI, which binds no per-job scope.
+    let job_scopes = crate::JobScopes::capture();
     for (param_clone, reflection_payloads, dom_payloads) in param_jobs {
         // Check cancellation before spawning next param task
         if ctx.cancelled() {
@@ -1846,11 +1866,14 @@ pub async fn run_scanning(
                     format!("Completed scanning {}", target.url),
                 );
             }
-            return;
+            return ScanRunReport::default();
         }
 
         let ctx = ctx.clone();
-        let handle = tokio::spawn(async move {
+        // Re-enter the per-job scopes inside the spawned worker so the requests
+        // it sends are tallied and rate-limited against THIS job, not the
+        // process-wide globals (see `JobScopes`). Cheap no-op on the CLI.
+        let handle = tokio::spawn(crate::with_job_scopes(job_scopes.clone(), async move {
             ctx.scan_param(param_clone, reflection_payloads, dom_payloads)
                 .await;
             // Bump the live completion counter after this parameter is fully
@@ -1860,12 +1883,20 @@ pub async fn run_scanning(
             if let Some(done) = &ctx.params_done {
                 done.fetch_add(1, Ordering::Relaxed);
             }
-        });
+        }));
         handles.push(handle);
     }
 
+    let mut worker_panics = 0usize;
     for handle in handles {
         if let Err(e) = handle.await {
+            // A JoinError from a worker is almost always a panic inside
+            // scan_param (a scanning-pipeline bug). Count it so the caller can
+            // mark the scan as partial/failed instead of reporting a clean
+            // `done`; the param's findings are incomplete either way.
+            if e.is_panic() {
+                worker_panics += 1;
+            }
             eprintln!("[!] scanning task failed: {e}");
         }
     }
@@ -1884,6 +1915,8 @@ pub async fn run_scanning(
             format!("Completed scanning {}", target.url),
         );
     }
+
+    ScanRunReport { worker_panics }
 }
 
 /// Drop Reflected findings on the *current target* that are already covered
