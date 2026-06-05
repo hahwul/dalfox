@@ -14,6 +14,14 @@ pub const DEFAULT_DELAY_MS: u64 = 0;
 pub const DEFAULT_WORKERS: usize = 50;
 pub const DEFAULT_MAX_CONCURRENT_TARGETS: usize = 50;
 pub const DEFAULT_MAX_TARGETS_PER_HOST: usize = 100;
+/// Default for `--rate-limit`: 0 = unlimited (no token bucket installed),
+/// preserving the historical "only `--delay` paces requests" behavior.
+pub const DEFAULT_RATE_LIMIT: u32 = 0;
+/// Default for `--retries`: 0 = do not retry 5xx / transient transport
+/// errors (HTTP 429 is always retried regardless; see `send_with_retry`).
+pub const DEFAULT_RETRIES: u32 = 0;
+/// Default for `--retry-delay`: base for the exponential retry backoff (ms).
+pub const DEFAULT_RETRY_DELAY_MS: u64 = 1000;
 /// Floor for WAF fingerprint confidence. Weak signals like
 /// `Server: Google Frontend` (0.15 — every Google-hosted property has it) or
 /// generic "Request blocked" body markers (0.3) are filtered out by default.
@@ -28,6 +36,15 @@ pub const DEFAULT_WAF_MIN_CONFIDENCE: f32 = 0.3;
 pub const CLI_MAX_TIMEOUT_SECS: u64 = 3600;
 pub const CLI_MAX_DELAY_MS: u64 = 60_000;
 pub const CLI_MAX_WORKERS: usize = 500;
+/// Sanity cap for `--rate-limit` (req/sec). A value past this almost always
+/// means a typo (e.g. a delay in ms typed into the rate field); the limiter
+/// is for throttling, not for unbounded fan-out.
+pub const CLI_MAX_RATE_LIMIT: u32 = 100_000;
+/// Sanity cap for `--retries`. Retrying more than this turns a transient
+/// blip into a multi-minute hang per request.
+pub const CLI_MAX_RETRIES: u32 = 100;
+/// Sanity cap for `--retry-delay` (ms), matching `--delay`'s ceiling.
+pub const CLI_MAX_RETRY_DELAY_MS: u64 = 60_000;
 // Default HTTP method (used by CLI and target parsing)
 pub const DEFAULT_METHOD: &str = "GET";
 
@@ -324,6 +341,29 @@ pub struct ScanArgs {
     pub delay: u64,
 
     #[clap(help_heading = "NETWORK")]
+    /// Cap the global outbound request rate in requests/second, shared across
+    /// all workers and targets (0 = unlimited). Unlike --delay (which only
+    /// spaces a single worker's requests), this bounds the total in-flight
+    /// burst from workers × concurrent targets — friendlier to shared-IP /
+    /// edge WAF thresholds. Example: --rate-limit 20
+    #[arg(long = "rate-limit", short = 'r', visible_alias = "rl", default_value_t = crate::cmd::scan::DEFAULT_RATE_LIMIT)]
+    pub rate_limit: u32,
+
+    #[clap(help_heading = "NETWORK")]
+    /// Retry failed requests on HTTP 5xx and transient transport errors
+    /// (timeouts, connection resets) up to this many times (0 = off). HTTP
+    /// 429 is always retried regardless of this value. Example: --retries 2
+    #[arg(long, default_value_t = crate::cmd::scan::DEFAULT_RETRIES)]
+    pub retries: u32,
+
+    #[clap(help_heading = "NETWORK")]
+    /// Base delay (ms) for the exponential backoff between retries
+    /// (--retries). Doubles each attempt and is capped internally; a server
+    /// Retry-After header takes precedence on 429. Example: --retry-delay 500
+    #[arg(long = "retry-delay", default_value_t = crate::cmd::scan::DEFAULT_RETRY_DELAY_MS)]
+    pub retry_delay: u64,
+
+    #[clap(help_heading = "NETWORK")]
     /// Proxy URL (e.g., http://localhost:8080, socks5://localhost:9050)
     #[arg(long)]
     pub proxy: Option<String>,
@@ -472,7 +512,11 @@ pub struct ScanArgs {
     pub force_waf: Option<String>,
 
     #[clap(help_heading = "WAF")]
-    /// Auto-throttle scanning when WAF is detected (workers=1, delay=3000ms)
+    /// Adaptive WAF evasion: when a WAF is detected, randomize inter-request
+    /// timing (jitter) and escalate a cooldown pause on clusters of blocked
+    /// responses, instead of the old blunt workers=1/delay=3000 preset. Pairs
+    /// well with --rate-limit. The per-WAF pacing hint is applied automatically
+    /// on detection even without this flag.
     #[arg(long)]
     pub waf_evasion: bool,
 
@@ -586,6 +630,9 @@ impl ScanArgs {
             skip_waf_probe: false,
             force_waf: None,
             waf_evasion: false,
+            rate_limit: 0,
+            retries: 0,
+            retry_delay: 1000,
             waf_min_confidence: 0.0,
             remote_payloads: vec![],
             remote_wordlists: vec![],

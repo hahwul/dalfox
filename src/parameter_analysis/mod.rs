@@ -505,7 +505,7 @@ async fn send_probe_request_for_param(
         request_builder = request_builder.body(d.clone());
     }
 
-    crate::tick_request_count();
+    crate::record_outbound_request().await;
     let resp = request_builder.send().await.ok()?;
     if !ignore_return.is_empty() && ignore_return.contains(&resp.status().as_u16()) {
         return None;
@@ -883,7 +883,7 @@ pub async fn active_probe_param(
                 _ => unreachable!(),
             };
             let request_builder = client.request(target.parse_method(), url);
-            crate::tick_request_count();
+            crate::record_outbound_request().await;
             if let Ok(resp) = request_builder.send().await
                 && let Ok(text) = resp.text().await
                 && text.contains(&raw_marker)

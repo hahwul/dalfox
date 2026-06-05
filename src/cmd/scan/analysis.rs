@@ -185,6 +185,7 @@ pub(crate) async fn run_preflight_and_analysis(
                             // (JSON/JSONL output). Plain mode logs the same
                             // info to the console below; JSON consumers
                             // would otherwise have no visibility.
+                            let mut detected_waf_extra_delay_ms = 0u64;
                             if let Some(ref waf_info) = target.waf_info {
                                 let detected_json: Vec<serde_json::Value> = waf_info
                                     .detected
@@ -205,6 +206,10 @@ pub(crate) async fn run_preflight_and_analysis(
                                         waf_info.waf_types();
                                     let strategy =
                                         crate::waf::bypass::merge_strategies(&waf_types);
+                                    // Carry the per-WAF pacing hint onto the target so the
+                                    // injection paths actually slow down for rate-limiting
+                                    // WAFs — previously this only landed in JSON meta.
+                                    detected_waf_extra_delay_ms = strategy.extra_delay_hint_ms;
                                     meta_json["bypass"] = serde_json::json!({
                                         "encoders": strategy.extra_encoders,
                                         "mutation_count": strategy.mutations.len(),
@@ -217,17 +222,23 @@ pub(crate) async fn run_preflight_and_analysis(
                                     .insert(target.url.to_string(), meta_json);
                             }
 
-                            // WAF evasion: auto-throttle when WAF detected
-                            if args_clone.waf_evasion {
-                                target.workers = 1;
-                                target.delay = 3000;
-                                if !args_clone.silence {
-                                    let ts = chrono::Local::now().format("%-I:%M%p").to_string();
-                                    crate::cprintln!(
-                                        "\x1b[90m{}\x1b[0m \x1b[33mWAF\x1b[0m evasion activated: workers=1, delay=3000ms",
-                                        ts
-                                    );
-                                }
+                            // Apply the WAF pacing hint so detected rate-limiting
+                            // WAFs slow the injection cadence even without
+                            // --waf-evasion (0 when no WAF / --waf-bypass off).
+                            target.waf_extra_delay_ms = detected_waf_extra_delay_ms;
+
+                            // Adaptive WAF evasion: randomized inter-request jitter
+                            // plus an escalating cooldown on block clusters, applied
+                            // in the injection paths via `args.waf_evasion` and
+                            // `target.waf_extra_delay_ms`. This replaces the old blunt
+                            // workers=1 / delay=3000 preset, which throttled far harder
+                            // than necessary and was trivially fingerprintable.
+                            if args_clone.waf_evasion && !args_clone.silence {
+                                let ts = chrono::Local::now().format("%-I:%M%p").to_string();
+                                crate::cprintln!(
+                                    "\x1b[90m{}\x1b[0m \x1b[33mWAF\x1b[0m evasion activated: adaptive jitter + cooldown",
+                                    ts
+                                );
                             }
                         }
                         // Store technology detection result on target

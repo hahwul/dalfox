@@ -118,7 +118,10 @@ dalfox scan [TARGETS]... [FLAGS]
 |------|-------|---------|-------------|
 | `--timeout` | — | `10` | Per-request timeout in seconds (network only; does not bound total scan time) |
 | `--scan-timeout` | — | `0` | Hard wall-clock cap per target for the scan stage (post-preflight), in seconds. Aborts a target once exceeded; useful when many sequential phases each pay the per-request `--timeout` cost against a partially-hung endpoint. `0` disables. |
-| `--delay` | — | `0` | Delay between requests (ms) |
+| `--delay` | — | `0` | Delay between requests (ms), per worker |
+| `--rate-limit` | `-r`, `--rl` | `0` | Cap the **global** outbound request rate in requests/second, shared across every worker and target (`0` = unlimited). Unlike `--delay` (which only spaces one worker), this bounds the total in-flight burst from `workers × concurrent targets` — friendlier to shared-IP / edge WAF thresholds. |
+| `--retries` | — | `0` | Retry failed requests on HTTP 5xx and transient transport errors (timeouts, connection resets) up to this many times (`0` = off). HTTP 429 is always retried regardless. |
+| `--retry-delay` | — | `1000` | Base delay (ms) for the exponential backoff between `--retries` attempts (doubles each attempt, capped internally). A server `Retry-After` header takes precedence on 429. |
 | `--proxy` | — | — | Proxy URL (`http://`, `socks5://`) |
 | `--follow-redirects` | `-F` | false | Follow 3xx responses |
 | `--ignore-return` | — | — | HTTP status codes to ignore |
@@ -162,7 +165,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--waf-bypass` | `auto` | `auto`, `force`, `off` |
 | `--skip-waf-probe` | false | Skip active WAF fingerprinting |
 | `--force-waf` | — | WAF name when `--waf-bypass force` |
-| `--waf-evasion` | false | Auto-throttle (`workers=1`, `delay=3000`) on WAF detection |
+| `--waf-evasion` | false | Adaptive evasion on WAF detection: randomized inter-request jitter + an escalating cooldown on clusters of blocked responses (replaces the old blunt `workers=1`/`delay=3000` preset). The per-WAF pacing hint is applied automatically on detection even without this flag. Pairs well with `--rate-limit`. |
 | `--waf-min-confidence` | `0.3` | Drop fingerprints below this confidence (0.0–1.0). The default `0.3` suppresses weak matches like `Server: Google Frontend` (0.15). Set lower to keep weak signals; `1.0` keeps only fingerprints with full confidence. |
 
 ---

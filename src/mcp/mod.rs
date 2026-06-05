@@ -346,8 +346,9 @@ impl DalfoxMcp {
             }
         }));
 
-        crate::REQUEST_COUNT_JOB
-            .scope(progress.requests_sent.clone(), async {
+        crate::with_job_rate_limiter(
+            scan_args.rate_limit,
+            crate::REQUEST_COUNT_JOB.scope(progress.requests_sent.clone(), async {
                 crate::WAF_CONSECUTIVE_BLOCKS_JOB
                     .scope(job_waf_consecutive.clone(), async {
                         // Dispatch blind-XSS probes when a callback URL was
@@ -420,8 +421,9 @@ impl DalfoxMcp {
                         .await;
                     })
                     .await;
-            })
-            .await;
+            }),
+        )
+        .await;
 
         drop(findings_updater);
 
@@ -890,6 +892,9 @@ Final results (via get_results_dalfox) include finding type \
             skip_waf_probe: false,
             force_waf: None,
             waf_evasion: false,
+            rate_limit: 0,
+            retries: 0,
+            retry_delay: 1000,
             waf_min_confidence: 0.0,
             remote_payloads: vec![],
             remote_wordlists: vec![],

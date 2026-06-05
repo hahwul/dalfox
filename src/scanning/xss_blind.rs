@@ -205,7 +205,7 @@ async fn send_blind_request(target: &Target, param_name: &str, payload: &str, pa
     // Send the request. We don't inspect the response (blind payloads report
     // out-of-band), but surface transport errors at DEBUG so users can tell a
     // delivery failure apart from a target that simply never calls back.
-    crate::tick_request_count();
+    crate::record_outbound_request().await;
     if let Err(e) = request.send().await
         && crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed)
     {
@@ -263,7 +263,7 @@ pub async fn blind_scan_forms(
     if let Some(ref h) = cookie_header {
         fetch = fetch.header("Cookie", h);
     }
-    crate::tick_request_count();
+    crate::record_outbound_request().await;
     let html = match fetch.send().await {
         Ok(resp) => match resp.text().await {
             Ok(text) => text,
@@ -377,7 +377,7 @@ pub async fn blind_scan_forms(
             }
             request = request.body(body);
 
-            crate::tick_request_count();
+            crate::record_outbound_request().await;
             if let Err(e) = request.send().await
                 && crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed)
             {

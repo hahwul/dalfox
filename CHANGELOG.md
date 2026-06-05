@@ -11,7 +11,13 @@ and continues to receive security backports per [SECURITY.md](./SECURITY.md).
 
 ### Added
 
+* **Global rate limiting (`--rate-limit` / `-r` / `--rl`)**: A true requests-per-second token-bucket limiter, shared across every worker and target, caps the aggregate outbound rate (`0` = unlimited). Unlike `--delay` (which only spaces a single worker), this bounds the total in-flight burst from `workers × concurrent targets` — friendlier to shared-IP and edge-WAF thresholds. Installed process-wide from the CLI and bound per-job for concurrent MCP / REST scans. Also configurable via `rate_limit` in the config file. Fixes [#1096](https://github.com/hahwul/dalfox/issues/1096).
+* **Transient retry policy (`--retries` / `--retry-delay`)**: `send_with_retry` now optionally retries HTTP 5xx and transient transport errors (timeouts, connection resets) with exponential backoff, in addition to the always-on HTTP 429 handling (which honors `Retry-After`). Off by default (`--retries 0`) so the default scan is unchanged; also configurable via `retries` / `retry_delay` in the config file.
 * **Structured outputs (SARIF / Markdown / TOML)**: The scan metadata envelope (`meta` with `dalfox_version`, `targets`, `scan_duration_ms`, `total_requests`, `findings_count`, `target_summary` including per-target WAF/bypass info) is now included for parity with JSON/JSONL. SARIF surfaces it under `runs[].properties` and `tool.driver.properties`; Markdown renders summary tables; TOML adds a `[meta]` table. Fixes [#1093](https://github.com/hahwul/dalfox/issues/1093).
+
+### Changed
+
+* **Adaptive WAF evasion (`--waf-evasion`)**: Replaced the blunt `workers=1` / `delay=3000ms` preset with adaptive timing — randomized inter-request jitter (so the cadence can't be fingerprinted) plus an escalating cooldown on clusters of blocked responses. The per-WAF `extra_delay_hint_ms` is now consumed to pace injection requests on detection (previously it only appeared in JSON metadata) instead of being dead weight. Pairs with `--rate-limit`. Part of [#1096](https://github.com/hahwul/dalfox/issues/1096).
 
 ## 3.0.2
 

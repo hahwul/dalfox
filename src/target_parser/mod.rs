@@ -46,6 +46,12 @@ pub struct Target {
     /// WAF is detected and bypass is enabled; left `None` otherwise so
     /// the no-WAF path pays no overhead.
     pub mutation_stats: Option<Arc<crate::waf::bypass::MutationStats>>,
+    /// Extra inter-request pause (ms) applied to injection sends once a WAF
+    /// is detected, sourced from the matched WAF's `extra_delay_hint_ms`.
+    /// 0 when no WAF was detected or `--waf-bypass off`. Set during preflight
+    /// analysis; consumed by the reflection / DOM injection paths so the hint
+    /// actually paces requests instead of only surfacing in JSON meta.
+    pub waf_extra_delay_ms: u64,
 }
 
 impl Target {
@@ -146,6 +152,7 @@ pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
         csp_analysis: None,
         tech_info: None,
         mutation_stats: None,
+        waf_extra_delay_ms: 0,
     })
 }
 
@@ -307,6 +314,7 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
         csp_analysis: None,
         tech_info: None,
         mutation_stats: None,
+        waf_extra_delay_ms: 0,
     })
 }
 

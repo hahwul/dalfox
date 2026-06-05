@@ -192,3 +192,142 @@ fn test_build_preflight_request_head_ignores_range() {
         "HEAD preflight should not set Range header"
     );
 }
+
+// ---- retry policy (decide_retry / next_backoff_ms) ----
+
+#[test]
+fn backoff_is_exponential_and_capped() {
+    // base 1000 => 1s, 2s, 4s, 8s, 16s, then clamp at 32s? no: cap is 30s.
+    assert_eq!(next_backoff_ms(1000, 0), 1000);
+    assert_eq!(next_backoff_ms(1000, 1), 2000);
+    assert_eq!(next_backoff_ms(1000, 2), 4000);
+    assert_eq!(next_backoff_ms(1000, 3), 8000);
+    assert_eq!(next_backoff_ms(1000, 4), 16000);
+    // 2^5 * 1000 = 32000 -> clamped to the 30s ceiling.
+    assert_eq!(next_backoff_ms(1000, 5), BACKOFF_CAP_MS);
+    // shift saturates at BACKOFF_SHIFT_CAP, then the cap holds.
+    assert_eq!(next_backoff_ms(1000, 99), BACKOFF_CAP_MS);
+    // base of 0 is floored to 1ms so a request still makes progress.
+    assert_eq!(next_backoff_ms(0, 0), 1);
+}
+
+#[test]
+fn retry_429_always_even_when_transient_disabled() {
+    // --retries 0 (transient off) must still retry 429 up to MAX_429_RETRIES.
+    let st = RetryState::default();
+    let d = decide_retry(SendOutcome::Status(429), st, 0, 1000, None);
+    assert_eq!(
+        d,
+        RetryDecision::Sleep {
+            ms: 1000,
+            rate_limited: true
+        }
+    );
+}
+
+#[test]
+fn retry_429_honors_retry_after_capped() {
+    let st = RetryState::default();
+    // Retry-After 5s is used verbatim.
+    let d = decide_retry(SendOutcome::Status(429), st, 0, 1000, Some(5000));
+    assert_eq!(
+        d,
+        RetryDecision::Sleep {
+            ms: 5000,
+            rate_limited: true
+        }
+    );
+    // A huge Retry-After is clamped to the ceiling.
+    let d = decide_retry(SendOutcome::Status(429), st, 0, 1000, Some(10 * 60 * 1000));
+    assert_eq!(
+        d,
+        RetryDecision::Sleep {
+            ms: BACKOFF_CAP_MS,
+            rate_limited: true
+        }
+    );
+}
+
+#[test]
+fn retry_429_stops_after_budget() {
+    let st = RetryState {
+        rl_done: MAX_429_RETRIES,
+        tr_done: 0,
+    };
+    assert_eq!(
+        decide_retry(SendOutcome::Status(429), st, 0, 1000, None),
+        RetryDecision::Stop
+    );
+}
+
+#[test]
+fn transient_retries_are_opt_in() {
+    let st = RetryState::default();
+    // Default budget 0 => 5xx and network errors are NOT retried.
+    assert_eq!(
+        decide_retry(SendOutcome::Status(503), st, 0, 1000, None),
+        RetryDecision::Stop
+    );
+    assert_eq!(
+        decide_retry(SendOutcome::TransientError, st, 0, 1000, None),
+        RetryDecision::Stop
+    );
+    // With a budget of 2, both are retried with exponential backoff.
+    assert_eq!(
+        decide_retry(SendOutcome::Status(503), st, 2, 1000, None),
+        RetryDecision::Sleep {
+            ms: 1000,
+            rate_limited: false
+        }
+    );
+    assert_eq!(
+        decide_retry(SendOutcome::TransientError, st, 2, 500, None),
+        RetryDecision::Sleep {
+            ms: 500,
+            rate_limited: false
+        }
+    );
+}
+
+#[test]
+fn transient_retries_respect_budget_and_advance_backoff() {
+    // Second transient retry (tr_done=1) uses the next backoff step.
+    let st = RetryState {
+        rl_done: 0,
+        tr_done: 1,
+    };
+    assert_eq!(
+        decide_retry(SendOutcome::Status(500), st, 2, 1000, None),
+        RetryDecision::Sleep {
+            ms: 2000,
+            rate_limited: false
+        }
+    );
+    // Budget exhausted (tr_done == max) => stop.
+    let st = RetryState {
+        rl_done: 0,
+        tr_done: 2,
+    };
+    assert_eq!(
+        decide_retry(SendOutcome::Status(500), st, 2, 1000, None),
+        RetryDecision::Stop
+    );
+}
+
+#[test]
+fn success_and_fatal_never_retry() {
+    let st = RetryState::default();
+    assert_eq!(
+        decide_retry(SendOutcome::Status(200), st, 5, 1000, None),
+        RetryDecision::Stop
+    );
+    // 4xx (other than 429) is a real answer, not a retryable failure.
+    assert_eq!(
+        decide_retry(SendOutcome::Status(404), st, 5, 1000, None),
+        RetryDecision::Stop
+    );
+    assert_eq!(
+        decide_retry(SendOutcome::FatalError, st, 5, 1000, None),
+        RetryDecision::Stop
+    );
+}

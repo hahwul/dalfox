@@ -278,7 +278,7 @@ pub async fn fingerprint_with_probe(
     let body = target.data.clone();
     let rb = crate::utils::build_request(client, target, method, probe_url, body);
 
-    crate::tick_request_count();
+    crate::record_outbound_request().await;
 
     let resp = match rb.send().await {
         Ok(r) => r,
