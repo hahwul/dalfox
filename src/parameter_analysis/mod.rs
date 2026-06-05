@@ -779,15 +779,32 @@ pub async fn active_probe_param(
         }
         None => {
             // No reflected segment — the markers never came back. That can be
-            // genuine heavy filtering, or a WAF that blocked the whole request
+            // genuine heavy filtering, a WAF that blocked the whole request
             // because it inspects only the first N bytes of the value and
-            // tripped on the leading special chars. Distinguish them with one
-            // window-overflow probe: re-send the batched probe behind a benign
-            // filler prefix. If the markers + specials now reflect, the param
-            // sits behind a size-limited inspection window — record the pad so
-            // every payload is sent past it; otherwise fall back to the legacy
-            // "all invalid" classification.
-            match window_overflow_probe(&client, target, &param, &semaphore).await {
+            // tripped on the leading special chars, or a server that strips a
+            // fixed prefix/suffix (partial reflection) so only part of a marker
+            // survives.
+            //
+            // Only the *block* case is a window-overflow candidate. Gate on a
+            // genuine block: the batched probe reflected NOTHING, i.e. neither
+            // marker survived. A prefix/suffix-stripping server leaves one
+            // marker intact (discovery already handles those as partial
+            // reflection), and a block page that echoes the payload (e.g. a
+            // reflected-block-page WAF) carries the markers too — neither is a
+            // size-limited inspection window, so skip the probe for them.
+            let genuine_block = batched_response.as_deref().is_none_or(|body| {
+                !body.contains(crate::scanning::markers::open_marker())
+                    && !body.contains(crate::scanning::markers::close_marker())
+            });
+            let window = if genuine_block {
+                // One window-overflow probe: re-send the batched probe behind a
+                // benign filler prefix. If the markers + specials now reflect,
+                // the param sits behind a size-limited inspection window.
+                window_overflow_probe(&client, target, &param, &semaphore).await
+            } else {
+                None
+            };
+            match window {
                 Some((win_valid, win_invalid)) => {
                     valid = win_valid;
                     invalid = win_invalid;
@@ -797,6 +814,8 @@ pub async fn active_probe_param(
                             .to_string(),
                     );
                 }
+                // Genuine filtering / partial strip — keep the legacy
+                // "all invalid" classification.
                 None => invalid.extend_from_slice(SPECIAL_PROBE_CHARS),
             }
         }

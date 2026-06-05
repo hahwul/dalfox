@@ -1386,3 +1386,48 @@ async fn active_probe_does_not_set_wafpad_for_position_independent_block() {
         "genuine filtering (stripping past any window) must not be treated as window-limited"
     );
 }
+
+/// Counter-case: a server that strips a fixed PREFIX (first 4 chars) and echoes
+/// the rest. The batched probe's open-marker prefix is eaten, so the segment
+/// isn't found (None arm) — but this is *partial reflection*, not a block: the
+/// close marker survives. The genuine-block guard must skip the window-overflow
+/// probe here, so no `wafpad` is set (a benign pad would otherwise be absorbed
+/// by the strip and falsely look like a window bypass).
+#[tokio::test]
+async fn active_probe_does_not_set_wafpad_for_prefix_strip() {
+    use axum::{Router, extract::Query, response::IntoResponse, routing::get};
+    use std::collections::HashMap;
+    use std::net::Ipv4Addr;
+    use tokio::time::{Duration, sleep};
+
+    async fn strip_prefix4(Query(p): Query<HashMap<String, String>>) -> impl IntoResponse {
+        let v = p.get("x").cloned().unwrap_or_default();
+        // Drop the first 4 chars, echo the rest raw — partial reflection.
+        let echoed: String = v.chars().skip(4).collect();
+        format!("<html><body><div class='results'>{echoed}</div></body></html>")
+    }
+
+    let app = Router::new().route("/cat", get(strip_prefix4));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let target = parse_target(&format!("http://{addr}/cat?x=1")).unwrap();
+    let res = active_probe_param(
+        &target,
+        probe_param("x", Location::Query),
+        Arc::new(Semaphore::new(8)),
+    )
+    .await;
+
+    assert_ne!(
+        res.pre_encoding.as_deref(),
+        Some("wafpad"),
+        "a fixed-prefix-stripping server (partial reflection) must not be mistaken for a window WAF"
+    );
+}
