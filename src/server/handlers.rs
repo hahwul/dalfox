@@ -305,13 +305,9 @@ pub(crate) async fn get_scan_handler(
     let cookie = params.get("cookie").cloned();
     // A present-but-unparseable numeric query param is a 400, not a silent
     // fallback to the default (which is what `.parse().ok()` used to do).
-    let (worker, delay, timeout, rate_limit, scan_timeout): (
-        Option<usize>,
-        Option<u64>,
-        Option<u64>,
-        Option<u32>,
-        Option<u64>,
-    ) = match (
+    // Types infer from the `parse_num_query` turbofishes — worker:usize,
+    // delay/timeout/scan_timeout:u64, rate_limit:u32, each wrapped in Option.
+    let (worker, delay, timeout, rate_limit, scan_timeout) = match (
         parse_num_query::<usize>(&params, "worker"),
         parse_num_query::<u64>(&params, "delay"),
         parse_num_query::<u64>(&params, "timeout"),
