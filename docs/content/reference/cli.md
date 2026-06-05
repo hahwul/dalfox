@@ -50,7 +50,7 @@ dalfox scan [TARGETS]... [FLAGS]
 
 | Flag | Short | Default | Description |
 |------|-------|---------|-------------|
-| `--input-type` | `-i` | `auto` | `auto`, `url`, `file`, `pipe`, `raw-http` |
+| `--input-type` | `-i` | `auto` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har` |
 
 ### Output
 

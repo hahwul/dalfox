@@ -79,13 +79,17 @@ dalfox scan targets.txt --skip-mining --workers 10 --delay 150
 
 Combine with `--max-concurrent-targets` and `--max-targets-per-host` for safety.
 
-### E. Raw Captured Request (raw-http)
+### E. Raw Captured Request (raw-http) / HAR export (har)
 
 ```bash
+# One captured request:
 dalfox scan -i raw-http captured-request.txt --blind https://your.interact.sh
+# A whole HAR / proxy export (every request, method+headers+cookies+body preserved):
+dalfox scan capture.har                 # auto-detected
+dalfox scan -i har capture.har          # explicit
 ```
 
-Excellent when the interesting parameters live in cookies, custom headers, or a complex JSON body. See `references/cli.md`.
+Excellent when the interesting parameters live in cookies, custom headers, or a complex JSON body. `har` fans a multi-request capture out into one target per `log.entries[].request` (deduped by URL+method); `raw-http` is the single-request form. See `references/cli.md`.
 
 ### F. Stored XSS (SXSS)
 
@@ -118,7 +122,7 @@ See `references/advanced.md` for the detailed recipes:
 - "Too many parameters / too slow" → preflight + `--skip-mining` + explicit `-p`
 - "WAF present" → the matrix of `--waf-bypass`, `--force-waf`, `--waf-evasion`
 - "Need custom payloads or markers" → `--custom-payload`, `--inject-marker`, `--custom-alert-*`
-- "Captured request testing" → `-i raw-http`
+- "Captured request testing" → `-i raw-http` (single request) or `-i har` (whole proxy/DevTools export)
 - Concurrency / politeness caps
 
 ## 6. Configuration & Environment

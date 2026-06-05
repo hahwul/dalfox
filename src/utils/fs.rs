@@ -73,6 +73,28 @@ pub fn read_bounded(path: &Path, max_bytes: u64, label: &str) -> std::io::Result
     Ok(buf)
 }
 
+/// Read up to `max_bytes` from the start of `path` for cheap content sniffing,
+/// returning a lossy-UTF-8 string. Unlike [`read_bounded`], an oversized file
+/// is *truncated* to the prefix rather than rejected, so auto-detection can
+/// classify a (possibly huge) input from its first few KiB without slurping it
+/// in full — the committed input mode reads the whole file afterwards. Refuses
+/// non-regular files. The text may end on a U+FFFD replacement if the cut falls
+/// mid-multibyte-char, which is harmless for the ASCII markers callers sniff.
+pub fn read_prefix_lossy(path: &Path, max_bytes: u64) -> std::io::Result<String> {
+    let md = std::fs::metadata(path)?;
+    if !md.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("{} is not a regular file", path.display()),
+        ));
+    }
+    let mut f = std::fs::File::open(path)?;
+    let mut bytes = Vec::new();
+    // `take` bounds the read even for a pseudo-file that streams forever.
+    f.by_ref().take(max_bytes).read_to_end(&mut bytes)?;
+    Ok(String::from_utf8_lossy(&bytes).into_owned())
+}
+
 /// Read STDIN into a String with a hard byte cap. Same intent as
 /// `read_bounded` but for the streaming side — `cat /dev/zero | dalfox`
 /// would otherwise OOM the process.

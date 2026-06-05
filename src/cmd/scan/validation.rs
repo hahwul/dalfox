@@ -190,7 +190,7 @@ pub(crate) fn looks_like_url_input(s: &str) -> bool {
 pub(crate) fn looks_like_target_list_filename(s: &str) -> bool {
     const EXTS: &[&str] = &[
         "txt", "list", "lst", "csv", "tsv", "log", "json", "jsonl", "ndjson", "yaml", "yml",
-        "conf", "cfg", "ini", "req", "raw", "http",
+        "conf", "cfg", "ini", "req", "raw", "http", "har",
     ];
     s.rsplit('.')
         .next()
@@ -251,6 +251,7 @@ mod input_shape_tests {
         assert!(looks_like_target_list_filename("data.csv"));
         assert!(looks_like_target_list_filename("out.JSONL"));
         assert!(looks_like_target_list_filename("req.HTTP"));
+        assert!(looks_like_target_list_filename("capture.har"));
         // A bare host has no recognized list extension.
         assert!(!looks_like_target_list_filename("example.com"));
         assert!(!looks_like_target_list_filename("noext"));

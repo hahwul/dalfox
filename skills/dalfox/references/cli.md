@@ -6,10 +6,12 @@ All flags are defined in `src/cmd/scan.rs:ScanArgs`. Defaults are centralized in
 
 | Flag | Default | Notes |
 |------|---------|-------|
-| `-i, --input-type` | `auto` | `auto`, `url`, `file`, `pipe`, `raw-http` |
-| `TARGET` (positional) | — | URL, file path, or raw HTTP when `-i raw-http` |
+| `-i, --input-type` | `auto` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har` |
+| `TARGET` (positional) | — | URL, file path, raw HTTP (`-i raw-http`), or HAR file (`-i har` / auto-detected) |
 
 **`raw-http`** is powerful: you can feed a complete captured request (from Burp "Copy to file" or `curl -v` output) and dalfox will parse method, path, headers, cookies, and body.
+
+**`har`** scans a whole HAR / proxy export at once: every `log.entries[].request` becomes a target with its URL, method, headers, cookies, and body preserved (deduplicated by URL+method). Auto-detected from file content, or force it with `-i har`; HAR can also be piped on stdin.
 
 ## Output & POC
 

@@ -225,6 +225,12 @@ pub(crate) async fn run_scan_job(
 
     let args = ScanArgs {
         detect_outdated_libs: opts.detect_outdated_libs.unwrap_or(false),
+        // Each REST job scans exactly one caller-supplied URL, with method,
+        // headers, cookies, and body provided as explicit request fields — the
+        // same fidelity a single HAR entry carries. The multi-target input
+        // shapes (`file`, `pipe`, `raw-http`, `har`) are CLI-only because they
+        // fan one input out into many targets, which the one-job-one-URL model
+        // here doesn't express; callers replay a HAR by POSTing /scan per entry.
         input_type: "url".to_string(),
         format: "json".to_string(),
         output: None,

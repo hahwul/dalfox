@@ -423,3 +423,106 @@ async fn test_run_scan_unknown_format_fallback_path() {
 
     run_scan(&args).await;
 }
+
+/// `--input-type har` with no file argument and no stdin pipe must fail fast
+/// with a clear error rather than hanging or scanning nothing.
+#[tokio::test]
+async fn test_run_scan_har_requires_a_source() {
+    let mut args = base_scan_args();
+    args.input_type = "har".to_string();
+    args.targets.clear();
+    args.silence = false;
+
+    let outcome = run_scan(&args).await;
+    assert_eq!(outcome, dalfox::cmd::scan::ScanOutcome::Error);
+}
+
+/// A `--input-type har` argument that is neither a readable file nor valid HAR
+/// JSON surfaces a parse error instead of being silently treated as a URL.
+#[tokio::test]
+async fn test_run_scan_har_invalid_content_errors() {
+    let mut args = base_scan_args();
+    args.input_type = "har".to_string();
+    args.targets = vec!["this is definitely not har".to_string()];
+    args.silence = false;
+
+    let outcome = run_scan(&args).await;
+    assert_eq!(outcome, dalfox::cmd::scan::ScanOutcome::Error);
+}
+
+/// End-to-end proof that a HAR file drives the scan: both entries — a GET with
+/// query params and a POST carrying a body — must reach the target host with
+/// their original method and path preserved. A local recorder captures every
+/// request the scan sends so we can assert the HAR shaped them.
+#[tokio::test]
+async fn test_run_scan_har_input_drives_get_and_post_targets() {
+    use axum::extract::State;
+    use axum::response::Html;
+    use axum::routing::post;
+    use std::sync::{Arc, Mutex};
+
+    type Hits = Arc<Mutex<Vec<(String, String)>>>;
+
+    async fn record(
+        State(hits): State<Hits>,
+        method: axum::http::Method,
+        uri: axum::http::Uri,
+    ) -> Html<String> {
+        hits.lock()
+            .expect("hits mutex")
+            .push((method.to_string(), uri.path().to_string()));
+        Html("<html><body>ok</body></html>".to_string())
+    }
+
+    let hits: Hits = Arc::new(Mutex::new(Vec::new()));
+    let app = Router::new()
+        .route("/search", get(record))
+        .route("/comment", post(record))
+        .with_state(hits.clone());
+    let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let handle = tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let base = format!("http://{}/", addr);
+
+    // GET entry with a query param + POST entry with a urlencoded body.
+    let har = format!(
+        r#"{{"log":{{"version":"1.2","entries":[
+            {{"request":{{"method":"GET","url":"{base}search?q=test","headers":[],"cookies":[]}}}},
+            {{"request":{{"method":"POST","url":"{base}comment",
+              "headers":[{{"name":"Content-Type","value":"application/x-www-form-urlencoded"}}],
+              "cookies":[],
+              "postData":{{"mimeType":"application/x-www-form-urlencoded","text":"comment=hello"}}}}}}
+        ]}}}}"#
+    );
+    let har_path = unique_temp_path("har-input.har");
+    std::fs::write(&har_path, har).expect("write HAR");
+
+    let mut args = base_scan_args();
+    args.input_type = "har".to_string();
+    args.targets = vec![har_path.to_string_lossy().to_string()];
+    // Keep it lean: mining/AST add noise and latency without changing what we
+    // assert (that both HAR entries are reached with the right method).
+    args.skip_mining = true;
+    args.skip_mining_dict = true;
+    args.skip_mining_dom = true;
+    args.skip_ast_analysis = true;
+    args.silence = true;
+
+    run_scan(&args).await;
+    handle.abort();
+    let _ = std::fs::remove_file(&har_path);
+
+    let recorded = hits.lock().expect("hits mutex").clone();
+    assert!(
+        recorded.iter().any(|(m, p)| m == "GET" && p == "/search"),
+        "HAR GET entry should have been scanned, recorded: {:?}",
+        recorded
+    );
+    assert!(
+        recorded.iter().any(|(m, p)| m == "POST" && p == "/comment"),
+        "HAR POST entry (with body) should have been scanned, recorded: {:?}",
+        recorded
+    );
+}

@@ -957,7 +957,7 @@ pub fn default_toml_template() -> String {
 
 [scan]
 # INPUT
-# input_type = "auto"        # auto, url, file, pipe, raw-http (parses raw HTTP request file or literal)
+# input_type = "auto"        # auto, url, file, pipe, raw-http (parses raw HTTP request file or literal), har (HAR / proxy export)
 
 # OUTPUT
 # format = "plain"           # plain, json, jsonl, markdown, sarif, toml
