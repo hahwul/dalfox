@@ -73,6 +73,13 @@ pub(crate) fn validate_numeric_args(
             ),
         ));
     }
+    // The rate-limit / retry caps below intentionally reuse
+    // `INVALID_INPUT_TYPE`, the same code every other numeric range check in
+    // this function emits (workers, timeout, delay, …). Keeping one code for
+    // "a numeric arg was out of range" means structured-output (JSON/JSONL/
+    // SARIF) consumers can match a single, stable category for all of them
+    // rather than a per-flag taxonomy; the human-facing message carries the
+    // specific flag and bound.
     if args.rate_limit > CLI_MAX_RATE_LIMIT {
         return Err((
             crate::cmd::error_codes::INVALID_INPUT_TYPE,
