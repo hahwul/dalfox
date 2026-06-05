@@ -167,6 +167,7 @@ Returns version, `auth_required`, and the list of supported endpoints. Good for 
     "worker": 50,
     "delay": 0,
     "timeout": 10,
+    "scan_timeout": 0,
     "blind": "https://callback.interact.sh",
     "method": "POST",
     "data": "user=test",
@@ -194,6 +195,15 @@ Fields mirror the CLI flags. See the [CLI reference](../../reference/cli/) for m
 `detect_outdated_libs` is opt-in (default `false`): set it `true` to also report
 outdated / known-vulnerable JS libraries as informational `[I]` findings
 (CWE-1104, 0 extra requests). The same key works as a `GET /scan` query parameter.
+
+`scan_timeout` is the whole-scan wall-clock budget in seconds (default `0` =
+unbounded), distinct from the per-request `timeout`. When the budget is reached
+the scan stops, keeps whatever partial findings it gathered, and settles as
+`cancelled` with an `error_message` that mentions `scan_timeout` (so you can tell
+a timeout apart from a client-issued cancel). Start the server with
+`--scan-timeout <secs>` to cap **every** submitted scan: a request may ask for a
+shorter budget but cannot exceed or disable the server cap — useful for bounding
+long or `deep_scan` jobs so one target can't pin a worker indefinitely.
 
 ## Job lifecycle
 
@@ -252,3 +262,8 @@ sudo systemctl enable --now dalfox
 - **`--jsonp` makes `GET` endpoints readable cross-origin** via `<script>`,
   which is not subject to the CORS allow-list. Enable it only when you intend
   that, and pair it with `--api-key`.
+- **Bound scan runtime with `--scan-timeout`.** The per-request `timeout` only
+  caps a single HTTP request; a scan with many parameters and payloads (or
+  `deep_scan`) can still run for a long time. Set `--scan-timeout <secs>` so
+  every submitted scan has a hard wall-clock budget and a single slow target
+  can't tie up a worker indefinitely.

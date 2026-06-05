@@ -28,6 +28,7 @@ fn make_state(
         allow_headers: "Content-Type,X-API-KEY,Authorization".to_string(),
         jsonp_enabled: jsonp,
         callback_param_name: cb_name.to_string(),
+        scan_timeout: None,
     }
 }
 
@@ -135,6 +136,48 @@ async fn start_reflecting_target_server() -> SocketAddr {
         .await
         .expect("bind reflecting target listener");
     let addr = listener.local_addr().expect("reflecting target local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    addr
+}
+
+/// Reflects each query value back into the HTML body — but with the
+/// XSS-significant characters (`< > " '`) stripped — after a fixed per-request
+/// delay. The alphanumeric reflection probe still appears, so `analyze_parameters`
+/// classifies the param as reflective and `run_scanning` sweeps the *whole*
+/// payload set; yet no payload can ever verify (the breakout chars are gone),
+/// so the scan never short-circuits on a finding. Combined with the delay this
+/// guarantees the scan runs long enough for a small `scan_timeout` to trip.
+async fn target_slow_reflect_handler(Query(q): Query<Map<String, String>>) -> impl IntoResponse {
+    tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+    let mut body = String::from("<html><body>");
+    for (k, v) in &q {
+        let safe: String = v
+            .chars()
+            .filter(|c| !matches!(c, '<' | '>' | '"' | '\''))
+            .collect();
+        body.push_str(&format!("<div>{k}={safe}</div>"));
+    }
+    body.push_str("</body></html>");
+    (
+        StatusCode::OK,
+        [("content-type", "text/html; charset=utf-8")],
+        body,
+    )
+}
+
+async fn start_slow_reflecting_target_server() -> SocketAddr {
+    let app = Router::new()
+        .route("/", any(target_slow_reflect_handler))
+        .route("/{*rest}", any(target_slow_reflect_handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind slow reflecting target listener");
+    let addr = listener
+        .local_addr()
+        .expect("slow reflecting target local addr");
     tokio::spawn(async move {
         let _ = axum::serve(listener, app).await;
     });
@@ -1028,6 +1071,7 @@ async fn test_run_scan_job_success_marks_done() {
         skip_ast_analysis: None,
         // Exercise the ON path: opts -> job_runner -> ScanArgs -> analysis gate.
         detect_outdated_libs: Some(true),
+        scan_timeout: None,
     };
 
     let run = tokio::time::timeout(
@@ -1048,6 +1092,71 @@ async fn test_run_scan_job_success_marks_done() {
     let job = jobs.get(&id).expect("job should remain");
     assert_eq!(job.status, JobStatus::Done);
     assert!(job.results.is_some());
+}
+
+#[tokio::test]
+async fn test_run_scan_job_scan_timeout_marks_cancelled_with_partial_results() {
+    // End-to-end: a per-request `scan_timeout` must bound the whole scan. The
+    // target reflects (neutralized) values after a 120ms delay, and with a
+    // single worker the payload sweep serializes well past the 1s budget — so
+    // the budget trips mid-scan. The job must settle as `cancelled` (not Done
+    // at a bogus 100%), expose whatever partial results it has, and record an
+    // error_message that distinguishes a timeout from a user-initiated cancel.
+    let addr = start_slow_reflecting_target_server().await;
+    let state = make_state(None, None, false, false, "callback");
+    let id = "scan-timeout-job".to_string();
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert(id.clone(), test_job(JobStatus::Queued, None, ""));
+    }
+
+    let opts = ScanOptions {
+        encoders: Some(vec!["none".to_string()]),
+        worker: Some(1),
+        // Skip mining so the (slow) traffic is the reflective-param payload
+        // sweep rather than dictionary guessing — keeps the test focused.
+        skip_mining: Some(true),
+        scan_timeout: Some(1),
+        ..ScanOptions::default()
+    };
+
+    let run = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        run_scan_job(
+            state.clone(),
+            id.clone(),
+            format!("http://{}/?q=test", addr),
+            opts,
+            false,
+            false,
+        ),
+    )
+    .await;
+    assert!(
+        run.is_ok(),
+        "run_scan_job should return once the budget trips"
+    );
+
+    let jobs = state.jobs.lock().await;
+    let job = jobs.get(&id).expect("job should remain");
+    assert_eq!(
+        job.status,
+        JobStatus::Cancelled,
+        "a budget-tripped scan must settle as cancelled, not done"
+    );
+    let msg = job
+        .error_message
+        .as_deref()
+        .expect("a timeout must record an error_message");
+    assert!(
+        msg.contains("scan_timeout"),
+        "error_message should mention scan_timeout, got: {msg}"
+    );
+    assert!(
+        job.results.is_some(),
+        "partial results vector should be attached even on timeout"
+    );
+    assert!(job.finished_at_ms.is_some());
 }
 
 #[tokio::test]
@@ -1298,6 +1407,7 @@ async fn test_run_server_returns_on_invalid_bind_address() {
         host: "not a valid host".to_string(),
         api_key: None,
         log_file: None,
+        scan_timeout: None,
         allowed_origins: None,
         jsonp: false,
         callback_param_name: "callback".to_string(),
@@ -1319,6 +1429,7 @@ async fn test_run_server_returns_on_bind_failure_after_state_build() {
         host: Ipv4Addr::LOCALHOST.to_string(),
         api_key: Some("server-key".to_string()),
         log_file: None,
+        scan_timeout: None,
         allowed_origins: Some(
             "*,regex:^https://.*\\.example\\.com$,https://*.corp.local".to_string(),
         ),
@@ -1540,6 +1651,18 @@ fn test_validate_scan_options_rejects_out_of_range() {
         ..ScanOptions::default()
     };
     assert!(validate_scan_options(&bad_worker_hi).is_err());
+
+    // scan_timeout: 0 is allowed (disabled); anything over the ceiling is not.
+    let ok_disabled = ScanOptions {
+        scan_timeout: Some(0),
+        ..ScanOptions::default()
+    };
+    assert!(validate_scan_options(&ok_disabled).is_ok());
+    let bad_scan_timeout = ScanOptions {
+        scan_timeout: Some(MAX_SCAN_TIMEOUT_SECS + 1),
+        ..ScanOptions::default()
+    };
+    assert!(validate_scan_options(&bad_scan_timeout).is_err());
 }
 
 #[tokio::test]
@@ -1637,7 +1760,12 @@ async fn test_get_scan_handler_rejects_unparseable_numeric_query() {
     // A present-but-unparseable numeric query param is a 400, not a silent
     // fallback to the default. (`?timeout=0` is already rejected by range
     // validation; this covers the non-numeric / negative class.)
-    for (key, val) in [("timeout", "abc"), ("worker", "-5"), ("delay", "1.5")] {
+    for (key, val) in [
+        ("timeout", "abc"),
+        ("worker", "-5"),
+        ("delay", "1.5"),
+        ("scan_timeout", "soon"),
+    ] {
         let state = make_state(None, None, false, false, "cb");
         let mut params = Map::new();
         params.insert("url".to_string(), "http://example.com".to_string());

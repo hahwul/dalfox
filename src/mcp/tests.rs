@@ -35,6 +35,7 @@ fn default_scan_params(target: &str) -> ScanWithDalfoxParams {
         user_agent: None,
         encoders: vec!["none".to_string()],
         timeout: 1,
+        scan_timeout: 0,
         delay: 0,
         follow_redirects: false,
         proxy: None,
@@ -977,6 +978,34 @@ async fn test_scan_with_dalfox_accepts_workers_at_max() {
     mcp.scan_with_dalfox(Parameters(params))
         .await
         .expect("workers == MAX_WORKERS must be accepted");
+}
+
+#[tokio::test]
+async fn test_scan_with_dalfox_rejects_scan_timeout_over_max() {
+    let mcp = DalfoxMcp::new();
+    let params = ScanWithDalfoxParams {
+        scan_timeout: MAX_SCAN_TIMEOUT_SECS + 1,
+        ..default_scan_params("http://127.0.0.1:1/?q=a")
+    };
+    let err = mcp
+        .scan_with_dalfox(Parameters(params))
+        .await
+        .expect_err("scan_timeout over the ceiling must be rejected");
+    assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+    assert!(err.message.contains("scan_timeout must be between"));
+}
+
+#[tokio::test]
+async fn test_scan_with_dalfox_accepts_scan_timeout_zero() {
+    // 0 means "no budget" and must be accepted (it's the default-equivalent).
+    let mcp = DalfoxMcp::new();
+    let params = ScanWithDalfoxParams {
+        scan_timeout: 0,
+        ..default_scan_params("http://127.0.0.1:1/?q=a")
+    };
+    mcp.scan_with_dalfox(Parameters(params))
+        .await
+        .expect("scan_timeout == 0 (unbounded) must be accepted");
 }
 
 #[tokio::test]

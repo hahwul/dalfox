@@ -41,9 +41,10 @@ use rmcp::{
 use crate::{
     cmd::scan::ScanArgs,
     job::{
-        AbortOnDrop, JOB_RETENTION_SECS, Job, JobStatus, MAX_DELAY_MS, MAX_TIMEOUT_SECS,
-        MAX_WORKERS, has_http_scheme, now_ms, parse_job_status,
-        purge_expired_jobs as purge_jobs_map, send_reachability_probe, unreachable_error_message,
+        AbortOnDrop, JOB_RETENTION_SECS, Job, JobStatus, MAX_DELAY_MS, MAX_SCAN_TIMEOUT_SECS,
+        MAX_TIMEOUT_SECS, MAX_WORKERS, has_http_scheme, now_ms, parse_job_status,
+        purge_expired_jobs as purge_jobs_map, run_within_scan_budget, send_reachability_probe,
+        unreachable_error_message,
     },
     parameter_analysis::analyze_parameters,
     scanning::result::{Result as ScanResult, SanitizedResult},
@@ -346,7 +347,7 @@ impl DalfoxMcp {
             }
         }));
 
-        crate::with_job_rate_limiter(
+        let scan_fut = crate::with_job_rate_limiter(
             scan_args.rate_limit,
             crate::REQUEST_COUNT_JOB.scope(progress.requests_sent.clone(), async {
                 crate::WAF_CONSECUTIVE_BLOCKS_JOB
@@ -422,8 +423,14 @@ impl DalfoxMcp {
                     })
                     .await;
             }),
-        )
-        .await;
+        );
+
+        // Enforce the whole-scan wall-clock budget. On expiry the cancel flag is
+        // tripped so in-flight workers wind down at their next checkpoint and
+        // the job settles as `cancelled` with partial results, mirroring a user
+        // cancel — plus an error_message below so a timeout stays distinguishable.
+        let timed_out =
+            run_within_scan_budget(scan_args.scan_timeout, &cancel_flag, scan_fut).await;
 
         drop(findings_updater);
 
@@ -463,9 +470,24 @@ impl DalfoxMcp {
             if let Some(j) = jobs.get_mut(&scan_id) {
                 // Store partial or complete results
                 j.results = Some(Arc::new(sanitized));
-                // Only update status if not already cancelled (cancel sets status immediately)
+                // Only update status if not already cancelled (cancel sets status
+                // immediately). A scan_timeout trips `cancel_flag` without setting
+                // the status, so map `was_cancelled` to Cancelled here — otherwise
+                // a timed-out scan would mislabel itself Done at 100%.
                 if j.status != JobStatus::Cancelled {
-                    j.status = JobStatus::Done;
+                    j.status = if was_cancelled {
+                        JobStatus::Cancelled
+                    } else {
+                        JobStatus::Done
+                    };
+                }
+                // Record *why* a budget-tripped scan stopped so a client can tell
+                // a timeout apart from a user cancel (both surface as `cancelled`).
+                if timed_out && j.error_message.is_none() {
+                    j.error_message = Some(format!(
+                        "scan exceeded scan_timeout ({}s); returning partial results",
+                        scan_args.scan_timeout
+                    ));
                 }
                 // finished_at_ms may already be set by cancel_scan_dalfox; preserve it
                 // so we record the moment the user asked to stop, not when the task noticed.
@@ -482,7 +504,13 @@ impl DalfoxMcp {
         };
         Self::log(
             "JOB",
-            &format!("scan {} scan_id={} url={}", status_label, scan_id, url),
+            &format!(
+                "scan {}{} scan_id={} url={}",
+                status_label,
+                if timed_out { " (scan_timeout)" } else { "" },
+                scan_id,
+                url
+            ),
         );
     }
 }
@@ -542,6 +570,14 @@ pub struct ScanWithDalfoxParams {
     #[serde(default = "default_timeout")]
     #[schemars(range(min = 1, max = 299))]
     pub timeout: u64,
+
+    /// Whole-scan wall-clock budget in seconds (0-86400). When the budget is
+    /// reached the scan stops, returns whatever partial results it gathered, and
+    /// settles as `cancelled` with an error_message noting the timeout. 0 = no
+    /// budget (unbounded). Use this to bound long/deep scans. Default: 0
+    #[serde(default)]
+    #[schemars(range(max = 86400))]
+    pub scan_timeout: u64,
 
     /// Delay between requests in milliseconds (0-9999). Default: 0
     #[serde(default)]
@@ -733,6 +769,7 @@ Final results (via get_results_dalfox) include finding type \
             user_agent,
             encoders,
             timeout,
+            scan_timeout,
             delay,
             follow_redirects,
             proxy,
@@ -784,6 +821,15 @@ Final results (via get_results_dalfox) include finding type \
                 format!(
                     "workers must be between 1 and {} (got {})",
                     MAX_WORKERS, workers
+                ),
+                None,
+            ));
+        }
+        if scan_timeout > MAX_SCAN_TIMEOUT_SECS {
+            return Err(ErrorData::invalid_params(
+                format!(
+                    "scan_timeout must be between 0 and {} seconds (got {})",
+                    MAX_SCAN_TIMEOUT_SECS, scan_timeout
                 ),
                 None,
             ));
@@ -857,7 +903,10 @@ Final results (via get_results_dalfox) include finding type \
             skip_reflection_cookie: false,
             skip_reflection_path: false,
             timeout,
-            scan_timeout: 0,
+            // Whole-scan wall-clock budget; 0 = unbounded. Enforced in
+            // `run_job` by wrapping the scan future (run_scanning doesn't honor
+            // this field — the CLI applies the same budget in its scan loop).
+            scan_timeout,
             delay,
             proxy,
             follow_redirects,
