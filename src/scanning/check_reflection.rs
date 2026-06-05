@@ -50,15 +50,17 @@ const WAF_BACKOFF_CAP_MS: u64 = 30_000;
 /// Base adaptive cooldown (milliseconds, before any jitter) for a WAF block
 /// response, or `0` for "don't pause". The block *class* decides whether the
 /// cooldown applies at all, because the correct reaction differs:
-///   * **429 / 503** are genuine rate-limit / overload signals — the origin is
-///     telling us to slow down, so the escalating cooldown is always honored.
-///   * **403 / 406** are per-request *content* blocks: *this payload* was
-///     rejected. The right move is to try the next payload immediately, so the
-///     cooldown is only paid under explicit `--waf-evasion` (the user opting
-///     into cautious, stealthy pacing). Otherwise a facade that 403s most
-///     payloads (signature / anomaly-scoring WAFs) would burn the entire
-///     `--scan-timeout` in backoff and never reach a bypass that does slip
-///     through — the failure mode behind xssmaze `waf-facade` L3/L5.
+///
+/// * **429 / 503** are genuine rate-limit / overload signals — the origin is
+///   telling us to slow down, so the escalating cooldown is always honored.
+/// * **403 / 406** are per-request *content* blocks: *this payload* was
+///   rejected. The right move is to try the next payload immediately, so the
+///   cooldown is only paid under explicit `--waf-evasion` (the user opting
+///   into cautious, stealthy pacing). Otherwise a facade that 403s most
+///   payloads (signature / anomaly-scoring WAFs) would burn the entire
+///   `--scan-timeout` in backoff and never reach a bypass that does slip
+///   through — the failure mode behind xssmaze `waf-facade` L3/L5.
+///
 /// Returns `0` below `WAF_BACKOFF_THRESHOLD` consecutive blocks (transient).
 fn waf_block_cooldown_ms(status_code: u16, consecutive: u32, waf_evasion: bool) -> u64 {
     let is_rate_limit = matches!(status_code, 429 | 503);
