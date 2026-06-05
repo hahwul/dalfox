@@ -281,7 +281,11 @@ pub(crate) async fn run_scan_job(
         timeout: opts
             .timeout
             .unwrap_or(crate::cmd::scan::DEFAULT_TIMEOUT_SECS),
-        scan_timeout: 0,
+        // Whole-scan wall-clock budget: the request's own value, capped by the
+        // server-wide `--scan-timeout` when set. Enforced below by wrapping the
+        // scan future, since `run_scanning` itself doesn't honor this field
+        // (the CLI applies the same budget in its scan loop, not in scanning).
+        scan_timeout: effective_scan_timeout(opts.scan_timeout, state.scan_timeout),
         delay: opts.delay.unwrap_or(0),
         proxy: opts.proxy.clone(),
         follow_redirects: opts.follow_redirects.unwrap_or(false),
@@ -438,7 +442,7 @@ pub(crate) async fn run_scan_job(
     // Captured from inside the scoped/async blocks below so worker-panic count
     // survives past the scan; assigned by the run_scanning call.
     let mut scan_report = crate::scanning::ScanRunReport::default();
-    crate::with_job_rate_limiter(
+    let scan_fut = crate::with_job_rate_limiter(
         args.rate_limit,
         crate::REQUEST_COUNT_JOB.scope(progress.requests_sent.clone(), async {
             crate::WAF_CONSECUTIVE_BLOCKS_JOB
@@ -522,8 +526,13 @@ pub(crate) async fn run_scan_job(
                 })
                 .await;
         }),
-    )
-    .await;
+    );
+
+    // Enforce the whole-scan wall-clock budget. On expiry the cancel flag is
+    // tripped so any in-flight workers wind down at their next checkpoint, and
+    // the job settles as `cancelled` with whatever partial results it gathered
+    // (plus an explanatory error_message) — the same shape as a user cancel.
+    let timed_out = run_within_scan_budget(args.scan_timeout, &cancel_flag, scan_fut).await;
 
     drop(findings_updater);
 
@@ -574,10 +583,19 @@ pub(crate) async fn run_scan_job(
                     JobStatus::Done
                 };
             }
+            // A worker panic and a scan_timeout are mutually exclusive (a
+            // timeout trips the cancel flag, so `panicked` is false then), so a
+            // simple if/else-if records whichever applies without clobbering an
+            // error_message a prior path already set.
             if panicked && job.error_message.is_none() {
                 job.error_message = Some(format!(
                     "{} scan worker task(s) panicked; results are partial",
                     scan_report.worker_panics
+                ));
+            } else if timed_out && job.error_message.is_none() {
+                job.error_message = Some(format!(
+                    "scan exceeded scan_timeout ({}s); returning partial results",
+                    args.scan_timeout
                 ));
             }
             // Preserve an earlier finished_at_ms set by cancel_scan_handler
@@ -600,7 +618,13 @@ pub(crate) async fn run_scan_job(
     log(
         &state,
         "JOB",
-        &format!("{} id={} url={}", status_label, job_id, url),
+        &format!(
+            "{}{} id={} url={}",
+            status_label,
+            if timed_out { " (scan_timeout)" } else { "" },
+            job_id,
+            url
+        ),
     );
 
     // Reuse the target's HTTP configuration (proxy, TLS relaxation, redirect

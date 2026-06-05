@@ -31,6 +31,14 @@ pub struct ServerArgs {
     #[arg(long = "rate-limit")]
     pub rate_limit: Option<u32>,
 
+    /// Server-wide cap on each scan's total wall-clock runtime, in seconds
+    /// (0 or unset = unbounded). Applied to every submitted scan: a request's
+    /// own scan_timeout may be shorter but cannot exceed or disable this cap.
+    /// Bounds long/deep scans so a single target can't pin a worker indefinitely.
+    #[clap(help_heading = "SERVER")]
+    #[arg(long = "scan-timeout")]
+    pub scan_timeout: Option<u64>,
+
     /// Maximum number of concurrently active (queued + running) scans. Once the
     /// cap is hit, new submissions get HTTP 503 until a slot frees. 0 disables
     /// the cap (unbounded). Bounds memory + the blocking-pool against a flood
@@ -99,6 +107,9 @@ pub(crate) struct AppState {
     // Server-wide per-scan request-rate cap (RPS). None/Some(0) leaves scans
     // unbounded unless a request supplies its own rate_limit.
     pub(crate) rate_limit: Option<u32>,
+    // Server-wide cap on per-scan wall-clock runtime (seconds). `None`/`Some(0)`
+    // leaves scans unbounded unless a request supplies its own scan_timeout.
+    pub(crate) scan_timeout: Option<u64>,
     // Max concurrent (queued + running) scans; 0 = unlimited.
     pub(crate) max_concurrent_scans: usize,
 }
@@ -155,6 +166,10 @@ pub(crate) struct ScanOptions {
     /// Per-scan outbound request rate (requests/second; 0 = unlimited). Capped
     /// by the server's `--rate-limit` when set.
     pub(crate) rate_limit: Option<u32>,
+    /// Whole-scan wall-clock budget in seconds (0 = unbounded). When the server
+    /// was started with `--scan-timeout`, that value caps this one — a request
+    /// may ask for a shorter budget but cannot exceed or disable the cap.
+    pub(crate) scan_timeout: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize)]

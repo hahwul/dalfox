@@ -30,6 +30,14 @@ pub(crate) fn validate_scan_options(opts: &ScanOptions) -> Result<(), String> {
             MAX_WORKERS, w
         ));
     }
+    if let Some(st) = opts.scan_timeout
+        && st > MAX_SCAN_TIMEOUT_SECS
+    {
+        return Err(format!(
+            "scan_timeout must be between 0 and {} seconds (got {})",
+            MAX_SCAN_TIMEOUT_SECS, st
+        ));
+    }
     Ok(())
 }
 

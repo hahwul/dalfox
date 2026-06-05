@@ -305,19 +305,25 @@ pub(crate) async fn get_scan_handler(
     let cookie = params.get("cookie").cloned();
     // A present-but-unparseable numeric query param is a 400, not a silent
     // fallback to the default (which is what `.parse().ok()` used to do).
-    let (worker, delay, timeout, rate_limit): (
+    let (worker, delay, timeout, rate_limit, scan_timeout): (
         Option<usize>,
         Option<u64>,
         Option<u64>,
         Option<u32>,
+        Option<u64>,
     ) = match (
         parse_num_query::<usize>(&params, "worker"),
         parse_num_query::<u64>(&params, "delay"),
         parse_num_query::<u64>(&params, "timeout"),
         parse_num_query::<u32>(&params, "rate_limit"),
+        parse_num_query::<u64>(&params, "scan_timeout"),
     ) {
-        (Ok(w), Ok(d), Ok(t), Ok(rl)) => (w, d, t, rl),
-        (Err(msg), ..) | (_, Err(msg), ..) | (_, _, Err(msg), _) | (.., Err(msg)) => {
+        (Ok(w), Ok(d), Ok(t), Ok(rl), Ok(st)) => (w, d, t, rl, st),
+        (Err(msg), ..)
+        | (_, Err(msg), ..)
+        | (_, _, Err(msg), ..)
+        | (_, _, _, Err(msg), _)
+        | (.., Err(msg)) => {
             let resp = ApiResponse::<serde_json::Value> {
                 code: 400,
                 msg,
@@ -386,6 +392,7 @@ pub(crate) async fn get_scan_handler(
         skip_ast_analysis: Some(skip_ast_analysis),
         detect_outdated_libs: Some(detect_outdated_libs),
         rate_limit,
+        scan_timeout,
     };
 
     if let Err(msg) = validate_scan_options(&opts) {

@@ -3836,6 +3836,49 @@ impl<'a> DomXssVisitor<'a> {
         }
         // Walk the callee
         self.walk_expression(&call.callee);
+
+        // Descend into function/arrow callbacks passed as arguments so a
+        // source→sink flow that lives *inside* a deferred callback is still
+        // analyzed. The classic shape is a `setTimeout` / `setInterval` /
+        // `requestAnimationFrame` / `queueMicrotask` body — e.g.
+        // `setTimeout(function(){ el.innerHTML = location.search }, 0)`. The
+        // callback never runs at parse time, and the call's arguments are not
+        // walked anywhere else (the trailing `walk_expression(&call.callee)`
+        // only descends the callee), so without this the body is invisible.
+        // Cases that own their callback walking (`addEventListener`, `.then`
+        // chains, `Reflect.apply`, …) `return` early and never reach here.
+        self.walk_callback_argument_bodies(call);
+    }
+
+    /// Walk function/arrow callbacks passed as call arguments, each with an
+    /// isolated taint scope so a callback-local variable (`var q = …` inside
+    /// the callback) does not leak taint into the enclosing scope. Only
+    /// function-shaped arguments are descended; data arguments keep their
+    /// existing taint-evaluation-only treatment.
+    fn walk_callback_argument_bodies(&mut self, call: &CallExpression<'a>) {
+        for arg in &call.arguments {
+            let Some(expr) = arg.as_expression() else {
+                continue;
+            };
+            let statements = match expr {
+                Expression::FunctionExpression(func) => {
+                    let Some(body) = &func.body else {
+                        continue;
+                    };
+                    &body.statements
+                }
+                Expression::ArrowFunctionExpression(arrow) => &arrow.body.statements,
+                _ => continue,
+            };
+
+            let saved_tainted = self.tainted_vars.clone();
+            let saved_aliases = self.var_aliases.clone();
+            let saved_field_taints = self.field_taints.clone();
+            self.walk_statements(statements);
+            self.tainted_vars = saved_tainted;
+            self.var_aliases = saved_aliases;
+            self.field_taints = saved_field_taints;
+        }
     }
 }
 
