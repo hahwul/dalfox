@@ -47,6 +47,33 @@ const WAF_BACKOFF_BASE_MS: u64 = 2000;
 /// Absolute ceiling (milliseconds) on a single adaptive-backoff sleep.
 const WAF_BACKOFF_CAP_MS: u64 = 30_000;
 
+/// Base adaptive cooldown (milliseconds, before any jitter) for a WAF block
+/// response, or `0` for "don't pause". The block *class* decides whether the
+/// cooldown applies at all, because the correct reaction differs:
+///
+/// * **429 / 503** are genuine rate-limit / overload signals — the origin is
+///   telling us to slow down, so the escalating cooldown is always honored.
+/// * **403 / 406** are per-request *content* blocks: *this payload* was
+///   rejected. The right move is to try the next payload immediately, so the
+///   cooldown is only paid under explicit `--waf-evasion` (the user opting
+///   into cautious, stealthy pacing). Otherwise a facade that 403s most
+///   payloads (signature / anomaly-scoring WAFs) would burn the entire
+///   `--scan-timeout` in backoff and never reach a bypass that does slip
+///   through — the failure mode behind xssmaze `waf-facade` L3/L5.
+///
+/// Returns `0` below `WAF_BACKOFF_THRESHOLD` consecutive blocks (transient).
+fn waf_block_cooldown_ms(status_code: u16, consecutive: u32, waf_evasion: bool) -> u64 {
+    let is_rate_limit = matches!(status_code, 429 | 503);
+    let is_content_block = matches!(status_code, 403 | 406);
+    let apply_cooldown = is_rate_limit || (is_content_block && waf_evasion);
+    if !apply_cooldown || consecutive < WAF_BACKOFF_THRESHOLD {
+        return 0;
+    }
+    let escalation = (consecutive - WAF_BACKOFF_THRESHOLD).min(WAF_BACKOFF_MAX_ESCALATION);
+    let backoff_ms = WAF_BACKOFF_BASE_MS * (1u64 << escalation);
+    backoff_ms.min(WAF_BACKOFF_CAP_MS)
+}
+
 /// Check whether *all* occurrences of `payload` in `html` fall inside safe tags
 /// (textarea, noscript, style, xmp, plaintext, title).  If the payload appears
 /// at least once outside a safe tag, returns `false`.
@@ -1255,19 +1282,14 @@ async fn fetch_injection_response_with_client(
             // consecutive counter is per-scan when bound (MCP / REST runners)
             // so one scan's WAF blocks don't slow down unrelated concurrent
             // scans; CLI falls back to the process-wide counter.
-            let is_waf_block = status_code == 403
-                || status_code == 406
-                || status_code == 429
-                || status_code == 503;
+            let is_waf_block = matches!(status_code, 403 | 406 | 429 | 503);
             if is_waf_block {
                 let consecutive = crate::tick_waf_block();
-                // Apply adaptive cooldown when consecutive blocks exceed the
-                // threshold — the "cooldown pause" half of --waf-evasion.
-                if consecutive >= WAF_BACKOFF_THRESHOLD {
-                    let escalation =
-                        (consecutive - WAF_BACKOFF_THRESHOLD).min(WAF_BACKOFF_MAX_ESCALATION);
-                    let backoff_ms = WAF_BACKOFF_BASE_MS * (1u64 << escalation);
-                    let mut backoff_ms = backoff_ms.min(WAF_BACKOFF_CAP_MS);
+                // `waf_block_cooldown_ms` decides whether (and how long) to
+                // pause based on the block class — see its doc comment.
+                let mut backoff_ms =
+                    waf_block_cooldown_ms(status_code, consecutive, args.waf_evasion);
+                if backoff_ms > 0 {
                     // Under --waf-evasion, scatter the cooldown by up to +50% so
                     // the backoff itself isn't a fixed, fingerprintable interval.
                     if args.waf_evasion {

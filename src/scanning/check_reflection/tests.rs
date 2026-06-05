@@ -1428,3 +1428,72 @@ async fn test_path_reflection_suppressed_on_non_html_content_type() {
         "path-injection reflection on application/javascript should be suppressed"
     );
 }
+
+// ---- adaptive WAF cooldown policy (waf_block_cooldown_ms) ----
+
+#[test]
+fn content_block_does_not_cooldown_in_default_mode() {
+    // 403 / 406 are per-request content blocks: in default mode (no
+    // --waf-evasion) the scanner must keep churning payloads, never sleep —
+    // otherwise a facade that 403s most payloads burns the whole scan-timeout.
+    for status in [403u16, 406] {
+        for consecutive in [WAF_BACKOFF_THRESHOLD, WAF_BACKOFF_THRESHOLD + 10, 999] {
+            assert_eq!(
+                waf_block_cooldown_ms(status, consecutive, false),
+                0,
+                "status {status} should not cool down in default mode (n={consecutive})"
+            );
+        }
+    }
+}
+
+#[test]
+fn content_block_cools_down_under_waf_evasion() {
+    // With --waf-evasion the user opts into cautious pacing, so content blocks
+    // get the escalating cooldown once past the threshold.
+    assert_eq!(
+        waf_block_cooldown_ms(403, WAF_BACKOFF_THRESHOLD - 1, true),
+        0,
+        "below threshold = no cooldown even under evasion"
+    );
+    assert_eq!(
+        waf_block_cooldown_ms(403, WAF_BACKOFF_THRESHOLD, true),
+        WAF_BACKOFF_BASE_MS,
+        "first over-threshold block = base delay"
+    );
+    assert!(
+        waf_block_cooldown_ms(403, WAF_BACKOFF_THRESHOLD + 1, true) > WAF_BACKOFF_BASE_MS,
+        "cooldown escalates with consecutive blocks"
+    );
+}
+
+#[test]
+fn rate_limit_always_cools_down() {
+    // 429 / 503 are genuine "slow down" signals — honored regardless of mode.
+    for status in [429u16, 503] {
+        assert_eq!(
+            waf_block_cooldown_ms(status, WAF_BACKOFF_THRESHOLD, false),
+            WAF_BACKOFF_BASE_MS,
+            "status {status} must cool down even in default mode"
+        );
+        assert_eq!(
+            waf_block_cooldown_ms(status, WAF_BACKOFF_THRESHOLD - 1, false),
+            0,
+            "status {status} stays quiet below the transient threshold"
+        );
+    }
+}
+
+#[test]
+fn cooldown_is_capped_and_ignores_non_block_status() {
+    // Escalation plateaus at the absolute ceiling.
+    assert_eq!(
+        waf_block_cooldown_ms(429, 100, true),
+        WAF_BACKOFF_CAP_MS,
+        "a long block streak is capped at WAF_BACKOFF_CAP_MS"
+    );
+    // Non-block statuses never cool down.
+    for status in [200u16, 301, 404, 500] {
+        assert_eq!(waf_block_cooldown_ms(status, 999, true), 0);
+    }
+}
