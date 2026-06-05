@@ -227,23 +227,27 @@ fn is_skippable_har_header(name: &str) -> bool {
 }
 
 /// Extract a request body from `postData`, preferring the captured raw `text`
-/// and falling back to reconstructing a urlencoded-shaped body from parsed
-/// `params`. Returns `None` for an empty body so GET-style targets stay
+/// and falling back to reconstructing an `x-www-form-urlencoded` body from
+/// parsed `params`. Returns `None` for an empty body so GET-style targets stay
 /// body-less.
 fn har_body(pd: HarPostData) -> Option<String> {
     if let Some(text) = pd.text.filter(|t| !t.is_empty()) {
         return Some(text);
     }
     if !pd.params.is_empty() {
-        let body = pd
-            .params
-            .iter()
-            .map(|p| match &p.value {
-                Some(v) => format!("{}={}", p.name, v),
-                None => p.name.clone(),
-            })
-            .collect::<Vec<_>>()
-            .join("&");
+        // No raw `text` — reconstruct the body from the structured params. HAR
+        // stores these decoded, so percent-encode each name/value (a value with
+        // `&`, `=`, a space, or unicode would otherwise corrupt the body) and
+        // always emit `name=` even when the value is absent. Going through the
+        // form serializer keeps the result well-formed so dalfox's own
+        // body-param parser re-splits it into the same fields it was built from.
+        let body = url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(
+                pd.params
+                    .iter()
+                    .map(|p| (p.name.as_str(), p.value.as_deref().unwrap_or(""))),
+            )
+            .finish();
         if !body.is_empty() {
             return Some(body);
         }
@@ -402,6 +406,26 @@ mod tests {
         }}]}}"#;
         let targets = parse_har(har).unwrap();
         assert_eq!(targets[0].data.as_deref(), Some("a=1&b=2"));
+    }
+
+    #[test]
+    fn params_body_is_form_url_encoded() {
+        // Reconstructed params bodies must be properly form-encoded so special
+        // characters don't change the request shape, and a valueless param
+        // becomes `name=` (not a bare `name`).
+        let har = r#"{"log":{"entries":[{"request":{
+            "method":"POST","url":"https://example.com/f",
+            "postData":{"params":[
+                {"name":"q","value":"a b&c=d"},
+                {"name":"flag"},
+                {"name":"uni","value":"café"}
+            ]}
+        }}]}}"#;
+        let targets = parse_har(har).unwrap();
+        assert_eq!(
+            targets[0].data.as_deref(),
+            Some("q=a+b%26c%3Dd&flag=&uni=caf%C3%A9")
+        );
     }
 
     #[test]
