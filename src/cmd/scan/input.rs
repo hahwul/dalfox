@@ -24,14 +24,15 @@ pub(crate) async fn resolve_targets(
     // file that lies about its size (`/dev/zero` reports 0 bytes via
     // metadata) is still stopped.
     const MAX_TARGET_LIST_BYTES: u64 = crate::utils::fs::MAX_FILE_READ_BYTES;
+    // Prefix budget for content sniffing during auto-detection. A raw HTTP
+    // request is identified by its first line and a HAR by its leading
+    // `{ … "log" … "entries"` preamble, so 8 KiB is enough to classify the
+    // input without reading a (possibly huge) file in full — only the
+    // committed input mode reads the whole file. Real HARs place `entries`
+    // within the first few hundred bytes; the rare capture that buries it past
+    // the budget can still be forced with `--input-type har`.
+    const SNIFF_PREFIX_BYTES: u64 = 8 * 1024;
 
-    // Auto-detect raw-http on positional args. Read each candidate
-    // file *once* into a cache so the later "auto" branch can reuse
-    // the content — previously this code ran `fs::read_to_string`
-    // here and again immediately below, doubling the I/O on every
-    // legitimate target list.
-    let mut auto_file_cache: std::collections::HashMap<String, String> =
-        std::collections::HashMap::new();
     // stdin can only be read once. When auto-detection needs to peek at a
     // piped stream (to tell a HAR document apart from a line-based URL list),
     // it buffers the whole stream here so the parsing phase reuses the same
@@ -79,52 +80,43 @@ pub(crate) async fn resolve_targets(
                 return Err(ScanOutcome::Error);
             }
         } else {
-            // Raw-http auto-detect. Read each candidate file once and
-            // cache the content; the later auto branch re-uses the
-            // same string. Bounded so a `/dev/zero` argument can't
-            // OOM us during *detection*.
-            let is_raw_http = args.targets.iter().all(|t| {
+            // Classify the positional file args by sniffing a bounded *prefix*
+            // of each rather than slurping it in full: `is_raw_http_request`
+            // only inspects the first line and `is_har_content` only the
+            // leading `{ … "log" … "entries"` markers, so the first few KiB
+            // decide it. The committed input mode reads each file completely
+            // later. Raw HTTP pasted directly on the CLI is matched as a
+            // literal (it is not a path on disk). Both flags accumulate with
+            // AND, so a single non-match rules a type out.
+            let mut all_raw_http = true;
+            let mut all_har = true;
+            for t in &args.targets {
                 if crate::target_parser::is_raw_http_request(t) {
-                    return true;
+                    all_har = false; // a raw-http literal is never a HAR
+                    continue;
                 }
-                if let Ok(content) = crate::utils::fs::read_bounded(
+                match crate::utils::fs::read_prefix_lossy(
                     std::path::Path::new(t),
-                    MAX_TARGET_LIST_BYTES,
-                    "target list",
+                    SNIFF_PREFIX_BYTES,
                 ) {
-                    let is_raw = crate::target_parser::is_raw_http_request(&content);
-                    auto_file_cache.insert(t.clone(), content);
-                    is_raw
-                } else {
-                    false
+                    Ok(prefix) => {
+                        all_raw_http &= crate::target_parser::is_raw_http_request(&prefix);
+                        all_har &= crate::target_parser::is_har_content(&prefix);
+                    }
+                    // Not a readable file (a bare URL/host literal, or an
+                    // unreadable path): neither a raw-http nor a HAR file.
+                    Err(_) => {
+                        all_raw_http = false;
+                        all_har = false;
+                    }
                 }
-            });
-            if is_raw_http {
+                if !all_raw_http && !all_har {
+                    break; // neither type is still possible — stop sniffing
+                }
+            }
+            if all_raw_http {
                 "raw-http".to_string()
-            } else if args.targets.iter().all(|t| {
-                // HAR auto-detect: every positional target is a file whose
-                // content looks like a HAR document. Reuses the cache the
-                // raw-http pass populated and bounds any fresh read the same
-                // way. A HAR never matches `is_raw_http_request` (it starts
-                // with `{`), so this can only fire after raw-http is ruled out.
-                if let Some(content) = auto_file_cache.get(t) {
-                    return crate::target_parser::is_har_content(content);
-                }
-                if crate::target_parser::is_raw_http_request(t) {
-                    return false; // a raw-http literal, not a file on disk
-                }
-                if let Ok(content) = crate::utils::fs::read_bounded(
-                    std::path::Path::new(t),
-                    MAX_TARGET_LIST_BYTES,
-                    "HAR file",
-                ) {
-                    let is_har = crate::target_parser::is_har_content(&content);
-                    auto_file_cache.insert(t.clone(), content);
-                    is_har
-                } else {
-                    false
-                }
-            }) {
+            } else if all_har {
                 "har".to_string()
             } else {
                 "auto".to_string()
@@ -175,27 +167,18 @@ pub(crate) async fn resolve_targets(
                 target_strings.push(target.clone());
                 continue;
             }
-            // Try the cached read from the raw-http detection pass
-            // first; fall back to a fresh bounded read for anything
-            // not already in the cache (this branch is also reached
-            // when raw-http detection short-circuited on an earlier
-            // target and didn't try fs at all).
-            let file_read: Option<std::result::Result<String, std::io::Error>> =
-                match auto_file_cache.remove(target) {
-                    Some(content) => Some(Ok(content)),
-                    None => {
-                        let p = std::path::Path::new(target);
-                        if p.exists() {
-                            Some(crate::utils::fs::read_bounded(
-                                p,
-                                MAX_TARGET_LIST_BYTES,
-                                "target list",
-                            ))
-                        } else {
-                            None
-                        }
-                    }
-                };
+            // Detection only sniffed a prefix, so read the file in full now
+            // (None when the arg isn't a file on disk — treated as a URL).
+            let p = std::path::Path::new(target);
+            let file_read: Option<std::result::Result<String, std::io::Error>> = if p.exists() {
+                Some(crate::utils::fs::read_bounded(
+                    p,
+                    MAX_TARGET_LIST_BYTES,
+                    "target list",
+                ))
+            } else {
+                None
+            };
             match file_read {
                 Some(Ok(content)) => {
                     // Ambiguity: input is both a readable file *and*
@@ -428,7 +411,7 @@ pub(crate) async fn resolve_targets(
             // A single HAR document expands to many Targets. Load it from the
             // detection cache, a file on disk, or treat the string itself as
             // the document (the stdin buffer / a literal).
-            let content = match load_request_source(&s, &mut auto_file_cache, args, "HAR file") {
+            let content = match load_request_source(&s, args, "HAR file") {
                 Ok(c) => c,
                 Err(outcome) => return Err(outcome),
             };
@@ -452,11 +435,10 @@ pub(crate) async fn resolve_targets(
             }
         } else if input_type == "raw-http" {
             // Parse raw HTTP from the detection cache, a file, or a literal.
-            let content =
-                match load_request_source(&s, &mut auto_file_cache, args, "raw HTTP request") {
-                    Ok(c) => c,
-                    Err(outcome) => return Err(outcome),
-                };
+            let content = match load_request_source(&s, args, "raw HTTP request") {
+                Ok(c) => c,
+                Err(outcome) => return Err(outcome),
+            };
             match crate::target_parser::parse_raw_http_request(&content) {
                 Ok(mut target) => {
                     apply_request_cli_overrides(&mut target, args);
@@ -705,19 +687,16 @@ pub(crate) async fn resolve_targets(
 }
 
 /// Load the source text for a request-bearing input (`raw-http` or `har`):
-/// reuse the content cached during auto-detection, else read the file at `s`
-/// (bounded), else treat `s` itself as the document (a stdin buffer or a CLI
-/// literal). Emits the structured error and returns `Err(ScanOutcome::Error)`
-/// when an existing file can't be read within the byte cap.
+/// read the file at `s` (bounded), else treat `s` itself as the document (a
+/// stdin buffer or a CLI literal). Detection only sniffs a prefix, so the full
+/// read happens here, once we've committed to the input type. Emits the
+/// structured error and returns `Err(ScanOutcome::Error)` when an existing file
+/// can't be read within the byte cap.
 fn load_request_source(
     s: &str,
-    cache: &mut std::collections::HashMap<String, String>,
     args: &ScanArgs,
     label: &str,
 ) -> std::result::Result<String, ScanOutcome> {
-    if let Some(content) = cache.remove(s) {
-        return Ok(content);
-    }
     let p = std::path::Path::new(s);
     if p.exists() {
         match crate::utils::fs::read_bounded(p, crate::utils::fs::MAX_FILE_READ_BYTES, label) {

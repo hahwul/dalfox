@@ -1823,4 +1823,51 @@ mod har_input {
         assert_eq!(targets.len(), 1);
         assert_eq!(targets[0].url.host_str(), Some("keep.test"));
     }
+
+    #[tokio::test]
+    async fn auto_detects_large_har_from_prefix_markers() {
+        // A HAR larger than the sniff prefix is still auto-detected because the
+        // `log`/`entries` markers sit at the very start — detection classifies
+        // it from a bounded prefix without reading the whole file.
+        let big_q = "A".repeat(16 * 1024);
+        let har = format!(
+            r#"{{"log":{{"entries":[{{"request":{{"method":"GET","url":"https://demo.test/?q={big_q}"}}}}]}}}}"#
+        );
+        assert!(har.len() > 8 * 1024, "fixture must exceed the sniff prefix");
+        let path = write_temp_har(&har);
+        let mut args = default_scan_args();
+        args.input_type = "auto".to_string();
+        args.targets = vec![path.to_string_lossy().to_string()];
+
+        let targets = super::super::input::resolve_targets(&args)
+            .await
+            .expect("large HAR with leading markers should auto-detect");
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].method, "GET");
+    }
+
+    #[tokio::test]
+    async fn explicit_har_parses_when_markers_past_prefix() {
+        // The flip side of prefix sniffing: a HAR that buries `entries` past
+        // the sniff budget won't auto-detect, but `-i har` reads the file in
+        // full and parses it — the documented escape hatch.
+        let pad = " ".repeat(16 * 1024);
+        let har = format!(
+            r#"{{"log":{{"comment":"{pad}","entries":[{{"request":{{"method":"GET","url":"https://demo.test/?q=1"}}}}]}}}}"#
+        );
+        let path = write_temp_har(&har);
+        let mut args = default_scan_args();
+        args.input_type = "har".to_string(); // explicit, not auto
+        args.targets = vec![path.to_string_lossy().to_string()];
+
+        let targets = super::super::input::resolve_targets(&args)
+            .await
+            .expect("explicit -i har should parse regardless of marker position");
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].url.as_str(), "https://demo.test/?q=1");
+    }
 }
