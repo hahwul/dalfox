@@ -130,6 +130,39 @@ fn job_status_deserializes_from_lowercase_string() {
 }
 
 #[test]
+fn effective_rate_limit_resolves_request_and_cap() {
+    // No request, no cap → unlimited.
+    assert_eq!(effective_rate_limit(None, None), 0);
+    // No request, cap set → the cap applies to everyone.
+    assert_eq!(effective_rate_limit(None, Some(20)), 20);
+    // Cap explicitly 0 → still unlimited.
+    assert_eq!(effective_rate_limit(None, Some(0)), 0);
+    // Request only → used as-is (including an explicit unlimited).
+    assert_eq!(effective_rate_limit(Some(50), None), 50);
+    assert_eq!(effective_rate_limit(Some(0), None), 0);
+    // Request below the cap → request wins (a client may ask for less).
+    assert_eq!(effective_rate_limit(Some(5), Some(20)), 5);
+    // Request above the cap → clamped down to the cap.
+    assert_eq!(effective_rate_limit(Some(100), Some(20)), 20);
+    // Request tries to go unlimited while a cap is set → clamped to the cap.
+    assert_eq!(effective_rate_limit(Some(0), Some(20)), 20);
+}
+
+#[test]
+fn split_cookie_pairs_splits_and_trims_multi_cookie_value() {
+    // The bug F4 fixes: a bare split_once('=') would fold "; lang=en" into the
+    // first value and keep the surrounding whitespace.
+    let pairs = split_cookie_pairs("session = abc ; lang=en");
+    assert_eq!(
+        pairs,
+        vec![
+            ("session".to_string(), "abc".to_string()),
+            ("lang".to_string(), "en".to_string()),
+        ]
+    );
+}
+
+#[test]
 fn job_status_rejects_unknown_variant() {
     assert!(serde_json::from_str::<JobStatus>("\"finished\"").is_err());
 }

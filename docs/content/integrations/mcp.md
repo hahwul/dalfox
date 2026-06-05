@@ -55,6 +55,7 @@ Submit a scan. Returns immediately.
   "encoders": ["url", "html"],
   "timeout": 10,
   "workers": 50,
+  "rate_limit": 0,
   "blind_callback_url": "https://callback.example",
   "deep_scan": false,
   "skip_ast_analysis": false,
@@ -65,6 +66,10 @@ Submit a scan. Returns immediately.
 `detect_outdated_libs` is opt-in (default `false`): set it `true` to also emit
 informational `[I]` findings for outdated / known-vulnerable JS libraries
 (CWE-1104, 0 extra requests). Left off, the scan reports only XSS.
+
+`rate_limit` caps the scan's outbound requests/second (`0` = unlimited, the
+default), now enforced across all worker tasks — use it to be gentle on a
+fragile target or to stay under a WAF threshold.
 
 Response:
 

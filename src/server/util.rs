@@ -64,19 +64,97 @@ where
     }
 }
 
-/// Split the server's HTTP-style `Cookie` header value (`a=b; c=d`) into
-/// `(name, value)` pairs. Earlier code did a single `split_once('=')` on the
-/// whole input, which silently folded `; c=d` into the value of the first
-/// pair — `preflight_handler` already used the `;`-split form, so the two
-/// endpoints disagreed on what a multi-cookie header meant.
-pub(crate) fn split_cookie_pairs(raw: &str) -> Vec<(String, String)> {
-    raw.split(';')
-        .filter_map(|p| p.trim().split_once('='))
-        .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
-        .collect()
+/// Lenient boolean query-parameter parse shared by GET /scan and DELETE
+/// /scan/{id}. `?flag=1` / `true` / `yes` / `on` (any case, trimmed) read as
+/// true; absent or anything else reads as false. Previously GET /scan accepted
+/// only the exact string `"true"` while DELETE's `?purge` accepted `"1"` and
+/// `"true"`, so the same `?include_request=1` silently did nothing.
+pub(crate) fn parse_bool_query(params: &HashMap<String, String>, key: &str) -> bool {
+    params.get(key).is_some_and(|v| {
+        let v = v.trim();
+        v == "1"
+            || v.eq_ignore_ascii_case("true")
+            || v.eq_ignore_ascii_case("yes")
+            || v.eq_ignore_ascii_case("on")
+    })
+}
+
+/// Admit a new scan and insert a queued `Job` for `url` under a single
+/// jobs-lock, or return `None` when the server is already at its
+/// `max_concurrent_scans` capacity (`0` = unlimited). Counting active
+/// (non-terminal) jobs and inserting under the *same* lock keeps the check
+/// race-free. Returns the reserved scan_id on success. Shared by POST and GET
+/// /scan so both paths enforce the cap and build the queued job identically.
+pub(crate) async fn try_admit_and_queue(
+    state: &AppState,
+    url: &str,
+    callback_url: Option<String>,
+) -> Option<String> {
+    let mut jobs = state.jobs.lock().await;
+    if state.max_concurrent_scans > 0
+        && jobs.values().filter(|j| !j.is_terminal()).count() >= state.max_concurrent_scans
+    {
+        return None;
+    }
+    let id = crate::utils::make_unique_scan_id(url, |id| jobs.contains_key(id));
+    jobs.insert(
+        id.clone(),
+        Job {
+            status: JobStatus::Queued,
+            results: None,
+            callback_url,
+            progress: JobProgress::default(),
+            cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            error_message: None,
+            target_url: url.to_string(),
+            queued_at_ms: now_ms(),
+            started_at_ms: None,
+            finished_at_ms: None,
+        },
+    );
+    Some(id)
+}
+
+/// Build the standard 503 "at capacity" response body for a rejected admission.
+pub(crate) fn at_capacity_response(state: &AppState) -> ApiResponse<serde_json::Value> {
+    ApiResponse::<serde_json::Value> {
+        code: 503,
+        msg: format!(
+            "server at capacity: {} concurrent scans already in flight (raise or disable with --max-concurrent-scans)",
+            state.max_concurrent_scans
+        ),
+        data: None,
+    }
+}
+
+/// Defang ASCII control characters in a (possibly user-controlled) log message
+/// so a submitter can't forge extra log lines. Log calls embed the target URL
+/// and error strings, which carry attacker-supplied bytes; `has_http_scheme`
+/// only checks the prefix, so an embedded `\n`/`\r` would otherwise inject a
+/// whole fabricated `[ts] [LVL] ...` line into the file and onto stdout.
+/// CR/LF become `\n`/`\r`; other C0 controls become `\xNN`; tab is kept. Returns
+/// a borrowed string on the common (clean) path so non-injecting logs allocate
+/// nothing.
+pub(crate) fn sanitize_log_message(msg: &str) -> std::borrow::Cow<'_, str> {
+    if !msg.bytes().any(|b| b < 0x20 && b != b'\t') {
+        return std::borrow::Cow::Borrowed(msg);
+    }
+    let mut out = String::with_capacity(msg.len() + 8);
+    for c in msg.chars() {
+        match c {
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push('\t'),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\x{:02x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    std::borrow::Cow::Owned(out)
 }
 
 pub(crate) fn log(state: &AppState, level: &str, message: &str) {
+    let message = sanitize_log_message(message);
+    let message = message.as_ref();
     let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let (color, lvl) = match level {
         "INF" => ("\x1b[36m", "INF"),

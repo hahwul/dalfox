@@ -35,9 +35,11 @@ pub(crate) use serde::{Deserialize, Serialize};
 
 pub(crate) use crate::cmd::scan::ScanArgs;
 pub(crate) use crate::job::{
-    AbortOnDrop, JOB_RETENTION_SECS, Job, JobProgress, JobStatus, MAX_DELAY_MS, MAX_TIMEOUT_SECS,
-    MAX_WORKERS, has_http_scheme, now_ms, parse_job_status, purge_expired_jobs as purge_jobs_map,
-    send_reachability_probe, unreachable_error_message,
+    AbortOnDrop, JOB_RETENTION_SECS, Job, JobProgress, JobStatus, MAX_DELAY_MS,
+    MAX_DISCOVERED_PARAMS, MAX_TIMEOUT_SECS, MAX_WORKERS, cap_reflection_params,
+    effective_rate_limit, has_http_scheme, now_ms, parse_job_status,
+    purge_expired_jobs as purge_jobs_map, send_reachability_probe, split_cookie_pairs,
+    unreachable_error_message,
 };
 pub(crate) use crate::parameter_analysis::analyze_parameters;
 pub(crate) use crate::scanning::result::{Result as ScanResult, SanitizedResult};
@@ -137,6 +139,8 @@ pub async fn run_server(args: ServerArgs) {
         allow_headers,
         jsonp_enabled: args.jsonp,
         callback_param_name: args.callback_param_name.clone(),
+        rate_limit: args.rate_limit,
+        max_concurrent_scans: args.max_concurrent_scans,
     };
 
     let app = Router::new()
@@ -154,6 +158,10 @@ pub async fn run_server(args: ServerArgs) {
         .route("/scan/{id}", options(options_result_handler))
         .route("/health", get(health_handler))
         .route("/health", options(options_scan_handler))
+        // Explicit request-body cap for every route. Replaces axum's implicit
+        // 2 MiB default so the bound is documented and operator-tunable; a
+        // body over the limit is rejected with 413 before handler code runs.
+        .layer(axum::extract::DefaultBodyLimit::max(args.max_body_bytes))
         .with_state(state.clone());
 
     log(

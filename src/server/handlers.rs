@@ -78,26 +78,20 @@ pub(crate) async fn start_scan_handler(
 
     // Reserve a unique scan_id and insert the queued job under one lock so a
     // same-target resubmission in the same nanosecond can't clobber an
-    // in-flight job (see make_scan_id's nonce). Regenerate on collision.
-    let id = {
-        let mut jobs = state.jobs.lock().await;
-        let id = crate::utils::make_unique_scan_id(&url, |id| jobs.contains_key(id));
-        jobs.insert(
-            id.clone(),
-            Job {
-                status: JobStatus::Queued,
-                results: None,
-                callback_url: callback_url.clone(),
-                progress: JobProgress::default(),
-                cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                error_message: None,
-                target_url: url.clone(),
-                queued_at_ms: now_ms(),
-                started_at_ms: None,
-                finished_at_ms: None,
-            },
-        );
-        id
+    // in-flight job (see make_scan_id's nonce), and so the concurrency cap is
+    // checked race-free against the live job count. 503 when at capacity.
+    let id = match try_admit_and_queue(&state, &url, callback_url).await {
+        Some(id) => id,
+        None => {
+            let resp = at_capacity_response(&state);
+            return make_api_response(
+                &state,
+                &headers,
+                &params,
+                StatusCode::SERVICE_UNAVAILABLE,
+                &resp,
+            );
+        }
     };
     log(&state, "JOB", &format!("queued id={} url={}", id, url));
 
@@ -143,9 +137,12 @@ pub(crate) async fn get_result_handler(
 
     match job {
         Some(j) => {
+            // Include Error so an early infra failure (parse/reachability/panic)
+            // still exposes params_total / requests_sent gathered before it
+            // failed, instead of an opaque error_message with no progress.
             let progress_data = if matches!(
                 j.status,
-                JobStatus::Running | JobStatus::Done | JobStatus::Cancelled
+                JobStatus::Running | JobStatus::Done | JobStatus::Cancelled | JobStatus::Error
             ) {
                 let params_total = j
                     .progress
@@ -155,30 +152,34 @@ pub(crate) async fn get_result_handler(
                     .progress
                     .params_tested
                     .load(std::sync::atomic::Ordering::Relaxed);
-                let estimated_completion_pct =
-                    if matches!(j.status, JobStatus::Done | JobStatus::Cancelled) {
-                        if j.status == JobStatus::Done {
-                            100
-                        } else if params_total > 0 {
-                            ((params_tested as f64 / params_total as f64) * 100.0) as u32
-                        } else {
-                            0
-                        }
+                let estimated_completion_pct = if matches!(
+                    j.status,
+                    JobStatus::Done | JobStatus::Cancelled | JobStatus::Error
+                ) {
+                    if j.status == JobStatus::Done {
+                        100
                     } else if params_total > 0 {
-                        ((params_tested as f64 / params_total as f64) * 100.0).min(99.0) as u32
+                        ((params_tested as f64 / params_total as f64) * 100.0) as u32
                     } else {
                         0
-                    };
-                let suggested_poll_interval_ms: u64 =
-                    if matches!(j.status, JobStatus::Done | JobStatus::Cancelled) {
-                        0
-                    } else if estimated_completion_pct > 80 {
-                        1000
-                    } else if estimated_completion_pct > 10 {
-                        3000
-                    } else {
-                        2000
-                    };
+                    }
+                } else if params_total > 0 {
+                    ((params_tested as f64 / params_total as f64) * 100.0).min(99.0) as u32
+                } else {
+                    0
+                };
+                let suggested_poll_interval_ms: u64 = if matches!(
+                    j.status,
+                    JobStatus::Done | JobStatus::Cancelled | JobStatus::Error
+                ) {
+                    0
+                } else if estimated_completion_pct > 80 {
+                    1000
+                } else if estimated_completion_pct > 10 {
+                    3000
+                } else {
+                    2000
+                };
                 Some(ProgressPayload {
                     params_total,
                     params_tested,
@@ -304,13 +305,19 @@ pub(crate) async fn get_scan_handler(
     let cookie = params.get("cookie").cloned();
     // A present-but-unparseable numeric query param is a 400, not a silent
     // fallback to the default (which is what `.parse().ok()` used to do).
-    let (worker, delay, timeout): (Option<usize>, Option<u64>, Option<u64>) = match (
+    let (worker, delay, timeout, rate_limit): (
+        Option<usize>,
+        Option<u64>,
+        Option<u64>,
+        Option<u32>,
+    ) = match (
         parse_num_query::<usize>(&params, "worker"),
         parse_num_query::<u64>(&params, "delay"),
         parse_num_query::<u64>(&params, "timeout"),
+        parse_num_query::<u32>(&params, "rate_limit"),
     ) {
-        (Ok(w), Ok(d), Ok(t)) => (w, d, t),
-        (Err(msg), ..) | (_, Err(msg), _) | (.., Err(msg)) => {
+        (Ok(w), Ok(d), Ok(t), Ok(rl)) => (w, d, t, rl),
+        (Err(msg), ..) | (_, Err(msg), ..) | (_, _, Err(msg), _) | (.., Err(msg)) => {
             let resp = ApiResponse::<serde_json::Value> {
                 code: 400,
                 msg,
@@ -326,8 +333,9 @@ pub(crate) async fn get_scan_handler(
         .unwrap_or_else(|| "GET".to_string());
     let data_opt = params.get("data").cloned();
     let user_agent = params.get("user_agent").cloned();
-    let include_request = params.get("include_request").is_some_and(|s| s == "true");
-    let include_response = params.get("include_response").is_some_and(|s| s == "true");
+    // Lenient boolean parse (1/true/yes/on) shared with DELETE; see parse_bool_query.
+    let include_request = parse_bool_query(&params, "include_request");
+    let include_response = parse_bool_query(&params, "include_response");
 
     let param_list: Option<Vec<String>> = params.get("param").map(|s| {
         s.split(',')
@@ -336,14 +344,12 @@ pub(crate) async fn get_scan_handler(
             .collect()
     });
     let proxy = params.get("proxy").cloned();
-    let follow_redirects = params.get("follow_redirects").is_some_and(|s| s == "true");
-    let skip_mining = params.get("skip_mining").is_some_and(|s| s == "true");
-    let skip_discovery = params.get("skip_discovery").is_some_and(|s| s == "true");
-    let deep_scan = params.get("deep_scan").is_some_and(|s| s == "true");
-    let skip_ast_analysis = params.get("skip_ast_analysis").is_some_and(|s| s == "true");
-    let detect_outdated_libs = params
-        .get("detect_outdated_libs")
-        .is_some_and(|s| s == "true");
+    let follow_redirects = parse_bool_query(&params, "follow_redirects");
+    let skip_mining = parse_bool_query(&params, "skip_mining");
+    let skip_discovery = parse_bool_query(&params, "skip_discovery");
+    let deep_scan = parse_bool_query(&params, "deep_scan");
+    let skip_ast_analysis = parse_bool_query(&params, "skip_ast_analysis");
+    let detect_outdated_libs = parse_bool_query(&params, "detect_outdated_libs");
 
     let opts = ScanOptions {
         cookie,
@@ -379,6 +385,7 @@ pub(crate) async fn get_scan_handler(
         deep_scan: Some(deep_scan),
         skip_ast_analysis: Some(skip_ast_analysis),
         detect_outdated_libs: Some(detect_outdated_libs),
+        rate_limit,
     };
 
     if let Err(msg) = validate_scan_options(&opts) {
@@ -391,26 +398,20 @@ pub(crate) async fn get_scan_handler(
     }
 
     let callback_url = opts.callback_url.clone();
-    // Reserve a unique scan_id under one lock (see POST /scan).
-    let id = {
-        let mut jobs = state.jobs.lock().await;
-        let id = crate::utils::make_unique_scan_id(&url, |id| jobs.contains_key(id));
-        jobs.insert(
-            id.clone(),
-            Job {
-                status: JobStatus::Queued,
-                results: None,
-                callback_url,
-                progress: JobProgress::default(),
-                cancelled: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-                error_message: None,
-                target_url: url.clone(),
-                queued_at_ms: now_ms(),
-                started_at_ms: None,
-                finished_at_ms: None,
-            },
-        );
-        id
+    // Reserve a unique scan_id and enforce the concurrency cap under one lock
+    // (see POST /scan). 503 when at capacity.
+    let id = match try_admit_and_queue(&state, &url, callback_url).await {
+        Some(id) => id,
+        None => {
+            let resp = at_capacity_response(&state);
+            return make_api_response(
+                &state,
+                &headers,
+                &params,
+                StatusCode::SERVICE_UNAVAILABLE,
+                &resp,
+            );
+        }
     };
     log(&state, "JOB", &format!("queued id={} url={}", id, url));
 
@@ -495,9 +496,7 @@ pub(crate) async fn cancel_scan_handler(
     // When ?purge=1, delete the job from memory instead of (or in addition to)
     // cancelling it. Only allowed when the job is already terminal — callers
     // must first cancel a running scan and wait for it to settle.
-    let purge_requested = params
-        .get("purge")
-        .is_some_and(|v| v == "1" || v.eq_ignore_ascii_case("true"));
+    let purge_requested = parse_bool_query(&params, "purge");
 
     let mut jobs = state.jobs.lock().await;
     match jobs.get_mut(&id) {
@@ -625,14 +624,23 @@ pub(crate) async fn list_scans_handler(
     };
 
     // Optional pagination. offset defaults to 0, limit == 0 means return all.
-    let offset: usize = params
-        .get("offset")
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
-    let limit: usize = params
-        .get("limit")
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(0);
+    // A present-but-unparseable value is a 400, not a silent fallback — matching
+    // GET /scan's strict numeric handling (parse_num_query) rather than the old
+    // `.parse().ok()` that turned `?limit=abc` into "return everything".
+    let (offset, limit): (usize, usize) = match (
+        parse_num_query::<usize>(&params, "offset"),
+        parse_num_query::<usize>(&params, "limit"),
+    ) {
+        (Ok(o), Ok(l)) => (o.unwrap_or(0), l.unwrap_or(0)),
+        (Err(msg), _) | (_, Err(msg)) => {
+            let resp = ApiResponse::<serde_json::Value> {
+                code: 400,
+                msg,
+                data: None,
+            };
+            return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+        }
+    };
 
     let jobs = state.jobs.lock().await;
 
@@ -803,6 +811,9 @@ pub(crate) async fn preflight_handler(
                 });
 
                 analyze_parameters(&mut target, &scan_args, None).await;
+                // Apply the same per-scan parameter cap a real scan would, so
+                // the estimate reflects what scanning actually fans out to.
+                cap_reflection_params(&mut target);
 
                 let enc_factor = {
                     let encs = &scan_args.encoders;

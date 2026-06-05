@@ -167,6 +167,7 @@ Returns version, `auth_required`, and the list of supported endpoints. Good for 
     "worker": 50,
     "delay": 0,
     "timeout": 10,
+    "rate_limit": 0,
     "blind": "https://callback.interact.sh",
     "method": "POST",
     "data": "user=test",
@@ -194,6 +195,20 @@ Fields mirror the CLI flags. See the [CLI reference](../../reference/cli/) for m
 `detect_outdated_libs` is opt-in (default `false`): set it `true` to also report
 outdated / known-vulnerable JS libraries as informational `[I]` findings
 (CWE-1104, 0 extra requests). The same key works as a `GET /scan` query parameter.
+
+`rate_limit` caps the scan's outbound requests/second (`0` = unlimited, the
+default), enforced across all worker tasks. The server-wide `--rate-limit` flag
+is an upper bound: a request may ask for a lower rate but cannot exceed or
+disable it.
+
+### Server flags worth setting
+
+- `--rate-limit <rps>` — cap every scan's outbound request rate (protects targets).
+- `--max-concurrent-scans <n>` — reject new submissions with `503` once `n`
+  scans are queued/running (default `100`, `0` = unlimited). Bounds memory and
+  the blocking pool against a flood of submissions.
+- `--max-body-bytes <n>` — explicit request-body cap for `POST /scan` and
+  `/preflight` (default `1048576` = 1 MiB); oversized bodies get `413`.
 
 ## Job lifecycle
 
