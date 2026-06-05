@@ -695,7 +695,10 @@ pub struct PreflightDalfoxParams {
     /// Target URL to analyze. Must start with http:// or https://.
     pub target: String,
 
-    /// Specific parameters to test. Supports location hints via "name:location" syntax.
+    /// Accepted for symmetry with scan_with_dalfox but NOT used by preflight:
+    /// preflight always reports the full auto-discovered parameter set (the
+    /// impact estimate), matching the REST `/preflight` endpoint. Pass the
+    /// filter to scan_with_dalfox when you actually run the scan.
     #[serde(default)]
     pub param: Vec<String>,
 
