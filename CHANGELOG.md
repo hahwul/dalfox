@@ -11,6 +11,7 @@ and continues to receive security backports per [SECURITY.md](./SECURITY.md).
 
 ### Added
 
+* **HAR input (`--input-type har`)**: `dalfox scan` now accepts a HAR / proxy export (Burp, Caido, ZAP, browser DevTools, mitmproxy) as a scan source. Every `log.entries[].request` becomes a target with its URL, method, headers, cookies, and body preserved — replacing the lossy workaround of flattening a capture to per-line URLs. HAR is auto-detected from file content (and from a stdin pipe), selectable explicitly with `-i har`, deduplicated by URL+method, and run through the same scope filters as every other input. Restores a capability the Go v2.x line had. Fixes [#1095](https://github.com/hahwul/dalfox/issues/1095).
 * **Structured outputs (SARIF / Markdown / TOML)**: The scan metadata envelope (`meta` with `dalfox_version`, `targets`, `scan_duration_ms`, `total_requests`, `findings_count`, `target_summary` including per-target WAF/bypass info) is now included for parity with JSON/JSONL. SARIF surfaces it under `runs[].properties` and `tool.driver.properties`; Markdown renders summary tables; TOML adds a `[meta]` table. Fixes [#1093](https://github.com/hahwul/dalfox/issues/1093).
 
 ## 3.0.2

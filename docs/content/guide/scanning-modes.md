@@ -7,7 +7,9 @@ toc = true
 
 Dalfox accepts targets in several shapes. Every mode shares the same discovery, payload, and verification engine; they differ only in how you feed URLs in and where results go.
 
-Under the hood there are four subcommands: `scan` (the scanner), `server` (long-lived REST API), `payload` (payload utilities), and `mcp` (Model Context Protocol stdio server). Everything below labelled "URL / File / Pipe / Raw HTTP / SXSS" is a *shape of input* that the `scan` subcommand handles via `--input-type`; they are not independent subcommands.
+Under the hood there are four subcommands: `scan` (the scanner), `server` (long-lived REST API), `payload` (payload utilities), and `mcp` (Model Context Protocol stdio server). Everything below labelled "URL / File / Pipe / Raw HTTP / HAR / SXSS" is a *shape of input* that the `scan` subcommand handles via `--input-type`; they are not independent subcommands.
+
+> The fan-out input shapes (`file`, `pipe`, `raw-http`, `har`) are `scan`-only: each expands one input into many targets. The `server` and `mcp` interfaces are single-target per call — they take one URL plus explicit method/headers/cookies/body (the same fidelity one HAR entry carries), so you replay a captured session by issuing one call per request.
 
 ## Auto (default)
 
@@ -66,6 +68,23 @@ The file is a standard raw HTTP request (method + path + headers + blank line + 
 
 For live proxy workflows (especially Caido Active Workflows) see the dedicated **[Caido integration guide](../integrations/caido/)**. It covers the exact shell pattern, the Caido boolean gotcha in If/Else nodes, and how to turn results into Findings automatically.
 
+## HAR mode
+
+Hand Dalfox a whole [HAR](http://www.softwareishard.com/blog/har-12-spec/) (HTTP Archive) export — the JSON capture that browser DevTools and intercepting proxies (Burp, Caido, ZAP, Charles, mitmproxy) produce — and it scans every request in it, preserving each one's URL, method, headers, cookies, and body:
+
+```bash
+# Auto-detected from the file content:
+dalfox scan capture.har
+# or explicit:
+dalfox scan --input-type har capture.har
+# or piped from another tool:
+mitmdump -nr flows -w /dev/stdout --set hardump=- | dalfox scan -i har
+```
+
+Unlike flattening a HAR to a plain list of URLs (which throws away method, headers, cookies, and body), HAR mode keeps the full shape of each captured request, so a POST with a JSON body or an authenticated session is replayed faithfully. Each `log.entries[].request` becomes one target; requests are deduplicated by URL + method and run through the same scope filters as every other mode. Non-`http(s)` entries (`data:`, `blob:`, WebSocket, browser-extension URLs) are skipped automatically.
+
+This restores a capability the Go v2.x line had that the v3 rewrite initially dropped. CLI request flags still apply on top — e.g. `-H "Authorization: Bearer …"` is appended to every entry, and `--include-url` / `--out-of-scope` narrow the set.
+
 ## Stored XSS mode (SXSS)
 
 Test the classic "inject on form A, payload appears on page B" pattern:
@@ -117,6 +136,7 @@ dalfox payload uri-scheme        # print javascript:/data: payloads
 | Test one URL | Auto / URL |
 | Scan a list from your crawler | File or Pipe |
 | Replay a specific request | Raw HTTP |
+| Replay a whole captured session (proxy/DevTools export) | HAR |
 | Test a form that writes to another page | SXSS |
 | Run many scans from a dashboard or CI | Server |
 | Let an AI agent drive scans | MCP |

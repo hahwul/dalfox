@@ -32,6 +32,11 @@ pub(crate) async fn resolve_targets(
     // legitimate target list.
     let mut auto_file_cache: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
+    // stdin can only be read once. When auto-detection needs to peek at a
+    // piped stream (to tell a HAR document apart from a line-based URL list),
+    // it buffers the whole stream here so the parsing phase reuses the same
+    // bytes instead of reading an already-drained stdin.
+    let mut buffered_stdin: Option<String> = None;
     let stdin_is_piped = !std::io::IsTerminal::is_terminal(&std::io::stdin());
 
     let input_type = if args.input_type == "auto" {
@@ -39,7 +44,30 @@ pub(crate) async fn resolve_targets(
             // No positional targets: only honour stdin if it's actually
             // piped — never block waiting for terminal input.
             if stdin_is_piped {
-                "pipe".to_string()
+                // Buffer stdin once, then auto-detect: a HAR document piped in
+                // (`cat capture.har | dalfox scan`) parses as `har`; anything
+                // else is treated as a line-based pipe from the same bytes.
+                match crate::utils::fs::read_stdin_bounded(MAX_TARGET_LIST_BYTES, "stdin pipe") {
+                    Ok(buf) => {
+                        let detected = if crate::target_parser::is_har_content(&buf) {
+                            "har"
+                        } else {
+                            "pipe"
+                        };
+                        buffered_stdin = Some(buf);
+                        detected.to_string()
+                    }
+                    Err(e) => {
+                        if !args.silence {
+                            emit_error(
+                                &args.format,
+                                crate::cmd::error_codes::STDIN_ERROR,
+                                &format!("Error reading from stdin: {}", e),
+                            );
+                        }
+                        return Err(ScanOutcome::Error);
+                    }
+                }
             } else {
                 if !args.silence {
                     emit_error(
@@ -73,6 +101,31 @@ pub(crate) async fn resolve_targets(
             });
             if is_raw_http {
                 "raw-http".to_string()
+            } else if args.targets.iter().all(|t| {
+                // HAR auto-detect: every positional target is a file whose
+                // content looks like a HAR document. Reuses the cache the
+                // raw-http pass populated and bounds any fresh read the same
+                // way. A HAR never matches `is_raw_http_request` (it starts
+                // with `{`), so this can only fire after raw-http is ruled out.
+                if let Some(content) = auto_file_cache.get(t) {
+                    return crate::target_parser::is_har_content(content);
+                }
+                if crate::target_parser::is_raw_http_request(t) {
+                    return false; // a raw-http literal, not a file on disk
+                }
+                if let Ok(content) = crate::utils::fs::read_bounded(
+                    std::path::Path::new(t),
+                    MAX_TARGET_LIST_BYTES,
+                    "HAR file",
+                ) {
+                    let is_har = crate::target_parser::is_har_content(&content);
+                    auto_file_cache.insert(t.clone(), content);
+                    is_har
+                } else {
+                    false
+                }
+            }) {
+                "har".to_string()
             } else {
                 "auto".to_string()
             }
@@ -254,28 +307,36 @@ pub(crate) async fn resolve_targets(
                     return Err(ScanOutcome::Error);
                 }
                 let mut piped_targets = Vec::new();
-                match crate::utils::fs::read_stdin_bounded(MAX_TARGET_LIST_BYTES, "stdin pipe") {
-                    Ok(buffer) => {
-                        for line in buffer.lines() {
-                            let trimmed = line.trim();
-                            // Same comment-skipping convention as the
-                            // auto/file paths above so `cat targets.txt
-                            // | dalfox` and `dalfox scan targets.txt`
-                            // behave identically.
-                            if !trimmed.is_empty() && !trimmed.starts_with('#') {
-                                piped_targets.push(trimmed.to_string());
+                // Reuse the stream buffered during auto-detection when present
+                // (auto fell through to pipe); otherwise read stdin now.
+                let buffer = match buffered_stdin.take() {
+                    Some(buf) => buf,
+                    None => {
+                        match crate::utils::fs::read_stdin_bounded(
+                            MAX_TARGET_LIST_BYTES,
+                            "stdin pipe",
+                        ) {
+                            Ok(buf) => buf,
+                            Err(e) => {
+                                if !args.silence {
+                                    emit_error(
+                                        &args.format,
+                                        crate::cmd::error_codes::STDIN_ERROR,
+                                        &format!("Error reading from stdin: {}", e),
+                                    );
+                                }
+                                return Err(ScanOutcome::Error);
                             }
                         }
                     }
-                    Err(e) => {
-                        if !args.silence {
-                            emit_error(
-                                &args.format,
-                                crate::cmd::error_codes::STDIN_ERROR,
-                                &format!("Error reading from stdin: {}", e),
-                            );
-                        }
-                        return Err(ScanOutcome::Error);
+                };
+                for line in buffer.lines() {
+                    let trimmed = line.trim();
+                    // Same comment-skipping convention as the auto/file paths
+                    // above so `cat targets.txt | dalfox` and `dalfox scan
+                    // targets.txt` behave identically.
+                    if !trimmed.is_empty() && !trimmed.starts_with('#') {
+                        piped_targets.push(trimmed.to_string());
                     }
                 }
                 if !args.targets.is_empty() {
@@ -297,6 +358,42 @@ pub(crate) async fn resolve_targets(
                 // Treat targets as raw HTTP request files or literals; actual parsing happens later
                 args.targets.clone()
             }
+            "har" => {
+                // Each string is a whole HAR document (a stdin buffer or a file
+                // path / literal), expanded to many Targets by parse_har later.
+                if let Some(buf) = buffered_stdin.take() {
+                    // Auto-detected HAR on stdin.
+                    vec![buf]
+                } else if !args.targets.is_empty() {
+                    // Explicit `-i har file1.har file2.har …` (or HAR literals).
+                    args.targets.clone()
+                } else if stdin_is_piped {
+                    // Explicit `-i har` reading HAR from a pipe.
+                    match crate::utils::fs::read_stdin_bounded(MAX_TARGET_LIST_BYTES, "stdin pipe")
+                    {
+                        Ok(buf) => vec![buf],
+                        Err(e) => {
+                            if !args.silence {
+                                emit_error(
+                                    &args.format,
+                                    crate::cmd::error_codes::STDIN_ERROR,
+                                    &format!("Error reading from stdin: {}", e),
+                                );
+                            }
+                            return Err(ScanOutcome::Error);
+                        }
+                    }
+                } else {
+                    if !args.silence {
+                        emit_error(
+                            &args.format,
+                            crate::cmd::error_codes::NO_FILE,
+                            "No HAR file specified for input-type=har (pass a .har path or pipe HAR on stdin)",
+                        );
+                    }
+                    return Err(ScanOutcome::Error);
+                }
+            }
 
             _ => {
                 if !args.silence {
@@ -304,7 +401,7 @@ pub(crate) async fn resolve_targets(
                         &args.format,
                         crate::cmd::error_codes::INVALID_INPUT_TYPE,
                         &format!(
-                            "Invalid input-type '{}'. Use 'auto', 'url', 'file', 'pipe', or 'raw-http'",
+                            "Invalid input-type '{}'. Use 'auto', 'url', 'file', 'pipe', 'raw-http', or 'har'",
                             input_type
                         ),
                     );
@@ -327,74 +424,42 @@ pub(crate) async fn resolve_targets(
 
     let mut parsed_targets = Vec::new();
     for s in target_strings {
-        if input_type == "raw-http" {
-            // Parse raw HTTP from file or literal via target_parser helper
-            // Try cached first, then bounded read, then fallback to literal
-            let content = match auto_file_cache.remove(&s) {
-                Some(content) => content,
-                None => {
-                    let p = std::path::Path::new(&s);
-                    if p.exists() {
-                        match crate::utils::fs::read_bounded(
-                            p,
-                            MAX_TARGET_LIST_BYTES,
-                            "raw HTTP request",
-                        ) {
-                            Ok(c) => c,
-                            Err(e) => {
-                                if !args.silence {
-                                    emit_error(
-                                        &args.format,
-                                        crate::cmd::error_codes::INPUT_TOO_LARGE,
-                                        &format!(
-                                            "Error reading raw HTTP request file {}: {}",
-                                            s, e
-                                        ),
-                                    );
-                                }
-                                return Err(ScanOutcome::Error);
-                            }
-                        }
-                    } else {
-                        s.clone()
+        if input_type == "har" {
+            // A single HAR document expands to many Targets. Load it from the
+            // detection cache, a file on disk, or treat the string itself as
+            // the document (the stdin buffer / a literal).
+            let content = match load_request_source(&s, &mut auto_file_cache, args, "HAR file") {
+                Ok(c) => c,
+                Err(outcome) => return Err(outcome),
+            };
+            match crate::target_parser::parse_har(&content) {
+                Ok(har_targets) => {
+                    for mut target in har_targets {
+                        apply_request_cli_overrides(&mut target, args);
+                        parsed_targets.push(target);
                     }
                 }
-            };
+                Err(e) => {
+                    if !args.silence {
+                        emit_error(
+                            &args.format,
+                            crate::cmd::error_codes::PARSE_ERROR,
+                            &format!("Error parsing HAR '{}': {}", s, e),
+                        );
+                    }
+                    return Err(ScanOutcome::Error);
+                }
+            }
+        } else if input_type == "raw-http" {
+            // Parse raw HTTP from the detection cache, a file, or a literal.
+            let content =
+                match load_request_source(&s, &mut auto_file_cache, args, "raw HTTP request") {
+                    Ok(c) => c,
+                    Err(outcome) => return Err(outcome),
+                };
             match crate::target_parser::parse_raw_http_request(&content) {
                 Ok(mut target) => {
-                    // Apply CLI overrides cautiously
-                    if args.method != "GET" {
-                        target.method = args.method.clone();
-                    }
-                    if let Some(d) = &args.data {
-                        target.data = Some(d.clone());
-                    }
-                    for h in &args.headers {
-                        if let Some((name, value)) = h.split_once(":") {
-                            target
-                                .headers
-                                .push((name.trim().to_string(), value.trim().to_string()));
-                        }
-                    }
-                    if let Some(ua) = &args.user_agent {
-                        target.headers.push(("User-Agent".to_string(), ua.clone()));
-                        target.user_agent = Some(ua.clone());
-                    } else if target.user_agent.is_none() {
-                        target.user_agent = Some("".to_string());
-                    }
-                    for c in &args.cookies {
-                        if let Some((k, v)) = c.split_once('=') {
-                            target
-                                .cookies
-                                .push((k.trim().to_string(), v.trim().to_string()));
-                        }
-                    }
-                    target.timeout = args.timeout;
-                    target.delay = args.delay;
-                    target.proxy = args.proxy.clone();
-                    target.follow_redirects = args.follow_redirects;
-                    target.ignore_return = args.ignore_return.clone();
-                    target.workers = args.workers;
+                    apply_request_cli_overrides(&mut target, args);
                     parsed_targets.push(target);
                 }
                 Err(e) => {
@@ -637,4 +702,80 @@ pub(crate) async fn resolve_targets(
     }
 
     Ok(parsed_targets)
+}
+
+/// Load the source text for a request-bearing input (`raw-http` or `har`):
+/// reuse the content cached during auto-detection, else read the file at `s`
+/// (bounded), else treat `s` itself as the document (a stdin buffer or a CLI
+/// literal). Emits the structured error and returns `Err(ScanOutcome::Error)`
+/// when an existing file can't be read within the byte cap.
+fn load_request_source(
+    s: &str,
+    cache: &mut std::collections::HashMap<String, String>,
+    args: &ScanArgs,
+    label: &str,
+) -> std::result::Result<String, ScanOutcome> {
+    if let Some(content) = cache.remove(s) {
+        return Ok(content);
+    }
+    let p = std::path::Path::new(s);
+    if p.exists() {
+        match crate::utils::fs::read_bounded(p, crate::utils::fs::MAX_FILE_READ_BYTES, label) {
+            Ok(c) => Ok(c),
+            Err(e) => {
+                if !args.silence {
+                    emit_error(
+                        &args.format,
+                        crate::cmd::error_codes::INPUT_TOO_LARGE,
+                        &format!("Error reading {} {}: {}", label, s, e),
+                    );
+                }
+                Err(ScanOutcome::Error)
+            }
+        }
+    } else {
+        Ok(s.to_string())
+    }
+}
+
+/// Apply CLI overrides to a Target parsed from a request-bearing source
+/// (`raw-http` or `har`). Request-content fields (method, body, headers,
+/// cookies, User-Agent) are only touched when the user explicitly set the
+/// matching flag, so each captured request keeps its own shape by default;
+/// CLI headers and cookies are *appended* (not replaced) since the request
+/// already carries its own. Network/runtime fields are always taken from the
+/// args. This is the shared override path for both raw-HTTP and HAR inputs.
+fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
+    if args.method != DEFAULT_METHOD {
+        target.method = args.method.clone();
+    }
+    if let Some(d) = &args.data {
+        target.data = Some(d.clone());
+    }
+    for h in &args.headers {
+        if let Some((name, value)) = h.split_once(':') {
+            target
+                .headers
+                .push((name.trim().to_string(), value.trim().to_string()));
+        }
+    }
+    if let Some(ua) = &args.user_agent {
+        target.headers.push(("User-Agent".to_string(), ua.clone()));
+        target.user_agent = Some(ua.clone());
+    } else if target.user_agent.is_none() {
+        target.user_agent = Some("".to_string());
+    }
+    for c in &args.cookies {
+        if let Some((k, v)) = c.split_once('=') {
+            target
+                .cookies
+                .push((k.trim().to_string(), v.trim().to_string()));
+        }
+    }
+    target.timeout = args.timeout;
+    target.delay = args.delay;
+    target.proxy = args.proxy.clone();
+    target.follow_redirects = args.follow_redirects;
+    target.ignore_return = args.ignore_return.clone();
+    target.workers = args.workers;
 }

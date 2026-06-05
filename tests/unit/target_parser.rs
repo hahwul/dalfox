@@ -1,10 +1,10 @@
 //! Unit tests for the target_parser module
 //!
-//! Tests URL parsing, method detection, and raw HTTP request parsing.
+//! Tests URL parsing, method detection, raw HTTP request parsing, and HAR input.
 
 use dalfox::target_parser::{
-    is_raw_http_request, parse_method_url_body, parse_raw_http_request, parse_target,
-    parse_target_with_method,
+    is_har_content, is_raw_http_request, parse_har, parse_method_url_body, parse_raw_http_request,
+    parse_target, parse_target_with_method,
 };
 
 mod parse_target {
@@ -275,5 +275,100 @@ mod raw_http_request {
         assert_eq!(t.method, "POST");
         assert_eq!(t.url.as_str(), "http://example.com/submit");
         assert_eq!(t.data.as_deref(), Some("a=1&b=2"));
+    }
+}
+
+/// Fixture-based tests for HAR input (issue #1095). The fixture
+/// `tests/fixtures/sample.har` is a realistic HAR with a GET entry (query
+/// params, cookies, a User-Agent, HTTP/2 pseudo-headers) and a POST entry
+/// (form body + Content-Length). These exercise the public `parse_har` /
+/// `is_har_content` API the `scan --input-type har` path relies on.
+mod har {
+    use super::*;
+
+    const SAMPLE_HAR: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/sample.har"
+    ));
+
+    #[test]
+    fn fixture_is_detected_as_har() {
+        assert!(is_har_content(SAMPLE_HAR));
+        // A URL list and a raw HTTP request must not be mistaken for HAR.
+        assert!(!is_har_content(
+            "https://example.com/?q=1\nhttps://example.com/?q=2"
+        ));
+        assert!(!is_har_content(
+            "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n"
+        ));
+    }
+
+    #[test]
+    fn fixture_parses_get_and_post_entries() {
+        let targets = parse_har(SAMPLE_HAR).expect("fixture HAR should parse");
+        assert_eq!(targets.len(), 2, "fixture has one GET and one POST entry");
+
+        let get = &targets[0];
+        assert_eq!(get.method, "GET");
+        assert_eq!(
+            get.url.as_str(),
+            "https://demo.dalfox.test/search?q=hello&lang=en"
+        );
+        assert_eq!(get.user_agent.as_deref(), Some("Mozilla/5.0 (HAR fixture)"));
+        // Cookies are modelled separately, parsed from the Cookie header.
+        assert!(
+            get.cookies
+                .iter()
+                .any(|(k, v)| k == "session" && v == "abc123")
+        );
+        assert!(get.cookies.iter().any(|(k, v)| k == "theme" && v == "dark"));
+        // A meaningful header survives; managed/pseudo headers are stripped.
+        assert!(
+            get.headers
+                .iter()
+                .any(|(k, v)| k == "Referer" && v == "https://demo.dalfox.test/")
+        );
+        for stripped in [
+            "host",
+            "accept-encoding",
+            "connection",
+            ":authority",
+            ":method",
+            "cookie",
+            "user-agent",
+        ] {
+            assert!(
+                !get.headers
+                    .iter()
+                    .any(|(k, _)| k.eq_ignore_ascii_case(stripped)),
+                "{stripped} should be stripped from GET headers: {:?}",
+                get.headers
+            );
+        }
+
+        let post = &targets[1];
+        assert_eq!(post.method, "POST");
+        assert_eq!(post.url.as_str(), "https://demo.dalfox.test/comment");
+        assert_eq!(post.data.as_deref(), Some("author=guest&body=hi+there"));
+        assert!(
+            post.cookies
+                .iter()
+                .any(|(k, v)| k == "session" && v == "abc123")
+        );
+        // Content-Length is recomputed by the HTTP client, never forwarded.
+        assert!(
+            !post
+                .headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("content-length")),
+            "Content-Length must not be forwarded: {:?}",
+            post.headers
+        );
+        // Content-Type is preserved so the body is interpreted correctly.
+        assert!(
+            post.headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        );
     }
 }

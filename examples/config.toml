@@ -9,7 +9,8 @@
 # INPUT
 # auto: detect URL or treat target as file path when readable,
 # url|file|pipe: force interpretation,
-# raw-http: parse raw HTTP request (file or literal)
+# raw-http: parse raw HTTP request (file or literal),
+# har: parse a HAR / proxy export (one target per logged request)
 input_type = "auto"
 
 # OUTPUT

@@ -19,7 +19,7 @@ Everything lives under the `[scan]` table and mirrors the CLI flag names (snake-
 ```toml
 [scan]
 # INPUT
-input_type = "auto"
+input_type = "auto"   # auto, url, file, pipe, raw-http, har
 
 # OUTPUT
 format = "plain"

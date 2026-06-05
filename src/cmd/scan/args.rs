@@ -118,7 +118,7 @@ fn parse_http_method_arg(s: &str) -> std::result::Result<String, String> {
 #[derive(Clone, Args)]
 pub struct ScanArgs {
     #[clap(help_heading = "INPUT")]
-    /// Input type: auto, url, file, pipe, raw-http
+    /// Input type: auto, url, file, pipe, raw-http, har
     #[arg(short = 'i', long, default_value = "auto")]
     pub input_type: String,
 

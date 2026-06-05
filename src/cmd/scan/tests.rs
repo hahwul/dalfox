@@ -1675,3 +1675,152 @@ fn test_emit_error_renders_all_format_branches() {
     super::emit_error("jsonl", crate::cmd::error_codes::PARSE_ERROR, "bad parse");
     super::emit_error("plain", crate::cmd::error_codes::FILE_READ_ERROR, "io fail");
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// HAR input resolution (issue #1095). These exercise `resolve_targets` end to
+// end — explicit `-i har`, content-based auto-detection, CLI override append,
+// and the shared url|method dedupe — with no network involved.
+// ─────────────────────────────────────────────────────────────────────────
+
+mod har_input {
+    use super::*;
+
+    const TWO_ENTRY_HAR: &str = r#"{"log":{"version":"1.2","entries":[
+        {"request":{"method":"GET","url":"https://demo.test/search?q=1",
+          "headers":[{"name":"Cookie","value":"sid=xyz"}],"cookies":[]}},
+        {"request":{"method":"POST","url":"https://demo.test/comment",
+          "headers":[{"name":"Content-Type","value":"application/x-www-form-urlencoded"}],
+          "cookies":[],
+          "postData":{"mimeType":"application/x-www-form-urlencoded","text":"body=hi"}}}
+    ]}}"#;
+
+    fn write_temp_har(body: &str) -> std::path::PathBuf {
+        let mut path = std::env::temp_dir();
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time")
+            .as_nanos();
+        path.push(format!(
+            "dalfox-har-test-{}-{}.har",
+            std::process::id(),
+            nanos
+        ));
+        std::fs::write(&path, body).expect("write temp HAR");
+        path
+    }
+
+    #[tokio::test]
+    async fn explicit_har_resolves_get_and_post_targets() {
+        let har = write_temp_har(TWO_ENTRY_HAR);
+        let mut args = default_scan_args();
+        args.input_type = "har".to_string();
+        args.targets = vec![har.to_string_lossy().to_string()];
+
+        let targets = super::super::input::resolve_targets(&args)
+            .await
+            .expect("HAR should resolve");
+        let _ = std::fs::remove_file(&har);
+
+        assert_eq!(targets.len(), 2);
+        let get = targets
+            .iter()
+            .find(|t| t.method == "GET")
+            .expect("GET target");
+        assert_eq!(get.url.as_str(), "https://demo.test/search?q=1");
+        assert!(get.cookies.iter().any(|(k, v)| k == "sid" && v == "xyz"));
+        let post = targets
+            .iter()
+            .find(|t| t.method == "POST")
+            .expect("POST target");
+        assert_eq!(post.url.as_str(), "https://demo.test/comment");
+        assert_eq!(post.data.as_deref(), Some("body=hi"));
+    }
+
+    #[tokio::test]
+    async fn auto_detects_har_file_by_content() {
+        // `-i auto` (the default) must route a HAR file to the HAR parser based
+        // on its content, not its extension — the user-facing "auto distinguishes
+        // HAR" requirement.
+        let har = write_temp_har(TWO_ENTRY_HAR);
+        let mut args = default_scan_args();
+        args.input_type = "auto".to_string();
+        args.targets = vec![har.to_string_lossy().to_string()];
+
+        let targets = super::super::input::resolve_targets(&args)
+            .await
+            .expect("auto-detected HAR should resolve");
+        let _ = std::fs::remove_file(&har);
+
+        assert_eq!(targets.len(), 2);
+        assert!(targets.iter().any(|t| t.method == "GET"));
+        assert!(targets.iter().any(|t| t.method == "POST"));
+    }
+
+    #[tokio::test]
+    async fn cli_header_is_appended_to_every_har_target() {
+        let har = write_temp_har(TWO_ENTRY_HAR);
+        let mut args = default_scan_args();
+        args.input_type = "har".to_string();
+        args.targets = vec![har.to_string_lossy().to_string()];
+        args.headers = vec!["Authorization: Bearer t0ken".to_string()];
+
+        let targets = super::super::input::resolve_targets(&args)
+            .await
+            .expect("HAR should resolve");
+        let _ = std::fs::remove_file(&har);
+
+        assert_eq!(targets.len(), 2);
+        for t in &targets {
+            assert!(
+                t.headers
+                    .iter()
+                    .any(|(k, v)| k == "Authorization" && v == "Bearer t0ken"),
+                "every HAR target should carry the CLI-supplied header, got {:?}",
+                t.headers
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn duplicate_url_method_entries_are_deduped() {
+        // Two identical GET requests collapse to one via the shared url|method
+        // dedupe; a differing method survives as its own target.
+        let har = r#"{"log":{"entries":[
+            {"request":{"method":"GET","url":"https://demo.test/a?x=1"}},
+            {"request":{"method":"GET","url":"https://demo.test/a?x=1"}},
+            {"request":{"method":"POST","url":"https://demo.test/a?x=1"}}
+        ]}}"#;
+        let path = write_temp_har(har);
+        let mut args = default_scan_args();
+        args.input_type = "har".to_string();
+        args.targets = vec![path.to_string_lossy().to_string()];
+
+        let targets = super::super::input::resolve_targets(&args)
+            .await
+            .expect("HAR should resolve");
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(targets.len(), 2, "duplicate GET should be deduped");
+    }
+
+    #[tokio::test]
+    async fn out_of_scope_filter_applies_to_har_targets() {
+        let har = r#"{"log":{"entries":[
+            {"request":{"method":"GET","url":"https://keep.test/a?x=1"}},
+            {"request":{"method":"GET","url":"https://drop.test/b?y=2"}}
+        ]}}"#;
+        let path = write_temp_har(har);
+        let mut args = default_scan_args();
+        args.input_type = "har".to_string();
+        args.targets = vec![path.to_string_lossy().to_string()];
+        args.out_of_scope = vec!["drop.test".to_string()];
+
+        let targets = super::super::input::resolve_targets(&args)
+            .await
+            .expect("HAR should resolve");
+        let _ = std::fs::remove_file(&path);
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].url.host_str(), Some("keep.test"));
+    }
+}

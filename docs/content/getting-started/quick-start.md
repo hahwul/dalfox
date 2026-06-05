@@ -71,6 +71,13 @@ Or point Dalfox at a **raw HTTP request** file you captured from your proxy:
 dalfox scan --input-type raw-http request.txt
 ```
 
+Or replay an entire **HAR** export (from browser DevTools or a proxy) — Dalfox scans every request in it, preserving each one's method, headers, cookies, and body:
+
+```bash
+dalfox scan capture.har            # auto-detected
+dalfox scan --input-type har capture.har
+```
+
 ## 6. Catch Blind XSS
 
 Use an out-of-band callback (Interactsh, Burp Collaborator, XSS Hunter, etc.):

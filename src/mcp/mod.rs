@@ -824,6 +824,12 @@ Final results (via get_results_dalfox) include finding type \
         // see the comment on `ScanWithDalfoxParams::cookies` for the reason.
         let scan_args = Arc::new(ScanArgs {
             detect_outdated_libs,
+            // One MCP scan call targets exactly one URL, with method/headers/
+            // cookies/data supplied as explicit fields — the same per-request
+            // fidelity a single HAR entry carries. The fan-out input shapes
+            // (`file`, `pipe`, `raw-http`, `har`) stay CLI-only because they
+            // expand one input into many targets, which this single-target tool
+            // doesn't model; an agent replays a HAR by calling the tool per entry.
             input_type: "url".to_string(),
             format: "json".to_string(),
             targets: vec![target.clone()],

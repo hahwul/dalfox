@@ -5,6 +5,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 use url::Url;
 
+mod har;
+pub use har::{is_har_content, parse_har};
+
 /// Cache key capturing the inputs that affect Client construction:
 /// timeout, optional proxy URL, and follow-redirects policy. The
 /// scheme/host are NOT part of the key because reqwest::Client manages
@@ -49,6 +52,35 @@ pub struct Target {
 }
 
 impl Target {
+    /// Construct a `Target` for `url` with empty request fields (method `GET`,
+    /// no data/headers/cookies) and scan-context fields at their parse-time
+    /// defaults. `resolve_targets` overwrites timeout/delay/proxy/workers/etc.
+    /// from the CLI args before scanning, so those values here are just
+    /// placeholders that keep unit-level parsing self-contained. Callers fill
+    /// the request-specific fields via struct-update syntax, e.g.
+    /// `Target { method, data, ..Target::for_url(url) }`.
+    pub(crate) fn for_url(url: Url) -> Self {
+        Target {
+            url,
+            method: "GET".to_string(),
+            data: None,
+            headers: vec![],
+            cookies: vec![],
+            user_agent: None,
+            reflection_params: vec![],
+            timeout: 10,
+            delay: 0,
+            proxy: None,
+            workers: 10,
+            follow_redirects: false,
+            ignore_return: vec![],
+            waf_info: None,
+            csp_analysis: None,
+            tech_info: None,
+            mutation_stats: None,
+        }
+    }
+
     /// Parse the method string into a `reqwest::Method`, defaulting to GET on failure.
     /// This avoids repeating `.method.parse().unwrap_or(reqwest::Method::GET)` everywhere.
     pub fn parse_method(&self) -> reqwest::Method {
@@ -128,25 +160,7 @@ pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
         format!("http://{}", s)
     };
     let url = Url::parse(&url_str)?;
-    Ok(Target {
-        url,
-        method: "GET".to_string(),
-        data: None,
-        headers: vec![],
-        cookies: vec![],
-        user_agent: None,
-        reflection_params: vec![],
-        timeout: 10,
-        delay: 0,
-        proxy: None,
-        workers: 10,
-        follow_redirects: false,
-        ignore_return: vec![],
-        waf_info: None,
-        csp_analysis: None,
-        tech_info: None,
-        mutation_stats: None,
-    })
+    Ok(Target::for_url(url))
 }
 
 /// Parse a target string that may be in "METHOD URL [BODY]" format.
@@ -290,23 +304,12 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
     };
 
     Ok(Target {
-        url,
         method,
         data,
         headers: headers_vec,
         cookies: cookies_vec,
         user_agent,
-        reflection_params: vec![],
-        timeout: 10,
-        delay: 0,
-        proxy: None,
-        workers: 10,
-        follow_redirects: false,
-        ignore_return: vec![],
-        waf_info: None,
-        csp_analysis: None,
-        tech_info: None,
-        mutation_stats: None,
+        ..Target::for_url(url)
     })
 }
 
