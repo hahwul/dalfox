@@ -593,6 +593,68 @@ setInterval(code, 1000);
 }
 
 #[test]
+fn test_settimeout_callback_body_flow_detected() {
+    // The source→sink flow lives *inside* a `setTimeout(function(){ … })`
+    // deferred callback — the xssmaze `waf-facade/level8` shape (a fake
+    // "Checking your browser" challenge whose verify step writes the query
+    // into innerHTML). The callback never runs at parse time, so its body must
+    // be walked explicitly; without callback descent this slipped through.
+    let code = r#"
+setTimeout(function () {
+  var q = new URLSearchParams(location.search).get('query') || '';
+  document.getElementById('out').innerHTML = 'Resource: ' + q;
+}, 600);
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let result = analyzer.analyze(code).unwrap();
+    assert!(
+        result.iter().any(|v| v.sink.contains("innerHTML")),
+        "Should detect URLSearchParams→innerHTML flow inside a setTimeout callback; got {:?}",
+        result
+            .iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_settimeout_arrow_callback_body_flow_detected() {
+    // Same deferred-callback flow, arrow-function form.
+    let code = r#"
+setTimeout(() => {
+  document.getElementById('out').innerHTML = location.hash;
+}, 0);
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let result = analyzer.analyze(code).unwrap();
+    assert!(
+        result.iter().any(|v| v.sink.contains("innerHTML")),
+        "Should detect location.hash→innerHTML flow inside a setTimeout arrow callback"
+    );
+}
+
+#[test]
+fn test_callback_body_local_taint_does_not_leak() {
+    // A callback-local tainted var must not leak into the enclosing scope and
+    // mark an unrelated outer write as vulnerable. Only the in-callback sink
+    // (if any) should fire — here the callback is inert, so nothing should.
+    let code = r#"
+setTimeout(function () { var q = location.search; var safe = 'static'; }, 0);
+document.getElementById('out').innerHTML = q;
+"#;
+    let analyzer = AstDomAnalyzer::new();
+    let result = analyzer.analyze(code).unwrap();
+    assert!(
+        result.is_empty(),
+        "Callback-local taint must not leak to the outer scope; got {:?}",
+        result
+            .iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn test_function_constructor() {
     let code = r#"
 let input = location.hash;
