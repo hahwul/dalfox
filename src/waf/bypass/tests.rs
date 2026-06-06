@@ -132,7 +132,10 @@ fn test_case_alternate() {
 fn test_case_alternate_closing_tag() {
     // Both the opening and the closing tag name must be alternated so a WAF
     // signature on `</script>` is evaded too, not just `<script>`.
-    assert_eq!(case_alternate("<script>alert(1)</script>"), "<ScRiPt>alert(1)</ScRiPt>");
+    assert_eq!(
+        case_alternate("<script>alert(1)</script>"),
+        "<ScRiPt>alert(1)</ScRiPt>"
+    );
     // A `/` that follows tag-name chars is still a separator: `<svg/onload>`
     // keeps `onload` un-alternated (only the `svg` tag name is touched).
     assert_eq!(case_alternate("<svg/onload>"), "<SvG/onload>");

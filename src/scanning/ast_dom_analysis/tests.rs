@@ -3768,9 +3768,9 @@ fn source_nesting_guard_flags_pathological_input_only() {
         ")".repeat(MAX_SOURCE_NESTING_DEPTH)
     )));
     // Many *non-nested* unary/keyword ops must not trip the run counter.
-    assert!(!source_nesting_exceeds_limit(&"!a; !b; typeof c; ".repeat(
-        MAX_SOURCE_NESTING_DEPTH + 5
-    )));
+    assert!(!source_nesting_exceeds_limit(
+        &"!a; !b; typeof c; ".repeat(MAX_SOURCE_NESTING_DEPTH + 5)
+    ));
     // Over the cap on each independent 1-byte / keyword vector: flagged.
     let over = MAX_SOURCE_NESTING_DEPTH + 5;
     assert!(source_nesting_exceeds_limit(&format!(
@@ -3783,8 +3783,14 @@ fn source_nesting_guard_flags_pathological_input_only() {
         "{a:".repeat(over),
         "}".repeat(over)
     )));
-    assert!(source_nesting_exceeds_limit(&format!("{}a", "[".repeat(over))));
-    assert!(source_nesting_exceeds_limit(&format!("{}a", "!".repeat(over))));
+    assert!(source_nesting_exceeds_limit(&format!(
+        "{}a",
+        "[".repeat(over)
+    )));
+    assert!(source_nesting_exceeds_limit(&format!(
+        "{}a",
+        "!".repeat(over)
+    )));
     assert!(source_nesting_exceeds_limit(&format!(
         "{}a",
         "typeof ".repeat(over)
@@ -3800,8 +3806,14 @@ fn analyze_survives_deep_recursion_vectors() {
         // visitor recursion (parser handles these iteratively)
         format!("var x = location.hash{}; el.innerHTML = x;", ".a".repeat(n)),
         // flat call chain — the shape that defeated the earlier per-call guard
-        format!("var x = location.hash{}; el.innerHTML = x;", ".a()".repeat(n)),
-        format!("var x = location.hash{}; el.innerHTML = x;", ".a(b)".repeat(n)),
+        format!(
+            "var x = location.hash{}; el.innerHTML = x;",
+            ".a()".repeat(n)
+        ),
+        format!(
+            "var x = location.hash{}; el.innerHTML = x;",
+            ".a(b)".repeat(n)
+        ),
         format!("var x = location.hash{}; el.write(x);", "['a']".repeat(n)),
         // parser-recursion vectors that pass the bracket/unary pre-scan
         {
@@ -3837,7 +3849,10 @@ fn analyze_survives_deep_recursion_vectors() {
         format!("$(({}\"a\")+location.hash);", "\"a\"+".repeat(n)),
         // onmessage assignment on a long `.`-chain receiver — recurses through
         // message_event_source_for_receiver.
-        format!("a{}.onmessage = function(e) {{ x = e.data; }};", ".a".repeat(n)),
+        format!(
+            "a{}.onmessage = function(e) {{ x = e.data; }};",
+            ".a".repeat(n)
+        ),
     ];
     for src in &vectors {
         let _ = AstDomAnalyzer::new().analyze(src);
@@ -3847,7 +3862,10 @@ fn analyze_survives_deep_recursion_vectors() {
 #[test]
 fn analyze_skips_oversize_and_dense_input() {
     // Past the length cap -> skipped (best-effort), returns empty, no crash.
-    let huge = format!("var x = 1;{}", " /*pad*/".repeat(MAX_ANALYZE_SOURCE_BYTES / 7));
+    let huge = format!(
+        "var x = 1;{}",
+        " /*pad*/".repeat(MAX_ANALYZE_SOURCE_BYTES / 7)
+    );
     assert!(huge.len() > MAX_ANALYZE_SOURCE_BYTES);
     assert_eq!(AstDomAnalyzer::new().analyze(&huge).unwrap().len(), 0);
     // Dense bracket nesting -> rejected pre-parse, returns empty.
@@ -3873,5 +3891,35 @@ document.getElementById('o').innerHTML = v;
             .iter()
             .map(|v| (v.source.clone(), v.sink.clone()))
             .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn recursion_guard_caps_then_restores_depth() {
+    // Directly exercises the shared-counter guard, independent of the parse
+    // stack (the `analyze()` path masks it: any input deep enough to overflow is
+    // also large enough to run on the big-stack thread). This is the test that
+    // proves the counter actually bounds recursion and is reset on unwind.
+    let visitor = DomXssVisitor::new("");
+
+    // Entries up to the cap are admitted; the (cap+1)-th must be refused so a
+    // chain of mutually-recursive analysis fns can't grow the stack unbounded.
+    let mut guards = Vec::new();
+    for i in 0..MAX_AST_VISIT_DEPTH {
+        let g = visitor.enter_recursion();
+        assert!(g.is_some(), "entry #{i} (below the cap) must be admitted");
+        guards.push(g);
+    }
+    assert!(
+        visitor.enter_recursion().is_none(),
+        "entry at MAX_AST_VISIT_DEPTH must be refused"
+    );
+
+    // Dropping the guards (unwinding the recursion) must restore budget — else a
+    // wide-but-shallow program would be falsely capped after its first deep path.
+    guards.clear();
+    assert!(
+        visitor.enter_recursion().is_some(),
+        "dropping the RAII guards must decrement the shared counter"
     );
 }

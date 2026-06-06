@@ -51,6 +51,16 @@ const MAX_ANALYZE_SOURCE_BYTES: usize = 512 * 1024;
 /// shallow script is only the few KB of stack actually touched.
 const ANALYZE_STACK_BYTES: usize = 256 * 1024 * 1024;
 
+/// Below this size [`analyze`] parses inline instead of spawning an
+/// [`ANALYZE_STACK_BYTES`] thread. After the pre-parse guard rejects the
+/// 1-byte-per-level chains, every surviving parser-recursion level costs ≥2
+/// source bytes (`=y`, `a:`, `if(a)`, …), so a script this small can reach at
+/// most ~1k parser frames — comfortably within a normal worker stack — and the
+/// visitor walk is depth-capped to [`MAX_AST_VISIT_DEPTH`] regardless of stack.
+/// The vast majority of inline `<script>` blocks land here and skip the
+/// thread-spawn cost; larger blocks pay for the big stack they might need.
+const INLINE_PARSE_BYTES: usize = 2 * 1024;
+
 /// Maximum source-level nesting depth accepted before parsing. oxc's
 /// recursive-descent parser has **no** internal depth/stack guard (only a 4 GiB
 /// byte-length cap), so deeply nested brackets (`((((…`, `{a:{a:…`, `[[[[…`) or
@@ -4172,15 +4182,31 @@ impl AstDomAnalyzer {
     pub fn analyze(&self, source_code: &str) -> Result<Vec<DomXssVulnerability>, String> {
         if source_code.len() > MAX_ANALYZE_SOURCE_BYTES || source_nesting_exceeds_limit(source_code)
         {
+            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!(
+                    "[ast] skipping DOM-XSS analysis of a {}-byte script (over length cap {} or nesting guard)",
+                    source_code.len(),
+                    MAX_ANALYZE_SOURCE_BYTES
+                );
+            }
             return Ok(Vec::new());
         }
 
         let script_element_ids = self.script_element_ids.clone();
-        // Run the parse + walk on a thread with a large (mostly-virtual,
-        // lazily-committed) stack so the recursive-descent parser can't overflow
-        // a normal worker stack on the multi-byte statement/assignment chains
-        // the cheaper guards above can't catch. `scope` keeps it synchronous and
-        // lets the closure borrow `source_code`.
+
+        // Fast path: a script this small can't nest a parser-recursion vector
+        // deep enough to overflow a normal worker stack (see [`INLINE_PARSE_BYTES`]),
+        // so parse it inline and skip the thread-spawn cost the common small
+        // inline `<script>` block would otherwise pay on every call.
+        if source_code.len() <= INLINE_PARSE_BYTES {
+            return Self::analyze_on_stack(source_code, script_element_ids);
+        }
+
+        // Larger input may carry a deep multi-byte statement/assignment chain
+        // (`if(a)if(b)…`, `x=y=z=…`) the parser would overflow on a normal stack,
+        // so run the parse + walk on a thread with a large (mostly-virtual,
+        // lazily-committed) stack. `scope` keeps it synchronous and lets the
+        // closure borrow `source_code`.
         std::thread::scope(|scope| {
             let handle = std::thread::Builder::new()
                 .stack_size(ANALYZE_STACK_BYTES)
