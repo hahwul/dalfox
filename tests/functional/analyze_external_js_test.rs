@@ -71,6 +71,26 @@ async fn many_page() -> impl IntoResponse {
     )
 }
 
+/// Harmless vendor bundle (no sink).
+async fn vendor_js() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "application/javascript")],
+        "var vendor = 1;",
+    )
+}
+
+/// Page with two scripts: sinky /app.js and harmless /vendor.js.
+async fn two_scripts_page() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+        r#"<!DOCTYPE html><html><body>
+            <div id="result"></div>
+            <script src="/app.js"></script>
+            <script src="/vendor.js"></script>
+        </body></html>"#,
+    )
+}
+
 /// /js/:n — harmless for n < 16, DOM-XSS sink for n >= 16.
 async fn numbered_js(AxumPath(n): AxumPath<u32>) -> impl IntoResponse {
     let body = if n >= 16 {
@@ -87,6 +107,8 @@ async fn start_server() -> SocketAddr {
     let app = Router::new()
         .route("/", get(spa_page))
         .route("/app.js", get(app_js))
+        .route("/vendor.js", get(vendor_js))
+        .route("/two", get(two_scripts_page))
         .route("/big.js", get(big_js))
         .route("/big", get(big_js_page))
         .route("/many", get(many_page))
@@ -110,6 +132,7 @@ fn make_scan_args(
     addr: SocketAddr,
     path: &str,
     analyze_external_js: bool,
+    include_url: Vec<String>,
     exclude_url: Vec<String>,
 ) -> (ScanArgs, std::path::PathBuf) {
     let url = format!("http://{}:{}{}", addr.ip(), addr.port(), path);
@@ -131,7 +154,7 @@ fn make_scan_args(
         method: "GET".to_string(),
         user_agent: None,
         cookie_from_raw: None,
-        include_url: vec![],
+        include_url,
         exclude_url,
         ignore_param: vec![],
         out_of_scope: vec![],
@@ -217,7 +240,7 @@ fn read_findings(out: &std::path::Path) -> Vec<serde_json::Value> {
 #[tokio::test]
 async fn test_ext_js_spa_finds_dom_xss() {
     let addr = start_server().await;
-    let (args, out) = make_scan_args(addr, "/", true, vec![]);
+    let (args, out) = make_scan_args(addr, "/", true, vec![], vec![]);
     scan::run_scan(&args).await;
     let findings = read_findings(&out);
     assert!(
@@ -239,7 +262,7 @@ async fn test_ext_js_spa_finds_dom_xss() {
 #[tokio::test]
 async fn test_ext_js_default_off_no_findings() {
     let addr = start_server().await;
-    let (args, out) = make_scan_args(addr, "/", false, vec![]);
+    let (args, out) = make_scan_args(addr, "/", false, vec![], vec![]);
     scan::run_scan(&args).await;
     let findings = read_findings(&out);
     assert!(
@@ -252,7 +275,7 @@ async fn test_ext_js_default_off_no_findings() {
 #[tokio::test]
 async fn test_ext_js_size_cap_skips_oversized_script() {
     let addr = start_server().await;
-    let (args, out) = make_scan_args(addr, "/big", true, vec![]);
+    let (args, out) = make_scan_args(addr, "/big", true, vec![], vec![]);
     // Primarily a no-panic smoke test; big.js has no sink so findings == 0.
     scan::run_scan(&args).await;
     let _ = read_findings(&out); // must not panic
@@ -263,7 +286,7 @@ async fn test_ext_js_size_cap_skips_oversized_script() {
 #[tokio::test]
 async fn test_ext_js_count_cap_stops_at_max() {
     let addr = start_server().await;
-    let (args, out) = make_scan_args(addr, "/many", true, vec![]);
+    let (args, out) = make_scan_args(addr, "/many", true, vec![], vec![]);
     scan::run_scan(&args).await;
     let findings = read_findings(&out);
     assert!(
@@ -277,11 +300,32 @@ async fn test_ext_js_count_cap_stops_at_max() {
 #[tokio::test]
 async fn test_ext_js_exclude_url_skips_matched_script() {
     let addr = start_server().await;
-    let (args, out) = make_scan_args(addr, "/", true, vec!["app\\.js".to_string()]);
+    let (args, out) = make_scan_args(addr, "/", true, vec![], vec!["app\\.js".to_string()]);
     scan::run_scan(&args).await;
     let findings = read_findings(&out);
     assert!(
         findings.is_empty(),
         "excluded script should not be analyzed; got: {findings:?}"
+    );
+}
+
+/// --include-url filter: only scripts whose URL matches the allowlist are
+/// analyzed. Page /two has sinky /app.js and harmless /vendor.js. When
+/// include_url matches only "vendor", /app.js is skipped → no findings.
+#[tokio::test]
+async fn test_ext_js_include_url_allows_only_matched_script() {
+    let addr = start_server().await;
+    let (args, out) = make_scan_args(
+        addr,
+        "/two",
+        true,
+        vec!["vendor\\.js".to_string()],
+        vec![],
+    );
+    scan::run_scan(&args).await;
+    let findings = read_findings(&out);
+    assert!(
+        findings.is_empty(),
+        "sinky app.js should be skipped when include_url allows only vendor.js; got: {findings:?}"
     );
 }
