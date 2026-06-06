@@ -45,6 +45,7 @@ fn default_scan_params(target: &str) -> ScanWithDalfoxParams {
         skip_discovery: false,
         deep_scan: false,
         skip_ast_analysis: false,
+        analyze_external_js: false,
         detect_outdated_libs: false,
         blind_callback_url: None,
         workers: 1,

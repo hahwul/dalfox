@@ -1072,6 +1072,7 @@ async fn test_run_scan_job_success_marks_done() {
         skip_discovery: None,
         deep_scan: None,
         skip_ast_analysis: None,
+        analyze_external_js: None,
         // Exercise the ON path: opts -> job_runner -> ScanArgs -> analysis gate.
         detect_outdated_libs: Some(true),
         rate_limit: None,
