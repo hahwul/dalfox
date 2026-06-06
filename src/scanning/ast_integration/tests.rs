@@ -821,35 +821,7 @@ fn e2e_apidom_level3_xhr_innerhtml_finding() {
     );
 }
 
-// --- extract_same_origin_script_srcs + same_origin tests ---
-
-#[test]
-fn test_same_origin_true() {
-    let a = url::Url::parse("https://example.com/app.js").unwrap();
-    let b = url::Url::parse("https://example.com/page").unwrap();
-    assert!(same_origin(&a, &b));
-}
-
-#[test]
-fn test_same_origin_different_host() {
-    let a = url::Url::parse("https://cdn.example.com/app.js").unwrap();
-    let b = url::Url::parse("https://example.com/page").unwrap();
-    assert!(!same_origin(&a, &b));
-}
-
-#[test]
-fn test_same_origin_different_scheme() {
-    let a = url::Url::parse("http://example.com/app.js").unwrap();
-    let b = url::Url::parse("https://example.com/page").unwrap();
-    assert!(!same_origin(&a, &b));
-}
-
-#[test]
-fn test_same_origin_different_port() {
-    let a = url::Url::parse("https://example.com:8080/app.js").unwrap();
-    let b = url::Url::parse("https://example.com/page").unwrap();
-    assert!(!same_origin(&a, &b));
-}
+// --- extract_same_origin_script_srcs tests ---
 
 #[test]
 fn test_extract_same_origin_script_srcs_absolute() {

@@ -532,6 +532,24 @@ async fn run_ast_dom_analysis(
     results
 }
 
+/// Append a batch of findings to the shared results vector and bump the
+/// running findings counter. No-op when `batch` is empty. Centralizes the
+/// lock + extend + counter-update sequence shared by every preflight finding
+/// source (libs, initial AST, external JS) across the CLI, server, and MCP
+/// surfaces.
+pub(crate) async fn accumulate_findings(
+    results: &tokio::sync::Mutex<Vec<crate::scanning::result::Result>>,
+    findings_count: &std::sync::atomic::AtomicUsize,
+    batch: Vec<crate::scanning::result::Result>,
+) {
+    if batch.is_empty() {
+        return;
+    }
+    let added = batch.len();
+    results.lock().await.extend(batch);
+    findings_count.fetch_add(added, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Fetch all same-origin `<script src>` bundles referenced by `html` and run
 /// AST DOM-XSS analysis on each one. Called once per target at the pre-scan
 /// (preflight) stage so it fires even for SPAs that have no server-side
@@ -611,22 +629,9 @@ pub(crate) async fn fetch_and_analyze_external_js(
                     &body,
                     &vuln.source,
                 );
-            let poc_url = crate::scanning::ast_integration::build_dom_xss_poc_url(
-                target.url.as_str(),
-                &vuln.source,
-                &payload,
-            );
             let message =
                 format!("{description} (needs runtime confirmation) [external JS: {url_str}]");
-            let mut ast_result = crate::scanning::result::Result::builder(
-                crate::scanning::result::FindingType::AstDetected,
-            )
-            .inject_type("DOM-XSS")
-            .method(target.method.clone())
-            .data(poc_url)
-            .param("-")
-            .payload(payload)
-            .evidence(format!(
+            let evidence = format!(
                 "{}:{}:{} - {} (Source: {}, Sink: {}) [script: {}]",
                 target.url.as_str(),
                 vuln.line,
@@ -635,21 +640,16 @@ pub(crate) async fn fetch_and_analyze_external_js(
                 vuln.source,
                 vuln.sink,
                 url_str,
-            ))
-            .cwe("CWE-79")
-            .severity("Medium")
-            .message_id(0)
-            .message_str(message)
-            .build();
-            if self_bootstrap_verified {
-                ast_result.result_type = crate::scanning::result::FindingType::Verified;
-                ast_result.severity = "High".to_string();
-                ast_result.message_str = format!(
-                    "{} [static self-bootstrap confirmed]",
-                    ast_result.message_str
-                );
-            }
-            results.push(ast_result);
+            );
+            results.push(crate::scanning::ast_integration::build_ast_dom_xss_result(
+                target.url.as_str(),
+                &target.method,
+                &vuln.source,
+                payload,
+                evidence,
+                message,
+                self_bootstrap_verified,
+            ));
         }
     }
 

@@ -364,7 +364,7 @@ fn test_analyze_external_js_e2e_finds_dom_xss() {
     let cites_script = findings.iter().any(|f| {
         f["evidence"]
             .as_str()
-            .map_or(false, |e| e.contains("sink.js"))
+            .is_some_and(|e| e.contains("sink.js"))
     });
     assert!(
         cites_script,

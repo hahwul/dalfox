@@ -87,13 +87,6 @@ pub fn extract_javascript_from_html(html: &str) -> Vec<String> {
     js_code
 }
 
-/// Returns true when two URLs share the same scheme, host, and port.
-fn same_origin(a: &url::Url, b: &url::Url) -> bool {
-    a.scheme() == b.scheme()
-        && a.host_str() == b.host_str()
-        && a.port_or_known_default() == b.port_or_known_default()
-}
-
 /// Collect resolved, deduped, same-origin `<script src>` URLs from `html`,
 /// resolved relative to `base` (the response URL). Cross-origin srcs are dropped.
 pub fn extract_same_origin_script_srcs(html: &str, base: &url::Url) -> Vec<url::Url> {
@@ -110,7 +103,7 @@ pub fn extract_same_origin_script_srcs(html: &str, base: &url::Url) -> Vec<url::
             Ok(u) => u,
             Err(_) => continue,
         };
-        if !same_origin(&resolved, base) {
+        if !crate::scanning::xss_blind::is_same_origin(&resolved, base) {
             continue;
         }
         let key = resolved.as_str().to_string();
@@ -722,6 +715,45 @@ pub fn analyze_javascript_for_dom_xss_with_html_context(
     }
 }
 
+/// Build a DOM-XSS `Result` from a single AST finding, applying the
+/// self-bootstrap upgrade (Verified / High severity) when statically
+/// confirmed. Shared by the initial-HTML pass and the external-JS pass so
+/// both surfaces emit identically shaped findings. `evidence` and `message`
+/// are caller-supplied because they differ per source (inline vs external).
+pub(crate) fn build_ast_dom_xss_result(
+    target_url: &str,
+    target_method: &str,
+    source: &str,
+    payload: String,
+    evidence: String,
+    message: String,
+    self_bootstrap_verified: bool,
+) -> crate::scanning::result::Result {
+    let poc_url = build_dom_xss_poc_url(target_url, source, &payload);
+    let mut ast_result =
+        crate::scanning::result::Result::builder(crate::scanning::result::FindingType::AstDetected)
+            .inject_type("DOM-XSS")
+            .method(target_method.to_string())
+            .data(poc_url)
+            .param("-")
+            .payload(payload)
+            .evidence(evidence)
+            .cwe("CWE-79")
+            .severity("Medium")
+            .message_id(0)
+            .message_str(message)
+            .build();
+    if self_bootstrap_verified {
+        ast_result.result_type = crate::scanning::result::FindingType::Verified;
+        ast_result.severity = "High".to_string();
+        ast_result.message_str = format!(
+            "{} [static self-bootstrap confirmed]",
+            ast_result.message_str
+        );
+    }
+    ast_result
+}
+
 /// Run the "initial response" AST DOM-XSS analysis used to seed scans
 /// with findings that don't require an active payload injection — the
 /// JavaScript already wires a known source (e.g. `location.hash`) to a
@@ -749,7 +781,6 @@ pub fn run_initial_ast_dom_analysis(
         );
         for (vuln, payload, description) in findings {
             let self_bootstrap_verified = has_self_bootstrap_verification(&js_code, &vuln.source);
-            let poc_url = build_dom_xss_poc_url(target_url, &vuln.source, &payload);
             let message = if let Some(hint) =
                 build_dom_xss_manual_poc_hint(target_url, &vuln.source, &payload)
             {
@@ -757,32 +788,19 @@ pub fn run_initial_ast_dom_analysis(
             } else {
                 format!("{description} (needs runtime confirmation) [light check: no parameter]")
             };
-            let mut ast_result = crate::scanning::result::Result::builder(
-                crate::scanning::result::FindingType::AstDetected,
-            )
-            .inject_type("DOM-XSS")
-            .method(target_method.to_string())
-            .data(poc_url)
-            .param("-")
-            .payload(payload)
-            .evidence(format!(
+            let evidence = format!(
                 "{}:{}:{} - {} (Source: {}, Sink: {})",
                 target_url, vuln.line, vuln.column, description, vuln.source, vuln.sink
-            ))
-            .cwe("CWE-79")
-            .severity("Medium")
-            .message_id(0)
-            .message_str(message)
-            .build();
-            if self_bootstrap_verified {
-                ast_result.result_type = crate::scanning::result::FindingType::Verified;
-                ast_result.severity = "High".to_string();
-                ast_result.message_str = format!(
-                    "{} [static self-bootstrap confirmed]",
-                    ast_result.message_str
-                );
-            }
-            out.push(ast_result);
+            );
+            out.push(build_ast_dom_xss_result(
+                target_url,
+                target_method,
+                &vuln.source,
+                payload,
+                evidence,
+                message,
+                self_bootstrap_verified,
+            ));
         }
     }
     out

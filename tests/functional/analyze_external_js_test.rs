@@ -227,7 +227,7 @@ async fn test_ext_js_spa_finds_dom_xss() {
     let cites_script = findings.iter().any(|f| {
         f["evidence"]
             .as_str()
-            .map_or(false, |e| e.contains("/app.js"))
+            .is_some_and(|e| e.contains("/app.js"))
     });
     assert!(
         cites_script,

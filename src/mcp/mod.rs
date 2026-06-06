@@ -405,13 +405,12 @@ impl DalfoxMcp {
                                     scan_args.as_ref(),
                                 )
                                 .await;
-                                if !ext_batch.is_empty() {
-                                    let added = ext_batch.len();
-                                    let mut guard = results_arc.lock().await;
-                                    guard.extend(ext_batch);
-                                    findings_count
-                                        .fetch_add(added, std::sync::atomic::Ordering::Relaxed);
-                                }
+                                crate::scanning::accumulate_findings(
+                                    &results_arc,
+                                    &findings_count,
+                                    ext_batch,
+                                )
+                                .await;
                             }
                         }
 
