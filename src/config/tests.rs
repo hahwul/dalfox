@@ -405,6 +405,29 @@ fn test_apply_to_scan_args_conservative_preserves_existing_values() {
 }
 
 #[test]
+fn test_apply_to_scan_args_if_default_waf_precedence() {
+    // Config carries non-default WAF settings.
+    let mut scan = full_scan_config();
+    scan.waf_bypass = Some("off".to_string());
+    scan.force_waf = Some("cloudflare".to_string());
+    let cfg = Config { scan: Some(scan) };
+
+    // Case 1: CLI left both at their clap defaults ("auto" / None) -> config fills them.
+    let mut args = default_scan_args();
+    cfg.apply_to_scan_args_if_default(&mut args);
+    assert_eq!(args.waf_bypass, "off");
+    assert_eq!(args.force_waf.as_deref(), Some("cloudflare"));
+
+    // Case 2: CLI explicitly set both -> CLI wins, config is ignored.
+    let mut args = default_scan_args();
+    args.waf_bypass = "force".to_string();
+    args.force_waf = Some("akamai".to_string());
+    cfg.apply_to_scan_args_if_default(&mut args);
+    assert_eq!(args.waf_bypass, "force");
+    assert_eq!(args.force_waf.as_deref(), Some("akamai"));
+}
+
+#[test]
 fn test_apply_to_scan_args_if_default_maps_all_supported_fields() {
     struct DebugGuard(bool);
     impl Drop for DebugGuard {

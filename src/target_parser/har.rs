@@ -164,7 +164,9 @@ pub fn parse_har(content: &str) -> Result<Vec<Target>, Box<dyn std::error::Error
             cookies = req
                 .cookies
                 .iter()
-                .map(|c| (c.name.trim().to_string(), c.value.clone()))
+                // Trim the value too, matching the Cookie-header path above, so
+                // the same cookie parses identically whichever HAR field carries it.
+                .map(|c| (c.name.trim().to_string(), c.value.trim().to_string()))
                 .collect();
         }
 
@@ -395,6 +397,23 @@ mod tests {
         let targets = parse_har(har).unwrap();
         assert_eq!(targets[0].cookies.len(), 2);
         assert!(targets[0].cookies.iter().any(|(k, v)| k == "a" && v == "1"));
+    }
+
+    #[test]
+    fn trims_whitespace_in_cookies_array_values() {
+        // Values from the structured `cookies` fallback must be trimmed the same
+        // way the Cookie-header path trims them, so a HAR exporter that pads the
+        // value doesn't leak whitespace into the request.
+        let har = r#"{"log":{"entries":[{"request":{
+            "method":"GET","url":"https://example.com/",
+            "cookies":[{"name":" session ","value":" abc123 "}]
+        }}]}}"#;
+        let targets = parse_har(har).unwrap();
+        assert_eq!(targets[0].cookies.len(), 1);
+        assert_eq!(
+            targets[0].cookies[0],
+            ("session".to_string(), "abc123".to_string())
+        );
     }
 
     #[test]

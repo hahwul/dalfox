@@ -3746,3 +3746,132 @@ document.getElementById('o').innerHTML = rsp.text();
             .collect::<Vec<_>>()
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Stack-overflow hardening. The analyzed JavaScript comes from the scanned
+// (attacker-controlled) page, and oxc's recursive-descent parser has no depth
+// guard, so deeply nested hostile input must not crash the scanner via an
+// uncatchable stack-overflow SIGABRT. Three layers defend it: the shared
+// visitor recursion counter (MAX_AST_VISIT_DEPTH), the pre-parse nesting scan
+// (source_nesting_exceeds_limit), and a large parse stack + length cap
+// (MAX_ANALYZE_SOURCE_BYTES). Each `analyze()` here would abort the whole test
+// process if its vector regressed.
+// ─────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn source_nesting_guard_flags_pathological_input_only() {
+    // Real code, comfortably under the cap: not flagged.
+    assert!(!source_nesting_exceeds_limit("a.b.c.d(e, f).g[h] + !ok"));
+    assert!(!source_nesting_exceeds_limit(&format!(
+        "var x = {}1{};",
+        "(".repeat(MAX_SOURCE_NESTING_DEPTH),
+        ")".repeat(MAX_SOURCE_NESTING_DEPTH)
+    )));
+    // Many *non-nested* unary/keyword ops must not trip the run counter.
+    assert!(!source_nesting_exceeds_limit(&"!a; !b; typeof c; ".repeat(
+        MAX_SOURCE_NESTING_DEPTH + 5
+    )));
+    // Over the cap on each independent 1-byte / keyword vector: flagged.
+    let over = MAX_SOURCE_NESTING_DEPTH + 5;
+    assert!(source_nesting_exceeds_limit(&format!(
+        "{}1{}",
+        "(".repeat(over),
+        ")".repeat(over)
+    )));
+    assert!(source_nesting_exceeds_limit(&format!(
+        "{}1{}",
+        "{a:".repeat(over),
+        "}".repeat(over)
+    )));
+    assert!(source_nesting_exceeds_limit(&format!("{}a", "[".repeat(over))));
+    assert!(source_nesting_exceeds_limit(&format!("{}a", "!".repeat(over))));
+    assert!(source_nesting_exceeds_limit(&format!(
+        "{}a",
+        "typeof ".repeat(over)
+    )));
+}
+
+#[test]
+fn analyze_survives_deep_recursion_vectors() {
+    // Every shape that previously stack-overflowed the parser or the visitor.
+    // `analyze()` must return (Ok/Err), never abort the process.
+    let n = MAX_AST_VISIT_DEPTH as usize * 16;
+    let vectors = [
+        // visitor recursion (parser handles these iteratively)
+        format!("var x = location.hash{}; el.innerHTML = x;", ".a".repeat(n)),
+        // flat call chain — the shape that defeated the earlier per-call guard
+        format!("var x = location.hash{}; el.innerHTML = x;", ".a()".repeat(n)),
+        format!("var x = location.hash{}; el.innerHTML = x;", ".a(b)".repeat(n)),
+        format!("var x = location.hash{}; el.write(x);", "['a']".repeat(n)),
+        // parser-recursion vectors that pass the bracket/unary pre-scan
+        {
+            let mut s = String::new();
+            for _ in 0..n {
+                s.push_str("if(a)");
+            }
+            s.push_str("el.write(location.hash);");
+            s
+        },
+        {
+            let mut s = String::from("var x; x");
+            for _ in 0..n {
+                s.push_str("=y");
+            }
+            s.push(';');
+            s
+        },
+        // promise-chain driver: fetch().then(f).then(f)… recurses outside the
+        // expression/statement walkers (promise_kind_of_call/_expr).
+        {
+            let mut s = String::from("fetch('/u')");
+            for _ in 0..n {
+                s.push_str(".then(f)");
+            }
+            s.push_str("; x;");
+            s
+        },
+        // computed-member key built from a `+` chain — recurses through
+        // eval_static_string_expr, also outside the main walkers.
+        format!("var k = x[{}\"a\"]; el.write(k);", "\"a\"+".repeat(n)),
+        // jQuery selector with a `+` prefix — recurses through static_leading_string.
+        format!("$(({}\"a\")+location.hash);", "\"a\"+".repeat(n)),
+        // onmessage assignment on a long `.`-chain receiver — recurses through
+        // message_event_source_for_receiver.
+        format!("a{}.onmessage = function(e) {{ x = e.data; }};", ".a".repeat(n)),
+    ];
+    for src in &vectors {
+        let _ = AstDomAnalyzer::new().analyze(src);
+    }
+}
+
+#[test]
+fn analyze_skips_oversize_and_dense_input() {
+    // Past the length cap -> skipped (best-effort), returns empty, no crash.
+    let huge = format!("var x = 1;{}", " /*pad*/".repeat(MAX_ANALYZE_SOURCE_BYTES / 7));
+    assert!(huge.len() > MAX_ANALYZE_SOURCE_BYTES);
+    assert_eq!(AstDomAnalyzer::new().analyze(&huge).unwrap().len(), 0);
+    // Dense bracket nesting -> rejected pre-parse, returns empty.
+    let depth = MAX_SOURCE_NESTING_DEPTH * 50;
+    let nested = format!("var x = {}1{};", "{a:".repeat(depth), "}".repeat(depth));
+    assert_eq!(AstDomAnalyzer::new().analyze(&nested).unwrap().len(), 0);
+}
+
+#[test]
+fn analyze_still_detects_moderately_nested_dom_xss() {
+    // Realistic nesting (well under every cap) must still be fully analyzed:
+    // the guards only engage far past anything legitimate.
+    let code = r#"
+let p = (((location.hash)));
+let v = "" + (p ? p.slice(1) : "fallback");
+document.getElementById('o').innerHTML = v;
+"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink.contains("innerHTML")),
+        "moderately nested source→sink flow must still be detected; got {:?}",
+        vulns
+            .iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
