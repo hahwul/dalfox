@@ -511,6 +511,20 @@ pub(crate) async fn run_preflight_and_analysis(
                         guard.extend(ast_batch);
                         findings_count_clone.fetch_add(added, Ordering::Relaxed);
                     }
+                    let ext_client = target.build_client_or_default();
+                    let ext_batch = crate::scanning::fetch_and_analyze_external_js(
+                        &ext_client,
+                        &target,
+                        &response_text,
+                        &args_clone,
+                    )
+                    .await;
+                    if !ext_batch.is_empty() {
+                        let added = ext_batch.len();
+                        let mut guard = results_clone.lock().await;
+                        guard.extend(ext_batch);
+                        findings_count_clone.fetch_add(added, Ordering::Relaxed);
+                    }
                 }
 
                 // Pretty reflection summary (plain only)

@@ -532,6 +532,140 @@ async fn run_ast_dom_analysis(
     results
 }
 
+/// Fetch all same-origin `<script src>` bundles referenced by `html` and run
+/// AST DOM-XSS analysis on each one. Called once per target at the pre-scan
+/// (preflight) stage so it fires even for SPAs that have no server-side
+/// parameter reflection (where the per-param probe loop never executes).
+///
+/// Returns an empty `Vec` when `--analyze-external-js` is not set.
+pub(crate) async fn fetch_and_analyze_external_js(
+    client: &reqwest::Client,
+    target: &Target,
+    html: &str,
+    scan_args: &ScanArgs,
+) -> Vec<crate::scanning::result::Result> {
+    if !scan_args.analyze_external_js {
+        return Vec::new();
+    }
+
+    // Compile scope filters once rather than per-URL.
+    let include_patterns: Vec<regex::Regex> = scan_args
+        .include_url
+        .iter()
+        .filter_map(|p| regex::Regex::new(p).ok())
+        .collect();
+    let exclude_patterns: Vec<regex::Regex> = scan_args
+        .exclude_url
+        .iter()
+        .filter_map(|p| regex::Regex::new(p).ok())
+        .collect();
+
+    let script_urls =
+        crate::scanning::ast_integration::extract_same_origin_script_srcs(html, &target.url);
+
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut results: Vec<crate::scanning::result::Result> = Vec::new();
+
+    for script_url in script_urls {
+        if seen.len() >= MAX_EXTERNAL_JS_FILES {
+            break;
+        }
+        let url_str = script_url.as_str().to_owned();
+        if !seen.insert(url_str.clone()) {
+            continue;
+        }
+
+        // Apply --include-url / --exclude-url scope to external script URLs.
+        if !include_patterns.is_empty()
+            && !include_patterns.iter().any(|r| r.is_match(&url_str))
+        {
+            continue;
+        }
+        if exclude_patterns.iter().any(|r| r.is_match(&url_str)) {
+            continue;
+        }
+
+        let rb = crate::utils::build_request(
+            client,
+            target,
+            reqwest::Method::GET,
+            script_url.clone(),
+            None,
+        );
+        let resp = match crate::utils::send_with_retry(rb, scan_args.retries, scan_args.retry_delay).await {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        if !resp.status().is_success() {
+            continue;
+        }
+        let body = match resp.text().await {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        if body.len() > MAX_EXTERNAL_JS_BYTES {
+            continue;
+        }
+
+        let script_element_ids =
+            crate::scanning::ast_integration::extract_script_element_ids(&body);
+        let findings =
+            crate::scanning::ast_integration::analyze_javascript_for_dom_xss_with_html_context(
+                &body,
+                target.url.as_str(),
+                &script_element_ids,
+            );
+
+        for (vuln, payload, description) in findings {
+            let self_bootstrap_verified =
+                crate::scanning::ast_integration::has_self_bootstrap_verification(
+                    &body,
+                    &vuln.source,
+                );
+            let poc_url = crate::scanning::ast_integration::build_dom_xss_poc_url(
+                target.url.as_str(),
+                &vuln.source,
+                &payload,
+            );
+            let message = format!("{description} (needs runtime confirmation) [external JS: {url_str}]");
+            let mut ast_result = crate::scanning::result::Result::builder(
+                crate::scanning::result::FindingType::AstDetected,
+            )
+            .inject_type("DOM-XSS")
+            .method(target.method.clone())
+            .data(poc_url)
+            .param("-")
+            .payload(payload)
+            .evidence(format!(
+                "{}:{}:{} - {} (Source: {}, Sink: {}) [script: {}]",
+                target.url.as_str(),
+                vuln.line,
+                vuln.column,
+                description,
+                vuln.source,
+                vuln.sink,
+                url_str,
+            ))
+            .cwe("CWE-79")
+            .severity("Medium")
+            .message_id(0)
+            .message_str(message)
+            .build();
+            if self_bootstrap_verified {
+                ast_result.result_type = crate::scanning::result::FindingType::Verified;
+                ast_result.severity = "High".to_string();
+                ast_result.message_str = format!(
+                    "{} [static self-bootstrap confirmed]",
+                    ast_result.message_str
+                );
+            }
+            results.push(ast_result);
+        }
+    }
+
+    results
+}
+
 fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
     use crate::parameter_analysis::Location;
     let url = match param.location {
