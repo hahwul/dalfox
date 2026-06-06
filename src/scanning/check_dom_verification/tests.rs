@@ -101,7 +101,7 @@ fn default_scan_args() -> crate::cmd::scan::ScanArgs {
         sxss_method: "GET".to_string(),
         sxss_retries: 3,
         skip_ast_analysis: false,
-        hpp: false,
+        analyze_external_js: false,        hpp: false,
         waf_bypass: "auto".to_string(),
         skip_waf_probe: false,
         force_waf: None,

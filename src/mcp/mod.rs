@@ -1000,6 +1000,7 @@ Final results (via get_results_dalfox) include finding type \
             sxss_method: "GET".to_string(),
             sxss_retries: 3,
             skip_ast_analysis,
+            analyze_external_js: false,
             hpp: false,
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,
