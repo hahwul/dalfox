@@ -238,16 +238,7 @@ body::before {
 .header-nav a.active {
     color: var(--text-primary);
 }
-.header-nav a.active::after {
-    content: "";
-    position: absolute;
-    bottom: -20px;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: var(--accent);
-    border-radius: 2px;
-}
+
 .header-right {
     display: flex;
     align-items: center;
@@ -332,12 +323,123 @@ body::before {
     background: var(--bg-sidebar);
     /* Explicit full-height divider rule against the content column. */
     border-right: 1px solid var(--border-light);
-    overflow-y: auto;
-    padding: 1.5rem 0 2rem;
+    /* Flex column so the nav scrolls while the collapse button stays pinned
+       to the bottom. */
+    display: flex;
+    flex-direction: column;
     z-index: 150;
+    transition: transform 0.25s ease;
 }
 .sidebar-nav {
-    padding: 0 0.6rem;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 1.5rem 0.6rem 1rem;
+    /* Scrollbar is hidden by default and only fades in while the pointer is
+       over the sidebar. Track width is reserved (transparent thumb) so the
+       reveal never reflows the link list. */
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+    transition: scrollbar-color 0.2s ease;
+}
+.docs-sidebar:hover .sidebar-nav {
+    scrollbar-color: var(--border-light) transparent;
+}
+.sidebar-nav::-webkit-scrollbar {
+    width: 6px;
+}
+.sidebar-nav::-webkit-scrollbar-track {
+    background: transparent;
+}
+.sidebar-nav::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 3px;
+    transition: background 0.2s ease;
+}
+.docs-sidebar:hover .sidebar-nav::-webkit-scrollbar-thumb {
+    background: var(--border-light);
+}
+.docs-sidebar:hover .sidebar-nav::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+/* ----- Collapse / expand controls -------------------------------------- */
+.sidebar-footer {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    border-top: 1px solid var(--border-light);
+    padding: 0.4rem 0.6rem;
+}
+/* Current release tag, anchored to the GitHub release notes. */
+.sidebar-version {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    text-decoration: none;
+    padding: 0.2rem 0.45rem;
+    border-radius: 5px;
+    transition:
+        color 0.12s,
+        background 0.12s;
+}
+.sidebar-version:hover {
+    color: var(--text-secondary);
+    background: var(--bg-hover);
+}
+.sidebar-collapse-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition:
+        color 0.12s,
+        background 0.12s;
+}
+.sidebar-collapse-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+.sidebar-collapse-btn svg {
+    flex-shrink: 0;
+}
+/* Floating tab that re-opens the sidebar; only shown while collapsed. */
+.sidebar-expand-btn {
+    display: none;
+    position: fixed;
+    left: 0;
+    top: calc(var(--header-h) + 1rem);
+    z-index: 160;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 46px;
+    padding: 0;
+    background: var(--bg-sidebar);
+    border: 1px solid var(--border-light);
+    border-left: none;
+    border-radius: 0 8px 8px 0;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition:
+        color 0.12s,
+        background 0.12s,
+        width 0.12s;
+}
+.sidebar-expand-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+    width: 36px;
 }
 .sidebar-section {
     margin-bottom: 1.5rem;
@@ -385,11 +487,7 @@ body::before {
 }
 .sidebar-links a.active {
     color: var(--text-primary);
-    background: linear-gradient(
-        90deg,
-        var(--accent-dim),
-        transparent 85%
-    );
+    background: linear-gradient(90deg, var(--accent-dim), transparent 85%);
     font-weight: 500;
     border-left-color: var(--accent);
     padding-left: calc(0.85rem - 2px);
@@ -419,9 +517,29 @@ body::before {
     padding: 3rem 3.5rem 4rem;
     max-width: calc(var(--content-max) + var(--sidebar-w) + 7rem);
     min-width: 0;
+    transition: margin-left 0.25s ease;
 }
 .docs-article {
     max-width: var(--content-max);
+}
+
+/* ----- Collapsed sidebar (desktop only) -------------------------------------
+   The collapse toggle adds `sidebar-collapsed` to <html> (set pre-paint by
+   js/sidebar-init.js so a restored state never flashes). Scoped to ≥769px so
+   it never interferes with the mobile hamburger overlay below. */
+@media (min-width: 769px) {
+    html.sidebar-collapsed .docs-sidebar {
+        transform: translateX(-100%);
+    }
+    html.sidebar-collapsed .docs-main {
+        margin-left: 0;
+    }
+    html.sidebar-collapsed body:has(.docs-layout) .site-footer {
+        margin-left: 0;
+    }
+    html.sidebar-collapsed .sidebar-expand-btn {
+        display: flex;
+    }
 }
 
 /* ==========================================================================
@@ -510,10 +628,7 @@ body::before {
     color: var(--accent);
     text-decoration: none;
     /* Underline drawn as a stroke that grows from the left on hover. */
-    background-image: linear-gradient(
-        var(--accent-hover),
-        var(--accent-hover)
-    );
+    background-image: linear-gradient(var(--accent-hover), var(--accent-hover));
     background-repeat: no-repeat;
     background-position: 0 100%;
     background-size: 0% 1px;
@@ -561,11 +676,7 @@ body::before {
 /* Code blocks — framed like a window pane (窓) with corner brackets. */
 .docs-article pre {
     background:
-        linear-gradient(
-            180deg,
-            rgba(139, 148, 232, 0.04),
-            transparent 64px
-        ),
+        linear-gradient(180deg, rgba(139, 148, 232, 0.04), transparent 64px),
         var(--bg-code);
     padding: 1.1rem 1.3rem;
     border-radius: 8px;
@@ -650,11 +761,7 @@ body::before {
     text-align: left;
     padding: 0.65rem 0.85rem;
     /* Ink band header with an accent-tinted base rule. */
-    background: linear-gradient(
-        180deg,
-        var(--bg-hover),
-        var(--bg-surface)
-    );
+    background: linear-gradient(180deg, var(--bg-hover), var(--bg-surface));
     border-bottom: 1px solid var(--ink-line-strong);
     color: var(--text-primary);
     font-weight: 600;
@@ -1046,7 +1153,7 @@ nav.pagination a:hover {
        and filling with the muted text token (the raster itself is white). */
     background-color: var(--text-muted);
     -webkit-mask: url("../images/hahwul.webp") center / contain no-repeat;
-            mask: url("../images/hahwul.webp") center / contain no-repeat;
+    mask: url("../images/hahwul.webp") center / contain no-repeat;
     transition: background-color 0.3s ease;
 }
 .hahwul-img:hover {
@@ -1067,6 +1174,7 @@ nav.pagination a:hover {
    this selector is a no-op there and the footer spans full width. */
 body:has(.docs-layout) .site-footer {
     margin-left: var(--sidebar-w);
+    transition: margin-left 0.25s ease;
 }
 .footer-inner {
     max-width: 1100px;
@@ -1112,8 +1220,6 @@ body:has(.docs-layout) .site-footer {
     padding-top: var(--header-h);
     overflow-x: hidden;
 }
-
-
 
 /* Hero */
 .hero {
@@ -1168,7 +1274,7 @@ body:has(.docs-layout) .site-footer {
     position: absolute;
     inset: 0;
     z-index: -1;
-    background-image: url('/images/illust.webp');
+    background-image: url("/images/illust.webp");
     /* Let the night scene cover the entire headline area ("Hunt every XSS") */
     background-position: 48% 28%;
     background-size: 82% auto;
@@ -1190,34 +1296,34 @@ body:has(.docs-layout) .site-footer {
         ),
         /* 2. Very soft large vignette (bright areas) */
         radial-gradient(
-            ellipse at 88% 36%,
-            black 38%,
-            rgba(0, 0, 0, 0.97) 54%,
-            rgba(0, 0, 0, 0.78) 66%,
-            rgba(0, 0, 0, 0.42) 78%,
-            rgba(0, 0, 0, 0.18) 88%,
-            rgba(0, 0, 0, 0.05) 94%,
-            transparent 99%
-        ),
+                ellipse at 88% 36%,
+                black 38%,
+                rgba(0, 0, 0, 0.97) 54%,
+                rgba(0, 0, 0, 0.78) 66%,
+                rgba(0, 0, 0, 0.42) 78%,
+                rgba(0, 0, 0, 0.18) 88%,
+                rgba(0, 0, 0, 0.05) 94%,
+                transparent 99%
+            ),
         /* 3. Top fade */
         linear-gradient(
-            to bottom,
-            transparent 0%,
-            rgba(0, 0, 0, 0.1) 7%,
-            rgba(0, 0, 0, 0.42) 14%,
-            rgba(0, 0, 0, 0.76) 23%,
-            black 34%
-        ),
+                to bottom,
+                transparent 0%,
+                rgba(0, 0, 0, 0.1) 7%,
+                rgba(0, 0, 0, 0.42) 14%,
+                rgba(0, 0, 0, 0.76) 23%,
+                black 34%
+            ),
         /* 4. STRONG right-edge fade (aggressive vertical dissolve on the entire right side) */
         linear-gradient(
-            to left,
-            transparent 0%,
-            rgba(0, 0, 0, 0.06) 9%,
-            rgba(0, 0, 0, 0.32) 18%,
-            rgba(0, 0, 0, 0.68) 29%,
-            rgba(0, 0, 0, 0.91) 40%,
-            black 52%
-        );
+                to left,
+                transparent 0%,
+                rgba(0, 0, 0, 0.06) 9%,
+                rgba(0, 0, 0, 0.32) 18%,
+                rgba(0, 0, 0, 0.68) 29%,
+                rgba(0, 0, 0, 0.91) 40%,
+                black 52%
+            );
     -webkit-mask-image:
         /* 1. Much softer left protection — allow the illustration to cover the entire "Hunt every XSS" headline area */
         linear-gradient(
@@ -1232,34 +1338,34 @@ body:has(.docs-layout) .site-footer {
         ),
         /* 2. Very soft large vignette (bright areas) */
         radial-gradient(
-            ellipse at 88% 36%,
-            black 38%,
-            rgba(0, 0, 0, 0.97) 54%,
-            rgba(0, 0, 0, 0.78) 66%,
-            rgba(0, 0, 0, 0.42) 78%,
-            rgba(0, 0, 0, 0.18) 88%,
-            rgba(0, 0, 0, 0.05) 94%,
-            transparent 99%
-        ),
+                ellipse at 88% 36%,
+                black 38%,
+                rgba(0, 0, 0, 0.97) 54%,
+                rgba(0, 0, 0, 0.78) 66%,
+                rgba(0, 0, 0, 0.42) 78%,
+                rgba(0, 0, 0, 0.18) 88%,
+                rgba(0, 0, 0, 0.05) 94%,
+                transparent 99%
+            ),
         /* 3. Top fade */
         linear-gradient(
-            to bottom,
-            transparent 0%,
-            rgba(0, 0, 0, 0.1) 7%,
-            rgba(0, 0, 0, 0.42) 14%,
-            rgba(0, 0, 0, 0.76) 23%,
-            black 34%
-        ),
+                to bottom,
+                transparent 0%,
+                rgba(0, 0, 0, 0.1) 7%,
+                rgba(0, 0, 0, 0.42) 14%,
+                rgba(0, 0, 0, 0.76) 23%,
+                black 34%
+            ),
         /* 4. STRONG right-edge fade (aggressive vertical dissolve on the entire right side) */
         linear-gradient(
-            to left,
-            transparent 0%,
-            rgba(0, 0, 0, 0.06) 9%,
-            rgba(0, 0, 0, 0.32) 18%,
-            rgba(0, 0, 0, 0.68) 29%,
-            rgba(0, 0, 0, 0.91) 40%,
-            black 52%
-        );
+                to left,
+                transparent 0%,
+                rgba(0, 0, 0, 0.06) 9%,
+                rgba(0, 0, 0, 0.32) 18%,
+                rgba(0, 0, 0, 0.68) 29%,
+                rgba(0, 0, 0, 0.91) 40%,
+                black 52%
+            );
     mask-composite: intersect;
     -webkit-mask-composite: intersect;
     pointer-events: none;
@@ -1879,7 +1985,7 @@ body:has(.docs-layout) .site-footer {
     width: 58%;
     z-index: 0;
     pointer-events: none;
-    background-image: url('/images/illust2.webp');
+    background-image: url("/images/illust2.webp");
     background-position: 62% 38%;
     background-size: cover;
     background-repeat: no-repeat;
@@ -2008,7 +2114,7 @@ body:has(.docs-layout) .site-footer {
     inset: 0;
     z-index: 0;
     pointer-events: none;
-    background-image: url('/images/illust3.webp');
+    background-image: url("/images/illust3.webp");
     background-position: center 32%;
     background-size: cover;
     background-repeat: no-repeat;
@@ -2186,6 +2292,12 @@ body:has(.docs-layout) .site-footer {
     .docs-sidebar.open {
         transform: translateX(0);
     }
+    /* The collapse/expand controls are a desktop affordance; on mobile the
+       sidebar is a hamburger-driven overlay, so hide them entirely. */
+    .sidebar-footer,
+    .sidebar-expand-btn {
+        display: none;
+    }
     .docs-main {
         margin-left: 0;
         padding: 2rem 1.25rem 3rem;
@@ -2319,7 +2431,9 @@ body:has(.docs-layout) .site-footer {
     font-size: 0.8rem;
     color: var(--text-secondary);
     text-decoration: none;
-    transition: color 0.15s, border-left-color 0.15s;
+    transition:
+        color 0.15s,
+        border-left-color 0.15s;
     border-left: 2px solid transparent;
     padding-left: 0.75rem;
     margin-left: -2px;

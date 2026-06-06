@@ -1,0 +1,66 @@
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        Getting Started
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="{{ base_url }}/getting-started/">Overview</a></li>
+        <li><a href="{{ base_url }}/getting-started/installation/">Installation</a></li>
+        <li><a href="{{ base_url }}/getting-started/quick-start/">Quick Start</a></li>
+        <li><a href="{{ base_url }}/getting-started/configuration/">Configuration</a></li>
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        Guide
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="{{ base_url }}/guide/">Overview</a></li>
+        <li><a href="{{ base_url }}/guide/scanning-modes/">Scanning Modes</a></li>
+        <li><a href="{{ base_url }}/guide/parameters/">Parameters &amp; Discovery</a></li>
+        <li><a href="{{ base_url }}/guide/payloads/">Payloads &amp; Encoding</a></li>
+        <li><a href="{{ base_url }}/guide/waf-bypass/">WAF Bypass</a></li>
+        <li><a href="{{ base_url }}/guide/stored-xss/">Stored XSS</a></li>
+        <li><a href="{{ base_url }}/guide/output/">Output &amp; Reports</a></li>
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Integrations
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="{{ base_url }}/integrations/">Overview</a></li>
+        <li><a href="{{ base_url }}/integrations/server/">REST API Server</a></li>
+        <li><a href="{{ base_url }}/integrations/mcp/">MCP Server</a></li>
+        <li><a href="{{ base_url }}/integrations/caido/">Caido Workflows</a></li>
+        <li><a href="{{ base_url }}/integrations/skills/">Agent Skill</a></li>
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        Reference
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="{{ base_url }}/reference/">Overview</a></li>
+        <li><a href="{{ base_url }}/reference/cli/">CLI Reference</a></li>
+        <li><a href="{{ base_url }}/reference/config/">Config File</a></li>
+        <li><a href="{{ base_url }}/reference/environment/">Environment</a></li>
+        <li><a href="{{ base_url }}/reference/xssmaze/">XSSMaze Score</a></li>
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v{{ site.data.dalfox.version }}" target="_blank" rel="noopener" title="Dalfox v{{ site.data.dalfox.version }} release notes">v{{ site.data.dalfox.version }}</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="Expand sidebar" title="Expand sidebar">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
