@@ -662,6 +662,11 @@ pub struct ScanWithDalfoxParams {
     #[serde(default)]
     pub skip_ast_analysis: bool,
 
+    /// Fetch and AST-analyze same-origin external <script src> bundles for DOM-XSS.
+    /// Off by default to preserve request budget. Default: false
+    #[serde(default)]
+    pub analyze_external_js: bool,
+
     /// Also report outdated / known-vulnerable JS libraries (informational,
     /// CWE-1104, 0 extra requests). Default: false
     #[serde(default)]
@@ -834,6 +839,7 @@ Final results (via get_results_dalfox) include finding type \
             skip_discovery,
             deep_scan,
             skip_ast_analysis,
+            analyze_external_js,
             detect_outdated_libs,
             blind_callback_url,
             workers,
@@ -1014,7 +1020,7 @@ Final results (via get_results_dalfox) include finding type \
             sxss_method: "GET".to_string(),
             sxss_retries: 3,
             skip_ast_analysis,
-            analyze_external_js: false,
+            analyze_external_js,
             hpp: false,
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,

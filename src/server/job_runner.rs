@@ -316,7 +316,7 @@ pub(crate) async fn run_scan_job(
         sxss_method: "GET".to_string(),
         sxss_retries: 3,
         skip_ast_analysis: opts.skip_ast_analysis.unwrap_or(false),
-        analyze_external_js: false,
+        analyze_external_js: opts.analyze_external_js.unwrap_or(false),
         hpp: false,
         waf_bypass: "auto".to_string(),
         skip_waf_probe: false,
