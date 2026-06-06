@@ -1448,3 +1448,183 @@ async fn test_run_scanning_empty_params() {
     )
     .await;
 }
+
+// ── fetch_and_analyze_external_js unit tests ─────────────────────────────────
+
+/// Minimal axum server for external-JS unit tests. Serves:
+///   GET /app.js  → `js_body`
+///   GET /big.js  → body just over MAX_EXTERNAL_JS_BYTES (512 KiB)
+async fn start_ext_js_server(js_body: &'static str) -> std::net::SocketAddr {
+    use axum::{Router, http::header, routing::get};
+
+    let app_js = move || async move {
+        ([(header::CONTENT_TYPE, "application/javascript")], js_body)
+    };
+    let big_js = || async {
+        // "// x\n" × 110_000 ≈ 550 KiB > 512 KiB cap
+        let body = "// x\n".repeat(110_000);
+        ([(header::CONTENT_TYPE, "application/javascript")], body)
+    };
+    let app = Router::new()
+        .route("/app.js", get(app_js))
+        .route("/big.js", get(big_js));
+
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind ext-js test server");
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    addr
+}
+
+fn ext_js_scan_args(analyze: bool) -> crate::cmd::scan::ScanArgs {
+    crate::cmd::scan::ScanArgs {
+        detect_outdated_libs: false,
+        input_type: "url".to_string(),
+        format: "json".to_string(),
+        targets: vec![],
+        param: vec![],
+        data: None,
+        headers: vec![],
+        cookies: vec![],
+        method: "GET".to_string(),
+        user_agent: None,
+        cookie_from_raw: None,
+        include_url: vec![],
+        exclude_url: vec![],
+        ignore_param: vec![],
+        out_of_scope: vec![],
+        out_of_scope_file: None,
+        mining_dict_word: None,
+        skip_mining: true,
+        skip_mining_dict: true,
+        skip_mining_dom: true,
+        only_discovery: false,
+        skip_discovery: true,
+        skip_reflection_header: true,
+        skip_reflection_cookie: true,
+        skip_reflection_path: true,
+        timeout: 5,
+        scan_timeout: 0,
+        delay: 0,
+        proxy: None,
+        follow_redirects: false,
+        ignore_return: vec![],
+        output: None,
+        include_request: false,
+        include_response: false,
+        include_all: false,
+        no_color: true,
+        silence: true,
+        dry_run: false,
+        stream_findings: false,
+        poc_type: "plain".to_string(),
+        limit: None,
+        limit_result_type: "all".to_string(),
+        only_poc: vec![],
+        workers: 2,
+        max_concurrent_targets: 2,
+        max_targets_per_host: 10,
+        encoders: vec![],
+        custom_blind_xss_payload: None,
+        blind_callback_url: None,
+        custom_payload: None,
+        only_custom_payload: false,
+        inject_marker: None,
+        custom_alert_value: "1".to_string(),
+        custom_alert_type: "none".to_string(),
+        skip_xss_scanning: true,
+        deep_scan: false,
+        sxss: false,
+        sxss_url: None,
+        sxss_method: "GET".to_string(),
+        sxss_retries: 1,
+        skip_ast_analysis: false,
+        analyze_external_js: analyze,
+        hpp: false,
+        waf_bypass: "off".to_string(),
+        skip_waf_probe: true,
+        force_waf: None,
+        waf_evasion: false,
+        rate_limit: 0,
+        retries: 0,
+        retry_delay: 0,
+        waf_min_confidence: 0.0,
+        remote_payloads: vec![],
+        remote_wordlists: vec![],
+        max_payloads_per_param: 0,
+    }
+}
+
+/// flag=false → always returns empty regardless of page content.
+#[tokio::test]
+async fn test_fetch_ext_js_flag_off_returns_empty() {
+    let addr = start_ext_js_server(
+        r#"document.getElementById("r").innerHTML = location.hash.substring(1);"#,
+    )
+    .await;
+    let target = parse_target(&format!("http://{addr}/")).unwrap();
+    let client = target.build_client_or_default();
+    let html = format!(
+        r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#
+    );
+    let args = ext_js_scan_args(false);
+    let findings = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    assert!(findings.is_empty(), "flag off must return empty; got {findings:?}");
+}
+
+/// flag=true + script has `location.hash → innerHTML` → finding returned and
+/// evidence cites the script URL.
+#[tokio::test]
+async fn test_fetch_ext_js_detects_dom_xss_in_script() {
+    let addr = start_ext_js_server(
+        r#"document.getElementById("r").innerHTML = location.hash.substring(1);"#,
+    )
+    .await;
+    let target = parse_target(&format!("http://{addr}/")).unwrap();
+    let client = target.build_client_or_default();
+    let html = format!(
+        r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#
+    );
+    let args = ext_js_scan_args(true);
+    let findings = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    assert!(!findings.is_empty(), "expected DOM-XSS finding from external script");
+    let cites_script = findings.iter().any(|f| f.evidence.contains("/app.js"));
+    assert!(cites_script, "evidence must cite the script URL; got {findings:#?}");
+}
+
+/// Body larger than MAX_EXTERNAL_JS_BYTES → skipped gracefully, no panic.
+#[tokio::test]
+async fn test_fetch_ext_js_skips_oversized_body() {
+    let addr = start_ext_js_server("").await;
+    let target = parse_target(&format!("http://{addr}/")).unwrap();
+    let client = target.build_client_or_default();
+    let html = format!(
+        r#"<html><body><script src="http://{addr}/big.js"></script></body></html>"#
+    );
+    let args = ext_js_scan_args(true);
+    // big.js has no sink; primary assertion is no panic on oversized body.
+    let _ = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+}
+
+/// exclude_url matching the script URL → script skipped, empty result.
+#[tokio::test]
+async fn test_fetch_ext_js_exclude_url_skips_script() {
+    let addr = start_ext_js_server(
+        r#"document.getElementById("r").innerHTML = location.hash.substring(1);"#,
+    )
+    .await;
+    let target = parse_target(&format!("http://{addr}/")).unwrap();
+    let client = target.build_client_or_default();
+    let html = format!(
+        r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#
+    );
+    let mut args = ext_js_scan_args(true);
+    args.exclude_url = vec!["app\\.js".to_string()];
+    let findings = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    assert!(
+        findings.is_empty(),
+        "excluded script must not produce findings; got {findings:?}"
+    );
+}
