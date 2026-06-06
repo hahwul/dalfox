@@ -258,6 +258,118 @@ fn test_e2e_stdin_and_positional_targets_merged() {
     );
 }
 
+/// Verify `--analyze-external-js` is a recognized flag (clap doesn't reject it).
+#[test]
+fn test_analyze_external_js_flag_is_recognized() {
+    // Scan a port that will immediately refuse so the test is fast, but the
+    // important thing is clap must accept the flag without "unexpected argument".
+    let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args([
+            "scan",
+            "http://127.0.0.1:1/",
+            "--analyze-external-js",
+            "--skip-xss-scanning",
+            "--skip-discovery",
+            "--skip-mining",
+            "--silence",
+        ])
+        .output()
+        .expect("failed to execute dalfox");
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !stderr.contains("unexpected argument"),
+        "--analyze-external-js must be a recognised flag; stderr: {stderr}"
+    );
+}
+
+/// Full E2E: dalfox binary with `--analyze-external-js` finds a DOM-XSS sink
+/// inside a same-origin external script and reports it in JSON output.
+#[test]
+fn test_analyze_external_js_e2e_finds_dom_xss() {
+    use axum::{Router, http::header, routing::get, response::IntoResponse};
+
+    // Start an in-process axum server. The tokio runtime lives for the
+    // duration of the test; the spawned server task keeps it alive while
+    // the dalfox subprocess runs.
+    let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
+
+    let addr = rt.block_on(async {
+        async fn page() -> impl IntoResponse {
+            (
+                [(header::CONTENT_TYPE, "text/html; charset=utf-8")],
+                r#"<!DOCTYPE html><html><body>
+                    <div id="r"></div>
+                    <script src="/sink.js"></script>
+                </body></html>"#,
+            )
+        }
+        async fn sink_js() -> impl IntoResponse {
+            (
+                [(header::CONTENT_TYPE, "application/javascript")],
+                r#"document.getElementById("r").innerHTML = location.hash.substring(1);"#,
+            )
+        }
+        let app = Router::new()
+            .route("/", get(page))
+            .route("/sink.js", get(sink_js));
+
+        let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+            .await
+            .expect("bind e2e test server");
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        addr
+    });
+
+    let out_path = std::env::temp_dir().join(format!(
+        "dalfox_e2e_extjs_{}.json",
+        addr.port()
+    ));
+
+    let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args([
+            "scan",
+            &format!("http://{addr}/"),
+            "--analyze-external-js",
+            "--skip-xss-scanning",
+            "--skip-discovery",
+            "--skip-mining",
+            "--format", "json",
+            "--output", out_path.to_str().unwrap(),
+            "--silence",
+        ])
+        .output()
+        .expect("failed to execute dalfox");
+
+    rt.shutdown_background();
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let content = std::fs::read_to_string(&out_path).unwrap_or_else(|_| {
+        panic!(
+            "dalfox should write JSON output file; exit={:?}\nstdout: {stdout}\nstderr: {stderr}",
+            output.status.code()
+        )
+    });
+    let v: serde_json::Value =
+        serde_json::from_str(&content).expect("output should be valid JSON");
+    let findings = v["findings"].as_array().expect("should have findings array");
+
+    assert!(
+        !findings.is_empty(),
+        "expected at least one DOM-XSS finding from external sink.js; output: {content}"
+    );
+    let cites_script = findings.iter().any(|f| {
+        f["evidence"].as_str().map_or(false, |e| e.contains("sink.js"))
+    });
+    assert!(
+        cites_script,
+        "finding evidence must cite the external script URL; findings: {findings:?}"
+    );
+}
+
 #[cfg(unix)]
 #[test]
 fn test_e2e_non_regular_file_rejected() {
