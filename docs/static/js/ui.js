@@ -36,6 +36,30 @@
     }
   }
 
+  // --- Sidebar collapse / expand (desktop docs layout) ---
+  // The initial state is applied pre-paint by js/sidebar-init.js; here we just
+  // wire the toggle buttons and persist the choice.
+  var collapseBtn = document.getElementById('sidebar-collapse');
+  var expandBtn = document.getElementById('sidebar-expand');
+  function setSidebarCollapsed(collapsed) {
+    document.documentElement.classList.toggle('sidebar-collapsed', collapsed);
+    try {
+      localStorage.setItem('dalfox-sidebar-collapsed', collapsed ? '1' : '0');
+    } catch (e) {}
+    if (collapseBtn) collapseBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    if (expandBtn) expandBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+  }
+  if (collapseBtn) {
+    collapseBtn.addEventListener('click', function () {
+      setSidebarCollapsed(true);
+    });
+  }
+  if (expandBtn) {
+    expandBtn.addEventListener('click', function () {
+      setSidebarCollapsed(false);
+    });
+  }
+
   // --- Mobile hamburger menu (docs layout only) ---
   var hamburger = document.querySelector('.hamburger');
   var sidebar = document.querySelector('.docs-sidebar');

@@ -1,6 +1,7 @@
 # Bumps the dalfox version across every file that hardcodes it
-# (Cargo.toml, Cargo.lock, flake.nix, snap/snapcraft.yaml, aur/PKGBUILD).
-# Prompts for the new version interactively and prints a per-file checkmark.
+# (Cargo.toml, Cargo.lock, flake.nix, snap/snapcraft.yaml, aur/PKGBUILD,
+# docs/data/dalfox.json). Prompts for the new version interactively and
+# prints a per-file checkmark.
 #
 # Pre-release suffixes are allowed (e.g. 3.0.0-dev.1, 3.1.0-rc.1).
 
@@ -9,6 +10,7 @@ CARGO_LOCK   = "Cargo.lock"
 FLAKE_NIX    = "flake.nix"
 SNAP_YAML    = "snap/snapcraft.yaml"
 AUR_PKGBUILD = "aur/PKGBUILD"
+DOCS_DATA    = "docs/data/dalfox.json"
 
 # Read helpers (mirror version_check.cr).
 
@@ -50,6 +52,14 @@ def aur_version : String?
   content = File.read(AUR_PKGBUILD)
   match = content.match(/^pkgver=([^\s]+)/m)
   match ? match[1].gsub('_', '-') : nil
+rescue
+  nil
+end
+
+def docs_data_version : String?
+  content = File.read(DOCS_DATA)
+  match = content.match(/"version"\s*:\s*"([^"]+)"/)
+  match ? match[1] : nil
 rescue
   nil
 end
@@ -128,6 +138,19 @@ rescue ex
   false
 end
 
+# docs/data/dalfox.json keeps the bare `X.Y.Z` (no `v` prefix), matching
+# Cargo.toml; the sidebar template prepends the `v` for display.
+def update_docs_data(new_version : String) : Bool
+  content = File.read(DOCS_DATA)
+  updated = content.sub(/("version"\s*:\s*")[^"]+(")/, "\\1#{new_version}\\2")
+  return false if updated == content
+  File.write(DOCS_DATA, updated)
+  true
+rescue ex
+  puts "  error: #{ex.message}"
+  false
+end
+
 # Loose semver — allow numeric pre-release suffix (`-dev.1`, `-rc.2`,
 # `-alpha`).
 def valid_version?(version : String) : Bool
@@ -141,6 +164,7 @@ lock_v  = cargo_lock_version
 flake_v = flake_version
 snap_v  = snap_version
 aur_v   = aur_version
+docs_v  = docs_data_version
 
 puts "Current versions:"
 puts "  #{CARGO_TOML.ljust(22)} #{cargo_v || "Not found"}"
@@ -148,9 +172,10 @@ puts "  #{CARGO_LOCK.ljust(22)} #{lock_v || "Not found"}"
 puts "  #{FLAKE_NIX.ljust(22)} #{flake_v || "Not found"}"
 puts "  #{SNAP_YAML.ljust(22)} #{snap_v || "Not found"}"
 puts "  #{AUR_PKGBUILD.ljust(22)} #{aur_v || "Not found"}"
+puts "  #{DOCS_DATA.ljust(22)} #{docs_v || "Not found"}"
 puts
 
-versions = [cargo_v, lock_v, flake_v, snap_v, aur_v].compact
+versions = [cargo_v, lock_v, flake_v, snap_v, aur_v, docs_v].compact
 unique = versions.uniq
 
 if unique.size > 1
@@ -158,7 +183,7 @@ if unique.size > 1
   puts
 end
 
-current = cargo_v || lock_v || flake_v || snap_v || aur_v || "unknown"
+current = cargo_v || lock_v || flake_v || snap_v || aur_v || docs_v || "unknown"
 puts "Current: #{current}"
 print "New version (Enter to cancel): "
 input = gets
@@ -191,6 +216,7 @@ total = 0
   {FLAKE_NIX, ->{ update_flake(new_version) }, !flake_v.nil?},
   {SNAP_YAML, ->{ update_snap(new_version) }, !snap_v.nil?},
   {AUR_PKGBUILD, ->{ update_aur(new_version) }, !aur_v.nil?},
+  {DOCS_DATA, ->{ update_docs_data(new_version) }, !docs_v.nil?},
 ].each do |tuple|
   path, fn, present = tuple
   next unless present
