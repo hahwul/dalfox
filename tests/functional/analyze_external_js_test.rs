@@ -315,13 +315,7 @@ async fn test_ext_js_exclude_url_skips_matched_script() {
 #[tokio::test]
 async fn test_ext_js_include_url_allows_only_matched_script() {
     let addr = start_server().await;
-    let (args, out) = make_scan_args(
-        addr,
-        "/two",
-        true,
-        vec!["vendor\\.js".to_string()],
-        vec![],
-    );
+    let (args, out) = make_scan_args(addr, "/two", true, vec!["vendor\\.js".to_string()], vec![]);
     scan::run_scan(&args).await;
     let findings = read_findings(&out);
     assert!(
