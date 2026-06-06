@@ -51,6 +51,11 @@ use tokio::sync::{Mutex, RwLock, Semaphore};
 /// Prevents payload explosion when WAF bypass mutations are applied.
 const MAX_WAF_MUTATION_VARIANTS_PER_PAYLOAD: usize = 3;
 
+/// Maximum number of distinct same-origin external JS files fetched per scan parameter.
+const MAX_EXTERNAL_JS_FILES: usize = 16;
+/// Maximum bytes read from a single external JS file (matches analyzer limit).
+const MAX_EXTERNAL_JS_BYTES: usize = 512 * 1024;
+
 /// Build a `with_key("req_per_sec", …)` tracker for an indicatif progress bar.
 ///
 /// `start` is the value of `crate::REQUEST_COUNT` captured at bar creation;
@@ -1135,6 +1140,8 @@ struct ParamScanState {
     /// DOM XSS already confirmed for this param locally — skip the
     /// remaining DOM payloads.
     dom_found_locally: bool,
+    /// Dedup set for external JS URLs already fetched for this param.
+    ext_script_seen: HashSet<String>,
 }
 
 /// Shared, cheaply-clonable context handed to each spawned worker. Every
