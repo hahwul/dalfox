@@ -1694,6 +1694,26 @@ async fn test_resolve_targets_cookie_from_raw_file() {
 }
 
 #[tokio::test]
+async fn test_resolve_targets_cookie_from_raw_case_insensitive() {
+    // HTTP header names are case-insensitive (HTTP/2 even mandates lowercase),
+    // so a raw request whose Cookie header is lowercase / mixed-case and lacks a
+    // space after the colon must still yield cookies.
+    let path = write_temp_file(
+        "cookie_raw_ci",
+        "GET / HTTP/2\r\nhost: example.com\r\ncookie:sid=abc; foo=bar\r\n\r\n",
+    );
+    let mut args = default_scan_args();
+    args.input_type = "url".to_string();
+    args.targets = vec!["https://example.com/".to_string()];
+    args.cookie_from_raw = Some(path);
+    let targets = resolve_targets(&args).await.expect("resolve ok");
+    assert_eq!(targets.len(), 1);
+    let cookies = &targets[0].cookies;
+    assert!(cookies.iter().any(|(k, v)| k == "sid" && v == "abc"));
+    assert!(cookies.iter().any(|(k, v)| k == "foo" && v == "bar"));
+}
+
+#[tokio::test]
 async fn test_resolve_targets_parse_error_errors() {
     let mut args = default_scan_args();
     args.input_type = "url".to_string();

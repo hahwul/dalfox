@@ -8,8 +8,149 @@ use oxc_allocator::Allocator;
 use oxc_ast::ast::*;
 use oxc_parser::Parser;
 use oxc_span::{GetSpan, SourceType};
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 use std::sync::LazyLock;
+
+/// Maximum AST recursion depth for the taint-analysis visitor. The JavaScript
+/// fed to the analyzer comes from the scanned (attacker-controlled) page, and
+/// oxc parses left-leaning member/binary chains *iteratively* — so a chain like
+/// `a.b.c.d…`, `a+a+a+…`, a flat method chain `x.a().a().a()…`, or a deeply
+/// nested array/object the parser accepted, would overflow the stack inside the
+/// recursive visitor (`is_tainted`, `find_source_in_expr`, `walk_expression`,
+/// `walk_statement`, `get_member_string`, …) and abort the whole scanner with an
+/// uncatchable SIGABRT. Real-world code nests only a few dozen levels, so this
+/// cap degrades analysis gracefully far past anything legitimate while keeping
+/// the visitor's stack usage bounded. Enforced by a single shared counter
+/// ([`DomXssVisitor::enter_recursion`]) checked at the entry of every recursive
+/// analysis fn, so the bound holds across helper boundaries (e.g.
+/// `call_taint_and_source`) that would reset a per-call depth parameter.
+const MAX_AST_VISIT_DEPTH: u32 = 256;
+
+/// Upper bound on the size of a single JavaScript block handed to [`analyze`].
+/// oxc's recursive-descent parser has no depth guard, and some constructs the
+/// pre-parse [`source_nesting_exceeds_limit`] scan can't cheaply bound — long
+/// right-leaning statement/assignment chains (`if(a)if(b)…`, `x=y=z=…`,
+/// `for(;;)for(;;)…`) where each level costs ≥2 source bytes — recurse once per
+/// level *inside* `.parse()`. Because every such level consumes at least one
+/// source byte, capping the input length bounds the achievable parser depth;
+/// combined with [`ANALYZE_STACK_BYTES`] this guarantees the parser can't
+/// overflow. Scripts larger than this skip AST analysis (best-effort); the cap
+/// sits far above any realistic inline `<script>` while staying well under the
+/// point where a maximally-dense chain could exhaust the analysis stack.
+const MAX_ANALYZE_SOURCE_BYTES: usize = 512 * 1024;
+
+/// Stack size for the dedicated thread that runs the parse + walk. The *walk* is
+/// separately bounded to [`MAX_AST_VISIT_DEPTH`] frames by the shared recursion
+/// guard, so the deepest consumer of this stack is the **parser**: the densest
+/// legal-after-pre-parse-guard input is a ~2-byte-per-level assignment/label
+/// chain within [`MAX_ANALYZE_SOURCE_BYTES`], i.e. ~256k parser frames at
+/// ~600 B/frame ≈ 150 MiB, which this absorbs with ~1.7× headroom. The
+/// reservation is virtual (lazily committed), so the real RSS cost on the common
+/// shallow script is only the few KB of stack actually touched.
+const ANALYZE_STACK_BYTES: usize = 256 * 1024 * 1024;
+
+/// Below this size [`analyze`] parses inline instead of spawning an
+/// [`ANALYZE_STACK_BYTES`] thread. After the pre-parse guard rejects the
+/// 1-byte-per-level chains, every surviving parser-recursion level costs ≥2
+/// source bytes (`=y`, `a:`, `if(a)`, …), so a script this small can reach at
+/// most ~1k parser frames — comfortably within a normal worker stack — and the
+/// visitor walk is depth-capped to [`MAX_AST_VISIT_DEPTH`] regardless of stack.
+/// The vast majority of inline `<script>` blocks land here and skip the
+/// thread-spawn cost; larger blocks pay for the big stack they might need.
+const INLINE_PARSE_BYTES: usize = 2 * 1024;
+
+/// Maximum source-level nesting depth accepted before parsing. oxc's
+/// recursive-descent parser has **no** internal depth/stack guard (only a 4 GiB
+/// byte-length cap), so deeply nested brackets (`((((…`, `{a:{a:…`, `[[[[…`) or
+/// long prefix-operator runs (`!!!!…`, `typeof typeof …`, `new new …`) overflow
+/// the stack *inside* `.parse()` itself — before the visitor (and its depth
+/// guard) ever runs. Empirically oxc overflows a 2 MiB worker stack at roughly
+/// 500–600 nested brackets; this conservative cap stays well below that while
+/// sitting far above any legitimate script, so `analyze` skips (rather than
+/// crashes on) pathological input. See [`source_nesting_exceeds_limit`].
+const MAX_SOURCE_NESTING_DEPTH: usize = 200;
+
+/// Conservatively reject source whose structural nesting could overflow oxc's
+/// recursive-descent parser. Scans once, counting two independent things that
+/// each drive parser recursion:
+///
+/// * bracket nesting depth — `(`/`[`/`{` raise it, `)`/`]`/`}` lower it;
+/// * the length of a run of consecutive prefix-unary operators — the single
+///   chars `!`/`~` and the word operators `typeof`/`void`/`delete`/`new`/
+///   `await`/`yield`, each of which the parser descends into recursively.
+///
+/// The scan is intentionally *not* string/comment aware: counting brackets that
+/// happen to sit inside a string literal can only *over*-estimate nesting, so it
+/// never lets a genuinely dangerous input through — at worst it skips analysis
+/// of a script that crams 200+ literal brackets into a string, which is itself
+/// pathological. Returns `true` when either measure exceeds
+/// [`MAX_SOURCE_NESTING_DEPTH`].
+fn source_nesting_exceeds_limit(source: &str) -> bool {
+    const PREFIX_KEYWORDS: [&str; 6] = ["typeof", "void", "delete", "new", "await", "yield"];
+
+    let bytes = source.as_bytes();
+    let mut bracket_depth: usize = 0;
+    let mut unary_run: usize = 0;
+    let mut i = 0;
+    while i < bytes.len() {
+        let b = bytes[i];
+        match b {
+            b'(' | b'[' | b'{' => {
+                bracket_depth += 1;
+                if bracket_depth > MAX_SOURCE_NESTING_DEPTH {
+                    return true;
+                }
+                unary_run = 0;
+                i += 1;
+            }
+            b')' | b']' | b'}' => {
+                bracket_depth = bracket_depth.saturating_sub(1);
+                unary_run = 0;
+                i += 1;
+            }
+            b'!' | b'~' => {
+                unary_run += 1;
+                if unary_run > MAX_SOURCE_NESTING_DEPTH {
+                    return true;
+                }
+                i += 1;
+            }
+            b' ' | b'\t' | b'\r' | b'\n' => {
+                // Whitespace separates tokens without ending a unary run
+                // (`! ! !x` / `typeof typeof x` are still nested unaries).
+                i += 1;
+            }
+            b'a'..=b'z' | b'A'..=b'Z' | b'_' | b'$' => {
+                // Read a full identifier/keyword token.
+                let start = i;
+                while i < bytes.len() {
+                    let c = bytes[i];
+                    if c.is_ascii_alphanumeric() || c == b'_' || c == b'$' {
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+                let word = &source[start..i];
+                if PREFIX_KEYWORDS.contains(&word) {
+                    unary_run += 1;
+                    if unary_run > MAX_SOURCE_NESTING_DEPTH {
+                        return true;
+                    }
+                } else {
+                    unary_run = 0;
+                }
+            }
+            _ => {
+                unary_run = 0;
+                i += 1;
+            }
+        }
+    }
+    false
+}
 
 /// Represents a potential DOM XSS vulnerability found via AST analysis
 #[derive(Debug, Clone)]
@@ -128,6 +269,31 @@ struct DomXssVisitor<'a> {
     /// wrongly drop taint set on a sibling path — e.g.
     /// `if (c) out = taint; else out = 'x'; sink(out)`.
     branch_depth: u32,
+    /// Current recursion depth of the analysis walk, shared across every
+    /// mutually-recursive analysis fn (`is_tainted`, `find_source_in_expr`,
+    /// `walk_expression`, `walk_statement`, `get_member_string`, …). Incremented
+    /// on entry / decremented on exit via [`DomXssVisitor::enter_recursion`];
+    /// when it reaches [`MAX_AST_VISIT_DEPTH`] the entered fn bails with a safe
+    /// default. A single shared counter (rather than a per-call depth argument)
+    /// is what makes the guard impossible to defeat by routing recursion through
+    /// a helper that re-enters at depth 0 — the flat-call-chain shape
+    /// `x.a().a().a()…` did exactly that. An `Rc<Cell<…>>` (rather than a bare
+    /// `Cell`) so the RAII guard can own a handle to the counter without
+    /// borrowing `self` — the walkers take `&mut self`, which a `&self`-borrow
+    /// held across the call would conflict with.
+    recursion_depth: Rc<Cell<u32>>,
+}
+
+/// RAII token returned by [`DomXssVisitor::enter_recursion`]; decrements the
+/// shared recursion counter when the analysis fn that holds it returns.
+struct RecursionGuard {
+    depth: Rc<Cell<u32>>,
+}
+
+impl Drop for RecursionGuard {
+    fn drop(&mut self) {
+        self.depth.set(self.depth.get().saturating_sub(1));
+    }
 }
 
 // Module-level DOM source/sink/sanitizer constants
@@ -521,12 +687,29 @@ impl<'a> DomXssVisitor<'a> {
             script_element_ids: HashSet::new(),
             response_object_vars: HashSet::new(),
             branch_depth: 0,
+            recursion_depth: Rc::new(Cell::new(0)),
         }
     }
 
     fn with_script_element_ids(mut self, ids: HashSet<String>) -> Self {
         self.script_element_ids = ids;
         self
+    }
+
+    /// Enter one recursive analysis step. Returns `None` — telling the caller to
+    /// bail with a safe default (`false` / `None` / stop walking) — once the
+    /// shared recursion depth has reached [`MAX_AST_VISIT_DEPTH`]; otherwise
+    /// increments the counter and hands back a [`RecursionGuard`] that restores
+    /// it on scope exit. See [`recursion_depth`](DomXssVisitor::recursion_depth).
+    fn enter_recursion(&self) -> Option<RecursionGuard> {
+        let depth = self.recursion_depth.get();
+        if depth >= MAX_AST_VISIT_DEPTH {
+            return None;
+        }
+        self.recursion_depth.set(depth + 1);
+        Some(RecursionGuard {
+            depth: Rc::clone(&self.recursion_depth),
+        })
     }
 
     /// Recognise `document.createElement('script')` (and the spelling variants
@@ -710,8 +893,14 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
-    /// Get string representation of static member expression
+    /// Get string representation of static member expression.
+    ///
+    /// A long `a.b.c.d…` member chain (which oxc parses iteratively, so the
+    /// parser never overflows) recurses here once per `.` segment; the shared
+    /// recursion guard bails past [`MAX_AST_VISIT_DEPTH`] so a hostile chain
+    /// can't overflow the stack and abort the scanner.
     fn get_member_string(&self, member: &StaticMemberExpression) -> Option<String> {
+        let _guard = self.enter_recursion()?;
         let property = member.property.name.as_str();
         match &member.object {
             Expression::Identifier(id) => Some(format!("{}.{}", id.name.as_str(), property)),
@@ -734,8 +923,12 @@ impl<'a> DomXssVisitor<'a> {
         self.eval_static_string_expr(&member.expression)
     }
 
-    /// Get string representation of computed member expression when property is literal.
+    /// Get string representation of computed member expression when property is
+    /// literal. Mutually recursive with [`get_member_string`]; the shared
+    /// recursion guard bounds `a["b"]["c"]…` chains so a hostile computed-member
+    /// chain can't overflow the stack.
     fn get_computed_member_string(&self, member: &ComputedMemberExpression<'a>) -> Option<String> {
+        let _guard = self.enter_recursion()?;
         let property = self.get_computed_property_string(member)?;
         match &member.object {
             Expression::Identifier(id) => Some(format!("{}.{}", id.name.as_str(), property)),
@@ -784,7 +977,13 @@ impl<'a> DomXssVisitor<'a> {
     }
 
     /// Evaluate an expression to a static string when possible.
+    ///
+    /// Recurses unguarded by the visitor walk (it's reached from
+    /// `get_computed_member_string` for `x[ "a" + "b" + … ]` keys), so it carries
+    /// the shared recursion guard itself — a hostile `+`/paren chain here would
+    /// otherwise overflow the stack independently of the visitor's other guards.
     fn eval_static_string_expr(&self, expr: &Expression<'a>) -> Option<String> {
+        let _guard = self.enter_recursion()?;
         match expr {
             Expression::StringLiteral(s) => Some(s.value.to_string()),
             Expression::TemplateLiteral(t) if t.expressions.is_empty() => {
@@ -920,6 +1119,10 @@ impl<'a> DomXssVisitor<'a> {
     /// — including a template literal that opens with `${expr}` (empty first
     /// quasi), where the runtime prefix is dynamic.
     fn static_leading_string(&self, expr: &Expression<'a>) -> Option<String> {
+        // Recurses down `+` / paren chains outside the main walkers (reached via
+        // the jQuery selector heuristic), so it carries the shared recursion
+        // guard — `$("a"+"a"+…+location.hash)` would otherwise overflow here.
+        let _guard = self.enter_recursion()?;
         match expr {
             Expression::StringLiteral(s) => Some(s.value.to_string()),
             Expression::TemplateLiteral(t) => {
@@ -1582,8 +1785,21 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
-    /// Check if expression is tainted
+    /// Check if expression is tainted.
+    ///
+    /// Hostile JavaScript can nest expressions arbitrarily deep (`a.b.c.d…`,
+    /// `a+a+a+…`, a flat call chain `x.a().a()…`, deeply nested arrays/objects),
+    /// and oxc parses left-leaning member/binary chains iteratively, so the
+    /// recursion here — not the parser — is what would overflow the stack and
+    /// abort the whole scanner (an uncatchable SIGABRT). The shared recursion
+    /// guard bails out as "not tainted" once depth reaches [`MAX_AST_VISIT_DEPTH`],
+    /// far beyond any real-world code, and (unlike a per-call depth argument)
+    /// keeps counting across the `call_taint_and_source` helper this delegates to
+    /// for call expressions.
     fn is_tainted(&self, expr: &Expression) -> bool {
+        let Some(_guard) = self.enter_recursion() else {
+            return false;
+        };
         match expr {
             Expression::Identifier(id) => {
                 self.tainted_vars.contains(id.name.as_str())
@@ -1922,8 +2138,17 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
-    /// Walk through a single statement
+    /// Walk through a single statement.
+    ///
+    /// Nested statements (`if(a)if(b)…`, `for(;;)for(;;)…`, nested blocks)
+    /// recurse here, so the shared recursion guard bounds statement nesting the
+    /// same way it bounds expression nesting — stopping past
+    /// [`MAX_AST_VISIT_DEPTH`] so a hostile chain that parsed (on the large
+    /// analysis stack) can't overflow the walk.
     fn walk_statement(&mut self, stmt: &Statement<'a>) {
+        let Some(_guard) = self.enter_recursion() else {
+            return;
+        };
         match stmt {
             Statement::VariableDeclaration(var_decl) => {
                 for decl in &var_decl.declarations {
@@ -2344,8 +2569,14 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
-    /// Find a source in an expression (for alias tracking)
+    /// Find a source in an expression (for alias tracking).
+    ///
+    /// Mirrors the recursion guard in [`is_tainted`]: a deeply nested
+    /// attacker-controlled expression would otherwise overflow the stack here
+    /// and abort the scanner. Returns `None` (no source found) once the shared
+    /// recursion depth reaches [`MAX_AST_VISIT_DEPTH`].
     fn find_source_in_expr(&self, expr: &Expression<'a>) -> Option<String> {
+        let _guard = self.enter_recursion()?;
         match expr {
             Expression::Identifier(id) => self.var_aliases.get(id.name.as_str()).cloned(),
             Expression::StaticMemberExpression(member) => {
@@ -2488,8 +2719,17 @@ impl<'a> DomXssVisitor<'a> {
         }
     }
 
-    /// Walk through an expression
+    /// Walk through an expression.
+    ///
+    /// Guards the same way as [`is_tainted`]: member / binary / logical /
+    /// conditional chains (and, via `walk_call_expression`, flat call chains)
+    /// recurse here, so a hostile deeply nested expression would overflow the
+    /// stack and SIGABRT the scanner. The shared recursion guard stops
+    /// descending past [`MAX_AST_VISIT_DEPTH`].
     fn walk_expression(&mut self, expr: &Expression<'a>) {
+        let Some(_guard) = self.enter_recursion() else {
+            return;
+        };
         match expr {
             Expression::AssignmentExpression(assign) => {
                 self.walk_assignment_expression(assign);
@@ -2624,6 +2864,12 @@ impl<'a> DomXssVisitor<'a> {
     /// into the next callback's parameter. Returns the kind the chain
     /// ultimately resolves to (unused at the top level).
     fn promise_kind_of_call(&mut self, call: &CallExpression<'a>) -> PromiseValueKind {
+        // A long `fetch(u).then(f).then(f)…` chain recurses through this driver
+        // once per link, outside the expression/statement walkers, so it carries
+        // the shared recursion guard itself (bail = "unknown promise value").
+        let Some(_guard) = self.enter_recursion() else {
+            return PromiseValueKind::Unknown;
+        };
         if self.is_fetch_call(call) {
             // The URL argument is rarely a sink, but walk it so any nested
             // source/sink inside the request expression is still visited.
@@ -2669,6 +2915,9 @@ impl<'a> DomXssVisitor<'a> {
     }
 
     fn promise_kind_of_expr(&mut self, expr: &Expression<'a>) -> PromiseValueKind {
+        let Some(_guard) = self.enter_recursion() else {
+            return PromiseValueKind::Unknown;
+        };
         match expr {
             Expression::ParenthesizedExpression(p) => self.promise_kind_of_expr(&p.expression),
             Expression::CallExpression(call) => self.promise_kind_of_call(call),
@@ -2854,6 +3103,13 @@ impl<'a> DomXssVisitor<'a> {
     }
 
     fn message_event_source_for_receiver(&self, receiver: &Expression<'a>) -> String {
+        // Descends a `.`-chain receiver outside the main walkers (reached from
+        // onmessage assignments / addEventListener("message", …)), so it carries
+        // the shared recursion guard, falling back to its generic default. A
+        // hostile `a.a.a.….onmessage = fn` chain would otherwise overflow here.
+        let Some(_guard) = self.enter_recursion() else {
+            return "event.data".to_string();
+        };
         match receiver {
             Expression::Identifier(id) => match self.instance_classes.get(id.name.as_str()) {
                 Some(class_name) if class_name == "BroadcastChannel" => {
@@ -3905,8 +4161,80 @@ impl AstDomAnalyzer {
         self
     }
 
-    /// Analyze JavaScript source code for DOM XSS vulnerabilities
+    /// Analyze JavaScript source code for DOM XSS vulnerabilities.
+    ///
+    /// The input comes from the scanned (attacker-controlled) page, and oxc's
+    /// recursive-descent parser has no depth guard — so hostile nesting could
+    /// stack-overflow the parser (an uncatchable SIGABRT) before any of the
+    /// visitor's own [`MAX_AST_VISIT_DEPTH`] guards run. Three layers prevent
+    /// that, in order of cost:
+    ///
+    /// 1. **Length cap** ([`MAX_ANALYZE_SOURCE_BYTES`]): every nesting level
+    ///    costs ≥1 source byte, so bounding length bounds the achievable parser
+    ///    depth. Oversized blocks skip analysis (best-effort).
+    /// 2. **Pre-parse scan** ([`source_nesting_exceeds_limit`]): rejects the
+    ///    1-byte-per-level vectors (`((((…`, `!!!!…`) that would otherwise blow
+    ///    the budget the length cap alone allows.
+    /// 3. **Large parse stack** ([`ANALYZE_STACK_BYTES`]): the surviving
+    ///    multi-byte chains (`if(a)if(b)…`, `x=y=z=…`) still recurse in the
+    ///    parser, so the parse + walk run on a dedicated big-stack thread sized
+    ///    to absorb the depth the length cap permits.
     pub fn analyze(&self, source_code: &str) -> Result<Vec<DomXssVulnerability>, String> {
+        if source_code.len() > MAX_ANALYZE_SOURCE_BYTES || source_nesting_exceeds_limit(source_code)
+        {
+            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                eprintln!(
+                    "[ast] skipping DOM-XSS analysis of a {}-byte script (over length cap {} or nesting guard)",
+                    source_code.len(),
+                    MAX_ANALYZE_SOURCE_BYTES
+                );
+            }
+            return Ok(Vec::new());
+        }
+
+        let script_element_ids = self.script_element_ids.clone();
+
+        // Fast path: a script this small can't nest a parser-recursion vector
+        // deep enough to overflow a normal worker stack (see [`INLINE_PARSE_BYTES`]),
+        // so parse it inline and skip the thread-spawn cost the common small
+        // inline `<script>` block would otherwise pay on every call.
+        if source_code.len() <= INLINE_PARSE_BYTES {
+            return Self::analyze_on_stack(source_code, script_element_ids);
+        }
+
+        // Larger input may carry a deep multi-byte statement/assignment chain
+        // (`if(a)if(b)…`, `x=y=z=…`) the parser would overflow on a normal stack,
+        // so run the parse + walk on a thread with a large (mostly-virtual,
+        // lazily-committed) stack. `scope` keeps it synchronous and lets the
+        // closure borrow `source_code`.
+        std::thread::scope(|scope| {
+            let handle = std::thread::Builder::new()
+                .stack_size(ANALYZE_STACK_BYTES)
+                .spawn_scoped(scope, move || {
+                    Self::analyze_on_stack(source_code, script_element_ids)
+                });
+            match handle {
+                // A panic inside the parse/walk (not a stack overflow, which
+                // would abort the process) degrades to "no findings" rather than
+                // taking down the scan.
+                Ok(h) => h.join().unwrap_or_else(|_| Ok(Vec::new())),
+                // Thread spawn failed (e.g. resource limits). We must NOT parse
+                // inline: an input that passed the guards (e.g. a ~512 KiB
+                // statement chain) can need tens of MiB of stack and would
+                // overflow the caller's worker stack. Skip analysis instead —
+                // best-effort, and spawn failure is rare.
+                Err(_) => Ok(Vec::new()),
+            }
+        })
+    }
+
+    /// Parse `source_code` and run the DOM-XSS walk, returning the findings.
+    /// Factored out of [`analyze`] so it can run on a dedicated large-stack
+    /// thread.
+    fn analyze_on_stack(
+        source_code: &str,
+        script_element_ids: HashSet<String>,
+    ) -> Result<Vec<DomXssVulnerability>, String> {
         let allocator = Allocator::default();
         let source_type = SourceType::default();
 
@@ -3917,8 +4245,8 @@ impl AstDomAnalyzer {
             return Err(format!("Parse errors: {}", error_messages.join(", ")));
         }
 
-        let mut visitor = DomXssVisitor::new(source_code)
-            .with_script_element_ids(self.script_element_ids.clone());
+        let mut visitor =
+            DomXssVisitor::new(source_code).with_script_element_ids(script_element_ids);
         visitor.walk_statements(&ret.program.body);
 
         Ok(visitor.vulnerabilities)

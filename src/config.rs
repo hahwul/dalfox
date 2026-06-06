@@ -829,7 +829,9 @@ impl Config {
                 args.hpp = v;
             }
             // WAF
-            if let Some(v) = &scan.waf_bypass {
+            if let Some(v) = &scan.waf_bypass
+                && args.waf_bypass == "auto"
+            {
                 args.waf_bypass = v.clone();
             }
             if let Some(v) = scan.skip_waf_probe
@@ -837,7 +839,9 @@ impl Config {
             {
                 args.skip_waf_probe = v;
             }
-            if let Some(v) = &scan.force_waf {
+            if let Some(v) = &scan.force_waf
+                && args.force_waf.is_none()
+            {
                 args.force_waf = Some(v.clone());
             }
             if let Some(v) = scan.waf_evasion

@@ -661,13 +661,16 @@ pub(crate) async fn resolve_targets(
             Ok(content) => {
                 let mut cookies_from_raw: Vec<(String, String)> = Vec::new();
                 for line in content.lines() {
-                    if let Some(cookie_line) = line.strip_prefix("Cookie: ") {
-                        for cookie in cookie_line.split("; ") {
-                            if let Some((name, value)) = cookie.split_once('=') {
-                                cookies_from_raw
-                                    .push((name.trim().to_string(), value.trim().to_string()));
-                            }
-                        }
+                    // HTTP header names are case-insensitive (RFC 7230 §3.2;
+                    // HTTP/2 mandates lowercase), so match `Cookie`/`cookie`/
+                    // `COOKIE` alike and tolerate arbitrary spacing after the
+                    // colon. Delegate value splitting to the shared
+                    // `split_cookie_pairs` so this parses identically to the
+                    // server / preflight cookie paths.
+                    if let Some((name, value)) = line.split_once(':')
+                        && name.trim().eq_ignore_ascii_case("cookie")
+                    {
+                        cookies_from_raw.extend(crate::job::split_cookie_pairs(value));
                     }
                 }
                 if !cookies_from_raw.is_empty() {

@@ -270,11 +270,33 @@ pub fn detect_technologies(headers: &HeaderMap, body: Option<&str>) -> TechDetec
                 tech: TechType::Handlebars,
                 evidence: "handlebars.js",
             },
-            // Svelte
+            // Svelte. A bare "svelte" substring fires on unrelated prose
+            // (e.g. "sveltekit", a word in a comment), so anchor each rule to a
+            // framework-asset / runtime marker the way the sibling rules do.
             BodyDetectRule {
-                pattern: "svelte",
+                pattern: "svelte.js",
                 tech: TechType::Svelte,
-                evidence: "Svelte reference in body",
+                evidence: "svelte.js script",
+            },
+            BodyDetectRule {
+                pattern: "svelte.min.js",
+                tech: TechType::Svelte,
+                evidence: "svelte.min.js script",
+            },
+            BodyDetectRule {
+                pattern: "__svelte",
+                tech: TechType::Svelte,
+                evidence: "__svelte runtime marker",
+            },
+            BodyDetectRule {
+                pattern: "data-svelte",
+                tech: TechType::Svelte,
+                evidence: "data-svelte attribute",
+            },
+            BodyDetectRule {
+                pattern: "svelte-hmr",
+                tech: TechType::Svelte,
+                evidence: "svelte-hmr dev runtime",
             },
             // Ember
             BodyDetectRule {

@@ -266,9 +266,21 @@ fn test_detect_handlebars_from_body() {
 #[test]
 fn test_detect_svelte_from_body() {
     let headers = make_headers(&[]);
-    let body = "<script src='/build/svelte-app.js'></script>";
+    // Real Svelte/SvelteKit output carries an anchored marker (here the
+    // `__svelte`/`data-svelte` runtime markers), not just the bare word.
+    let body = "<div data-svelte-h='svelte-1a2b3c'></div><script>__sveltekit_1={}</script>";
     let result = detect_technologies(&headers, Some(body));
     assert!(result.has(&TechType::Svelte));
+}
+
+#[test]
+fn test_svelte_not_detected_from_prose() {
+    // A bare "svelte" substring in prose / unrelated paths must not be flagged
+    // as the Svelte framework (the old `pattern: "svelte"` rule false-fired here).
+    let headers = make_headers(&[]);
+    let body = "<p>We made a svelte, sveltekit-free design decision.</p>";
+    let result = detect_technologies(&headers, Some(body));
+    assert!(!result.has(&TechType::Svelte));
 }
 
 #[test]

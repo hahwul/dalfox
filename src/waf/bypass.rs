@@ -939,7 +939,7 @@ fn exotic_whitespace(payload: &str) -> String {
 }
 
 /// Alternate the case of HTML tag characters.
-/// `<script>` → `<ScRiPt>`, `<img` → `<ImG`
+/// `<script>` → `<ScRiPt>`, `<img` → `<ImG`, `</script>` → `</ScRiPt>`
 fn case_alternate(payload: &str) -> String {
     let mut result = String::with_capacity(payload.len());
     let mut in_tag = false;
@@ -949,6 +949,13 @@ fn case_alternate(payload: &str) -> String {
         if c == '<' {
             in_tag = true;
             tag_char_idx = 0;
+            result.push(c);
+        } else if in_tag && c == '/' && tag_char_idx == 0 {
+            // Closing-tag slash (`</tag>`): the `/` sits immediately after `<`
+            // (no tag-name char seen yet), so keep tracking and alternate the
+            // tag name that follows. A `/` appearing *after* tag-name chars is
+            // an attribute / self-close separator (e.g. `<svg/onload>`) and
+            // still terminates the run via the branch below.
             result.push(c);
         } else if c == '>' || c == ' ' || c == '\t' || c == '\n' || c == '/' {
             in_tag = false;
