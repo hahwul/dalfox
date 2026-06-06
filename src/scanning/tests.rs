@@ -70,7 +70,7 @@ fn integration_scan_args(skip_xss: bool) -> crate::cmd::scan::ScanArgs {
         sxss_method: "GET".to_string(),
         sxss_retries: 1,
         skip_ast_analysis: true,
-        analyze_external_js: false,        
+        analyze_external_js: false,
         hpp: false,
         waf_bypass: "off".to_string(),
         skip_waf_probe: true,
@@ -437,7 +437,7 @@ fn default_scan_args() -> crate::cmd::scan::ScanArgs {
         sxss_method: "GET".to_string(),
         sxss_retries: 3,
         skip_ast_analysis: false,
-        analyze_external_js: false,        
+        analyze_external_js: false,
         hpp: false,
         waf_bypass: "auto".to_string(),
         skip_waf_probe: false,
@@ -927,7 +927,7 @@ async fn test_xss_scanning_get_query() {
         sxss_method: "GET".to_string(),
         sxss_retries: 3,
         skip_ast_analysis: false,
-        analyze_external_js: false,        
+        analyze_external_js: false,
         hpp: false,
         waf_bypass: "auto".to_string(),
         skip_waf_probe: false,
@@ -1030,7 +1030,7 @@ async fn test_xss_scanning_post_body() {
         sxss_method: "GET".to_string(),
         sxss_retries: 3,
         skip_ast_analysis: false,
-        analyze_external_js: false,        
+        analyze_external_js: false,
         hpp: false,
         waf_bypass: "auto".to_string(),
         skip_waf_probe: false,
@@ -1148,7 +1148,7 @@ async fn test_run_scanning_with_reflection_params() {
         sxss_method: "GET".to_string(),
         sxss_retries: 3,
         skip_ast_analysis: false,
-        analyze_external_js: false,        
+        analyze_external_js: false,
         hpp: false,
         waf_bypass: "auto".to_string(),
         skip_waf_probe: false,
@@ -1419,7 +1419,7 @@ async fn test_run_scanning_empty_params() {
         sxss_method: "GET".to_string(),
         sxss_retries: 3,
         skip_ast_analysis: false,
-        analyze_external_js: false,        
+        analyze_external_js: false,
         hpp: false,
         waf_bypass: "auto".to_string(),
         skip_waf_probe: false,
@@ -1457,9 +1457,8 @@ async fn test_run_scanning_empty_params() {
 async fn start_ext_js_server(js_body: &'static str) -> std::net::SocketAddr {
     use axum::{Router, http::header, routing::get};
 
-    let app_js = move || async move {
-        ([(header::CONTENT_TYPE, "application/javascript")], js_body)
-    };
+    let app_js =
+        move || async move { ([(header::CONTENT_TYPE, "application/javascript")], js_body) };
     let big_js = || async {
         // "// x\n" × 110_000 ≈ 550 KiB > 512 KiB cap
         let body = "// x\n".repeat(110_000);
@@ -1566,12 +1565,13 @@ async fn test_fetch_ext_js_flag_off_returns_empty() {
     .await;
     let target = parse_target(&format!("http://{addr}/")).unwrap();
     let client = target.build_client_or_default();
-    let html = format!(
-        r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#
-    );
+    let html = format!(r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#);
     let args = ext_js_scan_args(false);
     let findings = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
-    assert!(findings.is_empty(), "flag off must return empty; got {findings:?}");
+    assert!(
+        findings.is_empty(),
+        "flag off must return empty; got {findings:?}"
+    );
 }
 
 /// flag=true + script has `location.hash → innerHTML` → finding returned and
@@ -1584,14 +1584,18 @@ async fn test_fetch_ext_js_detects_dom_xss_in_script() {
     .await;
     let target = parse_target(&format!("http://{addr}/")).unwrap();
     let client = target.build_client_or_default();
-    let html = format!(
-        r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#
-    );
+    let html = format!(r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#);
     let args = ext_js_scan_args(true);
     let findings = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
-    assert!(!findings.is_empty(), "expected DOM-XSS finding from external script");
+    assert!(
+        !findings.is_empty(),
+        "expected DOM-XSS finding from external script"
+    );
     let cites_script = findings.iter().any(|f| f.evidence.contains("/app.js"));
-    assert!(cites_script, "evidence must cite the script URL; got {findings:#?}");
+    assert!(
+        cites_script,
+        "evidence must cite the script URL; got {findings:#?}"
+    );
 }
 
 /// Body larger than MAX_EXTERNAL_JS_BYTES → skipped gracefully, no panic.
@@ -1600,9 +1604,7 @@ async fn test_fetch_ext_js_skips_oversized_body() {
     let addr = start_ext_js_server("").await;
     let target = parse_target(&format!("http://{addr}/")).unwrap();
     let client = target.build_client_or_default();
-    let html = format!(
-        r#"<html><body><script src="http://{addr}/big.js"></script></body></html>"#
-    );
+    let html = format!(r#"<html><body><script src="http://{addr}/big.js"></script></body></html>"#);
     let args = ext_js_scan_args(true);
     // big.js has no sink; primary assertion is no panic on oversized body.
     let _ = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
@@ -1617,9 +1619,7 @@ async fn test_fetch_ext_js_exclude_url_skips_script() {
     .await;
     let target = parse_target(&format!("http://{addr}/")).unwrap();
     let client = target.build_client_or_default();
-    let html = format!(
-        r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#
-    );
+    let html = format!(r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#);
     let mut args = ext_js_scan_args(true);
     args.exclude_url = vec!["app\\.js".to_string()];
     let findings = fetch_and_analyze_external_js(&client, &target, &html, &args).await;

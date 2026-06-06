@@ -483,10 +483,7 @@ pub(crate) async fn run_scan_job(
                                     .fetch_add(added, std::sync::atomic::Ordering::Relaxed);
                             }
                             let ext_batch = crate::scanning::fetch_and_analyze_external_js(
-                                &client,
-                                &target,
-                                &body,
-                                &args,
+                                &client, &target, &body, &args,
                             )
                             .await;
                             if !ext_batch.is_empty() {

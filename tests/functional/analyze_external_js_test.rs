@@ -6,13 +6,7 @@
 //! All tests use `deep_scan: false` so the preflight fires and captures the
 //! page body — the path that feeds `fetch_and_analyze_external_js`.
 
-use axum::{
-    extract::Path as AxumPath,
-    http::header,
-    response::IntoResponse,
-    routing::get,
-    Router,
-};
+use axum::{Router, extract::Path as AxumPath, http::header, response::IntoResponse, routing::get};
 use dalfox::cmd::scan::{self, ScanArgs};
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -180,13 +174,13 @@ fn make_scan_args(
         inject_marker: None,
         custom_alert_value: "1".to_string(),
         custom_alert_type: "none".to_string(),
-        skip_xss_scanning: true,   // skip payload probing — we only care about AST findings
-        deep_scan: false,          // must be false so the preflight captures the page body
+        skip_xss_scanning: true, // skip payload probing — we only care about AST findings
+        deep_scan: false,        // must be false so the preflight captures the page body
         sxss: false,
         sxss_url: None,
         sxss_method: "GET".to_string(),
         sxss_retries: 1,
-        skip_ast_analysis: false,  // must be false for AST/external-JS path to run
+        skip_ast_analysis: false, // must be false for AST/external-JS path to run
         analyze_external_js,
         hpp: false,
         waf_bypass: "off".to_string(),

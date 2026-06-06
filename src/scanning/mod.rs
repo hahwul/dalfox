@@ -570,23 +570,18 @@ pub(crate) async fn fetch_and_analyze_external_js(
         let url_str = script_url.as_str().to_owned();
 
         // Apply --include-url / --exclude-url scope to external script URLs.
-        if !include_patterns.is_empty()
-            && !include_patterns.iter().any(|r| r.is_match(&url_str))
-        {
+        if !include_patterns.is_empty() && !include_patterns.iter().any(|r| r.is_match(&url_str)) {
             continue;
         }
         if exclude_patterns.iter().any(|r| r.is_match(&url_str)) {
             continue;
         }
 
-        let rb = crate::utils::build_request(
-            client,
-            target,
-            reqwest::Method::GET,
-            script_url,
-            None,
-        );
-        let resp = match crate::utils::send_with_retry(rb, scan_args.retries, scan_args.retry_delay).await {
+        let rb =
+            crate::utils::build_request(client, target, reqwest::Method::GET, script_url, None);
+        let resp = match crate::utils::send_with_retry(rb, scan_args.retries, scan_args.retry_delay)
+            .await
+        {
             Ok(r) => r,
             Err(_) => continue,
         };
@@ -621,7 +616,8 @@ pub(crate) async fn fetch_and_analyze_external_js(
                 &vuln.source,
                 &payload,
             );
-            let message = format!("{description} (needs runtime confirmation) [external JS: {url_str}]");
+            let message =
+                format!("{description} (needs runtime confirmation) [external JS: {url_str}]");
             let mut ast_result = crate::scanning::result::Result::builder(
                 crate::scanning::result::FindingType::AstDetected,
             )

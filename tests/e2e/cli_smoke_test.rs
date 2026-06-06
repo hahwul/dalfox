@@ -287,7 +287,7 @@ fn test_analyze_external_js_flag_is_recognized() {
 /// inside a same-origin external script and reports it in JSON output.
 #[test]
 fn test_analyze_external_js_e2e_finds_dom_xss() {
-    use axum::{Router, http::header, routing::get, response::IntoResponse};
+    use axum::{Router, http::header, response::IntoResponse, routing::get};
 
     // Start an in-process axum server. The tokio runtime lives for the
     // duration of the test; the spawned server task keeps it alive while
@@ -323,10 +323,7 @@ fn test_analyze_external_js_e2e_finds_dom_xss() {
         addr
     });
 
-    let out_path = std::env::temp_dir().join(format!(
-        "dalfox_e2e_extjs_{}.json",
-        addr.port()
-    ));
+    let out_path = std::env::temp_dir().join(format!("dalfox_e2e_extjs_{}.json", addr.port()));
 
     let output = Command::new(env!("CARGO_BIN_EXE_dalfox"))
         .args([
@@ -336,8 +333,10 @@ fn test_analyze_external_js_e2e_finds_dom_xss() {
             "--skip-xss-scanning",
             "--skip-discovery",
             "--skip-mining",
-            "--format", "json",
-            "--output", out_path.to_str().unwrap(),
+            "--format",
+            "json",
+            "--output",
+            out_path.to_str().unwrap(),
             "--silence",
         ])
         .output()
@@ -353,16 +352,19 @@ fn test_analyze_external_js_e2e_finds_dom_xss() {
             output.status.code()
         )
     });
-    let v: serde_json::Value =
-        serde_json::from_str(&content).expect("output should be valid JSON");
-    let findings = v["findings"].as_array().expect("should have findings array");
+    let v: serde_json::Value = serde_json::from_str(&content).expect("output should be valid JSON");
+    let findings = v["findings"]
+        .as_array()
+        .expect("should have findings array");
 
     assert!(
         !findings.is_empty(),
         "expected at least one DOM-XSS finding from external sink.js; output: {content}"
     );
     let cites_script = findings.iter().any(|f| {
-        f["evidence"].as_str().map_or(false, |e| e.contains("sink.js"))
+        f["evidence"]
+            .as_str()
+            .map_or(false, |e| e.contains("sink.js"))
     });
     assert!(
         cites_script,
