@@ -1628,3 +1628,62 @@ async fn test_fetch_ext_js_exclude_url_skips_script() {
         "excluded script must not produce findings; got {findings:?}"
     );
 }
+
+/// Script URL returns a non-2xx status (404) → skipped gracefully, no findings.
+#[tokio::test]
+async fn test_fetch_ext_js_non_2xx_response_is_skipped() {
+    let addr = start_ext_js_server("").await;
+    let target = parse_target(&format!("http://{addr}/")).unwrap();
+    let client = target.build_client_or_default();
+    // /nonexistent.js has no route → axum returns 404
+    let html = format!(
+        r#"<html><body><script src="http://{addr}/nonexistent.js"></script></body></html>"#
+    );
+    let args = ext_js_scan_args(true);
+    let findings = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    assert!(
+        findings.is_empty(),
+        "non-2xx response must be skipped; got {findings:?}"
+    );
+}
+
+/// Script URL connection is refused (port closed) → error silently skipped, no panic.
+#[tokio::test]
+async fn test_fetch_ext_js_network_error_is_skipped() {
+    // Bind, capture address, then drop so the port is closed before the test connects.
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let closed_addr = listener.local_addr().unwrap();
+    drop(listener);
+
+    let target = parse_target(&format!("http://{closed_addr}/")).unwrap();
+    let client = target.build_client_or_default();
+    let html = format!(
+        r#"<html><body><script src="http://{closed_addr}/app.js"></script></body></html>"#
+    );
+    let args = ext_js_scan_args(true);
+    let findings = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    assert!(
+        findings.is_empty(),
+        "network error must be skipped gracefully; got {findings:?}"
+    );
+}
+
+/// accumulate_findings with an empty batch must be a no-op (counter unchanged, vec unchanged).
+#[tokio::test]
+async fn test_accumulate_findings_empty_batch_is_noop() {
+    let results: tokio::sync::Mutex<Vec<crate::scanning::result::Result>> =
+        tokio::sync::Mutex::new(Vec::new());
+    let counter = std::sync::atomic::AtomicUsize::new(0);
+    accumulate_findings(&results, &counter, vec![]).await;
+    assert_eq!(
+        counter.load(std::sync::atomic::Ordering::Relaxed),
+        0,
+        "counter must not change for empty batch"
+    );
+    assert!(
+        results.lock().await.is_empty(),
+        "results vec must remain empty for empty batch"
+    );
+}

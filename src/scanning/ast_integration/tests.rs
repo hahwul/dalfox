@@ -908,3 +908,44 @@ fn test_extract_same_origin_script_srcs_relative_no_slash() {
     assert_eq!(srcs.len(), 1);
     assert_eq!(srcs[0].as_str(), "https://example.com/app/classic.js");
 }
+
+#[test]
+fn test_build_ast_dom_xss_result_self_bootstrap_verified_upgrades_to_high() {
+    use crate::scanning::result::FindingType;
+    let r = super::build_ast_dom_xss_result(
+        "https://example.com/",
+        "GET",
+        "location.hash",
+        "#<img src=x onerror=alert(1)>".to_string(),
+        "example.com:1:1 - sink (Source: location.hash, Sink: innerHTML)".to_string(),
+        "DOM-XSS via hash".to_string(),
+        true,
+    );
+    assert_eq!(r.result_type, FindingType::Verified);
+    assert_eq!(r.severity, "High");
+    assert!(
+        r.message_str.contains("[static self-bootstrap confirmed]"),
+        "message must carry verification note; got: {}",
+        r.message_str
+    );
+}
+
+#[test]
+fn test_build_ast_dom_xss_result_not_verified_stays_medium_ast() {
+    use crate::scanning::result::FindingType;
+    let r = super::build_ast_dom_xss_result(
+        "https://example.com/",
+        "GET",
+        "location.hash",
+        "#<img src=x onerror=alert(1)>".to_string(),
+        "evidence".to_string(),
+        "DOM-XSS via hash".to_string(),
+        false,
+    );
+    assert_eq!(r.result_type, FindingType::AstDetected);
+    assert_eq!(r.severity, "Medium");
+    assert!(
+        !r.message_str.contains("[static self-bootstrap confirmed]"),
+        "unverified result must not carry verification note"
+    );
+}
