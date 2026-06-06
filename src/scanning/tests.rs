@@ -1659,9 +1659,8 @@ async fn test_fetch_ext_js_network_error_is_skipped() {
 
     let target = parse_target(&format!("http://{closed_addr}/")).unwrap();
     let client = target.build_client_or_default();
-    let html = format!(
-        r#"<html><body><script src="http://{closed_addr}/app.js"></script></body></html>"#
-    );
+    let html =
+        format!(r#"<html><body><script src="http://{closed_addr}/app.js"></script></body></html>"#);
     let args = ext_js_scan_args(true);
     let findings = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
     assert!(
