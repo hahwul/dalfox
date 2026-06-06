@@ -121,6 +121,12 @@ Different WAFs fall to different tricks. A small sample:
 
 You don't configure these directly; they're selected automatically per WAF. To inspect what's happening, run with `--debug`.
 
+## Inspection-window overflow
+
+Some WAFs (e.g. AWS WAF-style configs) only inspect the **first N bytes** of a parameter value. A vector at the start of the value trips a block, but the same vector reflects untouched once it's pushed past the inspected window.
+
+During active probing, when a parameter's special-character probe comes back fully blocked, Dalfox re-tries it behind a long benign filler prefix. If the characters now reflect, it concludes the value sits behind a size-limited inspection window and automatically prepends that filler to every payload for the parameter — so the real vector always lands past the window. The reported PoC URL includes the filler, so it reproduces as-is. This is automatic; nothing to configure.
+
 ## Combining with encoders
 
 Your `--encoders` list and the WAF's extra encoders are merged. So this:
