@@ -820,3 +820,119 @@ fn e2e_apidom_level3_xhr_innerhtml_finding() {
             .collect::<Vec<_>>()
     );
 }
+
+// --- extract_same_origin_script_srcs + same_origin tests ---
+
+#[test]
+fn test_same_origin_true() {
+    let a = url::Url::parse("https://example.com/app.js").unwrap();
+    let b = url::Url::parse("https://example.com/page").unwrap();
+    assert!(same_origin(&a, &b));
+}
+
+#[test]
+fn test_same_origin_different_host() {
+    let a = url::Url::parse("https://cdn.example.com/app.js").unwrap();
+    let b = url::Url::parse("https://example.com/page").unwrap();
+    assert!(!same_origin(&a, &b));
+}
+
+#[test]
+fn test_same_origin_different_scheme() {
+    let a = url::Url::parse("http://example.com/app.js").unwrap();
+    let b = url::Url::parse("https://example.com/page").unwrap();
+    assert!(!same_origin(&a, &b));
+}
+
+#[test]
+fn test_same_origin_different_port() {
+    let a = url::Url::parse("https://example.com:8080/app.js").unwrap();
+    let b = url::Url::parse("https://example.com/page").unwrap();
+    assert!(!same_origin(&a, &b));
+}
+
+#[test]
+fn test_extract_same_origin_script_srcs_absolute() {
+    let base = url::Url::parse("https://example.com/page").unwrap();
+    let html = r#"<html><body>
+        <script src="https://example.com/app.js"></script>
+    </body></html>"#;
+    let srcs = extract_same_origin_script_srcs(html, &base);
+    assert_eq!(srcs.len(), 1);
+    assert_eq!(srcs[0].as_str(), "https://example.com/app.js");
+}
+
+#[test]
+fn test_extract_same_origin_script_srcs_relative() {
+    let base = url::Url::parse("https://example.com/page").unwrap();
+    let html = r#"<html><body>
+        <script src="/bundle.js"></script>
+    </body></html>"#;
+    let srcs = extract_same_origin_script_srcs(html, &base);
+    assert_eq!(srcs.len(), 1);
+    assert_eq!(srcs[0].as_str(), "https://example.com/bundle.js");
+}
+
+#[test]
+fn test_extract_same_origin_script_srcs_drops_cross_origin() {
+    let base = url::Url::parse("https://example.com/page").unwrap();
+    let html = r#"<html><body>
+        <script src="/local.js"></script>
+        <script src="https://cdn.example.com/remote.js"></script>
+        <script src="http://example.com/wrongscheme.js"></script>
+    </body></html>"#;
+    let srcs = extract_same_origin_script_srcs(html, &base);
+    assert_eq!(srcs.len(), 1);
+    assert_eq!(srcs[0].as_str(), "https://example.com/local.js");
+}
+
+#[test]
+fn test_extract_same_origin_script_srcs_dedups() {
+    let base = url::Url::parse("https://example.com/page").unwrap();
+    let html = r#"<html><body>
+        <script src="/app.js"></script>
+        <script src="/app.js"></script>
+    </body></html>"#;
+    let srcs = extract_same_origin_script_srcs(html, &base);
+    assert_eq!(srcs.len(), 1);
+}
+
+#[test]
+fn test_extract_same_origin_script_srcs_ignores_inline_and_empty_src() {
+    let base = url::Url::parse("https://example.com/page").unwrap();
+    let html = r#"<html><body>
+        <script>var x = 1;</script>
+        <script src=""></script>
+        <script src="/real.js"></script>
+    </body></html>"#;
+    let srcs = extract_same_origin_script_srcs(html, &base);
+    assert_eq!(srcs.len(), 1);
+    assert_eq!(srcs[0].as_str(), "https://example.com/real.js");
+}
+
+#[test]
+fn test_extract_same_origin_script_srcs_preserves_order() {
+    let base = url::Url::parse("https://example.com/page").unwrap();
+    let html = r#"<html><body>
+        <script src="/first.js"></script>
+        <script src="https://other.com/skip.js"></script>
+        <script src="/second.js"></script>
+    </body></html>"#;
+    let srcs = extract_same_origin_script_srcs(html, &base);
+    assert_eq!(srcs.len(), 2);
+    assert!(srcs[0].as_str().ends_with("/first.js"));
+    assert!(srcs[1].as_str().ends_with("/second.js"));
+}
+
+#[test]
+fn test_extract_same_origin_script_srcs_relative_no_slash() {
+    // "classic.js" (no leading slash) resolves relative to the base path directory,
+    // not the root — so https://example.com/app/page -> https://example.com/app/classic.js
+    let base = url::Url::parse("https://example.com/app/page").unwrap();
+    let html = r#"<html><body>
+        <script src="classic.js"></script>
+    </body></html>"#;
+    let srcs = extract_same_origin_script_srcs(html, &base);
+    assert_eq!(srcs.len(), 1);
+    assert_eq!(srcs[0].as_str(), "https://example.com/app/classic.js");
+}

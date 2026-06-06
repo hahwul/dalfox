@@ -87,6 +87,40 @@ pub fn extract_javascript_from_html(html: &str) -> Vec<String> {
     js_code
 }
 
+/// Returns true when two URLs share the same scheme, host, and port.
+fn same_origin(a: &url::Url, b: &url::Url) -> bool {
+    a.scheme() == b.scheme()
+        && a.host_str() == b.host_str()
+        && a.port_or_known_default() == b.port_or_known_default()
+}
+
+/// Collect resolved, deduped, same-origin `<script src>` URLs from `html`,
+/// resolved relative to `base` (the response URL). Cross-origin srcs are dropped.
+pub fn extract_same_origin_script_srcs(html: &str, base: &url::Url) -> Vec<url::Url> {
+    let document = Html::parse_document(html);
+    let selector = selectors::script();
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for element in document.select(selector) {
+        let src = match element.value().attr("src") {
+            Some(s) if !s.trim().is_empty() => s.trim(),
+            _ => continue,
+        };
+        let resolved = match base.join(src) {
+            Ok(u) => u,
+            Err(_) => continue,
+        };
+        if !same_origin(&resolved, base) {
+            continue;
+        }
+        let key = resolved.as_str().to_string();
+        if seen.insert(key) {
+            out.push(resolved);
+        }
+    }
+    out
+}
+
 /// Generate an executable POC payload based on the source and sink
 /// Returns (payload, description)
 fn extract_search_param_chain(source: &str) -> Option<Vec<&str>> {
