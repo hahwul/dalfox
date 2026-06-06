@@ -1140,8 +1140,6 @@ struct ParamScanState {
     /// DOM XSS already confirmed for this param locally — skip the
     /// remaining DOM payloads.
     dom_found_locally: bool,
-    /// Dedup set for external JS URLs already fetched for this param.
-    ext_script_seen: HashSet<String>,
 }
 
 /// Shared, cheaply-clonable context handed to each spawned worker. Every
