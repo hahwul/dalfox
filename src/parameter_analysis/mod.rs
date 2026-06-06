@@ -667,6 +667,58 @@ async fn detect_escaped_quotes_via_probe(
     escaped_quotes_from_response(resp.as_deref()?, valid)
 }
 
+/// One-shot WAF inspection-window-overflow probe. Re-sends the batched
+/// special-char probe behind a benign filler prefix (`waf_window_pad`) so the
+/// markers + special chars land past a size-limited inspection window (the
+/// AWS WAF-style "only the first N bytes are scanned" class). Returns the
+/// `(valid, invalid)` special-char split when the padded probe reflects at
+/// least one special char raw — the signature of a window-limited WAF — and
+/// `None` otherwise (genuine filtering, or no reflection at all).
+///
+/// Skips params that already carry a pre-encoding transform: the pad rides the
+/// `pre_encoding` rail, so applying it would clobber an existing encoding. Such
+/// a param keeps the legacy "all invalid" classification.
+async fn window_overflow_probe(
+    client: &reqwest::Client,
+    target: &Target,
+    param: &Param,
+    semaphore: &Arc<Semaphore>,
+) -> Option<(Vec<char>, Vec<char>)> {
+    if param.pre_encoding.is_some() || param.pre_encoding_pipeline.is_some() {
+        return None;
+    }
+
+    let batched_chars: String = SPECIAL_PROBE_CHARS.iter().collect();
+    let probe = format!(
+        "{}{}{}{}",
+        crate::encoding::pre_encoding::waf_window_pad(),
+        crate::scanning::markers::open_marker(),
+        batched_chars,
+        crate::scanning::markers::close_marker(),
+    );
+
+    let permit = semaphore.acquire().await.expect("acquire semaphore permit");
+    let resp = send_probe_request_for_param(client, target, param, &probe).await;
+    drop(permit);
+
+    let segment = resp.as_deref().and_then(extract_reflected_segment)?;
+    let mut valid = Vec::new();
+    let mut invalid = Vec::new();
+    for &c in SPECIAL_PROBE_CHARS {
+        if char_reflected_in_segment(segment, c) {
+            valid.push(c);
+        } else {
+            invalid.push(c);
+        }
+    }
+    // Only a window-limited WAF if padding actually recovered special chars;
+    // if everything is still stripped, it's genuine filtering, not a window.
+    if valid.is_empty() {
+        return None;
+    }
+    Some((valid, invalid))
+}
+
 /// Coverage safety net: if the batched probe is reflected but **no** char
 /// survives in the reflected segment (likely the server's WAF tripped on the
 /// dense special-char payload, while individual chars would pass), the
@@ -726,10 +778,46 @@ pub async fn active_probe_param(
             }
         }
         None => {
-            // No reflected segment — either the request failed or the
-            // server didn't echo the markers. Mark all chars invalid (same
-            // as the legacy per-char path's failure behavior).
-            invalid.extend_from_slice(SPECIAL_PROBE_CHARS);
+            // No reflected segment — the markers never came back. That can be
+            // genuine heavy filtering, a WAF that blocked the whole request
+            // because it inspects only the first N bytes of the value and
+            // tripped on the leading special chars, or a server that strips a
+            // fixed prefix/suffix (partial reflection) so only part of a marker
+            // survives.
+            //
+            // Only the *block* case is a window-overflow candidate. Gate on a
+            // genuine block: the batched probe reflected NOTHING, i.e. neither
+            // marker survived. A prefix/suffix-stripping server leaves one
+            // marker intact (discovery already handles those as partial
+            // reflection), and a block page that echoes the payload (e.g. a
+            // reflected-block-page WAF) carries the markers too — neither is a
+            // size-limited inspection window, so skip the probe for them.
+            let genuine_block = batched_response.as_deref().is_none_or(|body| {
+                !body.contains(crate::scanning::markers::open_marker())
+                    && !body.contains(crate::scanning::markers::close_marker())
+            });
+            let window = if genuine_block {
+                // One window-overflow probe: re-send the batched probe behind a
+                // benign filler prefix. If the markers + specials now reflect,
+                // the param sits behind a size-limited inspection window.
+                window_overflow_probe(&client, target, &param, &semaphore).await
+            } else {
+                None
+            };
+            match window {
+                Some((win_valid, win_invalid)) => {
+                    valid = win_valid;
+                    invalid = win_invalid;
+                    param.pre_encoding = Some(
+                        crate::encoding::pre_encoding::PreEncodingType::WafWindowPad
+                            .as_str()
+                            .to_string(),
+                    );
+                }
+                // Genuine filtering / partial strip — keep the legacy
+                // "all invalid" classification.
+                None => invalid.extend_from_slice(SPECIAL_PROBE_CHARS),
+            }
         }
     }
 
