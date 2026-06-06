@@ -51,7 +51,7 @@ use tokio::sync::{Mutex, RwLock, Semaphore};
 /// Prevents payload explosion when WAF bypass mutations are applied.
 const MAX_WAF_MUTATION_VARIANTS_PER_PAYLOAD: usize = 3;
 
-/// Maximum number of distinct same-origin external JS files fetched per scan parameter.
+/// Maximum number of distinct same-origin external JS files fetched per target page fetch.
 const MAX_EXTERNAL_JS_FILES: usize = 16;
 /// Maximum bytes read from a single external JS file (matches analyzer limit).
 const MAX_EXTERNAL_JS_BYTES: usize = 512 * 1024;
@@ -563,17 +563,11 @@ pub(crate) async fn fetch_and_analyze_external_js(
     let script_urls =
         crate::scanning::ast_integration::extract_same_origin_script_srcs(html, &target.url);
 
-    let mut seen: HashSet<String> = HashSet::new();
     let mut results: Vec<crate::scanning::result::Result> = Vec::new();
 
-    for script_url in script_urls {
-        if seen.len() >= MAX_EXTERNAL_JS_FILES {
-            break;
-        }
+    // extract_same_origin_script_srcs already deduplicates; just cap the count.
+    for script_url in script_urls.into_iter().take(MAX_EXTERNAL_JS_FILES) {
         let url_str = script_url.as_str().to_owned();
-        if !seen.insert(url_str.clone()) {
-            continue;
-        }
 
         // Apply --include-url / --exclude-url scope to external script URLs.
         if !include_patterns.is_empty()
@@ -589,7 +583,7 @@ pub(crate) async fn fetch_and_analyze_external_js(
             client,
             target,
             reqwest::Method::GET,
-            script_url.clone(),
+            script_url,
             None,
         );
         let resp = match crate::utils::send_with_retry(rb, scan_args.retries, scan_args.retry_delay).await {
