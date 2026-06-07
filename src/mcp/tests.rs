@@ -1057,3 +1057,27 @@ async fn test_purge_expired_jobs_removes_old_terminal_jobs() {
         "active job must never be purged"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// mcp/mod.rs — analyze_external_js field on ScanWithDalfoxParams is wired
+// through to ScanArgs and does not cause scan_with_dalfox to reject.
+// ─────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_scan_with_dalfox_analyze_external_js_queues_successfully() {
+    let mcp = DalfoxMcp::new();
+    let params = ScanWithDalfoxParams {
+        analyze_external_js: true,
+        ..default_scan_params("http://127.0.0.1:1/?q=a")
+    };
+    let resp = mcp
+        .scan_with_dalfox(Parameters(params))
+        .await
+        .expect("analyze_external_js: true must queue without error");
+    let payload = parse_result_json(&resp);
+    assert_eq!(payload["status"], "queued");
+    assert!(
+        payload["scan_id"].as_str().is_some(),
+        "scan_id must be present in queue response"
+    );
+}

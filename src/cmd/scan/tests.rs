@@ -1934,3 +1934,78 @@ mod har_input {
         assert_eq!(targets[0].url.as_str(), "https://demo.test/?q=1");
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// analysis.rs — analyze_external_js branch in run_preflight_and_analysis
+// ─────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_run_preflight_and_analysis_analyze_external_js_produces_finding() {
+    use super::analysis::run_preflight_and_analysis;
+
+    // Serve HTML that loads a same-origin <script src> whose body contains
+    // a DOM-XSS sink. The inline HTML has no sink so any finding must come
+    // from fetching and analyzing the external script.
+    let app = Router::new()
+        .route(
+            "/",
+            get(|| async {
+                let mut headers = HeaderMap::new();
+                headers.insert(
+                    "content-type",
+                    HeaderValue::from_static("text/html; charset=utf-8"),
+                );
+                (
+                    headers,
+                    r#"<html><head><script src="/sink.js"></script></head><body>ok</body></html>"#,
+                )
+            }),
+        )
+        .route(
+            "/sink.js",
+            get(|| async {
+                let mut headers = HeaderMap::new();
+                headers.insert(
+                    "content-type",
+                    HeaderValue::from_static("application/javascript"),
+                );
+                (headers, "document.write(location.hash.substring(1));")
+            }),
+        );
+
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind test server");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+
+    let url = format!("http://{}/", addr);
+    let target = parse_target(&url).expect("valid target");
+    let host = target.url.host_str().unwrap_or("127.0.0.1").to_string();
+
+    let mut args = default_scan_args();
+    args.analyze_external_js = true;
+    args.skip_ast_analysis = false;
+    args.skip_xss_scanning = true;
+    args.skip_mining = true;
+    args.skip_waf_probe = true;
+
+    let state = make_scan_state(vec![]);
+    let mut host_groups = std::collections::HashMap::new();
+    host_groups.insert(host, vec![target]);
+
+    run_preflight_and_analysis(&args, &mut host_groups, &state).await;
+
+    let results = state.results.lock().await;
+    assert!(
+        !results.is_empty(),
+        "analyze_external_js must yield at least one DOM-XSS finding from the external script"
+    );
+    assert!(
+        results.iter().any(|f| f.evidence.contains("sink.js")),
+        "finding evidence must reference the external script; findings: {:?}",
+        *results
+    );
+}
