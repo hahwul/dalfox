@@ -1669,6 +1669,61 @@ async fn test_fetch_ext_js_network_error_is_skipped() {
     );
 }
 
+/// include_url set to a pattern that does NOT match the script URL → script skipped, empty result.
+#[tokio::test]
+async fn test_fetch_ext_js_include_url_skips_non_matching_script() {
+    let addr = start_ext_js_server(
+        r#"document.getElementById("r").innerHTML = location.hash.substring(1);"#,
+    )
+    .await;
+    let target = parse_target(&format!("http://{addr}/")).unwrap();
+    let client = target.build_client_or_default();
+    let html = format!(r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#);
+    let mut args = ext_js_scan_args(true);
+    // Pattern that does NOT match /app.js → the include-filter `continue` branch fires.
+    args.include_url = vec!["only_this_pattern_matches".to_string()];
+    let findings = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    assert!(
+        findings.is_empty(),
+        "script not matching include_url must be skipped; got {findings:?}"
+    );
+}
+
+/// resp.text() failure (connection dropped mid-body) → skipped gracefully, no findings.
+#[tokio::test]
+async fn test_fetch_ext_js_body_read_error_is_skipped() {
+    use tokio::io::AsyncWriteExt;
+
+    // Raw TCP server: advertises Content-Length: 1000 but closes after a few bytes,
+    // so reqwest's resp.text() gets a truncated-body error.
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        if let Ok((mut stream, _)) = listener.accept().await {
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\nContent-Length: 1000\r\n\r\npartial",
+                )
+                .await
+                .ok();
+            // Dropping `stream` closes the connection before 1000 bytes are sent.
+        }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+
+    let target = parse_target(&format!("http://{addr}/")).unwrap();
+    let client = target.build_client_or_default();
+    let html = format!(r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#);
+    let args = ext_js_scan_args(true);
+    let findings = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    assert!(
+        findings.is_empty(),
+        "body read error must be skipped gracefully; got {findings:?}"
+    );
+}
+
 /// accumulate_findings with an empty batch must be a no-op (counter unchanged, vec unchanged).
 #[tokio::test]
 async fn test_accumulate_findings_empty_batch_is_noop() {

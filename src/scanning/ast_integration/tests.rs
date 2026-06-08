@@ -897,6 +897,20 @@ fn test_extract_same_origin_script_srcs_preserves_order() {
 }
 
 #[test]
+fn test_extract_same_origin_script_srcs_skips_unparseable_src() {
+    // "http://" has an empty host — url::Url::join returns Err and the entry
+    // must be silently skipped (the `Err(_) => continue` branch at line 104).
+    let base = url::Url::parse("https://example.com/page").unwrap();
+    let html = r#"<html><body>
+        <script src="http://"></script>
+        <script src="/valid.js"></script>
+    </body></html>"#;
+    let srcs = extract_same_origin_script_srcs(html, &base);
+    assert_eq!(srcs.len(), 1);
+    assert_eq!(srcs[0].as_str(), "https://example.com/valid.js");
+}
+
+#[test]
 fn test_extract_same_origin_script_srcs_relative_no_slash() {
     // "classic.js" (no leading slash) resolves relative to the base path directory,
     // not the root — so https://example.com/app/page -> https://example.com/app/classic.js
