@@ -581,6 +581,7 @@ pub(crate) async fn fetch_and_analyze_external_js(
     let script_urls =
         crate::scanning::ast_integration::extract_same_origin_script_srcs(html, &target.url);
 
+    let script_element_ids = crate::scanning::ast_integration::extract_script_element_ids(html);
     let mut results: Vec<crate::scanning::result::Result> = Vec::new();
 
     // extract_same_origin_script_srcs already deduplicates; just cap the count.
@@ -614,8 +615,6 @@ pub(crate) async fn fetch_and_analyze_external_js(
             continue;
         }
 
-        let script_element_ids =
-            crate::scanning::ast_integration::extract_script_element_ids(&body);
         let findings =
             crate::scanning::ast_integration::analyze_javascript_for_dom_xss_with_html_context(
                 &body,

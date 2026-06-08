@@ -1724,6 +1724,32 @@ async fn test_fetch_ext_js_body_read_error_is_skipped() {
     );
 }
 
+/// The script_element_ids set must be sourced from the host HTML, not the JS body.
+/// When the host page has `<script id="eval-me">` and the external JS writes
+/// `document.getElementById('eval-me').innerText = location.hash.substring(1)`,
+/// the analyzer must recognise it as a JS-eval sink. With the old (buggy) code the JS
+/// body was passed to `extract_script_element_ids`, producing an empty set and silently
+/// missing the finding.
+#[tokio::test]
+async fn test_fetch_ext_js_uses_html_for_script_element_ids() {
+    let addr = start_ext_js_server(
+        r#"document.getElementById('eval-me').innerText = location.hash.substring(1);"#,
+    )
+    .await;
+    let target = parse_target(&format!("http://{addr}/")).unwrap();
+    let client = target.build_client_or_default();
+    // Host HTML declares <script id="eval-me"> — the ID that makes the sink recognisable.
+    let html = format!(
+        r#"<html><body><script id="eval-me"></script><script src="http://{addr}/app.js"></script></body></html>"#
+    );
+    let args = ext_js_scan_args(true);
+    let findings = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    assert!(
+        !findings.is_empty(),
+        "expected DOM-XSS finding when host HTML supplies the script element ID; got none"
+    );
+}
+
 /// accumulate_findings with an empty batch must be a no-op (counter unchanged, vec unchanged).
 #[tokio::test]
 async fn test_accumulate_findings_empty_batch_is_noop() {
