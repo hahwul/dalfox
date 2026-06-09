@@ -45,6 +45,7 @@ fn default_scan_params(target: &str) -> ScanWithDalfoxParams {
         skip_discovery: false,
         deep_scan: false,
         skip_ast_analysis: false,
+        analyze_external_js: false,
         detect_outdated_libs: false,
         blind_callback_url: None,
         workers: 1,
@@ -116,6 +117,7 @@ fn default_scan_args(target: &str) -> ScanArgs {
         sxss_method: "GET".to_string(),
         sxss_retries: 3,
         skip_ast_analysis: false,
+        analyze_external_js: false,
         hpp: false,
         waf_bypass: "auto".to_string(),
         skip_waf_probe: false,
@@ -1053,5 +1055,103 @@ async fn test_purge_expired_jobs_removes_old_terminal_jobs() {
     assert!(
         jobs.contains_key("active"),
         "active job must never be purged"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// mcp/mod.rs — analyze_external_js field on ScanWithDalfoxParams is wired
+// through to ScanArgs and does not cause scan_with_dalfox to reject.
+// ─────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_scan_with_dalfox_analyze_external_js_queues_successfully() {
+    let mcp = DalfoxMcp::new();
+    let params = ScanWithDalfoxParams {
+        analyze_external_js: true,
+        ..default_scan_params("http://127.0.0.1:1/?q=a")
+    };
+    let resp = mcp
+        .scan_with_dalfox(Parameters(params))
+        .await
+        .expect("analyze_external_js: true must queue without error");
+    let payload = parse_result_json(&resp);
+    assert_eq!(payload["status"], "queued");
+    assert!(
+        payload["scan_id"].as_str().is_some(),
+        "scan_id must be present in queue response"
+    );
+}
+
+/// run_job with analyze_external_js=true must produce findings that reference
+/// the external JS file. Calls run_job directly (no polling) so the assertion
+/// on job.results is deterministic.
+#[tokio::test]
+async fn test_run_scan_job_analyze_external_js_produces_external_js_findings() {
+    use axum::{Router, http::header, response::Html, routing::get};
+    use std::net::{Ipv4Addr, SocketAddr};
+    use tokio::time::{Duration, sleep};
+
+    // Host HTML: declares <script id="eval-me"> so the AST analyzer can
+    // resolve getElementById('eval-me').innerText as an eval-equivalent sink.
+    async fn html_page() -> Html<&'static str> {
+        Html(
+            r#"<html><body>
+<script id="eval-me"></script>
+<script src="/app.js"></script>
+</body></html>"#,
+        )
+    }
+    async fn app_js() -> impl axum::response::IntoResponse {
+        (
+            [(header::CONTENT_TYPE, "application/javascript")],
+            r#"document.getElementById('eval-me').innerText = location.hash.substring(1);"#,
+        )
+    }
+
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind ext-js mcp test server");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        let app = Router::new()
+            .route("/", get(html_page))
+            .route("/app.js", get(app_js));
+        let _ = axum::serve(listener, app).await;
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let scan_id = "ext-js-run-job".to_string();
+    let mcp = DalfoxMcp::new();
+    {
+        let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
+        jobs.insert(
+            scan_id.clone(),
+            crate::job::Job::new_queued(format!("http://{addr}/")),
+        );
+    }
+
+    let mut args = default_scan_args(&format!("http://{addr}/"));
+    args.targets = vec![format!("http://{addr}/")];
+    args.skip_mining = true;
+    args.skip_mining_dict = true;
+    args.skip_mining_dom = true;
+    args.skip_xss_scanning = true;
+    args.skip_ast_analysis = false;
+    args.analyze_external_js = true;
+    args.encoders = vec!["none".to_string()];
+
+    mcp.run_job(scan_id.clone(), Arc::new(args)).await;
+
+    let jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
+    let job = jobs.get(&scan_id).expect("job must exist after run_job");
+    let results = job
+        .results
+        .as_ref()
+        .expect("job.results must be set after run_job");
+    assert!(
+        results
+            .iter()
+            .any(|r| r.message_str.contains("external JS")),
+        "expected at least one finding referencing external JS; got: {results:?}"
     );
 }

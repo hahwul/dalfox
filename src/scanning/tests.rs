@@ -70,6 +70,7 @@ fn integration_scan_args(skip_xss: bool) -> crate::cmd::scan::ScanArgs {
         sxss_method: "GET".to_string(),
         sxss_retries: 1,
         skip_ast_analysis: true,
+        analyze_external_js: false,
         hpp: false,
         waf_bypass: "off".to_string(),
         skip_waf_probe: true,
@@ -436,6 +437,7 @@ fn default_scan_args() -> crate::cmd::scan::ScanArgs {
         sxss_method: "GET".to_string(),
         sxss_retries: 3,
         skip_ast_analysis: false,
+        analyze_external_js: false,
         hpp: false,
         waf_bypass: "auto".to_string(),
         skip_waf_probe: false,
@@ -925,6 +927,7 @@ async fn test_xss_scanning_get_query() {
         sxss_method: "GET".to_string(),
         sxss_retries: 3,
         skip_ast_analysis: false,
+        analyze_external_js: false,
         hpp: false,
         waf_bypass: "auto".to_string(),
         skip_waf_probe: false,
@@ -1027,6 +1030,7 @@ async fn test_xss_scanning_post_body() {
         sxss_method: "GET".to_string(),
         sxss_retries: 3,
         skip_ast_analysis: false,
+        analyze_external_js: false,
         hpp: false,
         waf_bypass: "auto".to_string(),
         skip_waf_probe: false,
@@ -1144,6 +1148,7 @@ async fn test_run_scanning_with_reflection_params() {
         sxss_method: "GET".to_string(),
         sxss_retries: 3,
         skip_ast_analysis: false,
+        analyze_external_js: false,
         hpp: false,
         waf_bypass: "auto".to_string(),
         skip_waf_probe: false,
@@ -1414,6 +1419,7 @@ async fn test_run_scanning_empty_params() {
         sxss_method: "GET".to_string(),
         sxss_retries: 3,
         skip_ast_analysis: false,
+        analyze_external_js: false,
         hpp: false,
         waf_bypass: "auto".to_string(),
         skip_waf_probe: false,
@@ -1441,4 +1447,323 @@ async fn test_run_scanning_empty_params() {
         None,
     )
     .await;
+}
+
+// ── fetch_and_analyze_external_js unit tests ─────────────────────────────────
+
+/// Minimal axum server for external-JS unit tests. Serves:
+///   GET /app.js  → `js_body`
+///   GET /big.js  → body just over MAX_EXTERNAL_JS_BYTES (512 KiB)
+async fn start_ext_js_server(js_body: &'static str) -> std::net::SocketAddr {
+    use axum::{Router, http::header, routing::get};
+
+    let app_js =
+        move || async move { ([(header::CONTENT_TYPE, "application/javascript")], js_body) };
+    let big_js = || async {
+        // "// x\n" × 110_000 ≈ 550 KiB > 512 KiB cap
+        let body = "// x\n".repeat(110_000);
+        ([(header::CONTENT_TYPE, "application/javascript")], body)
+    };
+    let app = Router::new()
+        .route("/app.js", get(app_js))
+        .route("/big.js", get(big_js));
+
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind ext-js test server");
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+    addr
+}
+
+fn ext_js_scan_args(analyze: bool) -> crate::cmd::scan::ScanArgs {
+    crate::cmd::scan::ScanArgs {
+        detect_outdated_libs: false,
+        input_type: "url".to_string(),
+        format: "json".to_string(),
+        targets: vec![],
+        param: vec![],
+        data: None,
+        headers: vec![],
+        cookies: vec![],
+        method: "GET".to_string(),
+        user_agent: None,
+        cookie_from_raw: None,
+        include_url: vec![],
+        exclude_url: vec![],
+        ignore_param: vec![],
+        out_of_scope: vec![],
+        out_of_scope_file: None,
+        mining_dict_word: None,
+        skip_mining: true,
+        skip_mining_dict: true,
+        skip_mining_dom: true,
+        only_discovery: false,
+        skip_discovery: true,
+        skip_reflection_header: true,
+        skip_reflection_cookie: true,
+        skip_reflection_path: true,
+        timeout: 5,
+        scan_timeout: 0,
+        delay: 0,
+        proxy: None,
+        follow_redirects: false,
+        ignore_return: vec![],
+        output: None,
+        include_request: false,
+        include_response: false,
+        include_all: false,
+        no_color: true,
+        silence: true,
+        dry_run: false,
+        stream_findings: false,
+        poc_type: "plain".to_string(),
+        limit: None,
+        limit_result_type: "all".to_string(),
+        only_poc: vec![],
+        workers: 2,
+        max_concurrent_targets: 2,
+        max_targets_per_host: 10,
+        encoders: vec![],
+        custom_blind_xss_payload: None,
+        blind_callback_url: None,
+        custom_payload: None,
+        only_custom_payload: false,
+        inject_marker: None,
+        custom_alert_value: "1".to_string(),
+        custom_alert_type: "none".to_string(),
+        skip_xss_scanning: true,
+        deep_scan: false,
+        sxss: false,
+        sxss_url: None,
+        sxss_method: "GET".to_string(),
+        sxss_retries: 1,
+        skip_ast_analysis: false,
+        analyze_external_js: analyze,
+        hpp: false,
+        waf_bypass: "off".to_string(),
+        skip_waf_probe: true,
+        force_waf: None,
+        waf_evasion: false,
+        rate_limit: 0,
+        retries: 0,
+        retry_delay: 0,
+        waf_min_confidence: 0.0,
+        remote_payloads: vec![],
+        remote_wordlists: vec![],
+        max_payloads_per_param: 0,
+    }
+}
+
+/// flag=false → always returns empty regardless of page content.
+#[tokio::test]
+async fn test_fetch_ext_js_flag_off_returns_empty() {
+    let addr = start_ext_js_server(
+        r#"document.getElementById("r").innerHTML = location.hash.substring(1);"#,
+    )
+    .await;
+    let target = parse_target(&format!("http://{addr}/")).unwrap();
+    let client = target.build_client_or_default();
+    let html = format!(r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#);
+    let args = ext_js_scan_args(false);
+    let findings = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    assert!(
+        findings.is_empty(),
+        "flag off must return empty; got {findings:?}"
+    );
+}
+
+/// flag=true + script has `location.hash → innerHTML` → finding returned and
+/// evidence cites the script URL.
+#[tokio::test]
+async fn test_fetch_ext_js_detects_dom_xss_in_script() {
+    let addr = start_ext_js_server(
+        r#"document.getElementById("r").innerHTML = location.hash.substring(1);"#,
+    )
+    .await;
+    let target = parse_target(&format!("http://{addr}/")).unwrap();
+    let client = target.build_client_or_default();
+    let html = format!(r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#);
+    let args = ext_js_scan_args(true);
+    let findings = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    assert!(
+        !findings.is_empty(),
+        "expected DOM-XSS finding from external script"
+    );
+    let cites_script = findings.iter().any(|f| f.evidence.contains("/app.js"));
+    assert!(
+        cites_script,
+        "evidence must cite the script URL; got {findings:#?}"
+    );
+}
+
+/// Body larger than MAX_EXTERNAL_JS_BYTES → skipped gracefully, no panic.
+#[tokio::test]
+async fn test_fetch_ext_js_skips_oversized_body() {
+    let addr = start_ext_js_server("").await;
+    let target = parse_target(&format!("http://{addr}/")).unwrap();
+    let client = target.build_client_or_default();
+    let html = format!(r#"<html><body><script src="http://{addr}/big.js"></script></body></html>"#);
+    let args = ext_js_scan_args(true);
+    // big.js has no sink; primary assertion is no panic on oversized body.
+    let _ = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+}
+
+/// exclude_url matching the script URL → script skipped, empty result.
+#[tokio::test]
+async fn test_fetch_ext_js_exclude_url_skips_script() {
+    let addr = start_ext_js_server(
+        r#"document.getElementById("r").innerHTML = location.hash.substring(1);"#,
+    )
+    .await;
+    let target = parse_target(&format!("http://{addr}/")).unwrap();
+    let client = target.build_client_or_default();
+    let html = format!(r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#);
+    let mut args = ext_js_scan_args(true);
+    args.exclude_url = vec!["app\\.js".to_string()];
+    let findings = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    assert!(
+        findings.is_empty(),
+        "excluded script must not produce findings; got {findings:?}"
+    );
+}
+
+/// Script URL returns a non-2xx status (404) → skipped gracefully, no findings.
+#[tokio::test]
+async fn test_fetch_ext_js_non_2xx_response_is_skipped() {
+    let addr = start_ext_js_server("").await;
+    let target = parse_target(&format!("http://{addr}/")).unwrap();
+    let client = target.build_client_or_default();
+    // /nonexistent.js has no route → axum returns 404
+    let html = format!(
+        r#"<html><body><script src="http://{addr}/nonexistent.js"></script></body></html>"#
+    );
+    let args = ext_js_scan_args(true);
+    let findings = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    assert!(
+        findings.is_empty(),
+        "non-2xx response must be skipped; got {findings:?}"
+    );
+}
+
+/// Script URL connection is refused (port closed) → error silently skipped, no panic.
+#[tokio::test]
+async fn test_fetch_ext_js_network_error_is_skipped() {
+    // Bind, capture address, then drop so the port is closed before the test connects.
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let closed_addr = listener.local_addr().unwrap();
+    drop(listener);
+
+    let target = parse_target(&format!("http://{closed_addr}/")).unwrap();
+    let client = target.build_client_or_default();
+    let html =
+        format!(r#"<html><body><script src="http://{closed_addr}/app.js"></script></body></html>"#);
+    let args = ext_js_scan_args(true);
+    let findings = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    assert!(
+        findings.is_empty(),
+        "network error must be skipped gracefully; got {findings:?}"
+    );
+}
+
+/// include_url set to a pattern that does NOT match the script URL → script skipped, empty result.
+#[tokio::test]
+async fn test_fetch_ext_js_include_url_skips_non_matching_script() {
+    let addr = start_ext_js_server(
+        r#"document.getElementById("r").innerHTML = location.hash.substring(1);"#,
+    )
+    .await;
+    let target = parse_target(&format!("http://{addr}/")).unwrap();
+    let client = target.build_client_or_default();
+    let html = format!(r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#);
+    let mut args = ext_js_scan_args(true);
+    // Pattern that does NOT match /app.js → the include-filter `continue` branch fires.
+    args.include_url = vec!["only_this_pattern_matches".to_string()];
+    let findings = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    assert!(
+        findings.is_empty(),
+        "script not matching include_url must be skipped; got {findings:?}"
+    );
+}
+
+/// resp.text() failure (connection dropped mid-body) → skipped gracefully, no findings.
+#[tokio::test]
+async fn test_fetch_ext_js_body_read_error_is_skipped() {
+    use tokio::io::AsyncWriteExt;
+
+    // Raw TCP server: advertises Content-Length: 1000 but closes after a few bytes,
+    // so reqwest's resp.text() gets a truncated-body error.
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .await
+        .unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        if let Ok((mut stream, _)) = listener.accept().await {
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/javascript\r\nContent-Length: 1000\r\n\r\npartial",
+                )
+                .await
+                .ok();
+            // Dropping `stream` closes the connection before 1000 bytes are sent.
+        }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+
+    let target = parse_target(&format!("http://{addr}/")).unwrap();
+    let client = target.build_client_or_default();
+    let html = format!(r#"<html><body><script src="http://{addr}/app.js"></script></body></html>"#);
+    let args = ext_js_scan_args(true);
+    let findings = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    assert!(
+        findings.is_empty(),
+        "body read error must be skipped gracefully; got {findings:?}"
+    );
+}
+
+/// The script_element_ids set must be sourced from the host HTML, not the JS body.
+/// When the host page has `<script id="eval-me">` and the external JS writes
+/// `document.getElementById('eval-me').innerText = location.hash.substring(1)`,
+/// the analyzer must recognise it as a JS-eval sink. With the old (buggy) code the JS
+/// body was passed to `extract_script_element_ids`, producing an empty set and silently
+/// missing the finding.
+#[tokio::test]
+async fn test_fetch_ext_js_uses_html_for_script_element_ids() {
+    let addr = start_ext_js_server(
+        r#"document.getElementById('eval-me').innerText = location.hash.substring(1);"#,
+    )
+    .await;
+    let target = parse_target(&format!("http://{addr}/")).unwrap();
+    let client = target.build_client_or_default();
+    // Host HTML declares <script id="eval-me"> — the ID that makes the sink recognisable.
+    let html = format!(
+        r#"<html><body><script id="eval-me"></script><script src="http://{addr}/app.js"></script></body></html>"#
+    );
+    let args = ext_js_scan_args(true);
+    let findings = fetch_and_analyze_external_js(&client, &target, &html, &args).await;
+    assert!(
+        !findings.is_empty(),
+        "expected DOM-XSS finding when host HTML supplies the script element ID; got none"
+    );
+}
+
+/// accumulate_findings with an empty batch must be a no-op (counter unchanged, vec unchanged).
+#[tokio::test]
+async fn test_accumulate_findings_empty_batch_is_noop() {
+    let results: tokio::sync::Mutex<Vec<crate::scanning::result::Result>> =
+        tokio::sync::Mutex::new(Vec::new());
+    let counter = std::sync::atomic::AtomicUsize::new(0);
+    accumulate_findings(&results, &counter, vec![]).await;
+    assert_eq!(
+        counter.load(std::sync::atomic::Ordering::Relaxed),
+        0,
+        "counter must not change for empty batch"
+    );
+    assert!(
+        results.lock().await.is_empty(),
+        "results vec must remain empty for empty batch"
+    );
 }

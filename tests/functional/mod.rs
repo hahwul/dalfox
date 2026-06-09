@@ -10,6 +10,8 @@ pub mod xss_mock_server;
 pub mod mock_case_loader;
 // DOM XSS detection tests
 pub mod dom_xss_tests;
+// --analyze-external-js integration tests
+pub mod analyze_external_js_test;
 // Mining tests (placeholder)
 // pub mod mining;
 // Pipeline tests (placeholder)

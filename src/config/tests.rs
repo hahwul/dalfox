@@ -69,6 +69,7 @@ fn default_scan_args() -> crate::cmd::scan::ScanArgs {
         sxss_method: "GET".to_string(),
         sxss_retries: 3,
         skip_ast_analysis: false,
+        analyze_external_js: false,
         hpp: false,
         waf_bypass: "auto".to_string(),
         skip_waf_probe: false,
@@ -149,6 +150,7 @@ fn full_scan_config() -> ScanConfig {
         sxss_method: Some("POST".to_string()),
         sxss_retries: Some(12),
         skip_ast_analysis: Some(true),
+        analyze_external_js: Some(true),
         detect_outdated_libs: Some(true),
         hpp: Some(false),
         waf_bypass: Some("auto".to_string()),
@@ -513,6 +515,7 @@ fn test_apply_to_scan_args_if_default_maps_all_supported_fields() {
     assert_eq!(args.sxss_method, "POST");
     assert_eq!(args.sxss_retries, 12);
     assert!(args.skip_ast_analysis);
+    assert!(args.analyze_external_js);
     assert!(args.detect_outdated_libs);
 }
 

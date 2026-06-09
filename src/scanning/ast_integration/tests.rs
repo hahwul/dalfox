@@ -820,3 +820,146 @@ fn e2e_apidom_level3_xhr_innerhtml_finding() {
             .collect::<Vec<_>>()
     );
 }
+
+// --- extract_same_origin_script_srcs tests ---
+
+#[test]
+fn test_extract_same_origin_script_srcs_absolute() {
+    let base = url::Url::parse("https://example.com/page").unwrap();
+    let html = r#"<html><body>
+        <script src="https://example.com/app.js"></script>
+    </body></html>"#;
+    let srcs = extract_same_origin_script_srcs(html, &base);
+    assert_eq!(srcs.len(), 1);
+    assert_eq!(srcs[0].as_str(), "https://example.com/app.js");
+}
+
+#[test]
+fn test_extract_same_origin_script_srcs_relative() {
+    let base = url::Url::parse("https://example.com/page").unwrap();
+    let html = r#"<html><body>
+        <script src="/bundle.js"></script>
+    </body></html>"#;
+    let srcs = extract_same_origin_script_srcs(html, &base);
+    assert_eq!(srcs.len(), 1);
+    assert_eq!(srcs[0].as_str(), "https://example.com/bundle.js");
+}
+
+#[test]
+fn test_extract_same_origin_script_srcs_drops_cross_origin() {
+    let base = url::Url::parse("https://example.com/page").unwrap();
+    let html = r#"<html><body>
+        <script src="/local.js"></script>
+        <script src="https://cdn.example.com/remote.js"></script>
+        <script src="http://example.com/wrongscheme.js"></script>
+    </body></html>"#;
+    let srcs = extract_same_origin_script_srcs(html, &base);
+    assert_eq!(srcs.len(), 1);
+    assert_eq!(srcs[0].as_str(), "https://example.com/local.js");
+}
+
+#[test]
+fn test_extract_same_origin_script_srcs_dedups() {
+    let base = url::Url::parse("https://example.com/page").unwrap();
+    let html = r#"<html><body>
+        <script src="/app.js"></script>
+        <script src="/app.js"></script>
+    </body></html>"#;
+    let srcs = extract_same_origin_script_srcs(html, &base);
+    assert_eq!(srcs.len(), 1);
+}
+
+#[test]
+fn test_extract_same_origin_script_srcs_ignores_inline_and_empty_src() {
+    let base = url::Url::parse("https://example.com/page").unwrap();
+    let html = r#"<html><body>
+        <script>var x = 1;</script>
+        <script src=""></script>
+        <script src="/real.js"></script>
+    </body></html>"#;
+    let srcs = extract_same_origin_script_srcs(html, &base);
+    assert_eq!(srcs.len(), 1);
+    assert_eq!(srcs[0].as_str(), "https://example.com/real.js");
+}
+
+#[test]
+fn test_extract_same_origin_script_srcs_preserves_order() {
+    let base = url::Url::parse("https://example.com/page").unwrap();
+    let html = r#"<html><body>
+        <script src="/first.js"></script>
+        <script src="https://other.com/skip.js"></script>
+        <script src="/second.js"></script>
+    </body></html>"#;
+    let srcs = extract_same_origin_script_srcs(html, &base);
+    assert_eq!(srcs.len(), 2);
+    assert!(srcs[0].as_str().ends_with("/first.js"));
+    assert!(srcs[1].as_str().ends_with("/second.js"));
+}
+
+#[test]
+fn test_extract_same_origin_script_srcs_skips_unparseable_src() {
+    // "http://" has an empty host — url::Url::join returns Err and the entry
+    // must be silently skipped (the `Err(_) => continue` branch at line 104).
+    let base = url::Url::parse("https://example.com/page").unwrap();
+    let html = r#"<html><body>
+        <script src="http://"></script>
+        <script src="/valid.js"></script>
+    </body></html>"#;
+    let srcs = extract_same_origin_script_srcs(html, &base);
+    assert_eq!(srcs.len(), 1);
+    assert_eq!(srcs[0].as_str(), "https://example.com/valid.js");
+}
+
+#[test]
+fn test_extract_same_origin_script_srcs_relative_no_slash() {
+    // "classic.js" (no leading slash) resolves relative to the base path directory,
+    // not the root — so https://example.com/app/page -> https://example.com/app/classic.js
+    let base = url::Url::parse("https://example.com/app/page").unwrap();
+    let html = r#"<html><body>
+        <script src="classic.js"></script>
+    </body></html>"#;
+    let srcs = extract_same_origin_script_srcs(html, &base);
+    assert_eq!(srcs.len(), 1);
+    assert_eq!(srcs[0].as_str(), "https://example.com/app/classic.js");
+}
+
+#[test]
+fn test_build_ast_dom_xss_result_self_bootstrap_verified_upgrades_to_high() {
+    use crate::scanning::result::FindingType;
+    let r = super::build_ast_dom_xss_result(
+        "https://example.com/",
+        "GET",
+        "location.hash",
+        "#<img src=x onerror=alert(1)>".to_string(),
+        "example.com:1:1 - sink (Source: location.hash, Sink: innerHTML)".to_string(),
+        "DOM-XSS via hash".to_string(),
+        true,
+    );
+    assert_eq!(r.result_type, FindingType::Verified);
+    assert_eq!(r.severity, "High");
+    assert!(
+        r.message_str.contains("[static self-bootstrap confirmed]"),
+        "message must carry verification note; got: {}",
+        r.message_str
+    );
+}
+
+#[test]
+fn test_build_ast_dom_xss_result_not_verified_stays_medium_ast() {
+    use crate::scanning::result::FindingType;
+    let r = super::build_ast_dom_xss_result(
+        "https://example.com/",
+        "GET",
+        "location.hash",
+        "#<img src=x onerror=alert(1)>".to_string(),
+        "evidence".to_string(),
+        "DOM-XSS via hash".to_string(),
+        false,
+    );
+    assert_eq!(r.result_type, FindingType::AstDetected);
+    assert_eq!(r.severity, "Medium");
+    assert!(
+        !r.message_str.contains("[static self-bootstrap confirmed]"),
+        "unverified result must not carry verification note"
+    );
+}

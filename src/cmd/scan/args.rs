@@ -485,6 +485,12 @@ pub struct ScanArgs {
     pub skip_ast_analysis: bool,
 
     #[clap(help_heading = "XSS SCANNING")]
+    /// Fetch and AST-analyze same-origin external <script src> bundles for DOM-XSS
+    /// (off by default to preserve request budget)
+    #[arg(long)]
+    pub analyze_external_js: bool,
+
+    #[clap(help_heading = "XSS SCANNING")]
     /// Enable HTTP Parameter Pollution (HPP) — duplicate query params to bypass WAF
     #[arg(long)]
     pub hpp: bool,
@@ -625,6 +631,7 @@ impl ScanArgs {
             sxss_method: "GET".to_string(),
             sxss_retries: 3,
             skip_ast_analysis: true,
+            analyze_external_js: false,
             hpp: false,
             waf_bypass: "auto".to_string(),
             skip_waf_probe: false,

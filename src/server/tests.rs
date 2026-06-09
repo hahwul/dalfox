@@ -1072,6 +1072,7 @@ async fn test_run_scan_job_success_marks_done() {
         skip_discovery: None,
         deep_scan: None,
         skip_ast_analysis: None,
+        analyze_external_js: None,
         // Exercise the ON path: opts -> job_runner -> ScanArgs -> analysis gate.
         detect_outdated_libs: Some(true),
         rate_limit: None,
@@ -2518,4 +2519,120 @@ fn test_parse_bool_query_accepts_common_truthy_forms() {
         assert!(!parse_bool_query(&p, "flag"), "should reject {v:?}");
     }
     assert!(!parse_bool_query(&Map::new(), "absent"));
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// job_runner.rs — analyze_external_js: Some(true) exercises the new
+// fetch_and_analyze_external_js call added in run_scan_job.
+// ─────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_run_scan_job_analyze_external_js_produces_external_js_findings() {
+    // Serve HTML that references a same-origin script with a DOM-XSS sink.
+    // The inline HTML carries no sink so any finding must originate from
+    // the external script fetched by fetch_and_analyze_external_js.
+    let app = Router::new()
+        .route(
+            "/",
+            any(|| async {
+                (
+                    StatusCode::OK,
+                    [("content-type", "text/html; charset=utf-8")],
+                    r#"<html><head><script src="/sink.js"></script></head><body>ok</body></html>"#,
+                )
+            }),
+        )
+        .route(
+            "/sink.js",
+            any(|| async {
+                (
+                    StatusCode::OK,
+                    [("content-type", "application/javascript")],
+                    "document.write(location.hash.substring(1));",
+                )
+            }),
+        );
+
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind ext-js test server");
+    let addr = listener.local_addr().expect("addr");
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+
+    let state = make_state(None, None, false, false, "callback");
+    let id = "ext-js-job".to_string();
+    {
+        let mut jobs = state.jobs.lock().await;
+        jobs.insert(id.clone(), test_job(JobStatus::Queued, None, ""));
+    }
+
+    let opts = ScanOptions {
+        analyze_external_js: Some(true),
+        encoders: Some(vec!["none".to_string()]),
+        worker: Some(1),
+        skip_mining: Some(true),
+        ..ScanOptions::default()
+    };
+
+    let run = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        run_scan_job(
+            state.clone(),
+            id.clone(),
+            format!("http://{}/", addr),
+            opts,
+            false,
+            false,
+        ),
+    )
+    .await;
+    assert!(run.is_ok(), "run_scan_job must complete in time");
+
+    let jobs = state.jobs.lock().await;
+    let job = jobs.get(&id).expect("job should remain");
+    assert_eq!(job.status, JobStatus::Done);
+    let results = job.results.as_ref().expect("results must be set");
+    assert!(
+        results.iter().any(|f| f.evidence.contains("sink.js")),
+        "findings must reference sink.js from external JS analysis; findings: {:?}",
+        results
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// handlers.rs — ?analyze_external_js=true is parsed and forwarded to
+// ScanOptions, not rejected with a 400.
+// ─────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_get_scan_handler_analyze_external_js_param_is_accepted() {
+    let state = make_state(None, None, false, false, "cb");
+    let mut params = Map::new();
+    params.insert("url".to_string(), "http://127.0.0.1:1/".to_string());
+    params.insert("analyze_external_js".to_string(), "true".to_string());
+
+    let resp = get_scan_handler(State(state.clone()), HeaderMap::new(), Query(params))
+        .await
+        .into_response();
+    assert_eq!(
+        resp.status(),
+        StatusCode::OK,
+        "?analyze_external_js=true must queue the scan, not return 400"
+    );
+
+    let body = response_body_string(resp).await;
+    let parsed: serde_json::Value = serde_json::from_str(&body).expect("json body");
+    let scan_id = parsed["data"]["scan_id"]
+        .as_str()
+        .expect("scan_id in response")
+        .to_string();
+
+    let jobs = state.jobs.lock().await;
+    assert!(
+        jobs.contains_key(&scan_id),
+        "job must be present in the queue after handler returns"
+    );
 }

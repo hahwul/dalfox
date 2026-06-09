@@ -51,6 +51,11 @@ use tokio::sync::{Mutex, RwLock, Semaphore};
 /// Prevents payload explosion when WAF bypass mutations are applied.
 const MAX_WAF_MUTATION_VARIANTS_PER_PAYLOAD: usize = 3;
 
+/// Maximum number of distinct same-origin external JS files fetched per target page fetch.
+const MAX_EXTERNAL_JS_FILES: usize = 16;
+/// Maximum bytes read from a single external JS file (matches analyzer limit).
+const MAX_EXTERNAL_JS_BYTES: usize = 512 * 1024;
+
 /// Build a `with_key("req_per_sec", …)` tracker for an indicatif progress bar.
 ///
 /// `start` is the value of `crate::REQUEST_COUNT` captured at bar creation;
@@ -524,6 +529,129 @@ async fn run_ast_dom_analysis(
             results.push(ast_result);
         }
     }
+    results
+}
+
+/// Append a batch of findings to the shared results vector and bump the
+/// running findings counter. No-op when `batch` is empty. Centralizes the
+/// lock + extend + counter-update sequence shared by every preflight finding
+/// source (libs, initial AST, external JS) across the CLI, server, and MCP
+/// surfaces.
+pub(crate) async fn accumulate_findings(
+    results: &tokio::sync::Mutex<Vec<crate::scanning::result::Result>>,
+    findings_count: &std::sync::atomic::AtomicUsize,
+    batch: Vec<crate::scanning::result::Result>,
+) {
+    if batch.is_empty() {
+        return;
+    }
+    let added = batch.len();
+    results.lock().await.extend(batch);
+    findings_count.fetch_add(added, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Fetch all same-origin `<script src>` bundles referenced by `html` and run
+/// AST DOM-XSS analysis on each one. Called once per target at the pre-scan
+/// (preflight) stage so it fires even for SPAs that have no server-side
+/// parameter reflection (where the per-param probe loop never executes).
+///
+/// Returns an empty `Vec` when `--analyze-external-js` is not set.
+pub(crate) async fn fetch_and_analyze_external_js(
+    client: &reqwest::Client,
+    target: &Target,
+    html: &str,
+    scan_args: &ScanArgs,
+) -> Vec<crate::scanning::result::Result> {
+    if !scan_args.analyze_external_js {
+        return Vec::new();
+    }
+
+    // Compile scope filters once rather than per-URL.
+    let include_patterns: Vec<regex::Regex> = scan_args
+        .include_url
+        .iter()
+        .filter_map(|p| regex::Regex::new(p).ok())
+        .collect();
+    let exclude_patterns: Vec<regex::Regex> = scan_args
+        .exclude_url
+        .iter()
+        .filter_map(|p| regex::Regex::new(p).ok())
+        .collect();
+
+    let script_urls =
+        crate::scanning::ast_integration::extract_same_origin_script_srcs(html, &target.url);
+
+    let script_element_ids = crate::scanning::ast_integration::extract_script_element_ids(html);
+    let mut results: Vec<crate::scanning::result::Result> = Vec::new();
+
+    // extract_same_origin_script_srcs already deduplicates; just cap the count.
+    for script_url in script_urls.into_iter().take(MAX_EXTERNAL_JS_FILES) {
+        let url_str = script_url.as_str().to_owned();
+
+        // Apply --include-url / --exclude-url scope to external script URLs.
+        if !include_patterns.is_empty() && !include_patterns.iter().any(|r| r.is_match(&url_str)) {
+            continue;
+        }
+        if exclude_patterns.iter().any(|r| r.is_match(&url_str)) {
+            continue;
+        }
+
+        let rb =
+            crate::utils::build_request(client, target, reqwest::Method::GET, script_url, None);
+        let resp = match crate::utils::send_with_retry(rb, scan_args.retries, scan_args.retry_delay)
+            .await
+        {
+            Ok(r) => r,
+            Err(_) => continue,
+        };
+        if !resp.status().is_success() {
+            continue;
+        }
+        let body = match resp.text().await {
+            Ok(b) => b,
+            Err(_) => continue,
+        };
+        if body.len() > MAX_EXTERNAL_JS_BYTES {
+            continue;
+        }
+
+        let findings =
+            crate::scanning::ast_integration::analyze_javascript_for_dom_xss_with_html_context(
+                &body,
+                target.url.as_str(),
+                &script_element_ids,
+            );
+
+        for (vuln, payload, description) in findings {
+            let self_bootstrap_verified =
+                crate::scanning::ast_integration::has_self_bootstrap_verification(
+                    &body,
+                    &vuln.source,
+                );
+            let message =
+                format!("{description} (needs runtime confirmation) [external JS: {url_str}]");
+            let evidence = format!(
+                "{}:{}:{} - {} (Source: {}, Sink: {}) [script: {}]",
+                target.url.as_str(),
+                vuln.line,
+                vuln.column,
+                description,
+                vuln.source,
+                vuln.sink,
+                url_str,
+            );
+            results.push(crate::scanning::ast_integration::build_ast_dom_xss_result(
+                target.url.as_str(),
+                &target.method,
+                &vuln.source,
+                payload,
+                evidence,
+                message,
+                self_bootstrap_verified,
+            ));
+        }
+    }
+
     results
 }
 

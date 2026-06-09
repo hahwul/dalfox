@@ -161,6 +161,8 @@ pub(crate) struct ScanOptions {
     pub(crate) deep_scan: Option<bool>,
     /// Skip AST-based JavaScript analysis.
     pub(crate) skip_ast_analysis: Option<bool>,
+    /// Fetch and AST-analyze same-origin external <script src> bundles for DOM-XSS.
+    pub(crate) analyze_external_js: Option<bool>,
     /// Also report outdated / known-vulnerable JS libraries (informational, CWE-1104).
     pub(crate) detect_outdated_libs: Option<bool>,
     /// Per-scan outbound request rate (requests/second; 0 = unlimited). Capped

@@ -60,9 +60,16 @@ Submit a scan. Returns immediately.
   "blind_callback_url": "https://callback.example",
   "deep_scan": false,
   "skip_ast_analysis": false,
+  "analyze_external_js": false,
   "detect_outdated_libs": false
 }
 ```
+
+`analyze_external_js` is opt-in (default `false`): set it `true` to fetch
+same-origin `<script src>` bundles at preflight time and run AST DOM-XSS
+analysis on them. Useful for SPAs where all sink logic lives in external
+bundles and the page has no server-side reflection. Caps: 16 files,
+512 KiB per file; honours `include_url`/`exclude_url` filters.
 
 `detect_outdated_libs` is opt-in (default `false`): set it `true` to also emit
 informational `[I]` findings for outdated / known-vulnerable JS libraries

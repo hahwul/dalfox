@@ -316,6 +316,7 @@ pub(crate) async fn run_scan_job(
         sxss_method: "GET".to_string(),
         sxss_retries: 3,
         skip_ast_analysis: opts.skip_ast_analysis.unwrap_or(false),
+        analyze_external_js: opts.analyze_external_js.unwrap_or(false),
         hpp: false,
         waf_bypass: "auto".to_string(),
         skip_waf_probe: false,
@@ -481,6 +482,16 @@ pub(crate) async fn run_scan_job(
                                 findings_count
                                     .fetch_add(added, std::sync::atomic::Ordering::Relaxed);
                             }
+                            let ext_batch = crate::scanning::fetch_and_analyze_external_js(
+                                &client, &target, &body, &args,
+                            )
+                            .await;
+                            crate::scanning::accumulate_findings(
+                                &results,
+                                &findings_count,
+                                ext_batch,
+                            )
+                            .await;
                         }
                     }
 

@@ -351,6 +351,7 @@ pub(crate) async fn get_scan_handler(
     let skip_discovery = parse_bool_query(&params, "skip_discovery");
     let deep_scan = parse_bool_query(&params, "deep_scan");
     let skip_ast_analysis = parse_bool_query(&params, "skip_ast_analysis");
+    let analyze_external_js = parse_bool_query(&params, "analyze_external_js");
     let detect_outdated_libs = parse_bool_query(&params, "detect_outdated_libs");
 
     let opts = ScanOptions {
@@ -386,6 +387,7 @@ pub(crate) async fn get_scan_handler(
         skip_discovery: Some(skip_discovery),
         deep_scan: Some(deep_scan),
         skip_ast_analysis: Some(skip_ast_analysis),
+        analyze_external_js: Some(analyze_external_js),
         detect_outdated_libs: Some(detect_outdated_libs),
         rate_limit,
         scan_timeout,
