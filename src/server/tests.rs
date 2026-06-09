@@ -1067,6 +1067,7 @@ async fn test_run_scan_job_success_marks_done() {
         callback_url: None,
         param: None,
         proxy: None,
+        insecure: None,
         follow_redirects: None,
         skip_mining: None,
         skip_discovery: None,
@@ -2519,6 +2520,37 @@ fn test_parse_bool_query_accepts_common_truthy_forms() {
         assert!(!parse_bool_query(&p, "flag"), "should reject {v:?}");
     }
     assert!(!parse_bool_query(&Map::new(), "absent"));
+}
+
+#[test]
+fn test_parse_opt_bool_query_preserves_absent() {
+    // Absent -> None (so callers can apply a non-false default like insecure).
+    assert_eq!(parse_opt_bool_query(&Map::new(), "insecure"), None);
+    // Present truthy / falsy values map to Some(bool).
+    for v in ["1", "true", "yes", "on", " TRUE "] {
+        let mut p = Map::new();
+        p.insert("insecure".to_string(), v.to_string());
+        assert_eq!(parse_opt_bool_query(&p, "insecure"), Some(true), "{v:?}");
+    }
+    for v in ["0", "false", "no", "off", ""] {
+        let mut p = Map::new();
+        p.insert("insecure".to_string(), v.to_string());
+        assert_eq!(parse_opt_bool_query(&p, "insecure"), Some(false), "{v:?}");
+    }
+}
+
+#[test]
+fn test_hydrate_preflight_target_insecure_default_and_override() {
+    // Absent insecure -> scanner default (true). Explicit false -> validate.
+    let mut opts = ScanOptions::default();
+    let t = hydrate_preflight_target("https://example.com", &opts, 10)
+        .expect("hydrate default");
+    assert!(t.insecure, "preflight target should default to insecure=true");
+
+    opts.insecure = Some(false);
+    let t = hydrate_preflight_target("https://example.com", &opts, 10)
+        .expect("hydrate insecure=false");
+    assert!(!t.insecure, "insecure=false must propagate to the target");
 }
 
 // ─────────────────────────────────────────────────────────────────────────

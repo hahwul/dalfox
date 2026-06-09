@@ -26,6 +26,7 @@ fn test_job(status: JobStatus, results: Option<Vec<SanitizedResult>>) -> Job {
 
 fn default_scan_params(target: &str) -> ScanWithDalfoxParams {
     ScanWithDalfoxParams {
+        insecure: true,
         target: target.to_string(),
         param: vec![],
         method: "GET".to_string(),
@@ -55,6 +56,7 @@ fn default_scan_params(target: &str) -> ScanWithDalfoxParams {
 
 fn default_scan_args(target: &str) -> ScanArgs {
     ScanArgs {
+        insecure: true,
         detect_outdated_libs: false,
         input_type: "url".to_string(),
         format: "json".to_string(),
@@ -451,6 +453,33 @@ async fn test_scan_with_dalfox_ignores_cookie_from_raw_field() {
     assert!(payload["scan_id"].as_str().is_some());
 }
 
+#[test]
+fn test_insecure_param_serde_defaults_true() {
+    // Omitted `insecure` defaults to true (scanner posture) for both the scan
+    // and preflight params; an explicit `false` opts into TLS validation.
+    let scan: ScanWithDalfoxParams =
+        serde_json::from_value(serde_json::json!({ "target": "https://example.com" }))
+            .expect("minimal scan params deserialize");
+    assert!(scan.insecure, "scan insecure should default to true");
+
+    let scan_off: ScanWithDalfoxParams = serde_json::from_value(
+        serde_json::json!({ "target": "https://example.com", "insecure": false }),
+    )
+    .expect("scan params with insecure=false deserialize");
+    assert!(!scan_off.insecure);
+
+    let pre: PreflightDalfoxParams =
+        serde_json::from_value(serde_json::json!({ "target": "https://example.com" }))
+            .expect("minimal preflight params deserialize");
+    assert!(pre.insecure, "preflight insecure should default to true");
+
+    let pre_off: PreflightDalfoxParams = serde_json::from_value(
+        serde_json::json!({ "target": "https://example.com", "insecure": false }),
+    )
+    .expect("preflight params with insecure=false deserialize");
+    assert!(!pre_off.insecure);
+}
+
 #[tokio::test]
 async fn test_list_scans_returns_all_jobs() {
     let mcp = DalfoxMcp::new();
@@ -542,6 +571,7 @@ async fn test_cancel_scan_rejects_unknown_id() {
 async fn test_preflight_rejects_empty_target() {
     let mcp = DalfoxMcp::new();
     let params = PreflightDalfoxParams {
+        insecure: true,
         target: "".to_string(),
         param: vec![],
         method: "GET".to_string(),
@@ -567,6 +597,7 @@ async fn test_preflight_rejects_empty_target() {
 async fn test_preflight_rejects_non_http_target() {
     let mcp = DalfoxMcp::new();
     let params = PreflightDalfoxParams {
+        insecure: true,
         target: "ftp://example.com".to_string(),
         param: vec![],
         method: "GET".to_string(),
@@ -592,6 +623,7 @@ async fn test_preflight_rejects_non_http_target() {
 async fn test_preflight_unreachable_target_returns_reachable_false() {
     let mcp = DalfoxMcp::new();
     let params = PreflightDalfoxParams {
+        insecure: true,
         target: "http://127.0.0.1:1/?q=test".to_string(),
         param: vec![],
         method: "GET".to_string(),

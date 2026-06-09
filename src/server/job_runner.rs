@@ -288,6 +288,9 @@ pub(crate) async fn run_scan_job(
         scan_timeout: effective_scan_timeout(opts.scan_timeout, state.scan_timeout),
         delay: opts.delay.unwrap_or(0),
         proxy: opts.proxy.clone(),
+        // Default to insecure (skip TLS verification) like the CLI scan path,
+        // unless the request explicitly opts into validation via insecure=false.
+        insecure: opts.insecure.unwrap_or(true),
         follow_redirects: opts.follow_redirects.unwrap_or(false),
         ignore_return: vec![],
 
@@ -378,6 +381,7 @@ pub(crate) async fn run_scan_job(
             t.timeout = args.timeout;
             t.delay = args.delay;
             t.proxy = args.proxy.clone();
+            t.insecure = args.insecure;
             t.follow_redirects = args.follow_redirects;
             t.ignore_return = args.ignore_return.clone();
             t.workers = args.workers;
@@ -719,6 +723,7 @@ pub(crate) fn hydrate_preflight_target(
     t.timeout = timeout_secs;
     t.user_agent = opts.user_agent.clone();
     t.proxy = opts.proxy.clone();
+    t.insecure = opts.insecure.unwrap_or(true);
     t.follow_redirects = opts.follow_redirects.unwrap_or(false);
     // Parse via the shared helper so preflight rejects empty header names the
     // same way the scan path does (a bare `:value` is dropped, not forwarded).

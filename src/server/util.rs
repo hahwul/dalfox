@@ -87,6 +87,24 @@ pub(crate) fn parse_bool_query(params: &HashMap<String, String>, key: &str) -> b
     })
 }
 
+/// Like [`parse_bool_query`] but preserves the present/absent distinction:
+/// returns `None` when the key is absent and `Some(bool)` when present. Used
+/// for flags whose default is *not* `false` (e.g. `insecure`, which defaults
+/// to true), so the caller can apply its own default only when the query
+/// parameter was omitted.
+pub(crate) fn parse_opt_bool_query(
+    params: &HashMap<String, String>,
+    key: &str,
+) -> Option<bool> {
+    params.get(key).map(|v| {
+        let v = v.trim();
+        v == "1"
+            || v.eq_ignore_ascii_case("true")
+            || v.eq_ignore_ascii_case("yes")
+            || v.eq_ignore_ascii_case("on")
+    })
+}
+
 /// Admit a new scan and insert a queued `Job` for `url` under a single
 /// jobs-lock, or return `None` when the server is already at its
 /// `max_concurrent_scans` capacity (`0` = unlimited). Counting active

@@ -369,6 +369,21 @@ pub struct ScanArgs {
     pub proxy: Option<String>,
 
     #[clap(help_heading = "NETWORK")]
+    /// Skip TLS/SSL certificate verification, accepting self-signed, expired,
+    /// or hostname-mismatched certs. Enabled by default for scanner use; pass
+    /// `--insecure=false` to enforce certificate validation. Example: --insecure=false
+    #[arg(
+        long,
+        num_args = 0..=1,
+        require_equals = true,
+        default_value_t = true,
+        default_missing_value = "true",
+        action = clap::ArgAction::Set,
+        value_parser = clap::builder::BoolishValueParser::new(),
+    )]
+    pub insecure: bool,
+
+    #[clap(help_heading = "NETWORK")]
     /// Follow HTTP redirects. Example: -F
     #[arg(short = 'F', long)]
     pub follow_redirects: bool,
@@ -598,6 +613,10 @@ impl ScanArgs {
             scan_timeout: 0,
             delay: 0,
             proxy: opts.proxy,
+            // Preflight only inspects content-type/parameters; like the scan
+            // path it trusts self-signed / staging certs by default so
+            // discovery isn't blocked by an internal TLS posture.
+            insecure: true,
             follow_redirects: opts.follow_redirects,
             ignore_return: vec![],
             output: None,
@@ -672,6 +691,41 @@ mod arg_parser_tests {
         ])
         .expect("encoders htmlpad,unicode,zwsp should be accepted");
         assert_eq!(cli.scan.encoders, vec!["htmlpad", "unicode", "zwsp"]);
+    }
+
+    #[test]
+    fn insecure_defaults_true_and_accepts_explicit_values() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(flatten)]
+            scan: ScanArgs,
+        }
+
+        // Omitted: scanner trusts certs by default.
+        let cli = TestCli::try_parse_from(["dalfox", "https://example.com"])
+            .expect("parse without --insecure");
+        assert!(cli.scan.insecure, "insecure should default to true");
+
+        // Bare `--insecure` keeps it on (and does NOT swallow the positional).
+        let cli = TestCli::try_parse_from(["dalfox", "--insecure", "https://example.com"])
+            .expect("parse with bare --insecure");
+        assert!(cli.scan.insecure);
+        assert_eq!(cli.scan.targets, vec!["https://example.com".to_string()]);
+
+        // `--insecure=false` opts into TLS certificate validation.
+        let cli = TestCli::try_parse_from(["dalfox", "https://example.com", "--insecure=false"])
+            .expect("parse with --insecure=false");
+        assert!(!cli.scan.insecure, "insecure=false should disable insecure mode");
+
+        // Boolish values are accepted on the `=` form.
+        let cli = TestCli::try_parse_from(["dalfox", "https://example.com", "--insecure=true"])
+            .expect("parse with --insecure=true");
+        assert!(cli.scan.insecure);
+        let cli = TestCli::try_parse_from(["dalfox", "https://example.com", "--insecure=0"])
+            .expect("parse with --insecure=0");
+        assert!(!cli.scan.insecure);
     }
 
     #[test]

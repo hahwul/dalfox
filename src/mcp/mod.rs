@@ -273,6 +273,7 @@ impl DalfoxMcp {
                 t.timeout = scan_args.timeout;
                 t.delay = scan_args.delay;
                 t.proxy = scan_args.proxy.clone();
+                t.insecure = scan_args.insecure;
                 t.follow_redirects = scan_args.follow_redirects;
                 t.ignore_return = scan_args.ignore_return.clone();
                 t.workers = scan_args.workers;
@@ -633,6 +634,12 @@ pub struct ScanWithDalfoxParams {
     #[serde(default)]
     pub follow_redirects: bool,
 
+    /// Skip TLS/SSL certificate verification (accept self-signed, expired, or
+    /// hostname-mismatched certs). Default: true. Set false to enforce
+    /// certificate validation.
+    #[serde(default = "default_true")]
+    pub insecure: bool,
+
     /// HTTP/SOCKS proxy URL. Example: "http://127.0.0.1:8080"
     #[serde(default)]
     pub proxy: Option<String>,
@@ -701,6 +708,12 @@ fn default_timeout() -> u64 {
 }
 fn default_workers() -> usize {
     crate::cmd::scan::DEFAULT_WORKERS
+}
+/// Default for the `insecure` param: TLS verification is skipped by default
+/// (scanner posture), matching the CLI `--insecure` default and the REST
+/// server. Clients pass `"insecure": false` to enforce certificate validation.
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -784,6 +797,11 @@ pub struct PreflightDalfoxParams {
     #[serde(default)]
     pub follow_redirects: bool,
 
+    /// Skip TLS/SSL certificate verification. Default: true. Set false to
+    /// enforce certificate validation.
+    #[serde(default = "default_true")]
+    pub insecure: bool,
+
     /// Skip parameter mining. Default: false
     #[serde(default)]
     pub skip_mining: bool,
@@ -831,6 +849,7 @@ Final results (via get_results_dalfox) include finding type \
             scan_timeout,
             delay,
             follow_redirects,
+            insecure,
             proxy,
             include_request,
             include_response,
@@ -984,6 +1003,7 @@ Final results (via get_results_dalfox) include finding type \
             scan_timeout,
             delay,
             proxy,
+            insecure,
             follow_redirects,
             ignore_return: vec![],
             output: None,
@@ -1349,6 +1369,7 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
                 t.method = params.method.clone();
                 t.timeout = params.timeout;
                 t.proxy = params.proxy.clone();
+                t.insecure = params.insecure;
                 t.follow_redirects = params.follow_redirects;
                 t.user_agent = params.user_agent.clone();
                 // Shared parsers: reject empty header names and `;`-split +

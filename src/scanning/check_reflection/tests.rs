@@ -39,6 +39,7 @@ fn make_param() -> Param {
 
 fn default_scan_args() -> crate::cmd::scan::ScanArgs {
     crate::cmd::scan::ScanArgs {
+        insecure: true,
         detect_outdated_libs: false,
         input_type: "auto".to_string(),
         format: "json".to_string(),

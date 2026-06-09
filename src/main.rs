@@ -379,6 +379,10 @@ async fn main() {
             scan_timeout: 0,
             delay: cmd::scan::DEFAULT_DELAY_MS,
             proxy: None,
+            // Scanner default: skip TLS verification. The bare `dalfox <TARGET>`
+            // path takes no `--insecure` flag (only global flags are accepted
+            // here), so config can still flip this via apply_to_scan_args_if_default.
+            insecure: true,
             follow_redirects: false,
             ignore_return: vec![],
             output: None,

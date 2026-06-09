@@ -95,6 +95,10 @@ pub struct ScanConfig {
     pub retries: Option<u32>,
     pub retry_delay: Option<u64>,
     pub proxy: Option<String>,
+    /// Skip TLS/SSL certificate verification. Omitted (None) keeps the
+    /// scanner default of `true` (insecure); set `false` to enforce
+    /// certificate validation.
+    pub insecure: Option<bool>,
     pub follow_redirects: Option<bool>,
     pub ignore_return: Option<Vec<u16>>,
     // ENGINE
@@ -275,6 +279,9 @@ impl Config {
             if let Some(v) = &scan.proxy {
                 args.proxy = Some(v.clone());
             }
+            if let Some(v) = scan.insecure {
+                args.insecure = v;
+            }
             if let Some(v) = scan.follow_redirects {
                 args.follow_redirects = v;
             }
@@ -411,6 +418,13 @@ impl Config {
                 && args.proxy.is_none()
             {
                 args.proxy = Some(v.clone());
+            }
+            // `insecure` defaults to true; only honor the config value while
+            // the flag is still at that default (mirrors apply_if_default).
+            if let Some(v) = scan.insecure
+                && args.insecure
+            {
+                args.insecure = v;
             }
             if let Some(v) = scan.scan_timeout
                 && args.scan_timeout == 0
@@ -700,6 +714,15 @@ impl Config {
                 && args.proxy.is_none()
             {
                 args.proxy = Some(v.clone());
+            }
+            // `insecure` defaults to true, so "still at default" means
+            // `args.insecure == true`. A CLI `--insecure=false` therefore
+            // wins over the config file; config only takes effect when the
+            // user left the flag untouched.
+            if let Some(v) = scan.insecure
+                && args.insecure
+            {
+                args.insecure = v;
             }
             if let Some(v) = scan.follow_redirects
                 && !args.follow_redirects
@@ -1011,6 +1034,7 @@ pub fn default_toml_template() -> String {
 # scan_timeout = 0           # hard wall-clock cap per target for the scan stage in seconds
 # delay = 0                  # milliseconds
 # proxy = "http://127.0.0.1:8080"  # also used for remote provider fetches
+# insecure = true            # skip TLS certificate verification (default true); set false to enforce validation
 # follow_redirects = false
 
 # ENGINE

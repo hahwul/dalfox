@@ -151,6 +151,10 @@ pub(crate) struct ScanOptions {
     pub(crate) param: Option<Vec<String>>,
     /// HTTP/SOCKS proxy URL.
     pub(crate) proxy: Option<String>,
+    /// Skip TLS/SSL certificate verification. Absent (None) keeps the scanner
+    /// default of `true` (accept self-signed / staging certs); set `false` to
+    /// enforce certificate validation.
+    pub(crate) insecure: Option<bool>,
     /// Follow HTTP redirects (3xx).
     pub(crate) follow_redirects: Option<bool>,
     /// Skip parameter mining (DOM and dictionary-based discovery).

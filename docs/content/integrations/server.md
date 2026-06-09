@@ -182,6 +182,7 @@ Returns version, `auth_required`, and the list of supported endpoints. Good for 
     "callback_url": "https://your-webhook.example/dalfox",
     "param": ["q", "id:query"],
     "proxy": "http://127.0.0.1:8080",
+    "insecure": true,
     "follow_redirects": false,
     "skip_mining": false,
     "skip_discovery": false,
@@ -196,6 +197,9 @@ Fields mirror the CLI flags. See the [CLI reference](../../reference/cli/) for m
 `detect_outdated_libs` is opt-in (default `false`): set it `true` to also report
 outdated / known-vulnerable JS libraries as informational `[I]` findings
 (CWE-1104, 0 extra requests). The same key works as a `GET /scan` query parameter.
+`insecure` defaults to `true` (TLS certificate verification is skipped, matching
+the CLI scanner default); send `"insecure": false` (or `?insecure=false` on
+`GET /scan`) to enforce certificate validation.
 
 `rate_limit` caps the scan's outbound requests/second (`0` = unlimited, the
 default), enforced across all worker tasks. The server-wide `--rate-limit` flag

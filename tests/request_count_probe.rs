@@ -25,6 +25,7 @@ use dalfox::cmd::scan::{self, ScanArgs};
 
 fn make_args() -> ScanArgs {
     ScanArgs {
+        insecure: true,
         detect_outdated_libs: false,
         input_type: "url".to_string(),
         format: "json".to_string(),
