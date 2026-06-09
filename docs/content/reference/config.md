@@ -74,6 +74,7 @@ rate_limit = 0
 retries = 0
 retry_delay = 1000
 # proxy = "http://127.0.0.1:8080"
+insecure = true
 follow_redirects = false
 ignore_return = []
 
@@ -181,6 +182,7 @@ debug = false
 | `retries` | int | `0` | Retry 5xx / transient transport errors this many times (`0` = off; 429 always retried) |
 | `retry_delay` | int | `1000` | Base backoff (ms) between `retries` attempts (exponential) |
 | `proxy` | string | — | Proxy URL |
+| `insecure` | bool | `true` | Skip TLS certificate verification; set `false` to enforce validation |
 | `follow_redirects` | bool | `false` | Follow 3xx responses |
 | `ignore_return` | array | `[]` | HTTP status codes to ignore |
 

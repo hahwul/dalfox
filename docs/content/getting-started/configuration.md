@@ -91,6 +91,7 @@ Anything that has a CLI flag under `dalfox scan` can live in the `[scan]` table.
 | `headers` | `["Accept: text/html"]` | Extra request headers |
 | `user_agent` | `"Dalfox Scanner"` | Default User-Agent |
 | `waf_bypass` | `"auto"` | WAF bypass mode (`auto`, `force`, `off`) |
+| `insecure` | `true` | Skip TLS certificate verification (`false` to enforce) |
 | `follow_redirects` | `true` | Follow 3xx responses |
 
 See the [Config File reference](../../reference/config/) for every key.

@@ -9,11 +9,11 @@ mod har;
 pub use har::{is_har_content, parse_har};
 
 /// Cache key capturing the inputs that affect Client construction:
-/// timeout, optional proxy URL, and follow-redirects policy. The
-/// scheme/host are NOT part of the key because reqwest::Client manages
-/// per-host connection pools internally — one Client safely serves any
-/// number of hosts.
-type ClientCacheKey = (u64, Option<String>, bool);
+/// timeout, optional proxy URL, follow-redirects policy, and whether TLS
+/// certificate verification is skipped (`insecure`). The scheme/host are
+/// NOT part of the key because reqwest::Client manages per-host connection
+/// pools internally — one Client safely serves any number of hosts.
+type ClientCacheKey = (u64, Option<String>, bool, bool);
 
 /// Process-wide cache of reqwest::Clients keyed by ClientCacheKey. Each
 /// cached entry is cheap to clone (reqwest::Client is internally Arc'd).
@@ -55,6 +55,12 @@ pub struct Target {
     /// analysis; consumed by the reflection / DOM injection paths so the hint
     /// actually paces requests instead of only surfacing in JSON meta.
     pub waf_extra_delay_ms: u64,
+    /// Skip TLS/SSL certificate verification when building the HTTP client
+    /// (`danger_accept_invalid_certs`). Defaults to `true` so the scanner
+    /// trusts self-signed / expired / hostname-mismatched certs out of the
+    /// box (`--insecure`); set to `false` (`--insecure=false`) to enforce
+    /// certificate validation.
+    pub insecure: bool,
 }
 
 impl Target {
@@ -85,6 +91,9 @@ impl Target {
             tech_info: None,
             mutation_stats: None,
             waf_extra_delay_ms: 0,
+            // Scanner default: trust self-signed / staging certs unless the
+            // caller explicitly opts into validation (`--insecure=false`).
+            insecure: true,
         }
     }
 
@@ -96,7 +105,12 @@ impl Target {
 
     /// Cache key derived from the Target fields that affect Client construction.
     fn client_cache_key(&self) -> ClientCacheKey {
-        (self.timeout, self.proxy.clone(), self.follow_redirects)
+        (
+            self.timeout,
+            self.proxy.clone(),
+            self.follow_redirects,
+            self.insecure,
+        )
     }
 
     /// Build a reqwest Client, falling back to a default Client on error.
@@ -133,7 +147,9 @@ impl Target {
         // is harmless (the loser's value is dropped on insert).
         let mut client_builder = Client::builder()
             .timeout(Duration::from_secs(self.timeout))
-            .danger_accept_invalid_certs(true); // Insecure mode for scanner
+            // Insecure mode for scanner (default on; `--insecure=false` to
+            // enforce TLS certificate validation).
+            .danger_accept_invalid_certs(self.insecure);
 
         if let Some(proxy_url) = &self.proxy
             && let Ok(proxy) = reqwest::Proxy::all(proxy_url)
@@ -339,6 +355,7 @@ mod tests {
     const REUSE_TIMEOUT: u64 = 60_001;
     const DISTINCT_TIMEOUT_A: u64 = 60_002;
     const DISTINCT_TIMEOUT_B: u64 = 60_003;
+    const INSECURE_TIMEOUT: u64 = 60_004;
 
     /// Count cached Clients whose key carries `timeout`. Scoping by a
     /// per-test-unique timeout isolates the measurement from any other test
@@ -346,7 +363,7 @@ mod tests {
     fn cache_entries_with_timeout(timeout: u64) -> usize {
         client_cache()
             .lock()
-            .map(|g| g.keys().filter(|(t, _, _)| *t == timeout).count())
+            .map(|g| g.keys().filter(|(t, _, _, _)| *t == timeout).count())
             .unwrap_or(0)
     }
 
@@ -379,6 +396,39 @@ mod tests {
         let _ = a.build_client().unwrap();
         assert_eq!(cache_entries_with_timeout(a.timeout), 1);
         assert_eq!(cache_entries_with_timeout(b.timeout), 1);
+    }
+
+    /// `insecure` is part of the Client cache key, so toggling TLS
+    /// verification yields two distinct cached Clients rather than silently
+    /// reusing one built with the other posture.
+    #[test]
+    fn test_client_cache_separates_on_insecure() {
+        let mut secure = parse_target("https://example.com").unwrap();
+        secure.timeout = INSECURE_TIMEOUT;
+        secure.insecure = false;
+        let mut insecure = parse_target("https://example.com").unwrap();
+        insecure.timeout = INSECURE_TIMEOUT;
+        insecure.insecure = true;
+        let _ = secure.build_client().unwrap();
+        let _ = insecure.build_client().unwrap();
+        // Rebuild to confirm reuse (no third entry created).
+        let _ = secure.build_client().unwrap();
+        assert_eq!(
+            cache_entries_with_timeout(INSECURE_TIMEOUT),
+            2,
+            "secure and insecure clients must not share a cache entry"
+        );
+    }
+
+    /// Scanner default: a freshly parsed target trusts invalid certs unless
+    /// the caller opts into validation.
+    #[test]
+    fn test_parse_target_defaults_to_insecure() {
+        let target = parse_target("https://example.com").unwrap();
+        assert!(
+            target.insecure,
+            "insecure must default to true (scanner mode)"
+        );
     }
 
     #[test]

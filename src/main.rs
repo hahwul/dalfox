@@ -379,6 +379,11 @@ async fn main() {
             scan_timeout: 0,
             delay: cmd::scan::DEFAULT_DELAY_MS,
             proxy: None,
+            // Bare `dalfox <TARGET>` path takes no `--insecure` flag (only
+            // global flags are accepted here), so leave it unspecified (None);
+            // config can set it via apply_to_scan_args_if_default and the
+            // effective value defaults to insecure (true) when building targets.
+            insecure: None,
             follow_redirects: false,
             ignore_return: vec![],
             output: None,

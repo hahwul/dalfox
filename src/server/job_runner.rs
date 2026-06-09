@@ -288,6 +288,10 @@ pub(crate) async fn run_scan_job(
         scan_timeout: effective_scan_timeout(opts.scan_timeout, state.scan_timeout),
         delay: opts.delay.unwrap_or(0),
         proxy: opts.proxy.clone(),
+        // Pass the request's choice through verbatim (None => unspecified);
+        // the effective value defaults to insecure (true) when the Target's
+        // client is built, matching the CLI scan path.
+        insecure: opts.insecure,
         follow_redirects: opts.follow_redirects.unwrap_or(false),
         ignore_return: vec![],
 
@@ -378,6 +382,7 @@ pub(crate) async fn run_scan_job(
             t.timeout = args.timeout;
             t.delay = args.delay;
             t.proxy = args.proxy.clone();
+            t.insecure = args.insecure.unwrap_or(true);
             t.follow_redirects = args.follow_redirects;
             t.ignore_return = args.ignore_return.clone();
             t.workers = args.workers;
@@ -394,6 +399,22 @@ pub(crate) async fn run_scan_job(
             return;
         }
     };
+
+    // Insecure-TLS posture signal. The CLI prints a one-shot stderr warning;
+    // server jobs run silenced, so surface the same fact in the job log when an
+    // https target is scanned with certificate validation disabled (the
+    // default unless the request sent `insecure=false`). Ops triaging a MITM
+    // scenario can then see it per job.
+    if target.insecure && target.url.scheme().eq_ignore_ascii_case("https") {
+        log(
+            &state,
+            "JOB",
+            &format!(
+                "insecure-tls id={} url={} (TLS certificate validation disabled; send insecure=false to enforce)",
+                job_id, url
+            ),
+        );
+    }
 
     // Reachability gate. A parseable-but-unreachable target (connection
     // refused, DNS failure, TLS error, timeout) otherwise runs the full
@@ -719,6 +740,7 @@ pub(crate) fn hydrate_preflight_target(
     t.timeout = timeout_secs;
     t.user_agent = opts.user_agent.clone();
     t.proxy = opts.proxy.clone();
+    t.insecure = opts.insecure.unwrap_or(true);
     t.follow_redirects = opts.follow_redirects.unwrap_or(false);
     // Parse via the shared helper so preflight rejects empty header names the
     // same way the scan path does (a bare `:value` is dropped, not forwarded).

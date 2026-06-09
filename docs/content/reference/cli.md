@@ -123,6 +123,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--retries` | — | `0` | Retry failed requests on HTTP 5xx and transient transport errors (timeouts, connection resets) up to this many times (`0` = off). HTTP 429 is always retried regardless. |
 | `--retry-delay` | — | `1000` | Base delay (ms) for the exponential backoff between `--retries` attempts (doubles each attempt, capped internally). A server `Retry-After` header takes precedence on 429. |
 | `--proxy` | — | — | Proxy URL (`http://`, `socks5://`) |
+| `--insecure` | — | `true` | Skip TLS/SSL certificate verification (accept self-signed, expired, or hostname-mismatched certs). On by default for scanner use; pass `--insecure=false` to enforce certificate validation. |
 | `--follow-redirects` | `-F` | false | Follow 3xx responses |
 | `--ignore-return` | — | — | HTTP status codes to ignore |
 

@@ -382,6 +382,9 @@ pub(crate) async fn get_scan_handler(
         callback_url: params.get("callback_url").cloned(),
         param: param_list,
         proxy,
+        // Absent ?insecure leaves None so the scan path applies its
+        // insecure-by-default; ?insecure=false opts into TLS validation.
+        insecure: parse_opt_bool_query(&params, "insecure"),
         follow_redirects: Some(follow_redirects),
         skip_mining: Some(skip_mining),
         skip_discovery: Some(skip_discovery),
@@ -806,6 +809,7 @@ pub(crate) async fn preflight_handler(
                     user_agent: opts.user_agent.clone(),
                     timeout: timeout_secs,
                     proxy: opts.proxy.clone(),
+                    insecure: opts.insecure.unwrap_or(true),
                     follow_redirects: opts.follow_redirects.unwrap_or(false),
                     skip_mining: opts.skip_mining.unwrap_or(false),
                     skip_discovery: opts.skip_discovery.unwrap_or(false),

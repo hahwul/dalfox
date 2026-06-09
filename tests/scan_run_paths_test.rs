@@ -12,6 +12,7 @@ use tokio::net::TcpListener;
 
 fn base_scan_args() -> ScanArgs {
     ScanArgs {
+        insecure: Some(true),
         detect_outdated_libs: false,
         input_type: "url".to_string(),
         format: "json".to_string(),

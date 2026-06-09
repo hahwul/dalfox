@@ -95,6 +95,10 @@ pub struct ScanConfig {
     pub retries: Option<u32>,
     pub retry_delay: Option<u64>,
     pub proxy: Option<String>,
+    /// Skip TLS/SSL certificate verification. Omitted (None) keeps the
+    /// scanner default of `true` (insecure); set `false` to enforce
+    /// certificate validation.
+    pub insecure: Option<bool>,
     pub follow_redirects: Option<bool>,
     pub ignore_return: Option<Vec<u16>>,
     // ENGINE
@@ -275,6 +279,9 @@ impl Config {
             if let Some(v) = &scan.proxy {
                 args.proxy = Some(v.clone());
             }
+            if let Some(v) = scan.insecure {
+                args.insecure = Some(v);
+            }
             if let Some(v) = scan.follow_redirects {
                 args.follow_redirects = v;
             }
@@ -411,6 +418,14 @@ impl Config {
                 && args.proxy.is_none()
             {
                 args.proxy = Some(v.clone());
+            }
+            // `insecure` is None unless the user passed --insecure; only fill
+            // it from config when the CLI left it unspecified, so an explicit
+            // CLI choice (either direction) always wins (mirrors apply_if_default).
+            if let Some(v) = scan.insecure
+                && args.insecure.is_none()
+            {
+                args.insecure = Some(v);
             }
             if let Some(v) = scan.scan_timeout
                 && args.scan_timeout == 0
@@ -700,6 +715,17 @@ impl Config {
                 && args.proxy.is_none()
             {
                 args.proxy = Some(v.clone());
+            }
+            // `insecure` is `None` unless the user passed `--insecure[=…]`, so
+            // config only applies when the flag was left off. An explicit CLI
+            // value — `--insecure=true` *or* `--insecure=false` — is `Some(_)`
+            // and therefore always wins over the config file, in either
+            // direction. (A plain `bool` couldn't express this: it can't tell
+            // an explicit `--insecure=true` apart from the default.)
+            if let Some(v) = scan.insecure
+                && args.insecure.is_none()
+            {
+                args.insecure = Some(v);
             }
             if let Some(v) = scan.follow_redirects
                 && !args.follow_redirects
@@ -1011,6 +1037,7 @@ pub fn default_toml_template() -> String {
 # scan_timeout = 0           # hard wall-clock cap per target for the scan stage in seconds
 # delay = 0                  # milliseconds
 # proxy = "http://127.0.0.1:8080"  # also used for remote provider fetches
+# insecure = true            # skip TLS certificate verification (default true); set false to enforce validation
 # follow_redirects = false
 
 # ENGINE
