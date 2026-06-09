@@ -92,10 +92,7 @@ pub(crate) fn parse_bool_query(params: &HashMap<String, String>, key: &str) -> b
 /// for flags whose default is *not* `false` (e.g. `insecure`, which defaults
 /// to true), so the caller can apply its own default only when the query
 /// parameter was omitted.
-pub(crate) fn parse_opt_bool_query(
-    params: &HashMap<String, String>,
-    key: &str,
-) -> Option<bool> {
+pub(crate) fn parse_opt_bool_query(params: &HashMap<String, String>, key: &str) -> Option<bool> {
     params.get(key).map(|v| {
         let v = v.trim();
         v == "1"

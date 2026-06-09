@@ -2543,13 +2543,15 @@ fn test_parse_opt_bool_query_preserves_absent() {
 fn test_hydrate_preflight_target_insecure_default_and_override() {
     // Absent insecure -> scanner default (true). Explicit false -> validate.
     let mut opts = ScanOptions::default();
-    let t = hydrate_preflight_target("https://example.com", &opts, 10)
-        .expect("hydrate default");
-    assert!(t.insecure, "preflight target should default to insecure=true");
+    let t = hydrate_preflight_target("https://example.com", &opts, 10).expect("hydrate default");
+    assert!(
+        t.insecure,
+        "preflight target should default to insecure=true"
+    );
 
     opts.insecure = Some(false);
-    let t = hydrate_preflight_target("https://example.com", &opts, 10)
-        .expect("hydrate insecure=false");
+    let t =
+        hydrate_preflight_target("https://example.com", &opts, 10).expect("hydrate insecure=false");
     assert!(!t.insecure, "insecure=false must propagate to the target");
 }
 

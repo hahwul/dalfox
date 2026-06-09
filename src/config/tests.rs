@@ -443,17 +443,25 @@ fn test_apply_to_scan_args_if_default_insecure_precedence() {
     let mut args = default_scan_args();
     assert!(args.insecure);
     cfg.apply_to_scan_args_if_default(&mut args);
-    assert!(!args.insecure, "config insecure=false should apply when CLI is default");
+    assert!(
+        !args.insecure,
+        "config insecure=false should apply when CLI is default"
+    );
 
     // Case 2: CLI explicitly disabled it (false) -> config (also false) is a no-op,
     // but more importantly a config of Some(true) must NOT re-enable it.
     let mut scan_on = full_scan_config();
     scan_on.insecure = Some(true);
-    let cfg_on = Config { scan: Some(scan_on) };
+    let cfg_on = Config {
+        scan: Some(scan_on),
+    };
     let mut args = default_scan_args();
     args.insecure = false; // user passed --insecure=false
     cfg_on.apply_to_scan_args_if_default(&mut args);
-    assert!(!args.insecure, "CLI --insecure=false must win over config insecure=true");
+    assert!(
+        !args.insecure,
+        "CLI --insecure=false must win over config insecure=true"
+    );
 
     // Case 3: config omits insecure (None) -> default-true is preserved.
     let cfg_none = Config {
@@ -461,7 +469,10 @@ fn test_apply_to_scan_args_if_default_insecure_precedence() {
     };
     let mut args = default_scan_args();
     cfg_none.apply_to_scan_args_if_default(&mut args);
-    assert!(args.insecure, "omitted config insecure keeps the scanner default (true)");
+    assert!(
+        args.insecure,
+        "omitted config insecure keeps the scanner default (true)"
+    );
 }
 
 #[test]

@@ -717,7 +717,10 @@ mod arg_parser_tests {
         // `--insecure=false` opts into TLS certificate validation.
         let cli = TestCli::try_parse_from(["dalfox", "https://example.com", "--insecure=false"])
             .expect("parse with --insecure=false");
-        assert!(!cli.scan.insecure, "insecure=false should disable insecure mode");
+        assert!(
+            !cli.scan.insecure,
+            "insecure=false should disable insecure mode"
+        );
 
         // Boolish values are accepted on the `=` form.
         let cli = TestCli::try_parse_from(["dalfox", "https://example.com", "--insecure=true"])

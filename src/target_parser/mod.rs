@@ -425,7 +425,10 @@ mod tests {
     #[test]
     fn test_parse_target_defaults_to_insecure() {
         let target = parse_target("https://example.com").unwrap();
-        assert!(target.insecure, "insecure must default to true (scanner mode)");
+        assert!(
+            target.insecure,
+            "insecure must default to true (scanner mode)"
+        );
     }
 
     #[test]
