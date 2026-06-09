@@ -809,6 +809,7 @@ pub(crate) async fn preflight_handler(
                     user_agent: opts.user_agent.clone(),
                     timeout: timeout_secs,
                     proxy: opts.proxy.clone(),
+                    insecure: opts.insecure.unwrap_or(true),
                     follow_redirects: opts.follow_redirects.unwrap_or(false),
                     skip_mining: opts.skip_mining.unwrap_or(false),
                     skip_discovery: opts.skip_discovery.unwrap_or(false),

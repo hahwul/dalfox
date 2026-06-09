@@ -308,6 +308,20 @@ impl DalfoxMcp {
             }
         };
 
+        // Insecure-TLS posture signal. MCP jobs run silenced (no stderr
+        // warning like the CLI), so log the fact when an https target is
+        // scanned with certificate validation disabled (the default unless the
+        // caller sent insecure=false), mirroring the REST server's job log.
+        if target.insecure && target.url.scheme().eq_ignore_ascii_case("https") {
+            Self::log(
+                "JOB",
+                &format!(
+                    "insecure-tls scan_id={} url={} (TLS certificate validation disabled; set insecure=false to enforce)",
+                    scan_id, url
+                ),
+            );
+        }
+
         // Reachability gate, mirroring preflight_dalfox and the REST server:
         // a parseable-but-unreachable target otherwise finishes `done` with 0
         // findings, which a client can't distinguish from "scanned, no XSS".
@@ -1409,6 +1423,7 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
             user_agent: params.user_agent.clone(),
             timeout: params.timeout,
             proxy: params.proxy.clone(),
+            insecure: params.insecure,
             follow_redirects: params.follow_redirects,
             skip_mining: params.skip_mining,
             skip_discovery: params.skip_discovery,

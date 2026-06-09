@@ -399,6 +399,22 @@ pub(crate) async fn run_scan_job(
         }
     };
 
+    // Insecure-TLS posture signal. The CLI prints a one-shot stderr warning;
+    // server jobs run silenced, so surface the same fact in the job log when an
+    // https target is scanned with certificate validation disabled (the
+    // default unless the request sent `insecure=false`). Ops triaging a MITM
+    // scenario can then see it per job.
+    if target.insecure && target.url.scheme().eq_ignore_ascii_case("https") {
+        log(
+            &state,
+            "JOB",
+            &format!(
+                "insecure-tls id={} url={} (TLS certificate validation disabled; send insecure=false to enforce)",
+                job_id, url
+            ),
+        );
+    }
+
     // Reachability gate. A parseable-but-unreachable target (connection
     // refused, DNS failure, TLS error, timeout) otherwise runs the full
     // pipeline and finishes `done` with 0 findings — indistinguishable from
