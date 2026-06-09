@@ -10,7 +10,7 @@ use dalfox::cmd::scan::ScanArgs;
 /// Factory function to create default ScanArgs for testing
 pub fn create_test_scan_args() -> ScanArgs {
     ScanArgs {
-        insecure: true,
+        insecure: Some(true),
         detect_outdated_libs: false,
         input_type: "auto".to_string(),
         format: "json".to_string(),

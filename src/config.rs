@@ -280,7 +280,7 @@ impl Config {
                 args.proxy = Some(v.clone());
             }
             if let Some(v) = scan.insecure {
-                args.insecure = v;
+                args.insecure = Some(v);
             }
             if let Some(v) = scan.follow_redirects {
                 args.follow_redirects = v;
@@ -419,12 +419,13 @@ impl Config {
             {
                 args.proxy = Some(v.clone());
             }
-            // `insecure` defaults to true; only honor the config value while
-            // the flag is still at that default (mirrors apply_if_default).
+            // `insecure` is None unless the user passed --insecure; only fill
+            // it from config when the CLI left it unspecified, so an explicit
+            // CLI choice (either direction) always wins (mirrors apply_if_default).
             if let Some(v) = scan.insecure
-                && args.insecure
+                && args.insecure.is_none()
             {
-                args.insecure = v;
+                args.insecure = Some(v);
             }
             if let Some(v) = scan.scan_timeout
                 && args.scan_timeout == 0
@@ -715,14 +716,16 @@ impl Config {
             {
                 args.proxy = Some(v.clone());
             }
-            // `insecure` defaults to true, so "still at default" means
-            // `args.insecure == true`. A CLI `--insecure=false` therefore
-            // wins over the config file; config only takes effect when the
-            // user left the flag untouched.
+            // `insecure` is `None` unless the user passed `--insecure[=…]`, so
+            // config only applies when the flag was left off. An explicit CLI
+            // value — `--insecure=true` *or* `--insecure=false` — is `Some(_)`
+            // and therefore always wins over the config file, in either
+            // direction. (A plain `bool` couldn't express this: it can't tell
+            // an explicit `--insecure=true` apart from the default.)
             if let Some(v) = scan.insecure
-                && args.insecure
+                && args.insecure.is_none()
             {
-                args.insecure = v;
+                args.insecure = Some(v);
             }
             if let Some(v) = scan.follow_redirects
                 && !args.follow_redirects

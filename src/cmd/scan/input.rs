@@ -494,7 +494,7 @@ pub(crate) async fn resolve_targets(
                     target.timeout = args.timeout;
                     target.delay = args.delay;
                     target.proxy = args.proxy.clone();
-                    target.insecure = args.insecure;
+                    target.insecure = args.insecure.unwrap_or(true);
                     target.follow_redirects = args.follow_redirects;
                     target.ignore_return = args.ignore_return.clone();
                     target.workers = args.workers;
@@ -758,7 +758,7 @@ fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
     target.timeout = args.timeout;
     target.delay = args.delay;
     target.proxy = args.proxy.clone();
-    target.insecure = args.insecure;
+    target.insecure = args.insecure.unwrap_or(true);
     target.follow_redirects = args.follow_redirects;
     target.ignore_return = args.ignore_return.clone();
     target.workers = args.workers;

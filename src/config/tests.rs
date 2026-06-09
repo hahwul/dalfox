@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 
 fn default_scan_args() -> crate::cmd::scan::ScanArgs {
     crate::cmd::scan::ScanArgs {
-        insecure: true,
+        insecure: Some(true),
         detect_outdated_libs: false,
         input_type: "auto".to_string(),
         format: "plain".to_string(),
@@ -439,39 +439,61 @@ fn test_apply_to_scan_args_if_default_insecure_precedence() {
     scan.insecure = Some(false);
     let cfg = Config { scan: Some(scan) };
 
-    // Case 1: CLI left insecure at its clap default (true) -> config flips it off.
+    // Case 1: CLI left --insecure unspecified (None) -> config flips it off.
     let mut args = default_scan_args();
-    assert!(args.insecure);
+    args.insecure = None;
     cfg.apply_to_scan_args_if_default(&mut args);
-    assert!(
-        !args.insecure,
-        "config insecure=false should apply when CLI is default"
+    assert_eq!(
+        args.insecure,
+        Some(false),
+        "config insecure=false should apply when CLI left it unspecified"
     );
 
-    // Case 2: CLI explicitly disabled it (false) -> config (also false) is a no-op,
-    // but more importantly a config of Some(true) must NOT re-enable it.
+    // Case 2: CLI explicitly disabled it (Some(false)) -> a config of Some(true)
+    // must NOT re-enable it; the explicit CLI choice wins.
     let mut scan_on = full_scan_config();
     scan_on.insecure = Some(true);
     let cfg_on = Config {
         scan: Some(scan_on),
     };
     let mut args = default_scan_args();
-    args.insecure = false; // user passed --insecure=false
+    args.insecure = Some(false); // user passed --insecure=false
     cfg_on.apply_to_scan_args_if_default(&mut args);
-    assert!(
-        !args.insecure,
+    assert_eq!(
+        args.insecure,
+        Some(false),
         "CLI --insecure=false must win over config insecure=true"
     );
 
-    // Case 3: config omits insecure (None) -> default-true is preserved.
+    // Case 3 (the precedence gap Copilot flagged): CLI explicitly *enabled* it
+    // (Some(true)) while config sets false -> CLI must win and stay insecure.
+    // A plain bool couldn't express this; Option<bool> can.
+    let mut scan_off = full_scan_config();
+    scan_off.insecure = Some(false);
+    let cfg_off = Config {
+        scan: Some(scan_off),
+    };
+    let mut args = default_scan_args();
+    args.insecure = Some(true); // user passed --insecure / --insecure=true
+    cfg_off.apply_to_scan_args_if_default(&mut args);
+    assert_eq!(
+        args.insecure,
+        Some(true),
+        "CLI --insecure=true must win over config insecure=false"
+    );
+
+    // Case 4: config omits insecure (None) + CLI unspecified -> stays None,
+    // and the effective value defaults to insecure (true).
     let cfg_none = Config {
         scan: Some(full_scan_config()),
     };
     let mut args = default_scan_args();
+    args.insecure = None;
     cfg_none.apply_to_scan_args_if_default(&mut args);
+    assert_eq!(args.insecure, None);
     assert!(
-        args.insecure,
-        "omitted config insecure keeps the scanner default (true)"
+        args.insecure.unwrap_or(true),
+        "omitted config + CLI keeps the scanner default (true)"
     );
 }
 
@@ -483,7 +505,7 @@ fn test_apply_to_scan_args_unconditional_overrides_insecure() {
     let cfg = Config { scan: Some(scan) };
     let mut args = default_scan_args();
     cfg.apply_to_scan_args(&mut args);
-    assert!(!args.insecure);
+    assert_eq!(args.insecure, Some(false));
 }
 
 #[test]

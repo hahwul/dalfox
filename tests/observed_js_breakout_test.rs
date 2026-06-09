@@ -46,7 +46,7 @@ async fn nested_object_handler(Query(p): Query<HashMap<String, String>>) -> Html
 
 fn base_args(url: String, out: String) -> ScanArgs {
     ScanArgs {
-        insecure: true,
+        insecure: Some(true),
         detect_outdated_libs: false,
         input_type: "url".to_string(),
         format: "json".to_string(),

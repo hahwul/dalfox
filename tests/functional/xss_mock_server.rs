@@ -1030,7 +1030,7 @@ async fn run_scan_test(
     let out_path_str = out_path.to_string_lossy().to_string();
 
     let args = ScanArgs {
-        insecure: true,
+        insecure: Some(true),
         detect_outdated_libs: false,
         input_type: "url".to_string(),
         format: "json".to_string(),
@@ -1156,7 +1156,7 @@ async fn run_discovery_once(opts: DiscoveryOpts) -> bool {
     target.workers = 10;
 
     let args = ScanArgs {
-        insecure: true,
+        insecure: Some(true),
         detect_outdated_libs: false,
         input_type: "url".to_string(),
         format: "json".to_string(),
@@ -2632,7 +2632,7 @@ async fn run_libscan(addr: SocketAddr, case_id: u32, detect_libs: bool) -> Vec<s
     let out_path_str = out_path.to_string_lossy().to_string();
 
     let args = ScanArgs {
-        insecure: true,
+        insecure: Some(true),
         // The opt-in outdated-library detector is gated by this flag.
         detect_outdated_libs: detect_libs,
         input_type: "url".to_string(),

@@ -10,7 +10,7 @@ use std::net::{Ipv4Addr, SocketAddr};
 
 fn default_scan_args() -> crate::cmd::scan::ScanArgs {
     crate::cmd::scan::ScanArgs {
-        insecure: true,
+        insecure: Some(true),
         detect_outdated_libs: false,
         input_type: "url".to_string(),
         format: "json".to_string(),

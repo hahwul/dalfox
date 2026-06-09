@@ -372,16 +372,20 @@ pub struct ScanArgs {
     /// Skip TLS/SSL certificate verification, accepting self-signed, expired,
     /// or hostname-mismatched certs. Enabled by default for scanner use; pass
     /// `--insecure=false` to enforce certificate validation. Example: --insecure=false
+    ///
+    /// Stored as Option so presence is distinguishable from the default:
+    /// `None` means the user didn't pass the flag (config may set it; the
+    /// effective value is `unwrap_or(true)`), while `Some(_)` is an explicit
+    /// CLI choice that always wins over config — in either direction.
     #[arg(
         long,
         num_args = 0..=1,
         require_equals = true,
-        default_value_t = true,
         default_missing_value = "true",
         action = clap::ArgAction::Set,
         value_parser = clap::builder::BoolishValueParser::new(),
     )]
-    pub insecure: bool,
+    pub insecure: Option<bool>,
 
     #[clap(help_heading = "NETWORK")]
     /// Follow HTTP redirects. Example: -F
@@ -621,8 +625,9 @@ impl ScanArgs {
             // Preflight only inspects content-type/parameters; it defaults to
             // trusting self-signed / staging certs (callers pass `true`) so
             // discovery isn't blocked by an internal TLS posture, but the value
-            // is now caller-controlled rather than hardcoded.
-            insecure: opts.insecure,
+            // is now caller-controlled rather than hardcoded. The caller always
+            // has a concrete bool here, so record it as an explicit choice.
+            insecure: Some(opts.insecure),
             follow_redirects: opts.follow_redirects,
             ignore_return: vec![],
             output: None,
@@ -709,32 +714,35 @@ mod arg_parser_tests {
             scan: ScanArgs,
         }
 
-        // Omitted: scanner trusts certs by default.
+        // Omitted: None (unspecified). The effective value is unwrap_or(true)
+        // at the consumption points, but presence must be distinguishable so
+        // config / CLI precedence can be resolved correctly.
         let cli = TestCli::try_parse_from(["dalfox", "https://example.com"])
             .expect("parse without --insecure");
-        assert!(cli.scan.insecure, "insecure should default to true");
+        assert_eq!(cli.scan.insecure, None, "omitted --insecure should be None");
 
-        // Bare `--insecure` keeps it on (and does NOT swallow the positional).
+        // Bare `--insecure` => Some(true) (and does NOT swallow the positional).
         let cli = TestCli::try_parse_from(["dalfox", "--insecure", "https://example.com"])
             .expect("parse with bare --insecure");
-        assert!(cli.scan.insecure);
+        assert_eq!(cli.scan.insecure, Some(true));
         assert_eq!(cli.scan.targets, vec!["https://example.com".to_string()]);
 
         // `--insecure=false` opts into TLS certificate validation.
         let cli = TestCli::try_parse_from(["dalfox", "https://example.com", "--insecure=false"])
             .expect("parse with --insecure=false");
-        assert!(
-            !cli.scan.insecure,
-            "insecure=false should disable insecure mode"
+        assert_eq!(
+            cli.scan.insecure,
+            Some(false),
+            "insecure=false should be Some(false)"
         );
 
         // Boolish values are accepted on the `=` form.
         let cli = TestCli::try_parse_from(["dalfox", "https://example.com", "--insecure=true"])
             .expect("parse with --insecure=true");
-        assert!(cli.scan.insecure);
+        assert_eq!(cli.scan.insecure, Some(true));
         let cli = TestCli::try_parse_from(["dalfox", "https://example.com", "--insecure=0"])
             .expect("parse with --insecure=0");
-        assert!(!cli.scan.insecure);
+        assert_eq!(cli.scan.insecure, Some(false));
     }
 
     #[test]
@@ -820,7 +828,7 @@ mod arg_parser_tests {
         assert!(args.skip_xss_scanning);
         assert!(args.skip_ast_analysis);
         assert!(args.silence);
-        assert!(args.insecure);
+        assert_eq!(args.insecure, Some(true));
         // skip_mining fans out to all three mining toggles.
         assert!(args.skip_mining && args.skip_mining_dict && args.skip_mining_dom);
     }
@@ -845,8 +853,9 @@ mod arg_parser_tests {
             skip_discovery: false,
             encoders: vec![],
         });
-        assert!(
-            !validate.insecure,
+        assert_eq!(
+            validate.insecure,
+            Some(false),
             "insecure=false must thread through for_preflight"
         );
     }

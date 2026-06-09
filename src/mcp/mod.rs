@@ -273,7 +273,7 @@ impl DalfoxMcp {
                 t.timeout = scan_args.timeout;
                 t.delay = scan_args.delay;
                 t.proxy = scan_args.proxy.clone();
-                t.insecure = scan_args.insecure;
+                t.insecure = scan_args.insecure.unwrap_or(true);
                 t.follow_redirects = scan_args.follow_redirects;
                 t.ignore_return = scan_args.ignore_return.clone();
                 t.workers = scan_args.workers;
@@ -1017,7 +1017,9 @@ Final results (via get_results_dalfox) include finding type \
             scan_timeout,
             delay,
             proxy,
-            insecure,
+            // params.insecure is a concrete bool (default true via serde); record
+            // it as an explicit choice so it flows through unchanged.
+            insecure: Some(insecure),
             follow_redirects,
             ignore_return: vec![],
             output: None,

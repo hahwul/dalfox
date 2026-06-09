@@ -372,7 +372,7 @@ fn test_load_custom_payloads_caches_by_path() {
 
 fn base_args() -> ScanArgs {
     ScanArgs {
-        insecure: true,
+        insecure: Some(true),
         detect_outdated_libs: false,
         input_type: "auto".to_string(),
         format: "json".to_string(),

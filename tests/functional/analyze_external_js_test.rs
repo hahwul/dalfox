@@ -143,7 +143,7 @@ fn make_scan_args(
         path.replace(['/', '.'], "_"),
     ));
     let args = ScanArgs {
-        insecure: true,
+        insecure: Some(true),
         detect_outdated_libs: false,
         input_type: "url".to_string(),
         format: "json".to_string(),

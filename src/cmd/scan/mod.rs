@@ -327,7 +327,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // Security note must reach the operator even with `--silence` —
     // silencing is for stdout, this is stderr and tells them about a
     // deliberate but consequential TLS posture.
-    if args.insecure
+    if args.insecure.unwrap_or(true)
         && parsed_targets
             .iter()
             .any(|t| t.url.scheme().eq_ignore_ascii_case("https"))
