@@ -397,35 +397,42 @@ impl DalfoxMcp {
                         // hit the REST server, now fixed in both places.
                         if !scan_args.skip_ast_analysis {
                             let client = target.build_client_or_default();
-                            if let Ok(resp) = client.get(target.url.clone()).send().await
-                                && let Ok(body) = resp.text().await
-                            {
-                                let ast_batch =
+                            if let Ok(resp) = client.get(target.url.clone()).send().await {
+                                // Read CSP off the response before consuming the
+                                // body so a `require-trusted-types-for` page is
+                                // analyzed with the same Trusted Types awareness
+                                // the CLI gets from preflight.
+                                let trusted_types_enforced =
+                                    crate::scanning::csp_requires_trusted_types(resp.headers());
+                                if let Ok(body) = resp.text().await {
+                                    let ast_batch =
                                     crate::scanning::ast_integration::run_initial_ast_dom_analysis(
                                         &body,
                                         target.url.as_str(),
                                         &target.method,
+                                        trusted_types_enforced,
                                     );
-                                if !ast_batch.is_empty() {
-                                    let added = ast_batch.len();
-                                    let mut guard = results_arc.lock().await;
-                                    guard.extend(ast_batch);
-                                    findings_count
-                                        .fetch_add(added, std::sync::atomic::Ordering::Relaxed);
+                                    if !ast_batch.is_empty() {
+                                        let added = ast_batch.len();
+                                        let mut guard = results_arc.lock().await;
+                                        guard.extend(ast_batch);
+                                        findings_count
+                                            .fetch_add(added, std::sync::atomic::Ordering::Relaxed);
+                                    }
+                                    let ext_batch = crate::scanning::fetch_and_analyze_external_js(
+                                        &client,
+                                        &target,
+                                        &body,
+                                        scan_args.as_ref(),
+                                    )
+                                    .await;
+                                    crate::scanning::accumulate_findings(
+                                        &results_arc,
+                                        &findings_count,
+                                        ext_batch,
+                                    )
+                                    .await;
                                 }
-                                let ext_batch = crate::scanning::fetch_and_analyze_external_js(
-                                    &client,
-                                    &target,
-                                    &body,
-                                    scan_args.as_ref(),
-                                )
-                                .await;
-                                crate::scanning::accumulate_findings(
-                                    &results_arc,
-                                    &findings_count,
-                                    ext_batch,
-                                )
-                                .await;
                             }
                         }
 

@@ -103,6 +103,16 @@ impl Target {
         self.method.parse().unwrap_or(reqwest::Method::GET)
     }
 
+    /// Whether this target's (enforcing) CSP requires Trusted Types
+    /// (`require-trusted-types-for 'script'`). Drives the AST DOM analyzer's
+    /// strict-default-policy suppression. False when no CSP was analysed or the
+    /// captured policy was report-only (neutralised at analysis time).
+    pub fn trusted_types_enforced(&self) -> bool {
+        self.csp_analysis
+            .as_ref()
+            .is_some_and(|c| c.require_trusted_types_for)
+    }
+
     /// Cache key derived from the Target fields that affect Client construction.
     fn client_cache_key(&self) -> ClientCacheKey {
         (

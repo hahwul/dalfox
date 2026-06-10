@@ -159,7 +159,33 @@ pub(crate) async fn run_preflight_and_analysis(
                         if let Some((hn, hv)) = preflight.csp_header {
                             __preflight_csp_present = true;
                             // Analyze CSP and store on target for bypass payload generation
-                            target.csp_analysis = Some(crate::payload::xss_csp_bypass::analyze_csp(&hv));
+                            let mut csp = crate::payload::xss_csp_bypass::analyze_csp(&hv);
+                            // A report-only CSP enforces nothing — it only emits
+                            // violation reports — so `require-trusted-types-for`
+                            // there must not drive Trusted Types suppression in
+                            // the AST analyzer (that would be a false negative).
+                            // Bypass-payload fields stay as parsed.
+                            if !hn.eq_ignore_ascii_case("content-security-policy") {
+                                csp.require_trusted_types_for = false;
+                            }
+                            if crate::DEBUG.load(Ordering::Relaxed) {
+                                let class = if csp.is_hardened() {
+                                    "hardened (nonce/hash-only)"
+                                } else if csp.is_gadget_bypassable() {
+                                    "gadget-bypassable"
+                                } else {
+                                    "no script-execution bypass surface"
+                                };
+                                crate::ceprintln!(
+                                    "[csp] {} classified {} (strict-dynamic={}, nonces={}, trusted-types-enforced={})",
+                                    hn,
+                                    class,
+                                    csp.has_strict_dynamic,
+                                    csp.nonce_values.len(),
+                                    csp.require_trusted_types_for
+                                );
+                            }
+                            target.csp_analysis = Some(csp);
                             __preflight_csp_header = Some((hn, hv));
                         }
                         // Store WAF detection result on target
@@ -504,6 +530,7 @@ pub(crate) async fn run_preflight_and_analysis(
                             &response_text,
                             target.url.as_str(),
                             &target.method,
+                            target.trusted_types_enforced(),
                         );
                     if !ast_batch.is_empty() {
                         let added = ast_batch.len();

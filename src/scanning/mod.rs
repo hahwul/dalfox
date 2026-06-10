@@ -438,12 +438,14 @@ async fn run_ast_dom_analysis(
     let js_blocks = crate::scanning::ast_integration::extract_javascript_from_html(response_text);
     let script_element_ids =
         crate::scanning::ast_integration::extract_script_element_ids(response_text);
+    let trusted_types_enforced = target.trusted_types_enforced();
     for js_code in js_blocks {
         let findings =
             crate::scanning::ast_integration::analyze_javascript_for_dom_xss_with_html_context(
                 &js_code,
                 target.url.as_str(),
                 &script_element_ids,
+                trusted_types_enforced,
             );
         for (vuln, payload, description) in findings {
             let self_bootstrap_verified =
@@ -582,6 +584,7 @@ pub(crate) async fn fetch_and_analyze_external_js(
         crate::scanning::ast_integration::extract_same_origin_script_srcs(html, &target.url);
 
     let script_element_ids = crate::scanning::ast_integration::extract_script_element_ids(html);
+    let trusted_types_enforced = target.trusted_types_enforced();
     let mut results: Vec<crate::scanning::result::Result> = Vec::new();
 
     // extract_same_origin_script_srcs already deduplicates; just cap the count.
@@ -620,6 +623,7 @@ pub(crate) async fn fetch_and_analyze_external_js(
                 &body,
                 target.url.as_str(),
                 &script_element_ids,
+                trusted_types_enforced,
             );
 
         for (vuln, payload, description) in findings {
@@ -858,6 +862,24 @@ fn compute_waf_strategy(
             Some(crate::waf::bypass::merge_strategies(&waf_types))
         }
     })
+}
+
+/// Whether the response headers carry an **enforcing** CSP with
+/// `require-trusted-types-for 'script'`. Used by the server / MCP surfaces —
+/// which fetch the page directly rather than through the preflight stage — to
+/// give the initial AST DOM analysis the same Trusted Types awareness the CLI
+/// path derives from `target.csp_analysis`.
+///
+/// The report-only variant (`Content-Security-Policy-Report-Only`) is
+/// deliberately ignored: it only emits violation reports and enforces nothing,
+/// so the browser does not route sinks through the default policy. Treating it
+/// as enforcement would suppress genuine findings (a false negative).
+pub fn csp_requires_trusted_types(headers: &reqwest::header::HeaderMap) -> bool {
+    headers
+        .get("content-security-policy")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| crate::payload::xss_csp_bypass::analyze_csp(v).require_trusted_types_for)
+        .unwrap_or(false)
 }
 
 /// Pre-merge the payloads shared across every parameter: CSP-bypass payloads

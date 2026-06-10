@@ -210,3 +210,231 @@ fn test_bypass_payloads_jsdelivr_gadget() {
     let payloads = get_csp_bypass_payloads(&analysis);
     assert!(payloads.iter().any(|p| p.contains("jsdelivr.net")));
 }
+
+// --- nonce / hash parsing -------------------------------------------------
+
+#[test]
+fn test_analyze_csp_parses_nonce_value_case_preserved() {
+    let analysis = analyze_csp("script-src 'nonce-AbC123==' 'strict-dynamic'");
+    assert_eq!(analysis.nonce_values, vec!["AbC123==".to_string()]);
+    // The nonce token must not leak into the host allowlist.
+    assert!(analysis.whitelisted_domains.is_empty());
+}
+
+#[test]
+fn test_analyze_csp_parses_multiple_nonces() {
+    let analysis = analyze_csp("script-src 'nonce-aaa' 'nonce-bbb'");
+    assert_eq!(
+        analysis.nonce_values,
+        vec!["aaa".to_string(), "bbb".to_string()]
+    );
+}
+
+#[test]
+fn test_analyze_csp_empty_nonce_ignored() {
+    let analysis = analyze_csp("script-src 'nonce-'");
+    assert!(analysis.nonce_values.is_empty());
+}
+
+#[test]
+fn test_analyze_csp_parses_hashes() {
+    let analysis = analyze_csp("script-src 'sha256-abc123=' 'sha384-def' 'sha512-ghi'");
+    assert_eq!(
+        analysis.hash_values,
+        vec![
+            "sha256-abc123=".to_string(),
+            "sha384-def".to_string(),
+            "sha512-ghi".to_string()
+        ]
+    );
+    assert!(analysis.whitelisted_domains.is_empty());
+}
+
+#[test]
+fn test_analyze_csp_nonce_not_whitelisted_with_host() {
+    let analysis = analyze_csp("script-src 'nonce-xyz' https://cdn.example.com");
+    assert_eq!(analysis.nonce_values, vec!["xyz".to_string()]);
+    assert_eq!(
+        analysis.whitelisted_domains,
+        vec!["https://cdn.example.com".to_string()]
+    );
+}
+
+// --- Trusted Types directive parsing --------------------------------------
+
+#[test]
+fn test_analyze_csp_require_trusted_types_for_script() {
+    let analysis = analyze_csp("require-trusted-types-for 'script'");
+    assert!(analysis.require_trusted_types_for);
+}
+
+#[test]
+fn test_analyze_csp_require_trusted_types_for_unquoted() {
+    // Some servers omit the quotes; accept both spellings.
+    let analysis = analyze_csp("require-trusted-types-for script");
+    assert!(analysis.require_trusted_types_for);
+}
+
+#[test]
+fn test_analyze_csp_no_require_trusted_types_by_default() {
+    let analysis = analyze_csp("script-src 'self'");
+    assert!(!analysis.require_trusted_types_for);
+    assert!(analysis.trusted_types.is_none());
+}
+
+#[test]
+fn test_analyze_csp_trusted_types_policy_list() {
+    let analysis = analyze_csp("trusted-types default dompurify 'allow-duplicates'");
+    let tt = analysis.trusted_types.expect("trusted-types parsed");
+    assert_eq!(
+        tt,
+        vec![
+            "default".to_string(),
+            "dompurify".to_string(),
+            "allow-duplicates".to_string()
+        ]
+    );
+}
+
+#[test]
+fn test_analyze_csp_trusted_types_empty_means_no_policies() {
+    let analysis = analyze_csp("trusted-types;");
+    assert_eq!(analysis.trusted_types, Some(vec![]));
+}
+
+// --- classification helpers ----------------------------------------------
+
+#[test]
+fn test_is_nonce_or_hash_based() {
+    assert!(analyze_csp("script-src 'nonce-x'").is_nonce_or_hash_based());
+    assert!(analyze_csp("script-src 'sha256-x='").is_nonce_or_hash_based());
+    assert!(!analyze_csp("script-src 'self' https://cdn.example.com").is_nonce_or_hash_based());
+}
+
+#[test]
+fn test_hardened_nonce_only_csp() {
+    // nonce + hash, no strict-dynamic, no unsafe-*, no gadget host → hardened.
+    let analysis =
+        analyze_csp("script-src 'nonce-r4nd0m' 'sha256-abc='; object-src 'none'; base-uri 'none'");
+    assert!(analysis.is_hardened());
+    assert!(!analysis.is_gadget_bypassable());
+    // And it emits no actionable script-execution payloads beyond what missing
+    // directives (none here) would add.
+    let payloads = get_csp_bypass_payloads(&analysis);
+    assert!(payloads.iter().all(|p| !p.contains("nonce=")));
+}
+
+#[test]
+fn test_gadget_bypassable_strict_dynamic() {
+    let analysis = analyze_csp("script-src 'nonce-r4nd0m' 'strict-dynamic'");
+    assert!(analysis.is_gadget_bypassable());
+    assert!(!analysis.is_hardened());
+}
+
+#[test]
+fn test_gadget_bypassable_whitelisted_gadget_host() {
+    let analysis = analyze_csp("script-src 'nonce-x' https://cdnjs.cloudflare.com");
+    assert!(analysis.is_gadget_bypassable());
+    assert!(!analysis.is_hardened());
+}
+
+#[test]
+fn test_unsafe_inline_is_gadget_bypassable() {
+    let analysis = analyze_csp("script-src 'unsafe-inline'");
+    assert!(analysis.is_gadget_bypassable());
+}
+
+// --- strict-dynamic payload generation ------------------------------------
+
+#[test]
+fn test_strict_dynamic_emits_nonce_reuse_payloads() {
+    let analysis = analyze_csp("script-src 'strict-dynamic' 'nonce-PRED1CT4BLE'");
+    let payloads = get_csp_bypass_payloads(&analysis);
+    // Nonce reuse: an injected <script> carrying the captured nonce. The value
+    // is quoted so a base64 nonce containing `=` stays intact in the attribute.
+    assert!(
+        payloads
+            .iter()
+            .any(|p| p.contains("nonce=\"PRED1CT4BLE\"") && p.contains("<script"))
+    );
+}
+
+#[test]
+fn test_strict_dynamic_nonce_value_is_quoted() {
+    // A real base64 nonce ends in `=`; the emitted attribute must quote it so
+    // the value isn't truncated in an unquoted HTML attribute.
+    let analysis = analyze_csp("script-src 'strict-dynamic' 'nonce-YWJjZA=='");
+    let payloads = get_csp_bypass_payloads(&analysis);
+    assert!(
+        payloads.iter().any(|p| p.contains("nonce=\"YWJjZA==\"")),
+        "base64 nonce with '=' padding must be emitted quoted and intact"
+    );
+    // And never unquoted (which would truncate at the first `=`).
+    assert!(
+        payloads.iter().all(|p| !p.contains("nonce=YWJjZA")),
+        "nonce must not be emitted unquoted"
+    );
+}
+
+#[test]
+fn test_strict_dynamic_emits_dom_gadgets() {
+    let analysis = analyze_csp("script-src 'strict-dynamic' 'nonce-x'");
+    let payloads = get_csp_bypass_payloads(&analysis);
+    // DOM script-gadgets survive strict-dynamic; require.js data-main and the
+    // document.write self-propagating gadget are the canonical ones.
+    assert!(payloads.iter().any(|p| p.contains("data-main")));
+    assert!(payloads.iter().any(|p| p.contains("document.write")));
+}
+
+#[test]
+fn test_strict_dynamic_without_nonce_still_emits_dom_gadgets() {
+    // hash-pinned strict-dynamic with no nonce: no nonce-reuse payload, but the
+    // DOM gadgets still apply.
+    let analysis = analyze_csp("script-src 'strict-dynamic' 'sha256-abc='");
+    let payloads = get_csp_bypass_payloads(&analysis);
+    assert!(payloads.iter().all(|p| !p.contains("nonce=")));
+    assert!(payloads.iter().any(|p| p.contains("data-main")));
+}
+
+#[test]
+fn test_strict_dynamic_ignores_host_allowlist_gadgets() {
+    // Under strict-dynamic the host allowlist is ignored, so a plain
+    // host-loaded JSONP gadget (Google complete/search) must NOT be emitted —
+    // only the DOM script-gadgets that survive strict-dynamic.
+    let analysis = analyze_csp("script-src 'strict-dynamic' 'nonce-x' https://ajax.googleapis.com");
+    let payloads = get_csp_bypass_payloads(&analysis);
+    assert!(
+        payloads
+            .iter()
+            .all(|p| !p.contains("google.com/complete/search")),
+        "host-allowlist JSONP gadget should be suppressed under strict-dynamic"
+    );
+}
+
+#[test]
+fn test_payloads_are_deduped() {
+    // A host matching multiple gadget patterns must not yield duplicate payloads.
+    let analysis = CspAnalysis {
+        whitelisted_domains: vec![
+            "https://code.jquery.com".to_string(),
+            "https://code.jquery.com".to_string(),
+        ],
+        ..Default::default()
+    };
+    let payloads = get_csp_bypass_payloads(&analysis);
+    let mut sorted = payloads.clone();
+    sorted.sort();
+    sorted.dedup();
+    assert_eq!(sorted.len(), payloads.len(), "payloads must be unique");
+}
+
+#[test]
+fn test_report_only_and_full_csp_parse_identically() {
+    // analyze_csp takes only the value, so report-only headers (handled at the
+    // header layer) parse the same directives.
+    let value = "script-src 'nonce-abc' 'strict-dynamic'; require-trusted-types-for 'script'";
+    let analysis = analyze_csp(value);
+    assert!(analysis.has_strict_dynamic);
+    assert_eq!(analysis.nonce_values, vec!["abc".to_string()]);
+    assert!(analysis.require_trusted_types_for);
+}

@@ -1774,3 +1774,33 @@ async fn test_accumulate_findings_empty_batch_is_noop() {
         "results vec must remain empty for empty batch"
     );
 }
+
+// --- csp_requires_trusted_types (server/MCP TT enforcement gate) ----------
+
+#[test]
+fn test_csp_requires_trusted_types_enforcing_header() {
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        "content-security-policy",
+        "require-trusted-types-for 'script'".parse().unwrap(),
+    );
+    assert!(super::csp_requires_trusted_types(&headers));
+}
+
+#[test]
+fn test_csp_requires_trusted_types_ignores_report_only() {
+    // Report-only enforces nothing, so it must NOT signal TT enforcement —
+    // otherwise a real DOM-XSS finding would be wrongly suppressed (FN).
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert(
+        "content-security-policy-report-only",
+        "require-trusted-types-for 'script'".parse().unwrap(),
+    );
+    assert!(!super::csp_requires_trusted_types(&headers));
+}
+
+#[test]
+fn test_csp_requires_trusted_types_absent() {
+    let headers = reqwest::header::HeaderMap::new();
+    assert!(!super::csp_requires_trusted_types(&headers));
+}
