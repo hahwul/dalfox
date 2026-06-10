@@ -1200,18 +1200,18 @@ impl<'a> DomXssVisitor<'a> {
             };
             let call_src = self.expr_source(result.unwrap());
             let rest = body_src.replacen(call_src, "", 1);
-            if rest.contains(p) {
+            if Self::identifier_referenced(&rest, p) {
                 return TtStrictness::Permissive;
             }
             return TtStrictness::Strict;
         }
 
         // (2) No sanitizer: strict only when the parameter is never referenced in
-        //     the body (input isn't passed through). The substring check
-        //     over-counts references, so it only ever errs toward permissive.
+        //     the body (input isn't passed through). The token check only ever
+        //     errs toward permissive, so it never mislabels a passthrough.
         match param_name {
             Some(p) => {
-                if body_src.contains(p) {
+                if Self::identifier_referenced(body_src, p) {
                     TtStrictness::Permissive
                 } else {
                     TtStrictness::Strict
@@ -1219,6 +1219,38 @@ impl<'a> DomXssVisitor<'a> {
             }
             None => TtStrictness::Strict,
         }
+    }
+
+    /// Whether `name` appears in `src` as a standalone identifier token — i.e.
+    /// not as a substring inside a longer identifier/keyword. Bounded on both
+    /// sides by a non-identifier byte (`[A-Za-z0-9_$]`).
+    ///
+    /// A deliberately text-based (rather than AST-based) reference check: it
+    /// catches every real identifier reference (a JS identifier is always
+    /// delimited by non-identifier characters), so it never mislabels a genuine
+    /// passthrough as strict — preserving the no-false-negative guarantee. It is
+    /// stricter than a raw `contains`, so `param "s"` no longer matches inside
+    /// `sanitize` / `console` / `"processing"`, recovering the intended
+    /// false-positive suppression. (It does not strip string/comment contents;
+    /// a bare token there still matches, which only over-keeps a finding.)
+    fn identifier_referenced(src: &str, name: &str) -> bool {
+        if name.is_empty() {
+            return false;
+        }
+        let is_ident = |b: u8| b.is_ascii_alphanumeric() || b == b'_' || b == b'$';
+        let bytes = src.as_bytes();
+        let mut from = 0;
+        while let Some(rel) = src[from..].find(name) {
+            let start = from + rel;
+            let end = start + name.len();
+            let before_ok = start == 0 || !is_ident(bytes[start - 1]);
+            let after_ok = end == bytes.len() || !is_ident(bytes[end]);
+            if before_ok && after_ok {
+                return true;
+            }
+            from = start + 1;
+        }
+        false
     }
 
     /// Source text spanning a list of statements (first start .. last end),

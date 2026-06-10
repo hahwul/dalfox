@@ -326,13 +326,16 @@ pub fn get_csp_bypass_payloads(analysis: &CspAnalysis) -> Vec<String> {
     if analysis.has_strict_dynamic {
         // Nonce reuse: an injected <script> bearing a captured nonce executes
         // when that nonce is static / predictable / reflected into the sink.
+        // The nonce value is quoted: base64 nonces routinely contain `=` (and
+        // sometimes `+`/`/`), which are invalid in an unquoted HTML attribute
+        // value and would truncate the nonce so it no longer matches the CSP.
         for nonce in &analysis.nonce_values {
             payloads.push(format!(
-                "<script nonce={} class={}>alert(1)</script>",
+                "<script nonce=\"{}\" class={}>alert(1)</script>",
                 nonce, class_marker
             ));
             payloads.push(format!(
-                "<script nonce={} src=\"data:text/javascript,alert(1)\" id={}></script>",
+                "<script nonce=\"{}\" src=\"data:text/javascript,alert(1)\" id={}></script>",
                 nonce, id_marker
             ));
         }

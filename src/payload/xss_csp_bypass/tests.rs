@@ -350,11 +350,29 @@ fn test_unsafe_inline_is_gadget_bypassable() {
 fn test_strict_dynamic_emits_nonce_reuse_payloads() {
     let analysis = analyze_csp("script-src 'strict-dynamic' 'nonce-PRED1CT4BLE'");
     let payloads = get_csp_bypass_payloads(&analysis);
-    // Nonce reuse: an injected <script> carrying the captured nonce.
+    // Nonce reuse: an injected <script> carrying the captured nonce. The value
+    // is quoted so a base64 nonce containing `=` stays intact in the attribute.
     assert!(
         payloads
             .iter()
-            .any(|p| p.contains("nonce=PRED1CT4BLE") && p.contains("<script"))
+            .any(|p| p.contains("nonce=\"PRED1CT4BLE\"") && p.contains("<script"))
+    );
+}
+
+#[test]
+fn test_strict_dynamic_nonce_value_is_quoted() {
+    // A real base64 nonce ends in `=`; the emitted attribute must quote it so
+    // the value isn't truncated in an unquoted HTML attribute.
+    let analysis = analyze_csp("script-src 'strict-dynamic' 'nonce-YWJjZA=='");
+    let payloads = get_csp_bypass_payloads(&analysis);
+    assert!(
+        payloads.iter().any(|p| p.contains("nonce=\"YWJjZA==\"")),
+        "base64 nonce with '=' padding must be emitted quoted and intact"
+    );
+    // And never unquoted (which would truncate at the first `=`).
+    assert!(
+        payloads.iter().all(|p| !p.contains("nonce=YWJjZA")),
+        "nonce must not be emitted unquoted"
     );
 }
 

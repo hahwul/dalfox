@@ -130,10 +130,38 @@ pub fn all() -> &'static [ScriptGadget] {
 /// allowlist) is present. Used for CSPs *without* `strict-dynamic`, where a
 /// whitelisted host genuinely permits loading a `<script src>` from it.
 pub fn gadgets_for_host(allowed_origin: &str) -> impl Iterator<Item = &'static ScriptGadget> {
-    let origin = allowed_origin.to_ascii_lowercase();
+    let lowered = allowed_origin.to_ascii_lowercase();
+    let host = extract_host(&lowered).to_string();
     GADGETS.iter().filter(move |g| {
-        !g.host_patterns.is_empty() && g.host_patterns.iter().any(|p| origin.contains(p))
+        !g.host_patterns.is_empty() && g.host_patterns.iter().any(|p| host_matches(&host, p))
     })
+}
+
+/// Extract the bare host from a CSP `script-src` source value: strips the
+/// scheme (`https://` or a leading `//`), any path/query/fragment, the port,
+/// and a leading `*.` wildcard label. Input is expected already lowercased.
+fn extract_host(origin: &str) -> &str {
+    let s = origin
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(origin);
+    let s = s.strip_prefix("//").unwrap_or(s);
+    let s = s.split(['/', '?', '#']).next().unwrap_or(s);
+    let s = s.split(':').next().unwrap_or(s);
+    s.strip_prefix("*.").unwrap_or(s)
+}
+
+/// Match an allowlisted `host` against a gadget host pattern. A dotted pattern
+/// (a full domain like `googleapis.com`) is matched on a domain boundary — the
+/// host must equal it or be a subdomain — so `notgoogle.com` no longer matches
+/// `google.com`. A bare fragment (`jquery`, `angular`) keeps loose substring
+/// matching, since those intentionally catch any host serving that library.
+fn host_matches(host: &str, pattern: &str) -> bool {
+    if pattern.contains('.') {
+        host == pattern || host.ends_with(&format!(".{pattern}"))
+    } else {
+        host.contains(pattern)
+    }
 }
 
 /// Gadgets that survive `strict-dynamic` — DOM script-gadgets that get a trusted

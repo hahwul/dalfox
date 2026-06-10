@@ -72,6 +72,53 @@ fn test_gadgets_for_host_unknown_returns_empty() {
 }
 
 #[test]
+fn test_gadgets_for_host_does_not_overmatch_lookalike_domain() {
+    // `notgoogle.com` merely *contains* `google.com` as a substring — a dotted
+    // domain pattern must match on a domain boundary, not loosely.
+    assert!(gadgets_for_host("https://notgoogle.com").next().is_none());
+    assert!(
+        gadgets_for_host("https://jsdelivr.net.evil.com")
+            .next()
+            .is_none()
+    );
+    assert!(
+        gadgets_for_host("https://cdnjs.cloudflare.com.attacker.test")
+            .next()
+            .is_none()
+    );
+}
+
+#[test]
+fn test_gadgets_for_host_matches_subdomain_of_domain_pattern() {
+    // A genuine subdomain of a dotted pattern still matches.
+    assert!(
+        gadgets_for_host("https://ajax.googleapis.com")
+            .next()
+            .is_some()
+    );
+    assert!(
+        gadgets_for_host("https://sub.cdn.jsdelivr.net")
+            .next()
+            .is_some()
+    );
+}
+
+#[test]
+fn test_gadgets_for_host_strips_port_and_path() {
+    assert!(
+        gadgets_for_host("https://code.jquery.com:443/jquery.js")
+            .next()
+            .is_some()
+    );
+}
+
+#[test]
+fn test_gadgets_for_host_handles_wildcard_and_schemeless() {
+    assert!(gadgets_for_host("*.googleapis.com").next().is_some());
+    assert!(gadgets_for_host("//cdn.jsdelivr.net").next().is_some());
+}
+
+#[test]
 fn test_gadgets_for_host_is_case_insensitive() {
     let hits: Vec<_> = gadgets_for_host("HTTPS://CODE.JQUERY.COM").collect();
     assert!(!hits.is_empty());
