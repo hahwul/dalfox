@@ -1335,6 +1335,11 @@ impl<'a> DomXssVisitor<'a> {
     /// `createHTML`, a value could reach the sink as an already-`TrustedHTML`
     /// (but unsanitized) object the default policy never re-checks — so we do
     /// not suppress, keeping the finding.
+    ///
+    /// Scope note: analysis is per-`<script>` block, so `default_tt_policy` only
+    /// reflects a `'default'` policy defined in the *same* block as the sink. A
+    /// policy created in a separate block leaves this `None` here, so the
+    /// finding is kept — the safe (no-false-negative) direction.
     fn default_policy_suppresses_sink(&self, sink: &str) -> bool {
         if !self.trusted_types_enforced {
             return false;

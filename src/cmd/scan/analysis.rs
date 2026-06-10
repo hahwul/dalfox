@@ -168,6 +168,23 @@ pub(crate) async fn run_preflight_and_analysis(
                             if !hn.eq_ignore_ascii_case("content-security-policy") {
                                 csp.require_trusted_types_for = false;
                             }
+                            if crate::DEBUG.load(Ordering::Relaxed) {
+                                let class = if csp.is_hardened() {
+                                    "hardened (nonce/hash-only)"
+                                } else if csp.is_gadget_bypassable() {
+                                    "gadget-bypassable"
+                                } else {
+                                    "no script-execution bypass surface"
+                                };
+                                crate::ceprintln!(
+                                    "[csp] {} classified {} (strict-dynamic={}, nonces={}, trusted-types-enforced={})",
+                                    hn,
+                                    class,
+                                    csp.has_strict_dynamic,
+                                    csp.nonce_values.len(),
+                                    csp.require_trusted_types_for
+                                );
+                            }
                             target.csp_analysis = Some(csp);
                             __preflight_csp_header = Some((hn, hv));
                         }
