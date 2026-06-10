@@ -680,24 +680,31 @@ pub fn analyze_javascript_for_dom_xss(
     String,
     String,
 )> {
-    analyze_javascript_for_dom_xss_with_html_context(js_code, _url, &HashSet::new())
+    analyze_javascript_for_dom_xss_with_html_context(js_code, _url, &HashSet::new(), false)
 }
 
 /// Same as `analyze_javascript_for_dom_xss`, but supplies the AST analyzer
 /// with the set of `<script>` element IDs observed in the surrounding HTML
 /// so inline `getElementById('id').innerText = tainted` shapes resolve to
 /// a JS-eval sink. Use `extract_script_element_ids(html)` to build the set.
+///
+/// `trusted_types_enforced` reflects the response CSP's
+/// `require-trusted-types-for 'script'`; when set, a strict `'default'`
+/// Trusted Types policy in the page suppresses the (now false-positive)
+/// TrustedHTML-sink findings it neutralizes.
 pub fn analyze_javascript_for_dom_xss_with_html_context(
     js_code: &str,
     _url: &str,
     script_element_ids: &HashSet<String>,
+    trusted_types_enforced: bool,
 ) -> Vec<(
     crate::scanning::ast_dom_analysis::DomXssVulnerability,
     String,
     String,
 )> {
     let analyzer = crate::scanning::ast_dom_analysis::AstDomAnalyzer::new()
-        .with_script_element_ids(script_element_ids.clone());
+        .with_script_element_ids(script_element_ids.clone())
+        .with_trusted_types_enforced(trusted_types_enforced);
 
     match analyzer.analyze(js_code) {
         Ok(vulnerabilities) => {
@@ -769,6 +776,7 @@ pub fn run_initial_ast_dom_analysis(
     response_text: &str,
     target_url: &str,
     target_method: &str,
+    trusted_types_enforced: bool,
 ) -> Vec<crate::scanning::result::Result> {
     let js_blocks = extract_javascript_from_html(response_text);
     let script_element_ids = extract_script_element_ids(response_text);
@@ -778,6 +786,7 @@ pub fn run_initial_ast_dom_analysis(
             &js_code,
             target_url,
             &script_element_ids,
+            trusted_types_enforced,
         );
         for (vuln, payload, description) in findings {
             let self_bootstrap_verified = has_self_bootstrap_verification(&js_code, &vuln.source);

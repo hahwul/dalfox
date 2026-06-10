@@ -711,7 +711,7 @@ fn e2e_jquery_level1_constructor_finding_and_hash_poc() {
       if (target) { $(target).appendTo('#content'); }
     </script>
     </body></html>"#;
-    let results = run_initial_ast_dom_analysis(html, "http://t/jquery/level1/", "GET");
+    let results = run_initial_ast_dom_analysis(html, "http://t/jquery/level1/", "GET", false);
     assert!(
         results.iter().any(|r| r.evidence.contains("jQuery$")),
         "jQuery $() constructor must surface a finding; got {:?}",
@@ -746,7 +746,8 @@ fn e2e_codeexec_level1_dynamic_import_finding_and_data_uri_poc() {
       }
     </script>
     </body></html>"#;
-    let results = run_initial_ast_dom_analysis(html, "http://t/codeexec/level1/?query=a", "GET");
+    let results =
+        run_initial_ast_dom_analysis(html, "http://t/codeexec/level1/?query=a", "GET", false);
     assert!(
         results.iter().any(|r| r.evidence.contains("Sink: import")),
         "dynamic import() must surface a finding; got {:?}",
@@ -780,7 +781,7 @@ fn e2e_apidom_level1_fetch_innerhtml_finding() {
         .then(function (t) { document.getElementById('out').innerHTML = t; });
     </script>
     </body></html>"#;
-    let results = run_initial_ast_dom_analysis(html, "http://t/apidom/level1/?q=a", "GET");
+    let results = run_initial_ast_dom_analysis(html, "http://t/apidom/level1/?q=a", "GET", false);
     assert!(
         results
             .iter()
@@ -807,7 +808,7 @@ fn e2e_apidom_level3_xhr_innerhtml_finding() {
       xhr.send();
     </script>
     </body></html>"#;
-    let results = run_initial_ast_dom_analysis(html, "http://t/apidom/level3/?q=a", "GET");
+    let results = run_initial_ast_dom_analysis(html, "http://t/apidom/level3/?q=a", "GET", false);
     assert!(
         results.iter().any(
             |r| r.evidence.contains("Source: XMLHttpRequest.responseText")

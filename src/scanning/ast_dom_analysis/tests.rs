@@ -3923,3 +3923,338 @@ fn recursion_guard_caps_then_restores_depth() {
         "dropping the RAII guards must decrement the shared counter"
     );
 }
+
+// =========================================================================
+// Trusted Types awareness (issue #1097)
+// =========================================================================
+
+/// Helper: count DOM-XSS findings for `code`, with optional enforcement.
+fn tt_findings(code: &str, enforced: bool) -> Vec<DomXssVulnerability> {
+    AstDomAnalyzer::new()
+        .with_trusted_types_enforced(enforced)
+        .analyze(code)
+        .expect("analyze ok")
+}
+
+#[test]
+fn test_tt_strict_explicit_wrapper_clears_taint() {
+    // Routing the tainted value through a strict policy.createHTML — which
+    // returns a recognised sanitizer's output — is genuinely safe, so no
+    // finding. (Not gated on enforcement: the value is sanitized regardless.)
+    let code = r#"
+const policy = trustedTypes.createPolicy('p', { createHTML: s => DOMPurify.sanitize(s) });
+document.body.innerHTML = policy.createHTML(location.hash);
+"#;
+    assert!(
+        tt_findings(code, false).is_empty(),
+        "strict createHTML wrapper must clear taint"
+    );
+}
+
+#[test]
+fn test_tt_permissive_explicit_wrapper_keeps_finding() {
+    // A permissive `createHTML: x => x` is a no-op; the value reaching innerHTML
+    // is still attacker-controlled, so the finding must be kept (flagged).
+    let code = r#"
+const policy = trustedTypes.createPolicy('p', { createHTML: x => x });
+document.body.innerHTML = policy.createHTML(location.hash);
+"#;
+    let f = tt_findings(code, false);
+    assert!(
+        f.iter().any(|v| v.sink.contains("innerHTML")),
+        "permissive createHTML wrapper must NOT suppress the finding"
+    );
+}
+
+#[test]
+fn test_tt_permissive_explicit_wrapper_function_form() {
+    let code = r#"
+const policy = trustedTypes.createPolicy('p', { createHTML: function(s){ return s; } });
+el.innerHTML = policy.createHTML(location.search);
+"#;
+    assert!(
+        !tt_findings(code, false).is_empty(),
+        "an identity function-expression createHTML must keep the finding"
+    );
+}
+
+#[test]
+fn test_tt_method_shorthand_strict_wrapper_clears() {
+    // `createHTML(s) { return DOMPurify.sanitize(s); }` method shorthand.
+    let code = r#"
+const policy = trustedTypes.createPolicy('p', { createHTML(s) { return DOMPurify.sanitize(s); } });
+el.innerHTML = policy.createHTML(location.hash);
+"#;
+    assert!(
+        tt_findings(code, false).is_empty(),
+        "method-shorthand strict createHTML must clear taint"
+    );
+}
+
+#[test]
+fn test_tt_inline_chain_strict_clears() {
+    // Inline `createPolicy(...).createHTML(x)` chain (no variable binding).
+    let code = r#"
+el.innerHTML = trustedTypes.createPolicy('p', { createHTML: s => escapeHtml(s) }).createHTML(location.hash);
+"#;
+    assert!(
+        tt_findings(code, false).is_empty(),
+        "inline strict createPolicy().createHTML() chain must clear taint"
+    );
+}
+
+#[test]
+fn test_tt_inline_chain_permissive_keeps() {
+    let code = r#"
+el.innerHTML = trustedTypes.createPolicy('p', { createHTML: s => s }).createHTML(location.hash);
+"#;
+    assert!(
+        !tt_findings(code, false).is_empty(),
+        "inline permissive createPolicy().createHTML() chain must keep finding"
+    );
+}
+
+#[test]
+fn test_tt_strict_default_policy_suppresses_under_enforcement() {
+    // A strict 'default' policy auto-applies to every TrustedHTML sink when
+    // require-trusted-types-for is enforced → the raw-string sink is protected.
+    let code = r#"
+trustedTypes.createPolicy('default', { createHTML: s => DOMPurify.sanitize(s) });
+document.body.innerHTML = location.hash;
+"#;
+    assert!(
+        tt_findings(code, true).is_empty(),
+        "strict default policy under enforcement must suppress the TrustedHTML finding"
+    );
+}
+
+#[test]
+fn test_tt_strict_default_policy_kept_without_enforcement() {
+    // No require-trusted-types-for → the default policy is inert → finding kept.
+    // This is the critical no-false-negative guarantee.
+    let code = r#"
+trustedTypes.createPolicy('default', { createHTML: s => DOMPurify.sanitize(s) });
+document.body.innerHTML = location.hash;
+"#;
+    assert!(
+        !tt_findings(code, false).is_empty(),
+        "without enforcement a default policy is inert → finding must be kept"
+    );
+}
+
+#[test]
+fn test_tt_permissive_default_policy_kept_under_enforcement() {
+    // The headline case from #1097: createPolicy('default', {createHTML: x=>x})
+    // is a bypassable no-op — even with enforcement it provides no protection,
+    // so the finding must remain.
+    let code = r#"
+trustedTypes.createPolicy('default', { createHTML: x => x });
+document.body.innerHTML = location.hash;
+"#;
+    assert!(
+        !tt_findings(code, true).is_empty(),
+        "permissive default policy must be flagged, not treated as protection"
+    );
+}
+
+#[test]
+fn test_tt_default_suppression_only_covers_html_sinks() {
+    // A strict default createHTML guards TrustedHTML sinks only — it must NOT
+    // suppress a TrustedScript sink like eval (that needs createScript).
+    let code = r#"
+trustedTypes.createPolicy('default', { createHTML: s => DOMPurify.sanitize(s) });
+eval(location.hash);
+"#;
+    assert!(
+        tt_findings(code, true)
+            .iter()
+            .any(|v| v.sink.contains("eval")),
+        "default createHTML must not suppress a non-HTML (eval) sink"
+    );
+}
+
+#[test]
+fn test_tt_fn_guard_permissive_explicit_policy_blocks_default_suppression() {
+    // FN guard: a strict default policy would normally suppress, but the
+    // presence of a permissive explicit policy means a value could reach the
+    // sink as already-Trusted-but-unsanitized — so the finding is kept.
+    let code = r#"
+trustedTypes.createPolicy('default', { createHTML: s => DOMPurify.sanitize(s) });
+const weak = trustedTypes.createPolicy('weak', { createHTML: x => x });
+document.body.innerHTML = location.hash;
+"#;
+    assert!(
+        !tt_findings(code, true).is_empty(),
+        "a permissive explicit policy must disable default-policy suppression (no FN)"
+    );
+}
+
+#[test]
+fn test_tt_default_suppression_order_keeps_finding_when_policy_defined_after() {
+    // The sink executes before the policy is created → at sink time the default
+    // policy is not yet active → finding kept (correct and FN-safe).
+    let code = r#"
+document.body.innerHTML = location.hash;
+trustedTypes.createPolicy('default', { createHTML: s => DOMPurify.sanitize(s) });
+"#;
+    assert!(
+        !tt_findings(code, true).is_empty(),
+        "a default policy defined after the sink must not suppress it"
+    );
+}
+
+#[test]
+fn test_tt_window_prefixed_create_policy_recognised() {
+    let code = r#"
+const p = window.trustedTypes.createPolicy('p', { createHTML: s => DOMPurify.sanitize(s) });
+el.innerHTML = p.createHTML(location.hash);
+"#;
+    assert!(
+        tt_findings(code, false).is_empty(),
+        "window.trustedTypes.createPolicy must be recognised"
+    );
+}
+
+#[test]
+fn test_tt_unknown_custom_sanitizer_in_policy_is_permissive() {
+    // An unrecognised wrapper inside createHTML is conservatively permissive, so
+    // we keep the finding (no false negative on a custom, possibly-unsafe fn).
+    let code = r#"
+const p = trustedTypes.createPolicy('p', { createHTML: s => myCustomThing(s) });
+el.innerHTML = p.createHTML(location.hash);
+"#;
+    assert!(
+        !tt_findings(code, false).is_empty(),
+        "unrecognised createHTML body must stay permissive (keep finding)"
+    );
+}
+
+#[test]
+fn test_tt_no_policy_no_behavior_change() {
+    // Sanity: with no Trusted Types at all, enforcement flag changes nothing.
+    let code = r#"
+document.body.innerHTML = location.hash;
+"#;
+    assert_eq!(
+        tt_findings(code, true).len(),
+        tt_findings(code, false).len(),
+        "absent TT policies → enforcement flag must not change findings"
+    );
+    assert!(!tt_findings(code, true).is_empty());
+}
+
+#[test]
+fn test_tt_strict_create_script_wrapper_clears_eval() {
+    // createScript with a constant (no-param) body never returns the input, so
+    // it is strict → the eval sink is cleared.
+    let code = r#"
+const p = trustedTypes.createPolicy('p', { createScript: () => 'console.log(1)' });
+eval(p.createScript(location.hash));
+"#;
+    assert!(
+        tt_findings(code, false).is_empty(),
+        "strict createScript wrapper must clear the eval sink"
+    );
+}
+
+#[test]
+fn test_tt_strict_create_script_url_wrapper_clears_src() {
+    let code = r#"
+const s = document.createElement('script');
+const p = trustedTypes.createPolicy('p', { createScriptURL: () => 'https://cdn.example/a.js' });
+s.src = p.createScriptURL(location.hash);
+"#;
+    assert!(
+        tt_findings(code, false).is_empty(),
+        "strict createScriptURL wrapper must clear the src sink"
+    );
+}
+
+#[test]
+fn test_tt_permissive_create_script_wrapper_keeps_eval() {
+    let code = r#"
+const p = trustedTypes.createPolicy('p', { createScript: s => s });
+eval(p.createScript(location.hash));
+"#;
+    assert!(
+        !tt_findings(code, false).is_empty(),
+        "permissive createScript wrapper must keep the eval finding"
+    );
+}
+
+// --- Trusted Types classifier FN regression tests (review #1097) ----------
+
+#[test]
+fn test_tt_default_param_createhtml_is_permissive() {
+    // Regression: `(s = '') => s` is a default-parameter (AssignmentPattern), so
+    // the old `first_param_name` returned None and the body was misclassified as
+    // strict — suppressing a real finding. It is an identity passthrough and
+    // must stay permissive (finding kept) even under enforcement.
+    let code = r#"
+trustedTypes.createPolicy('default', { createHTML: (s = '') => s });
+document.body.innerHTML = location.hash;
+"#;
+    assert!(
+        !tt_findings(code, true).is_empty(),
+        "default-parameter identity createHTML must not be treated as strict"
+    );
+}
+
+#[test]
+fn test_tt_destructured_param_createhtml_is_permissive() {
+    let code = r#"
+const p = trustedTypes.createPolicy('p', { createHTML: ({ html }) => html });
+el.innerHTML = p.createHTML(location.hash);
+"#;
+    assert!(
+        !tt_findings(code, false).is_empty(),
+        "destructured-param createHTML can't be name-tracked → keep finding"
+    );
+}
+
+#[test]
+fn test_tt_guarded_raw_return_before_sanitizer_is_permissive() {
+    // Regression: a raw `return s` nested in an `if` precedes the top-level
+    // sanitizer return. The old single-first-return scan only saw the sanitizer
+    // and wrongly classified the policy strict, suppressing the finding.
+    let code = r#"
+const p = trustedTypes.createPolicy('p', {
+  createHTML(s) { if (window.unsafe) return s; return DOMPurify.sanitize(s); }
+});
+el.innerHTML = p.createHTML(location.hash);
+"#;
+    assert!(
+        !tt_findings(code, false).is_empty(),
+        "a guarded raw-passthrough return path must keep the policy permissive"
+    );
+}
+
+#[test]
+fn test_tt_concat_with_sanitizer_is_permissive() {
+    // `return DOMPurify.sanitize(s) + s` leaks the raw input alongside the
+    // sanitized output → permissive.
+    let code = r#"
+const p = trustedTypes.createPolicy('p', { createHTML: s => DOMPurify.sanitize(s) + s });
+el.innerHTML = p.createHTML(location.hash);
+"#;
+    assert!(
+        !tt_findings(code, false).is_empty(),
+        "concatenating raw input with sanitized output must stay permissive"
+    );
+}
+
+#[test]
+fn test_tt_sole_sanitizer_return_after_side_effect_is_strict() {
+    // A non-return statement before the sole sanitizer return must NOT block the
+    // strict classification — the returned value is still fully sanitized.
+    let code = r#"
+const p = trustedTypes.createPolicy('p', {
+  createHTML(s) { log('converting'); return DOMPurify.sanitize(s); }
+});
+el.innerHTML = p.createHTML(location.hash);
+"#;
+    assert!(
+        tt_findings(code, false).is_empty(),
+        "a sole sanitizer return after a side-effect statement is still strict"
+    );
+}

@@ -1,3 +1,4 @@
+pub mod gadget_db;
 pub mod js_breakout;
 pub mod mining;
 pub mod remote;

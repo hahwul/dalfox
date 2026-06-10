@@ -202,6 +202,45 @@ enum PromiseValueKind {
     Unknown,
 }
 
+/// Strictness of a Trusted Types policy `create*` callback.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum TtStrictness {
+    /// The callback genuinely neutralizes its input — it returns a recognised
+    /// sanitizer's output, or never returns the raw parameter at all. Routing a
+    /// tainted value through such a callback (or its auto-applied default
+    /// policy) is safe, so the finding is a false positive and is suppressed.
+    Strict,
+    /// Identity / passthrough (`x => x`), trivial wrapping, or a body we cannot
+    /// prove safe. The conservative default: taint is *kept*, so a permissive
+    /// `createPolicy('default', {createHTML: x=>x})` is correctly flagged as a
+    /// bypassable no-op rather than mistaken for protection.
+    Permissive,
+}
+
+/// Per-method strictness of a `trustedTypes.createPolicy(name, {...})` policy.
+/// Methods absent from the config default to [`TtStrictness::Permissive`] so an
+/// unanalyzable policy never suppresses a finding (no false negative).
+#[derive(Clone, Copy)]
+struct TtPolicyInfo {
+    create_html: TtStrictness,
+    create_script: TtStrictness,
+    create_script_url: TtStrictness,
+}
+
+/// The first parameter of a Trusted Types `create*` callback, as far as the
+/// classifier can reason about it.
+enum TtParam {
+    /// No parameter at all (and no rest param) — the callback can't reference
+    /// the untrusted input, so its result is input-independent.
+    None,
+    /// A plain `BindingIdentifier` we can track by name.
+    Named(String),
+    /// A default (`s = ''`), destructured (`{h}`), or rest (`...args`) param —
+    /// the input is reachable but not trackable by a simple name, so the
+    /// callback is treated conservatively (permissive).
+    Complex,
+}
+
 /// AST visitor for DOM XSS analysis
 struct DomXssVisitor<'a> {
     /// Set of tainted variable names
@@ -282,6 +321,25 @@ struct DomXssVisitor<'a> {
     /// borrowing `self` — the walkers take `&mut self`, which a `&self`-borrow
     /// held across the call would conflict with.
     recursion_depth: Rc<Cell<u32>>,
+    /// Whether `require-trusted-types-for 'script'` is enforced for this page
+    /// (threaded from the response CSP). Gates the program-wide default-policy
+    /// suppression: without enforcement a `'default'` policy is inert, so we
+    /// never suppress on its account — preserving today's findings exactly.
+    trusted_types_enforced: bool,
+    /// `policyVar -> per-method strictness` for `const p = trustedTypes
+    /// .createPolicy(name, {...})`. Lets `p.createHTML(taint)` be treated as a
+    /// (strict) sanitizer or a (permissive) no-op. Populated as the walk passes
+    /// each binding, so a policy defined before a sink is known at the sink; a
+    /// policy defined *after* simply isn't applied (the finding is kept — the
+    /// safe direction).
+    tt_policies: HashMap<String, TtPolicyInfo>,
+    /// Strictness of the auto-applied `'default'` policy, when one is defined in
+    /// this block. Used — only under [`trusted_types_enforced`] — to suppress
+    /// TrustedHTML-sink findings the browser's default `createHTML` would
+    /// neutralize.
+    ///
+    /// [`trusted_types_enforced`]: DomXssVisitor::trusted_types_enforced
+    default_tt_policy: Option<TtPolicyInfo>,
 }
 
 /// RAII token returned by [`DomXssVisitor::enter_recursion`]; decrements the
@@ -688,11 +746,23 @@ impl<'a> DomXssVisitor<'a> {
             response_object_vars: HashSet::new(),
             branch_depth: 0,
             recursion_depth: Rc::new(Cell::new(0)),
+            trusted_types_enforced: false,
+            tt_policies: HashMap::new(),
+            default_tt_policy: None,
         }
     }
 
     fn with_script_element_ids(mut self, ids: HashSet<String>) -> Self {
         self.script_element_ids = ids;
+        self
+    }
+
+    /// Mark that the page enforces `require-trusted-types-for 'script'`, so a
+    /// strict `'default'` Trusted Types policy genuinely neutralizes TrustedHTML
+    /// sinks and those findings can be suppressed. Off by default — when off,
+    /// behaviour is identical to before Trusted Types awareness existed.
+    fn with_trusted_types_enforced(mut self, enforced: bool) -> Self {
+        self.trusted_types_enforced = enforced;
         self
     }
 
@@ -974,6 +1044,310 @@ impl<'a> DomXssVisitor<'a> {
             return true;
         }
         false
+    }
+
+    // --- Trusted Types policy recognition ---------------------------------
+    //
+    // A `trustedTypes.createPolicy(name, { createHTML, createScript,
+    // createScriptURL })` registers conversion callbacks. Two shapes matter:
+    //   * an *explicit* wrapper call `policy.createHTML(x)` whose result feeds a
+    //     sink — a strict callback sanitizes `x` (taint cleared), a permissive
+    //     one (`x => x`) does not (taint kept, finding flagged);
+    //   * the `'default'` policy, which the browser auto-applies to every
+    //     TrustedHTML sink *when `require-trusted-types-for` is enforced* — a
+    //     strict default `createHTML` neutralizes those sinks (see
+    //     [`default_policy_suppresses_sink`]).
+    //
+    // [`default_policy_suppresses_sink`]: DomXssVisitor::default_policy_suppresses_sink
+
+    /// If `call` is `trustedTypes.createPolicy(name, {...})` (bare or via
+    /// `window`/`self`/`globalThis`), return the static policy name (when
+    /// determinable) and its config object literal.
+    fn tt_create_policy_config<'b>(
+        &self,
+        call: &'b CallExpression<'a>,
+    ) -> Option<(Option<String>, &'b ObjectExpression<'a>)> {
+        let Expression::StaticMemberExpression(member) = &call.callee else {
+            return None;
+        };
+        if member.property.name.as_str() != "createPolicy" {
+            return None;
+        }
+        let is_trusted_types = matches!(
+            self.get_expr_string(&member.object).as_deref(),
+            Some(
+                "trustedTypes"
+                    | "window.trustedTypes"
+                    | "self.trustedTypes"
+                    | "globalThis.trustedTypes"
+            )
+        );
+        if !is_trusted_types {
+            return None;
+        }
+        let name = call
+            .arguments
+            .first()
+            .and_then(|a| a.as_expression())
+            .and_then(|e| self.eval_static_string_expr(e));
+        let config = call
+            .arguments
+            .get(1)
+            .and_then(|a| a.as_expression())
+            .and_then(|e| match e {
+                Expression::ObjectExpression(o) => Some(&**o),
+                _ => None,
+            });
+        config.map(|c| (name, c))
+    }
+
+    /// Same as [`tt_create_policy_config`] but accepts any expression (unwraps
+    /// parentheses), used for the inline `createPolicy(...).createHTML(x)` chain.
+    ///
+    /// [`tt_create_policy_config`]: DomXssVisitor::tt_create_policy_config
+    fn tt_create_policy_call<'b>(
+        &self,
+        expr: &'b Expression<'a>,
+    ) -> Option<(Option<String>, &'b ObjectExpression<'a>)> {
+        match expr {
+            Expression::CallExpression(call) => self.tt_create_policy_config(call),
+            Expression::ParenthesizedExpression(p) => self.tt_create_policy_call(&p.expression),
+            _ => None,
+        }
+    }
+
+    /// First parameter of a `create*` callback, classified for the strictness
+    /// analysis. A default/destructured/rest param is [`TtParam::Complex`]
+    /// (reachable input we can't name-track → conservatively permissive); only a
+    /// plain identifier is trackable, and only a genuinely empty parameter list
+    /// is [`TtParam::None`].
+    fn tt_callback_param(params: &FormalParameters<'a>) -> TtParam {
+        match params.items.first() {
+            Some(p) => match &p.pattern {
+                BindingPattern::BindingIdentifier(id) => TtParam::Named(id.name.to_string()),
+                _ => TtParam::Complex,
+            },
+            None if params.rest.is_some() => TtParam::Complex,
+            None => TtParam::None,
+        }
+    }
+
+    /// Classify a policy `create*` callback as strict (genuinely sanitizing) or
+    /// permissive. Conservative by construction: anything not *provably* safe is
+    /// permissive, so the taint is kept and no false negative is introduced.
+    ///
+    /// A callback is strict only when:
+    ///   * it has no trackable parameter at all (can't pass the input through); or
+    ///   * its return expression is a recognised sanitizer call **and** the
+    ///     parameter is referenced *only* inside that call — i.e. no other
+    ///     statement (a guarded `return s`, a `'<b>'+s` concat, …) leaks the raw
+    ///     input. The reference test is textual over the whole body source, so
+    ///     it catches passthrough at any nesting depth and in any return path,
+    ///     and only ever errs toward permissive.
+    fn classify_tt_create_method(&self, fn_expr: &Expression<'a>) -> TtStrictness {
+        let (params, stmts): (
+            &FormalParameters<'a>,
+            &oxc_allocator::Vec<'a, Statement<'a>>,
+        ) = match fn_expr {
+            Expression::ArrowFunctionExpression(arrow) => (&arrow.params, &arrow.body.statements),
+            Expression::FunctionExpression(func) => match &func.body {
+                Some(body) => (&func.params, &body.statements),
+                None => return TtStrictness::Permissive,
+            },
+            // Not a callback we can analyze (e.g. a bare identifier reference)
+            // — assume the worst: permissive, so the finding is kept.
+            _ => return TtStrictness::Permissive,
+        };
+
+        let param = Self::tt_callback_param(params);
+        // A default/destructured/rest param routes the input through in a way we
+        // can't name-track — keep the finding.
+        let param_name = match &param {
+            TtParam::None => None,
+            TtParam::Named(name) => Some(name.as_str()),
+            TtParam::Complex => return TtStrictness::Permissive,
+        };
+
+        // The "result" expression used for sanitizer detection: an arrow concise
+        // body's expression, otherwise the first `return`.
+        let result = match fn_expr {
+            Expression::ArrowFunctionExpression(arrow) if arrow.expression => match stmts.first() {
+                Some(Statement::ExpressionStatement(stmt)) => Some(&stmt.expression),
+                _ => None,
+            },
+            _ => Self::first_return_expr(stmts),
+        };
+        let result = result.map(|mut r| {
+            while let Expression::ParenthesizedExpression(p) = r {
+                r = &p.expression;
+            }
+            r
+        });
+
+        // Body source (statements only — excludes the parameter list, so the
+        // parameter declaration itself never counts as a reference).
+        let body_src = self.stmts_source(stmts);
+
+        // (1) Result is a recognised sanitizer call. Grant strict only when the
+        //     parameter is referenced nowhere *outside* that call — otherwise
+        //     another path (e.g. `if (c) return s;`) could leak the raw input.
+        if let Some(Expression::CallExpression(call)) = result
+            && let Some(name) = self.get_expr_string(&call.callee)
+            && (self.sanitizers.contains(name.as_str()) || Self::is_likely_sanitizer_name(&name))
+        {
+            let Some(p) = param_name else {
+                return TtStrictness::Strict;
+            };
+            let call_src = self.expr_source(result.unwrap());
+            let rest = body_src.replacen(call_src, "", 1);
+            if rest.contains(p) {
+                return TtStrictness::Permissive;
+            }
+            return TtStrictness::Strict;
+        }
+
+        // (2) No sanitizer: strict only when the parameter is never referenced in
+        //     the body (input isn't passed through). The substring check
+        //     over-counts references, so it only ever errs toward permissive.
+        match param_name {
+            Some(p) => {
+                if body_src.contains(p) {
+                    TtStrictness::Permissive
+                } else {
+                    TtStrictness::Strict
+                }
+            }
+            None => TtStrictness::Strict,
+        }
+    }
+
+    /// Source text spanning a list of statements (first start .. last end),
+    /// empty when the list is empty. Used to inspect a callback body without
+    /// the surrounding braces or parameter list.
+    fn stmts_source(&self, stmts: &[Statement<'a>]) -> &'a str {
+        match (stmts.first(), stmts.last()) {
+            (Some(first), Some(last)) => self
+                .source_code
+                .get(first.span().start as usize..last.span().end as usize)
+                .unwrap_or(""),
+            _ => "",
+        }
+    }
+
+    /// Source text of a single expression.
+    fn expr_source(&self, expr: &Expression<'a>) -> &'a str {
+        let span = expr.span();
+        self.source_code
+            .get(span.start as usize..span.end as usize)
+            .unwrap_or("")
+    }
+
+    /// Build a [`TtPolicyInfo`] from a `createPolicy` config object literal.
+    fn build_tt_policy_info(&self, config: &ObjectExpression<'a>) -> TtPolicyInfo {
+        let mut info = TtPolicyInfo {
+            create_html: TtStrictness::Permissive,
+            create_script: TtStrictness::Permissive,
+            create_script_url: TtStrictness::Permissive,
+        };
+        for prop in &config.properties {
+            let oxc_ast::ast::ObjectPropertyKind::ObjectProperty(p) = prop else {
+                continue;
+            };
+            let Some(key) = self.get_property_key_name(&p.key) else {
+                continue;
+            };
+            match key.as_str() {
+                "createHTML" => info.create_html = self.classify_tt_create_method(&p.value),
+                "createScript" => info.create_script = self.classify_tt_create_method(&p.value),
+                "createScriptURL" => {
+                    info.create_script_url = self.classify_tt_create_method(&p.value)
+                }
+                _ => {}
+            }
+        }
+        info
+    }
+
+    /// Record a `var p = trustedTypes.createPolicy(name, {...})` binding so a
+    /// later `p.createHTML(x)` resolves, and remember the `'default'` policy.
+    /// Reassigning `p` to a non-policy clears the stale entry.
+    fn record_tt_policy_binding(&mut self, var_name: &str, init: &Expression<'a>) {
+        if let Some((name, config)) = self.tt_create_policy_call(init) {
+            let info = self.build_tt_policy_info(config);
+            self.tt_policies.insert(var_name.to_string(), info);
+            if name.as_deref() == Some("default") {
+                self.default_tt_policy = Some(info);
+            }
+        } else {
+            self.tt_policies.remove(var_name);
+        }
+    }
+
+    /// If `call` is a Trusted Types `create*` wrapper (`policy.createHTML(x)`,
+    /// `.createScript`, `.createScriptURL`) — either on a tracked policy
+    /// variable or an inline `createPolicy(...).createHTML(x)` chain — return
+    /// the strictness of the corresponding callback.
+    fn tt_wrapper_call_strictness(&self, call: &CallExpression<'a>) -> Option<TtStrictness> {
+        let Expression::StaticMemberExpression(member) = &call.callee else {
+            return None;
+        };
+        let pick = |info: &TtPolicyInfo| match member.property.name.as_str() {
+            "createHTML" => Some(info.create_html),
+            "createScript" => Some(info.create_script),
+            "createScriptURL" => Some(info.create_script_url),
+            _ => None,
+        };
+        if let Expression::Identifier(id) = &member.object
+            && let Some(info) = self.tt_policies.get(id.name.as_str())
+        {
+            return pick(info);
+        }
+        if let Some((_, config)) = self.tt_create_policy_call(&member.object) {
+            return pick(&self.build_tt_policy_info(config));
+        }
+        None
+    }
+
+    /// TrustedHTML-family sinks: the ones the browser routes through a Trusted
+    /// Types `createHTML` policy (including the default policy) under
+    /// enforcement. Script / ScriptURL sinks are intentionally excluded — they
+    /// use `createScript` / `createScriptURL`, which the default-policy
+    /// suppression does not model.
+    fn is_trusted_html_sink(sink: &str) -> bool {
+        matches!(
+            sink,
+            "innerHTML"
+                | "outerHTML"
+                | "insertAdjacentHTML"
+                | "createContextualFragment"
+                | "document.write"
+                | "document.writeln"
+                | "setHTMLUnsafe"
+                | "srcdoc"
+                | "html"
+        )
+    }
+
+    /// Whether an enforced, strict `'default'` Trusted Types policy neutralizes
+    /// this TrustedHTML sink, making the finding a false positive.
+    ///
+    /// FN guard: if *any* explicit policy in this block has a permissive
+    /// `createHTML`, a value could reach the sink as an already-`TrustedHTML`
+    /// (but unsanitized) object the default policy never re-checks — so we do
+    /// not suppress, keeping the finding.
+    fn default_policy_suppresses_sink(&self, sink: &str) -> bool {
+        if !self.trusted_types_enforced {
+            return false;
+        }
+        let Some(policy) = &self.default_tt_policy else {
+            return false;
+        };
+        if policy.create_html != TtStrictness::Strict || !Self::is_trusted_html_sink(sink) {
+            return false;
+        }
+        self.tt_policies
+            .values()
+            .all(|p| p.create_html == TtStrictness::Strict)
     }
 
     /// Evaluate an expression to a static string when possible.
@@ -1572,6 +1946,15 @@ impl<'a> DomXssVisitor<'a> {
             }
         }
 
+        // Trusted Types policy wrapper: `policy.createHTML(x)` / `.createScript`
+        // / `.createScriptURL`. A *strict* callback neutralizes its input like a
+        // sanitizer (taint cleared); a *permissive* one (`x => x`) does not, so
+        // we fall through and the argument's taint propagates — correctly
+        // flagging a `createPolicy('default', {createHTML: x=>x})` no-op.
+        if self.tt_wrapper_call_strictness(call) == Some(TtStrictness::Strict) {
+            return (false, None);
+        }
+
         // Sanitizers produce de-tainted values
         if let Some(func_name) = self.get_expr_string(&call.callee)
             && (self.sanitizers.contains(func_name.as_str())
@@ -1906,6 +2289,12 @@ impl<'a> DomXssVisitor<'a> {
         description: &str,
         explicit_source: Option<String>,
     ) {
+        // An enforced, strict `'default'` Trusted Types policy auto-sanitizes
+        // every TrustedHTML sink, so such a finding is a false positive.
+        if self.default_policy_suppresses_sink(sink) {
+            return;
+        }
+
         let offset = span.start as usize;
         // Binary search for the line containing this byte offset
         let line_idx = match self.line_starts.binary_search(&offset) {
@@ -2355,6 +2744,11 @@ impl<'a> DomXssVisitor<'a> {
                 } else {
                     self.script_element_vars.remove(var_name);
                 }
+
+                // `const p = trustedTypes.createPolicy(name, {...})` — track the
+                // policy so a later `p.createHTML(x)` resolves, and note the
+                // auto-applied `'default'` policy.
+                self.record_tt_policy_binding(var_name, init);
 
                 let mut assigned_url_search_params_source = false;
                 if let Expression::StaticMemberExpression(member) = init
@@ -3403,6 +3797,10 @@ impl<'a> DomXssVisitor<'a> {
                 if !assigned_bind_alias {
                     self.bound_function_aliases.remove(target_name);
                 }
+
+                // `p = trustedTypes.createPolicy(name, {...})` assignment form.
+                self.record_tt_policy_binding(target_name, &assign.right);
+
                 // Propagate taint through direct assignments like `a = taintedValue;`
                 if right_tainted {
                     self.tainted_vars.insert(target_name.to_string());
@@ -3447,6 +3845,15 @@ impl<'a> DomXssVisitor<'a> {
 
     /// Walk through a call expression
     fn walk_call_expression(&mut self, call: &CallExpression<'a>) {
+        // Standalone `trustedTypes.createPolicy('default', {...})` (not bound to
+        // a variable) still registers the auto-applied default policy.
+        if let Some((name, config)) = self.tt_create_policy_config(call)
+            && name.as_deref() == Some("default")
+        {
+            let info = self.build_tt_policy_info(config);
+            self.default_tt_policy = Some(info);
+        }
+
         // fetch().then(...) response-source chains (issue #1024). Drive the
         // whole chain here so each callback body is walked with the resolved
         // Response / tainted value bound to its parameter, then return.
@@ -4145,6 +4552,11 @@ pub struct AstDomAnalyzer {
     /// (see `ast_integration::extract_script_element_ids`). Empty when
     /// the caller has no HTML context.
     script_element_ids: HashSet<String>,
+    /// Whether the response CSP enforces `require-trusted-types-for 'script'`.
+    /// Threaded into the visitor to gate strict-default-policy suppression.
+    /// Off by default — preserving pre-Trusted-Types behaviour for callers
+    /// without CSP context.
+    trusted_types_enforced: bool,
 }
 
 impl AstDomAnalyzer {
@@ -4158,6 +4570,14 @@ impl AstDomAnalyzer {
     /// recognised as a JS-eval sink even when the lookup is inline.
     pub fn with_script_element_ids(mut self, ids: HashSet<String>) -> Self {
         self.script_element_ids = ids;
+        self
+    }
+
+    /// Mark that the response CSP enforces `require-trusted-types-for 'script'`,
+    /// so a strict `'default'` Trusted Types policy in the page neutralizes
+    /// TrustedHTML sinks and those (now false-positive) findings are suppressed.
+    pub fn with_trusted_types_enforced(mut self, enforced: bool) -> Self {
+        self.trusted_types_enforced = enforced;
         self
     }
 
@@ -4193,13 +4613,14 @@ impl AstDomAnalyzer {
         }
 
         let script_element_ids = self.script_element_ids.clone();
+        let trusted_types_enforced = self.trusted_types_enforced;
 
         // Fast path: a script this small can't nest a parser-recursion vector
         // deep enough to overflow a normal worker stack (see [`INLINE_PARSE_BYTES`]),
         // so parse it inline and skip the thread-spawn cost the common small
         // inline `<script>` block would otherwise pay on every call.
         if source_code.len() <= INLINE_PARSE_BYTES {
-            return Self::analyze_on_stack(source_code, script_element_ids);
+            return Self::analyze_on_stack(source_code, script_element_ids, trusted_types_enforced);
         }
 
         // Larger input may carry a deep multi-byte statement/assignment chain
@@ -4211,7 +4632,7 @@ impl AstDomAnalyzer {
             let handle = std::thread::Builder::new()
                 .stack_size(ANALYZE_STACK_BYTES)
                 .spawn_scoped(scope, move || {
-                    Self::analyze_on_stack(source_code, script_element_ids)
+                    Self::analyze_on_stack(source_code, script_element_ids, trusted_types_enforced)
                 });
             match handle {
                 // A panic inside the parse/walk (not a stack overflow, which
@@ -4234,6 +4655,7 @@ impl AstDomAnalyzer {
     fn analyze_on_stack(
         source_code: &str,
         script_element_ids: HashSet<String>,
+        trusted_types_enforced: bool,
     ) -> Result<Vec<DomXssVulnerability>, String> {
         let allocator = Allocator::default();
         let source_type = SourceType::default();
@@ -4245,8 +4667,9 @@ impl AstDomAnalyzer {
             return Err(format!("Parse errors: {}", error_messages.join(", ")));
         }
 
-        let mut visitor =
-            DomXssVisitor::new(source_code).with_script_element_ids(script_element_ids);
+        let mut visitor = DomXssVisitor::new(source_code)
+            .with_script_element_ids(script_element_ids)
+            .with_trusted_types_enforced(trusted_types_enforced);
         visitor.walk_statements(&ret.program.body);
 
         Ok(visitor.vulnerabilities)

@@ -19,7 +19,7 @@ Dalfox composes payloads from several families:
 | **Event handler** | `onmouseover=alert(1)` | Existing attribute value |
 | **DOM clobbering** | `<img id=x>` | Legacy DOM lookups |
 | **URL protocol** | `javascript:alert(1)` | `href`/`src`-like attributes |
-| **CSP bypass** | Nonce exfil, fallback origins | When CSP is relaxed |
+| **CSP bypass** | `strict-dynamic` script gadgets, nonce reuse, JSONP on allowed hosts | When the response carries a bypassable CSP |
 | **mXSS** | `<foreignobject>`/DOMPurify bypasses | Sanitizer-mutated DOM |
 | **Blind** | `<script src=//callback/></script>` | `--blind` is set |
 
@@ -36,6 +36,59 @@ During discovery Dalfox classifies each parameter by **injection context**, the 
 - Unknown → fallback mix of HTML + attribute
 
 This keeps request counts sane while maximising hit rate.
+
+## CSP-aware bypass payloads
+
+When the preflight stage sees a `Content-Security-Policy` (or `…-Report-Only`)
+header — or a `<meta http-equiv>` equivalent — Dalfox parses it and tailors the
+script-execution payloads to that policy's actual weaknesses. Payloads are only
+generated for the directives that are genuinely exploitable, so a target with no
+CSP (or a hardened one) sees no extra requests.
+
+| CSP shape | What Dalfox emits |
+|-----------|-------------------|
+| `unsafe-inline` / `unsafe-eval` | direct inline / `eval`-family payloads |
+| missing `base-uri` / `object-src` | `<base>` hijack / `<object>`/`<embed>` injection |
+| `data:` / `blob:` in `script-src` | `<script src=data:…>` / `Blob` URL loaders |
+| whitelisted CDN host | the matching JSONP / framework **script gadget** for that host |
+| `strict-dynamic` | DOM script-gadgets (RequireJS `data-main`, `document.write` self-propagation, AngularJS bootstrap) plus **nonce reuse** when a nonce is captured |
+
+Two modern shapes that earlier releases parsed but never acted on are now live:
+
+- **`strict-dynamic`.** Under `strict-dynamic` the browser ignores the host
+  allowlist, so a plain `<script src=allowed-host>` no longer loads. Dalfox
+  switches to DOM script-gadgets — payloads that get an already-trusted script
+  to create the attacker script — and, when the policy pins a nonce, emits a
+  `<script nonce=…>` reuse payload (effective when the nonce is static,
+  predictable, or reflected).
+- **Nonce / hash pinning.** `'nonce-…'` and `'sha256-…'` tokens are parsed and
+  used to classify the policy. A pure random-nonce/hash policy with no
+  `strict-dynamic` and no gadget host is treated as *hardened* — Dalfox does not
+  waste requests on it.
+
+The gadget set lives in an embedded, extensible database (JSONBee / H5SC /
+Google CSP-Evaluator shapes) rather than a hardcoded list, so coverage grows
+without touching the analyzer.
+
+## Trusted Types awareness
+
+[Trusted Types](https://web.dev/articles/trusted-types) is the primary DOM-XSS
+mitigation in hardened apps. Dalfox's AST DOM-XSS analyzer understands it:
+
+- A **strict** policy callback — `createPolicy('p', {createHTML: s => DOMPurify.sanitize(s)})`
+  — clears taint just like any other sanitizer, so values routed through
+  `p.createHTML(x)` no longer report.
+- A **permissive** default policy — the classic bypassable no-op
+  `createPolicy('default', {createHTML: x => x})` — is *not* mistaken for
+  protection; the finding is kept and flagged.
+- When the response CSP enforces `require-trusted-types-for 'script'` **and** the
+  page defines a strict `'default'` policy, the browser auto-sanitizes every
+  TrustedHTML sink — Dalfox suppresses those now-false-positive findings.
+
+The classifier is deliberately conservative: anything it can't prove safe stays
+permissive, so the finding is kept. Suppression never fires without enforcement,
+so a page that defines a default policy but forgets `require-trusted-types-for`
+still reports — no false negatives are introduced.
 
 ## Encoders
 
