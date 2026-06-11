@@ -263,6 +263,58 @@ pub fn is_xss_scannable_content_type(ct: &str) -> bool {
     )
 }
 
+/// True when a response Content-Type renders as inert *data* in a browser —
+/// navigating to it never parses the body as markup or executes it as a
+/// script, so a payload reflected into the body is not exploitable as
+/// reflected XSS regardless of the injection context inside it.
+///
+/// Deliberately a tight deny-list of structured-data / binary types
+/// (`application/json`, `text/csv`, `application/octet-stream`, fonts, raw
+/// media) rather than the inverse of the HTML allow-list, because the grey
+/// zone must stay *scannable* to avoid false negatives:
+///   * `application/javascript` / `text/javascript` — a reflected callback
+///     name is executable when the response is loaded via `<script src>`
+///     (JSONP injection), so these are NOT inert.
+///   * `text/plain` — browsers content-sniff it as HTML when
+///     `X-Content-Type-Options: nosniff` is absent, so it is NOT inert.
+///   * empty / missing Content-Type — also sniffable, NOT inert.
+pub fn content_type_is_inert_data(ct: &str) -> bool {
+    let Some(primary) = content_type_primary(ct) else {
+        return false;
+    };
+    if matches!(
+        primary.as_str(),
+        "application/json"
+            | "text/json"
+            | "application/csv"
+            | "text/csv"
+            | "application/octet-stream"
+            | "application/pdf"
+            | "application/zip"
+    ) {
+        return true;
+    }
+    // Structured `+json` suffix (e.g. `application/vnd.api+json`,
+    // `application/problem+json`) — data, never markup.
+    if let Some((typ, sub)) = primary.split_once('/')
+        && sub.ends_with("+json")
+        && typ != "image"
+    {
+        return true;
+    }
+    // Raw binary media — fonts, raster images, audio, video. SVG is excluded
+    // on purpose (it executes inline scripts/handlers) and is handled by the
+    // existing markup allow-list.
+    let primary_type = primary.split('/').next().unwrap_or("");
+    if matches!(primary_type, "font" | "audio" | "video") {
+        return true;
+    }
+    if primary_type == "image" && primary != "image/svg+xml" {
+        return true;
+    }
+    false
+}
+
 /// Build a preflight request for content-type detection.
 /// - If `prefer_head` is true, uses HEAD; otherwise GET.
 /// - When using GET and `range_bytes` is Some(n), adds `Range: bytes=0-(n-1)`
