@@ -41,7 +41,7 @@ mod validation;
 
 pub(crate) use args::parse_force_waf_arg;
 pub use args::{
-    CLI_MAX_DELAY_MS, CLI_MAX_RATE_LIMIT, CLI_MAX_RETRIES, CLI_MAX_RETRY_DELAY_MS,
+    BlindOobArgs, CLI_MAX_DELAY_MS, CLI_MAX_RATE_LIMIT, CLI_MAX_RETRIES, CLI_MAX_RETRY_DELAY_MS,
     CLI_MAX_TIMEOUT_SECS, CLI_MAX_WORKERS, DEFAULT_DELAY_MS, DEFAULT_ENCODERS,
     DEFAULT_MAX_CONCURRENT_TARGETS, DEFAULT_MAX_TARGETS_PER_HOST, DEFAULT_METHOD,
     DEFAULT_RATE_LIMIT, DEFAULT_RETRIES, DEFAULT_RETRY_DELAY_MS, DEFAULT_TIMEOUT_SECS,
@@ -454,28 +454,60 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         no_color: nc,
     };
 
-    // Perform blind XSS scanning if callback URL is provided
-    if let Some(callback_url) = &args.blind_callback_url {
-        if !args.silence && args.format == "plain" {
+    // Blind XSS: the static `-b/--blind` callback and/or OOB/OAST (interactsh)
+    // callbacks. Start an OOB session first — it fails soft (warn + continue),
+    // so a registration outage never aborts the scan. Injection then runs over
+    // whichever channel(s) are configured; the OOB poller is spawned once
+    // `stream_findings_enabled` is known (below) and drained before rendering.
+    let oob_session: Option<Arc<crate::oob::OobSession>> = if args.blind_oob_enabled() {
+        match crate::oob::OobSession::start(&args.oob_config()).await {
+            Ok(session) => {
+                if !args.silence && args.format == "plain" {
+                    println!(
+                        "OOB blind XSS armed via interactsh server: {}",
+                        session.server_domain()
+                    );
+                }
+                Some(Arc::new(session))
+            }
+            Err(e) => {
+                if !args.silence {
+                    eprintln!(
+                        "Warning: --blind-oob disabled (could not register with any server): {e}"
+                    );
+                }
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    if args.blind_callback_url.is_some() || oob_session.is_some() {
+        if let Some(callback_url) = &args.blind_callback_url
+            && !args.silence
+            && args.format == "plain"
+        {
             println!(
                 "Performing blind XSS scanning with callback URL: {}",
                 callback_url
             );
         }
+        let custom = args.custom_blind_xss_payload.as_deref();
         for group in host_groups.values() {
             for target in group {
-                crate::scanning::blind_scanning(
-                    target,
-                    callback_url,
-                    args.custom_blind_xss_payload.as_deref(),
-                )
-                .await;
-                crate::scanning::blind_scan_forms(
-                    target,
-                    callback_url,
-                    args.custom_blind_xss_payload.as_deref(),
-                )
-                .await;
+                let source = match (&args.blind_callback_url, &oob_session) {
+                    (Some(url), Some(session)) => crate::scanning::CallbackSource::Both {
+                        url: url.as_str(),
+                        session: session.as_ref(),
+                    },
+                    (Some(url), None) => crate::scanning::CallbackSource::Static(url.as_str()),
+                    (None, Some(session)) => crate::scanning::CallbackSource::Oob(session.as_ref()),
+                    // Guarded by the enclosing `if`: at least one is Some.
+                    (None, None) => continue,
+                };
+                crate::scanning::blind_scanning_with(target, source, custom).await;
+                crate::scanning::blind_scan_forms_with(target, source, custom).await;
             }
         }
     }
@@ -504,6 +536,19 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         && args.limit.is_none()
         && args.only_poc.is_empty();
 
+    // Spawn the OOB poller now that we know whether streaming is on. It writes
+    // correlated callbacks straight into the shared results vector and runs
+    // until `finish()` drains the grace window (below).
+    let oob_poller = oob_session.as_ref().map(|session| {
+        crate::oob::spawn_poller(
+            session.clone(),
+            state.results.clone(),
+            state.findings_count.clone(),
+            cancel_flag.clone(),
+            args.silence,
+        )
+    });
+
     // Per-host scanning loop: run_scanning for each target under the global
     // concurrency cap, with optional mid-scan finding streaming.
     scan_loop::run_scan_loop(
@@ -514,6 +559,17 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         stream_findings_enabled,
     )
     .await;
+
+    // Drain late OOB callbacks (they arrive seconds-to-minutes after delivery),
+    // then deregister. A pending Ctrl-C shortens the wait. Findings land in
+    // `state.results` before rendering below.
+    if let Some(poller) = oob_poller {
+        let wait = Duration::from_secs(args.blind_oob_wait());
+        if !args.silence && args.format == "plain" && wait.as_secs() > 0 {
+            println!("Waiting up to {}s for OOB callbacks...", wait.as_secs());
+        }
+        poller.finish(wait).await;
+    }
 
     if args.format == "plain" && !args.silence && total_targets > 1 {
         if let Some((tx, done_rx)) = overall_ticker {

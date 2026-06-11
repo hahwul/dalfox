@@ -1142,6 +1142,9 @@ Final results (via get_results_dalfox) include finding type \
             encoders,
             custom_blind_xss_payload: None,
             blind_callback_url,
+            // OOB/OAST blind XSS is CLI-only for now; the MCP path runs its own
+            // scan loop and would need the poller lifecycle wired separately.
+            oob: crate::cmd::scan::BlindOobArgs::default(),
             custom_payload: None,
             only_custom_payload: false,
             inject_marker: None,

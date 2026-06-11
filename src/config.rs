@@ -110,6 +110,11 @@ pub struct ScanConfig {
     pub remote_payloads: Option<Vec<String>>,
     pub custom_blind_xss_payload: Option<String>,
     pub blind_callback_url: Option<String>,
+    /// OOB/OAST (interactsh) blind XSS. `blind_oob` mirrors `--blind-oob`:
+    /// `Some([])` enables with default public servers, `Some([..])` names them.
+    pub blind_oob: Option<Vec<String>>,
+    pub blind_oob_secret: Option<String>,
+    pub blind_oob_wait: Option<u64>,
     pub custom_payload: Option<String>,
     pub only_custom_payload: Option<bool>,
     pub inject_marker: Option<String>,
@@ -311,6 +316,15 @@ impl Config {
             if let Some(v) = &scan.blind_callback_url {
                 args.blind_callback_url = Some(v.clone());
             }
+            if let Some(v) = &scan.blind_oob {
+                args.oob.blind_oob = Some(v.clone());
+            }
+            if let Some(v) = &scan.blind_oob_secret {
+                args.oob.blind_oob_secret = Some(v.clone());
+            }
+            if let Some(v) = scan.blind_oob_wait {
+                args.oob.blind_oob_wait = Some(v);
+            }
             if let Some(v) = &scan.custom_payload {
                 args.custom_payload = Some(v.clone());
             }
@@ -447,6 +461,21 @@ impl Config {
                 && args.blind_callback_url.is_none()
             {
                 args.blind_callback_url = Some(v.clone());
+            }
+            if let Some(v) = &scan.blind_oob
+                && args.oob.blind_oob.is_none()
+            {
+                args.oob.blind_oob = Some(v.clone());
+            }
+            if let Some(v) = &scan.blind_oob_secret
+                && args.oob.blind_oob_secret.is_none()
+            {
+                args.oob.blind_oob_secret = Some(v.clone());
+            }
+            if let Some(v) = scan.blind_oob_wait
+                && args.oob.blind_oob_wait.is_none()
+            {
+                args.oob.blind_oob_wait = Some(v);
             }
             if let Some(v) = &scan.custom_payload
                 && args.custom_payload.is_none()
@@ -780,6 +809,21 @@ impl Config {
             {
                 args.blind_callback_url = Some(v.clone());
             }
+            if let Some(v) = &scan.blind_oob
+                && args.oob.blind_oob.is_none()
+            {
+                args.oob.blind_oob = Some(v.clone());
+            }
+            if let Some(v) = &scan.blind_oob_secret
+                && args.oob.blind_oob_secret.is_none()
+            {
+                args.oob.blind_oob_secret = Some(v.clone());
+            }
+            if let Some(v) = scan.blind_oob_wait
+                && args.oob.blind_oob_wait.is_none()
+            {
+                args.oob.blind_oob_wait = Some(v);
+            }
             if let Some(v) = &scan.custom_payload
                 && args.custom_payload.is_none()
             {
@@ -1050,6 +1094,9 @@ pub fn default_toml_template() -> String {
 # remote_payloads = ["payloadbox", "portswigger"]
 # custom_blind_xss_payload = "blind.txt"
 # blind_callback_url = "https://your-bxss-callback.com"
+# blind_oob = ["oast.fun", "oast.me"]   # OOB/OAST via interactsh; [] = default public servers
+# blind_oob_secret = "token"            # auth token for a self-hosted interactsh server
+# blind_oob_wait = 30                   # seconds to keep polling for callbacks after the scan
 # custom_payload = "payloads.txt"
 # only_custom_payload = false
 # skip_xss_scanning = false

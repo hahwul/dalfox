@@ -63,6 +63,7 @@ pub mod config;
 pub mod encoding;
 pub mod job;
 pub mod mcp;
+pub mod oob;
 pub mod parameter_analysis;
 pub mod payload;
 pub mod scanning;

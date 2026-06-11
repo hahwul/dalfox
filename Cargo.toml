@@ -43,6 +43,19 @@ oxc_ast = "0.133.0"
 oxc_allocator = "0.133.0"
 oxc_span = "0.133.0"
 
+# OOB / OAST (interactsh) blind-XSS support. interactsh needs RSA-OAEP(SHA-256)
+# to unwrap the per-poll AES key and AES-256-CTR to decrypt each interaction.
+# `rsa` 0.9 is built against the digest/sha2 0.10 line, so the OAEP digest comes
+# from an aliased `sha2 0.10` (`sha2_oaep`) — the existing `sha2 0.11` above is
+# left untouched for response fingerprinting. `rand` must stay on 0.8 because
+# `rsa` 0.9 binds `rand_core` 0.6 for key generation.
+rsa = { version = "0.9", features = ["pem"] }
+aes = "0.8"
+ctr = "0.9"
+rand = "0.8"
+uuid = { version = "1", features = ["v4"] }
+sha2_oaep = { package = "sha2", version = "0.10" }
+
 [profile.release]
 lto = true
 codegen-units = 1

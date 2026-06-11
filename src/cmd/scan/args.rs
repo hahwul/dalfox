@@ -432,6 +432,12 @@ pub struct ScanArgs {
     #[arg(short = 'b', long = "blind")]
     pub blind_callback_url: Option<String>,
 
+    /// OOB/OAST (interactsh) blind-XSS options: --blind-oob[=servers],
+    /// --blind-oob-secret, --blind-oob-wait. Flattened so they appear as
+    /// top-level flags while staying a single field on `ScanArgs`.
+    #[command(flatten)]
+    pub oob: BlindOobArgs,
+
     #[clap(help_heading = "XSS SCANNING")]
     /// Load custom payloads from a file. Example: --custom-payload 'payloads.txt'
     #[arg(long)]
@@ -583,7 +589,74 @@ pub struct PreflightOptions {
     pub encoders: Vec<String>,
 }
 
+/// OOB/OAST (interactsh) blind-XSS flags, flattened into [`ScanArgs`]. Grouped
+/// into one sub-struct so adding OOB support touches a single `ScanArgs` field
+/// instead of three. `Default` (all-unset) means OOB is disabled.
+#[derive(Args, Clone, Debug, Default)]
+pub struct BlindOobArgs {
+    #[clap(help_heading = "XSS SCANNING")]
+    /// Enable OOB blind XSS via interactsh. Optional comma-separated server
+    /// domains (default: public servers). Example: --blind-oob oast.fun,oast.me
+    #[arg(long = "blind-oob", value_delimiter = ',', num_args = 0..)]
+    pub blind_oob: Option<Vec<String>>,
+
+    #[clap(help_heading = "XSS SCANNING")]
+    /// Auth token (secret) for a self-hosted interactsh server; sent as the
+    /// Authorization header on register/poll/deregister.
+    #[arg(long = "blind-oob-secret")]
+    pub blind_oob_secret: Option<String>,
+
+    #[clap(help_heading = "XSS SCANNING")]
+    /// Seconds to keep polling for OOB callbacks after all payloads are sent
+    /// (default 30; 0 = no extra end-of-scan wait).
+    #[arg(long = "blind-oob-wait")]
+    pub blind_oob_wait: Option<u64>,
+}
+
+/// Default end-of-scan OOB drain window when `--blind-oob-wait` is unset.
+pub const DEFAULT_BLIND_OOB_WAIT_SECS: u64 = 30;
+
 impl ScanArgs {
+    /// True when `--blind-oob` was supplied (with or without a server list).
+    pub fn blind_oob_enabled(&self) -> bool {
+        self.oob.blind_oob.is_some()
+    }
+
+    /// Candidate OOB server domains: the user's list, or the public mesh.
+    pub fn blind_oob_servers(&self) -> Vec<String> {
+        match &self.oob.blind_oob {
+            Some(list) if !list.is_empty() => list.clone(),
+            _ => crate::oob::DEFAULT_SERVERS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
+        }
+    }
+
+    /// Self-hosted interactsh auth token, if any.
+    pub fn blind_oob_secret(&self) -> Option<&str> {
+        self.oob.blind_oob_secret.as_deref()
+    }
+
+    /// End-of-scan OOB drain window in seconds.
+    pub fn blind_oob_wait(&self) -> u64 {
+        self.oob
+            .blind_oob_wait
+            .unwrap_or(DEFAULT_BLIND_OOB_WAIT_SECS)
+    }
+
+    /// Build [`crate::oob::OobConfig`] from the parsed args + scan HTTP knobs.
+    pub fn oob_config(&self) -> crate::oob::OobConfig {
+        crate::oob::OobConfig {
+            servers: self.blind_oob_servers(),
+            secret: self.blind_oob_secret().map(str::to_string),
+            wait_secs: self.blind_oob_wait(),
+            timeout: self.timeout,
+            proxy: self.proxy.clone(),
+            insecure: self.insecure.unwrap_or(false),
+        }
+    }
+
     /// Build a ScanArgs configured for preflight analysis only (no attack payloads).
     /// Used by both MCP preflight_dalfox and REST API /preflight endpoint.
     pub fn for_preflight(opts: PreflightOptions) -> Self {
@@ -648,6 +721,7 @@ impl ScanArgs {
             encoders: opts.encoders,
             custom_blind_xss_payload: None,
             blind_callback_url: None,
+            oob: BlindOobArgs::default(),
             custom_payload: None,
             only_custom_payload: false,
             inject_marker: None,
@@ -702,6 +776,46 @@ mod arg_parser_tests {
         ])
         .expect("encoders htmlpad,unicode,zwsp should be accepted");
         assert_eq!(cli.scan.encoders, vec!["htmlpad", "unicode", "zwsp"]);
+    }
+
+    #[test]
+    fn blind_oob_flag_off_bare_and_list() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(flatten)]
+            scan: ScanArgs,
+        }
+
+        // Omitted → disabled.
+        let off = TestCli::try_parse_from(["dalfox", "https://e.com"]).unwrap();
+        assert!(!off.scan.blind_oob_enabled());
+        assert_eq!(off.scan.blind_oob_wait(), DEFAULT_BLIND_OOB_WAIT_SECS);
+        assert_eq!(off.scan.blind_oob_servers(), crate::oob::DEFAULT_SERVERS);
+
+        // Bare `--blind-oob` → enabled, default public mesh.
+        let bare = TestCli::try_parse_from(["dalfox", "https://e.com", "--blind-oob"]).unwrap();
+        assert!(bare.scan.blind_oob_enabled());
+        assert_eq!(bare.scan.oob.blind_oob.as_deref(), Some(&[][..]));
+        assert_eq!(bare.scan.blind_oob_servers(), crate::oob::DEFAULT_SERVERS);
+
+        // Explicit comma-separated servers + secret + wait.
+        let full = TestCli::try_parse_from([
+            "dalfox",
+            "https://e.com",
+            "--blind-oob",
+            "oast.fun,oast.me",
+            "--blind-oob-secret",
+            "tok",
+            "--blind-oob-wait",
+            "12",
+        ])
+        .unwrap();
+        assert!(full.scan.blind_oob_enabled());
+        assert_eq!(full.scan.blind_oob_servers(), vec!["oast.fun", "oast.me"]);
+        assert_eq!(full.scan.blind_oob_secret(), Some("tok"));
+        assert_eq!(full.scan.blind_oob_wait(), 12);
     }
 
     #[test]

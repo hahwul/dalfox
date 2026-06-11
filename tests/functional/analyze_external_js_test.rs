@@ -193,6 +193,7 @@ fn make_scan_args(
         encoders: vec![],
         custom_blind_xss_payload: None,
         blind_callback_url: None,
+        oob: Default::default(),
         custom_payload: None,
         only_custom_payload: false,
         inject_marker: None,
