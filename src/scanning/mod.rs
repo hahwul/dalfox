@@ -2018,16 +2018,15 @@ pub async fn run_scanning(
             }
             continue;
         }
-        // Early stop if global limit reached
+        // Early stop if global limit reached. Use `break` (not an early
+        // `return`) so the join-drain loop below awaits the already-spawned
+        // workers instead of detaching them: a dropped JoinHandle does NOT
+        // abort its task, so an early return left workers hitting the target
+        // past the stop point, skipped `collapse_target_results` and the
+        // worker-panic tally, and let late findings race the server's result
+        // snapshot. The tail finishes the progress bar with "Completed scanning".
         if ctx.limit_reached() {
-            if let Some(ref pb) = pb {
-                finish_scan_bar(
-                    pb,
-                    console::style("✓").green().to_string(),
-                    format!("Completed scanning {}", target.url),
-                );
-            }
-            return ScanRunReport::default();
+            break;
         }
 
         let ctx = ctx.clone();

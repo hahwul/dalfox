@@ -244,6 +244,30 @@ pub fn is_raw_http_request(s: &str) -> bool {
     false
 }
 
+/// Request headers that must not be forwarded verbatim from an imported request
+/// (raw HTTP or HAR). `Content-Length`/`Transfer-Encoding` are recomputed by
+/// reqwest from the actual (payload-injected) body — a stale value mis-frames
+/// the request and truncates the body, so injected params are never seen.
+/// `Accept-Encoding` is left to reqwest so its transparent decompression stays
+/// on (a manual value yields compressed gibberish the markers never match).
+/// `Host` is set from the URL and the rest are hop-by-hop headers tied to the
+/// original connection. `Cookie`/`User-Agent` are handled separately by callers
+/// and are intentionally not listed here. Shared with the HAR import path.
+pub(crate) fn is_skippable_request_header(name: &str) -> bool {
+    const SKIP: &[&str] = &[
+        "host",
+        "content-length",
+        "accept-encoding",
+        "connection",
+        "proxy-connection",
+        "keep-alive",
+        "transfer-encoding",
+        "upgrade",
+        "te",
+    ];
+    SKIP.iter().any(|s| name.eq_ignore_ascii_case(s))
+}
+
 /// Parse a raw HTTP request into a Target.
 /// Supports:
 /// - Request line with absolute-form URI: GET http://example.com/path HTTP/1.1
@@ -291,19 +315,26 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
                 host_header = Some(value_trim.clone());
                 // No need to forward Host to reqwest; it sets Host automatically from URL.
             } else if name_trim.eq_ignore_ascii_case("cookie") {
-                // Split cookies into vector
+                // Split cookies into vector. Do NOT also keep the original Cookie
+                // header: leaving it in `headers_vec` makes per-cookie probing
+                // emit both the original and the mutated Cookie (reqwest appends),
+                // so the server may take the un-injected value and the payload
+                // never lands. `apply_headers_ua_cookies` rebuilds a single,
+                // correct Cookie header from `cookies_vec`/overrides — mirror HAR.
                 for kv in value_trim.split(';') {
                     let kv = kv.trim();
                     if let Some((k, v)) = kv.split_once('=') {
                         cookies_vec.push((k.trim().to_string(), v.trim().to_string()));
                     }
                 }
-                // Preserve original Cookie header as well
-                headers_vec.push((name_trim, value_trim));
             } else if name_trim.eq_ignore_ascii_case("user-agent") {
                 user_agent = Some(value_trim.clone());
                 headers_vec.push((name_trim, value_trim));
-            } else {
+            } else if !is_skippable_request_header(&name_trim) {
+                // Drop stale `Content-Length`/`Transfer-Encoding` (reqwest
+                // recomputes them from the injected body — a stale value
+                // truncates it) and hop-by-hop/`Accept-Encoding` headers, the
+                // same set the HAR import path strips.
                 headers_vec.push((name_trim, value_trim));
             }
         }
@@ -685,5 +716,53 @@ mod raw_http_tests {
         assert_eq!(t.method, "POST");
         assert_eq!(t.url.as_str(), "http://example.com/submit");
         assert_eq!(t.data.as_deref(), Some("a=1&b=2"));
+    }
+
+    #[test]
+    fn raw_http_strips_stale_framing_and_accept_encoding_headers() {
+        // A stale Content-Length / Transfer-Encoding must NOT be forwarded:
+        // reqwest recomputes them and a stale value truncates the
+        // payload-injected body (body-param XSS silently missed). Accept-Encoding
+        // must be dropped so reqwest's transparent decompression stays on.
+        let raw = "POST /submit HTTP/1.1\r\nHost: example.com\r\nContent-Length: 7\r\nTransfer-Encoding: chunked\r\nAccept-Encoding: gzip\r\nConnection: keep-alive\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\na=1&b=2";
+        let t = parse_raw_http_request(raw).expect("should parse");
+        for stripped in [
+            "content-length",
+            "transfer-encoding",
+            "accept-encoding",
+            "connection",
+        ] {
+            assert!(
+                !t.headers
+                    .iter()
+                    .any(|(k, _)| k.eq_ignore_ascii_case(stripped)),
+                "{stripped} must be stripped, got {:?}",
+                t.headers
+            );
+        }
+        // A normal header survives verbatim.
+        assert!(
+            t.headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("content-type"))
+        );
+    }
+
+    #[test]
+    fn raw_http_does_not_retain_original_cookie_header() {
+        // The Cookie header is split into `cookies` only; keeping it in `headers`
+        // too made per-cookie probing emit both the original and the mutated
+        // Cookie (reqwest appends), so the payload could fail to land.
+        let raw = "GET /p HTTP/1.1\r\nHost: example.com\r\nCookie: sid=abc; a=b\r\n\r\n";
+        let t = parse_raw_http_request(raw).expect("should parse");
+        assert!(
+            !t.headers
+                .iter()
+                .any(|(k, _)| k.eq_ignore_ascii_case("cookie")),
+            "original Cookie header must not be retained in headers, got {:?}",
+            t.headers
+        );
+        assert!(t.cookies.iter().any(|(k, v)| k == "sid" && v == "abc"));
+        assert!(t.cookies.iter().any(|(k, v)| k == "a" && v == "b"));
     }
 }

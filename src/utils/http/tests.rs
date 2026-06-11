@@ -193,6 +193,33 @@ fn test_build_preflight_request_head_ignores_range() {
     );
 }
 
+#[test]
+fn user_accept_encoding_header_is_dropped_to_keep_decompression() {
+    // A user-supplied Accept-Encoding (-H or raw-request import) disables
+    // reqwest's transparent decompression, so the body returns as raw gzip/br
+    // bytes and every reflection/marker check silently fails. It must be dropped
+    // while unrelated headers are preserved.
+    let mut target = parse_target("https://example.com/path").unwrap();
+    target.headers = vec![
+        ("Accept-Encoding".to_string(), "gzip".to_string()),
+        ("X-Keep".to_string(), "1".to_string()),
+    ];
+    crate::ensure_crypto_provider();
+    let client = reqwest::Client::new();
+    let req = build_preflight_request(&client, &target, false, None)
+        .build()
+        .expect("request should build");
+    assert!(
+        req.headers().get("Accept-Encoding").is_none(),
+        "user Accept-Encoding must be dropped so decompression stays on"
+    );
+    assert_eq!(
+        req.headers().get("X-Keep").and_then(|v| v.to_str().ok()),
+        Some("1"),
+        "unrelated user headers must be preserved"
+    );
+}
+
 // ---- retry policy (decide_retry / next_backoff_ms) ----
 
 #[test]

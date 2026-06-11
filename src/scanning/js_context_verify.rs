@@ -115,6 +115,31 @@ fn hash_block(script_src: &str) -> u64 {
 /// string-literal span. Returns `None` when the source has parser errors
 /// (treated as inert — injected JS that breaks parsing won't execute).
 fn collect_parsed_spans(script_src: &str) -> ParsedSpans {
+    // Guard the oxc parse exactly like `ast_dom_analysis::analyze`: a single
+    // malicious/compromised target can serve a `<script>` body with thousands
+    // of nested brackets or a multi-byte right-leaning chain that overflows
+    // oxc's recursive-descent parser *inside* `.parse()` — a stack overflow
+    // SIGABRTs the whole process (all in-flight scans, server/MCP jobs). Skip
+    // pathological bodies (treated as inert) and run larger-but-approved ones
+    // on a dedicated big-stack thread.
+    if crate::scanning::ast_dom_analysis::source_exceeds_parse_guards(script_src) {
+        return None;
+    }
+    if script_src.len() <= crate::scanning::ast_dom_analysis::SAFE_INLINE_PARSE_BYTES {
+        return collect_spans_on_stack(script_src);
+    }
+    // A spawn failure (`None`) is also treated as inert — we must NOT fall back
+    // to an inline parse, which could overflow the caller's worker stack.
+    crate::scanning::ast_dom_analysis::run_parse_on_large_stack(|| {
+        collect_spans_on_stack(script_src)
+    })
+    .flatten()
+}
+
+/// Parse `script_src` and collect every sink-call span and every string-literal
+/// span. Factored out of [`collect_parsed_spans`] so it can run on a dedicated
+/// large-stack thread for inputs above [`SAFE_INLINE_PARSE_BYTES`].
+fn collect_spans_on_stack(script_src: &str) -> ParsedSpans {
     let allocator = Allocator::default();
     let ret = Parser::new(&allocator, script_src, SourceType::default()).parse();
     if !ret.errors.is_empty() {

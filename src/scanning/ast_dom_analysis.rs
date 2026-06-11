@@ -152,6 +152,43 @@ fn source_nesting_exceeds_limit(source: &str) -> bool {
     false
 }
 
+/// True when `source` must NOT be handed to oxc's `Parser::parse` on a normal
+/// worker stack — either it exceeds [`MAX_ANALYZE_SOURCE_BYTES`] or its
+/// structural nesting could overflow the recursive-descent parser (see
+/// [`source_nesting_exceeds_limit`]). Shared by every oxc parse site so a
+/// hostile `<script>` body can't SIGABRT the process from one of them.
+pub(crate) fn source_exceeds_parse_guards(source: &str) -> bool {
+    source.len() > MAX_ANALYZE_SOURCE_BYTES || source_nesting_exceeds_limit(source)
+}
+
+/// Inputs at or below this size parse safely on a normal worker stack (see
+/// [`INLINE_PARSE_BYTES`]); larger inputs that pass [`source_exceeds_parse_guards`]
+/// should run through [`run_parse_on_large_stack`].
+pub(crate) const SAFE_INLINE_PARSE_BYTES: usize = INLINE_PARSE_BYTES;
+
+/// Run `f` (an oxc parse + collect) on a dedicated thread with a large,
+/// mostly-virtual stack ([`ANALYZE_STACK_BYTES`]) so a deep — but
+/// guard-approved — statement/assignment chain can't overflow the caller's
+/// worker stack. Returns `None` if the thread can't be spawned (rare; the
+/// caller treats that as "skip / inert", never parsing inline, since such an
+/// input could need tens of MiB of stack). `f` must return an owned value.
+pub(crate) fn run_parse_on_large_stack<T, F>(f: F) -> Option<T>
+where
+    T: Send,
+    F: FnOnce() -> T + Send,
+{
+    std::thread::scope(|scope| {
+        match std::thread::Builder::new()
+            .stack_size(ANALYZE_STACK_BYTES)
+            .spawn_scoped(scope, f)
+        {
+            // A panic inside the parse degrades to None rather than aborting.
+            Ok(h) => h.join().ok(),
+            Err(_) => None,
+        }
+    })
+}
+
 /// Represents a potential DOM XSS vulnerability found via AST analysis
 #[derive(Debug, Clone)]
 pub struct DomXssVulnerability {
@@ -1039,8 +1076,12 @@ impl<'a> DomXssVisitor<'a> {
         if func.contains("encode") && func.contains("html") {
             return true;
         }
-        // "purify" or "dompurify"
-        if func.contains("purify") {
+        // "purify"/"dompurify" as a *whole* segment only. Matching "purify" as a
+        // bare substring also fires on unrelated names like `impurifyData`,
+        // `purifyConfig`, or `unpurified`, wrongly clearing taint and hiding real
+        // DOM-XSS. The canonical `DOMPurify.sanitize` form is already covered by
+        // the explicit `DOM_SANITIZERS` allowlist.
+        if func == "purify" || func == "dompurify" {
             return true;
         }
         false
@@ -2605,10 +2646,21 @@ impl<'a> DomXssVisitor<'a> {
             }
             Statement::ForStatement(for_stmt) => {
                 // `init` runs unconditionally; `update`/`body` are conditional.
-                if let Some(ForStatementInit::VariableDeclaration(var_decl)) = &for_stmt.init {
-                    for decl in &var_decl.declarations {
-                        self.walk_variable_declarator(decl);
+                match &for_stmt.init {
+                    Some(ForStatementInit::VariableDeclaration(var_decl)) => {
+                        for decl in &var_decl.declarations {
+                            self.walk_variable_declarator(decl);
+                        }
                     }
+                    // Expression-form init (`for (x = location.hash; …)`): the
+                    // assignment runs unconditionally, so walk it so its taint is
+                    // tracked into the body (otherwise a downstream sink is missed).
+                    Some(init) => {
+                        if let Some(expr) = init.as_expression() {
+                            self.walk_expression(expr);
+                        }
+                    }
+                    None => {}
                 }
                 if let Some(test) = &for_stmt.test {
                     self.walk_expression(test);
@@ -2619,6 +2671,46 @@ impl<'a> DomXssVisitor<'a> {
                 }
                 self.walk_statement(&for_stmt.body);
                 self.branch_depth -= 1;
+            }
+            // `for (x of iterable)`: iterating a tainted iterable yields tainted
+            // elements, so taint the loop binding when the right-hand expression
+            // is tainted. Without this arm the old catch-all `_ => {}` dropped the
+            // body entirely — a false negative for source->sink flows inside this
+            // common (especially minified) loop form.
+            Statement::ForOfStatement(for_of) => {
+                self.walk_expression(&for_of.right);
+                if self.is_tainted(&for_of.right)
+                    && let ForStatementLeft::VariableDeclaration(var_decl) = &for_of.left
+                {
+                    for decl in &var_decl.declarations {
+                        if let BindingPattern::BindingIdentifier(id) = &decl.id {
+                            self.tainted_vars.insert(id.name.to_string());
+                        }
+                    }
+                }
+                self.branch_depth += 1;
+                self.walk_statement(&for_of.body);
+                self.branch_depth -= 1;
+            }
+            // `for (k in obj)` binds property *keys* (strings), not the iterated
+            // values, so don't taint the binding; still walk the iterated
+            // expression and the body so sources/sinks inside them are seen.
+            Statement::ForInStatement(for_in) => {
+                self.walk_expression(&for_in.right);
+                self.branch_depth += 1;
+                self.walk_statement(&for_in.body);
+                self.branch_depth -= 1;
+            }
+            Statement::DoWhileStatement(do_while) => {
+                self.branch_depth += 1;
+                self.walk_statement(&do_while.body);
+                self.branch_depth -= 1;
+                self.walk_expression(&do_while.test);
+            }
+            // A labeled statement (`loop: for (…) …`) just wraps its body; walk
+            // through so the labeled loop/block isn't skipped.
+            Statement::LabeledStatement(labeled) => {
+                self.walk_statement(&labeled.body);
             }
             Statement::FunctionDeclaration(func_decl) => {
                 // Parameterized functions are primarily handled through summaries/call sites.
