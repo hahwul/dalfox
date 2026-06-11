@@ -131,6 +131,41 @@ fn test_is_xss_scannable_content_type_deny_list() {
 }
 
 #[test]
+fn test_content_type_is_inert_data_deny_renders_as_data() {
+    // Structured data and binary types: a reflected payload is never parsed
+    // as markup, so these are inert.
+    assert!(content_type_is_inert_data("application/json"));
+    assert!(content_type_is_inert_data(
+        "application/json; charset=utf-8"
+    ));
+    assert!(content_type_is_inert_data("text/json"));
+    assert!(content_type_is_inert_data("text/csv"));
+    assert!(content_type_is_inert_data("application/octet-stream"));
+    assert!(content_type_is_inert_data("application/vnd.api+json"));
+    assert!(content_type_is_inert_data("application/problem+json"));
+    assert!(content_type_is_inert_data("image/png"));
+    assert!(content_type_is_inert_data("font/woff2"));
+    assert!(content_type_is_inert_data("video/mp4"));
+}
+
+#[test]
+fn test_content_type_is_inert_data_keeps_executable_and_sniffable() {
+    // Markup, script, and sniffable/empty types stay scannable — treating
+    // them as inert would drop real findings (JSONP, sniffed text/plain,
+    // SVG inline scripts).
+    assert!(!content_type_is_inert_data("text/html"));
+    assert!(!content_type_is_inert_data("application/xhtml+xml"));
+    assert!(!content_type_is_inert_data("image/svg+xml"));
+    assert!(!content_type_is_inert_data("application/javascript"));
+    assert!(!content_type_is_inert_data(
+        "text/javascript; charset=utf-8"
+    ));
+    assert!(!content_type_is_inert_data("text/plain"));
+    assert!(!content_type_is_inert_data(""));
+    assert!(!content_type_is_inert_data("invalid"));
+}
+
+#[test]
 fn test_is_xss_scannable_content_type_text_plain_allowed() {
     assert!(is_xss_scannable_content_type("text/plain"));
     assert!(is_xss_scannable_content_type("text/plain; charset=utf-8"));

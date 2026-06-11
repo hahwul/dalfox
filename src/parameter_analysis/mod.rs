@@ -779,6 +779,22 @@ pub async fn active_probe_param(
                 need_per_char_fallback = true;
             }
         }
+        None if matches!(param.location, Location::Path) => {
+            // Path location: the dense batched probe (every special char
+            // concatenated) routinely fails to reflect even on a permissive
+            // server, because characters like `/`, `\`, `[`, `]`, `{`, `}`
+            // reshape the URL path — extra `/` segments make the request miss
+            // its route, encoded slashes get rejected, etc. — so the markers
+            // land nowhere. That is a *probe artifact*, NOT a filtering signal.
+            // Falling back to the legacy "all invalid" classification here
+            // would wrongly mute every angle/paren/quote-bearing payload and
+            // miss genuine path XSS (e.g. a path segment reflected inside an
+            // HTML comment, which needs `-->…<svg onload=alert(1)>` — `(` `)`
+            // `<` `>` all required). Single-character path injections
+            // round-trip cleanly through percent-encoding, so re-probe each
+            // character individually instead.
+            need_per_char_fallback = true;
+        }
         None => {
             // No reflected segment — the markers never came back. That can be
             // genuine heavy filtering, a WAF that blocked the whole request

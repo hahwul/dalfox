@@ -653,20 +653,28 @@ fn payload_variants(payload: &str) -> Vec<String> {
 
 /// Returns true when at least one occurrence of a payload variant (raw or
 /// HTML-entity-decoded form) sits inside a context where HTML entity
-/// escaping is *not* sufficient to neutralize the injection — namely
-/// `<script>` / `<style>` raw-text content or an HTML event-handler
-/// attribute (`on*=…`). When this returns `false`, the entity-escaped
-/// reflection is safe by construction and can be suppressed.
+/// escaping is *not* sufficient to neutralize the injection.
+///
+/// The only such context for an entity-encoded reflection is an HTML
+/// event-handler attribute value (`on*=…`): the HTML parser decodes the
+/// attribute's character references while building the value, *then* hands
+/// the decoded string to the JS engine, so `onclick="&quot;;alert(1)//"`
+/// executes. Everywhere else the entities stay literal:
+///   * HTML body / non-event attribute text — rendered as characters, never
+///     re-parsed as markup.
+///   * `<script>` / `<style>` raw-text content — the JS and CSS tokenizers
+///     do **not** perform HTML character-reference decoding (HTML5 §13.2.5
+///     "script data"/"raw text" states), so `&quot;` inside a `<script>` is
+///     the literal six bytes `&quot;`, which cannot terminate a JS string or
+///     introduce a statement. A genuine raw-character break-out into a script
+///     is caught earlier by the byte-exact fast path in `classify_reflection`
+///     (it never reaches this entity-decoded gate).
+///
+/// When this returns `false`, the entity-escaped reflection is safe by
+/// construction and can be suppressed.
 fn html_entity_reflection_in_unsafe_context(html: &str, variants: &[String]) -> bool {
-    static SCRIPT_RE: OnceLock<Regex> = OnceLock::new();
-    static STYLE_RE: OnceLock<Regex> = OnceLock::new();
     static EVENT_HANDLER_RE: OnceLock<Regex> = OnceLock::new();
 
-    let script_re = SCRIPT_RE.get_or_init(|| {
-        Regex::new(r"(?is)<script\b[^>]*>(.*?)</script\s*>").expect("script regex")
-    });
-    let style_re = STYLE_RE
-        .get_or_init(|| Regex::new(r"(?is)<style\b[^>]*>(.*?)</style\s*>").expect("style regex"));
     let event_re = EVENT_HANDLER_RE.get_or_init(|| {
         Regex::new(r#"(?is)\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)"#)
             .expect("event handler regex")
@@ -679,20 +687,6 @@ fn html_entity_reflection_in_unsafe_context(html: &str, variants: &[String]) -> 
             .any(|v| body.contains(v) || decoded.contains(v))
     };
 
-    for cap in script_re.captures_iter(html) {
-        if let Some(body) = cap.get(1)
-            && check_body(body.as_str())
-        {
-            return true;
-        }
-    }
-    for cap in style_re.captures_iter(html) {
-        if let Some(body) = cap.get(1)
-            && check_body(body.as_str())
-        {
-            return true;
-        }
-    }
     for cap in event_re.captures_iter(html) {
         if let Some(val) = cap.get(1) {
             let raw = val.as_str();
@@ -866,15 +860,14 @@ pub(crate) fn classify_reflection(resp_text: &str, payload: &str) -> Option<Refl
         // longer surface as R Info findings, mirroring the established rule
         // that a properly escaped reflection is not a vulnerability.
         //
-        // We keep the finding when the entity-encoded reflection lands in a
-        // context where escaping is *not* sufficient:
-        // - inside `<script>` / `<style>` raw-text content (JS/CSS parsers
-        //   do not decode HTML entities, but the source still passes
-        //   through the parser and the entities can interact with parsing
-        //   in surprising ways — keep as a signal for manual review),
-        // - inside an HTML event-handler attribute value (`on*=…`) where
-        //   the browser decodes the entities while building the value
-        //   *before* handing it to the JS parser.
+        // We keep the finding only when the entity-encoded reflection lands
+        // in an HTML event-handler attribute value (`on*=…`), the one context
+        // where the browser decodes the entities while building the value
+        // *before* handing it to the JS parser. `<script>` / `<style>`
+        // raw-text content does NOT decode HTML entities (the JS/CSS
+        // tokenizers leave `&quot;` as literal bytes), so an entity-escaped
+        // reflection there is inert — see
+        // `html_entity_reflection_in_unsafe_context`.
         if html_entity_reflection_in_unsafe_context(resp_text, &payload_variants) {
             return Some(ReflectionKind::HtmlEntityDecoded);
         }
@@ -1346,6 +1339,40 @@ async fn fetch_injection_response_with_client(
             // Skip processing if the status code is in the ignore_return list
             if !args.ignore_return.is_empty() && args.ignore_return.contains(&status_code) {
                 return None;
+            }
+            // Inert-data content-type suppression for ALL non-Path locations.
+            // When the response declares a structured-data / binary type
+            // (`application/json`, `text/csv`, raster image, …), a browser
+            // navigating to it renders the body as data — never as markup —
+            // so a payload reflected into it is not exploitable as reflected
+            // XSS even when the body happens to contain HTML-looking text.
+            // This removes the false positives where a query/body param is
+            // echoed into a JSON API response (e.g. `{"q":"<svg onload=…>"}`).
+            // Path has its own stricter markup-only gate just below; JSONP
+            // (`application/javascript`) and sniffable `text/plain` are
+            // intentionally NOT treated as inert here (see
+            // `content_type_is_inert_data`), preserving those detections.
+            //
+            // Skip redirects: a 3xx carries the reflection in its `Location`
+            // header, and the body content-type describes the (usually empty)
+            // redirect body, not the redirect target — so it says nothing about
+            // whether the Location reflection is exploitable. Let those fall
+            // through to the Location-header check below.
+            if !matches!(param.location, Location::Path) && !(300..400).contains(&status_code) {
+                let ct = resp
+                    .headers()
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|v| v.to_str().ok())
+                    .unwrap_or("");
+                if crate::utils::content_type_is_inert_data(ct) {
+                    if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
+                        eprintln!(
+                            "[DBG] suppressing reflection on inert-data content-type (param={}, content-type={})",
+                            param.name, ct
+                        );
+                    }
+                    return None;
+                }
             }
             // Hard suppressions for Path that don't need to read the body:
             //   * 3xx redirects: any reflection lives in the Location header,

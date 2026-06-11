@@ -197,6 +197,23 @@ async fn redirect_decoded_handler(
     )
 }
 
+/// 302 whose body declares `application/json` but whose `Location` header
+/// echoes the payload. The inert-data content-type gate must NOT fire here:
+/// the body content-type describes the (empty) redirect body, not the redirect
+/// target, so the Location reflection must still be caught.
+async fn redirect_json_ct_handler(
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let q = params.get("q").cloned().unwrap_or_default();
+    (
+        StatusCode::FOUND,
+        [
+            ("location", format!("/final?next={}", q)),
+            ("content-type", "application/json".to_string()),
+        ],
+    )
+}
+
 async fn start_mock_server(stored_payload: &str) -> SocketAddr {
     let app = Router::new()
         .route("/reflect/raw", get(raw_handler))
@@ -208,6 +225,7 @@ async fn start_mock_server(stored_payload: &str) -> SocketAddr {
         .route("/reflect/json", get(json_handler))
         .route("/sxss/stored", get(sxss_handler))
         .route("/redirect/decoded", get(redirect_decoded_handler))
+        .route("/redirect/json-ct", get(redirect_json_ct_handler))
         .with_state(TestState {
             stored_payload: stored_payload.to_string(),
         });
@@ -327,16 +345,25 @@ fn test_classify_reflection_prefers_raw_match() {
 }
 
 #[test]
-fn test_is_payload_reflected_html_encoded_in_unsafe_context() {
-    // Entity-encoded reflection nested inside <script> — entities are not
-    // decoded by the JS parser but the source still passes through it, so
-    // the reflection is kept as an HtmlEntityDecoded finding for review.
+fn test_is_payload_reflected_html_encoded_in_script_is_inert() {
+    // Entity-encoded reflection nested inside a <script> JS string. The JS
+    // tokenizer does NOT perform HTML character-reference decoding (HTML5
+    // "script data" state), so `var x = '&#x3c;script&#x3e;…'` assigns the
+    // literal six-byte text `&#x3c;script&#x3e;…` to `x` — no `<script>`
+    // element, no execution. This must demote to None; surfacing it as
+    // HtmlEntityDecoded was a false positive (corpus cases 5019/5289).
     let payload = "<script>alert(1)</script>";
     let resp = "<script>var x = '&#x3c;script&#x3e;alert(1)&#x3c;/script&#x3e;';</script>";
-    assert_eq!(
-        classify_reflection(resp, payload),
-        Some(ReflectionKind::HtmlEntityDecoded)
-    );
+    assert_eq!(classify_reflection(resp, payload), None);
+}
+
+#[test]
+fn test_is_payload_reflected_html_encoded_in_style_is_inert() {
+    // Same principle for <style> raw-text: the CSS tokenizer does not decode
+    // HTML entities, so an entity-escaped break-out attempt is inert.
+    let payload = "</style><svg onload=alert(1)>";
+    let resp = "<style>.x{content:'&lt;/style&gt;&lt;svg onload=alert(1)&gt;';}</style>";
+    assert_eq!(classify_reflection(resp, payload), None);
 }
 
 #[test]
@@ -697,11 +724,12 @@ fn test_is_payload_reflected_negative() {
 #[test]
 fn test_is_payload_reflected_html_named_uppercase() {
     // Uppercase named entities must still decode for classification. Placed
-    // inside `<style>` so the unsafe-context gate keeps the reflection
-    // visible — body-context placement would be demoted (covered by the
-    // safe-context test above).
+    // inside an `on*=` event-handler attribute — the one context where the
+    // browser decodes entities before JS execution, so the unsafe-context
+    // gate keeps the reflection visible. Body/`<script>`/`<style>` placement
+    // would (correctly) demote because those contexts never decode entities.
     let payload = "<svg onload=alert(1)>";
-    let resp = "<style>body::before{content:'&LT;svg onload=alert(1)&GT;'}</style>";
+    let resp = "<button onclick=\"x='&LT;svg onload=alert(1)&GT;'\">go</button>";
     assert_eq!(
         classify_reflection(resp, payload),
         Some(ReflectionKind::HtmlEntityDecoded)
@@ -951,16 +979,37 @@ async fn test_check_reflection_catches_decoded_payload_in_redirect_location() {
 }
 
 #[tokio::test]
-async fn test_check_reflection_with_response_handles_json_raw_reflection() {
+async fn test_inert_data_gate_does_not_swallow_redirect_location_reflection() {
+    // A 302 whose body is declared `application/json` still echoes the payload
+    // in its `Location` header. The inert-data content-type gate must skip
+    // redirects (the body CT is irrelevant to the Location vector), so the
+    // reflection is still reported.
+    let payload = "<svg/onload=alert(1)>";
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/redirect/json-ct");
+    let param = make_param();
+    let args = default_scan_args();
+    assert!(
+        check_reflection(&target, &param, payload, &args).await,
+        "inert-data gate must not suppress a Location-header reflection on a JSON-CT redirect"
+    );
+}
+
+#[tokio::test]
+async fn test_check_reflection_suppresses_json_content_type_reflection() {
+    // The mock `/reflect/json` echoes `q` into an `application/json` body. A
+    // browser navigating to a genuine JSON response renders it as data, never
+    // as markup, so a reflected `<svg onload>` cannot execute — the inert-data
+    // content-type gate must suppress it (corpus negatives 5050 / 5284). This
+    // replaces the former assertion that JSON reflections surface as [R].
     let payload = "<svg/onload=alert(1)>";
     let addr = start_mock_server("stored").await;
     let target = make_target(addr, "/reflect/json");
     let param = make_param();
     let args = default_scan_args();
 
-    let (kind, body) = check_reflection_with_response(None, &target, &param, payload, &args).await;
-    assert_eq!(kind, Some(ReflectionKind::Raw));
-    assert!(body.unwrap_or_default().contains("echo"));
+    let (kind, _body) = check_reflection_with_response(None, &target, &param, payload, &args).await;
+    assert_eq!(kind, None, "application/json reflection must be suppressed");
 }
 
 // --- Safe context filtering tests ---

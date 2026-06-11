@@ -1443,3 +1443,62 @@ async fn active_probe_does_not_set_wafpad_for_prefix_strip() {
         "a fixed-prefix-stripping server (partial reflection) must not be mistaken for a window WAF"
     );
 }
+
+/// Path regression: the dense batched special-char probe injected into a URL
+/// path segment fails to reflect on a perfectly permissive server, because the
+/// `/` (and other path-structural chars) in the concatenated payload reshape
+/// the request into a different/non-existent route. The probe must NOT conclude
+/// "all specials invalid" from that artifact — it must fall back to per-char
+/// probing, which round-trips cleanly through percent-encoding, so that
+/// genuinely-surviving characters (`<`, `>`, `(`, `)` …) are correctly marked
+/// valid. Without this, no angle/paren-bearing payload is ever synthesized for
+/// path params and exploitable path reflections (e.g. inside an HTML comment)
+/// are missed.
+#[tokio::test]
+async fn active_probe_path_falls_back_to_per_char_when_batched_breaks_routing() {
+    use axum::{Router, extract::Path as AxPath, response::Html, routing::get};
+    use std::net::Ipv4Addr;
+    use tokio::time::{Duration, sleep};
+
+    // Single-segment route: reflects the segment raw inside a <div>. A payload
+    // containing `/` produces extra segments and misses this route (404), which
+    // is exactly what happens to the concatenated batched probe.
+    async fn reflect_seg(AxPath(seg): AxPath<String>) -> Html<String> {
+        Html(format!("<html><body><div id=out>{seg}</div></body></html>"))
+    }
+
+    let app = Router::new().route("/p/{seg}", get(reflect_seg));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    // path_segment_1 == the `seed` segment in /p/seed.
+    let target = parse_target(&format!("http://{addr}/p/seed")).unwrap();
+    let res = active_probe_param(
+        &target,
+        probe_param("path_segment_1", Location::Path),
+        Arc::new(Semaphore::new(8)),
+    )
+    .await;
+
+    let valid = res.valid_specials.clone().unwrap_or_default();
+    // Per-char probing must have run and reclassified the single-segment-safe
+    // structural chars as valid (they survive a lone path-segment injection).
+    for c in ['<', '>', '(', ')'] {
+        assert!(
+            valid.contains(&c),
+            "per-char path fallback should mark '{c}' valid (got valid={valid:?})"
+        );
+    }
+    // `/` cannot live inside one path segment — it must stay invalid.
+    let invalid = res.invalid_specials.clone().unwrap_or_default();
+    assert!(
+        invalid.contains(&'/'),
+        "'/' reshapes the path and must remain invalid (got invalid={invalid:?})"
+    );
+}
