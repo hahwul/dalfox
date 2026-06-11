@@ -364,3 +364,48 @@ fn detects_js_sinks_in_advanced_expressions() {
     let html_chain = format!("<script>{}</script>", payload_chain);
     assert!(has_js_context_evidence(payload_chain, &html_chain));
 }
+
+#[test]
+fn deeply_nested_script_is_inert_and_does_not_crash() {
+    // A malicious/compromised target can serve a `<script>` body with thousands
+    // of nested brackets; oxc's recursive-descent parser has no depth guard and
+    // would stack-overflow-SIGABRT the whole process when parsing it. The shared
+    // pre-parse guard must skip such a block (treated as inert) so this returns
+    // false WITHOUT crashing the test process. (A regression here aborts the run
+    // rather than failing the assert — that itself is the signal.)
+    let payload = "alert(1)";
+    let depth = 5000;
+    let nested = format!("{}{}{}", "(".repeat(depth), payload, ")".repeat(depth));
+    let html = format!("<script>var x = {};</script>", nested);
+    assert!(
+        !has_js_context_evidence(payload, &html),
+        "over-nested script must be skipped as inert, not parsed"
+    );
+}
+
+#[test]
+fn large_script_above_inline_cap_runs_on_large_stack_without_crashing() {
+    // A guard-approved but large script (above SAFE_INLINE_PARSE_BYTES) must
+    // parse on the dedicated big-stack thread and still verify a genuine sink.
+    let payload = "\"-alert(1)-\"";
+    let filler = "var pad = 1;\n".repeat(400); // ~5 KiB, over the 2 KiB inline cap
+    let html = format!("<script>{}var c2 = \"{}\";</script>", filler, payload);
+    assert!(
+        has_js_context_evidence(payload, &html),
+        "large-but-valid script should still verify the breakout sink"
+    );
+}
+
+#[test]
+fn checks_every_payload_occurrence_not_just_the_first() {
+    // A benign in-string reflection of the payload precedes the executable
+    // breakout occurrence in the same <script> block. find()'s first-match-only
+    // tested the inert in-string occurrence and missed the real sink; all
+    // occurrences must be checked.
+    let payload = "alert(1)";
+    let html = r#"<script>var s = "alert(1)"; alert(1);</script>"#;
+    assert!(
+        has_js_context_evidence(payload, html),
+        "the executable second occurrence must be detected"
+    );
+}

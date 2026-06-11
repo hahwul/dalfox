@@ -74,6 +74,56 @@ fn waf_block_cooldown_ms(status_code: u16, consecutive: u32, waf_evasion: bool) 
     backoff_ms.min(WAF_BACKOFF_CAP_MS)
 }
 
+/// Adaptive WAF accounting for one injection-response status code, shared by the
+/// normal and stored-XSS (`--sxss`) injection paths.
+///
+/// `streak` is the **per-worker** consecutive-block counter. A single scan fans
+/// out to up to ~50 param workers; they previously shared one (per-scan / global)
+/// counter, so any worker's 2xx reset another worker's accumulating streak and
+/// the `--waf-evasion` escalation almost never fired (and 429/503 storms paced
+/// erratically). The escalation now reads this local counter, while the
+/// process-wide total ([`crate::tick_waf_block`]) and the per-job task-local
+/// stay updated for reporting and cross-scan isolation.
+async fn apply_injection_waf_accounting(
+    status_code: u16,
+    target: &Target,
+    args: &crate::cmd::scan::ScanArgs,
+    streak: &std::sync::atomic::AtomicU32,
+) {
+    use std::sync::atomic::Ordering;
+    let is_waf_block = matches!(status_code, 403 | 406 | 429 | 503);
+    let consecutive = if is_waf_block {
+        // Keep the process-wide total + per-job task-local in sync for reporting
+        // and cross-scan isolation; the value we act on is the per-worker streak.
+        crate::tick_waf_block();
+        streak.fetch_add(1, Ordering::Relaxed) + 1
+    } else {
+        crate::reset_waf_consecutive();
+        streak.store(0, Ordering::Relaxed);
+        0
+    };
+    if is_waf_block {
+        // `waf_block_cooldown_ms` decides whether (and how long) to pause based
+        // on the block class — see its doc comment.
+        let mut backoff_ms = waf_block_cooldown_ms(status_code, consecutive, args.waf_evasion);
+        if backoff_ms > 0 {
+            // Under --waf-evasion, scatter the cooldown by up to +50% so the
+            // backoff itself isn't a fixed, fingerprintable interval.
+            if args.waf_evasion {
+                backoff_ms = backoff_ms
+                    .saturating_add(crate::utils::rate_limit::fast_jitter(backoff_ms / 2 + 1));
+            }
+            sleep(Duration::from_millis(backoff_ms)).await;
+        }
+    }
+    // Per-target bypass effectiveness telemetry. Only counts when bypass is
+    // active for the target (target.mutation_stats is populated during preflight
+    // when a WAF is detected and bypass is on).
+    if let Some(ref stats) = target.mutation_stats {
+        stats.record_request(is_waf_block);
+    }
+}
+
 /// Check whether *all* occurrences of `payload` in `html` fall inside safe tags
 /// (textarea, noscript, style, xmp, plaintext, title).  If the payload appears
 /// at least once outside a safe tag, returns `false`.
@@ -1030,12 +1080,13 @@ async fn fetch_injection_response(
     param: &Param,
     payload: &str,
     args: &crate::cmd::scan::ScanArgs,
+    streak: &std::sync::atomic::AtomicU32,
 ) -> Option<String> {
     if args.skip_xss_scanning {
         return None;
     }
     let client = target.build_client_or_default();
-    fetch_injection_response_with_client(&client, target, param, payload, args).await
+    fetch_injection_response_with_client(&client, target, param, payload, args, streak).await
 }
 
 async fn fetch_injection_response_with_client(
@@ -1044,6 +1095,7 @@ async fn fetch_injection_response_with_client(
     param: &Param,
     payload: &str,
     args: &crate::cmd::scan::ScanArgs,
+    streak: &std::sync::atomic::AtomicU32,
 ) -> Option<String> {
     if args.skip_xss_scanning {
         return None;
@@ -1232,7 +1284,17 @@ async fn fetch_injection_response_with_client(
         // retrieval-URL path doesn't gate on them either, and we want
         // consistent SXSS evidence semantics.
         let inject_body: Option<String> = match inject_resp {
-            Ok(resp) => resp.text().await.ok().filter(|t| !t.is_empty()),
+            Ok(resp) => {
+                // Mirror the normal path's WAF accounting on the stored-write
+                // response before consuming the body: a 403/406/503 stored-write
+                // block must drive the same --waf-evasion cooldown + consecutive
+                // streak and record bypass telemetry. Without this, SXSS scans
+                // hammer a blocking write endpoint (IP-ban risk) and
+                // target_summary.waf.bypass is always empty.
+                let status_code = resp.status().as_u16();
+                apply_injection_waf_accounting(status_code, target, args, streak).await;
+                resp.text().await.ok().filter(|t| !t.is_empty())
+            }
             Err(_) => None,
         };
 
@@ -1278,37 +1340,8 @@ async fn fetch_injection_response_with_client(
         if let Ok(resp) = inject_resp {
             let status_code = resp.status().as_u16();
 
-            // Track WAF block status codes for adaptive throttling. The
-            // consecutive counter is per-scan when bound (MCP / REST runners)
-            // so one scan's WAF blocks don't slow down unrelated concurrent
-            // scans; CLI falls back to the process-wide counter.
-            let is_waf_block = matches!(status_code, 403 | 406 | 429 | 503);
-            if is_waf_block {
-                let consecutive = crate::tick_waf_block();
-                // `waf_block_cooldown_ms` decides whether (and how long) to
-                // pause based on the block class — see its doc comment.
-                let mut backoff_ms =
-                    waf_block_cooldown_ms(status_code, consecutive, args.waf_evasion);
-                if backoff_ms > 0 {
-                    // Under --waf-evasion, scatter the cooldown by up to +50% so
-                    // the backoff itself isn't a fixed, fingerprintable interval.
-                    if args.waf_evasion {
-                        backoff_ms = backoff_ms.saturating_add(
-                            crate::utils::rate_limit::fast_jitter(backoff_ms / 2 + 1),
-                        );
-                    }
-                    sleep(Duration::from_millis(backoff_ms)).await;
-                }
-            } else {
-                // Reset consecutive block counter on successful response
-                crate::reset_waf_consecutive();
-            }
-            // Per-target bypass effectiveness telemetry. Only counts when
-            // bypass is active for the target (target.mutation_stats is
-            // populated during preflight when WAF detected and bypass on).
-            if let Some(ref stats) = target.mutation_stats {
-                stats.record_request(is_waf_block);
-            }
+            // Adaptive WAF accounting (per-worker streak + cooldown + telemetry).
+            apply_injection_waf_accounting(status_code, target, args, streak).await;
 
             // Skip processing if the status code is in the ignore_return list
             if !args.ignore_return.is_empty() && args.ignore_return.contains(&status_code) {
@@ -1410,13 +1443,10 @@ async fn fetch_injection_response_with_client(
     }
 }
 
-/// Inject `payload`, then classify reflection in the response.
-///
-/// Pass `Some(client)` to reuse a pooled HTTP client (MCP / REST runners);
-/// pass `None` on the CLI path to build a default client per request from
-/// the target. Returns the reflection kind (suppressed to `None` when the
-/// match lands only in a known-safe context) together with the response
-/// body, or `(None, None)` when no response was obtained.
+/// Inject `payload`, then classify reflection in the response. Convenience
+/// entry for tests / one-shot callers: uses a throwaway per-call WAF streak.
+/// Production scan workers call [`check_reflection_with_response_tracked`] with
+/// their own per-worker streak so the adaptive backoff escalates correctly.
 pub async fn check_reflection_with_response(
     client: Option<&Client>,
     target: &Target,
@@ -1424,11 +1454,34 @@ pub async fn check_reflection_with_response(
     payload: &str,
     args: &crate::cmd::scan::ScanArgs,
 ) -> (Option<ReflectionKind>, Option<String>) {
+    let streak = std::sync::atomic::AtomicU32::new(0);
+    check_reflection_with_response_tracked(client, target, param, payload, args, &streak).await
+}
+
+/// Inject `payload`, then classify reflection in the response.
+///
+/// Pass `Some(client)` to reuse a pooled HTTP client (MCP / REST runners);
+/// pass `None` on the CLI path to build a default client per request from
+/// the target. Returns the reflection kind (suppressed to `None` when the
+/// match lands only in a known-safe context) together with the response
+/// body, or `(None, None)` when no response was obtained.
+///
+/// `streak` is the caller's per-worker consecutive-WAF-block counter (see
+/// [`apply_injection_waf_accounting`]); one per param worker keeps the
+/// `--waf-evasion` backoff escalation from being reset by sibling workers.
+pub async fn check_reflection_with_response_tracked(
+    client: Option<&Client>,
+    target: &Target,
+    param: &Param,
+    payload: &str,
+    args: &crate::cmd::scan::ScanArgs,
+    streak: &std::sync::atomic::AtomicU32,
+) -> (Option<ReflectionKind>, Option<String>) {
     let text = match client {
         Some(client) => {
-            fetch_injection_response_with_client(client, target, param, payload, args).await
+            fetch_injection_response_with_client(client, target, param, payload, args, streak).await
         }
-        None => fetch_injection_response(target, param, payload, args).await,
+        None => fetch_injection_response(target, param, payload, args, streak).await,
     };
     if let Some(text) = text {
         let kind = classify_reflection(&text, payload);

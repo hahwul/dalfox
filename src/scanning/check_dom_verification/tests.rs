@@ -1030,3 +1030,17 @@ fn test_is_executable_url_attribute_pin_whitelist() {
         );
     }
 }
+
+#[test]
+fn html_structural_evidence_matches_entity_encoded_payload() {
+    // WAF-bypass payloads entity-encode the sink chars (`alert&#40;1&#41;`), but
+    // scraper decodes the parsed attribute back to `alert(1)`. The containment
+    // check must compare against the entity-decoded payload too, otherwise a
+    // genuine breakout is downgraded from Verified to Reflected.
+    let payload = "<svg onload=alert&#40;1&#41; class=dalfox>";
+    let doc = scraper::Html::parse_document(r#"<svg onload="alert(1)" class="dalfox"></svg>"#);
+    assert!(
+        has_html_structural_evidence_in_doc(payload, &doc),
+        "entity-encoded payload should still match the decoded attribute value"
+    );
+}

@@ -397,7 +397,18 @@ impl DalfoxMcp {
                         // hit the REST server, now fixed in both places.
                         if !scan_args.skip_ast_analysis {
                             let client = target.build_client_or_default();
-                            if let Ok(resp) = client.get(target.url.clone()).send().await {
+                            // Mirror the CLI preflight: carry the target's
+                            // headers/cookies/User-Agent (so auth/header/UA-gated
+                            // SPAs are analyzed logged-in, matching CLI findings)
+                            // and cap the body with `Range: 0-8191` so a large
+                            // response can't buffer unbounded into memory.
+                            let preflight = crate::utils::build_preflight_request(
+                                &client,
+                                &target,
+                                false,
+                                Some(8192),
+                            );
+                            if let Ok(resp) = preflight.send().await {
                                 // Read CSP off the response before consuming the
                                 // body so a `require-trusted-types-for` page is
                                 // analyzed with the same Trusted Types awareness

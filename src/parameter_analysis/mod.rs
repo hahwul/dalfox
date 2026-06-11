@@ -418,6 +418,7 @@ async fn send_probe_request_for_param(
         }
         Location::MultipartBody => {
             let mut form = reqwest::multipart::Form::new();
+            let mut placed = false;
             if let Some(d) = &data {
                 for pair in d.split('&') {
                     if let Some((k, v)) = pair.split_once('=') {
@@ -429,18 +430,19 @@ async fn send_probe_request_for_param(
                             .to_string();
                         if k == param_name {
                             form = form.text(k, payload.to_string());
+                            placed = true;
                         } else {
                             form = form.text(k, v);
                         }
                     }
                 }
             }
-            if data.is_none()
-                || !data
-                    .as_ref()
-                    .unwrap_or(&String::new())
-                    .contains(&param_name)
-            {
+            // Append the param as a new field only when the exact-match loop
+            // didn't already inject it. The old `!data.contains(name)` substring
+            // guard skipped this whenever `name` was a substring of another key
+            // or value, sending the probe with no payload (so all specials
+            // classified invalid and the param's <,> payloads were pruned).
+            if !placed {
                 form = form.text(param_name.clone(), payload.to_string());
             }
             request_builder = client

@@ -487,7 +487,19 @@ pub(crate) async fn run_scan_job(
                     // fails the regular scan path below still runs.
                     if !args.skip_ast_analysis {
                         let client = target.build_client_or_default();
-                        if let Ok(resp) = client.get(target.url.clone()).send().await {
+                        // Mirror the CLI preflight: carry the target's
+                        // headers/cookies/User-Agent (so auth/header/UA-gated
+                        // SPAs are analyzed logged-in, matching CLI findings —
+                        // a bare GET dropped them and analyzed the logged-out
+                        // page) and cap the body with `Range: 0-8191` so a large
+                        // response can't buffer unbounded into server memory.
+                        let preflight = crate::utils::build_preflight_request(
+                            &client,
+                            &target,
+                            false,
+                            Some(8192),
+                        );
+                        if let Ok(resp) = preflight.send().await {
                             // Read CSP off the response before the body is
                             // consumed, so a `require-trusted-types-for` page is
                             // analyzed with the same Trusted Types awareness the

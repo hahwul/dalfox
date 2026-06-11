@@ -37,7 +37,7 @@ pub mod xss_common;
 use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::Param;
 use crate::scanning::check_dom_verification::check_dom_verification_with_client;
-use crate::scanning::check_reflection::check_reflection_with_response;
+use crate::scanning::check_reflection::check_reflection_with_response_tracked;
 use crate::scanning::result::FindingType;
 use crate::target_parser::Target;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -1285,6 +1285,12 @@ struct ParamScanState {
     /// DOM XSS already confirmed for this param locally — skip the
     /// remaining DOM payloads.
     dom_found_locally: bool,
+    /// Per-worker consecutive-WAF-block streak driving the `--waf-evasion`
+    /// backoff escalation. Lives on the per-param scan state (one per worker)
+    /// so a single scan's ~50 concurrent workers don't reset each other's
+    /// streak — which previously kept the escalation from ever firing. Threaded
+    /// into `check_reflection_with_response_tracked`.
+    waf_streak: std::sync::atomic::AtomicU32,
 }
 
 /// Shared, cheaply-clonable context handed to each spawned worker. Every
@@ -1426,9 +1432,15 @@ impl ScanWorkerCtx {
         let mut probe_reflected = false;
         let mut probe_response_text: Option<String> = None;
         for pp in probe_payloads {
-            let (kind, response_text) =
-                check_reflection_with_response(Some(client), &self.target, param, pp, &self.args)
-                    .await;
+            let (kind, response_text) = check_reflection_with_response_tracked(
+                Some(client),
+                &self.target,
+                param,
+                pp,
+                &self.args,
+                &state.waf_streak,
+            )
+            .await;
             if kind.is_some() {
                 probe_reflected = true;
                 probe_response_text = response_text;
@@ -1471,12 +1483,13 @@ impl ScanWorkerCtx {
         // letter-stripping filters (e.g., /[a-zA-Z]/ removal).
         if !probe_reflected {
             let numeric_probe = crate::scanning::check_reflection::NUMERIC_PROBE_MARKER;
-            let (kind, _) = check_reflection_with_response(
+            let (kind, _) = check_reflection_with_response_tracked(
                 Some(client),
                 &self.target,
                 param,
                 numeric_probe,
                 &self.args,
+                &state.waf_streak,
             )
             .await;
             if kind.is_some() {
@@ -1523,12 +1536,13 @@ impl ScanWorkerCtx {
                     state.reflection_found_locally = true;
                     (None, None)
                 } else {
-                    check_reflection_with_response(
+                    check_reflection_with_response_tracked(
                         Some(self.client.as_ref()),
                         &self.target,
                         param,
                         &reflection_payload,
                         &self.args,
+                        &state.waf_streak,
                     )
                     .await
                 }
@@ -2018,16 +2032,15 @@ pub async fn run_scanning(
             }
             continue;
         }
-        // Early stop if global limit reached
+        // Early stop if global limit reached. Use `break` (not an early
+        // `return`) so the join-drain loop below awaits the already-spawned
+        // workers instead of detaching them: a dropped JoinHandle does NOT
+        // abort its task, so an early return left workers hitting the target
+        // past the stop point, skipped `collapse_target_results` and the
+        // worker-panic tally, and let late findings race the server's result
+        // snapshot. The tail finishes the progress bar with "Completed scanning".
         if ctx.limit_reached() {
-            if let Some(ref pb) = pb {
-                finish_scan_bar(
-                    pb,
-                    console::style("✓").green().to_string(),
-                    format!("Completed scanning {}", target.url),
-                );
-            }
-            return ScanRunReport::default();
+            break;
         }
 
         let ctx = ctx.clone();

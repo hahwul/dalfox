@@ -85,8 +85,15 @@ pub fn apply_headers_ua_cookies(
     target: &Target,
     cookie_header: Option<String>,
 ) -> RequestBuilder {
-    // Apply user provided headers first
+    // Apply user provided headers first. Skip `Accept-Encoding`: setting it
+    // manually disables reqwest's transparent decompression, so the body comes
+    // back as raw gzip/deflate/br bytes and every reflection/marker check
+    // silently fails (scan-wide false negatives). Leaving it unset keeps
+    // decompression on, mirroring the HAR import path's `is_skippable_har_header`.
     for (k, v) in &target.headers {
+        if k.eq_ignore_ascii_case("accept-encoding") {
+            continue;
+        }
         rb = rb.header(k, v);
     }
 

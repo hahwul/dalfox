@@ -4258,3 +4258,65 @@ el.innerHTML = p.createHTML(location.hash);
         "a sole sanitizer return after a side-effect statement is still strict"
     );
 }
+
+#[test]
+fn for_of_taints_loop_binding_from_tainted_iterable() {
+    // for-of over a tainted iterable taints the per-iteration binding, so the
+    // sink inside the body is flagged. The old catch-all `_ => {}` arm dropped
+    // the body entirely (false negative on a common, esp. minified, form).
+    let code = r#"for (const x of [location.hash]) { eval(x); }"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink.contains("eval")),
+        "for-of body sink should be detected, got {vulns:?}"
+    );
+}
+
+#[test]
+fn for_in_do_while_and_labeled_bodies_are_walked() {
+    // do-while body must be walked.
+    let do_while = r#"let h = location.hash; do { document.write(h); } while (false);"#;
+    let v1 = AstDomAnalyzer::new().analyze(do_while).unwrap();
+    assert!(
+        v1.iter().any(|v| v.sink.contains("write")),
+        "do-while body sink should be detected, got {v1:?}"
+    );
+    // labeled loop body must be walked.
+    let labeled = r#"let h = location.hash; outer: for (;;) { document.write(h); break outer; }"#;
+    let v2 = AstDomAnalyzer::new().analyze(labeled).unwrap();
+    assert!(
+        v2.iter().any(|v| v.sink.contains("write")),
+        "labeled loop body sink should be detected, got {v2:?}"
+    );
+}
+
+#[test]
+fn for_loop_expression_init_taint_reaches_sink() {
+    // `for (x = location.hash; …)` runs an unconditional tainting assignment in
+    // the init; the downstream sink must be flagged (init was previously only
+    // walked for the VariableDeclaration form).
+    let code = r#"var x; for (x = location.hash; ; ) { document.write(x); break; }"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink.contains("write")),
+        "for-init expression assignment taint should reach the sink, got {vulns:?}"
+    );
+}
+
+#[test]
+fn purify_substring_does_not_suppress_unrelated_function() {
+    // A name that merely *contains* "purify" (e.g. `impurifyData`) must NOT be
+    // treated as a sanitizer — doing so cleared taint and hid a real DOM-XSS.
+    let code = r#"document.write(impurifyData(location.hash));"#;
+    let vulns = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        vulns.iter().any(|v| v.sink.contains("write")),
+        "impurifyData must not be treated as a sanitizer, got {vulns:?}"
+    );
+    // Whole-segment `purify`/`dompurify` still sanitize (taint cleared).
+    let sanitized = r#"document.write(purify(location.hash));"#;
+    assert!(
+        AstDomAnalyzer::new().analyze(sanitized).unwrap().is_empty(),
+        "purify(x) as a whole-segment sanitizer should suppress the finding"
+    );
+}

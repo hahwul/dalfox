@@ -214,18 +214,8 @@ pub fn parse_har(content: &str) -> Result<Vec<Target>, Box<dyn std::error::Error
 /// original connection. `Cookie` and `User-Agent` are handled separately by the
 /// caller and are intentionally not listed here.
 fn is_skippable_har_header(name: &str) -> bool {
-    const SKIP: &[&str] = &[
-        "host",
-        "content-length",
-        "accept-encoding",
-        "connection",
-        "proxy-connection",
-        "keep-alive",
-        "transfer-encoding",
-        "upgrade",
-        "te",
-    ];
-    SKIP.iter().any(|s| name.eq_ignore_ascii_case(s))
+    // Single source of truth shared with the raw-HTTP request parser.
+    super::is_skippable_request_header(name)
 }
 
 /// Extract a request body from `postData`, preferring the captured raw `text`
