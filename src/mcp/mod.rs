@@ -403,7 +403,10 @@ impl DalfoxMcp {
                             // and cap the body with `Range: 0-8191` so a large
                             // response can't buffer unbounded into memory.
                             let preflight = crate::utils::build_preflight_request(
-                                &client, &target, false, Some(8192),
+                                &client,
+                                &target,
+                                false,
+                                Some(8192),
                             );
                             if let Ok(resp) = preflight.send().await {
                                 // Read CSP off the response before consuming the

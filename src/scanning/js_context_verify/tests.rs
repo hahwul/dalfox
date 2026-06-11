@@ -375,12 +375,7 @@ fn deeply_nested_script_is_inert_and_does_not_crash() {
     // rather than failing the assert — that itself is the signal.)
     let payload = "alert(1)";
     let depth = 5000;
-    let nested = format!(
-        "{}{}{}",
-        "(".repeat(depth),
-        payload,
-        ")".repeat(depth)
-    );
+    let nested = format!("{}{}{}", "(".repeat(depth), payload, ")".repeat(depth));
     let html = format!("<script>var x = {};</script>", nested);
     assert!(
         !has_js_context_evidence(payload, &html),
@@ -394,10 +389,7 @@ fn large_script_above_inline_cap_runs_on_large_stack_without_crashing() {
     // parse on the dedicated big-stack thread and still verify a genuine sink.
     let payload = "\"-alert(1)-\"";
     let filler = "var pad = 1;\n".repeat(400); // ~5 KiB, over the 2 KiB inline cap
-    let html = format!(
-        "<script>{}var c2 = \"{}\";</script>",
-        filler, payload
-    );
+    let html = format!("<script>{}var c2 = \"{}\";</script>", filler, payload);
     assert!(
         has_js_context_evidence(payload, &html),
         "large-but-valid script should still verify the breakout sink"
