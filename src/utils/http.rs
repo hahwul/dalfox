@@ -594,6 +594,13 @@ pub(crate) const MAX_RESPONSE_BODY_BYTES: usize = 16 * 1024 * 1024;
 /// Invalid UTF-8 (including a multi-byte codepoint split at the cap boundary)
 /// is replaced via [`String::from_utf8_lossy`], so this never panics. Use in
 /// place of `resp.text().await` on any response from a scanned target.
+///
+/// NOTE: unlike [`reqwest::Response::text`], this does NOT honor a non-UTF-8
+/// `Content-Type` charset label — it always decodes as UTF-8 (lossy). That is
+/// intentional (the cap streams raw bytes), and harmless for ASCII markers /
+/// payloads, but bytes 0x80–0xFF on a declared Latin-1 / Shift-JIS page become
+/// `U+FFFD` here where `text()` would have transcoded them. Modern targets are
+/// overwhelmingly UTF-8, so detection impact is negligible.
 pub(crate) async fn read_body_capped(
     mut resp: reqwest::Response,
     max_bytes: usize,

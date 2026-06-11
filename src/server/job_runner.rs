@@ -327,7 +327,13 @@ pub(crate) async fn run_scan_job(
             .clone()
             .unwrap_or_else(|| "auto".to_string()),
         skip_waf_probe: opts.skip_waf_probe.unwrap_or(false),
-        force_waf: opts.force_waf.clone(),
+        // Normalize to the canonical (lowercased) WAF name like the CLI/MCP do;
+        // `validate_scan_options` already rejected unknown names before queuing,
+        // so the fallback is defensive only.
+        force_waf: opts
+            .force_waf
+            .as_deref()
+            .map(|s| crate::cmd::scan::parse_force_waf_arg(s).unwrap_or_else(|_| s.to_string())),
         waf_evasion: opts.waf_evasion.unwrap_or(false),
         // Per-scan outbound request rate (RPS), capped by the server-wide
         // `--rate-limit`. Honored in `run_scanning`'s workers now that they
