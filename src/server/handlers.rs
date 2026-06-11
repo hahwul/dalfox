@@ -353,6 +353,23 @@ pub(crate) async fn get_scan_handler(
     let skip_ast_analysis = parse_bool_query(&params, "skip_ast_analysis");
     let analyze_external_js = parse_bool_query(&params, "analyze_external_js");
     let detect_outdated_libs = parse_bool_query(&params, "detect_outdated_libs");
+    let waf_bypass = params.get("waf_bypass").cloned();
+    let skip_waf_probe = parse_opt_bool_query(&params, "skip_waf_probe");
+    let force_waf = params.get("force_waf").cloned();
+    let waf_evasion = parse_opt_bool_query(&params, "waf_evasion");
+    // Present-but-unparseable is a 400 (same policy as the numeric params
+    // above); the [0.0, 1.0] range is enforced by `validate_scan_options`.
+    let waf_min_confidence = match parse_num_query::<f32>(&params, "waf_min_confidence") {
+        Ok(v) => v,
+        Err(msg) => {
+            let resp = ApiResponse::<serde_json::Value> {
+                code: 400,
+                msg,
+                data: None,
+            };
+            return make_api_response(&state, &headers, &params, StatusCode::BAD_REQUEST, &resp);
+        }
+    };
 
     let opts = ScanOptions {
         cookie,
@@ -392,6 +409,11 @@ pub(crate) async fn get_scan_handler(
         skip_ast_analysis: Some(skip_ast_analysis),
         analyze_external_js: Some(analyze_external_js),
         detect_outdated_libs: Some(detect_outdated_libs),
+        waf_bypass,
+        skip_waf_probe,
+        force_waf,
+        waf_evasion,
+        waf_min_confidence,
         rate_limit,
         scan_timeout,
     };

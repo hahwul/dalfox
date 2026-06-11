@@ -166,7 +166,7 @@ pub async fn verify_dom_xss_light_with_client(
             .get("Content-Security-Policy")
             .and_then(|v| v.to_str().ok())
             .map(ToString::to_string);
-        if let Ok(text) = resp.text().await {
+        if let Ok(text) = crate::utils::http::read_body(resp).await {
             // 1) Payload reflection present after normalization
             if crate::utils::is_htmlish_content_type(&ct)
                 && crate::scanning::check_reflection::classify_reflection(&text, payload).is_some()

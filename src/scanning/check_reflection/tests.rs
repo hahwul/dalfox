@@ -1021,6 +1021,23 @@ fn test_safe_context_textarea() {
     assert!(is_in_safe_context(&html, payload));
 }
 
+// A hostile page can echo the payload an unbounded number of times inside a
+// safe tag. Without the per-occurrence cap, vetting every echo against the
+// safe ranges is an O(n·m) CPU hang (body analysis runs after the response is
+// read, so the request timeout doesn't bound it). With the cap, the scan stops
+// early and returns `false` — the fail-toward-reporting answer — so the finding
+// is kept rather than the worker hanging.
+#[test]
+fn test_safe_context_occurrence_cap_bails_toward_reporting() {
+    let payload = "<x>";
+    // > MAX_PAYLOAD_OCCURRENCES echoes, all genuinely inside a safe <textarea>.
+    let inner = payload.repeat(MAX_PAYLOAD_OCCURRENCES + 50);
+    let html = format!("<html><textarea>{inner}</textarea></html>");
+    // Returns promptly (no hang) and does NOT suppress: cap flips the otherwise
+    // "all safe" verdict to `false`.
+    assert!(!is_in_safe_context(&html, payload));
+}
+
 #[test]
 fn test_safe_context_noscript() {
     let payload = "<img src=x onerror=alert(1)>";

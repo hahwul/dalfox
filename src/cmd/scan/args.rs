@@ -53,7 +53,7 @@ pub const DEFAULT_METHOD: &str = "GET";
 /// else at parse time so a typo like `--force-waf cloudflair` doesn't
 /// silently fall into the `WafType::Unknown(other)` bucket and skip
 /// the targeted bypass mutations.
-fn parse_force_waf_arg(s: &str) -> std::result::Result<String, String> {
+pub(crate) fn parse_force_waf_arg(s: &str) -> std::result::Result<String, String> {
     let lower = s.trim().to_ascii_lowercase();
     let known = [
         "cloudflare",

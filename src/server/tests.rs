@@ -1078,6 +1078,7 @@ async fn test_run_scan_job_success_marks_done() {
         detect_outdated_libs: Some(true),
         rate_limit: None,
         scan_timeout: None,
+        ..ScanOptions::default()
     };
 
     let run = tokio::time::timeout(
@@ -1675,6 +1676,57 @@ fn test_validate_scan_options_rejects_out_of_range() {
         ..ScanOptions::default()
     };
     assert!(validate_scan_options(&bad_scan_timeout).is_err());
+}
+
+#[test]
+fn test_validate_scan_options_waf_fields() {
+    // waf_bypass must be one of the CLI's three modes.
+    assert!(
+        validate_scan_options(&ScanOptions {
+            waf_bypass: Some("force".to_string()),
+            ..ScanOptions::default()
+        })
+        .is_ok()
+    );
+    assert!(
+        validate_scan_options(&ScanOptions {
+            waf_bypass: Some("nonsense".to_string()),
+            ..ScanOptions::default()
+        })
+        .is_err()
+    );
+
+    // force_waf is normalized/validated against the shared CLI WAF-name set.
+    assert!(
+        validate_scan_options(&ScanOptions {
+            force_waf: Some("CloudFlare".to_string()),
+            ..ScanOptions::default()
+        })
+        .is_ok()
+    );
+    assert!(
+        validate_scan_options(&ScanOptions {
+            force_waf: Some("notawaf".to_string()),
+            ..ScanOptions::default()
+        })
+        .is_err()
+    );
+
+    // waf_min_confidence is a probability in [0.0, 1.0].
+    assert!(
+        validate_scan_options(&ScanOptions {
+            waf_min_confidence: Some(0.5),
+            ..ScanOptions::default()
+        })
+        .is_ok()
+    );
+    assert!(
+        validate_scan_options(&ScanOptions {
+            waf_min_confidence: Some(1.5),
+            ..ScanOptions::default()
+        })
+        .is_err()
+    );
 }
 
 #[tokio::test]

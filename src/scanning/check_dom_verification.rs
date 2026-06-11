@@ -784,7 +784,7 @@ async fn verify_sxss_dom(
                     .get(reqwest::header::CONTENT_TYPE)
                     .and_then(|v| v.to_str().ok())
                     .unwrap_or("");
-                if let Ok(text) = resp.text().await
+                if let Ok(text) = crate::utils::http::read_body(resp).await
                     && crate::utils::is_htmlish_content_type(ct)
                     && crate::scanning::check_reflection::classify_reflection(&text, payload)
                         .is_some()
@@ -822,7 +822,7 @@ async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> (bool, Opt
 
     // Both HTML and non-HTML (JSONP, JSON with HTML) content types are accepted
     // as long as there is reflection + marker/executable-URL evidence in the response.
-    if let Ok(text) = resp.text().await
+    if let Ok(text) = crate::utils::http::read_body(resp).await
         && crate::scanning::check_reflection::classify_reflection(&text, payload).is_some()
         && has_dom_evidence(payload, &text)
     {

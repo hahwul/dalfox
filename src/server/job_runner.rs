@@ -322,17 +322,22 @@ pub(crate) async fn run_scan_job(
         skip_ast_analysis: opts.skip_ast_analysis.unwrap_or(false),
         analyze_external_js: opts.analyze_external_js.unwrap_or(false),
         hpp: false,
-        waf_bypass: "auto".to_string(),
-        skip_waf_probe: false,
-        force_waf: None,
-        waf_evasion: false,
+        waf_bypass: opts
+            .waf_bypass
+            .clone()
+            .unwrap_or_else(|| "auto".to_string()),
+        skip_waf_probe: opts.skip_waf_probe.unwrap_or(false),
+        force_waf: opts.force_waf.clone(),
+        waf_evasion: opts.waf_evasion.unwrap_or(false),
         // Per-scan outbound request rate (RPS), capped by the server-wide
         // `--rate-limit`. Honored in `run_scanning`'s workers now that they
         // re-enter the per-job rate-limiter scope (see crate::with_job_scopes).
         rate_limit: effective_rate_limit(opts.rate_limit, state.rate_limit),
         retries: 0,
         retry_delay: 1000,
-        waf_min_confidence: crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE,
+        waf_min_confidence: opts
+            .waf_min_confidence
+            .unwrap_or(crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE),
         remote_payloads: opts.remote_payloads.clone().unwrap_or_default(),
         remote_wordlists: opts.remote_wordlists.clone().unwrap_or_default(),
 
@@ -510,7 +515,7 @@ pub(crate) async fn run_scan_job(
                             // CLI gets from preflight.
                             let trusted_types_enforced =
                                 crate::scanning::csp_requires_trusted_types(resp.headers());
-                            if let Ok(body) = resp.text().await {
+                            if let Ok(body) = crate::utils::http::read_body(resp).await {
                                 let ast_batch =
                                     crate::scanning::ast_integration::run_initial_ast_dom_analysis(
                                         &body,

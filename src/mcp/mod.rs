@@ -419,7 +419,7 @@ impl DalfoxMcp {
                                 // the CLI gets from preflight.
                                 let trusted_types_enforced =
                                     crate::scanning::csp_requires_trusted_types(resp.headers());
-                                if let Ok(body) = resp.text().await {
+                                if let Ok(body) = crate::utils::http::read_body(resp).await {
                                     let ast_batch =
                                     crate::scanning::ast_integration::run_initial_ast_dom_analysis(
                                         &body,
@@ -732,10 +732,49 @@ pub struct ScanWithDalfoxParams {
     /// under a WAF's threshold. Now enforced across all worker tasks.
     #[serde(default)]
     pub rate_limit: u32,
+
+    /// WAF handling mode: "auto" (detect then bypass), "force" (use force_waf),
+    /// or "off" (detect only). Default: "auto"
+    #[serde(default = "default_waf_bypass")]
+    pub waf_bypass: String,
+
+    /// Skip the WAF fingerprinting probe entirely. Default: false
+    #[serde(default)]
+    pub skip_waf_probe: bool,
+
+    /// Force a specific WAF profile (e.g. "cloudflare", "akamai", "modsec")
+    /// instead of detecting one. Default: none.
+    #[serde(default)]
+    pub force_waf: Option<String>,
+
+    /// Enable adaptive WAF evasion. Default: false
+    #[serde(default)]
+    pub waf_evasion: bool,
+
+    /// WAF detection confidence floor in [0.0, 1.0]; fingerprints below this are
+    /// dropped. Default: 0.3
+    #[serde(default = "default_waf_min_confidence")]
+    pub waf_min_confidence: f32,
+
+    /// Fetch remote XSS payloads from providers (e.g. "portswigger",
+    /// "payloadbox"). Default: none.
+    #[serde(default)]
+    pub remote_payloads: Vec<String>,
+
+    /// Fetch remote parameter wordlists from providers (e.g. "burp",
+    /// "assetnote"). Default: none.
+    #[serde(default)]
+    pub remote_wordlists: Vec<String>,
 }
 
 fn default_method() -> String {
     crate::cmd::scan::DEFAULT_METHOD.to_string()
+}
+fn default_waf_bypass() -> String {
+    "auto".to_string()
+}
+fn default_waf_min_confidence() -> f32 {
+    crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE
 }
 fn default_encoders() -> Vec<String> {
     crate::cmd::scan::DEFAULT_ENCODERS
@@ -902,6 +941,13 @@ Final results (via get_results_dalfox) include finding type \
             blind_callback_url,
             workers,
             rate_limit,
+            waf_bypass,
+            skip_waf_probe,
+            force_waf,
+            waf_evasion,
+            waf_min_confidence,
+            remote_payloads,
+            remote_wordlists,
         } = params;
 
         let target = target.trim().to_string();
@@ -950,6 +996,34 @@ Final results (via get_results_dalfox) include finding type \
                 format!(
                     "scan_timeout must be between 0 and {} seconds (got {})",
                     MAX_SCAN_TIMEOUT_SECS, scan_timeout
+                ),
+                None,
+            ));
+        }
+        if !matches!(waf_bypass.as_str(), "auto" | "force" | "off") {
+            return Err(ErrorData::invalid_params(
+                format!(
+                    "waf_bypass must be one of auto, force, off (got '{}')",
+                    waf_bypass
+                ),
+                None,
+            ));
+        }
+        // Normalize/validate force_waf against the same WAF-name set the CLI
+        // accepts; the normalized (lowercased) form flows into ScanArgs.
+        let force_waf = match force_waf
+            .as_deref()
+            .map(crate::cmd::scan::parse_force_waf_arg)
+        {
+            Some(Ok(name)) => Some(name),
+            Some(Err(e)) => return Err(ErrorData::invalid_params(e, None)),
+            None => None,
+        };
+        if !(0.0..=1.0).contains(&waf_min_confidence) {
+            return Err(ErrorData::invalid_params(
+                format!(
+                    "waf_min_confidence must be between 0.0 and 1.0 (got {})",
+                    waf_min_confidence
                 ),
                 None,
             ));
@@ -1083,21 +1157,33 @@ Final results (via get_results_dalfox) include finding type \
             skip_ast_analysis,
             analyze_external_js,
             hpp: false,
-            waf_bypass: "auto".to_string(),
-            skip_waf_probe: false,
-            force_waf: None,
-            waf_evasion: false,
+            waf_bypass,
+            skip_waf_probe,
+            force_waf,
+            waf_evasion,
             // Per-call request-rate cap, now honored across all worker tasks
             // (see crate::with_job_scopes). 0 = unlimited.
             rate_limit,
             retries: 0,
             retry_delay: 1000,
-            // Match the server/CLI default so MCP doesn't surface low-confidence
-            // WAF fingerprints the other front-ends filter out (was 0.0).
-            waf_min_confidence: crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE,
-            remote_payloads: vec![],
-            remote_wordlists: vec![],
+            waf_min_confidence,
+            remote_payloads,
+            remote_wordlists,
         });
+
+        // Load any requested remote payload/wordlist providers into the global
+        // registries before the scan reads them. Mirrors the REST server and
+        // CLI; without this the `remote_payloads`/`remote_wordlists` fields
+        // would be silently inert on the MCP path.
+        if !scan_args.remote_payloads.is_empty() || !scan_args.remote_wordlists.is_empty() {
+            let _ = crate::utils::init_remote_resources_with_options(
+                &scan_args.remote_payloads,
+                &scan_args.remote_wordlists,
+                Some(scan_args.timeout),
+                scan_args.proxy.clone(),
+            )
+            .await;
+        }
 
         // Run the scan on tokio's managed blocking-threadpool. We still need a
         // current_thread runtime inside because analyze_parameters and the

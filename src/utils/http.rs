@@ -576,5 +576,49 @@ pub async fn send_with_retry(
     }
 }
 
+/// Hard cap on how many bytes of any single response body we buffer into
+/// memory. The reqwest client has a request `timeout` but no body-size limit,
+/// so a hostile (or misbehaving) server can stream an arbitrarily large body
+/// within the timeout window; with the default worker pool buffering many such
+/// bodies concurrently this is an out-of-memory crash vector. 16 MiB is far
+/// larger than any realistic HTML/JS page, so benign detection is unaffected.
+pub(crate) const MAX_RESPONSE_BODY_BYTES: usize = 16 * 1024 * 1024;
+
+/// Read a response body into a `String`, hard-capping at `max_bytes`.
+///
+/// Streams the body chunk-by-chunk (via [`reqwest::Response::chunk`], which is
+/// available without the `stream` feature) and stops — dropping the connection,
+/// so the server cannot keep pushing bytes — once `max_bytes` is reached. This
+/// bounds memory regardless of the advertised or actual `Content-Length`.
+///
+/// Invalid UTF-8 (including a multi-byte codepoint split at the cap boundary)
+/// is replaced via [`String::from_utf8_lossy`], so this never panics. Use in
+/// place of `resp.text().await` on any response from a scanned target.
+pub(crate) async fn read_body_capped(
+    mut resp: reqwest::Response,
+    max_bytes: usize,
+) -> Result<String, reqwest::Error> {
+    let mut buf: Vec<u8> = Vec::new();
+    while let Some(chunk) = resp.chunk().await? {
+        let remaining = max_bytes.saturating_sub(buf.len());
+        if remaining == 0 {
+            break;
+        }
+        let take = remaining.min(chunk.len());
+        buf.extend_from_slice(&chunk[..take]);
+        if buf.len() >= max_bytes {
+            break;
+        }
+    }
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
+/// Convenience over [`read_body_capped`] using the default
+/// [`MAX_RESPONSE_BODY_BYTES`] cap. Drop-in replacement for `resp.text().await`
+/// on responses from scanned targets.
+pub(crate) async fn read_body(resp: reqwest::Response) -> Result<String, reqwest::Error> {
+    read_body_capped(resp, MAX_RESPONSE_BODY_BYTES).await
+}
+
 #[cfg(test)]
 mod tests;

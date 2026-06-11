@@ -292,7 +292,7 @@ pub async fn fingerprint_with_probe(
 
     let status = resp.status().as_u16();
     let headers = resp.headers().clone();
-    let body_text = resp.text().await.ok();
+    let body_text = crate::utils::http::read_body(resp).await.ok();
 
     let mut result = fingerprint_from_response(&headers, body_text.as_deref(), status);
 

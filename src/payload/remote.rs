@@ -282,7 +282,7 @@ async fn fetch_multiple_text_lists(client: &Client, urls: &[String]) -> String {
         let client = client.clone();
         set.spawn(async move {
             match client.get(&url).send().await {
-                Ok(resp) => match resp.text().await {
+                Ok(resp) => match crate::utils::http::read_body(resp).await {
                     Ok(text) => Some(text),
                     Err(e) => {
                         eprintln!("[remote] failed to read body from {}: {}", url, e);
