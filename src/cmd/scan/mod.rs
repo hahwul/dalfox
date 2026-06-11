@@ -455,11 +455,19 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     };
 
     // Blind XSS: the static `-b/--blind` callback and/or OOB/OAST (interactsh)
-    // callbacks. Start an OOB session first — it fails soft (warn + continue),
-    // so a registration outage never aborts the scan. Injection then runs over
+    // callbacks. Skipped in preview-only modes — `--dry-run` (which advertises
+    // "without sending attack payloads") and `--only-discovery` — because blind
+    // payloads are real attack traffic and OOB registration is an outbound side
+    // effect to a third-party server.
+    //
+    // Start an OOB session first — it fails soft (warn + continue), so a
+    // registration outage never aborts the scan. Injection then runs over
     // whichever channel(s) are configured; the OOB poller is spawned once
     // `stream_findings_enabled` is known (below) and drained before rendering.
-    let oob_session: Option<Arc<crate::oob::OobSession>> = if args.blind_oob_enabled() {
+    let blind_active = !args.dry_run && !args.only_discovery;
+    let oob_session: Option<Arc<crate::oob::OobSession>> = if blind_active
+        && args.blind_oob_enabled()
+    {
         match crate::oob::OobSession::start(&args.oob_config()).await {
             Ok(session) => {
                 if !args.silence && args.format == "plain" {
@@ -483,7 +491,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         None
     };
 
-    if args.blind_callback_url.is_some() || oob_session.is_some() {
+    if blind_active && (args.blind_callback_url.is_some() || oob_session.is_some()) {
         if let Some(callback_url) = &args.blind_callback_url
             && !args.silence
             && args.format == "plain"

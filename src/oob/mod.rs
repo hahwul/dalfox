@@ -66,11 +66,6 @@ pub enum OobBackend {
 }
 
 impl OobBackend {
-    async fn register(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        match self {
-            OobBackend::Interactsh(c) => c.register().await,
-        }
-    }
     fn new_payload_url(&self) -> (String, String) {
         match self {
             OobBackend::Interactsh(c) => c.new_payload_url(),
@@ -113,22 +108,11 @@ impl OobSession {
         config: &OobConfig,
     ) -> Result<OobSession, Box<dyn std::error::Error + Send + Sync>> {
         let registry = Arc::new(CorrelationRegistry::new());
-        let mut last_err: Option<Box<dyn std::error::Error + Send + Sync>> = None;
-        for server in &config.servers {
-            match interactsh::InteractshClient::new(server, config) {
-                Ok(client) => {
-                    let backend = OobBackend::Interactsh(client);
-                    match backend.register().await {
-                        Ok(()) => return Ok(OobSession { backend, registry }),
-                        Err(e) => {
-                            last_err = Some(format!("register {server}: {e}").into());
-                        }
-                    }
-                }
-                Err(e) => last_err = Some(format!("init {server}: {e}").into()),
-            }
-        }
-        Err(last_err.unwrap_or_else(|| "no OOB servers configured".into()))
+        let client = interactsh::register_first(config).await?;
+        Ok(OobSession {
+            backend: OobBackend::Interactsh(client),
+            registry,
+        })
     }
 
     /// Mint a fresh per-payload callback URL, returning `(https URL, nonce)`.

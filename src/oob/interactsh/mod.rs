@@ -34,13 +34,36 @@ pub struct InteractshClient {
     http: Client,
 }
 
+/// Generate one keypair, then try each configured server in order until one
+/// registers. Returns the first live client, or the last error if all fail
+/// (the caller turns that into a soft warning). The RSA-2048 keypair is
+/// generated once and reused across attempts rather than per server.
+pub async fn register_first(config: &OobConfig) -> ClientResult<InteractshClient> {
+    let keys = SessionKeys::generate()?;
+    let mut last_err: Option<Box<dyn std::error::Error + Send + Sync>> = None;
+    for server in &config.servers {
+        let client = match InteractshClient::new(server, config, keys.clone()) {
+            Ok(c) => c,
+            Err(e) => {
+                last_err = Some(format!("init {server}: {e}").into());
+                continue;
+            }
+        };
+        match client.register().await {
+            Ok(()) => return Ok(client),
+            Err(e) => last_err = Some(format!("register {server}: {e}").into()),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| "no OOB servers configured".into()))
+}
+
 impl InteractshClient {
-    /// Build a client for `server` (does no network I/O — call [`register`] next).
+    /// Build a client for `server` from a pre-generated keypair (does no network
+    /// I/O — call [`register`] next).
     ///
     /// [`register`]: InteractshClient::register
-    pub fn new(server: &str, config: &OobConfig) -> ClientResult<Self> {
+    fn new(server: &str, config: &OobConfig, keys: SessionKeys) -> ClientResult<Self> {
         crate::ensure_crypto_provider();
-        let keys = SessionKeys::generate()?;
         let correlation_id = rand_label(CORRELATION_ID_LEN);
         let secret_key = uuid::Uuid::new_v4().to_string();
 
@@ -247,7 +270,8 @@ mod tests {
 
     #[test]
     fn payload_url_is_33_char_host_and_correlates() {
-        let client = InteractshClient::new("oast.fun", &test_config()).expect("client");
+        let keys = SessionKeys::generate().expect("keygen");
+        let client = InteractshClient::new("oast.fun", &test_config(), keys).expect("client");
         let (url, nonce) = client.new_payload_url();
         assert_eq!(nonce.len(), NONCE_LEN);
         let host = url.strip_prefix("https://").unwrap();

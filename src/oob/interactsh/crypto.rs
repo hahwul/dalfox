@@ -15,7 +15,9 @@ use sha2_oaep::Sha256;
 
 type CryptoResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send + Sync>>;
 
-/// RSA key material for one OOB session.
+/// RSA key material for one OOB session. Cloneable so a single keypair is
+/// generated once per session and reused across server-fallback attempts.
+#[derive(Clone)]
 pub struct SessionKeys {
     private: RsaPrivateKey,
     /// base64(PEM(SPKI)) of the public key — the exact form interactsh sends in
