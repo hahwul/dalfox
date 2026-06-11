@@ -78,7 +78,7 @@ async fn pre_collapse_query_probe(client: &reqwest::Client, target: &Target) -> 
                 .get("location")
                 .and_then(|v| v.to_str().ok())
                 .is_some_and(|loc| loc.contains(marker));
-        let text = resp.text().await.ok()?;
+        let text = crate::utils::http::read_body(resp).await.ok()?;
         if !location_has_marker && !text.contains(marker) {
             return None;
         }
@@ -745,7 +745,7 @@ pub async fn probe_dictionary_params(
                                 }
                             }
                         }
-                    } else if let Ok(text) = r.text().await {
+                    } else if let Ok(text) = crate::utils::http::read_body(r).await {
                         let mut st = stats_clone.lock().await;
                         st.record_attempt();
                         if crate::scanning::markers::classify_probe_reflection(&text).detected() {
@@ -967,7 +967,7 @@ pub async fn probe_body_params(
 
                 let mut discovered: Option<Param> = None;
                 if let Ok(r) = resp
-                    && let Ok(text) = r.text().await
+                    && let Ok(text) = crate::utils::http::read_body(r).await
                 {
                     let mut st = stats_clone.lock().await;
                     st.record_attempt();
@@ -1122,7 +1122,7 @@ pub async fn probe_response_id_params(
     let __resp = base_request.send().await;
     if let Ok(resp) = __resp
         && !resp.status().is_server_error()
-        && let Ok(text) = resp.text().await
+        && let Ok(text) = crate::utils::http::read_body(resp).await
     {
         // Scope the scraper::Html (which is !Send) strictly to the owning
         // block so the compiler can prove it never crosses any of the
@@ -1229,7 +1229,7 @@ pub async fn probe_response_id_params(
                         }
                         return discovered;
                     }
-                    if let Ok(text) = resp.text().await {
+                    if let Ok(text) = crate::utils::http::read_body(resp).await {
                         let mut st = stats_clone.lock().await;
                         st.record_attempt();
                         if crate::scanning::markers::classify_probe_reflection(&text).detected() {
@@ -1477,7 +1477,7 @@ pub async fn probe_json_body_params(
 
             let mut discovered: Option<Param> = None;
             if let Ok(r) = resp
-                && let Ok(text) = r.text().await
+                && let Ok(text) = crate::utils::http::read_body(r).await
             {
                 let mut st = stats_clone.lock().await;
                 st.record_attempt();
@@ -1696,7 +1696,7 @@ pub async fn probe_multipart_params(
 
             let mut discovered: Option<Param> = None;
             if let Ok(r) = request.send().await
-                && let Ok(text) = r.text().await
+                && let Ok(text) = crate::utils::http::read_body(r).await
                 && crate::scanning::markers::classify_probe_reflection(&text).detected()
             {
                 let context = detect_injection_context(&text);

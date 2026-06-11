@@ -28,6 +28,18 @@ pub use crate::encoding::pre_encoding::apply_pre_encoding;
 /// Maximum number of iterative URL-decode passes when building payload variants.
 const MAX_URL_DECODE_ITERATIONS: usize = 4;
 
+/// Upper bounds for the reflection heuristics' scans over a single response.
+/// Body analysis runs *after* the response is read, so it is not covered by the
+/// request timeout; a hostile page packed with safe tags, `<script>` blocks, or
+/// payload echoes could otherwise drive these O(n)/O(n·m) scans into a
+/// multi-second CPU hang (the loops vet every occurrence against every range).
+/// When a cap is hit we stop early and return the answer that does NOT suppress
+/// a finding (fail toward reporting), so the cap can only ever cost extra [R]
+/// noise on a pathological page — never a missed vulnerability.
+const MAX_SAFE_RANGES: usize = 4096;
+const MAX_SCRIPT_RANGES: usize = 4096;
+const MAX_PAYLOAD_OCCURRENCES: usize = 4096;
+
 /// Purely numeric reflection probe. Sent for parameters that showed no
 /// reflection with the normal alphanumeric markers, to catch injection
 /// points behind letter-stripping filters (e.g. `gsub(/[a-zA-Z]/, "")`),
@@ -173,11 +185,18 @@ fn is_in_safe_context(html: &str, payload: &str) -> bool {
 
     // Build safe-context ranges by scanning for opening/closing safe tags
     let mut safe_ranges: Vec<(usize, usize)> = Vec::new();
-    for &(open_pattern, close_pattern) in SAFE_TAG_PATTERNS {
+    'patterns: for &(open_pattern, close_pattern) in SAFE_TAG_PATTERNS {
         let mut search_pos = 0;
         while let Some(open_start) =
             find_ascii_case_insensitive(html_bytes, open_pattern, search_pos)
         {
+            // Cap the range set: a page with this many safe tags is hostile,
+            // and more ranges only grow memory and the per-occurrence scan
+            // below. Stopping here leaves later occurrences classified as
+            // unsafe, which keeps (does not suppress) the finding.
+            if safe_ranges.len() >= MAX_SAFE_RANGES {
+                break 'patterns;
+            }
             // Find the end of the opening tag '>'
             if let Some(tag_end_offset) = html[open_start..].find('>') {
                 let content_start = open_start + tag_end_offset + 1;
@@ -201,7 +220,14 @@ fn is_in_safe_context(html: &str, payload: &str) -> bool {
     // Check every occurrence of the payload
     let payload_len = payload.len();
     let mut search_start = 0;
+    let mut scanned = 0usize;
     while let Some(pos) = html[search_start..].find(payload) {
+        scanned += 1;
+        if scanned > MAX_PAYLOAD_OCCURRENCES {
+            // Too many echoes to vet individually; treat as not-fully-safe so
+            // the reflection is reported rather than silently suppressed.
+            return false;
+        }
         let abs_pos = search_start + pos;
         let in_safe = safe_ranges
             .iter()
@@ -321,7 +347,14 @@ pub(crate) fn marker_reflects_in_url_attr_only(html: &str, marker: &str) -> bool
     let bytes = html.as_bytes();
     let mut search_start = 0;
     let mut any = false;
+    let mut scanned = 0usize;
     while let Some(pos) = html[search_start..].find(marker) {
+        scanned += 1;
+        if scanned > MAX_PAYLOAD_OCCURRENCES {
+            // Bail toward reporting: `false` means "not exclusively URL-attr",
+            // so the URL-echo suppression does not apply and the finding stays.
+            return false;
+        }
         any = true;
         let abs = search_start + pos;
         if !occurrence_is_in_url_attr(bytes, abs) {
@@ -428,6 +461,13 @@ fn script_block_ranges(html: &str) -> Vec<(usize, usize)> {
     let mut ranges = Vec::new();
     let mut search = 0;
     while let Some(start) = find_ascii_case_insensitive(bytes, open, search) {
+        // Cap the range set. Unlike the unclosed-tag branch below we do NOT
+        // extend to end-of-document here: leaving later regions classified as
+        // non-script keeps payload occurrences there reportable (fail toward
+        // reporting) instead of marking them inert.
+        if ranges.len() >= MAX_SCRIPT_RANGES {
+            break;
+        }
         // Find the end of the opening tag '>'
         let Some(rel) = html[start..].find('>') else {
             break;
@@ -456,7 +496,14 @@ fn all_occurrences_in_ranges(haystack: &str, needle: &str, ranges: &[(usize, usi
     let needle_len = needle.len();
     let mut search = 0;
     let mut found_any = false;
+    let mut scanned = 0usize;
     while let Some(rel) = haystack[search..].find(needle) {
+        scanned += 1;
+        if scanned > MAX_PAYLOAD_OCCURRENCES {
+            // Give up vetting; `false` means "not all occurrences are inside the
+            // ranges", which keeps the finding rather than treating it as inert.
+            return false;
+        }
         let abs = search + rel;
         let in_range = ranges
             .iter()
@@ -771,7 +818,15 @@ fn url_encoded_payload_reflects_in_unsafe_url_context(html: &str, payload: &str)
     }
     let bytes = html.as_bytes();
     let mut search_start = 0;
+    let mut scanned = 0usize;
     while let Some(pos) = html[search_start..].find(payload) {
+        scanned += 1;
+        if scanned > MAX_PAYLOAD_OCCURRENCES {
+            // Couldn't rule out an unsafe-URL-context occurrence within the
+            // scan budget; the caller suppresses only when this is `false`, so
+            // returning `true` keeps the finding (fail toward reporting).
+            return true;
+        }
         let abs = search_start + pos;
         if occurrence_is_in_url_attr(bytes, abs) {
             return true;
@@ -1286,7 +1341,10 @@ async fn fetch_injection_response_with_client(
                 // target_summary.waf.bypass is always empty.
                 let status_code = resp.status().as_u16();
                 apply_injection_waf_accounting(status_code, target, args, streak).await;
-                resp.text().await.ok().filter(|t| !t.is_empty())
+                crate::utils::http::read_body(resp)
+                    .await
+                    .ok()
+                    .filter(|t| !t.is_empty())
             }
             Err(_) => None,
         };
@@ -1306,7 +1364,7 @@ async fn fetch_injection_response_with_client(
 
                 crate::record_outbound_request().await;
                 if let Ok(resp) = check_request.send().await
-                    && let Ok(text) = resp.text().await
+                    && let Ok(text) = crate::utils::http::read_body(resp).await
                     && !text.is_empty()
                 {
                     if classify_reflection(&text, payload).is_some() {
@@ -1437,7 +1495,7 @@ async fn fetch_injection_response_with_client(
                 // R is preserved while the false V upgrade is blocked.
                 return Some(format!("<html><body>{}</body></html>", location));
             }
-            match resp.text().await {
+            match crate::utils::http::read_body(resp).await {
                 Ok(body) => {
                     // Body-aware Path suppression for 4xx/5xx: keep the
                     // finding when the marker reflects somewhere other than

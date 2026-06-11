@@ -387,7 +387,7 @@ pub async fn check_query_discovery(
                         escaped_specials: None,
                         js_breakout: None,
                     });
-                } else if let Ok(text) = resp.text().await
+                } else if let Ok(text) = crate::utils::http::read_body(resp).await
                     && crate::scanning::markers::classify_probe_reflection(&text).detected()
                 {
                     let (valid, invalid) = classify_special_chars(&text);
@@ -459,7 +459,7 @@ pub async fn check_query_discovery(
             let request = crate::utils::build_request(&client, target, m, url, target.data.clone());
             crate::record_outbound_request().await;
             if let Ok(resp) = request.send().await
-                && let Ok(text) = resp.text().await
+                && let Ok(text) = crate::utils::http::read_body(resp).await
                 && crate::scanning::markers::classify_probe_reflection(&text).detected()
             {
                 // For pre-encoded params (base64/2base64), skip special char
@@ -543,7 +543,7 @@ pub async fn check_query_discovery(
             let request = crate::utils::build_request(&client, target, m, url, target.data.clone());
             crate::record_outbound_request().await;
             if let Ok(resp) = request.send().await
-                && let Ok(text) = resp.text().await
+                && let Ok(text) = crate::utils::http::read_body(resp).await
                 && crate::scanning::markers::classify_probe_reflection(&text).detected()
             {
                 discovered_names.insert(display_name.clone());
@@ -603,7 +603,7 @@ pub async fn check_query_discovery(
             let request = crate::utils::build_request(&client, target, m, url, target.data.clone());
             crate::record_outbound_request().await;
             if let Ok(resp) = request.send().await
-                && let Ok(text) = resp.text().await
+                && let Ok(text) = crate::utils::http::read_body(resp).await
                 && text.contains(numeric_marker)
             {
                 discovered_names.insert(name.clone());
@@ -650,7 +650,7 @@ pub async fn check_query_discovery(
         let request = crate::utils::build_request(&client, target, m, url, target.data.clone());
         crate::record_outbound_request().await;
         if let Ok(resp) = request.send().await
-            && let Ok(text) = resp.text().await
+            && let Ok(text) = crate::utils::http::read_body(resp).await
             && crate::scanning::markers::classify_probe_reflection(&text).detected()
         {
             let (valid, invalid) = classify_special_chars(&text);
@@ -731,7 +731,7 @@ async fn detect_blanket_header_echo(target: &Target) -> bool {
     let request = crate::utils::apply_header_overrides(base, &overrides);
     crate::record_outbound_request().await;
     match request.send().await {
-        Ok(resp) => match resp.text().await {
+        Ok(resp) => match crate::utils::http::read_body(resp).await {
             Ok(text) => crate::scanning::markers::classify_probe_reflection(&text).detected(),
             Err(_) => false,
         },
@@ -824,7 +824,7 @@ pub async fn check_header_discovery(
             crate::record_outbound_request().await;
             let mut discovered: Option<Param> = None;
             if let Ok(resp) = request.send().await
-                && let Ok(text) = resp.text().await
+                && let Ok(text) = crate::utils::http::read_body(resp).await
                 && crate::scanning::markers::classify_probe_reflection(&text).detected()
             {
                 let (valid, invalid) = classify_special_chars(&text);
@@ -974,7 +974,7 @@ pub async fn check_path_discovery(
                 //                                       `<td>{uri}</td>`).
                 let status = resp.status().as_u16();
                 if !(300..400).contains(&status)
-                    && let Ok(text) = resp.text().await
+                    && let Ok(text) = crate::utils::http::read_body(resp).await
                     && crate::scanning::markers::classify_probe_reflection(&text).detected()
                 {
                     let exploitable_context = (200..300).contains(&status)
@@ -1009,7 +1009,7 @@ pub async fn check_path_discovery(
                         );
                         crate::record_outbound_request().await;
                         match probe.send().await {
-                            Ok(r) => match r.text().await {
+                            Ok(r) => match crate::utils::http::read_body(r).await {
                                 Ok(t) => t.contains(&needle),
                                 Err(_) => false,
                             },
@@ -1127,7 +1127,7 @@ pub async fn check_cookie_discovery(
             crate::record_outbound_request().await;
             let mut discovered: Option<Param> = None;
             if let Ok(resp) = request.send().await
-                && let Ok(text) = resp.text().await
+                && let Ok(text) = crate::utils::http::read_body(resp).await
                 && crate::scanning::markers::classify_probe_reflection(&text).detected()
             {
                 let (valid, invalid) = classify_special_chars(&text);
@@ -1191,7 +1191,7 @@ pub async fn check_form_discovery(
     let request = crate::utils::build_request(&client, target, method, target.url.clone(), None);
     crate::record_outbound_request().await;
     let html = match request.send().await {
-        Ok(resp) => match resp.text().await {
+        Ok(resp) => match crate::utils::http::read_body(resp).await {
             Ok(text) => text,
             Err(_) => return,
         },
@@ -1286,7 +1286,7 @@ pub async fn check_form_discovery(
                 .multipart(form);
                 crate::record_outbound_request().await;
                 if let Ok(resp) = rb.send().await
-                    && let Ok(text) = resp.text().await
+                    && let Ok(text) = crate::utils::http::read_body(resp).await
                     && crate::scanning::markers::classify_probe_reflection(&text).detected()
                 {
                     let (valid, invalid) = classify_special_chars(&text);
@@ -1358,7 +1358,7 @@ pub async fn check_form_discovery(
                 );
                 crate::record_outbound_request().await;
                 if let Ok(resp) = rb.send().await
-                    && let Ok(text) = resp.text().await
+                    && let Ok(text) = crate::utils::http::read_body(resp).await
                     && crate::scanning::markers::classify_probe_reflection(&text).detected()
                 {
                     let (valid, invalid) = classify_special_chars(&text);
@@ -1404,7 +1404,7 @@ pub async fn check_form_discovery(
                 let rb = crate::utils::build_request(&client, target, m, test_url.clone(), None);
                 crate::record_outbound_request().await;
                 if let Ok(resp) = rb.send().await
-                    && let Ok(text) = resp.text().await
+                    && let Ok(text) = crate::utils::http::read_body(resp).await
                     && crate::scanning::markers::classify_probe_reflection(&text).detected()
                 {
                     let (valid, invalid) = classify_special_chars(&text);
@@ -1450,7 +1450,7 @@ pub async fn check_form_discovery(
             );
             crate::record_outbound_request().await;
             if let Ok(resp) = rb.send().await
-                && let Ok(text) = resp.text().await
+                && let Ok(text) = crate::utils::http::read_body(resp).await
                 && crate::scanning::markers::classify_probe_reflection(&text).detected()
             {
                 let (valid, invalid) = classify_special_chars(&text);
@@ -1535,7 +1535,7 @@ pub async fn check_form_discovery(
                     );
                     crate::record_outbound_request().await;
                     if let Ok(resp) = rb.send().await
-                        && let Ok(text) = resp.text().await
+                        && let Ok(text) = crate::utils::http::read_body(resp).await
                         && crate::scanning::markers::classify_probe_reflection(&text).detected()
                     {
                         let (valid, invalid) = classify_special_chars(&text);
@@ -1611,7 +1611,7 @@ pub async fn check_form_discovery(
                     );
                     crate::record_outbound_request().await;
                     if let Ok(resp) = rb.send().await
-                        && let Ok(text) = resp.text().await
+                        && let Ok(text) = crate::utils::http::read_body(resp).await
                         && crate::scanning::markers::classify_probe_reflection(&text).detected()
                     {
                         let (valid, invalid) = classify_special_chars(&text);

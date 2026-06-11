@@ -520,7 +520,7 @@ async fn send_probe_request_for_param(
     } else {
         None
     };
-    let body_text = match resp.text().await {
+    let body_text = match crate::utils::http::read_body(resp).await {
         Ok(body) => Some(body),
         Err(e) => {
             if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
@@ -991,7 +991,7 @@ pub async fn active_probe_param(
             let request_builder = client.request(target.parse_method(), url);
             crate::record_outbound_request().await;
             if let Ok(resp) = request_builder.send().await
-                && let Ok(text) = resp.text().await
+                && let Ok(text) = crate::utils::http::read_body(resp).await
                 && text.contains(&raw_marker)
             {
                 param.pre_encoding = Some(enc_name.to_string());

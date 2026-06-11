@@ -265,7 +265,7 @@ pub async fn blind_scan_forms(
     }
     crate::record_outbound_request().await;
     let html = match fetch.send().await {
-        Ok(resp) => match resp.text().await {
+        Ok(resp) => match crate::utils::http::read_body(resp).await {
             Ok(text) => text,
             Err(_) => return,
         },

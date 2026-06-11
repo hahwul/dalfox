@@ -38,6 +38,26 @@ pub(crate) fn validate_scan_options(opts: &ScanOptions) -> Result<(), String> {
             MAX_SCAN_TIMEOUT_SECS, st
         ));
     }
+    if let Some(mode) = opts.waf_bypass.as_deref()
+        && !matches!(mode, "auto" | "force" | "off")
+    {
+        return Err(format!(
+            "waf_bypass must be one of auto, force, off (got '{}')",
+            mode
+        ));
+    }
+    // Reuse the CLI's WAF-name normalizer so server/CLI accept the same set.
+    if let Some(name) = opts.force_waf.as_deref() {
+        crate::cmd::scan::parse_force_waf_arg(name)?;
+    }
+    if let Some(c) = opts.waf_min_confidence
+        && !(0.0..=1.0).contains(&c)
+    {
+        return Err(format!(
+            "waf_min_confidence must be between 0.0 and 1.0 (got {})",
+            c
+        ));
+    }
     Ok(())
 }
 

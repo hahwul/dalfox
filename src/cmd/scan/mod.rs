@@ -39,6 +39,7 @@ mod preflight;
 mod scan_loop;
 mod validation;
 
+pub(crate) use args::parse_force_waf_arg;
 pub use args::{
     CLI_MAX_DELAY_MS, CLI_MAX_RATE_LIMIT, CLI_MAX_RETRIES, CLI_MAX_RETRY_DELAY_MS,
     CLI_MAX_TIMEOUT_SECS, CLI_MAX_WORKERS, DEFAULT_DELAY_MS, DEFAULT_ENCODERS,

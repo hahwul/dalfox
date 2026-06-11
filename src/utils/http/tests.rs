@@ -416,3 +416,59 @@ fn parse_retry_after_accepts_seconds_and_http_date() {
     // Unparseable -> None so the caller falls back to exponential backoff.
     assert_eq!(with("not-a-date"), None);
 }
+
+/// Spawn a one-shot localhost server that replies with `body` and return its
+/// URL. Used to exercise the real `reqwest::Response::chunk()` read path.
+async fn serve_once(body: Vec<u8>) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        if let Ok((mut sock, _)) = listener.accept().await {
+            let mut scratch = [0u8; 1024];
+            let _ = sock.read(&mut scratch).await; // drain the request line/headers
+            let header = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = sock.write_all(header.as_bytes()).await;
+            let _ = sock.write_all(&body).await;
+            let _ = sock.flush().await;
+        }
+    });
+    format!("http://{addr}/")
+}
+
+#[tokio::test]
+async fn test_read_body_capped_returns_small_body_whole() {
+    crate::ensure_crypto_provider();
+    let url = serve_once(b"hello world".to_vec()).await;
+    let resp = reqwest::Client::new().get(&url).send().await.unwrap();
+    let body = read_body_capped(resp, 1024).await.unwrap();
+    assert_eq!(body, "hello world");
+}
+
+#[tokio::test]
+async fn test_read_body_capped_truncates_oversized_body() {
+    crate::ensure_crypto_provider();
+    // 20-byte body, 10-byte cap: exactly the first 10 bytes come back and the
+    // rest of the stream is dropped (no unbounded buffering).
+    let url = serve_once(b"0123456789ABCDEFGHIJ".to_vec()).await;
+    let resp = reqwest::Client::new().get(&url).send().await.unwrap();
+    let body = read_body_capped(resp, 10).await.unwrap();
+    assert_eq!(body, "0123456789");
+}
+
+#[tokio::test]
+async fn test_read_body_capped_handles_utf8_split_at_cap() {
+    crate::ensure_crypto_provider();
+    // Body is "a" + 'é' (0x61, 0xC3, 0xA9). A 2-byte cap lands inside the
+    // multi-byte codepoint; from_utf8_lossy must replace it instead of
+    // panicking on a non-char-boundary slice.
+    let url = serve_once(vec![0x61, 0xC3, 0xA9]).await;
+    let resp = reqwest::Client::new().get(&url).send().await.unwrap();
+    let body = read_body_capped(resp, 2).await.unwrap();
+    assert_eq!(body, "a\u{FFFD}");
+}

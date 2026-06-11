@@ -244,7 +244,7 @@ pub(crate) async fn preflight_content_type(
     if let Ok(get_resp) = get_req.send().await {
         let get_status = get_resp.status().as_u16();
         let get_headers = get_resp.headers().clone();
-        if let Ok(body) = get_resp.text().await {
+        if let Ok(body) = crate::utils::http::read_body(get_resp).await {
             response_body = Some(body.clone());
 
             // WAF detection from GET response (headers + body). Same

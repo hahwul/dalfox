@@ -51,6 +51,13 @@ fn default_scan_params(target: &str) -> ScanWithDalfoxParams {
         blind_callback_url: None,
         workers: 1,
         rate_limit: 0,
+        waf_bypass: "auto".to_string(),
+        skip_waf_probe: false,
+        force_waf: None,
+        waf_evasion: false,
+        waf_min_confidence: crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE,
+        remote_payloads: vec![],
+        remote_wordlists: vec![],
     }
 }
 
@@ -478,6 +485,46 @@ fn test_insecure_param_serde_defaults_true() {
     )
     .expect("preflight params with insecure=false deserialize");
     assert!(!pre_off.insecure);
+}
+
+#[test]
+fn test_waf_and_remote_params_serde() {
+    // Omitted WAF / remote fields fall back to the CLI/server defaults instead
+    // of being silently hardcoded inside the scan path.
+    let defaults: ScanWithDalfoxParams =
+        serde_json::from_value(serde_json::json!({ "target": "https://example.com" }))
+            .expect("minimal scan params deserialize");
+    assert_eq!(defaults.waf_bypass, "auto");
+    assert!(!defaults.skip_waf_probe);
+    assert!(defaults.force_waf.is_none());
+    assert!(!defaults.waf_evasion);
+    assert_eq!(
+        defaults.waf_min_confidence,
+        crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE
+    );
+    assert!(defaults.remote_payloads.is_empty());
+    assert!(defaults.remote_wordlists.is_empty());
+
+    // Explicit values deserialize through to the params struct (and thus to
+    // ScanArgs), no longer ignored as they were before.
+    let set: ScanWithDalfoxParams = serde_json::from_value(serde_json::json!({
+        "target": "https://example.com",
+        "waf_bypass": "off",
+        "skip_waf_probe": true,
+        "force_waf": "cloudflare",
+        "waf_evasion": true,
+        "waf_min_confidence": 0.75,
+        "remote_payloads": ["portswigger"],
+        "remote_wordlists": ["burp"],
+    }))
+    .expect("scan params with WAF/remote fields deserialize");
+    assert_eq!(set.waf_bypass, "off");
+    assert!(set.skip_waf_probe);
+    assert_eq!(set.force_waf.as_deref(), Some("cloudflare"));
+    assert!(set.waf_evasion);
+    assert_eq!(set.waf_min_confidence, 0.75);
+    assert_eq!(set.remote_payloads, vec!["portswigger".to_string()]);
+    assert_eq!(set.remote_wordlists, vec!["burp".to_string()]);
 }
 
 #[tokio::test]

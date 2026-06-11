@@ -624,7 +624,7 @@ pub(crate) async fn fetch_and_analyze_external_js(
         if !resp.status().is_success() {
             continue;
         }
-        let body = match resp.text().await {
+        let body = match crate::utils::http::read_body(resp).await {
             Ok(b) => b,
             Err(_) => continue,
         };

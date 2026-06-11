@@ -169,6 +169,17 @@ pub(crate) struct ScanOptions {
     pub(crate) analyze_external_js: Option<bool>,
     /// Also report outdated / known-vulnerable JS libraries (informational, CWE-1104).
     pub(crate) detect_outdated_libs: Option<bool>,
+    /// WAF handling mode: "auto" (detect then bypass), "force" (use force_waf),
+    /// or "off" (detect only). Absent keeps the scanner default ("auto").
+    pub(crate) waf_bypass: Option<String>,
+    /// Skip the WAF fingerprinting probe entirely. Absent keeps the default (false).
+    pub(crate) skip_waf_probe: Option<bool>,
+    /// Force a specific WAF profile (e.g. "cloudflare") instead of detecting one.
+    pub(crate) force_waf: Option<String>,
+    /// Enable adaptive WAF evasion. Absent keeps the default (false).
+    pub(crate) waf_evasion: Option<bool>,
+    /// WAF detection confidence floor in [0.0, 1.0]. Absent keeps the default (0.3).
+    pub(crate) waf_min_confidence: Option<f32>,
     /// Per-scan outbound request rate (requests/second; 0 = unlimited). Capped
     /// by the server's `--rate-limit` when set.
     pub(crate) rate_limit: Option<u32>,
