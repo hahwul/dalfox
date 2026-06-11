@@ -557,12 +557,19 @@ fn gather_sink_spans_in_expression(
     }
 }
 
-/// Locate the payload in the script block as raw substring. Returns the byte
-/// range `[start, end)` if found.
-fn locate_payload(script_src: &str, payload: &str) -> Option<(u32, u32)> {
-    let start = script_src.find(payload)?;
-    let end = start + payload.len();
-    Some((start as u32, end as u32))
+/// True when *any* occurrence of `payload` within `src` introduces a JS sink
+/// call. A benign in-string reflection (e.g. `var s = "…alert(1)…"`) can precede
+/// the genuinely executable breakout occurrence in the same `<script>` block, so
+/// every occurrence is checked — not just `find()`'s first, which downgraded a
+/// real finding to Reflected.
+fn any_payload_occurrence_hits_sink(src: &str, payload: &str) -> bool {
+    if payload.is_empty() {
+        return false;
+    }
+    src.match_indices(payload).any(|(start, _)| {
+        let end = start + payload.len();
+        script_block_has_sink_call_in_range(src, start as u32, end as u32)
+    })
 }
 
 /// Maximum body size (bytes) for which we attempt full-body JS parsing as a
@@ -585,16 +592,13 @@ pub(crate) fn has_js_context_evidence(payload: &str, html: &str) -> bool {
     let mut saw_block = false;
     for block in script_blocks(html) {
         saw_block = true;
-        if let Some((ps, pe)) = locate_payload(block, payload)
-            && script_block_has_sink_call_in_range(block, ps, pe)
-        {
+        if any_payload_occurrence_hits_sink(block, payload) {
             return true;
         }
     }
     if !saw_block
         && html.len() <= JSONP_PARSE_MAX_BYTES
-        && let Some((ps, pe)) = locate_payload(html, payload)
-        && script_block_has_sink_call_in_range(html, ps, pe)
+        && any_payload_occurrence_hits_sink(html, payload)
     {
         return true;
     }

@@ -234,6 +234,14 @@ fn infer_b64_or_b64url_json(value: &str) -> Vec<NestedField> {
 
 /// Strategy: standard-alphabet base64 wrapping a JSON object/array.
 fn infer_b64_json(value: &str) -> Vec<NestedField> {
+    // `query_pairs()` URL-decoding turns a raw `+` in the value into a space, so
+    // a standard-alphabet base64 value carrying `+` arrives space-mangled and
+    // would be rejected. Undo that for the standard-alphabet attempt (url-safe
+    // base64 has no `+`, so its path is unaffected). A non-base64/non-JSON value
+    // still bails at the decode/JSON checks below, so this can't cause a false
+    // discovery.
+    let restored = value.replace(' ', "+");
+    let value = restored.as_str();
     if !looks_like_b64(value, /*allow_url_safe=*/ false) {
         return Vec::new();
     }

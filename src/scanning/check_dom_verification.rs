@@ -298,6 +298,12 @@ fn has_html_structural_evidence_in_doc(payload: &str, document: &scraper::Html) 
         return false;
     }
 
+    // The raw payload may entity-encode its sink chars for WAF bypass (e.g.
+    // `alert&#40;1&#41;`), but scraper decodes the parsed attribute/script text
+    // back to `alert(1)`. Compare against the entity-decoded payload too, else a
+    // genuine breakout gets downgraded to Reflected in WAF-bypass mode.
+    let decoded_payload = decode_html_entities(payload);
+
     let selector = selectors::universal();
     for node in document.select(selector) {
         let value = node.value();
@@ -315,7 +321,7 @@ fn has_html_structural_evidence_in_doc(payload: &str, document: &scraper::Html) 
             if !crate::scanning::js_context_verify::payload_carries_js_sink(trimmed) {
                 continue;
             }
-            if payload.contains(trimmed) {
+            if payload.contains(trimmed) || decoded_payload.contains(trimmed) {
                 return true;
             }
         }
@@ -326,7 +332,7 @@ fn has_html_structural_evidence_in_doc(payload: &str, document: &scraper::Html) 
             let trimmed = text.trim();
             if !trimmed.is_empty()
                 && crate::scanning::js_context_verify::payload_carries_js_sink(trimmed)
-                && payload.contains(trimmed)
+                && (payload.contains(trimmed) || decoded_payload.contains(trimmed))
             {
                 return true;
             }

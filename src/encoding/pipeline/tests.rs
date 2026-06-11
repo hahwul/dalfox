@@ -433,3 +433,27 @@ fn pointer_escapes_special_chars() {
         assert_eq!(parsed[&key], "ZZZ", "field {key} replaced");
     }
 }
+
+#[test]
+fn b64_json_discovery_survives_plus_decoded_to_space() {
+    // `query_pairs()` turns a raw `+` in a base64 value into a space, so a
+    // standard-alphabet base64-of-JSON value carrying `+` arrives space-mangled.
+    // Discovery must still find the leaf (the `+` is restored before decoding).
+    // Pick a JSON whose STANDARD base64 contains a `+`.
+    let mut fixture = None;
+    for len in 1..=12usize {
+        let json = format!(r#"{{"k":"{}"}}"#, ">".repeat(len));
+        let enc = b64(&json);
+        if enc.contains('+') {
+            fixture = Some(enc);
+            break;
+        }
+    }
+    let enc = fixture.expect("a '>'-run JSON whose standard base64 contains '+'");
+    let mangled = enc.replace('+', " "); // simulate query_pairs '+' -> space
+    let leaves = infer_nested_pipelines(&mangled);
+    assert!(
+        !leaves.is_empty(),
+        "standard base64-of-JSON discovery must survive '+'->space (enc={enc}, mangled={mangled})"
+    );
+}

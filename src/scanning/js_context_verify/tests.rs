@@ -403,3 +403,17 @@ fn large_script_above_inline_cap_runs_on_large_stack_without_crashing() {
         "large-but-valid script should still verify the breakout sink"
     );
 }
+
+#[test]
+fn checks_every_payload_occurrence_not_just_the_first() {
+    // A benign in-string reflection of the payload precedes the executable
+    // breakout occurrence in the same <script> block. find()'s first-match-only
+    // tested the inert in-string occurrence and missed the real sink; all
+    // occurrences must be checked.
+    let payload = "alert(1)";
+    let html = r#"<script>var s = "alert(1)"; alert(1);</script>"#;
+    assert!(
+        has_js_context_evidence(payload, html),
+        "the executable second occurrence must be detected"
+    );
+}
