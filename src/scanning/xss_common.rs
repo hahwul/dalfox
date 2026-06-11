@@ -8,8 +8,37 @@ use std::sync::{Mutex, OnceLock};
 
 static CUSTOM_PAYLOAD_CACHE: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
 
-/// Generate dynamic payloads based on the injection context
+/// Per-context catalog cache. The generated catalog depends only on `context`
+/// and the process-stable scan markers (`OnceLock`s in `markers`), so the same
+/// context produces identical payloads for the whole process — yet
+/// `generate_dynamic_payloads` is called once or twice per reflecting param and
+/// per target, rebuilding hundreds of `format!`-allocated strings each time.
+/// Memoize the catalog keyed by the context's `Debug` repr (a stable, unique
+/// key that avoids requiring `Hash`/`Eq` on `InjectionContext`). Callers own and
+/// mutate the returned `Vec`, so we hand back a clone and the cache can't be
+/// corrupted.
+static DYNAMIC_PAYLOAD_CACHE: OnceLock<Mutex<HashMap<String, std::sync::Arc<Vec<String>>>>> =
+    OnceLock::new();
+
+/// Generate dynamic payloads based on the injection context (memoized).
 pub fn generate_dynamic_payloads(context: &InjectionContext) -> Vec<String> {
+    let key = format!("{context:?}");
+    let cache = DYNAMIC_PAYLOAD_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(guard) = cache.lock()
+        && let Some(cached) = guard.get(&key)
+    {
+        return cached.as_ref().clone();
+    }
+    let payloads = std::sync::Arc::new(generate_dynamic_payloads_uncached(context));
+    if let Ok(mut guard) = cache.lock() {
+        guard.insert(key, std::sync::Arc::clone(&payloads));
+    }
+    payloads.as_ref().clone()
+}
+
+/// Build the per-context payload catalog from scratch. Wrapped by the memoizing
+/// [`generate_dynamic_payloads`].
+fn generate_dynamic_payloads_uncached(context: &InjectionContext) -> Vec<String> {
     let mut payloads = Vec::new();
 
     match context {

@@ -408,6 +408,10 @@ impl DalfoxMcp {
                                 false,
                                 Some(8192),
                             );
+                            // Count + rate-limit the preflight GET like the CLI
+                            // (record_outbound_request), so it isn't missing from
+                            // the job's requests_sent tally.
+                            crate::record_outbound_request().await;
                             if let Ok(resp) = preflight.send().await {
                                 // Read CSP off the response before consuming the
                                 // body so a `require-trusted-types-for` page is
@@ -424,7 +428,10 @@ impl DalfoxMcp {
                                         trusted_types_enforced,
                                     );
                                     if !ast_batch.is_empty() {
-                                        let added = ast_batch.len();
+                                        let added = crate::scanning::count_matching_results(
+                                            &ast_batch,
+                                            &scan_args.limit_result_type.to_uppercase(),
+                                        );
                                         let mut guard = results_arc.lock().await;
                                         guard.extend(ast_batch);
                                         findings_count
@@ -441,6 +448,7 @@ impl DalfoxMcp {
                                         &results_arc,
                                         &findings_count,
                                         ext_batch,
+                                        &scan_args.limit_result_type.to_uppercase(),
                                     )
                                     .await;
                                 }

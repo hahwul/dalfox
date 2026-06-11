@@ -320,15 +320,38 @@ fn is_transient_error(e: &reqwest::Error) -> bool {
     e.is_timeout() || e.is_connect()
 }
 
-/// Parse a `Retry-After` header expressed in integer seconds into ms.
-/// Returns `None` for absent or non-integer (HTTP-date) values, in which
-/// case the caller falls back to exponential backoff.
+/// Parse a `Retry-After` header into ms-from-now. Accepts both RFC 7231 forms:
+/// delta-seconds (`Retry-After: 120`) and an HTTP-date (`Retry-After: Wed, 21
+/// Oct 2026 07:28:00 GMT`). A date already in the past yields `0`. Returns
+/// `None` only when the header is absent or unparseable, in which case the
+/// caller falls back to exponential backoff. The returned value is unclamped;
+/// [`decide_retry`] clamps it to [`BACKOFF_CAP_MS`].
 fn parse_retry_after_ms(headers: &reqwest::header::HeaderMap) -> Option<u64> {
-    headers
-        .get("retry-after")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.trim().parse::<u64>().ok())
-        .map(|secs| secs.saturating_mul(1000))
+    let raw = headers.get("retry-after").and_then(|v| v.to_str().ok())?;
+    let s = raw.trim();
+    // Preferred, most common form: delta-seconds.
+    if let Ok(secs) = s.parse::<u64>() {
+        return Some(secs.saturating_mul(1000));
+    }
+    // Fallback: HTTP-date. Without this a date-form value fell through to a
+    // 1s/2s/4s exponential backoff, burning the 429 retry budget in ~7s and
+    // abandoning a request that would have succeeded after the advertised wait.
+    parse_http_date_retry_ms(s)
+}
+
+/// Milliseconds from now until an HTTP-date `Retry-After`, or `None` if it is
+/// not a parseable IMF-fixdate (`Sun, 06 Nov 1994 08:49:37 GMT`). A past date
+/// yields `0`. The two obsolete date forms (RFC 850, asctime) are rare enough
+/// to skip — modern servers send IMF-fixdate.
+fn parse_http_date_retry_ms(s: &str) -> Option<u64> {
+    // Drop the leading weekday ("Wed, ") and parse the rest without `%a`:
+    // chrono rejects an IMF-fixdate whose weekday is inconsistent with the date,
+    // but a `Retry-After` hint shouldn't be discarded over a server's weekday
+    // typo — the date/time is what matters.
+    let date_part = s.split_once(", ").map(|(_, rest)| rest).unwrap_or(s);
+    let dt = chrono::NaiveDateTime::parse_from_str(date_part, "%d %b %Y %H:%M:%S GMT").ok()?;
+    let delta_ms = (dt.and_utc() - chrono::Utc::now()).num_milliseconds();
+    Some(delta_ms.max(0) as u64)
 }
 
 /// Network-decoupled outcome of a single send attempt, so the retry policy
@@ -491,6 +514,11 @@ pub async fn send_with_retry(
                     state.tr_done += 1;
                 }
                 current_rb = rb;
+                // Count the retry attempt we're about to make. Callers tick the
+                // first attempt themselves; each additional attempt is a real
+                // outbound request that was previously missing from REQUEST_COUNT
+                // (and the live req/s rate).
+                crate::tick_request_count();
             }
         }
     }

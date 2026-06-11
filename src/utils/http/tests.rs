@@ -358,3 +358,26 @@ fn success_and_fatal_never_retry() {
         RetryDecision::Stop
     );
 }
+
+#[test]
+fn parse_retry_after_accepts_seconds_and_http_date() {
+    use reqwest::header::HeaderMap;
+    let with = |val: &str| {
+        let mut h = HeaderMap::new();
+        h.insert("retry-after", val.parse().unwrap());
+        parse_retry_after_ms(&h)
+    };
+    // delta-seconds form (unchanged).
+    assert_eq!(with("120"), Some(120_000));
+    // HTTP-date form (IMF-fixdate) — previously ignored, falling back to a fast
+    // exponential backoff and burning the 429 retry budget.
+    let future = with("Wed, 21 Oct 2099 07:28:00 GMT").expect("future HTTP-date must parse");
+    assert!(
+        future > 0,
+        "future date should yield a positive wait, got {future}"
+    );
+    // A past date means "retry now": 0ms, not None.
+    assert_eq!(with("Wed, 21 Oct 1999 07:28:00 GMT"), Some(0));
+    // Unparseable -> None so the caller falls back to exponential backoff.
+    assert_eq!(with("not-a-date"), None);
+}

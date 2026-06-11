@@ -4320,3 +4320,23 @@ fn purify_substring_does_not_suppress_unrelated_function() {
         "purify(x) as a whole-segment sanitizer should suppress the finding"
     );
 }
+
+#[test]
+fn settimeout_tainted_delay_argument_is_not_a_sink() {
+    // `setTimeout(fn, location.hash)`: a tainted *delay* (2nd) argument is not
+    // exploitable, so it must NOT be flagged (only argument 0 is executed code).
+    let delay = r#"function fn(){} setTimeout(fn, location.hash);"#;
+    let v_delay = AstDomAnalyzer::new().analyze(delay).unwrap();
+    assert!(
+        !v_delay.iter().any(|v| v.sink.contains("setTimeout")),
+        "tainted delay arg must not flag setTimeout, got {v_delay:?}"
+    );
+    // `setTimeout(location.hash, 100)`: a tainted *code* (1st) argument IS a
+    // sink and must still be flagged.
+    let code = r#"setTimeout(location.hash, 100);"#;
+    let v_code = AstDomAnalyzer::new().analyze(code).unwrap();
+    assert!(
+        v_code.iter().any(|v| v.sink.contains("setTimeout")),
+        "tainted code arg must still flag setTimeout, got {v_code:?}"
+    );
+}

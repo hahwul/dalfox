@@ -499,6 +499,10 @@ pub(crate) async fn run_scan_job(
                             false,
                             Some(8192),
                         );
+                        // Count + rate-limit the preflight GET like the CLI
+                        // (record_outbound_request), so it isn't missing from the
+                        // job's requests_sent tally.
+                        crate::record_outbound_request().await;
                         if let Ok(resp) = preflight.send().await {
                             // Read CSP off the response before the body is
                             // consumed, so a `require-trusted-types-for` page is
@@ -515,7 +519,10 @@ pub(crate) async fn run_scan_job(
                                         trusted_types_enforced,
                                     );
                                 if !ast_batch.is_empty() {
-                                    let added = ast_batch.len();
+                                    let added = crate::scanning::count_matching_results(
+                                        &ast_batch,
+                                        &args.limit_result_type.to_uppercase(),
+                                    );
                                     let mut guard = results.lock().await;
                                     guard.extend(ast_batch);
                                     findings_count
@@ -529,6 +536,7 @@ pub(crate) async fn run_scan_job(
                                     &results,
                                     &findings_count,
                                     ext_batch,
+                                    &args.limit_result_type.to_uppercase(),
                                 )
                                 .await;
                             }

@@ -457,3 +457,19 @@ fn b64_json_discovery_survives_plus_decoded_to_space() {
         "standard base64-of-JSON discovery must survive '+'->space (enc={enc}, mangled={mangled})"
     );
 }
+
+#[test]
+fn jwt_alg_none_empty_signature_is_discovered() {
+    // alg=none tokens have the canonical `header.payload.` shape with an empty
+    // signature segment — the high-value class this strategy targets. Discovery
+    // must produce nested-field leaves (it previously rejected the empty sig).
+    use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+    let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"none","typ":"JWT"}"#);
+    let payload = URL_SAFE_NO_PAD.encode(r#"{"sub":"123","name":"alice"}"#);
+    let token = format!("{header}.{payload}."); // empty signature
+    let leaves = infer_nested_pipelines(&token);
+    assert!(
+        !leaves.is_empty(),
+        "alg=none JWT must yield nested-field leaves, got none"
+    );
+}
