@@ -197,6 +197,23 @@ async fn redirect_decoded_handler(
     )
 }
 
+/// 302 whose body declares `application/json` but whose `Location` header
+/// echoes the payload. The inert-data content-type gate must NOT fire here:
+/// the body content-type describes the (empty) redirect body, not the redirect
+/// target, so the Location reflection must still be caught.
+async fn redirect_json_ct_handler(
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
+    let q = params.get("q").cloned().unwrap_or_default();
+    (
+        StatusCode::FOUND,
+        [
+            ("location", format!("/final?next={}", q)),
+            ("content-type", "application/json".to_string()),
+        ],
+    )
+}
+
 async fn start_mock_server(stored_payload: &str) -> SocketAddr {
     let app = Router::new()
         .route("/reflect/raw", get(raw_handler))
@@ -208,6 +225,7 @@ async fn start_mock_server(stored_payload: &str) -> SocketAddr {
         .route("/reflect/json", get(json_handler))
         .route("/sxss/stored", get(sxss_handler))
         .route("/redirect/decoded", get(redirect_decoded_handler))
+        .route("/redirect/json-ct", get(redirect_json_ct_handler))
         .with_state(TestState {
             stored_payload: stored_payload.to_string(),
         });
@@ -957,6 +975,23 @@ async fn test_check_reflection_catches_decoded_payload_in_redirect_location() {
     assert!(
         check_reflection(&target, &param, payload, &args).await,
         "reflection check must catch the raw payload appearing in Location"
+    );
+}
+
+#[tokio::test]
+async fn test_inert_data_gate_does_not_swallow_redirect_location_reflection() {
+    // A 302 whose body is declared `application/json` still echoes the payload
+    // in its `Location` header. The inert-data content-type gate must skip
+    // redirects (the body CT is irrelevant to the Location vector), so the
+    // reflection is still reported.
+    let payload = "<svg/onload=alert(1)>";
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/redirect/json-ct");
+    let param = make_param();
+    let args = default_scan_args();
+    assert!(
+        check_reflection(&target, &param, payload, &args).await,
+        "inert-data gate must not suppress a Location-header reflection on a JSON-CT redirect"
     );
 }
 

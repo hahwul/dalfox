@@ -1352,7 +1352,13 @@ async fn fetch_injection_response_with_client(
             // (`application/javascript`) and sniffable `text/plain` are
             // intentionally NOT treated as inert here (see
             // `content_type_is_inert_data`), preserving those detections.
-            if !matches!(param.location, Location::Path) {
+            //
+            // Skip redirects: a 3xx carries the reflection in its `Location`
+            // header, and the body content-type describes the (usually empty)
+            // redirect body, not the redirect target — so it says nothing about
+            // whether the Location reflection is exploitable. Let those fall
+            // through to the Location-header check below.
+            if !matches!(param.location, Location::Path) && !(300..400).contains(&status_code) {
                 let ct = resp
                     .headers()
                     .get(reqwest::header::CONTENT_TYPE)
