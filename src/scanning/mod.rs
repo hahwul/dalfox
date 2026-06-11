@@ -110,7 +110,10 @@ pub type ParamPayloadJob = (Param, Vec<String>, Vec<String>);
 /// Count how many results in `results` match the `--limit-result-type` filter.
 /// Returns `results.len()` when filter is `"all"` (default).
 /// `filter` must already be uppercased (normalised once at scan start).
-fn count_matching_results(results: &[crate::scanning::result::Result], filter: &str) -> usize {
+pub(crate) fn count_matching_results(
+    results: &[crate::scanning::result::Result],
+    filter: &str,
+) -> usize {
     if filter == "ALL" {
         return results.len();
     }
@@ -539,15 +542,22 @@ async fn run_ast_dom_analysis(
 /// lock + extend + counter-update sequence shared by every preflight finding
 /// source (libs, initial AST, external JS) across the CLI, server, and MCP
 /// surfaces.
+///
+/// The counter is bumped by the number of findings that match
+/// `limit_result_type` (already-uppercased `--limit-result-type`), mirroring
+/// [`ScanWorkerCtx::flush_results`] — otherwise N preflight findings of a
+/// non-matching type would trip `--limit N` and short-circuit the injection
+/// phase before any matching finding is produced.
 pub(crate) async fn accumulate_findings(
     results: &tokio::sync::Mutex<Vec<crate::scanning::result::Result>>,
     findings_count: &std::sync::atomic::AtomicUsize,
     batch: Vec<crate::scanning::result::Result>,
+    limit_result_type: &str,
 ) {
     if batch.is_empty() {
         return;
     }
-    let added = batch.len();
+    let added = count_matching_results(&batch, limit_result_type);
     results.lock().await.extend(batch);
     findings_count.fetch_add(added, std::sync::atomic::Ordering::Relaxed);
 }
@@ -601,9 +611,13 @@ pub(crate) async fn fetch_and_analyze_external_js(
 
         let rb =
             crate::utils::build_request(client, target, reqwest::Method::GET, script_url, None);
-        let resp = match crate::utils::send_with_retry(rb, scan_args.retries, scan_args.retry_delay)
-            .await
-        {
+        let send_result =
+            crate::utils::send_with_retry(rb, scan_args.retries, scan_args.retry_delay).await;
+        // Count this external-JS fetch (up to MAX_EXTERNAL_JS_FILES per page);
+        // its retries, if any, are counted inside send_with_retry. These GETs
+        // were previously missing from REQUEST_COUNT / the live req/s rate.
+        crate::tick_request_count();
+        let resp = match send_result {
             Ok(r) => r,
             Err(_) => continue,
         };

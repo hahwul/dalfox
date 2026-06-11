@@ -478,3 +478,21 @@ fn test_get_dynamic_payloads_custom_string_alert_value() {
         "string alert type must wrap the value in quotes"
     );
 }
+
+#[test]
+fn generate_dynamic_payloads_is_memoized_and_stable() {
+    // The per-context catalog is memoized (process-stable markers), so repeated
+    // calls return identical payloads. The returned Vec is an independent clone,
+    // so mutating it must not corrupt the cache for a later call.
+    let ctx = InjectionContext::Attribute(Some(DelimiterType::DoubleQuote));
+    let first = generate_dynamic_payloads(&ctx);
+    let mut second = generate_dynamic_payloads(&ctx);
+    assert!(!first.is_empty(), "attribute context should yield payloads");
+    assert_eq!(first, second, "memoized catalog must be stable per context");
+    second.clear();
+    let third = generate_dynamic_payloads(&ctx);
+    assert_eq!(
+        first, third,
+        "mutating a returned clone must not corrupt the cache"
+    );
+}

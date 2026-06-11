@@ -316,9 +316,13 @@ fn infer_jwt(value: &str) -> Vec<NestedField> {
             && s.chars()
                 .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
     }
+    // The signature segment is empty for `alg=none` tokens (`header.payload.`) —
+    // the high-value class this strategy targets — so accept an empty third
+    // segment; only a non-empty signature must be valid base64url. JwtAssemble
+    // already reassembles the empty-signature form.
     if !is_b64url_no_pad(header_b64u)
         || !is_b64url_no_pad(payload_b64u)
-        || !is_b64url_no_pad(sig_b64u)
+        || (!sig_b64u.is_empty() && !is_b64url_no_pad(sig_b64u))
     {
         return Vec::new();
     }

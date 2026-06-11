@@ -49,6 +49,21 @@ fn detects_jquery_from_cdn_path() {
 }
 
 #[test]
+fn detects_inline_banner_when_script_closes_with_whitespace() {
+    // Regression: SCRIPT_INLINE_RE must accept `</script >` (trailing space),
+    // matching the AST module's `</script\s*>`. A space-padded closing tag
+    // previously dropped the inline banner and its CWE-1104 finding.
+    let body = "<script>/*! jQuery JavaScript Library v1.8.3\n ... */ \n var a=1;</script >";
+    let found = libs(body);
+    assert!(
+        found
+            .iter()
+            .any(|v| v.library == "jQuery" && v.version == "1.8.3"),
+        "inline banner closed by `</script >` should still be detected, got {found:?}"
+    );
+}
+
+#[test]
 fn detects_jquery_from_inline_banner() {
     let body = "<script>/*! jQuery JavaScript Library v1.8.3\n ... */ \n var a=1;</script>";
     let found = libs(body);

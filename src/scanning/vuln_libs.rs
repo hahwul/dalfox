@@ -215,7 +215,7 @@ static COMPILED: LazyLock<Vec<CompiledLib>> = LazyLock::new(|| {
 static SCRIPT_SRC_RE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r#"(?i)<script\b[^>]*\bsrc\s*=\s*["']?([^"'>\s]+)"#).unwrap());
 static SCRIPT_INLINE_RE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?is)<script\b(?:\s[^>]*)?>(.*?)</script>").unwrap());
+    LazyLock::new(|| Regex::new(r"(?is)<script\b(?:\s[^>]*)?>(.*?)</script\s*>").unwrap());
 
 /// Extract the script-context haystacks from `body`: `(src URLs joined, inline
 /// script bodies joined)`. url-patterns match only the former, inline-patterns

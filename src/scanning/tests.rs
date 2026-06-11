@@ -1763,7 +1763,7 @@ async fn test_accumulate_findings_empty_batch_is_noop() {
     let results: tokio::sync::Mutex<Vec<crate::scanning::result::Result>> =
         tokio::sync::Mutex::new(Vec::new());
     let counter = std::sync::atomic::AtomicUsize::new(0);
-    accumulate_findings(&results, &counter, vec![]).await;
+    accumulate_findings(&results, &counter, vec![], "ALL").await;
     assert_eq!(
         counter.load(std::sync::atomic::Ordering::Relaxed),
         0,
@@ -1772,6 +1772,32 @@ async fn test_accumulate_findings_empty_batch_is_noop() {
     assert!(
         results.lock().await.is_empty(),
         "results vec must remain empty for empty batch"
+    );
+}
+
+/// accumulate_findings must bump the limit counter by the number of findings
+/// matching --limit-result-type (like flush_results), not the whole batch —
+/// otherwise non-matching preflight findings trip --limit early.
+#[tokio::test]
+async fn test_accumulate_findings_counts_only_matching_result_type() {
+    let results: tokio::sync::Mutex<Vec<crate::scanning::result::Result>> =
+        tokio::sync::Mutex::new(Vec::new());
+    let counter = std::sync::atomic::AtomicUsize::new(0);
+    let batch = vec![
+        make_result(FindingType::Verified),
+        make_result(FindingType::Reflected),
+        make_result(FindingType::Reflected),
+    ];
+    accumulate_findings(&results, &counter, batch, "V").await;
+    assert_eq!(
+        counter.load(std::sync::atomic::Ordering::Relaxed),
+        1,
+        "only the single V finding should count toward --limit-result-type V"
+    );
+    assert_eq!(
+        results.lock().await.len(),
+        3,
+        "all findings are still stored regardless of the limit filter"
     );
 }
 

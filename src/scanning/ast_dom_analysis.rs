@@ -4513,8 +4513,20 @@ impl<'a> DomXssVisitor<'a> {
                 }
             }
 
-            // Check if any argument is tainted
-            for arg in &call.arguments {
+            // Check if any argument is tainted. For the timer / code sinks
+            // (setTimeout / setInterval / execScript) only the FIRST argument is
+            // the executed code — a tainted 2nd `delay` argument
+            // (`setTimeout(fn, location.hash)`) is not exploitable, so consider
+            // index 0 only (mirroring the setAttribute / execCommand
+            // positional special-cases below).
+            let first_arg_only = matches!(
+                func_name.as_str(),
+                "setTimeout" | "setInterval" | "execScript"
+            );
+            for (idx, arg) in call.arguments.iter().enumerate() {
+                if first_arg_only && idx != 0 {
+                    continue;
+                }
                 let (is_arg_tainted, source_hint) = self.argument_taint_and_source(arg);
 
                 if is_arg_tainted {

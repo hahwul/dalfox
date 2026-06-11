@@ -1369,7 +1369,14 @@ async fn fetch_injection_response_with_client(
                     .get(reqwest::header::CONTENT_TYPE)
                     .and_then(|v| v.to_str().ok())
                     .unwrap_or("");
-                if !ct.is_empty() && !crate::utils::is_htmlish_content_type(ct) {
+                // `image/svg+xml` executes inline <script>/event handlers on
+                // top-level navigation, so a dynamically-generated SVG that
+                // reflects a path segment is a real sink — allow it alongside
+                // the HTML-ish types (don't open up JSON/JS/raster, which render
+                // as data).
+                let executes_as_markup = crate::utils::is_htmlish_content_type(ct)
+                    || crate::utils::content_type_primary(ct).as_deref() == Some("image/svg+xml");
+                if !ct.is_empty() && !executes_as_markup {
                     if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
                         eprintln!(
                             "[DBG] suppressing path-injection reflection on non-HTML content-type (param={}, content-type={})",
