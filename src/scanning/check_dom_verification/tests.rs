@@ -717,6 +717,72 @@ fn test_has_marker_evidence_demoted_when_script_body_truncated() {
     );
 }
 
+/// Issue #1118 (script-body counter-case): when the `<script>` body sink
+/// survives on the marker element, the finding stays evidence.
+#[test]
+fn test_has_marker_evidence_kept_when_script_body_survives() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("<script class={}>alert(1)</script>", marker);
+    let body = format!(
+        "<html><body><script class=\"{}\">alert(1)</script></body></html>",
+        marker
+    );
+    assert!(has_marker_evidence(&payload, &body));
+}
+
+/// Issue #1118 (id-marker symmetry): the handler-survival gate applies to id
+/// markers too, not only class markers.
+#[test]
+fn test_has_marker_evidence_demoted_when_id_handler_truncated() {
+    let id = crate::scanning::markers::id_marker();
+    let payload = format!("<svg onload=alert() id={}>", id);
+    let truncated = format!("<html><body><svg id=\"{}\"></svg></body></html>", id);
+    assert!(
+        !has_marker_evidence(&payload, &truncated),
+        "id-marker element without the surviving handler must not be evidence"
+    );
+    let survived = format!(
+        "<html><body><svg id=\"{}\" onload=\"alert()\"></svg></body></html>",
+        id
+    );
+    assert!(has_marker_evidence(&payload, &survived));
+}
+
+/// Issue #1118 (WAF-bypass): payloads entity-encode the sink chars
+/// (`alert&#40;1&#41;`); scraper decodes the parsed handler back to `alert(1)`.
+/// The co-survival check must compare against the decoded value too — a genuine
+/// breakout stays evidence, while a truncated one is still demoted.
+#[test]
+fn test_has_marker_evidence_entity_encoded_sink() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("<svg onload=alert&#40;1&#41; class={}>", marker);
+    let survived = format!(
+        "<html><body><svg onload=\"alert(1)\" class=\"{}\"></svg></body></html>",
+        marker
+    );
+    assert!(
+        has_marker_evidence(&payload, &survived),
+        "decoded handler sink on the marker element should still be evidence"
+    );
+    let truncated = format!("<html><body><svg class=\"{}\"></svg></body></html>", marker);
+    assert!(
+        !has_marker_evidence(&payload, &truncated),
+        "entity-encoded payload with the handler dropped must be demoted"
+    );
+}
+
+/// Issue #1118: the public entry point used by the scan worker
+/// (`classify_dom_evidence`) must return `None` for a truncated-handler
+/// reflection — no fallback evidence path (HTML-structural, JS-context, inline
+/// breakout) should rescue it into a false [V].
+#[test]
+fn test_classify_dom_evidence_none_when_handler_truncated() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("'\"><svg/class={} onload=alert()//", marker);
+    let body = format!("<html><body><svg class=\"{}\"></svg></body></html>", marker);
+    assert_eq!(classify_dom_evidence(&payload, &body), None);
+}
+
 #[test]
 fn test_has_executable_url_attribute_evidence_detects_iframe_src_protocol() {
     let payload = "javascript:alert(1)";

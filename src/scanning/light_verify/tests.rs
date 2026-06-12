@@ -196,6 +196,31 @@ async fn test_verify_dom_xss_light_marker_element_present_without_payload() {
     assert_eq!(note, Some("marker element present".to_string()));
 }
 
+/// Issue #1118: path #2 ("marker element present") has no reflection gate, so
+/// it was the one surface where a marker-only reflection became a false [V].
+/// `/marker-only` echoes `<div class="MARKER">ok</div>` regardless of input —
+/// the marker class survives but the payload's `onload` handler never does.
+/// With the handler-survival gate, a sink-bearing payload must no longer verify
+/// here (contrast the test above, whose payload carries no sink and stays
+/// presence-only).
+#[tokio::test]
+async fn test_verify_dom_xss_light_marker_without_surviving_handler_demoted() {
+    let marker = crate::scanning::markers::class_marker().to_string();
+    let addr = start_mock_server(&marker).await;
+    let target = make_target(addr, "/marker-only", None, None);
+    let param = make_param(Location::Query, "q");
+    let payload = format!("'\"><svg/class={} onload=alert()//", marker);
+    let client = test_client();
+
+    let (verified, _response, _note) =
+        verify_dom_xss_light_with_client(&client, &target, &param, &payload).await;
+
+    assert!(
+        !verified,
+        "marker class without the payload's surviving handler must not verify"
+    );
+}
+
 #[tokio::test]
 async fn test_verify_dom_xss_light_sets_csp_hint_when_inline_handlers_blocked() {
     let marker = crate::scanning::markers::class_marker().to_string();
