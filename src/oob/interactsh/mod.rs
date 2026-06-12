@@ -27,6 +27,11 @@ pub struct InteractshClient {
     server: String,
     /// Full base URL (`scheme://host[:port]`) for register/poll/deregister.
     base: String,
+    /// Scheme to use for minted callback URLs (honors user-provided scheme for
+    /// self-hosted OAST so that e.g. `http://my-collab:8080` produces
+    /// `http://<corr><nonce>.my-collab:8080` in blind payloads rather than
+    /// hard-coded https).
+    callback_scheme: String,
     correlation_id: String,
     secret_key: String,
     token: Option<String>,
@@ -78,9 +83,15 @@ impl InteractshClient {
         let http = builder.build()?;
 
         let (base, host) = split_server(server);
+        let callback_scheme = if base.starts_with("http://") {
+            "http".to_string()
+        } else {
+            "https".to_string()
+        };
         Ok(Self {
             server: host,
             base,
+            callback_scheme,
             correlation_id,
             secret_key,
             token: config.secret.clone(),
@@ -122,12 +133,13 @@ impl InteractshClient {
         Ok(())
     }
 
-    /// Mint a fresh `https://<corr><nonce>.<server>` callback URL and return it
-    /// alongside the `nonce` used to correlate the eventual callback.
+    /// Mint a fresh `<scheme>://<corr><nonce>.<server>` callback URL (scheme
+    /// matches the one used for the OAST API server) and return it alongside
+    /// the `nonce` used to correlate the eventual callback.
     pub fn new_payload_url(&self) -> (String, String) {
         let nonce = rand_label(NONCE_LEN);
         let host = format!("{}{}.{}", self.correlation_id, nonce, self.server);
-        (format!("https://{host}"), nonce)
+        (format!("{}://{host}", self.callback_scheme), nonce)
     }
 
     /// Recover the 13-char nonce from an interaction's `full-id`

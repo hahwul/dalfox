@@ -1,0 +1,22 @@
+# Local cargo-audit configuration for dalfox.
+# See also .github/workflows/ci-security.yml for CI handling.
+
+[advisories]
+# RUSTSEC-2023-0071 (Marvin Attack: potential key recovery through timing
+# sidechannels in rsa crate): This is triggered by our use of rsa 0.9 for the
+# interactsh OOB blind-XSS feature. The protocol requires the client to
+# present an RSA-2048 public key at registration; the server replies with an
+# AES key wrapped by RSA-OAEP(SHA-256). We then use that AES key with CTR
+# mode for the interaction payloads.
+#
+# Practical impact in dalfox: all RSA private-key operations are performed
+# locally inside a short-lived background poller task during an interactive
+# scan initiated by the user. There is no persistent service, no attacker-
+# controlled high-precision timing measurements against the decrypt path,
+# and the keypair lives only for the duration of one scan session.
+#
+# No patched release of rsa 0.9 exists, and moving to a different RSA
+# implementation would require re-implementing the exact interactsh
+# registration/poll wire format (and its specific OAEP+CTR envelope).
+# We therefore ignore this advisory for this narrow, intentional use.
+ignore = ["RUSTSEC-2023-0071"]
