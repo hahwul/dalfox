@@ -783,6 +783,166 @@ fn test_classify_dom_evidence_none_when_handler_truncated() {
     assert_eq!(classify_dom_evidence(&payload, &body), None);
 }
 
+/// Issue #1118 coverage matrix for `has_marker_evidence`.
+///
+/// The bug slipped past the original suite because the fixtures sprinkled the
+/// marker into a hand-written body (`<img class="MARKER">`) instead of faithfully
+/// modelling what the server did to the *whole* payload. This table pins the
+/// verdict for each payload family against an explicit server transformation —
+/// full reflection, handler stripped/blanked/neutralised, marker as text only,
+/// multiple classes, multiple elements, ASCII case-fold, and entity-encoded
+/// sinks — so a regression in either direction (false [V] or lost recall) fails
+/// a named row.
+#[test]
+fn test_has_marker_evidence_matrix() {
+    let cm = crate::scanning::markers::class_marker();
+    let im = crate::scanning::markers::id_marker();
+    let up = cm.to_uppercase();
+
+    // (name, payload, reflected body, expected evidence)
+    let cases: Vec<(&str, String, String, bool)> = vec![
+        // ── handler templates: sink lives on the marker element ──
+        (
+            "svg_onload_full",
+            format!("<svg onload=alert() class={cm}>"),
+            format!("<svg onload=alert() class=\"{cm}\"></svg>"),
+            true,
+        ),
+        (
+            "svg_onload_handler_stripped",
+            format!("<svg onload=alert() class={cm}>"),
+            format!("<svg class=\"{cm}\"></svg>"),
+            false,
+        ),
+        (
+            "svg_onload_handler_blanked",
+            format!("<svg onload=alert() class={cm}>"),
+            format!("<svg onload=\"\" class=\"{cm}\"></svg>"),
+            false,
+        ),
+        (
+            "svg_onload_handler_neutralised",
+            format!("<svg onload=alert() class={cm}>"),
+            format!("<svg onload=\"void(0)\" class=\"{cm}\"></svg>"),
+            false,
+        ),
+        (
+            "breakout_class_first_full",
+            format!("'\"><svg/class={cm} onload=alert()//"),
+            format!("<svg class=\"{cm}\" onload=\"alert()//\"></svg>"),
+            true,
+        ),
+        (
+            "breakout_class_first_truncated",
+            format!("'\"><svg/class={cm} onload=alert()//"),
+            format!("<svg class=\"{cm}\"></svg>"),
+            false,
+        ),
+        (
+            "img_onerror_full",
+            format!("<img src=x onerror=alert(1) class={cm}>"),
+            format!("<img src=x onerror=alert(1) class=\"{cm}\">"),
+            true,
+        ),
+        (
+            "img_onerror_stripped",
+            format!("<img src=x onerror=alert(1) class={cm}>"),
+            format!("<img src=x class=\"{cm}\">"),
+            false,
+        ),
+        // ── script-body template: sink lives in the <script> body ──
+        (
+            "script_body_full",
+            format!("<script class={cm}>alert(1)</script>"),
+            format!("<script class=\"{cm}\">alert(1)</script>"),
+            true,
+        ),
+        (
+            "script_body_emptied",
+            format!("<script class={cm}>alert(1)</script>"),
+            format!("<script class=\"{cm}\"></script>"),
+            false,
+        ),
+        // ── marker placement / parsing edge cases ──
+        (
+            "marker_among_multiple_classes",
+            format!("<svg onload=alert() class={cm}>"),
+            format!("<svg onload=alert() class=\"a {cm} b\"></svg>"),
+            true,
+        ),
+        (
+            "marker_as_text_only_no_element",
+            format!("<svg onload=alert() class={cm}>"),
+            format!("<p>blocked input: class={cm} onlo...</p>"),
+            false,
+        ),
+        (
+            "multiple_markers_one_carries_handler",
+            format!("<svg onload=alert() class={cm}>"),
+            format!("<svg class=\"{cm}\"></svg><svg onload=alert() class=\"{cm}\"></svg>"),
+            true,
+        ),
+        // ── structural markers: presence is the exploit, no sink to verify ──
+        (
+            "structural_base_id",
+            format!("<base href=//evil/ id={im}>"),
+            format!("<base href=\"//evil/\" id=\"{im}\">"),
+            true,
+        ),
+        (
+            "structural_clobber_form",
+            format!(
+                "<form id={im} class={cm}><input name=action value=\"javascript:alert(1)\"></form>"
+            ),
+            format!(
+                "<form id=\"{im}\" class=\"{cm}\"><input name=action value=\"javascript:alert(1)\"></form>"
+            ),
+            true,
+        ),
+        // ── legacy `dalfox` marker ──
+        (
+            "legacy_dalfox_full",
+            "<img class=dalfox src=x onerror=alert(1)>".to_string(),
+            "<img class=\"dalfox\" src=x onerror=alert(1)>".to_string(),
+            true,
+        ),
+        (
+            "legacy_dalfox_stripped",
+            "<img class=dalfox src=x onerror=alert(1)>".to_string(),
+            "<img class=\"dalfox\">".to_string(),
+            false,
+        ),
+        // ── server uppercases every reflected byte (ASCII case-fold) ──
+        (
+            "casefold_handler_survives",
+            format!("<img src=x onerror=alert(1) class={cm}>"),
+            format!("<IMG SRC=X ONERROR=ALERT(1) CLASS=\"{up}\">"),
+            true,
+        ),
+        (
+            "casefold_handler_stripped",
+            format!("<img src=x onerror=alert(1) class={cm}>"),
+            format!("<IMG CLASS=\"{up}\">"),
+            false,
+        ),
+        // ── WAF-bypass: entity-encoded sink decodes to a live handler ──
+        (
+            "entity_encoded_sink_survives",
+            format!("<svg onload=alert&#40;1&#41; class={cm}>"),
+            format!("<svg onload=\"alert(1)\" class=\"{cm}\"></svg>"),
+            true,
+        ),
+    ];
+
+    for (name, payload, body, expected) in cases {
+        assert_eq!(
+            has_marker_evidence(&payload, &body),
+            expected,
+            "case `{name}`: payload={payload:?} body={body:?}"
+        );
+    }
+}
+
 #[test]
 fn test_has_executable_url_attribute_evidence_detects_iframe_src_protocol() {
     let payload = "javascript:alert(1)";
