@@ -69,8 +69,23 @@ pub(crate) fn make_api_response<T: Serialize>(
     let mut cors = build_cors_headers(state, req_headers);
     let cb = extract_jsonp_callback(state, params);
     let (ct, body) = build_response_body(resp, cb.as_deref());
-    if let Some(ct_val) = ct {
-        cors.insert("Content-Type", ct_val.parse().expect("static content-type"));
-    }
+    // Always set an explicit Content-Type so the body is never served as
+    // axum's `String` default of `text/plain; charset=utf-8`:
+    // `application/json` for the normal path, `application/javascript` for
+    // JSONP (chosen by `build_response_body`).
+    let content_type = ct.unwrap_or("application/json; charset=utf-8");
+    cors.insert(
+        "Content-Type",
+        content_type.parse().expect("static content-type"),
+    );
+    // Forbid MIME sniffing on every API response. The body reflects
+    // attacker-influenced input (target URLs, payload/evidence strings, error
+    // messages); `nosniff` stops a browser from re-interpreting a JSON or
+    // JSONP body as HTML and executing it, closing a content-type-confusion
+    // XSS path regardless of how a client loads the response.
+    cors.insert(
+        "X-Content-Type-Options",
+        "nosniff".parse().expect("static nosniff header"),
+    );
     (status, cors, body)
 }

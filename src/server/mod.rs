@@ -170,6 +170,29 @@ pub async fn run_server(args: ServerArgs) {
         "SERVER",
         &format!("listening on http://{}", addr_str),
     );
+
+    // Loud warning for the most dangerous misconfiguration: a network-reachable
+    // bind with auth disabled. The API scans any submitted URL and POSTs results
+    // to any callback_url, so an unauthenticated non-loopback instance is an open
+    // SSRF / scan-launch relay into whatever network it can reach (cloud metadata
+    // at 169.254.169.254, RFC1918 hosts, etc.). We warn rather than refuse so a
+    // deployment that fronts the server with its own auth/egress controls still
+    // starts. `auth_disabled` mirrors `check_api_key`: an empty key string is
+    // treated as no auth, same as `--api-key` help ("Leave empty to disable").
+    let auth_disabled = state.api_key.as_deref().is_none_or(|s| s.is_empty());
+    if auth_disabled && !addr.ip().is_loopback() {
+        log(
+            &state,
+            "WRN",
+            &format!(
+                "bound to non-loopback address {} with NO API key — the API is an \
+                 unauthenticated SSRF / scan-launch relay reachable by anyone on this \
+                 network. Set --api-key (or DALFOX_API_KEY), or bind to 127.0.0.1.",
+                addr_str
+            ),
+        );
+    }
+
     let listener = match tokio::net::TcpListener::bind(addr).await {
         Ok(l) => l,
         Err(e) => {
