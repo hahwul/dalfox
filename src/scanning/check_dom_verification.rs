@@ -76,12 +76,6 @@ fn payload_has_any_marker(payload: &str) -> bool {
         || payload_uses_legacy_id_marker(payload)
 }
 
-/// Returns `true` when at least one element's whitespace-separated class
-/// list contains `marker` under ASCII case-fold comparison. The standard
-/// CSS class selector path used elsewhere is case-sensitive (HTML5 class
-/// attributes are case-sensitive when matched as CSS selectors), so this
-/// scan is the only way to surface marker evidence on servers that
-/// case-fold the entire reflected input.
 /// Whether an element carries `marker` as one of its whitespace-separated
 /// class tokens under ASCII case-fold comparison.
 fn element_class_has(node: scraper::ElementRef, marker: &str) -> bool {
@@ -91,6 +85,12 @@ fn element_class_has(node: scraper::ElementRef, marker: &str) -> bool {
     })
 }
 
+/// Returns `true` when at least one element's whitespace-separated class
+/// list contains `marker` under ASCII case-fold comparison. The standard
+/// CSS class selector path used elsewhere is case-sensitive (HTML5 class
+/// attributes are case-sensitive when matched as CSS selectors), so this
+/// scan is the only way to surface marker evidence on servers that
+/// case-fold the entire reflected input.
 fn any_element_has_class_ascii_ci(document: &scraper::Html, marker: &str) -> bool {
     let selector = super::selectors::universal();
     document
@@ -98,9 +98,6 @@ fn any_element_has_class_ascii_ci(document: &scraper::Html, marker: &str) -> boo
         .any(|node| element_class_has(node, marker))
 }
 
-/// Like `any_element_has_class_ascii_ci`, but compares the element's `id`
-/// attribute as a whole token. HTML id values are not whitespace-separated
-/// lists, so the comparison is over the trimmed attribute value.
 /// Whether an element's `id` attribute equals `marker` (trimmed, ASCII
 /// case-fold).
 fn element_id_is(node: scraper::ElementRef, marker: &str) -> bool {
@@ -109,6 +106,9 @@ fn element_id_is(node: scraper::ElementRef, marker: &str) -> bool {
         .is_some_and(|id| id.trim().eq_ignore_ascii_case(marker))
 }
 
+/// Like `any_element_has_class_ascii_ci`, but compares the element's `id`
+/// attribute as a whole token. HTML id values are not whitespace-separated
+/// lists, so the comparison is over the trimmed attribute value.
 fn any_element_has_id_ascii_ci(document: &scraper::Html, marker: &str) -> bool {
     let selector = super::selectors::universal();
     document
@@ -167,8 +167,15 @@ fn element_carries_surviving_sink(node: scraper::ElementRef) -> bool {
 fn payload_marker_element_carries_sink(payload: &str) -> bool {
     let class_marker = crate::scanning::markers::class_marker();
     let id_marker = crate::scanning::markers::id_marker();
+    // Inspect the raw payload and, only when it differs, its entity-decoded form
+    // (WAF-bypass payloads encode the sink chars). Skipping the no-op decoded
+    // pass avoids re-parsing an identical fragment.
     let decoded = decode_html_entities(payload);
-    for candidate in [payload, decoded.as_str()] {
+    let mut candidates = vec![payload];
+    if decoded != payload {
+        candidates.push(decoded.as_str());
+    }
+    for candidate in candidates {
         let normalized = if candidate.trim_end().ends_with('>') {
             candidate.to_string()
         } else {
