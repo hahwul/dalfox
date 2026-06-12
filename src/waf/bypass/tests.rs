@@ -518,3 +518,94 @@ fn test_citrix_netscaler_strategy() {
     assert!(strategy.mutations.contains(&MutationType::CaseAlternation));
     assert!(strategy.extra_encoders.contains(&"unicode".to_string()));
 }
+
+/// Every mutation variant, used to exercise the `Display` and
+/// `apply_single_mutation` dispatch arms exhaustively.
+const ALL_MUTATIONS: &[MutationType] = &[
+    MutationType::HtmlCommentSplit,
+    MutationType::WhitespaceMutation,
+    MutationType::JsCommentSplit,
+    MutationType::BacktickParens,
+    MutationType::ConstructorChain,
+    MutationType::UnicodeJsEscape,
+    MutationType::MixedHtmlEntities,
+    MutationType::CaseAlternation,
+    MutationType::SlashSeparator,
+    MutationType::HtmlEntityParens,
+    MutationType::SvgAnimateExec,
+    MutationType::ExoticWhitespace,
+];
+
+#[test]
+fn display_renders_every_mutation_type() {
+    // Round-trips the Display arm for each variant (no two collide).
+    let mut seen = std::collections::HashSet::new();
+    for m in ALL_MUTATIONS {
+        let name = m.to_string();
+        assert!(!name.is_empty());
+        assert!(seen.insert(name), "Display names must be unique");
+    }
+    assert_eq!(seen.len(), ALL_MUTATIONS.len());
+}
+
+#[test]
+fn apply_single_mutation_dispatches_and_transforms_every_type() {
+    // A payload that triggers every mutation (HTML tag + attr break + sink
+    // call + parens) so each dispatch arm runs its real transform, not the
+    // no-op fallthrough.
+    let payload = "<svg onload=alert(1)>";
+    for m in ALL_MUTATIONS {
+        let out = apply_single_mutation(payload, m);
+        assert_ne!(out, payload, "{:?} should transform the trigger payload", m);
+    }
+}
+
+#[test]
+fn apply_single_mutation_is_a_no_op_on_inert_text() {
+    // No tag, no sink, no parens → every mutation returns the input
+    // unchanged via its fallthrough branch.
+    let payload = "just some inert text 123";
+    for m in ALL_MUTATIONS {
+        assert_eq!(apply_single_mutation(payload, m), payload, "{:?}", m);
+    }
+}
+
+#[test]
+fn mixed_html_entities_alternates_decimal_and_hex() {
+    // Each successive special char flips between decimal and hex entities.
+    assert_eq!(mixed_html_entities("<<>>"), "&#60;&#x3c;&#62;&#x3e;");
+    assert_eq!(mixed_html_entities("\"\"''"), "&#34;&#x22;&#39;&#x27;");
+}
+
+#[test]
+fn html_comment_split_handles_short_two_letter_tag() {
+    // A 2-letter tag (len < 3) splits after a single character.
+    assert_eq!(html_comment_split("<br x=1>"), "<b<!---->r x=1>");
+}
+
+#[test]
+fn whitespace_mutation_handles_slash_separator() {
+    // A `/`-separated tag/attr break maps to a tab via whitespace_alt_char.
+    assert_eq!(whitespace_mutation("<svg/onload=x>"), "<svg\tonload=x>");
+}
+
+#[test]
+fn constructor_chain_wraps_argument_with_both_quote_styles() {
+    // The call carries both a single and double quote, forcing
+    // wrap_js_string onto its escape-single-quotes branch.
+    let out = constructor_chain("alert(\"a'b\")");
+    assert!(out.starts_with("[].constructor.constructor('"));
+    assert!(
+        out.contains("\\'"),
+        "inner single quote must be escaped: {out}"
+    );
+    assert!(out.ends_with(")()"));
+}
+
+#[test]
+fn svg_animate_exec_transforms_uppercase_img_onerror() {
+    // The uppercase ONERROR= prefix branch (and the `<im` short match).
+    let out = svg_animate_exec("<IMG SRC=x ONERROR=alert(1)>");
+    assert!(out.starts_with("<svg><animate onbegin=alert(1)"));
+    assert!(out.contains("dur=1s"));
+}
