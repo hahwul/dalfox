@@ -26,3 +26,11 @@ jobs:
         uses: rustsec/audit-check@v2
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          # RUSTSEC-2023-0071 (Marvin Attack timing side-channel in rsa 0.9):
+          # Required by the interactsh OOB/OAST blind-XSS feature (RSA-2048 key
+          # registration + OAEP-wrapped per-poll AES key). Decryption happens
+          # locally inside the poller during a short user-initiated scan; there
+          # is no long-lived remote oracle an attacker can use for key recovery.
+          # No non-vulnerable drop-in replacement matches the interactsh wire
+          # protocol today. We ignore for this intentional dependency.
+          ignore: RUSTSEC-2023-0071

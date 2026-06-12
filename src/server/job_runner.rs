@@ -306,6 +306,9 @@ pub(crate) async fn run_scan_job(
 
         custom_blind_xss_payload: None,
         blind_callback_url: opts.blind.clone(),
+        // OOB/OAST blind XSS is CLI-only for now; the server runs its own scan
+        // loop and would need the poller lifecycle wired separately.
+        oob: crate::cmd::scan::BlindOobArgs::default(),
         custom_payload: None,
         only_custom_payload: false,
         inject_marker: None,

@@ -113,6 +113,7 @@ fn default_scan_args(target: &str) -> ScanArgs {
         encoders: vec!["none".to_string()],
         custom_blind_xss_payload: None,
         blind_callback_url: None,
+        oob: Default::default(),
         custom_payload: None,
         only_custom_payload: false,
         inject_marker: None,

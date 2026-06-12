@@ -57,6 +57,7 @@ fn default_scan_args() -> ScanArgs {
         encoders: vec!["url".to_string(), "html".to_string()],
         custom_blind_xss_payload: None,
         blind_callback_url: None,
+        oob: Default::default(),
         custom_payload: None,
         only_custom_payload: false,
         inject_marker: None,
