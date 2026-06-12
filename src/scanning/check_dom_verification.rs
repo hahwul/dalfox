@@ -82,25 +82,131 @@ fn payload_has_any_marker(payload: &str) -> bool {
 /// attributes are case-sensitive when matched as CSS selectors), so this
 /// scan is the only way to surface marker evidence on servers that
 /// case-fold the entire reflected input.
+/// Whether an element carries `marker` as one of its whitespace-separated
+/// class tokens under ASCII case-fold comparison.
+fn element_class_has(node: scraper::ElementRef, marker: &str) -> bool {
+    node.value().attr("class").is_some_and(|cls| {
+        cls.split_ascii_whitespace()
+            .any(|c| c.eq_ignore_ascii_case(marker))
+    })
+}
+
 fn any_element_has_class_ascii_ci(document: &scraper::Html, marker: &str) -> bool {
     let selector = super::selectors::universal();
-    document.select(selector).any(|node| {
-        node.value().attr("class").is_some_and(|cls| {
-            cls.split_ascii_whitespace()
-                .any(|c| c.eq_ignore_ascii_case(marker))
-        })
-    })
+    document
+        .select(selector)
+        .any(|node| element_class_has(node, marker))
 }
 
 /// Like `any_element_has_class_ascii_ci`, but compares the element's `id`
 /// attribute as a whole token. HTML id values are not whitespace-separated
 /// lists, so the comparison is over the trimmed attribute value.
+/// Whether an element's `id` attribute equals `marker` (trimmed, ASCII
+/// case-fold).
+fn element_id_is(node: scraper::ElementRef, marker: &str) -> bool {
+    node.value()
+        .attr("id")
+        .is_some_and(|id| id.trim().eq_ignore_ascii_case(marker))
+}
+
 fn any_element_has_id_ascii_ci(document: &scraper::Html, marker: &str) -> bool {
     let selector = super::selectors::universal();
-    document.select(selector).any(|node| {
-        node.value()
-            .attr("id")
-            .is_some_and(|id| id.trim().eq_ignore_ascii_case(marker))
+    document
+        .select(selector)
+        .any(|node| element_id_is(node, marker))
+}
+
+/// Whether `value` (an `on*` handler value or `<script>` body) carries a
+/// JavaScript sink call, tolerating ASCII case-folding (servers that uppercase
+/// reflected input) and HTML-entity encoding (WAF-bypass payloads like
+/// `alert&#40;1&#41;`), mirroring the decode handling in
+/// [`has_html_structural_evidence_in_doc`].
+fn value_carries_js_sink(value: &str) -> bool {
+    use crate::scanning::js_context_verify::payload_carries_js_sink as sink;
+    sink(value)
+        || sink(&value.to_ascii_lowercase())
+        || sink(&decode_html_entities(value))
+        || sink(&decode_html_entities(&value.to_ascii_lowercase()))
+}
+
+/// Whether `node`'s own attributes/body carry a surviving JS sink: an `on*`
+/// event-handler attribute whose value is a sink call, or a `<script>` element
+/// whose text body is a sink call. This is the "active ingredient" a
+/// handler/script-body marker template attaches *directly to the marker
+/// element*; if it did not survive the server's reflection, the marker class
+/// alone is not proof of execution (issue #1118).
+fn element_carries_surviving_sink(node: scraper::ElementRef) -> bool {
+    let v = node.value();
+    for (name, val) in v.attrs() {
+        if name.len() >= 3
+            && name.as_bytes()[..2].eq_ignore_ascii_case(b"on")
+            && value_carries_js_sink(val)
+        {
+            return true;
+        }
+    }
+    if v.name().eq_ignore_ascii_case("script") {
+        let text: String = node.text().collect();
+        if value_carries_js_sink(&text) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Whether the payload attaches an on*-handler / `<script>`-body JS sink
+/// *directly to its marker element*. Parses the payload as an HTML fragment
+/// (appending a closing `>` so breakout payloads such as
+/// `'"><svg/class=… onload=…//` still yield the element) and also the
+/// entity-decoded form, then inspects the element carrying the class/id marker.
+///
+/// Returns `false` for structural markers — base-href injection, DOM-clobbering
+/// containers (`<form id=…>`, `<object data=javascript:…>`) — where the marker
+/// element's mere presence is the exploit and there is no on*/script sink on it
+/// to verify, so those keep presence-only evidence.
+fn payload_marker_element_carries_sink(payload: &str) -> bool {
+    let class_marker = crate::scanning::markers::class_marker();
+    let id_marker = crate::scanning::markers::id_marker();
+    let decoded = decode_html_entities(payload);
+    for candidate in [payload, decoded.as_str()] {
+        let normalized = if candidate.trim_end().ends_with('>') {
+            candidate.to_string()
+        } else {
+            format!("{candidate}>")
+        };
+        let frag = scraper::Html::parse_fragment(&normalized);
+        let sel = super::selectors::universal();
+        let hit = frag.select(sel).any(|node| {
+            let is_marker = element_class_has(node, class_marker)
+                || element_class_has(node, "dalfox")
+                || element_id_is(node, id_marker)
+                || element_id_is(node, "dalfox");
+            is_marker && element_carries_surviving_sink(node)
+        });
+        if hit {
+            return true;
+        }
+    }
+    false
+}
+
+/// Whether at least one element carrying one of the payload's markers also
+/// carries a surviving JS sink. Used to gate the marker-evidence path for
+/// payloads whose marker element's own attributes/body ARE the exploit.
+fn marker_element_carries_surviving_sink(payload: &str, document: &scraper::Html) -> bool {
+    let class_marker = crate::scanning::markers::class_marker();
+    let id_marker = crate::scanning::markers::id_marker();
+    let has_class = payload.contains(class_marker);
+    let has_legacy_class = payload_uses_legacy_class_marker(payload);
+    let has_id = payload.contains(id_marker);
+    let has_legacy_id = payload_uses_legacy_id_marker(payload);
+    let sel = super::selectors::universal();
+    document.select(sel).any(|node| {
+        let is_marker = (has_class && element_class_has(node, class_marker))
+            || (has_legacy_class && element_class_has(node, "dalfox"))
+            || (has_id && element_id_is(node, id_marker))
+            || (has_legacy_id && element_id_is(node, "dalfox"));
+        is_marker && element_carries_surviving_sink(node)
     })
 }
 
@@ -172,7 +278,24 @@ fn has_marker_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
         true
     };
 
-    class_ok && id_ok
+    if !(class_ok && id_ok) {
+        return false;
+    }
+
+    // Issue #1118: when the payload attached its exploit (an `on*` handler or a
+    // `<script>` body sink) directly to the marker element, the marker class
+    // surviving is not enough — a server that reflects a *truncated* copy of the
+    // payload (e.g. ASP.NET `ValidateRequest` error pages) can preserve the
+    // marker class while dropping the handler, parsing into a real element that
+    // carries our marker but executes nothing. Require the sink to have survived
+    // on at least one marker-bearing element before treating this as DOM
+    // evidence. Structural markers (base-href, DOM-clobbering containers) carry
+    // no such sink on the marker element and keep presence-only evidence.
+    if payload_marker_element_carries_sink(payload) {
+        return marker_element_carries_surviving_sink(payload, document);
+    }
+
+    true
 }
 
 pub(crate) fn has_marker_evidence(payload: &str, text: &str) -> bool {

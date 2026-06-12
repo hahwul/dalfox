@@ -611,15 +611,110 @@ fn test_has_marker_evidence_requires_payload_marker() {
 fn test_has_marker_evidence_detects_class_marker_element() {
     let marker = crate::scanning::markers::class_marker();
     let payload = format!("<img src=x onerror=alert(1) class={}>", marker);
-    let body = format!("<html><body><img class=\"{}\"></body></html>", marker);
+    // The payload attaches its sink (onerror) to the marker element, so the
+    // marker class is evidence only when the handler also survives (issue #1118).
+    let body = format!(
+        "<html><body><img src=x onerror=alert(1) class=\"{}\"></body></html>",
+        marker
+    );
     assert!(has_marker_evidence(&payload, &body));
 }
 
 #[test]
 fn test_has_marker_evidence_detects_legacy_dalfox_class_marker_element() {
     let payload = "<img class=\"dalfox\" src=x onerror=alert(1)>";
-    let body = "<html><body><img class=\"dalfox\"></body></html>";
+    let body = "<html><body><img class=\"dalfox\" src=x onerror=alert(1)></body></html>";
     assert!(has_marker_evidence(payload, body));
+}
+
+/// Issue #1118: a server that reflects a *truncated* copy of the payload can
+/// preserve the marker class while dropping the `on*` handler. The marker
+/// element parses, but the handler never survives, so this is NOT exploitable
+/// and must not count as marker evidence.
+#[test]
+fn test_has_marker_evidence_demoted_when_handler_truncated() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("'\"><svg/class={} onload=alert()//", marker);
+    // ASP.NET ValidateRequest-style error page: the raw reflection is cut off
+    // right before `onload`, so the parsed svg carries the marker class but no
+    // handler.
+    let body = format!(
+        "<html><body><header>A potentially dangerous Request.Form value was \
+         detected (q=\"...&gt;&lt;svg/class={} onlo...\").</header>\
+         <svg class=\"{}\"></svg></body></html>",
+        marker, marker
+    );
+    assert!(
+        !has_marker_evidence(&payload, &body),
+        "marker class without the payload's surviving handler must not be evidence"
+    );
+}
+
+/// Issue #1118 (counter-case): when the same payload's handler DOES survive on
+/// the marker element, the finding is genuinely exploitable and stays evidence.
+#[test]
+fn test_has_marker_evidence_kept_when_handler_survives() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("'\"><svg/class={} onload=alert()//", marker);
+    let body = format!(
+        "<html><body><svg class=\"{}\" onload=\"alert()\"></svg></body></html>",
+        marker
+    );
+    assert!(has_marker_evidence(&payload, &body));
+}
+
+/// Issue #1118 (no regression): structural markers whose exploit is the
+/// element's mere presence — base-href injection, DOM-clobbering containers —
+/// carry no on*/script sink on the marker element, so presence-only evidence is
+/// preserved.
+#[test]
+fn test_has_marker_evidence_kept_for_structural_markers() {
+    let id = crate::scanning::markers::id_marker();
+    let class = crate::scanning::markers::class_marker();
+
+    // base-href injection — no sink on the marker element.
+    let base_payload = format!("<base href=//evil.example/ id={}>", id);
+    let base_body = format!(
+        "<html><head><base href=\"//evil.example/\" id=\"{}\"></head></html>",
+        id
+    );
+    assert!(
+        has_marker_evidence(&base_payload, &base_body),
+        "base-href marker presence is the exploit; must stay evidence"
+    );
+
+    // DOM-clobbering form container — the sink lives in a child input, not on
+    // the marker element itself.
+    let form_payload = format!(
+        "<form id={} class={}><input name=\"action\" value=\"javascript:alert(1)\"></form>",
+        id, class
+    );
+    let form_body = format!(
+        "<html><body><form id=\"{}\" class=\"{}\"><input name=\"action\" \
+         value=\"javascript:alert(1)\"></form></body></html>",
+        id, class
+    );
+    assert!(
+        has_marker_evidence(&form_payload, &form_body),
+        "clobbering container marker presence is the exploit; must stay evidence"
+    );
+}
+
+/// Issue #1118 (script-body family): a `<script class=marker>sink</script>`
+/// payload whose body is truncated away leaves the marker class on an empty
+/// script — no sink survives, so it is not evidence.
+#[test]
+fn test_has_marker_evidence_demoted_when_script_body_truncated() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("<script class={}>alert(1)</script>", marker);
+    let body = format!(
+        "<html><body><script class=\"{}\"></script></body></html>",
+        marker
+    );
+    assert!(
+        !has_marker_evidence(&payload, &body),
+        "marker class on an empty script (sink body dropped) must not be evidence"
+    );
 }
 
 #[test]
