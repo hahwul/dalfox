@@ -152,12 +152,7 @@ async fn file_mode_without_path_is_an_error() {
 
 #[tokio::test]
 async fn file_mode_missing_file_is_an_error() {
-    let args = args_from(&[
-        "-i",
-        "file",
-        "-S",
-        "/dalfox/no/such/target/list/xyz.txt",
-    ]);
+    let args = args_from(&["-i", "file", "-S", "/dalfox/no/such/target/list/xyz.txt"]);
     assert!(resolve_targets(&args).await.is_err());
 }
 
@@ -280,7 +275,9 @@ async fn raw_http_from_file_is_parsed() {
         "POST /login HTTP/1.1\r\nHost: file.example\r\nContent-Type: application/x-www-form-urlencoded\r\n\r\nu=a",
     );
     let args = args_from(&["-i", "raw-http", "-S", p.to_str().unwrap()]);
-    let targets = resolve_targets(&args).await.expect("raw http file resolves");
+    let targets = resolve_targets(&args)
+        .await
+        .expect("raw http file resolves");
     let _ = std::fs::remove_file(&p);
     assert_eq!(targets.len(), 1);
     assert_eq!(targets[0].method, "POST");
@@ -348,7 +345,8 @@ fn load_request_source_reads_existing_file() {
 fn load_request_source_treats_non_path_as_literal() {
     let args = args_from(&["-i", "url", "-S", "https://e.example/"]);
     let literal = "GET / HTTP/1.1\r\nHost: literal.example\r\n\r\n";
-    let out = load_request_source(literal, &args, "raw HTTP request").expect("literal passes through");
+    let out =
+        load_request_source(literal, &args, "raw HTTP request").expect("literal passes through");
     assert_eq!(out, literal);
 }
 
@@ -356,10 +354,9 @@ fn load_request_source_treats_non_path_as_literal() {
 
 #[test]
 fn apply_request_cli_overrides_only_overrides_explicit_flags() {
-    let mut target = crate::target_parser::parse_raw_http_request(
-        "GET /p HTTP/1.1\r\nHost: ov.example\r\n\r\n",
-    )
-    .expect("raw request parses");
+    let mut target =
+        crate::target_parser::parse_raw_http_request("GET /p HTTP/1.1\r\nHost: ov.example\r\n\r\n")
+            .expect("raw request parses");
 
     let args = args_from(&[
         "-i",
@@ -382,8 +379,18 @@ fn apply_request_cli_overrides_only_overrides_explicit_flags() {
 
     assert_eq!(target.method, "POST");
     assert_eq!(target.data.as_deref(), Some("k=v"));
-    assert!(target.headers.iter().any(|(k, v)| k == "X-Extra" && v == "yes"));
-    assert!(target.headers.iter().any(|(k, v)| k == "User-Agent" && v == "Agent/9"));
+    assert!(
+        target
+            .headers
+            .iter()
+            .any(|(k, v)| k == "X-Extra" && v == "yes")
+    );
+    assert!(
+        target
+            .headers
+            .iter()
+            .any(|(k, v)| k == "User-Agent" && v == "Agent/9")
+    );
     assert_eq!(target.user_agent.as_deref(), Some("Agent/9"));
     assert!(target.cookies.iter().any(|(k, v)| k == "sid" && v == "abc"));
 }

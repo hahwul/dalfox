@@ -550,7 +550,9 @@ fn build_blind_templates_falls_back_when_no_usable_lines() {
 #[test]
 fn build_blind_templates_falls_back_when_file_unreadable() {
     let templates = build_blind_templates(Some("/dalfox/no/such/blind/template.txt"));
-    assert!(!templates.is_empty(), "unreadable path falls back to built-in");
+    assert!(
+        !templates.is_empty(),
+        "unreadable path falls back to built-in"
+    );
     assert!(templates.iter().all(|t| t.contains("{}")));
 }
-

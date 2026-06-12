@@ -595,7 +595,10 @@ fn constructor_chain_wraps_argument_with_both_quote_styles() {
     // wrap_js_string onto its escape-single-quotes branch.
     let out = constructor_chain("alert(\"a'b\")");
     assert!(out.starts_with("[].constructor.constructor('"));
-    assert!(out.contains("\\'"), "inner single quote must be escaped: {out}");
+    assert!(
+        out.contains("\\'"),
+        "inner single quote must be escaped: {out}"
+    );
     assert!(out.ends_with(")()"));
 }
 
