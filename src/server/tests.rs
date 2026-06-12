@@ -379,6 +379,58 @@ async fn test_get_scan_handler_unauthorized_and_bad_request_jsonp() {
 }
 
 #[tokio::test]
+async fn test_responses_set_json_content_type_and_nosniff() {
+    // Non-JSONP responses must carry an explicit application/json Content-Type
+    // (not axum's String default of text/plain) plus X-Content-Type-Options:
+    // nosniff, so an attacker-influenced body can't be MIME-sniffed into HTML.
+    let state = make_state(None, None, false, false, "callback");
+    let resp = health_handler(State(state), HeaderMap::new(), Query(Map::new()))
+        .await
+        .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
+    assert!(
+        resp.headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .starts_with("application/json"),
+        "non-JSONP responses must be application/json"
+    );
+    assert_eq!(
+        resp.headers()
+            .get("x-content-type-options")
+            .and_then(|v| v.to_str().ok()),
+        Some("nosniff"),
+        "every API response must forbid MIME sniffing"
+    );
+}
+
+#[tokio::test]
+async fn test_jsonp_response_keeps_javascript_content_type_with_nosniff() {
+    // The JSONP path keeps application/javascript but must still send nosniff.
+    let state = make_state(None, None, false, true, "cb");
+    let mut q = Map::new();
+    q.insert("cb".to_string(), "myFn".to_string());
+    let resp = health_handler(State(state), HeaderMap::new(), Query(q))
+        .await
+        .into_response();
+    assert!(
+        resp.headers()
+            .get("content-type")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("")
+            .starts_with("application/javascript"),
+        "JSONP responses stay application/javascript"
+    );
+    assert_eq!(
+        resp.headers()
+            .get("x-content-type-options")
+            .and_then(|v| v.to_str().ok()),
+        Some("nosniff")
+    );
+}
+
+#[tokio::test]
 async fn test_get_result_handler_not_found_jsonp() {
     let state = make_state(None, None, false, true, "cb");
     let mut q = Map::new();
