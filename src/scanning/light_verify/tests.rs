@@ -70,6 +70,22 @@ async fn marker_only_html(State(state): State<TestState>) -> Html<String> {
     ))
 }
 
+/// Models an ASP.NET `ValidateRequest`-style error page (issue #1118): the raw
+/// submitted value is echoed unencoded but cut off right before the event
+/// handler, so the parsed element keeps the marker class while the `onload=` /
+/// `onerror=` handler never survives.
+async fn truncate_before_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
+    let q = params.get("q").cloned().unwrap_or_default();
+    let cut = q
+        .find("onload")
+        .or_else(|| q.find("onerror"))
+        .map(|i| &q[..i])
+        .unwrap_or(q.as_str());
+    Html(format!(
+        "<html><body><header>blocked: {cut}</header></body></html>"
+    ))
+}
+
 async fn csp_html() -> impl IntoResponse {
     (
         StatusCode::OK,
@@ -121,6 +137,7 @@ async fn start_mock_server(class_marker: &str) -> SocketAddr {
     let app = Router::new()
         .route("/reflect", get(reflect_html))
         .route("/marker-only", get(marker_only_html))
+        .route("/truncate", get(truncate_before_handler))
         .route("/csp", get(csp_html))
         .route("/redirect", get(redirect_route))
         .route("/header", get(reflect_header))
@@ -194,6 +211,74 @@ async fn test_verify_dom_xss_light_marker_element_present_without_payload() {
     assert!(verified);
     assert!(response.expect("response").contains(&marker));
     assert_eq!(note, Some("marker element present".to_string()));
+}
+
+/// Issue #1118: path #2 ("marker element present") has no reflection gate, so
+/// it was the one surface where a marker-only reflection became a false [V].
+/// `/marker-only` echoes `<div class="MARKER">ok</div>` regardless of input —
+/// the marker class survives but the payload's `onload` handler never does.
+/// With the handler-survival gate, a sink-bearing payload must no longer verify
+/// here (contrast the test above, whose payload carries no sink and stays
+/// presence-only).
+#[tokio::test]
+async fn test_verify_dom_xss_light_marker_without_surviving_handler_demoted() {
+    let marker = crate::scanning::markers::class_marker().to_string();
+    let addr = start_mock_server(&marker).await;
+    let target = make_target(addr, "/marker-only", None, None);
+    let param = make_param(Location::Query, "q");
+    let payload = format!("'\"><svg/class={} onload=alert()//", marker);
+    let client = test_client();
+
+    let (verified, _response, _note) =
+        verify_dom_xss_light_with_client(&client, &target, &param, &payload).await;
+
+    assert!(
+        !verified,
+        "marker class without the payload's surviving handler must not verify"
+    );
+}
+
+/// Issue #1118 end-to-end at the HTTP layer: the `/truncate` route faithfully
+/// reproduces the reported scenario (raw value echoed, cut before the handler).
+/// This is the test that would have caught the original bug — the marker class
+/// reaches the DOM but the handler does not, so it must not verify.
+#[tokio::test]
+async fn test_verify_dom_xss_light_truncated_handler_reflection_demoted() {
+    let marker = crate::scanning::markers::class_marker().to_string();
+    let addr = start_mock_server(&marker).await;
+    let target = make_target(addr, "/truncate", None, None);
+    let param = make_param(Location::Query, "q");
+    let payload = format!("'\"><svg/class={} onload=alert()//", marker);
+    let client = test_client();
+
+    let (verified, _response, _note) =
+        verify_dom_xss_light_with_client(&client, &target, &param, &payload).await;
+
+    assert!(
+        !verified,
+        "truncated-handler reflection must not verify (issue #1118)"
+    );
+}
+
+/// Counter-case to the truncation test: when the same handler payload is
+/// reflected in full, the handler survives on the marker element and the
+/// candidate genuinely verifies.
+#[tokio::test]
+async fn test_verify_dom_xss_light_full_handler_reflection_verifies() {
+    let marker = crate::scanning::markers::class_marker().to_string();
+    let addr = start_mock_server(&marker).await;
+    let target = make_target(addr, "/reflect", None, None);
+    let param = make_param(Location::Query, "q");
+    let payload = format!("<svg onload=alert(1) class={}>", marker);
+    let client = test_client();
+
+    let (verified, _response, _note) =
+        verify_dom_xss_light_with_client(&client, &target, &param, &payload).await;
+
+    assert!(
+        verified,
+        "fully-reflected handler on the marker element must verify"
+    );
 }
 
 #[tokio::test]
