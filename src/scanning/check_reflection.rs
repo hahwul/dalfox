@@ -599,6 +599,15 @@ pub enum ReflectionKind {
 ///   "&#x3c;script&#x3e;" -> "<script>"
 ///   "&#60;alert(1)&#62;"  -> "<alert(1)>"
 fn decode_html_entities(input: &str) -> String {
+    // Fast path: every HTML entity (numeric `&#…;` and named `&lt;` alike)
+    // begins with '&'. When the input has none, there is nothing to decode, so
+    // skip both regex scans and the second `replace_all().to_string()`
+    // allocation. classify_reflection runs this once per non-reflecting payload
+    // on the whole (up to 16 MiB) response body, so the saved scans/allocations
+    // add up across a scan.
+    if !input.as_bytes().contains(&b'&') {
+        return input.to_string();
+    }
     // Match patterns like &#xHH; or &#xHHHH; or &#DDDD; (hex 'x' is case-insensitive)
     // Upper bound is 8 hex / 8 decimal digits — covers zero-padded WAF-bypass
     // payloads emitted by `html_entity_zero_padded_encode` (`&#x0000003c;`,
@@ -654,6 +663,14 @@ fn decode_html_entities(input: &str) -> String {
 /// Decode form-style URL-encoded text where spaces may be preserved as '+'.
 /// This is intentionally narrow and only used for reflection normalization.
 fn decode_form_urlencoded_like(input: &str) -> Option<String> {
+    // Form decoding can only change the string when it carries a '+' (space
+    // shorthand) or a '%' (percent-escape). Without either, `replace('+',…)`
+    // and `urlencoding::decode` are both no-ops, so skip the two full-body
+    // allocations entirely — this runs per non-reflecting payload on the whole
+    // response body in classify_reflection's slow path.
+    if !input.as_bytes().iter().any(|&b| b == b'+' || b == b'%') {
+        return None;
+    }
     let normalized = input.replace('+', "%20");
     let decoded = urlencoding::decode(&normalized).ok()?.into_owned();
     if decoded == input {
@@ -664,15 +681,17 @@ fn decode_form_urlencoded_like(input: &str) -> Option<String> {
 }
 
 fn payload_variants(payload: &str) -> Vec<String> {
-    let mut variants = Vec::with_capacity(10);
-    let mut seen = std::collections::HashSet::with_capacity(10);
-    let owned_payload = payload.to_string();
-    seen.insert(owned_payload.clone());
-    variants.push(owned_payload);
+    // The variant set is tiny (original + entity-decoded + a short URL-decode
+    // chain capped at MAX_URL_DECODE_ITERATIONS), so a linear membership scan
+    // over the Vec is cheaper than a HashSet — it avoids the per-element hash,
+    // the contains()+insert() double lookup, and the extra String clone the set
+    // required. Order and membership are identical to the old HashSet-guarded
+    // build.
+    let mut variants: Vec<String> = Vec::with_capacity(10);
+    variants.push(payload.to_string());
 
     let html_dec = decode_html_entities(payload);
-    if !seen.contains(&html_dec) {
-        seen.insert(html_dec.clone());
+    if !variants.iter().any(|v| v == &html_dec) {
         variants.push(html_dec);
     }
 
@@ -687,8 +706,7 @@ fn payload_variants(payload: &str) -> Vec<String> {
             if url_dec == current {
                 break;
             }
-            if !seen.contains(&url_dec) {
-                seen.insert(url_dec.clone());
+            if !variants.iter().any(|v| v == &url_dec) {
                 variants.push(url_dec.clone());
             }
             current = url_dec;
@@ -897,7 +915,19 @@ pub(crate) fn classify_reflection(resp_text: &str, payload: &str) -> Option<Refl
         return Some(ReflectionKind::UrlDecoded);
     }
 
-    let html_dec = decode_html_entities(resp_text);
+    // Only allocate the entity-decoded copy of the body when it actually
+    // contains an entity-introducing '&'; otherwise borrow `resp_text`
+    // directly so the common no-entity response in this per-payload slow path
+    // pays no full-body String copy. `html_dec == resp_text` in the borrowed
+    // case, so every `html_dec != resp_text` gate below short-circuits exactly
+    // as before.
+    let html_dec_owned;
+    let html_dec: &str = if resp_text.as_bytes().contains(&b'&') {
+        html_dec_owned = decode_html_entities(resp_text);
+        html_dec_owned.as_str()
+    } else {
+        resp_text
+    };
     // Only treat as an entity-decoded reflection when the response actually
     // changed under entity decoding. The previous predicate (variant present
     // in `html_dec`) is true even when no entities were decoded — in which
@@ -942,7 +972,7 @@ pub(crate) fn classify_reflection(resp_text: &str, payload: &str) -> Option<Refl
     }
 
     // Check URL decoded version of HTML decoded
-    if let Ok(url_dec_html) = urlencoding::decode(&html_dec)
+    if let Ok(url_dec_html) = urlencoding::decode(html_dec)
         && url_dec_html != html_dec
         && payload_variants
             .iter()
@@ -959,7 +989,7 @@ pub(crate) fn classify_reflection(resp_text: &str, payload: &str) -> Option<Refl
         return Some(ReflectionKind::UrlDecoded);
     }
 
-    if let Some(form_dec_html) = decode_form_urlencoded_like(&html_dec)
+    if let Some(form_dec_html) = decode_form_urlencoded_like(html_dec)
         && payload_variants
             .iter()
             .any(|candidate| form_dec_html.contains(candidate))

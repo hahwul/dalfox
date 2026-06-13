@@ -787,6 +787,13 @@ fn build_request_text(target: &Target, param: &Param, payload: &str) -> String {
                         );
                     }
                     serde_json::to_string(&json_val).unwrap_or_else(|_| data.clone())
+                } else if param.value.is_empty() {
+                    // An empty `param.value` would make `str::replace` splice the
+                    // payload between every byte of `data` (empty-pattern match),
+                    // producing a garbled PoC. Re-serialize as `{name: payload}`
+                    // instead — identical to the no-data branch below and to what
+                    // `inject_payload` actually sends for invalid-JSON bodies.
+                    serde_json::json!({ &param.name: payload }).to_string()
                 } else {
                     data.replace(&param.value, payload)
                 }
@@ -1415,12 +1422,15 @@ impl ScanWorkerCtx {
         }
 
         // Save a reference copy for the HPP phase (only first 5 payloads)
-        // before the reflection phase consumes `reflection_payloads`.
-        let hpp_payloads: Vec<String> = if self.args.hpp {
-            reflection_payloads.iter().take(5).cloned().collect()
-        } else {
-            vec![]
-        };
+        // before the reflection phase consumes `reflection_payloads`. Gate on
+        // the same condition `run_hpp_phase` checks (Query location) so we don't
+        // clone payloads for params whose HPP phase would immediately return.
+        let hpp_payloads: Vec<String> =
+            if self.args.hpp && param.location == crate::parameter_analysis::Location::Query {
+                reflection_payloads.iter().take(5).cloned().collect()
+            } else {
+                vec![]
+            };
 
         if let PhaseFlow::Abort = self
             .run_reflection_phase(&param, reflection_payloads, &mut state)
@@ -1545,6 +1555,20 @@ impl ScanWorkerCtx {
             // Skip reflection if already found for this param
             let reflection_tuple = if state.reflection_found_locally {
                 (None, None)
+            } else if self.args.deep_scan {
+                // deep_scan never records into `found_params.reflection` (the
+                // write path short-circuits to `should_add = true` below), so
+                // the shared read would always return false. Skip the awaited
+                // lock and run the reflection check directly on every payload.
+                check_reflection_with_response_tracked(
+                    Some(self.client.as_ref()),
+                    &self.target,
+                    param,
+                    &reflection_payload,
+                    &self.args,
+                    &state.waf_streak,
+                )
+                .await
             } else {
                 let already = self
                     .found_params

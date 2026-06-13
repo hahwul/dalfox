@@ -944,6 +944,13 @@ impl Config {
 // - Otherwise, use "$HOME/.config/dalfox"
 // - Within the selected base directory, prefer "config.toml" over "config.json"
 // - If neither file exists, create "config.toml" with a commented template and return it as created
+/// Upper bound on the size of a config file we will read into memory. Config
+/// files are tiny in practice; the cap exists so a config path that resolves to
+/// a huge / unbounded file (e.g. a symlink to `/dev/zero`) fails fast instead of
+/// slurping unboundedly, keeping config loading consistent with every other
+/// input surface. Shared with the `--config` CLI path in `main`.
+pub const MAX_CONFIG_BYTES: u64 = 1 << 20; // 1 MiB
+
 pub fn load_or_init() -> Result<LoadResult, Box<dyn std::error::Error>> {
     let base_dir = resolve_config_dir()?;
     fs::create_dir_all(&base_dir)?;
@@ -952,7 +959,7 @@ pub fn load_or_init() -> Result<LoadResult, Box<dyn std::error::Error>> {
     let json_path = base_dir.join("config.json");
 
     if toml_path.exists() {
-        let s = fs::read_to_string(&toml_path)?;
+        let s = crate::utils::fs::read_bounded(&toml_path, MAX_CONFIG_BYTES, "config file")?;
         let cfg: Config = toml::from_str(&s)?;
         return Ok(LoadResult {
             config: cfg,
@@ -963,7 +970,7 @@ pub fn load_or_init() -> Result<LoadResult, Box<dyn std::error::Error>> {
     }
 
     if json_path.exists() {
-        let s = fs::read_to_string(&json_path)?;
+        let s = crate::utils::fs::read_bounded(&json_path, MAX_CONFIG_BYTES, "config file")?;
         let cfg: Config = serde_json::from_str(&s)?;
         return Ok(LoadResult {
             config: cfg,

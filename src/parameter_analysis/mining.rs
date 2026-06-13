@@ -619,18 +619,13 @@ pub async fn probe_dictionary_params(
             }
         }
         for param in param_chunk {
+            // Early collapse stop. (A second identical `collapsed` check used to
+            // follow immediately with no await in between — dead code, since
+            // this `break 'outer` already fires first when collapsed is set.)
             {
                 let st = stats.lock().await;
                 if st.collapsed {
                     break 'outer;
-                }
-            }
-            // original body below
-            // Early collapse stop
-            {
-                let st = stats.lock().await;
-                if st.collapsed {
-                    break;
                 }
             }
             // Skip if already discovered

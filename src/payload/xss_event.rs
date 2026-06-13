@@ -108,13 +108,21 @@ pub fn common_event_handler_names() -> &'static [&'static str] {
 /// This replaces the previous static XSS_ATTRIBUTE_PAYLOADS constant to ensure
 /// automatic synchronization when JavaScript payload list changes.
 pub fn get_dynamic_xss_attribute_payloads() -> Vec<String> {
-    let mut out = Vec::new();
-    for ev in common_event_handler_names().iter() {
-        for js in crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL.iter() {
-            out.push(format!("{}={}", ev, js));
+    // Memoized: combines the static event-handler name list with the stable
+    // XSS_JAVASCRIPT_PAYLOADS_SMALL const, so the catalog is identical per
+    // process. Avoids rebuilding once per reflection parameter.
+    static CACHE: std::sync::LazyLock<Vec<String>> = std::sync::LazyLock::new(|| {
+        let names = common_event_handler_names();
+        let mut out =
+            Vec::with_capacity(names.len() * crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL.len());
+        for ev in names.iter() {
+            for js in crate::payload::XSS_JAVASCRIPT_PAYLOADS_SMALL.iter() {
+                out.push(format!("{}={}", ev, js));
+            }
         }
-    }
-    out
+        out
+    });
+    CACHE.clone()
 }
 
 #[cfg(test)]

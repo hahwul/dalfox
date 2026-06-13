@@ -218,6 +218,16 @@ impl DalfoxMcp {
         eprintln!("[{}] [{}] {}", ts, level, msg);
     }
 
+    /// Lock the jobs map, recovering from a poisoned mutex by taking the inner
+    /// guard instead of re-panicking. The map only ever holds plain job records,
+    /// so operating on a possibly-inconsistent snapshot after a panic elsewhere
+    /// is far safer than turning a single poisoned lock into a permanent,
+    /// server-wide outage where every subsequent tool call panics. Matches the
+    /// recovery policy already used in `mark_job_error_sync`.
+    fn lock_jobs(&self) -> std::sync::MutexGuard<'_, HashMap<String, Job>> {
+        self.jobs.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
     /// Run the retention sweep, but at most once per `PURGE_MIN_INTERVAL_MS`.
     /// Retention is measured in hours so coarse-grained sweeping is fine, and
     /// the throttle avoids locking + scanning the whole map on every tool
@@ -236,7 +246,7 @@ impl DalfoxMcp {
         {
             return;
         }
-        let mut jobs = self.jobs.lock().expect("jobs mutex poisoned");
+        let mut jobs = self.lock_jobs();
         purge_jobs_map(&mut jobs, JOB_RETENTION_SECS);
     }
 
@@ -244,7 +254,7 @@ impl DalfoxMcp {
     async fn run_job(&self, scan_id: String, scan_args: Arc<ScanArgs>) {
         // Grab shared progress counters and cancellation flag for this job
         let (progress, cancel_flag) = {
-            let mut jobs = self.jobs.lock().expect("jobs mutex poisoned");
+            let mut jobs = self.lock_jobs();
             if let Some(j) = jobs.get_mut(&scan_id) {
                 if j.status == JobStatus::Cancelled
                     || j.cancelled.load(std::sync::atomic::Ordering::Relaxed)
@@ -298,7 +308,7 @@ impl DalfoxMcp {
             Err(e) => {
                 let msg = format!("parse_target failed: {}", e);
                 Self::log("ERR", &msg);
-                let mut jobs = self.jobs.lock().expect("jobs mutex poisoned");
+                let mut jobs = self.lock_jobs();
                 if let Some(j) = jobs.get_mut(&scan_id) {
                     j.status = JobStatus::Error;
                     j.error_message = Some(msg);
@@ -544,7 +554,7 @@ impl DalfoxMcp {
         // can't mistake a crashed scan for a clean finish. Cancellation wins.
         let panicked = !was_cancelled && scan_report.worker_panics > 0;
         {
-            let mut jobs = self.jobs.lock().expect("jobs mutex poisoned");
+            let mut jobs = self.lock_jobs();
             if let Some(j) = jobs.get_mut(&scan_id) {
                 // Store partial or complete results
                 j.results = Some(Arc::new(sanitized));
@@ -1042,7 +1052,7 @@ Final results (via get_results_dalfox) include finding type \
         // past it are rejected so an agent loop can't grow the job map /
         // blocking pool without bound.
         let scan_id = {
-            let mut jobs = self.jobs.lock().expect("jobs mutex poisoned");
+            let mut jobs = self.lock_jobs();
             let active = jobs.values().filter(|j| !j.is_terminal()).count();
             if active >= MAX_ACTIVE_SCANS_MCP {
                 return Err(ErrorData::invalid_params(
@@ -1279,7 +1289,7 @@ Call this repeatedly until status is 'done', 'error', or 'cancelled'."
         // deep clone of owned strings (`target_url`, `error_message`) that
         // `jobs.get(&pid).cloned()` used to perform on every poll.
         let snapshot = {
-            let jobs = self.jobs.lock().expect("jobs mutex poisoned");
+            let jobs = self.lock_jobs();
             jobs.get(&pid).map(|job| JobSnapshot {
                 status: job.status.clone(),
                 target_url: job.target_url.clone(),
@@ -1428,7 +1438,7 @@ status, and result_count."
         // Build the response under the lock but only on the JSON values we
         // need; serialization itself runs after the lock is released.
         let entries: Vec<serde_json::Value> = {
-            let jobs = self.jobs.lock().expect("jobs mutex poisoned");
+            let jobs = self.lock_jobs();
             jobs.iter()
                 .filter(|(_, job)| filter_status.as_ref().is_none_or(|f| &job.status == f))
                 .map(|(id, job)| {
@@ -1669,7 +1679,7 @@ still be retrieved via get_results_dalfox."
         if pid.is_empty() {
             return Err(ErrorData::invalid_params("scan_id must not be empty", None));
         }
-        let mut jobs = self.jobs.lock().expect("jobs mutex poisoned");
+        let mut jobs = self.lock_jobs();
         match jobs.get_mut(&pid) {
             Some(job) => {
                 let previous_status = job.status.clone();
@@ -1718,7 +1728,7 @@ Terminal scans are also auto-purged after 1 hour."
         if pid.is_empty() {
             return Err(ErrorData::invalid_params("scan_id must not be empty", None));
         }
-        let mut jobs = self.jobs.lock().expect("jobs mutex poisoned");
+        let mut jobs = self.lock_jobs();
         let previous_status = match jobs.get(&pid) {
             Some(job) => {
                 if !job.is_terminal() {

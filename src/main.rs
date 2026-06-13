@@ -203,8 +203,7 @@ async fn main() {
             // indefinitely. Config files are TOML/JSON — 1 MiB is more
             // than two orders of magnitude over what any real
             // operator-curated config will ever be.
-            const MAX_CONFIG_BYTES: u64 = 1 << 20; // 1 MiB
-            match read_bounded(p, MAX_CONFIG_BYTES, "config file") {
+            match read_bounded(p, dalfox::config::MAX_CONFIG_BYTES, "config file") {
                 Ok(content) => {
                     let is_json_ext = p
                         .extension()

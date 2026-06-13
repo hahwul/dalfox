@@ -32,6 +32,8 @@ fn make_state(
         scan_timeout: None,
         // 0 = unlimited so existing tests aren't rejected by the concurrency cap.
         max_concurrent_scans: 0,
+        last_purge_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
+        preflight_sem: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PREFLIGHT)),
     }
 }
 
@@ -2017,6 +2019,40 @@ async fn test_purge_expired_jobs_removes_old_terminal_jobs() {
     assert!(
         jobs.contains_key("active"),
         "active job must never be purged"
+    );
+}
+
+#[tokio::test]
+async fn test_purge_expired_jobs_is_throttled() {
+    // SRV-3: the retention sweep is throttled to once per interval so it doesn't
+    // run an O(n) scan (and lock the jobs map) on every request.
+    let state = make_state(None, None, false, false, "cb");
+
+    // First sweep runs (last_purge_ms starts at 0) and removes the expired job.
+    {
+        let mut jobs = state.jobs.lock().await;
+        let mut old = test_job(JobStatus::Done, None, "");
+        old.finished_at_ms = Some(now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
+        jobs.insert("old1".to_string(), old);
+    }
+    purge_expired_jobs(&state).await;
+    assert!(
+        !state.jobs.lock().await.contains_key("old1"),
+        "first purge should run and remove the expired job"
+    );
+
+    // A second, immediate sweep is throttled: a freshly-inserted expired job
+    // survives because the minimum interval hasn't elapsed yet.
+    {
+        let mut jobs = state.jobs.lock().await;
+        let mut old = test_job(JobStatus::Done, None, "");
+        old.finished_at_ms = Some(now_ms() - (JOB_RETENTION_SECS + 10) * 1000);
+        jobs.insert("old2".to_string(), old);
+    }
+    purge_expired_jobs(&state).await;
+    assert!(
+        state.jobs.lock().await.contains_key("old2"),
+        "second purge within the interval should be throttled (no-op)"
     );
 }
 

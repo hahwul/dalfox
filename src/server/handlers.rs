@@ -791,11 +791,36 @@ pub(crate) async fn preflight_handler(
         .timeout
         .unwrap_or(crate::cmd::scan::DEFAULT_TIMEOUT_SECS);
 
+    // Bound concurrent preflights: each one pins a blocking-pool thread for the
+    // full request timeout against an attacker-controlled target, so an
+    // unthrottled burst could exhaust the blocking pool and stall every scan.
+    // Shed excess load with 503 instead. The permit is moved into the blocking
+    // closure below so it is held until that thread actually frees.
+    let preflight_permit = match state.preflight_sem.clone().try_acquire_owned() {
+        Ok(p) => p,
+        Err(_) => {
+            let resp = ApiResponse::<serde_json::Value> {
+                code: 503,
+                msg: "preflight capacity reached; retry shortly".to_string(),
+                data: None,
+            };
+            return make_api_response(
+                &state,
+                &headers,
+                &params,
+                StatusCode::SERVICE_UNAVAILABLE,
+                &resp,
+            );
+        }
+    };
+
     // Run the analysis on tokio's blocking pool (reused across calls) with a
     // current_thread runtime inside because analyze_parameters and scraper-
     // backed HTML inspection are !Send.
     let outcome: Result<serde_json::Value, PreflightError> =
         tokio::task::spawn_blocking(move || {
+            // Hold the admission permit for the lifetime of this blocking thread.
+            let _preflight_permit = preflight_permit;
             let rt = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()

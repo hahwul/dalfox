@@ -863,6 +863,47 @@ fn test_build_request_text_path_segment_injection() {
     assert!(request.contains("GET /a/hello%20world/c HTTP/1.1"));
 }
 
+#[test]
+fn test_build_request_text_json_body_empty_value_reserializes() {
+    // Regression (ORCH-2): an empty `param.value` used to make the JsonBody
+    // fallback call `str::replace("", payload)`, splicing the payload between
+    // every byte of the (invalid-JSON) body and producing a garbled PoC. It
+    // should re-serialize to `{name: payload}` instead, matching what the
+    // scanner actually sends for invalid-JSON bodies.
+    let mut target = parse_target("https://example.com/api").unwrap();
+    target.method = "POST".to_string();
+    target.data = Some("not-json-at-all".to_string());
+
+    let param = Param {
+        name: "q".to_string(),
+        value: String::new(),
+        location: Location::JsonBody,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    };
+
+    let request = build_request_text(&target, &param, "PAYLOAD");
+    assert!(
+        request.contains(r#"{"q":"PAYLOAD"}"#),
+        "expected re-serialized JSON body, got:\n{request}"
+    );
+    // The old empty-pattern splice produced "PAYLOADn…" (payload interleaved
+    // with the original body bytes); ensure that no longer happens.
+    assert!(
+        !request.contains("PAYLOADn"),
+        "payload should not be spliced into the original body:\n{request}"
+    );
+}
+
 #[tokio::test]
 async fn test_xss_scanning_get_query() {
     let mut target = parse_target("https://example.com").unwrap();

@@ -61,9 +61,35 @@ pub(crate) fn validate_scan_options(opts: &ScanOptions) -> Result<(), String> {
     Ok(())
 }
 
+/// Minimum interval between job-retention sweeps. Retention is hours-granular,
+/// so deferring a sweep by up to a minute is invisible to clients while keeping
+/// the O(n) scan off the hot per-request path. Mirrors the MCP server.
+pub(crate) const PURGE_MIN_INTERVAL_MS: i64 = 60_000;
+
+/// Cap on concurrent `/preflight` operations. Each preflight pins a blocking-pool
+/// thread for the full request timeout, so this is sized well below tokio's
+/// default 512-thread blocking pool to guarantee scan jobs always have threads.
+pub(crate) const MAX_CONCURRENT_PREFLIGHT: usize = 32;
+
 /// Thin wrapper over `crate::job::purge_expired_jobs` that acquires the jobs
-/// lock for the caller.
+/// lock for the caller. Throttled to at most once per [`PURGE_MIN_INTERVAL_MS`]
+/// so the O(n) retention sweep doesn't run (and serialize all handlers on the
+/// jobs lock) on every request, including the high-frequency poll path.
 pub(crate) async fn purge_expired_jobs(state: &AppState) {
+    use std::sync::atomic::Ordering;
+    let now = crate::job::now_ms();
+    let last = state.last_purge_ms.load(Ordering::Relaxed);
+    if now - last < PURGE_MIN_INTERVAL_MS {
+        return;
+    }
+    // CAS so concurrent requests can't both decide to sweep.
+    if state
+        .last_purge_ms
+        .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
+        .is_err()
+    {
+        return;
+    }
     let mut jobs = state.jobs.lock().await;
     purge_jobs_map(&mut jobs, JOB_RETENTION_SECS);
 }
