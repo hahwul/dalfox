@@ -4340,3 +4340,162 @@ fn settimeout_tainted_delay_argument_is_not_a_sink() {
         "tainted code arg must still flag setTimeout, got {v_code:?}"
     );
 }
+
+// --- Issue #1125: Document.parseHTMLUnsafe() as an HTML-parsing sink ---
+
+#[test]
+fn detects_document_parse_html_unsafe_from_search() {
+    // xssmaze /htmlunsafe/level4/: URLSearchParams source -> parseHTMLUnsafe.
+    let js = r#"
+var q = new URLSearchParams(location.search).get('query') || '';
+var doc = Document.parseHTMLUnsafe(q);
+document.getElementById('out').append(...doc.body.childNodes);
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).expect("parses");
+    assert!(
+        r.iter().any(|v| v.sink == "parseHTMLUnsafe"),
+        "Document.parseHTMLUnsafe must be modeled as a sink: got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn detects_bare_parse_html_unsafe_from_hash() {
+    // Bare `parseHTMLUnsafe(...)` (destructured off Document) is the same sink.
+    let js = r#"
+var html = decodeURIComponent(location.hash.slice(1));
+var doc = parseHTMLUnsafe(html);
+document.body.append(...doc.body.childNodes);
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).expect("parses");
+    assert!(
+        r.iter()
+            .any(|v| v.sink == "parseHTMLUnsafe" && v.source.contains("location.hash")),
+        "bare parseHTMLUnsafe must fire on a tainted argument: got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn fetch_text_to_parse_html_unsafe() {
+    // xssmaze /htmlunsafe/level6/: async fetch response -> parseHTMLUnsafe.
+    let js = r#"
+fetch('/api').then(function (r) { return r.text(); })
+  .then(function (t) {
+    var doc = Document.parseHTMLUnsafe(t);
+    document.getElementById('out').append(...doc.body.childNodes);
+  });
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).expect("parses");
+    assert!(
+        r.iter().any(|v| v.sink == "parseHTMLUnsafe"),
+        "fetch text -> parseHTMLUnsafe must fire; got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn parse_html_unsafe_static_argument_is_not_a_sink() {
+    // A static HTML string is not attacker-controlled: must not flag.
+    let js = r#"var doc = Document.parseHTMLUnsafe('<b>hi</b>');"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        !r.iter().any(|v| v.sink == "parseHTMLUnsafe"),
+        "static parseHTMLUnsafe argument must not be flagged, got {r:?}"
+    );
+}
+
+// --- Issue #1126: window.open() as a navigation sink ---
+
+#[test]
+fn detects_window_open_from_hash() {
+    // xssmaze /navsink/level1/: location.hash -> window.open.
+    let js = r#"
+var target = decodeURIComponent(location.hash.slice(1));
+if (target) { window.open(target); }
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).expect("parses");
+    assert!(
+        r.iter()
+            .any(|v| v.sink == "window.open" && v.source.contains("location.hash")),
+        "window.open of location.hash must be modeled as a sink: got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn detects_window_open_from_search_with_target_arg() {
+    // xssmaze /navsink/level2/: URLSearchParams -> window.open(url, '_blank').
+    let js = r#"
+var url = new URLSearchParams(location.search).get('query') || '';
+if (url) { window.open(url, '_blank'); }
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).expect("parses");
+    assert!(
+        r.iter().any(|v| v.sink == "window.open"),
+        "window.open(url, '_blank') must fire on a tainted URL: got {:?}",
+        r.iter()
+            .map(|v| (v.source.clone(), v.sink.clone()))
+            .collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn detects_self_and_global_this_open_aliases() {
+    for (alias, src) in [
+        ("self.open(t)", "self.open"),
+        ("globalThis.open(t)", "globalThis.open"),
+    ] {
+        let js = format!("var t = location.hash; {alias};");
+        let r = AstDomAnalyzer::new().analyze(&js).unwrap();
+        assert!(
+            r.iter().any(|v| v.sink == src),
+            "{src} alias must be modeled as a navigation sink, got {r:?}"
+        );
+    }
+}
+
+#[test]
+fn window_open_tainted_window_name_is_not_a_sink() {
+    // Only argument-0 (the URL) is exploitable. A tainted 2nd `windowName`
+    // argument (`window.open('/x', location.hash)`) must NOT be flagged.
+    let js = r#"window.open('/safe', location.hash);"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        !r.iter().any(|v| v.sink == "window.open"),
+        "tainted window-name arg must not flag window.open, got {r:?}"
+    );
+}
+
+#[test]
+fn window_open_static_url_is_not_a_sink() {
+    let js = r#"window.open('https://example.com/', '_blank');"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        !r.iter().any(|v| v.sink == "window.open"),
+        "static window.open URL must not be flagged, got {r:?}"
+    );
+}
+
+#[test]
+fn xhr_open_is_not_a_window_open_sink() {
+    // `xhr.open(method, url)` is the XMLHttpRequest API, not a navigation
+    // sink: the bare `open` method name must not collide with `window.open`.
+    let js = r#"
+var xhr = new XMLHttpRequest();
+xhr.open('GET', location.hash);
+"#;
+    let r = AstDomAnalyzer::new().analyze(js).unwrap();
+    assert!(
+        !r.iter().any(|v| v.sink.ends_with("open")),
+        "xhr.open must not be treated as a navigation sink, got {r:?}"
+    );
+}
