@@ -489,6 +489,18 @@ const DOM_SINKS: &[&str] = &[
     "location.href",
     "location.assign",
     "location.replace",
+    // `window.open(url, …)` navigates the opened window to `url`; a
+    // `javascript:` / `data:text/html` scheme there executes script, exactly
+    // like the sibling `location.assign` / `location.replace` navigation
+    // sinks. Only the argument-0 URL position is dangerous (see the
+    // `first_arg_only` gate), so a tainted window-name / features argument is
+    // not treated as a sink. `self` / `globalThis` are the standard global
+    // aliases for `window`. Bare `open(...)` is intentionally excluded — it
+    // collides with `xhr.open` / `indexedDB.open` / `caches.open`, which are
+    // not navigation sinks.
+    "window.open",
+    "self.open",
+    "globalThis.open",
     "src",
     "srcdoc",
     "href",
@@ -506,6 +518,14 @@ const DOM_SINKS: &[&str] = &[
     // parses the argument as HTML with no sanitization, which is exactly the
     // shape of an exploitable injection.
     "setHTMLUnsafe",
+    // `Document.parseHTMLUnsafe(html)` is the parse-to-live-DOM analog of
+    // `setHTMLUnsafe` / `createContextualFragment`: it parses the string into
+    // a detached `Document` with no sanitizer, whose nodes are then adopted
+    // into the page. Matched as a bare method name so both the static
+    // `Document.parseHTMLUnsafe(...)` form and a bare `parseHTMLUnsafe(...)`
+    // are caught. The safe sibling `Document.parseHTML(...)` runs the built-in
+    // Sanitizer and is deliberately not modeled.
+    "parseHTMLUnsafe",
 ];
 
 const DOM_SANITIZERS: &[&str] = &[
@@ -1396,6 +1416,7 @@ impl<'a> DomXssVisitor<'a> {
                 | "document.write"
                 | "document.writeln"
                 | "setHTMLUnsafe"
+                | "parseHTMLUnsafe"
                 | "srcdoc"
                 | "html"
         )
@@ -4518,10 +4539,18 @@ impl<'a> DomXssVisitor<'a> {
             // the executed code — a tainted 2nd `delay` argument
             // (`setTimeout(fn, location.hash)`) is not exploitable, so consider
             // index 0 only (mirroring the setAttribute / execCommand
-            // positional special-cases below).
+            // positional special-cases below). The `*.open` navigation sinks are
+            // the same shape: only argument-0 (the URL) is exploitable; a
+            // tainted window-name (`window.open('/x', location.hash)`) or
+            // features string is not.
             let first_arg_only = matches!(
                 func_name.as_str(),
-                "setTimeout" | "setInterval" | "execScript"
+                "setTimeout"
+                    | "setInterval"
+                    | "execScript"
+                    | "window.open"
+                    | "self.open"
+                    | "globalThis.open"
             );
             for (idx, arg) in call.arguments.iter().enumerate() {
                 if first_arg_only && idx != 0 {
