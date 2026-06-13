@@ -112,10 +112,24 @@ pub fn parse_har(content: &str) -> Result<Vec<Target>, Box<dyn std::error::Error
     let content = content.trim_start_matches('\u{feff}');
     let har: Har = serde_json::from_str(content).map_err(|e| format!("invalid HAR JSON: {}", e))?;
 
+    // Hard cap on produced targets so a large-but-valid HAR can't amplify into
+    // multi-GiB resident memory (each Target plus the downstream all_target_urls
+    // / host_groups / dedup copies) beyond the input byte budget. Set far above
+    // any realistic capture; truncation is surfaced as a warning.
+    const MAX_HAR_TARGETS: usize = 1_000_000;
+
+    let total_entries = har.log.entries.len();
     let mut targets = Vec::new();
     let mut skipped_non_http = 0usize;
 
     for entry in har.log.entries {
+        if targets.len() >= MAX_HAR_TARGETS {
+            eprintln!(
+                "[warn] HAR has {} entries; capping at {} targets to bound memory",
+                total_entries, MAX_HAR_TARGETS
+            );
+            break;
+        }
         let req = entry.request;
 
         let url = match Url::parse(req.url.trim()) {

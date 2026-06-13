@@ -112,6 +112,17 @@ pub(crate) struct AppState {
     pub(crate) scan_timeout: Option<u64>,
     // Max concurrent (queued + running) scans; 0 = unlimited.
     pub(crate) max_concurrent_scans: usize,
+    /// Throttle state for the best-effort job-retention purge: the last time
+    /// (ms since epoch) a sweep ran. The purge is O(n) over the whole job map
+    /// and used to run on every request (including the high-frequency poll
+    /// path), serializing handlers on the jobs lock; gating it keeps the sweep
+    /// to at most once per minute. Mirrors the MCP server's throttle.
+    pub(crate) last_purge_ms: Arc<std::sync::atomic::AtomicI64>,
+    /// Bounds concurrent `/preflight` work. Each preflight pins a blocking-pool
+    /// thread for the full request timeout against an attacker-controlled
+    /// target, so without a cap a burst can exhaust the blocking pool and stall
+    /// every scan server-wide. Permits are held until the blocking thread frees.
+    pub(crate) preflight_sem: Arc<tokio::sync::Semaphore>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

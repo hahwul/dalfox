@@ -19,6 +19,15 @@ type ClientResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send +
 /// the rest of the 33-char subdomain label.
 const CORRELATION_ID_LEN: usize = 20;
 const NONCE_LEN: usize = 13;
+/// Cap on the OAST poll/register response body we buffer. Legitimate interactsh
+/// poll JSON is tiny; this bounds memory if a hostile/compromised OAST node
+/// streams an oversized body, consistent with the project's capped-body policy
+/// for scanned targets. A truncated body just yields a parse error the poller
+/// already swallows.
+const OOB_MAX_BODY_BYTES: usize = 4 << 20; // 4 MiB
+/// Upper bound on the pre-allocation hint for the decrypted-interaction buffer,
+/// so a large advertised entry count can't drive an oversized reservation.
+const OOB_MAX_ENTRIES_HINT: usize = 4096;
 const ALPHABET: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789";
 
 pub struct InteractshClient {
@@ -44,7 +53,14 @@ pub struct InteractshClient {
 /// (the caller turns that into a soft warning). The RSA-2048 keypair is
 /// generated once and reused across attempts rather than per server.
 pub async fn register_first(config: &OobConfig) -> ClientResult<InteractshClient> {
-    let keys = SessionKeys::generate()?;
+    // RSA-2048 keygen is a 50-300ms CPU burst. Run it on the blocking pool so it
+    // does not stall an async runtime worker (and any other tasks scheduled on
+    // it) for the duration.
+    let keys = tokio::task::spawn_blocking(SessionKeys::generate)
+        .await
+        .map_err(|e| -> Box<dyn std::error::Error + Send + Sync> {
+            format!("OOB keygen task panicked: {e}").into()
+        })??;
     let mut last_err: Option<Box<dyn std::error::Error + Send + Sync>> = None;
     for server in &config.servers {
         let client = match InteractshClient::new(server, config, keys.clone()) {
@@ -169,7 +185,10 @@ impl InteractshClient {
         if !resp.status().is_success() {
             return Err(format!("poll returned HTTP {}", resp.status()).into());
         }
-        let parsed: wire::PollResponse = resp.json().await?;
+        // Cap the buffered body instead of `resp.json()` (which reads without
+        // bound) so a hostile OAST node can't drive an OOM through the poller.
+        let body = crate::utils::http::read_body_capped(resp, OOB_MAX_BODY_BYTES).await?;
+        let parsed: wire::PollResponse = serde_json::from_str(&body)?;
 
         let aes_key_b64 = parsed.aes_key.as_deref().filter(|s| !s.is_empty());
         let Some(aes_key_b64) = aes_key_b64 else {
@@ -182,7 +201,7 @@ impl InteractshClient {
         }
         let aes_key = self.keys.decrypt_aes_key(aes_key_b64)?;
 
-        let mut out = Vec::with_capacity(entries.len());
+        let mut out = Vec::with_capacity(entries.len().min(OOB_MAX_ENTRIES_HINT));
         for item in &entries {
             let Ok(plain) = crypto::decrypt_interaction(&aes_key, item) else {
                 continue;

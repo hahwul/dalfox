@@ -142,6 +142,8 @@ pub async fn run_server(args: ServerArgs) {
         rate_limit: args.rate_limit,
         scan_timeout: args.scan_timeout,
         max_concurrent_scans: args.max_concurrent_scans,
+        last_purge_ms: Arc::new(std::sync::atomic::AtomicI64::new(0)),
+        preflight_sem: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PREFLIGHT)),
     };
 
     let app = Router::new()
