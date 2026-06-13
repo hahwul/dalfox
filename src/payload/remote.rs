@@ -19,35 +19,26 @@ static PAYLOAD_PROVIDER_REGISTRY: OnceLock<Mutex<HashMap<String, Vec<String>>>> 
 static WORDLIST_PROVIDER_REGISTRY: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new();
 
 fn ensure_default_registries() {
-    // Seed payload providers if empty
+    // Seed any built-in providers that aren't already registered. Seeding each
+    // default key independently (rather than gating on an empty registry) keeps
+    // the defaults available even after a caller has registered a custom
+    // provider first — registering "custom" must never suppress "payloadbox".
     {
         let reg = PAYLOAD_PROVIDER_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
         let mut m = reg.lock().unwrap_or_else(PoisonError::into_inner);
-        if m.is_empty() {
-            m.insert(
-                "payloadbox".to_string(),
-                vec!["https://assets.hahwul.com/xss-payloadbox.txt".to_string()],
-            );
-            m.insert(
-                "portswigger".to_string(),
-                vec!["https://assets.hahwul.com/xss-portswigger.txt".to_string()],
-            );
-        }
+        m.entry("payloadbox".to_string())
+            .or_insert_with(|| vec!["https://assets.hahwul.com/xss-payloadbox.txt".to_string()]);
+        m.entry("portswigger".to_string())
+            .or_insert_with(|| vec!["https://assets.hahwul.com/xss-portswigger.txt".to_string()]);
     }
-    // Seed wordlist providers if empty
     {
         let reg = WORDLIST_PROVIDER_REGISTRY.get_or_init(|| Mutex::new(HashMap::new()));
         let mut m = reg.lock().unwrap_or_else(PoisonError::into_inner);
-        if m.is_empty() {
-            m.insert(
-                "assetnote".to_string(),
-                vec!["https://assets.hahwul.com/wl-assetnote-params.txt".to_string()],
-            );
-            m.insert(
-                "burp".to_string(),
-                vec!["https://assets.hahwul.com/wl-params.txt".to_string()],
-            );
-        }
+        m.entry("assetnote".to_string()).or_insert_with(|| {
+            vec!["https://assets.hahwul.com/wl-assetnote-params.txt".to_string()]
+        });
+        m.entry("burp".to_string())
+            .or_insert_with(|| vec!["https://assets.hahwul.com/wl-params.txt".to_string()]);
     }
 }
 
