@@ -12,7 +12,7 @@ Most real targets sit behind a WAF. Dalfox fingerprints the WAF, then automatica
 1. Dalfox sends a small set of **fingerprint probes** to the target.
 2. If a known WAF signature shows up (headers like `cf-ray`, body markers like "Attention required!", or a 429/403 shape), Dalfox notes the WAF and its confidence.
 3. The scanner merges the WAF's **extra encoders** into your encoder list and adds the WAF's **mutation list** to the payload generator.
-4. Payload mutations are capped (3 variants per base payload) so request volume stays sane.
+4. Payload mutations are capped (4 variants per base payload) so request volume stays sane. The cap only applies once a WAF is detected, so the extra effort lands exactly on the scans that need it.
 
 This is all on by default. You only touch flags if you want to disable or steer it.
 
@@ -118,6 +118,12 @@ Different WAFs fall to different tricks. A small sample:
 | **Exotic whitespace** | form-feed / vertical tab | CRS 941320 |
 | **Case alternation** | `<ScRiPt>` | Case-sensitive rules |
 | **zwsp insertion** | `al​ert(1)` | Lexer-based detection |
+| **Keyword entity encode** | `onerror=&#97;lert(1)` | `alert`/handler keyword regex (attribute-decoded) |
+| **Multi-slash** | `<img/src=x/onerror=alert(1)>` | Regexes anchored on `\s` between later attributes |
+| **Scheme break** | `href=java&#9;script:alert(1)` | Literal `javascript:` scheme regex (URL-parser strips the TAB) |
+| **Entity scheme** | `href=&#106;avascript:alert(1)` | Literal `javascript:` scheme regex (attribute-decoded) |
+
+The last four exploit that the HTML tokenizer decodes character references **inside attribute values** before the URL parser or the event-handler JS compiler sees them. They fire only in attribute / event-handler / `javascript:`-URL context and are skipped for bare body text and `<script>`/`<style>` payloads, where no entity decoding happens.
 
 You don't configure these directly; they're selected automatically per WAF. To inspect what's happening, run with `--debug`.
 

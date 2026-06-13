@@ -48,8 +48,14 @@ use std::time::Duration;
 use tokio::sync::{Mutex, RwLock, Semaphore};
 
 /// Maximum number of WAF mutation variants generated per base payload.
-/// Prevents payload explosion when WAF bypass mutations are applied.
-const MAX_WAF_MUTATION_VARIANTS_PER_PAYLOAD: usize = 3;
+/// Prevents payload explosion when WAF bypass mutations are applied. This cap
+/// only takes effect when a WAF is detected and bypass is on (the only path
+/// that calls `expand_waf_payloads`), so it scales effort exactly on the scans
+/// that want more bypass attempts — not the common no-WAF path. Sized to give
+/// the attribute-decode-layer mutations (KeywordEntityEncode / MultiSlash /
+/// SchemeBreak) a slot alongside the proven structural ones for payloads where
+/// many mutations shape-match.
+const MAX_WAF_MUTATION_VARIANTS_PER_PAYLOAD: usize = 4;
 
 /// Maximum number of distinct same-origin external JS files fetched per target page fetch.
 const MAX_EXTERNAL_JS_FILES: usize = 16;
