@@ -396,6 +396,80 @@ fn large_script_above_inline_cap_runs_on_large_stack_without_crashing() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// JS-context payload × transform matrix (issue #1124)
+//
+// Extends the #1118/#1123 matrix pattern to the JS-context evidence kind. Each
+// row states how a server transformed the reflected payload (via the shared
+// `reflect` helper) and the verdict that transform should yield, instead of
+// hand-writing the script body per case.
+// ---------------------------------------------------------------------------
+#[test]
+fn test_js_context_evidence_matrix() {
+    use crate::scanning::dom_evidence_fixtures::{Transform, reflect};
+
+    // Payload breaks out of a double-quoted JS string and calls a sink.
+    let payload = "\"-alert(1)-\"";
+    let script_sink = r#"<script>var x = "{PAYLOAD}";</script>"#;
+    // Reflection that never reaches a <script> block.
+    let html_text_sink = "<html><body>{PAYLOAD}</body></html>";
+
+    // (label, transform, sink, expected_evidence)
+    let cases: &[(&str, Transform, &str, bool)] = &[
+        (
+            "full reflect into JS string slot",
+            Transform::Full,
+            script_sink,
+            true,
+        ),
+        // Server entity-encodes the breakout quote; inside <script> the JS
+        // parser does NOT decode `&quot;`, so the payload stays in the string.
+        (
+            "entity-encoded quote in script",
+            Transform::EntityEncoded,
+            script_sink,
+            false,
+        ),
+        // Percent escapes likewise stay literal in JS source → inert.
+        (
+            "percent-encoded in script",
+            Transform::PercentEncoded,
+            script_sink,
+            false,
+        ),
+        // `ALERT` is a distinct, undefined identifier under case-sensitive JS.
+        (
+            "case-folded in script",
+            Transform::CaseFolded,
+            script_sink,
+            false,
+        ),
+        // Truncated before the sink call → no `alert(` survives.
+        (
+            "truncated before sink",
+            Transform::TruncatedAt("alert"),
+            script_sink,
+            false,
+        ),
+        // Same payload reflected as HTML text, outside any <script> block.
+        (
+            "reflected outside any script",
+            Transform::Full,
+            html_text_sink,
+            false,
+        ),
+    ];
+
+    for (label, transform, sink, expected) in cases {
+        let body = reflect(payload, *transform, sink);
+        assert_eq!(
+            has_js_context_evidence(payload, &body),
+            *expected,
+            "js-context matrix row `{label}` mismatched on body: {body}"
+        );
+    }
+}
+
 #[test]
 fn checks_every_payload_occurrence_not_just_the_first() {
     // A benign in-string reflection of the payload precedes the executable

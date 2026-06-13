@@ -23,6 +23,9 @@ pub mod ast_dom_analysis;
 pub mod ast_integration;
 pub mod check_dom_verification;
 pub mod check_reflection;
+/// Shared test-only fixtures modelling server-side reflection transforms.
+#[cfg(test)]
+pub(crate) mod dom_evidence_fixtures;
 pub mod js_context_verify;
 pub mod light_verify;
 pub mod markers;

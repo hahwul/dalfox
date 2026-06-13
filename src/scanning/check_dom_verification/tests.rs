@@ -1032,6 +1032,168 @@ fn test_is_executable_url_attribute_pin_whitelist() {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Payload × transform matrices (issue #1124)
+//
+// The marker-evidence matrix lives with the #1118/#1123 handler-survival fix.
+// These tables extend the same pattern to the *other* DOM-evidence kinds —
+// executable-URL attribute, HTML-structural, and inline-handler breakout — so
+// each kind is exercised against bodies produced by an explicit, reviewable
+// server transform (`reflect(payload, Transform, sink)`) rather than ad-hoc
+// hand-written HTML. Every row documents "what the server did", and the
+// expected verdict is checked against that transform.
+// ---------------------------------------------------------------------------
+use crate::scanning::dom_evidence_fixtures::{Transform, reflect};
+
+#[test]
+fn test_executable_url_evidence_matrix() {
+    // Payload is a bare `javascript:` URL; the sink template decides the
+    // reflection context (navigational vs resource-fetch attribute).
+    let payload = "javascript:alert(1)";
+    let nav = r#"<html><body><a href="{PAYLOAD}">go</a></body></html>"#;
+    let img = r#"<html><body><img src="{PAYLOAD}"></body></html>"#;
+
+    // (label, transform, sink, expected_evidence)
+    let cases: &[(&str, Transform, &str, bool)] = &[
+        ("full reflect into a@href", Transform::Full, nav, true),
+        // HTML-entity encoding does NOT defang a scheme with no markup
+        // metacharacters — the href still navigates. URL/percent encoding is
+        // the real defence here.
+        (
+            "entity-encoded into a@href",
+            Transform::EntityEncoded,
+            nav,
+            true,
+        ),
+        // Percent-encoding breaks the `:` so it is no longer a URL scheme.
+        (
+            "percent-encoded into a@href",
+            Transform::PercentEncoded,
+            nav,
+            false,
+        ),
+        // Schemes are matched case-insensitively, mirroring the browser.
+        ("case-folded into a@href", Transform::CaseFolded, nav, true),
+        // Truncated before `(` — the full payload no longer appears in the value.
+        (
+            "truncated at '(' into a@href",
+            Transform::TruncatedAt("("),
+            nav,
+            false,
+        ),
+        // Same scheme, reflected into a resource-fetch attribute the browser
+        // never executes as code: the "sink" is not actually a sink.
+        ("full reflect into img@src", Transform::Full, img, false),
+    ];
+
+    for (label, transform, sink, expected) in cases {
+        let body = reflect(payload, *transform, sink);
+        assert_eq!(
+            has_dom_evidence(payload, &body),
+            *expected,
+            "executable-URL matrix row `{label}` mismatched on body: {body}"
+        );
+    }
+}
+
+#[test]
+fn test_html_structural_evidence_matrix() {
+    // Payload introduces a real element carrying an event-handler sink.
+    let payload = "<svg onload=alert(1)>";
+    let text_sink = "<html><body>results: {PAYLOAD}</body></html>";
+
+    let cases: &[(&str, Transform, bool)] = &[
+        ("full reflect", Transform::Full, true),
+        // Element survives but the handler that carried the sink is gone.
+        ("handler stripped", Transform::HandlerStripped, false),
+        // Handler attribute present but emptied — no sink call.
+        ("handler blanked", Transform::HandlerBlanked, false),
+        // Angle brackets escaped → inert text, scraper builds no <svg> element.
+        ("entity encoded", Transform::EntityEncoded, false),
+        // Percent escapes are not decoded by the HTML parser → inert text.
+        ("percent encoded", Transform::PercentEncoded, false),
+        // `ALERT` is a distinct (undefined) identifier; JS is case-sensitive.
+        ("case folded", Transform::CaseFolded, false),
+        // Truncated before the handler — element with no usable handler.
+        (
+            "truncated before handler",
+            Transform::TruncatedAt("onload"),
+            false,
+        ),
+    ];
+
+    for (label, transform, expected) in cases {
+        let body = reflect(payload, *transform, text_sink);
+        assert_eq!(
+            has_dom_evidence(payload, &body),
+            *expected,
+            "html-structural matrix row `{label}` mismatched on body: {body}"
+        );
+    }
+}
+
+#[test]
+fn test_inline_handler_breakout_evidence_matrix() {
+    // xss-game L4 shape: the server's own template wraps the reflected payload
+    // inside an existing `on*` handler's JS string argument.
+    let payload = "'-alert(1)-'";
+    let handler_sink = r#"<img onload="startTimer('{PAYLOAD}')">"#;
+    // A non-handler reflection context (server emits no `on*` attribute).
+    let text_sink = "<div>startTimer('{PAYLOAD}')</div>";
+
+    let cases: &[(&str, Transform, &str, bool)] = &[
+        // Raw reflection: the single quotes break the JS string immediately.
+        (
+            "full reflect into on-handler",
+            Transform::Full,
+            handler_sink,
+            true,
+        ),
+        // Server entity-encodes the quote, but the browser decodes `&#39;` at
+        // attribute-parse time, so the breakout still fires (the L4 lesson).
+        (
+            "entity-encoded quote in on-handler",
+            Transform::EntityEncoded,
+            handler_sink,
+            true,
+        ),
+        // Percent escapes stay literal in an HTML attribute → no breakout.
+        (
+            "percent-encoded quote in on-handler",
+            Transform::PercentEncoded,
+            handler_sink,
+            false,
+        ),
+        // `ALERT` is not the real sink under case-sensitive JS.
+        (
+            "case-folded in on-handler",
+            Transform::CaseFolded,
+            handler_sink,
+            false,
+        ),
+        // No `on*` attribute at all → nothing to break out of.
+        (
+            "reflected outside any handler",
+            Transform::Full,
+            text_sink,
+            false,
+        ),
+    ];
+
+    for (label, transform, sink, expected) in cases {
+        let body = reflect(payload, *transform, sink);
+        assert_eq!(
+            classify_dom_evidence(payload, &body),
+            if *expected {
+                Some(DomEvidenceKind::InlineHandlerBreakout)
+            } else {
+                None
+            },
+            "inline-handler matrix row `{label}` mismatched on body: {body}"
+        );
+    }
+}
+
 #[test]
 fn html_structural_evidence_matches_entity_encoded_payload() {
     // WAF-bypass payloads entity-encode the sink chars (`alert&#40;1&#41;`), but
