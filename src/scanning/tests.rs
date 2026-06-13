@@ -1878,3 +1878,379 @@ fn test_csp_requires_trusted_types_absent() {
     let headers = reqwest::header::HeaderMap::new();
     assert!(!super::csp_requires_trusted_types(&headers));
 }
+
+// ---- build_request_text: the displayed PoC HTTP request ------------------
+
+use crate::target_parser::Target;
+
+/// Minimal `Param` for request-text tests (all the discovery-derived metadata
+/// fields left at their `None` defaults).
+fn req_param(name: &str, value: &str, location: Location) -> Param {
+    Param {
+        name: name.to_string(),
+        value: value.to_string(),
+        location,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    }
+}
+
+fn target_for(url: &str) -> Target {
+    Target::for_url(url::Url::parse(url).expect("valid url"))
+}
+
+#[test]
+fn build_request_text_query_replaces_existing_param() {
+    let target = target_for("https://example.com/path?a=1&b=2");
+    let param = req_param("a", "1", Location::Query);
+    let req = super::build_request_text(&target, &param, "PAYLOAD");
+    // Request line is the GET method against the path with the injected query.
+    assert!(req.starts_with("GET /path?"), "req:\n{req}");
+    assert!(req.contains("a=PAYLOAD"), "req:\n{req}");
+    assert!(req.contains("b=2"), "req:\n{req}");
+    assert!(
+        req.contains(" HTTP/1.1\r\nHost: example.com"),
+        "req:\n{req}"
+    );
+    // A bodyless GET ends with the blank-line terminator, no Content-Length.
+    assert!(!req.contains("Content-Length:"), "req:\n{req}");
+}
+
+#[test]
+fn build_request_text_query_appends_missing_param() {
+    let target = target_for("https://example.com/path?x=1");
+    let param = req_param("q", "", Location::Query);
+    let req = super::build_request_text(&target, &param, "INJ");
+    assert!(req.contains("x=1"), "req:\n{req}");
+    assert!(req.contains("q=INJ"), "req:\n{req}");
+}
+
+#[test]
+fn build_request_text_path_segment_injection() {
+    let target = target_for("https://example.com/a/b/c");
+    // path_segment_1 targets the middle segment "b".
+    let param = req_param("path_segment_1", "b", Location::Path);
+    let req = super::build_request_text(&target, &param, "INJ");
+    assert!(req.starts_with("GET /a/INJ/c "), "req:\n{req}");
+}
+
+#[test]
+fn build_request_text_path_segment_out_of_range_is_unchanged() {
+    let target = target_for("https://example.com/a/b");
+    // Index 9 is past the end: the path is left intact.
+    let param = req_param("path_segment_9", "", Location::Path);
+    let req = super::build_request_text(&target, &param, "INJ");
+    assert!(req.starts_with("GET /a/b "), "req:\n{req}");
+    assert!(!req.contains("INJ"), "req:\n{req}");
+}
+
+#[test]
+fn build_request_text_body_replaces_in_existing_form_data() {
+    let target = Target {
+        method: "POST".to_string(),
+        data: Some("user=alice&pass=secret".to_string()),
+        ..target_for("https://example.com/login")
+    };
+    let param = req_param("pass", "secret", Location::Body);
+    let req = super::build_request_text(&target, &param, "PAY");
+    // Body location forces POST and a form content type.
+    assert!(req.starts_with("POST /login "), "req:\n{req}");
+    assert!(
+        req.contains("Content-Type: application/x-www-form-urlencoded"),
+        "req:\n{req}"
+    );
+    assert!(req.contains("user=alice"), "req:\n{req}");
+    assert!(req.contains("pass=PAY"), "req:\n{req}");
+    assert!(req.contains("Content-Length: "), "req:\n{req}");
+}
+
+#[test]
+fn build_request_text_body_synthesizes_when_no_data() {
+    let target = target_for("https://example.com/login");
+    let param = req_param("q", "", Location::Body);
+    let req = super::build_request_text(&target, &param, "PAY");
+    assert!(req.starts_with("POST /login "), "req:\n{req}");
+    assert!(req.contains("q=PAY"), "req:\n{req}");
+    assert!(
+        req.contains("Content-Type: application/x-www-form-urlencoded"),
+        "req:\n{req}"
+    );
+}
+
+#[test]
+fn build_request_text_jsonbody_injects_into_object() {
+    let target = Target {
+        method: "POST".to_string(),
+        data: Some(r#"{"name":"bob"}"#.to_string()),
+        ..target_for("https://example.com/api")
+    };
+    let param = req_param("name", "bob", Location::JsonBody);
+    let req = super::build_request_text(&target, &param, "PAY");
+    assert!(
+        req.contains("Content-Type: application/json"),
+        "req:\n{req}"
+    );
+    assert!(req.contains(r#""name":"PAY""#), "req:\n{req}");
+}
+
+#[test]
+fn build_request_text_jsonbody_synthesizes_when_no_data() {
+    let target = target_for("https://example.com/api");
+    let param = req_param("q", "", Location::JsonBody);
+    let req = super::build_request_text(&target, &param, "PAY");
+    assert!(
+        req.contains("Content-Type: application/json"),
+        "req:\n{req}"
+    );
+    assert!(req.contains(r#""q":"PAY""#), "req:\n{req}");
+}
+
+#[test]
+fn build_request_text_jsonbody_empty_value_reserializes_invalid_json() {
+    // Invalid-JSON body + empty param.value: must re-serialize as {name: payload}
+    // rather than splicing the payload between every byte of the body.
+    let target = Target {
+        method: "POST".to_string(),
+        data: Some("not-json-at-all".to_string()),
+        ..target_for("https://example.com/api")
+    };
+    let param = req_param("x", "", Location::JsonBody);
+    let req = super::build_request_text(&target, &param, "PAY");
+    assert!(req.contains(r#"{"x":"PAY"}"#), "req:\n{req}");
+    assert!(!req.contains("not-json"), "req:\n{req}");
+}
+
+#[test]
+fn build_request_text_does_not_duplicate_content_type_header() {
+    // When the target already carries a Content-Type the synthesizer must not
+    // append a second one.
+    let target = Target {
+        method: "POST".to_string(),
+        data: Some(r#"{"a":"1"}"#.to_string()),
+        headers: vec![("Content-Type".to_string(), "application/json".to_string())],
+        ..target_for("https://example.com/api")
+    };
+    let param = req_param("a", "1", Location::JsonBody);
+    let req = super::build_request_text(&target, &param, "PAY");
+    assert_eq!(
+        req.matches("Content-Type:").count(),
+        1,
+        "exactly one Content-Type expected, req:\n{req}"
+    );
+}
+
+#[test]
+fn build_request_text_includes_headers_and_cookies() {
+    let target = Target {
+        headers: vec![("X-Custom".to_string(), "yes".to_string())],
+        cookies: vec![
+            ("sid".to_string(), "abc".to_string()),
+            ("t".to_string(), "1".to_string()),
+        ],
+        ..target_for("https://example.com/path?a=1")
+    };
+    let param = req_param("a", "1", Location::Query);
+    let req = super::build_request_text(&target, &param, "PAY");
+    assert!(req.contains("\r\nX-Custom: yes"), "req:\n{req}");
+    // Cookies are joined with "; " on a single Cookie header.
+    assert!(req.contains("\r\nCookie: sid=abc; t=1"), "req:\n{req}");
+}
+
+#[test]
+fn build_request_text_multipart_keeps_body_and_type() {
+    let target = Target {
+        method: "POST".to_string(),
+        data: Some("--boundary\r\n...".to_string()),
+        ..target_for("https://example.com/upload")
+    };
+    let param = req_param("file", "", Location::MultipartBody);
+    let req = super::build_request_text(&target, &param, "PAY");
+    assert!(req.starts_with("POST /upload "), "req:\n{req}");
+    assert!(
+        req.contains("Content-Type: multipart/form-data"),
+        "req:\n{req}"
+    );
+    assert!(req.contains("--boundary"), "req:\n{req}");
+}
+
+// ---- ast_source_uses_browser_url_surface --------------------------------
+
+#[test]
+fn ast_source_browser_url_surface_detects_each_source() {
+    for src in [
+        "var x = location.hash;",
+        "location.search.slice(1)",
+        "new URLSearchParams.get('q')",
+        "el.href = location.href",
+        "p = location.pathname",
+        "d = document.URL",
+        "window.opener.postMessage(1)",
+        "if (event.newValue) {}",
+        "log(event.oldValue)",
+    ] {
+        assert!(
+            super::ast_source_uses_browser_url_surface(src),
+            "should flag attacker-controllable URL surface: {src:?}"
+        );
+    }
+}
+
+#[test]
+fn ast_source_browser_url_surface_ignores_safe_sources() {
+    for src in [
+        "var x = config.value;",
+        "el.textContent = data;",
+        "const n = items.length;",
+        "",
+    ] {
+        assert!(
+            !super::ast_source_uses_browser_url_surface(src),
+            "should not flag non-URL source: {src:?}"
+        );
+    }
+}
+
+// ---- compute_waf_strategy -----------------------------------------------
+
+#[test]
+fn compute_waf_strategy_off_returns_none() {
+    let target = target_for("https://example.com/");
+    // integration_scan_args defaults waf_bypass to "off".
+    let args = integration_scan_args(true);
+    assert_eq!(args.waf_bypass, "off");
+    assert!(super::compute_waf_strategy(&target, &args).is_none());
+}
+
+#[test]
+fn compute_waf_strategy_no_waf_info_returns_none() {
+    let target = target_for("https://example.com/");
+    let mut args = integration_scan_args(true);
+    args.waf_bypass = "auto".to_string();
+    // No WAF was fingerprinted, so there's nothing to bypass.
+    assert!(super::compute_waf_strategy(&target, &args).is_none());
+}
+
+#[test]
+fn compute_waf_strategy_empty_waf_info_returns_none() {
+    let target = Target {
+        waf_info: Some(crate::waf::WafDetectionResult::default()),
+        ..target_for("https://example.com/")
+    };
+    let mut args = integration_scan_args(true);
+    args.waf_bypass = "auto".to_string();
+    assert!(super::compute_waf_strategy(&target, &args).is_none());
+}
+
+#[test]
+fn compute_waf_strategy_detected_waf_returns_strategy() {
+    let waf = crate::waf::WafDetectionResult {
+        detected: vec![crate::waf::WafFingerprint {
+            waf_type: crate::waf::WafType::Cloudflare,
+            confidence: 0.9,
+            evidence: "cf-ray header".to_string(),
+        }],
+    };
+    let target = Target {
+        waf_info: Some(waf),
+        ..target_for("https://example.com/")
+    };
+    let mut args = integration_scan_args(true);
+    args.waf_bypass = "auto".to_string();
+    assert!(super::compute_waf_strategy(&target, &args).is_some());
+}
+
+// ---- generate_param_jobs: per-parameter work-unit assembly --------------
+
+fn target_with_params(params: Vec<Param>) -> Target {
+    Target {
+        reflection_params: params,
+        ..target_for("https://example.com/path?a=1")
+    }
+}
+
+#[test]
+fn generate_param_jobs_skips_fragment_params() {
+    // URL fragments never reach the server, so they must not produce a job.
+    let target = target_with_params(vec![
+        req_param("frag", "", Location::Fragment),
+        req_param("a", "1", Location::Query),
+    ]);
+    let args = integration_scan_args(true);
+    let (jobs, _total) = super::generate_param_jobs(&target, &args, None, &[]);
+    assert_eq!(jobs.len(), 1, "only the query param should yield a job");
+    assert_eq!(jobs[0].0.name, "a");
+}
+
+#[test]
+fn generate_param_jobs_total_tasks_matches_payload_counts() {
+    // `total_tasks` must equal the sum of reflection + DOM payloads across all
+    // jobs — that count drives the progress bar length and ETA.
+    let target = target_with_params(vec![req_param("a", "1", Location::Query)]);
+    let args = integration_scan_args(true);
+    let (jobs, total) = super::generate_param_jobs(&target, &args, None, &[]);
+    let summed: u64 = jobs
+        .iter()
+        .map(|(_, refl, dom)| (refl.len() + dom.len()) as u64)
+        .sum();
+    assert_eq!(total, summed);
+    // A plain reflected query param yields a non-empty payload set.
+    assert!(total > 0, "expected payloads for a reflected param");
+}
+
+#[test]
+fn generate_param_jobs_respects_max_payloads_per_param() {
+    let target = target_with_params(vec![req_param("a", "1", Location::Query)]);
+    let mut args = integration_scan_args(true);
+    args.max_payloads_per_param = 2;
+    let (jobs, _total) = super::generate_param_jobs(&target, &args, None, &[]);
+    for (_, refl, dom) in &jobs {
+        assert!(refl.len() <= 2, "reflection set over cap: {}", refl.len());
+        assert!(dom.len() <= 2, "dom set over cap: {}", dom.len());
+    }
+}
+
+#[test]
+fn generate_param_jobs_appends_shared_payloads() {
+    // Shared payloads (CSP-bypass + tech-specific) are appended to every job's
+    // reflection and DOM sets.
+    let target = target_with_params(vec![req_param("a", "1", Location::Query)]);
+    let args = integration_scan_args(true);
+    let shared = vec!["<shared-marker>".to_string()];
+    let (jobs, _total) = super::generate_param_jobs(&target, &args, None, &shared);
+    let (_, refl, dom) = &jobs[0];
+    assert!(
+        refl.iter().any(|p| p == "<shared-marker>"),
+        "refl missing shared"
+    );
+    assert!(
+        dom.iter().any(|p| p == "<shared-marker>"),
+        "dom missing shared"
+    );
+}
+
+#[test]
+fn generate_param_jobs_waf_expansion_never_drops_originals() {
+    // With a bypass strategy the reflection set is expanded with mutations /
+    // encoder variants, but the originals are always kept (at the front), so
+    // the expanded count is at least the un-expanded count.
+    let target = target_with_params(vec![req_param("a", "1", Location::Query)]);
+    let args = integration_scan_args(true);
+    let (plain_jobs, _) = super::generate_param_jobs(&target, &args, None, &[]);
+    let strategy = crate::waf::bypass::merge_strategies(&[&crate::waf::WafType::Cloudflare]);
+    let (waf_jobs, _) = super::generate_param_jobs(&target, &args, Some(&strategy), &[]);
+    assert!(
+        waf_jobs[0].1.len() >= plain_jobs[0].1.len(),
+        "WAF expansion must not shrink the reflection set ({} < {})",
+        waf_jobs[0].1.len(),
+        plain_jobs[0].1.len()
+    );
+}
