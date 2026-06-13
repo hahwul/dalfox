@@ -699,6 +699,24 @@ fn keyword_entity_encode_noops_without_attr_context_or_sink() {
 }
 
 #[test]
+fn keyword_entity_encode_noops_on_body_sink_after_closed_scheme_tag() {
+    // Regression (impl review): a `javascript:` URL attribute whose tag has
+    // already closed (`>`) before an unrelated body-text sink must NOT count as
+    // attribute context — the `>` drops the sink into body text, where the
+    // value is not entity-decoded. A bare `contains("javascript:")` would have
+    // wrongly fired here and emitted a non-executing variant.
+    assert_eq!(
+        keyword_entity_encode("<a href=javascript:foo(1)>more text alert(1)"),
+        "<a href=javascript:foo(1)>more text alert(1)"
+    );
+    // Also no-op for <style> raw text (references aren't decoded there either).
+    assert_eq!(
+        keyword_entity_encode("<style>alert(1)</style>"),
+        "<style>alert(1)</style>"
+    );
+}
+
+#[test]
 fn keyword_entity_encode_not_fooled_by_literal_script_in_attribute() {
     // Regression: a literal `<script` substring inside another tag's quoted
     // attribute value (closed by the attribute quote) must NOT be mistaken for
@@ -811,6 +829,16 @@ fn entity_scheme_encodes_leading_scheme_letter() {
     assert_eq!(
         entity_scheme("javascript:alert(1)"),
         "&#106;avascript:alert(1)"
+    );
+    // Quoted attribute value, and the vbscript scheme (v = 118) — parity with
+    // the SchemeBreak coverage.
+    assert_eq!(
+        entity_scheme("<iframe src=\"javascript:alert(1)\">"),
+        "<iframe src=\"&#106;avascript:alert(1)\">"
+    );
+    assert_eq!(
+        entity_scheme("vbscript:msgbox(1)"),
+        "&#118;bscript:msgbox(1)"
     );
 }
 

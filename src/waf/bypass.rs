@@ -1175,8 +1175,18 @@ fn scheme_in_exec_position(payload: &str, pos: usize) -> bool {
 /// for the handler shape so a stray `on…=` elsewhere doesn't false-trigger.
 fn sink_in_attr_context(payload: &str, name_start: usize) -> bool {
     let before = payload[..name_start].to_ascii_lowercase();
-    if before.contains("javascript:") || before.contains("vbscript:") {
-        return true;
+    // `javascript:` / `vbscript:` URL value: the scheme must precede the sink
+    // with no intervening `>` — a `>` closes the tag and drops the sink into
+    // body text, where the value is NOT entity-decoded. A bare
+    // `before.contains("javascript:")` would wrongly fire on
+    // `<a href=javascript:x>…text alert(1)` (sink in body), emitting a
+    // non-executing variant. Only the *nearest* scheme occurrence matters.
+    for scheme in EXECUTABLE_SCHEMES {
+        if let Some(pos) = before.rfind(scheme)
+            && !before[pos..].contains('>')
+        {
+            return true;
+        }
     }
     let tag_start = before.rfind('<').map(|i| i + 1).unwrap_or(0);
     let region = &before.as_bytes()[tag_start..];
