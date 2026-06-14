@@ -160,8 +160,14 @@ impl InteractshClient {
 
     /// Recover the 13-char nonce from an interaction's `full-id`
     /// (`<corr><nonce>.<server>`), or `None` if it isn't one of ours.
+    ///
+    /// The leftmost label is lowercased before matching: a recursive resolver may
+    /// apply DNS-0x20 case randomization, so a DNS callback's `full-id` can arrive
+    /// as e.g. `AbC...XyZ.oast.fun` even though we minted a lowercase host. Both
+    /// the correlation-id and the nonce alphabet are lowercase, so folding case
+    /// only ever recovers a correlation that would otherwise be missed.
     pub fn extract_nonce(&self, full_id: &str) -> Option<String> {
-        let label = full_id.split('.').next()?;
+        let label = full_id.split('.').next()?.to_ascii_lowercase();
         let rest = label.strip_prefix(&self.correlation_id)?;
         if rest.is_empty() {
             return None;
@@ -322,5 +328,13 @@ mod tests {
             Some(nonce.as_str())
         );
         assert!(client.extract_nonce("someoneelses.oast.fun").is_none());
+
+        // DNS-0x20: a resolver may upper/mixed-case the label; correlation must
+        // still recover the (lowercase) nonce.
+        let shouty = format!("{}{}.OAST.FUN", client.correlation_id(), nonce).to_ascii_uppercase();
+        assert_eq!(
+            client.extract_nonce(&shouty).as_deref(),
+            Some(nonce.as_str())
+        );
     }
 }
