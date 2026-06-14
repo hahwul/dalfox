@@ -52,7 +52,7 @@ oxc_span = "0.133.0"
 rsa = { version = "0.9", features = ["pem"] }
 aes = "0.8"
 ctr = "0.9"
-rand = "0.8"
+rand = "0.10"
 uuid = { version = "1", features = ["v4"] }
 sha2_oaep = { package = "sha2", version = "0.10" }
 
