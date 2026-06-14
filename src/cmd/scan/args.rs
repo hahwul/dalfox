@@ -596,8 +596,14 @@ pub struct PreflightOptions {
 pub struct BlindOobArgs {
     #[clap(help_heading = "XSS SCANNING")]
     /// Enable OOB blind XSS via interactsh. Optional comma-separated server
-    /// domains (default: public servers). Example: --blind-oob oast.fun,oast.me
-    #[arg(long = "blind-oob", value_delimiter = ',', num_args = 0..)]
+    /// domains (default: public servers). Example: --blind-oob=oast.fun,oast.me
+    //
+    // `require_equals` is deliberate (kept out of `--help`): with a bare
+    // `num_args = 0..` this option would greedily swallow the following
+    // positional target (`dalfox --blind-oob https://t` would treat `https://t`
+    // as a server name and leave no scan target). Forcing the `=` form keeps
+    // bare `--blind-oob` (default mesh) working while never consuming the URL.
+    #[arg(long = "blind-oob", value_delimiter = ',', num_args = 0.., require_equals = true)]
     pub blind_oob: Option<Vec<String>>,
 
     #[clap(help_heading = "XSS SCANNING")]
@@ -623,13 +629,27 @@ impl ScanArgs {
     }
 
     /// Candidate OOB server domains: the user's list, or the public mesh.
+    ///
+    /// Entries are trimmed and blanks dropped, so `--blind-oob=`,
+    /// `--blind-oob=,,`, or stray whitespace (`--blind-oob=" oast.fun , "`)
+    /// degrade to a clean list (or the public mesh) instead of attempting a
+    /// doomed registration against an empty host.
     pub fn blind_oob_servers(&self) -> Vec<String> {
-        match &self.oob.blind_oob {
-            Some(list) if !list.is_empty() => list.clone(),
-            _ => crate::oob::DEFAULT_SERVERS
+        let cleaned: Vec<String> = self
+            .oob
+            .blind_oob
+            .iter()
+            .flatten()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if cleaned.is_empty() {
+            crate::oob::DEFAULT_SERVERS
                 .iter()
                 .map(|s| s.to_string())
-                .collect(),
+                .collect()
+        } else {
+            cleaned
         }
     }
 
@@ -800,12 +820,12 @@ mod arg_parser_tests {
         assert_eq!(bare.scan.oob.blind_oob.as_deref(), Some(&[][..]));
         assert_eq!(bare.scan.blind_oob_servers(), crate::oob::DEFAULT_SERVERS);
 
-        // Explicit comma-separated servers + secret + wait.
+        // Explicit comma-separated servers (the `=` form is required) + secret
+        // + wait.
         let full = TestCli::try_parse_from([
             "dalfox",
             "https://e.com",
-            "--blind-oob",
-            "oast.fun,oast.me",
+            "--blind-oob=oast.fun,oast.me",
             "--blind-oob-secret",
             "tok",
             "--blind-oob-wait",
@@ -816,6 +836,71 @@ mod arg_parser_tests {
         assert_eq!(full.scan.blind_oob_servers(), vec!["oast.fun", "oast.me"]);
         assert_eq!(full.scan.blind_oob_secret(), Some("tok"));
         assert_eq!(full.scan.blind_oob_wait(), 12);
+    }
+
+    #[test]
+    fn blind_oob_never_swallows_positional_target() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(flatten)]
+            scan: ScanArgs,
+        }
+
+        // Regression: `--blind-oob` before the target must NOT eat the URL.
+        // Without `require_equals` a bare `num_args = 0..` greedily consumes the
+        // following positional, leaving the scan with no target.
+        let bare_before = TestCli::try_parse_from(["dalfox", "--blind-oob", "https://e.com"])
+            .expect("bare --blind-oob before target");
+        assert!(bare_before.scan.blind_oob_enabled());
+        assert_eq!(bare_before.scan.targets, vec!["https://e.com".to_string()]);
+        assert_eq!(
+            bare_before.scan.blind_oob_servers(),
+            crate::oob::DEFAULT_SERVERS
+        );
+
+        // Same with an explicit `=` server list before the target.
+        let list_before =
+            TestCli::try_parse_from(["dalfox", "--blind-oob=oast.fun,oast.me", "https://e.com"])
+                .expect("--blind-oob=list before target");
+        assert_eq!(list_before.scan.targets, vec!["https://e.com".to_string()]);
+        assert_eq!(
+            list_before.scan.blind_oob_servers(),
+            vec!["oast.fun", "oast.me"]
+        );
+    }
+
+    #[test]
+    fn blind_oob_blank_server_list_falls_back_to_mesh() {
+        use clap::Parser;
+
+        #[derive(Parser)]
+        struct TestCli {
+            #[command(flatten)]
+            scan: ScanArgs,
+        }
+
+        // `--blind-oob=` / `--blind-oob=,,` / stray whitespace must still enable
+        // OOB but degrade to the public mesh rather than registering an empty
+        // host. Enabled is keyed on presence, so each is still "on".
+        for arg in ["--blind-oob=", "--blind-oob=,,", "--blind-oob= , "] {
+            let cli = TestCli::try_parse_from(["dalfox", "https://e.com", arg])
+                .unwrap_or_else(|e| panic!("parse {arg}: {e}"));
+            assert!(cli.scan.blind_oob_enabled(), "{arg} should enable OOB");
+            assert_eq!(
+                cli.scan.blind_oob_servers(),
+                crate::oob::DEFAULT_SERVERS,
+                "{arg} should fall back to the default mesh"
+            );
+        }
+
+        // A list with one real entry and surrounding blanks keeps just the real
+        // one, trimmed.
+        let mixed =
+            TestCli::try_parse_from(["dalfox", "https://e.com", "--blind-oob= oast.fun ,,"])
+                .expect("mixed blank/real list");
+        assert_eq!(mixed.scan.blind_oob_servers(), vec!["oast.fun"]);
     }
 
     #[test]
