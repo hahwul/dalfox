@@ -23,6 +23,7 @@ pub mod ast_dom_analysis;
 pub mod ast_integration;
 pub mod check_dom_verification;
 pub mod check_reflection;
+pub(crate) use check_reflection::decode_html_entities;
 /// Shared test-only fixtures modelling server-side reflection transforms.
 #[cfg(test)]
 pub(crate) mod dom_evidence_fixtures;

@@ -932,6 +932,20 @@ fn test_has_marker_evidence_matrix() {
             format!("<svg onload=\"alert(1)\" class=\"{cm}\"></svg>"),
             true,
         ),
+        // numeric hex entity form in the sink value (tests shared decoder recovery)
+        (
+            "entity_encoded_sink_numeric_hex",
+            format!("<svg onload=alert&#x28;1&#x29; class={cm}>"),
+            format!("<svg onload=\"alert(1)\" class=\"{cm}\"></svg>"),
+            true,
+        ),
+        // server emitted uppercase named entity in handler value; DOM decoder + value_carries must recover
+        (
+            "entity_encoded_sink_upper_named_in_value",
+            format!("<img src=x onerror=alert(1) class={cm}>"),
+            format!("<img src=x onerror=\"ALERT&#40;1&#41;\" class=\"{cm}\">"),
+            true,
+        ),
     ];
 
     for (name, payload, body, expected) in cases {
@@ -941,6 +955,30 @@ fn test_has_marker_evidence_matrix() {
             "case `{name}`: payload={payload:?} body={body:?}"
         );
     }
+}
+
+/// Exercise the shared fixtures reflect() helper + both decoders (reflection
+/// classify + DOM classify_dom_evidence / has_html_structural) on a
+/// structural payload whose handler value uses entity encoding (WAF bypass
+/// style). The DOM decoder must turn the payload's &#40; into ( so the
+/// "sink value verbatim in payload or its decode" check passes against the
+/// parsed attr. Cross-checks decoder unification + fixture usage.
+#[test]
+fn test_fixtures_reflect_entity_structural_roundtrip_with_decoders() {
+    use crate::scanning::dom_evidence_fixtures::{Transform, reflect};
+    // Structural tag payload with entity-encoded parens inside the handler
+    // (common WAF-bypass shape). Full reflect: server echoes the syntax raw.
+    let payload = "<svg onload=alert&#40;1&#41;>".to_string();
+    let body = reflect(&payload, Transform::Full, "<div>reflected: {PAYLOAD}</div>");
+    // has_html_structural will parse the body (creating <svg> with onload="alert(1)"),
+    // then require that "alert(1)" appears in payload or (more relevant here)
+    // in decode_html_entities(payload). The shared decoder must succeed.
+    assert!(
+        crate::scanning::check_dom_verification::has_dom_evidence(&payload, &body),
+        "structural with entity-encoded sink value in payload must yield DOM evidence via decoder"
+    );
+    let kind = crate::scanning::check_reflection::classify_reflection(&body, &payload);
+    assert!(kind.is_some(), "must still classify as a reflection");
 }
 
 #[test]

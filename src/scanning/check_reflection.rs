@@ -610,7 +610,11 @@ pub enum ReflectionKind {
 /// Examples:
 ///   "&#x3c;script&#x3e;" -> "<script>"
 ///   "&#60;alert(1)&#62;"  -> "<alert(1)>"
-fn decode_html_entities(input: &str) -> String {
+///
+/// Shared with DOM verification paths (marker sink survival, structural evidence,
+/// inline handler breakout). Unknown entities are passed through unchanged
+/// ("never lose bytes").
+pub(crate) fn decode_html_entities(input: &str) -> String {
     // Fast path: every HTML entity (numeric `&#…;` and named `&lt;` alike)
     // begins with '&'. When the input has none, there is nothing to decode, so
     // skip both regex scans and the second `replace_all().to_string()`
@@ -634,20 +638,23 @@ fn decode_html_entities(input: &str) -> String {
     for m in re.find_iter(input) {
         out.push_str(&input[last..m.start()]);
         let entity = &input[m.start() + 2..m.end() - 1]; // strip &# and ;
-        let decoded = if entity.starts_with('x') || entity.starts_with('X') {
+        let ch = if entity.starts_with('x') || entity.starts_with('X') {
             let hex = &entity[1..];
             u32::from_str_radix(hex, 16)
                 .ok()
                 .and_then(std::char::from_u32)
-                .unwrap_or('\u{FFFD}')
         } else {
-            entity
-                .parse::<u32>()
-                .ok()
-                .and_then(std::char::from_u32)
-                .unwrap_or('\u{FFFD}')
+            entity.parse::<u32>().ok().and_then(std::char::from_u32)
         };
-        out.push(decoded);
+        if let Some(c) = ch {
+            out.push(c);
+        } else {
+            // Unknown / unrepresentable numeric entity: preserve the original
+            // &#...; text. Mirrors the "never lose bytes" contract used by the
+            // DOM verification decoder and prevents dropping information that
+            // downstream contains() / sink checks rely on.
+            out.push_str(&input[m.start()..m.end()]);
+        }
         last = m.end();
     }
     out.push_str(&input[last..]);
