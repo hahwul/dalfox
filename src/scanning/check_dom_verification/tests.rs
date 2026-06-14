@@ -965,15 +965,11 @@ fn test_has_marker_evidence_matrix() {
 /// parsed attr. Cross-checks decoder unification + fixture usage.
 #[test]
 fn test_fixtures_reflect_entity_structural_roundtrip_with_decoders() {
-    use crate::scanning::dom_evidence_fixtures::{reflect, Transform};
+    use crate::scanning::dom_evidence_fixtures::{Transform, reflect};
     // Structural tag payload with entity-encoded parens inside the handler
     // (common WAF-bypass shape). Full reflect: server echoes the syntax raw.
     let payload = "<svg onload=alert&#40;1&#41;>".to_string();
-    let body = reflect(
-        &payload,
-        Transform::Full,
-        "<div>reflected: {PAYLOAD}</div>",
-    );
+    let body = reflect(&payload, Transform::Full, "<div>reflected: {PAYLOAD}</div>");
     // has_html_structural will parse the body (creating <svg> with onload="alert(1)"),
     // then require that "alert(1)" appears in payload or (more relevant here)
     // in decode_html_entities(payload). The shared decoder must succeed.
@@ -982,10 +978,7 @@ fn test_fixtures_reflect_entity_structural_roundtrip_with_decoders() {
         "structural with entity-encoded sink value in payload must yield DOM evidence via decoder"
     );
     let kind = crate::scanning::check_reflection::classify_reflection(&body, &payload);
-    assert!(
-        kind.is_some(),
-        "must still classify as a reflection"
-    );
+    assert!(kind.is_some(), "must still classify as a reflection");
 }
 
 #[test]

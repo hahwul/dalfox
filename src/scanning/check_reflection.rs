@@ -644,10 +644,7 @@ pub(crate) fn decode_html_entities(input: &str) -> String {
                 .ok()
                 .and_then(std::char::from_u32)
         } else {
-            entity
-                .parse::<u32>()
-                .ok()
-                .and_then(std::char::from_u32)
+            entity.parse::<u32>().ok().and_then(std::char::from_u32)
         };
         if let Some(c) = ch {
             out.push(c);
