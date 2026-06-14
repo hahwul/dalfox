@@ -611,15 +611,336 @@ fn test_has_marker_evidence_requires_payload_marker() {
 fn test_has_marker_evidence_detects_class_marker_element() {
     let marker = crate::scanning::markers::class_marker();
     let payload = format!("<img src=x onerror=alert(1) class={}>", marker);
-    let body = format!("<html><body><img class=\"{}\"></body></html>", marker);
+    // The payload attaches its sink (onerror) to the marker element, so the
+    // marker class is evidence only when the handler also survives (issue #1118).
+    let body = format!(
+        "<html><body><img src=x onerror=alert(1) class=\"{}\"></body></html>",
+        marker
+    );
     assert!(has_marker_evidence(&payload, &body));
 }
 
 #[test]
 fn test_has_marker_evidence_detects_legacy_dalfox_class_marker_element() {
     let payload = "<img class=\"dalfox\" src=x onerror=alert(1)>";
-    let body = "<html><body><img class=\"dalfox\"></body></html>";
+    let body = "<html><body><img class=\"dalfox\" src=x onerror=alert(1)></body></html>";
     assert!(has_marker_evidence(payload, body));
+}
+
+/// Issue #1118: a server that reflects a *truncated* copy of the payload can
+/// preserve the marker class while dropping the `on*` handler. The marker
+/// element parses, but the handler never survives, so this is NOT exploitable
+/// and must not count as marker evidence.
+#[test]
+fn test_has_marker_evidence_demoted_when_handler_truncated() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("'\"><svg/class={} onload=alert()//", marker);
+    // ASP.NET ValidateRequest-style error page: the raw reflection is cut off
+    // right before `onload`, so the parsed svg carries the marker class but no
+    // handler.
+    let body = format!(
+        "<html><body><header>A potentially dangerous Request.Form value was \
+         detected (q=\"...&gt;&lt;svg/class={} onlo...\").</header>\
+         <svg class=\"{}\"></svg></body></html>",
+        marker, marker
+    );
+    assert!(
+        !has_marker_evidence(&payload, &body),
+        "marker class without the payload's surviving handler must not be evidence"
+    );
+}
+
+/// Issue #1118 (counter-case): when the same payload's handler DOES survive on
+/// the marker element, the finding is genuinely exploitable and stays evidence.
+#[test]
+fn test_has_marker_evidence_kept_when_handler_survives() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("'\"><svg/class={} onload=alert()//", marker);
+    let body = format!(
+        "<html><body><svg class=\"{}\" onload=\"alert()\"></svg></body></html>",
+        marker
+    );
+    assert!(has_marker_evidence(&payload, &body));
+}
+
+/// Issue #1118 (no regression): structural markers whose exploit is the
+/// element's mere presence — base-href injection, DOM-clobbering containers —
+/// carry no on*/script sink on the marker element, so presence-only evidence is
+/// preserved.
+#[test]
+fn test_has_marker_evidence_kept_for_structural_markers() {
+    let id = crate::scanning::markers::id_marker();
+    let class = crate::scanning::markers::class_marker();
+
+    // base-href injection — no sink on the marker element.
+    let base_payload = format!("<base href=//evil.example/ id={}>", id);
+    let base_body = format!(
+        "<html><head><base href=\"//evil.example/\" id=\"{}\"></head></html>",
+        id
+    );
+    assert!(
+        has_marker_evidence(&base_payload, &base_body),
+        "base-href marker presence is the exploit; must stay evidence"
+    );
+
+    // DOM-clobbering form container — the sink lives in a child input, not on
+    // the marker element itself.
+    let form_payload = format!(
+        "<form id={} class={}><input name=\"action\" value=\"javascript:alert(1)\"></form>",
+        id, class
+    );
+    let form_body = format!(
+        "<html><body><form id=\"{}\" class=\"{}\"><input name=\"action\" \
+         value=\"javascript:alert(1)\"></form></body></html>",
+        id, class
+    );
+    assert!(
+        has_marker_evidence(&form_payload, &form_body),
+        "clobbering container marker presence is the exploit; must stay evidence"
+    );
+}
+
+/// Issue #1118 (script-body family): a `<script class=marker>sink</script>`
+/// payload whose body is truncated away leaves the marker class on an empty
+/// script — no sink survives, so it is not evidence.
+#[test]
+fn test_has_marker_evidence_demoted_when_script_body_truncated() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("<script class={}>alert(1)</script>", marker);
+    let body = format!(
+        "<html><body><script class=\"{}\"></script></body></html>",
+        marker
+    );
+    assert!(
+        !has_marker_evidence(&payload, &body),
+        "marker class on an empty script (sink body dropped) must not be evidence"
+    );
+}
+
+/// Issue #1118 (script-body counter-case): when the `<script>` body sink
+/// survives on the marker element, the finding stays evidence.
+#[test]
+fn test_has_marker_evidence_kept_when_script_body_survives() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("<script class={}>alert(1)</script>", marker);
+    let body = format!(
+        "<html><body><script class=\"{}\">alert(1)</script></body></html>",
+        marker
+    );
+    assert!(has_marker_evidence(&payload, &body));
+}
+
+/// Issue #1118 (id-marker symmetry): the handler-survival gate applies to id
+/// markers too, not only class markers.
+#[test]
+fn test_has_marker_evidence_demoted_when_id_handler_truncated() {
+    let id = crate::scanning::markers::id_marker();
+    let payload = format!("<svg onload=alert() id={}>", id);
+    let truncated = format!("<html><body><svg id=\"{}\"></svg></body></html>", id);
+    assert!(
+        !has_marker_evidence(&payload, &truncated),
+        "id-marker element without the surviving handler must not be evidence"
+    );
+    let survived = format!(
+        "<html><body><svg id=\"{}\" onload=\"alert()\"></svg></body></html>",
+        id
+    );
+    assert!(has_marker_evidence(&payload, &survived));
+}
+
+/// Issue #1118 (WAF-bypass): payloads entity-encode the sink chars
+/// (`alert&#40;1&#41;`); scraper decodes the parsed handler back to `alert(1)`.
+/// The co-survival check must compare against the decoded value too — a genuine
+/// breakout stays evidence, while a truncated one is still demoted.
+#[test]
+fn test_has_marker_evidence_entity_encoded_sink() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("<svg onload=alert&#40;1&#41; class={}>", marker);
+    let survived = format!(
+        "<html><body><svg onload=\"alert(1)\" class=\"{}\"></svg></body></html>",
+        marker
+    );
+    assert!(
+        has_marker_evidence(&payload, &survived),
+        "decoded handler sink on the marker element should still be evidence"
+    );
+    let truncated = format!("<html><body><svg class=\"{}\"></svg></body></html>", marker);
+    assert!(
+        !has_marker_evidence(&payload, &truncated),
+        "entity-encoded payload with the handler dropped must be demoted"
+    );
+}
+
+/// Issue #1118: the public entry point used by the scan worker
+/// (`classify_dom_evidence`) must return `None` for a truncated-handler
+/// reflection — no fallback evidence path (HTML-structural, JS-context, inline
+/// breakout) should rescue it into a false [V].
+#[test]
+fn test_classify_dom_evidence_none_when_handler_truncated() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("'\"><svg/class={} onload=alert()//", marker);
+    let body = format!("<html><body><svg class=\"{}\"></svg></body></html>", marker);
+    assert_eq!(classify_dom_evidence(&payload, &body), None);
+}
+
+/// Issue #1118 coverage matrix for `has_marker_evidence`.
+///
+/// The bug slipped past the original suite because the fixtures sprinkled the
+/// marker into a hand-written body (`<img class="MARKER">`) instead of faithfully
+/// modelling what the server did to the *whole* payload. This table pins the
+/// verdict for each payload family against an explicit server transformation —
+/// full reflection, handler stripped/blanked/neutralised, marker as text only,
+/// multiple classes, multiple elements, ASCII case-fold, and entity-encoded
+/// sinks — so a regression in either direction (false [V] or lost recall) fails
+/// a named row.
+#[test]
+fn test_has_marker_evidence_matrix() {
+    let cm = crate::scanning::markers::class_marker();
+    let im = crate::scanning::markers::id_marker();
+    let up = cm.to_uppercase();
+
+    // (name, payload, reflected body, expected evidence)
+    let cases: Vec<(&str, String, String, bool)> = vec![
+        // ── handler templates: sink lives on the marker element ──
+        (
+            "svg_onload_full",
+            format!("<svg onload=alert() class={cm}>"),
+            format!("<svg onload=alert() class=\"{cm}\"></svg>"),
+            true,
+        ),
+        (
+            "svg_onload_handler_stripped",
+            format!("<svg onload=alert() class={cm}>"),
+            format!("<svg class=\"{cm}\"></svg>"),
+            false,
+        ),
+        (
+            "svg_onload_handler_blanked",
+            format!("<svg onload=alert() class={cm}>"),
+            format!("<svg onload=\"\" class=\"{cm}\"></svg>"),
+            false,
+        ),
+        (
+            "svg_onload_handler_neutralised",
+            format!("<svg onload=alert() class={cm}>"),
+            format!("<svg onload=\"void(0)\" class=\"{cm}\"></svg>"),
+            false,
+        ),
+        (
+            "breakout_class_first_full",
+            format!("'\"><svg/class={cm} onload=alert()//"),
+            format!("<svg class=\"{cm}\" onload=\"alert()//\"></svg>"),
+            true,
+        ),
+        (
+            "breakout_class_first_truncated",
+            format!("'\"><svg/class={cm} onload=alert()//"),
+            format!("<svg class=\"{cm}\"></svg>"),
+            false,
+        ),
+        (
+            "img_onerror_full",
+            format!("<img src=x onerror=alert(1) class={cm}>"),
+            format!("<img src=x onerror=alert(1) class=\"{cm}\">"),
+            true,
+        ),
+        (
+            "img_onerror_stripped",
+            format!("<img src=x onerror=alert(1) class={cm}>"),
+            format!("<img src=x class=\"{cm}\">"),
+            false,
+        ),
+        // ── script-body template: sink lives in the <script> body ──
+        (
+            "script_body_full",
+            format!("<script class={cm}>alert(1)</script>"),
+            format!("<script class=\"{cm}\">alert(1)</script>"),
+            true,
+        ),
+        (
+            "script_body_emptied",
+            format!("<script class={cm}>alert(1)</script>"),
+            format!("<script class=\"{cm}\"></script>"),
+            false,
+        ),
+        // ── marker placement / parsing edge cases ──
+        (
+            "marker_among_multiple_classes",
+            format!("<svg onload=alert() class={cm}>"),
+            format!("<svg onload=alert() class=\"a {cm} b\"></svg>"),
+            true,
+        ),
+        (
+            "marker_as_text_only_no_element",
+            format!("<svg onload=alert() class={cm}>"),
+            format!("<p>blocked input: class={cm} onlo...</p>"),
+            false,
+        ),
+        (
+            "multiple_markers_one_carries_handler",
+            format!("<svg onload=alert() class={cm}>"),
+            format!("<svg class=\"{cm}\"></svg><svg onload=alert() class=\"{cm}\"></svg>"),
+            true,
+        ),
+        // ── structural markers: presence is the exploit, no sink to verify ──
+        (
+            "structural_base_id",
+            format!("<base href=//evil/ id={im}>"),
+            format!("<base href=\"//evil/\" id=\"{im}\">"),
+            true,
+        ),
+        (
+            "structural_clobber_form",
+            format!(
+                "<form id={im} class={cm}><input name=action value=\"javascript:alert(1)\"></form>"
+            ),
+            format!(
+                "<form id=\"{im}\" class=\"{cm}\"><input name=action value=\"javascript:alert(1)\"></form>"
+            ),
+            true,
+        ),
+        // ── legacy `dalfox` marker ──
+        (
+            "legacy_dalfox_full",
+            "<img class=dalfox src=x onerror=alert(1)>".to_string(),
+            "<img class=\"dalfox\" src=x onerror=alert(1)>".to_string(),
+            true,
+        ),
+        (
+            "legacy_dalfox_stripped",
+            "<img class=dalfox src=x onerror=alert(1)>".to_string(),
+            "<img class=\"dalfox\">".to_string(),
+            false,
+        ),
+        // ── server uppercases every reflected byte (ASCII case-fold) ──
+        (
+            "casefold_handler_survives",
+            format!("<img src=x onerror=alert(1) class={cm}>"),
+            format!("<IMG SRC=X ONERROR=ALERT(1) CLASS=\"{up}\">"),
+            true,
+        ),
+        (
+            "casefold_handler_stripped",
+            format!("<img src=x onerror=alert(1) class={cm}>"),
+            format!("<IMG CLASS=\"{up}\">"),
+            false,
+        ),
+        // ── WAF-bypass: entity-encoded sink decodes to a live handler ──
+        (
+            "entity_encoded_sink_survives",
+            format!("<svg onload=alert&#40;1&#41; class={cm}>"),
+            format!("<svg onload=\"alert(1)\" class=\"{cm}\"></svg>"),
+            true,
+        ),
+    ];
+
+    for (name, payload, body, expected) in cases {
+        assert_eq!(
+            has_marker_evidence(&payload, &body),
+            expected,
+            "case `{name}`: payload={payload:?} body={body:?}"
+        );
+    }
 }
 
 #[test]
@@ -1028,6 +1349,168 @@ fn test_is_executable_url_attribute_pin_whitelist() {
         assert!(
             !is_executable_url_attribute(tag, attr),
             "{tag}@{attr} must NOT be treated as exec URL context"
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Payload × transform matrices (issue #1124)
+//
+// The marker-evidence matrix lives with the #1118/#1123 handler-survival fix.
+// These tables extend the same pattern to the *other* DOM-evidence kinds —
+// executable-URL attribute, HTML-structural, and inline-handler breakout — so
+// each kind is exercised against bodies produced by an explicit, reviewable
+// server transform (`reflect(payload, Transform, sink)`) rather than ad-hoc
+// hand-written HTML. Every row documents "what the server did", and the
+// expected verdict is checked against that transform.
+// ---------------------------------------------------------------------------
+use crate::scanning::dom_evidence_fixtures::{Transform, reflect};
+
+#[test]
+fn test_executable_url_evidence_matrix() {
+    // Payload is a bare `javascript:` URL; the sink template decides the
+    // reflection context (navigational vs resource-fetch attribute).
+    let payload = "javascript:alert(1)";
+    let nav = r#"<html><body><a href="{PAYLOAD}">go</a></body></html>"#;
+    let img = r#"<html><body><img src="{PAYLOAD}"></body></html>"#;
+
+    // (label, transform, sink, expected_kind) — pin the exact evidence path so
+    // a regression that confirms via the wrong kind is caught, not just masked.
+    let hit = Some(DomEvidenceKind::ExecutableUrl);
+    let cases: &[(&str, Transform, &str, Option<DomEvidenceKind>)] = &[
+        ("full reflect into a@href", Transform::Full, nav, hit),
+        // HTML-entity encoding does NOT defang a scheme with no markup
+        // metacharacters — the href still navigates. URL/percent encoding is
+        // the real defence here.
+        (
+            "entity-encoded into a@href",
+            Transform::EntityEncoded,
+            nav,
+            hit,
+        ),
+        // Percent-encoding breaks the `:` so it is no longer a URL scheme.
+        (
+            "percent-encoded into a@href",
+            Transform::PercentEncoded,
+            nav,
+            None,
+        ),
+        // Schemes are matched case-insensitively, mirroring the browser.
+        ("case-folded into a@href", Transform::CaseFolded, nav, hit),
+        // Truncated before `(` — the full payload no longer appears in the value.
+        (
+            "truncated at '(' into a@href",
+            Transform::TruncatedAt("("),
+            nav,
+            None,
+        ),
+        // Same scheme, reflected into a resource-fetch attribute the browser
+        // never executes as code: the "sink" is not actually a sink.
+        ("full reflect into img@src", Transform::Full, img, None),
+    ];
+
+    for (label, transform, sink, expected) in cases {
+        let body = reflect(payload, *transform, sink);
+        assert_eq!(
+            classify_dom_evidence(payload, &body),
+            *expected,
+            "executable-URL matrix row `{label}` mismatched on body: {body}"
+        );
+    }
+}
+
+#[test]
+fn test_html_structural_evidence_matrix() {
+    // Payload introduces a real element carrying an event-handler sink.
+    let payload = "<svg onload=alert(1)>";
+    let text_sink = "<html><body>results: {PAYLOAD}</body></html>";
+
+    let hit = Some(DomEvidenceKind::HtmlStructural);
+    let cases: &[(&str, Transform, Option<DomEvidenceKind>)] = &[
+        ("full reflect", Transform::Full, hit),
+        // Element survives but the handler that carried the sink is gone.
+        ("handler stripped", Transform::HandlerStripped, None),
+        // Handler attribute present but emptied — no sink call.
+        ("handler blanked", Transform::HandlerBlanked, None),
+        // Angle brackets escaped → inert text, scraper builds no <svg> element.
+        ("entity encoded", Transform::EntityEncoded, None),
+        // Percent escapes are not decoded by the HTML parser → inert text.
+        ("percent encoded", Transform::PercentEncoded, None),
+        // `ALERT` is a distinct (undefined) identifier; JS is case-sensitive.
+        ("case folded", Transform::CaseFolded, None),
+        // Truncated before the handler — element with no usable handler.
+        (
+            "truncated before handler",
+            Transform::TruncatedAt("onload"),
+            None,
+        ),
+    ];
+
+    for (label, transform, expected) in cases {
+        let body = reflect(payload, *transform, text_sink);
+        assert_eq!(
+            classify_dom_evidence(payload, &body),
+            *expected,
+            "html-structural matrix row `{label}` mismatched on body: {body}"
+        );
+    }
+}
+
+#[test]
+fn test_inline_handler_breakout_evidence_matrix() {
+    // xss-game L4 shape: the server's own template wraps the reflected payload
+    // inside an existing `on*` handler's JS string argument.
+    let payload = "'-alert(1)-'";
+    let handler_sink = r#"<img onload="startTimer('{PAYLOAD}')">"#;
+    // A non-handler reflection context (server emits no `on*` attribute).
+    let text_sink = "<div>startTimer('{PAYLOAD}')</div>";
+
+    let hit = Some(DomEvidenceKind::InlineHandlerBreakout);
+    let cases: &[(&str, Transform, &str, Option<DomEvidenceKind>)] = &[
+        // Raw reflection: the single quotes break the JS string immediately.
+        (
+            "full reflect into on-handler",
+            Transform::Full,
+            handler_sink,
+            hit,
+        ),
+        // Server entity-encodes the quote, but the browser decodes `&#39;` at
+        // attribute-parse time, so the breakout still fires (the L4 lesson).
+        (
+            "entity-encoded quote in on-handler",
+            Transform::EntityEncoded,
+            handler_sink,
+            hit,
+        ),
+        // Percent escapes stay literal in an HTML attribute → no breakout.
+        (
+            "percent-encoded quote in on-handler",
+            Transform::PercentEncoded,
+            handler_sink,
+            None,
+        ),
+        // `ALERT` is not the real sink under case-sensitive JS.
+        (
+            "case-folded in on-handler",
+            Transform::CaseFolded,
+            handler_sink,
+            None,
+        ),
+        // No `on*` attribute at all → nothing to break out of.
+        (
+            "reflected outside any handler",
+            Transform::Full,
+            text_sink,
+            None,
+        ),
+    ];
+
+    for (label, transform, sink, expected) in cases {
+        let body = reflect(payload, *transform, sink);
+        assert_eq!(
+            classify_dom_evidence(payload, &body),
+            *expected,
+            "inline-handler matrix row `{label}` mismatched on body: {body}"
         );
     }
 }

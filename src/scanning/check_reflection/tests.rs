@@ -793,6 +793,10 @@ async fn test_check_reflection_suppresses_inert_js_string_apos_reflection() {
 
 #[tokio::test]
 async fn test_check_reflection_detects_url_encoded_response() {
+    // Tag-payload echo (`<div>%3Csvg…%3E</div>`): out of scope for the inert-
+    // encoded-echo report gate (a byte gate can't tell a dead echo from a live
+    // element), so it remains reported. Soundly suppressing this needs the
+    // DOM/AST verification path.
     let payload = "<svg onload=alert(1)>";
     let addr = start_mock_server("stored").await;
     let target = make_target(addr, "/reflect/url-encoded");
@@ -800,7 +804,7 @@ async fn test_check_reflection_detects_url_encoded_response() {
     let args = default_scan_args();
 
     let found = check_reflection(&target, &param, payload, &args).await;
-    assert!(found, "URL-encoded reflection should be detected");
+    assert!(found, "URL-encoded tag reflection should be detected");
 }
 
 #[tokio::test]
@@ -1565,4 +1569,168 @@ fn cooldown_is_capped_and_ignores_non_block_status() {
     for status in [200u16, 301, 404, 500] {
         assert_eq!(waf_block_cooldown_ms(status, 999, true), 0);
     }
+}
+
+// --- Inert encoded-echo report-gate (is_inert_encoded_reflection) ---
+// Suppression cases (server escaped its output) + soundness boundaries that
+// MUST keep the finding (regression guards for the adversarial-review FNs).
+
+#[test]
+fn test_inert_encoded_reflection_url_encoded_quote_in_body() {
+    // Server percent-encodes a quote break-out's `"` into body text:
+    // `<div>Search: %22;alert(1)//</div>`. A browser renders `%22` literally,
+    // so the reflection is inert and suppressed.
+    let payload = "\";alert(1)//";
+    let html = "<div>Search: %22;alert(1)//</div>";
+    assert!(!html.contains(payload), "raw quote payload must not appear");
+    assert!(
+        is_inert_encoded_reflection(html, payload),
+        "percent-encoded quote echo in body must be inert"
+    );
+    assert!(is_in_safe_context_decoded(html, payload));
+}
+
+#[test]
+fn test_inert_encoded_reflection_skips_tag_payloads() {
+    // Out of scope: a tag-injecting payload (raw `<`/`>` in a variant) is left
+    // to the DOM/AST verification path even when fully escaped, because a byte
+    // gate cannot distinguish a dead echo from a live element. Must NOT suppress.
+    let payload = "<svg onload=alert(1) class=dlxtest>";
+    let html = "<div>%3Csvg%20onload%3Dalert%281%29%20class%3Ddlxtest%3E</div>";
+    assert!(
+        !is_inert_encoded_reflection(html, payload),
+        "tag payloads are out of scope for this gate and must be kept"
+    );
+}
+
+#[test]
+fn test_inert_encoded_reflection_entity_quote_breakout_in_body() {
+    // Quote break-out payload reflected with its `"` entity-encoded into a
+    // search-results body: `Results for: &quot;;alert(1)//`. The browser shows
+    // a literal quote — no attribute/string break-out — so it is inert.
+    let payload = "\";alert(1)//";
+    let html = "<p>Results for: &quot;;alert(1)//</p>";
+    assert!(!html.contains(payload), "raw quote payload must not appear");
+    assert!(
+        is_inert_encoded_reflection(html, payload),
+        "entity-encoded quote break-out in body must be inert"
+    );
+    assert!(is_in_safe_context_decoded(html, payload));
+}
+
+#[test]
+fn test_inert_encoded_reflection_keeps_raw_breakout() {
+    // The server did NOT escape: the raw payload variant is present in the
+    // body, so this is a genuine reflection and must not be suppressed.
+    let payload = "<svg onload=alert(1)>";
+    let html = "<div><svg onload=alert(1)></div>";
+    assert!(
+        !is_inert_encoded_reflection(html, payload),
+        "a raw un-escaped reflection is exploitable and must survive"
+    );
+    assert!(!is_in_safe_context_decoded(html, payload));
+}
+
+#[test]
+fn test_inert_encoded_reflection_keeps_quote_echo_in_url_attr() {
+    // A percent-encoded quote break-out inside an href value — the one context
+    // a browser percent-decodes — must be kept (cond d), unlike the same echo
+    // in body text which is demoted.
+    let payload = "\";alert(1)//";
+    let html = "<a href=\"%22;alert(1)//\">x</a>";
+    assert!(
+        !is_inert_encoded_reflection(html, payload),
+        "encoded quote echo inside a URL attribute must be kept"
+    );
+}
+
+#[test]
+fn test_inert_encoded_reflection_keeps_xlink_href_scheme() {
+    // Regression (review finding E): xlink:href is an exec-capable SVG URL sink.
+    // A percent-encoded javascript: scheme there must be kept, like href.
+    let payload = "javascript:alert(1)";
+    let html = "<svg><a xlink:href=\"javascript%3Aalert%281%29\"><text>x</text></a></svg>";
+    assert!(
+        !is_inert_encoded_reflection(html, payload),
+        "javascript: scheme inside xlink:href must be kept"
+    );
+}
+
+#[test]
+fn test_inert_encoded_reflection_keeps_event_handler_entity_breakout() {
+    // Regression (review finding A): an entity-encoded quote break-out landing
+    // in an on*= handler value. The HTML parser decodes `&#39;`/`&quot;` while
+    // building the handler, so the JS engine sees a live break-out -> executes.
+    let payload = "');alert(1)//";
+    let html = "<div onclick=\"greet('&#39;);alert(1)//')\">click</div>";
+    assert!(
+        !is_inert_encoded_reflection(html, payload),
+        "entity-encoded break-out in an event-handler attribute must be kept"
+    );
+    let payload2 = "\";alert(1)//";
+    let html2 = "<a onmouseover=\"x=&quot;&quot;;alert(1)//&quot;\">x</a>";
+    assert!(
+        !is_inert_encoded_reflection(html2, payload2),
+        "quot-encoded break-out in onmouseover must be kept"
+    );
+}
+
+#[test]
+fn test_inert_encoded_reflection_keeps_live_tag_masked_by_encoded_echo() {
+    // Regression (review finding B): a LIVE element from the payload is present
+    // raw but not byte-exact (server added id=x), while an encoded copy exists
+    // elsewhere. The global "an encoded echo exists" decision must not hide the
+    // live tag — the raw `<svg` opener keeps the finding.
+    let payload = "<svg onload=alert(1)>";
+    let html = "<div><svg id=x onload=alert(1)></div><!-- %3Csvg%20onload%3Dalert(1)%3E -->";
+    assert!(
+        !is_inert_encoded_reflection(html, payload),
+        "a live tag (extra attrs) co-existing with an encoded echo must be kept"
+    );
+    // Canonical-link masking: live <img onerror> + encoded copy in <link href>.
+    let p2 = "<img src=x onerror=alert(1)>";
+    let h2 = "<h1><img src=x onerror=alert(1) data-q=1></h1><link rel=canonical href=\"/s?q=%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E\">";
+    assert!(
+        !is_inert_encoded_reflection(h2, p2),
+        "canonical-link encoded copy must not mask a live onerror reflection"
+    );
+}
+
+#[test]
+fn test_inert_encoded_reflection_keeps_case_folded_live_with_echo() {
+    // Regression (review finding C): a case-folded live element (servers that
+    // upper/lower-case markup; tag/attr names are case-insensitive) co-existing
+    // with an encoded copy must be kept. Marker payload so detection is via the
+    // case-fold path.
+    let payload = "<svg onload=alert(1) class=dalfox>";
+    let html = "<div><SVG ONLOAD=alert(1) CLASS=DALFOX></div>--%3Csvg%20onload%3Dalert(1)%20class%3Ddalfox%3E";
+    assert!(
+        !is_inert_encoded_reflection(html, payload),
+        "case-folded live tag must be kept despite a co-existing encoded echo"
+    );
+}
+
+#[test]
+fn test_inert_encoded_reflection_keeps_plus_only_form_decode_breakout() {
+    // Regression (review finding D): a `+`->space form-decode un-escapes no
+    // HTML-active char, so it is not evidence of server escaping. The raw
+    // `<svg/onload=alert(1)>` (the `/` is a valid attr separator) is live.
+    let payload = "<svg/onload=alert(1)> z";
+    let html = "<div><svg/onload=alert(1)>+z</div>";
+    assert!(
+        !is_inert_encoded_reflection(html, payload),
+        "a bare +->space form-decode must not suppress a live raw tag"
+    );
+}
+
+#[test]
+fn test_inert_encoded_reflection_keeps_case_folded_reflection_no_echo() {
+    // The original soundness claim: a case-folded reflection matched via the
+    // marker fallback (decoding surfaces nothing) is never an encoded echo.
+    let payload = "<svg onload=alert(1) class=dalfox>";
+    let html = "<div><SVG ONLOAD=alert(1) CLASS=DALFOX></div>";
+    assert!(
+        !is_inert_encoded_reflection(html, payload),
+        "case-folded live reflection must not be suppressed"
+    );
 }
