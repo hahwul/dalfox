@@ -29,17 +29,22 @@ Terminal jobs auto-purge after 1 hour.
   "cookies": ["session=abc123"],
   "user_agent": "Mozilla/5.0...",
   "encoders": ["url", "html", "base64"],           // "none" means raw only
-  "timeout": 10,                                   // 1-299 (hard validated)
+  "timeout": 10,                                   // 1-299 (hard validated), per-request
+  "scan_timeout": 0,                               // whole-scan wall-clock budget (sec); 0 = disabled
   "delay": 0,                                      // 0-9999 ms (hard validated)
+  "rate_limit": 0,                                 // global req/sec across all workers; 0 = unlimited
   "follow_redirects": false,
   "proxy": "http://127.0.0.1:8080",
+  "insecure": true,                                // TLS posture; default skips cert validation, set false to enforce
   "include_request": false,                        // opt-in only — responses can be huge
   "include_response": false,
   "skip_mining": false,
   "skip_discovery": false,
   "deep_scan": false,
   "skip_ast_analysis": false,
-  "blind_callback_url": "https://xyz.interact.sh",
+  "analyze_external_js": false,                    // fetch same-origin <script src> bundles, AST-analyze (16 files / 512 KiB)
+  "detect_outdated_libs": false,                   // also emit [I] findings for known-vulnerable JS libs (CWE-1104, 0 extra reqs)
+  "blind_callback_url": "https://xyz.interact.sh", // OOB `--blind-oob` lifecycle is CLI-only; MCP uses this callback URL
   "workers": 50                                    // 1-500 (hard validated)
 }
 ```

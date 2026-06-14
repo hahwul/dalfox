@@ -68,8 +68,12 @@ If the number is huge or `reachable == false`, report back to the user before se
 
 See the concrete flag combinations in `references/cli.md` (search for "Polite authenticated scan" and "Blind").
 
+Two ways to catch blind XSS (CLI):
+- `--blind <url>` — you run the listener (interact.sh, Burp Collaborator, XSS Hunter) and watch it yourself.
+- `--blind-oob[=servers]` — Dalfox manages an interactsh (OAST) session for you: it registers, correlates each callback to the originating payload, and polls automatically (`--blind-oob-secret` for self-hosted, `--blind-oob-wait` to tune end-of-scan polling). CLI-only for now.
+
 Common MCP pattern:
-- Supply `headers`, `cookies`, `proxy`, `blind_callback_url`, and explicit `param` with location hints.
+- Supply `headers`, `cookies`, `proxy`, `blind_callback_url`, and explicit `param` with location hints. (MCP/server expose `--blind`-style callbacks; the managed `--blind-oob` lifecycle is CLI-only.)
 
 ### D. File / Many Targets
 
