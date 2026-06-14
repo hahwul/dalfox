@@ -50,7 +50,7 @@ oxc_span = "0.133.0"
 # left untouched for response fingerprinting. `rand` must stay on 0.8 because
 # `rsa` 0.9 binds `rand_core` 0.6 for key generation.
 rsa = { version = "0.9", features = ["pem"] }
-aes = "0.8"
+aes = "0.9"
 ctr = "0.9"
 rand = "0.8"
 uuid = { version = "1", features = ["v4"] }
