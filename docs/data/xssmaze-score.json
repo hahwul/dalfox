@@ -1,14 +1,14 @@
 {
-  "generated_at": "2026-06-01T00:49:45Z",
-  "dalfox_version": "3.0.0",
+  "generated_at": "2026-06-14T13:43:10Z",
+  "dalfox_version": "3.0.2",
   "xssmaze_version": "0.2.0",
   "xssmaze_image": "ghcr.io/hahwul/xssmaze:main",
-  "xssmaze_digest": "ghcr.io/hahwul/xssmaze@sha256:0e1ae9af7cfff1dfabdc20b11761dbcddcc023b60aa7f2314953ea5368db6193",
+  "xssmaze_digest": "ghcr.io/hahwul/xssmaze@sha256:9311b1693a75b72310a53852f72616e2bf11282a4b53cd2fe5fdf114aba0fb30",
   "total": {
-    "endpoints": 1013,
-    "detected": 995,
+    "endpoints": 1036,
+    "detected": 1014,
     "verified": 0,
-    "rate": 98.2
+    "rate": 97.9
   },
   "categories": [
     {
@@ -78,13 +78,6 @@
       "category": "browser",
       "endpoints": 5,
       "detected": 5,
-      "verified": 0,
-      "rate": 100.0
-    },
-    {
-      "category": "bugbounty",
-      "endpoints": 10,
-      "detected": 10,
       "verified": 0,
       "rate": 100.0
     },
@@ -272,8 +265,8 @@
     },
     {
       "category": "dom",
-      "endpoints": 35,
-      "detected": 35,
+      "endpoints": 38,
+      "detected": 38,
       "verified": 0,
       "rate": 100.0
     },
@@ -453,6 +446,13 @@
       "rate": 100.0
     },
     {
+      "category": "htmlunsafe",
+      "endpoints": 6,
+      "detected": 6,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
       "category": "import",
       "endpoints": 6,
       "detected": 6,
@@ -510,13 +510,6 @@
     },
     {
       "category": "jsescape",
-      "endpoints": 6,
-      "detected": 6,
-      "verified": 0,
-      "rate": 100.0
-    },
-    {
-      "category": "json",
       "endpoints": 6,
       "detected": 6,
       "verified": 0,
@@ -673,6 +666,13 @@
       "category": "mxss",
       "endpoints": 5,
       "detected": 5,
+      "verified": 0,
+      "rate": 100.0
+    },
+    {
+      "category": "navsink",
+      "endpoints": 6,
+      "detected": 6,
       "verified": 0,
       "rate": 100.0
     },
@@ -1098,8 +1098,8 @@
     },
     {
       "category": "waf",
-      "endpoints": 8,
-      "detected": 8,
+      "endpoints": 16,
+      "detected": 16,
       "verified": 0,
       "rate": 100.0
     },
@@ -1146,6 +1146,13 @@
       "rate": 100.0
     },
     {
+      "category": "bugbounty",
+      "endpoints": 10,
+      "detected": 9,
+      "verified": 0,
+      "rate": 90.0
+    },
+    {
       "category": "prototype",
       "endpoints": 10,
       "detected": 9,
@@ -1155,9 +1162,9 @@
     {
       "category": "modern",
       "endpoints": 32,
-      "detected": 28,
+      "detected": 27,
       "verified": 0,
-      "rate": 87.5
+      "rate": 84.4
     },
     {
       "category": "edgefilter",
@@ -1172,6 +1179,13 @@
       "detected": 5,
       "verified": 0,
       "rate": 83.3
+    },
+    {
+      "category": "json",
+      "endpoints": 6,
+      "detected": 4,
+      "verified": 0,
+      "rate": 66.7
     },
     {
       "category": "storedpat",
