@@ -25,6 +25,7 @@ use reqwest::Client;
 use std::sync::OnceLock;
 use tokio::time::{Duration, sleep};
 
+use super::decode_html_entities;
 use super::selectors;
 
 fn cached_class_marker_selector() -> &'static scraper::Selector {
@@ -623,66 +624,6 @@ fn has_inline_handler_breakout_evidence(payload: &str, text: &str) -> bool {
         }
     }
     false
-}
-
-/// Minimal HTML entity decoder for the named + numeric escapes that
-/// real-world templates emit when escaping user input into attribute
-/// values. Mirrors browser behaviour for the cases that matter for
-/// inline-handler breakout detection: `&#39;` → `'`, `&quot;` → `"`,
-/// `&lt;`/`&gt;`/`&amp;`. Anything we don't recognise passes through
-/// unchanged so we never lose bytes.
-fn decode_html_entities(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let mut chars = s.char_indices().peekable();
-    while let Some((i, c)) = chars.next() {
-        if c != '&' {
-            out.push(c);
-            continue;
-        }
-        let rest = &s[i + 1..];
-        let semi = match rest.find(';') {
-            Some(pos) if pos <= 8 => pos,
-            _ => {
-                out.push(c);
-                continue;
-            }
-        };
-        let entity = &rest[..semi];
-        let decoded = if let Some(stripped) = entity.strip_prefix('#') {
-            let (radix, digits) = if let Some(hex) = stripped.strip_prefix('x') {
-                (16, hex)
-            } else if let Some(hex) = stripped.strip_prefix('X') {
-                (16, hex)
-            } else {
-                (10, stripped)
-            };
-            u32::from_str_radix(digits, radix)
-                .ok()
-                .and_then(char::from_u32)
-        } else {
-            match entity {
-                "amp" => Some('&'),
-                "lt" => Some('<'),
-                "gt" => Some('>'),
-                "quot" => Some('"'),
-                "apos" => Some('\''),
-                _ => None,
-            }
-        };
-        match decoded {
-            Some(ch) => {
-                out.push(ch);
-                // Skip past the entity body + ';'.
-                for _ in 0..(semi + 1) {
-                    chars.next();
-                }
-            }
-            None => {
-                out.push(c);
-            }
-        }
-    }
-    out
 }
 
 /// Backward-compat boolean view used by callers that don't need the kind.

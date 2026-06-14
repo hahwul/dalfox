@@ -42,6 +42,11 @@ const JS_SINK_NAMES: &[&str] = &[
     // HTML with no sanitization, so a payload that names it is almost
     // certainly attempting code execution through that path.
     "setHTMLUnsafe",
+    // parseHTMLUnsafe (and bare parseHTMLUnsafe) is the no-sanitizer
+    // Document.parse sibling, modeled as DOM-XSS sink in AST analysis.
+    // Include here so JS-context / structural evidence classification
+    // recognizes reflected injections that introduce calls to it.
+    "parseHTMLUnsafe",
 ];
 
 /// Properties whose assignment from injected content is itself an XSS sink

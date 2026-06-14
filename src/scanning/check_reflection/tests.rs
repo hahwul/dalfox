@@ -317,6 +317,20 @@ fn test_decode_html_entities_ignores_invalid_numeric_sequences() {
 }
 
 #[test]
+fn test_decode_html_entities_preserves_unrepresentable_numeric() {
+    // Codepoints outside Unicode scalar value or too large for char::from_u32
+    // must be preserved verbatim (unified "never lose bytes" semantics shared
+    // with DOM verification decoder).
+    let too_large = "&#x110000;";
+    assert_eq!(decode_html_entities(too_large), too_large);
+    let big_decimal = "&#99999999;";
+    assert_eq!(decode_html_entities(big_decimal), big_decimal);
+    // Mixed with good content
+    let mixed = "x&#x110000;y";
+    assert_eq!(decode_html_entities(mixed), mixed);
+}
+
+#[test]
 fn test_decode_html_entities_zero_padded_hex() {
     // Output shape of `html_entity_zero_padded_encode` — 7 hex digits per char.
     // The regex must accept this length so the resulting payload classifies
