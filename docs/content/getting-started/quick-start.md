@@ -89,6 +89,15 @@ dalfox https://target.app \
 
 Dalfox sends blind-XSS payloads across every discovered parameter; if the payload fires later in an admin panel, your callback server records it.
 
+Or let Dalfox manage an [interactsh](https://github.com/projectdiscovery/interactsh) (OAST) server for you — it registers a session, correlates callbacks to the originating payload, and polls automatically:
+
+```bash
+dalfox https://target.app --blind-oob                  # public interactsh mesh
+dalfox https://target.app --blind-oob=oast.fun         # pick servers
+```
+
+Use `--blind-oob-secret` for a self-hosted server and `--blind-oob-wait` to control how long Dalfox keeps polling after the scan finishes.
+
 ## 7. Dry-run first
 
 Use `--dry-run` to preview what Dalfox would scan:

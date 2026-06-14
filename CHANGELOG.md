@@ -7,19 +7,49 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The previous Go implementation lives on the [`v2` branch](https://github.com/hahwul/dalfox/tree/v2)
 and continues to receive security backports per [SECURITY.md](./SECURITY.md).
 
-## Unreleased
+## 3.1.0
+
+A feature release: out-of-band (blind) XSS detection, external- and modern-DOM-sink analysis, CSP / Trusted Types awareness, filter-aware payload synthesis, HAR input, a global rate limiter, and broad WAF-bypass and server/MCP hardening.
 
 ### Added
 
-* **Attribute-decode WAF-bypass mutations**: Four new payload mutations target the HTML tokenizer's attribute-value entity decoding — a layer literal-string WAF regexes don't model. `KeywordEntityEncode` entity-encodes the first letter of a sink keyword in an event-handler / `javascript:`-URL value (`onerror=&#97;lert(1)`); `SchemeBreak` and `EntityScheme` split or entity-encode an executable URI scheme (`href=java&#9;script:…`, `href=&#106;avascript:…`) so the literal `javascript:` token never appears on the wire while the browser still resolves it; `MultiSlash` replaces *every* inter-attribute separator with `/` (`<img/src=x/onerror=alert(1)>`) to defeat regexes that re-anchor on whitespace before later attributes. Each carries a strict payload-shape gate (skipped for bare body text and `<script>`/`<style>` payloads, where no entity decoding happens) so it never emits a non-executing variant. Wired into the per-WAF strategies, and the per-payload mutation-variant cap was raised 3→4 — which only takes effect once a WAF is detected — to give them a slot alongside the proven structural mutations.
-* **HAR input (`--input-type har`)**: `dalfox scan` now accepts a HAR / proxy export (Burp, Caido, ZAP, browser DevTools, mitmproxy) as a scan source. Every `log.entries[].request` becomes a target with its URL, method, headers, cookies, and body preserved — replacing the lossy workaround of flattening a capture to per-line URLs. HAR is auto-detected from file content (and from a stdin pipe), selectable explicitly with `-i har`, deduplicated by URL+method, and run through the same scope filters as every other input. Restores a capability the Go v2.x line had. Fixes [#1095](https://github.com/hahwul/dalfox/issues/1095).
-* **Global rate limiting (`--rate-limit` / `-r` / `--rl`)**: A true requests-per-second token-bucket limiter, shared across every worker and target, caps the aggregate outbound rate (`0` = unlimited). Unlike `--delay` (which only spaces a single worker), this bounds the total in-flight burst from `workers × concurrent targets` — friendlier to shared-IP and edge-WAF thresholds. Installed process-wide from the CLI and bound per-job for concurrent MCP / REST scans. Also configurable via `rate_limit` in the config file. Fixes [#1096](https://github.com/hahwul/dalfox/issues/1096).
-* **Transient retry policy (`--retries` / `--retry-delay`)**: `send_with_retry` now optionally retries HTTP 5xx and transient transport errors (timeouts, connection resets) with exponential backoff, in addition to the always-on HTTP 429 handling (which honors `Retry-After`). Off by default (`--retries 0`) so the default scan is unchanged; also configurable via `retries` / `retry_delay` in the config file.
-* **Structured outputs (SARIF / Markdown / TOML)**: The scan metadata envelope (`meta` with `dalfox_version`, `targets`, `scan_duration_ms`, `total_requests`, `findings_count`, `target_summary` including per-target WAF/bypass info) is now included for parity with JSON/JSONL. SARIF surfaces it under `runs[].properties` and `tool.driver.properties`; Markdown renders summary tables; TOML adds a `[meta]` table. Fixes [#1093](https://github.com/hahwul/dalfox/issues/1093).
+* **Blind / out-of-band XSS (`--blind-oob`)**: OAST detection via an [interactsh](https://github.com/projectdiscovery/interactsh) server, catching execution in stored, async, and other non-reflecting sinks. CLI-only for now.
+* **External JavaScript analysis (`--analyze-external-js`)**: Fetches a target's same-origin `<script src>` bundles (16 files / 512 KiB cap) and runs them through AST DOM-XSS analysis. Fixes [#1094](https://github.com/hahwul/dalfox/issues/1094).
+* **Wider DOM-XSS coverage**: Models `Document.parseHTMLUnsafe()` and `window.open()` as sinks ([#1127](https://github.com/hahwul/dalfox/pull/1127)) and extends the recognized JS sink-name set ([#1139](https://github.com/hahwul/dalfox/pull/1139)).
+* **Outdated JS library detection (`--detect-outdated-libs`)**: Flags known-vulnerable front-end library versions as informational findings. Opt-in. Fixes [#1074](https://github.com/hahwul/dalfox/issues/1074).
+* **CSP & Trusted Types awareness**: Emits `strict-dynamic` / nonce gadget payloads and adapts to Trusted Types when a policy is present. Fixes [#1097](https://github.com/hahwul/dalfox/issues/1097).
+* **Filter-aware payload synthesis**: Computes exact JS breakout sequences from the observed script prefix, including escaped-quote and nested-context cases. Fixes [#1075](https://github.com/hahwul/dalfox/issues/1075), [#1072](https://github.com/hahwul/dalfox/issues/1072), [#1073](https://github.com/hahwul/dalfox/issues/1073).
+* **Attribute-decode WAF-bypass mutations**: Four mutations (`KeywordEntityEncode`, `SchemeBreak`, `EntityScheme`, `MultiSlash`) that exploit the HTML tokenizer's attribute-value entity decoding — a layer literal-string WAF regexes don't model.
+* **Size-limited WAF inspection-window bypass**: Detects WAFs that inspect only the first N bytes of a request and positions payloads past the window. Part of [#1106](https://github.com/hahwul/dalfox/pull/1106).
+* **HAR input (`--input-type har`)**: Accepts a HAR / proxy export (Burp, Caido, ZAP, DevTools, mitmproxy) as a scan source, one target per request. Restores a Go v2.x capability. Fixes [#1095](https://github.com/hahwul/dalfox/issues/1095).
+* **Global rate limiting (`--rate-limit` / `-r` / `--rl`)**: A requests-per-second token bucket shared across all workers and targets (`0` = unlimited), bounding the aggregate outbound rate that `--delay` can't. Fixes [#1096](https://github.com/hahwul/dalfox/issues/1096).
+* **Transient retry policy (`--retries` / `--retry-delay`)**: Optional exponential-backoff retries for HTTP 5xx and transient transport errors (off by default; HTTP 429 is always retried).
+* **`--insecure` TLS flag**: Makes TLS certificate validation configurable for `scan` / `server` / `mcp` (default on; `--insecure=false` enforces). Fixes [#1111](https://github.com/hahwul/dalfox/issues/1111).
+* **Whole-scan timeout for server & MCP (`scan_timeout`)**: Bounds total scan duration for concurrent REST / MCP jobs. Part of [#1103](https://github.com/hahwul/dalfox/pull/1103).
+* **Structured output metadata (SARIF / Markdown / TOML)**: The scan `meta` envelope (version, targets, duration, request/finding counts, per-target WAF info) now appears in all three formats for parity with JSON. Fixes [#1093](https://github.com/hahwul/dalfox/issues/1093).
 
 ### Changed
 
-* **Adaptive WAF evasion (`--waf-evasion`)**: Replaced the blunt `workers=1` / `delay=3000ms` preset with adaptive timing — randomized inter-request jitter (so the cadence can't be fingerprinted) plus an escalating cooldown on clusters of blocked responses. The per-WAF `extra_delay_hint_ms` is now consumed to pace injection requests on detection (previously it only appeared in JSON metadata) instead of being dead weight. Pairs with `--rate-limit`. Part of [#1096](https://github.com/hahwul/dalfox/issues/1096).
+* **Adaptive WAF evasion (`--waf-evasion`)**: Replaced the blunt `workers=1` / `delay=3000ms` preset with randomized inter-request jitter and an escalating cooldown on clusters of blocked responses. Part of [#1096](https://github.com/hahwul/dalfox/issues/1096).
+* **HTTP server internals**: Refactored the REST server into a dedicated subsystem with an extracted job domain.
+
+### Fixed
+
+* Cut reflected-XSS false positives and corrected path special-character probing — higher recall with ~31% fewer requests. Fixes [#1117](https://github.com/hahwul/dalfox/pull/1117).
+* Require a payload's handler/sink to survive on the marker element before verifying `[V]`, removing truncated-reflection false positives. Fixes [#1118](https://github.com/hahwul/dalfox/issues/1118).
+* Demoted inert encoded-echo reflections for non-tag payloads. Fixes [#1133](https://github.com/hahwul/dalfox/pull/1133).
+* Clear DOM taint on clean / sanitized reassignment, removing a class of DOM-XSS false positives. Fixes [#1087](https://github.com/hahwul/dalfox/pull/1087).
+* `--encoders` now accepts `htmlpad`, `unicode`, and `zwsp`. Fixes [#1076](https://github.com/hahwul/dalfox/pull/1076).
+* Closed xssmaze WAF-facade detection gaps. Fixes [#1104](https://github.com/hahwul/dalfox/pull/1104).
+* Parse-DoS hardening against deeply nested hostile JS, plus assorted false-negative and WAF / lifecycle fixes. Fixes [#1115](https://github.com/hahwul/dalfox/pull/1115).
+* `--blind-oob` no longer swallows the target URL. Fixes [#1132](https://github.com/hahwul/dalfox/pull/1132).
+* Closed 10 latent bugs from a source audit ([#1107](https://github.com/hahwul/dalfox/pull/1107)) and a batch of low-severity fixes ([#1116](https://github.com/hahwul/dalfox/pull/1116)).
+
+### Security & Reliability
+
+* Hardened the scanner / server / MCP against hostile responses — capped body reads and reflection-scan work to prevent OOM and hangs ([#1119](https://github.com/hahwul/dalfox/pull/1119), [#1129](https://github.com/hahwul/dalfox/pull/1129)).
+* REST responses now set an explicit `Content-Type` with `nosniff`, and the server warns on non-loopback binds without auth. Fixes [#1122](https://github.com/hahwul/dalfox/pull/1122).
+* Fixed a per-job scope leak and added rate-limit / concurrency caps for server and MCP scans ([#1105](https://github.com/hahwul/dalfox/pull/1105), [#1090](https://github.com/hahwul/dalfox/pull/1090)).
 
 ## 3.0.2
 

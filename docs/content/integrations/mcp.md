@@ -57,6 +57,7 @@ Submit a scan. Returns immediately.
   "scan_timeout": 0,
   "workers": 50,
   "rate_limit": 0,
+  "insecure": true,
   "blind_callback_url": "https://callback.example",
   "deep_scan": false,
   "skip_ast_analysis": false,
@@ -64,6 +65,10 @@ Submit a scan. Returns immediately.
   "detect_outdated_libs": false
 }
 ```
+
+`insecure` controls TLS certificate validation (default `true`, scanner-friendly):
+set it `false` to enforce certificate validation and reject self-signed or
+expired certs. Mirrors the `--insecure` CLI flag.
 
 `analyze_external_js` is opt-in (default `false`): set it `true` to fetch
 same-origin `<script src>` bundles at preflight time and run AST DOM-XSS

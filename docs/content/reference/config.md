@@ -88,6 +88,9 @@ encoders = ["url", "html"]
 remote_payloads = []
 # custom_blind_xss_payload = "blind.txt"
 # blind_callback_url = "https://callback.example"
+# blind_oob = []                       # [] = enable with the public interactsh mesh; or name servers: ["oast.fun"]
+# blind_oob_secret = "token"           # auth token for a self-hosted interactsh server
+# blind_oob_wait = 30                  # seconds to keep polling after payloads are sent
 # custom_payload = "payloads.txt"
 only_custom_payload = false
 # inject_marker = "FUZZ"
@@ -202,6 +205,9 @@ debug = false
 | `remote_payloads` | array | `[]` | Remote payload sources |
 | `custom_blind_xss_payload` | string | — | Custom blind template file |
 | `blind_callback_url` | string | — | Out-of-band callback URL |
+| `blind_oob` | array | — | Enable OOB/OAST blind XSS via interactsh (`[]` = public mesh; or name servers). Mirrors `--blind-oob` |
+| `blind_oob_secret` | string | — | Auth token for a self-hosted interactsh server |
+| `blind_oob_wait` | int | `30` | Seconds to keep polling for OOB callbacks after payloads are sent |
 | `custom_payload` | string | — | Custom payload file |
 | `only_custom_payload` | bool | `false` | Use only custom payloads |
 | `inject_marker` | string | — | Token to replace with payloads |

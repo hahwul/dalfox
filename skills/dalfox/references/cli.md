@@ -1,6 +1,6 @@
 # CLI Reference (dalfox scan)
 
-All flags are defined in `src/cmd/scan.rs:ScanArgs`. Defaults are centralized in the same file (`DEFAULT_*` constants).
+All flags are defined in `src/cmd/scan/args.rs:ScanArgs`. Defaults are centralized in the same file (`DEFAULT_*` constants).
 
 ## Input
 
@@ -63,7 +63,11 @@ All flags are defined in `src/cmd/scan.rs:ScanArgs`. Defaults are centralized in
 |------|---------|-------|
 | `--timeout` | 10s | Per-request |
 | `--scan-timeout` | 0 (disabled) | Hard wall-clock cap **per target** after preflight |
-| `--delay` | 0 ms | |
+| `--delay` | 0 ms | Spaces requests **within one worker** |
+| `-r, --rate-limit` (alias `--rl`) | 0 (unlimited) | Global requests/sec token bucket, shared across **all** workers + targets — bounds the aggregate burst from `workers × concurrent targets`. Friendlier to shared-IP / edge-WAF thresholds than `--delay` |
+| `--retries` | 0 (off) | Retry 5xx + transient transport errors with exponential backoff (HTTP 429 is always retried regardless, honoring `Retry-After`) |
+| `--retry-delay` | 1000 ms | Base delay for the `--retries` exponential backoff |
+| `--insecure[=bool]` | true | TLS posture. Default skips certificate validation (scanner-friendly); `--insecure=false` enforces validation |
 | `-F, --follow-redirects` | false | |
 | `--proxy` | — | `http://...` or `socks5://...` |
 | `--ignore-return` | (none) | Comma-separated status codes to drop before analysis (e.g. `302,403,404`) |
@@ -80,7 +84,10 @@ All flags are defined in `src/cmd/scan.rs:ScanArgs`. Defaults are centralized in
 | `--custom-payload` | — | File of extra payloads |
 | `--only-custom-payload` | false | Ignore built-in set |
 | `--custom-blind-xss-payload` | — | File for blind XSS |
-| `-b, --blind` | — | Callback URL (interact.sh, Burp Collab, etc.) |
+| `-b, --blind` | — | Callback URL (interact.sh, Burp Collab, etc.) — you run the listener |
+| `--blind-oob[=servers]` | — | OOB/OAST blind XSS: Dalfox manages an interactsh session, correlates callbacks per-payload, and polls. Bare `--blind-oob` uses the public mesh; name servers with the `=` form (`--blind-oob=oast.fun`). CLI-only |
+| `--blind-oob-secret` | — | Auth token for a self-hosted interactsh server |
+| `--blind-oob-wait` | 30 | Seconds to keep polling for callbacks after payloads are sent |
 | `--custom-alert-value` | `1` | Value used inside `alert(...)` etc. |
 | `--custom-alert-type` | `none` | `none` or `str` (wraps in quotes) |
 | `--inject-marker` | — | Replace this literal string with payloads |
@@ -89,6 +96,7 @@ All flags are defined in `src/cmd/scan.rs:ScanArgs`. Defaults are centralized in
 | `--skip-xss-scanning` | false | Discovery only (different from `--only-discovery`) |
 | `--skip-ast-analysis` | false | Disable oxc-based DOM XSS detection |
 | `--analyze-external-js` | false | Fetch same-origin `<script src>` bundles and run AST DOM-XSS on them (preflight, once per target; up to 16 files, 512 KiB each; respects `--include-url`/`--exclude-url`) |
+| `--detect-outdated-libs` | false | Also report outdated / known-vulnerable JS libraries as informational `[I]` findings (CWE-1104; 0 extra requests — inspects already-fetched script) |
 | `--hpp` | false | HTTP Parameter Pollution (duplicate query params) |
 
 ## Stored XSS (SXSS)
@@ -107,7 +115,7 @@ All flags are defined in `src/cmd/scan.rs:ScanArgs`. Defaults are centralized in
 | `--waf-bypass` | `auto` | `auto` (probe then bypass), `force`, `off` |
 | `--force-waf` | — | Pin a specific engine (`cloudflare`, `akamai`, `modsecurity`, `aws`, ...) |
 | `--skip-waf-probe` | false | Skip the active provocation request |
-| `--waf-evasion` | false | Auto-throttle (workers=1, delay=3000 ms) when WAF detected |
+| `--waf-evasion` | false | Adaptive throttling on WAF detection: randomized inter-request jitter (unfingerprintable cadence) + escalating cooldown on clusters of blocked responses, paced by the per-WAF delay hint. Pairs with `--rate-limit` |
 | `--waf-min-confidence` | 0.3 | Discard weak fingerprints (Google Frontend, generic "blocked" messages) |
 
 See `references/advanced.md` for recommended WAF combinations.

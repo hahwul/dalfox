@@ -143,6 +143,9 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--remote-payloads` | — | — | `portswigger`, `payloadbox` |
 | `--custom-blind-xss-payload` | — | — | Custom blind payload template file |
 | `--blind` | `-b` | — | Blind XSS callback URL |
+| `--blind-oob[=servers]` | — | — | Enable OOB/OAST blind XSS via interactsh; optional comma-separated server domains (default: public mesh). Requires the `=` form: `--blind-oob=oast.fun,oast.me` |
+| `--blind-oob-secret` | — | — | Auth token for a self-hosted interactsh server (sent as `Authorization` on register/poll/deregister) |
+| `--blind-oob-wait` | — | `30` | Seconds to keep polling for OOB callbacks after all payloads are sent (`0` = no extra end-of-scan wait) |
 | `--custom-payload` | — | — | Custom payload file |
 | `--only-custom-payload` | — | false | Use only custom payloads |
 | `--custom-alert-value` | — | `1` | Value inside `alert()`/`prompt()`/`confirm()` |
