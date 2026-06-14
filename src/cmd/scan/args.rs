@@ -597,12 +597,12 @@ pub struct BlindOobArgs {
     #[clap(help_heading = "XSS SCANNING")]
     /// Enable OOB blind XSS via interactsh. Optional comma-separated server
     /// domains (default: public servers). Example: --blind-oob=oast.fun,oast.me
-    ///
-    /// `require_equals` is deliberate: with a bare `num_args = 0..` this option
-    /// would greedily swallow the following positional target
-    /// (`dalfox --blind-oob https://t` would treat `https://t` as a server name
-    /// and leave no scan target). Forcing the `=` form keeps bare `--blind-oob`
-    /// (default mesh) working while never consuming the URL.
+    //
+    // `require_equals` is deliberate (kept out of `--help`): with a bare
+    // `num_args = 0..` this option would greedily swallow the following
+    // positional target (`dalfox --blind-oob https://t` would treat `https://t`
+    // as a server name and leave no scan target). Forcing the `=` form keeps
+    // bare `--blind-oob` (default mesh) working while never consuming the URL.
     #[arg(long = "blind-oob", value_delimiter = ',', num_args = 0.., require_equals = true)]
     pub blind_oob: Option<Vec<String>>,
 
