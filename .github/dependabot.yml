@@ -15,3 +15,11 @@ updates:
     schedule:
       interval: weekly
     target-branch: "main"
+    ignore:
+      # These are intentionally pinned (see Cargo.toml comments).
+      # rsa 0.9 requires older rand_core 0.6; aes/ctr/rand 0.8 line is required
+      # for OOB interactsh blind-XSS crypto (AES-256-CTR + RSA-OAEP).
+      # Bumping requires coordinated updates to interactsh/crypto.rs + rsa features.
+      - dependency-name: "aes"
+      - dependency-name: "ctr"
+      - dependency-name: "rand"
