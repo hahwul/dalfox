@@ -23,7 +23,7 @@ jobs:
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           round: false
-          includeBots: false
+          includeBots: true
           svgPath: docs/static/images/CONTRIBUTORS.svg
           noCommit: true
       - uses: peter-evans/create-pull-request@v8.1.1
