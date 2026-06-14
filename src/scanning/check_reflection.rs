@@ -287,6 +287,14 @@ fn is_in_safe_context_decoded(html: &str, payload: &str) -> bool {
     if is_payload_inert_in_scripts(html, payload) {
         return true;
     }
+    // Inert encoded echo: the server escaped its output (percent- or
+    // entity-encoded the reflection) and the encoded bytes are not inside a
+    // URL-valued attribute. The browser renders such text literally, so the
+    // reflection cannot break out. Covers `encoded_url`-style reflections and
+    // double-encoded structural/quote break-out payloads.
+    if is_inert_encoded_reflection(html, payload) {
+        return true;
+    }
     false
 }
 
@@ -329,6 +337,10 @@ const URL_VALUED_ATTRS: &[&[u8]] = &[
     b"profile",
     b"ping",
     b"archive",
+    // Namespaced SVG URL sink: `<a xlink:href>` / `<use xlink:href>` navigate,
+    // so a `javascript:` scheme there executes. Kept consistent with the AST /
+    // DOM-verification sink lists (mining.rs, ast_dom_analysis, check_dom_verification).
+    b"xlink:href",
 ];
 
 /// True when every occurrence of `marker` in `html` sits inside an HTML
@@ -852,6 +864,114 @@ fn url_encoded_payload_reflects_in_unsafe_url_context(html: &str, payload: &str)
         search_start = next_char_boundary(html, abs + 1);
     }
     false
+}
+
+/// Count of HTML break-out characters (`<`, `>`, `"`, `'`) in `s`. Used to
+/// prove a decode actually *un-escaped* structure (so a `+`→space form-decode,
+/// which neutralizes no HTML-active character, is not mistaken for evidence
+/// that the server escaped its output).
+fn structural_char_count(s: &str) -> usize {
+    s.bytes()
+        .filter(|b| matches!(b, b'<' | b'>' | b'"' | b'\''))
+        .count()
+}
+
+/// True when a reflection that `classify_reflection` matched only after
+/// decoding the whole response body is an inert *encoded echo* — the server
+/// escaped its own output and a browser renders the bytes literally, so the
+/// reflection cannot form markup, an attribute break-out, or an executable
+/// scheme.
+///
+/// Scope: this gate only soundly vets payloads that cannot inject an HTML
+/// TAG (no raw `<`/`>` in any variant) — quote / attribute-value / scheme
+/// break-outs. Deciding whether an escaped `<svg…>` echo co-exists with a
+/// *live* `<svg…>` element requires real HTML parsing (a page's own
+/// `<body>`/`<svg>` markup defeats byte heuristics), which is the DOM /
+/// AST-verification path's job, not the raw-byte report gate's.
+///
+/// Within that scope it rejects EVERY way the payload could still be live;
+/// each of the following keeps the finding (returns false): (a) a payload
+/// variant is present RAW (byte-exact) anywhere; (b) any variant carries a raw
+/// `<`/`>` (a tag payload — out of scope, keep); (c) the reflection lands in an
+/// event-handler (`on*=`) attribute value, where the HTML parser decodes
+/// entities before the JS engine runs them; (d) any decoded occurrence sits
+/// inside a URL-valued attribute.
+///
+/// It suppresses ONLY when a variant surfaces via a decode that genuinely
+/// un-escaped a structural character (`<`, `>`, `"`, `'`) — never via a bare
+/// `+`-to-space form-decode that neutralizes nothing.
+fn is_inert_encoded_reflection(html: &str, payload: &str) -> bool {
+    let variants = payload_variants(payload);
+    // (a) A genuine un-escaped reflection (raw variant present) is never an echo.
+    if variants.iter().any(|v| !v.is_empty() && html.contains(v)) {
+        return false;
+    }
+    // (b) Out of scope: any tag-injecting variant (raw `<`/`>`) is left to the
+    //     DOM/AST verification path — a byte gate cannot tell a fully-escaped
+    //     echo apart from a live element the server reflected with edits.
+    if variants.iter().any(|v| v.contains(['<', '>'])) {
+        return false;
+    }
+    // (c) Event-handler (`on*=`) context: the parser decodes entities before the
+    //     JS engine, so an entity-escaped break-out there executes. Keep — this
+    //     mirrors classify_reflection's own unsafe-context carve-out.
+    if html_entity_reflection_in_unsafe_context(html, &variants) {
+        return false;
+    }
+    // Build the decoded views the classifier matches against, keeping only the
+    // ones that actually un-escaped a structural character (real server escaping
+    // — not a `+`→space whitespace substitution).
+    let html_struct = structural_char_count(html);
+    let mut decoded_forms: Vec<String> = Vec::new();
+    let push_if_unescapes = |forms: &mut Vec<String>, d: String| {
+        if structural_char_count(&d) > html_struct {
+            forms.push(d);
+        }
+    };
+    if let Ok(d) = urlencoding::decode(html)
+        && d.as_ref() != html
+    {
+        push_if_unescapes(&mut decoded_forms, d.into_owned());
+    }
+    let html_dec = decode_html_entities(html);
+    if html_dec != html {
+        if let Ok(d) = urlencoding::decode(&html_dec)
+            && d.as_ref() != html_dec.as_str()
+        {
+            push_if_unescapes(&mut decoded_forms, d.into_owned());
+        }
+        push_if_unescapes(&mut decoded_forms, html_dec);
+    }
+    if let Some(f) = decode_form_urlencoded_like(html) {
+        push_if_unescapes(&mut decoded_forms, f);
+    }
+    // The payload must surface in such a decoded view (confirming an encoded
+    // echo) and no decoded occurrence may sit in a URL attribute.
+    let mut surfaced = false;
+    for decoded in &decoded_forms {
+        let bytes = decoded.as_bytes();
+        for v in &variants {
+            if v.is_empty() {
+                continue;
+            }
+            let mut start = 0;
+            let mut scanned = 0usize;
+            while let Some(pos) = decoded[start..].find(v.as_str()) {
+                surfaced = true;
+                scanned += 1;
+                if scanned > MAX_PAYLOAD_OCCURRENCES {
+                    // Couldn't fully vet occurrences — keep the finding.
+                    return false;
+                }
+                let abs = start + pos;
+                if occurrence_is_in_url_attr(bytes, abs) {
+                    return false;
+                }
+                start = next_char_boundary(decoded, abs + 1);
+            }
+        }
+    }
+    surfaced
 }
 
 /// Determine if payload is reflected in any normalization variant.
