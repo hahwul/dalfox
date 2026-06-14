@@ -5,6 +5,9 @@
 //! `rsa` 0.9 is built against the `digest`/`sha2` 0.10 line, so the OAEP digest
 //! comes from the aliased `sha2_oaep` crate (`sha2` 0.10). The rest of dalfox
 //! keeps using `sha2` 0.11 for response fingerprinting; the two coexist.
+//!
+//! AES/CTR use the 0.9/0.10 releases (cipher 0.5+); construction via Ctr128BE +
+//! new_from_slices continues to work (verified in roundtrip + e2e mock tests).
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as B64;
