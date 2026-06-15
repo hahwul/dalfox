@@ -318,24 +318,22 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // Per-target tracking for structured output (target_summary in JSON envelope)
     // Collect all target URLs that will be scanned, then track status per target.
     let all_target_urls: Vec<String> = parsed_targets.iter().map(|t| t.url.to_string()).collect();
-    // One-shot insecure-mode warning. By default dalfox builds its HTTP client
-    // with `danger_accept_invalid_certs(true)` (the `--insecure` flag, on by
+    // Insecure-mode diagnostic. By default dalfox builds its HTTP client with
+    // `danger_accept_invalid_certs(true)` (the `--insecure` flag, on by
     // default) so self-signed / expired / hostname-mismatch certs are silently
-    // trusted. That is intentional for a scanner but ops triaging a MITM
-    // scenario need a signal — print one warning per scan when any https://
-    // target is present AND insecure mode is active. When the operator opts
-    // into validation (`--insecure=false`), no warning is emitted.
-    // Security note must reach the operator even with `--silence` —
-    // silencing is for stdout, this is stderr and tells them about a
-    // deliberate but consequential TLS posture.
+    // trusted. That is intentional for a scanner and already documented on the
+    // flag, so warning on every https scan was just noise — the default posture
+    // isn't news. Operators triaging a MITM/TLS scenario can still surface it
+    // with `--debug`, where it lands as a DBG line for any https target in
+    // insecure mode. When validation is opted into (`--insecure=false`), nothing
+    // is emitted. `log_dbg` ignores `--silence` (it gates on `--debug` only), so
+    // a deliberately-quiet scan still shows it under debug.
     if args.insecure.unwrap_or(true)
         && parsed_targets
             .iter()
             .any(|t| t.url.scheme().eq_ignore_ascii_case("https"))
     {
-        eprintln!(
-            "Warning: TLS certificate validation is disabled (--insecure, on by default); self-signed, expired, or hostname-mismatched certs will be silently trusted. Use --insecure=false to enforce validation."
-        );
+        log_dbg("TLS validation disabled (--insecure default); use --insecure=false to enforce");
     }
     // Track targets that were skipped during preflight (content-type mismatch etc.)
     // Map of skipped target URL -> error code explaining why it was skipped.
@@ -465,40 +463,39 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // whichever channel(s) are configured; the OOB poller is spawned once
     // `stream_findings_enabled` is known (below) and drained before rendering.
     let blind_active = !args.dry_run && !args.only_discovery;
-    let oob_session: Option<Arc<crate::oob::OobSession>> = if blind_active
-        && args.blind_oob_enabled()
-    {
-        match crate::oob::OobSession::start(&args.oob_config()).await {
-            Ok(session) => {
-                if !args.silence && args.format == "plain" {
-                    println!(
-                        "OOB blind XSS armed via interactsh server: {}",
-                        session.server_domain()
+    let oob_session: Option<Arc<crate::oob::OobSession>> =
+        if blind_active && args.blind_oob_enabled() {
+            match crate::oob::OobSession::start(&args.oob_config()).await {
+                Ok(session) => {
+                    log_info(
+                        args,
+                        &format!(
+                            "OOB blind XSS armed via interactsh server: {}",
+                            session.server_domain()
+                        ),
                     );
+                    Some(Arc::new(session))
                 }
-                Some(Arc::new(session))
-            }
-            Err(e) => {
-                if !args.silence {
-                    eprintln!(
-                        "Warning: --blind-oob disabled (could not register with any server): {e}"
+                Err(e) => {
+                    log_warn(
+                        args,
+                        &format!("--blind-oob disabled (could not register with any server): {e}"),
                     );
+                    None
                 }
-                None
             }
-        }
-    } else {
-        None
-    };
+        } else {
+            None
+        };
 
     if blind_active && (args.blind_callback_url.is_some() || oob_session.is_some()) {
-        if let Some(callback_url) = &args.blind_callback_url
-            && !args.silence
-            && args.format == "plain"
-        {
-            println!(
-                "Performing blind XSS scanning with callback URL: {}",
-                callback_url
+        if let Some(callback_url) = &args.blind_callback_url {
+            log_info(
+                args,
+                &format!(
+                    "Performing blind XSS scanning with callback URL: {}",
+                    callback_url
+                ),
             );
         }
         let custom = args.custom_blind_xss_payload.as_deref();
@@ -573,8 +570,11 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // `state.results` before rendering below.
     if let Some(poller) = oob_poller {
         let wait = Duration::from_secs(args.blind_oob_wait());
-        if !args.silence && args.format == "plain" && wait.as_secs() > 0 {
-            println!("Waiting up to {}s for OOB callbacks...", wait.as_secs());
+        if wait.as_secs() > 0 {
+            log_info(
+                args,
+                &format!("Waiting up to {}s for OOB callbacks...", wait.as_secs()),
+            );
         }
         poller.finish(wait).await;
     }
