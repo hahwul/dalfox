@@ -283,9 +283,7 @@ pub async fn fingerprint_with_probe(
     let resp = match rb.send().await {
         Ok(r) => r,
         Err(e) => {
-            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                eprintln!("[DBG] waf probe network error for {}: {}", target.url, e);
-            }
+            crate::dbg_log!("waf probe network error for {}: {}", target.url, e);
             return WafDetectionResult::default();
         }
     };

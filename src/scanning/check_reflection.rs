@@ -1580,12 +1580,11 @@ async fn fetch_injection_response_with_client(
                     .and_then(|v| v.to_str().ok())
                     .unwrap_or("");
                 if crate::utils::content_type_is_inert_data(ct) {
-                    if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                        eprintln!(
-                            "[DBG] suppressing reflection on inert-data content-type (param={}, content-type={})",
-                            param.name, ct
-                        );
-                    }
+                    crate::dbg_log!(
+                        "suppressing reflection on inert-data content-type (param={}, content-type={})",
+                        param.name,
+                        ct
+                    );
                     return None;
                 }
             }
@@ -1598,12 +1597,11 @@ async fn fetch_injection_response_with_client(
             //     browsers render it as data, not markup.
             if matches!(param.location, Location::Path) {
                 if (300..400).contains(&status_code) {
-                    if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                        eprintln!(
-                            "[DBG] suppressing path reflection on 3xx redirect (param={}, status={})",
-                            param.name, status_code
-                        );
-                    }
+                    crate::dbg_log!(
+                        "suppressing path reflection on 3xx redirect (param={}, status={})",
+                        param.name,
+                        status_code
+                    );
                     return None;
                 }
                 let ct = resp
@@ -1619,12 +1617,11 @@ async fn fetch_injection_response_with_client(
                 let executes_as_markup = crate::utils::is_htmlish_content_type(ct)
                     || crate::utils::content_type_primary(ct).as_deref() == Some("image/svg+xml");
                 if !ct.is_empty() && !executes_as_markup {
-                    if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                        eprintln!(
-                            "[DBG] suppressing path-injection reflection on non-HTML content-type (param={}, content-type={})",
-                            param.name, ct
-                        );
-                    }
+                    crate::dbg_log!(
+                        "suppressing path-injection reflection on non-HTML content-type (param={}, content-type={})",
+                        param.name,
+                        ct
+                    );
                     return None;
                 }
             }
@@ -1666,23 +1663,21 @@ async fn fetch_injection_response_with_client(
                         &body,
                         payload,
                     ) {
-                        if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                            eprintln!(
-                                "[DBG] suppressing url-echo-only path reflection (param={}, status={})",
-                                param.name, status_code
-                            );
-                        }
+                        crate::dbg_log!(
+                            "suppressing url-echo-only path reflection (param={}, status={})",
+                            param.name,
+                            status_code
+                        );
                         return None;
                     }
                     Some(body)
                 }
                 Err(e) => {
-                    if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                        eprintln!(
-                            "[DBG] reflection response body read failed (param={}): {}",
-                            param.name, e
-                        );
-                    }
+                    crate::dbg_log!(
+                        "reflection response body read failed (param={}): {}",
+                        param.name,
+                        e
+                    );
                     None
                 }
             }

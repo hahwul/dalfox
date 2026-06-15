@@ -523,9 +523,7 @@ async fn send_probe_request_for_param(
     let body_text = match crate::utils::http::read_body(resp).await {
         Ok(body) => Some(body),
         Err(e) => {
-            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                eprintln!("[DBG] discovery response body read failed: {}", e);
-            }
+            crate::dbg_log!("discovery response body read failed: {}", e);
             None
         }
     };

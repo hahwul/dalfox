@@ -6,7 +6,7 @@
 
 use super::ScanState;
 use super::args::ScanArgs;
-use super::logging::{log_dbg, start_spinner};
+use super::logging::start_spinner;
 use super::preflight::{PreflightOutcome, is_allowed_content_type, preflight_content_type};
 use crate::parameter_analysis::analyze_parameters;
 use crate::target_parser::Target;
@@ -652,7 +652,7 @@ pub(crate) async fn run_preflight_and_analysis(
                             );
                         }
                         if args_clone.format == "plain" && !args_clone.silence {
-                            log_dbg(&format!("{} test cases (reqs) estimated", total));
+                            crate::dbg_log!("{} test cases (reqs) estimated", total);
                         }
                     }
                 }

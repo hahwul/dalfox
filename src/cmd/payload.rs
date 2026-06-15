@@ -89,9 +89,7 @@ fn fetch_and_print_remote(provider: &str) -> bool {
                         for p in list.iter() {
                             println!("{}", p);
                         }
-                        if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                            eprintln!("[DBG] {}: {} payloads", provider, count);
-                        }
+                        crate::dbg_log!("{}: {} payloads", provider, count);
                         ok_clone.store(true, std::sync::atomic::Ordering::Relaxed);
                     } else {
                         eprintln!(
@@ -121,9 +119,7 @@ pub fn run_payload(args: PayloadArgs) -> ScanOutcome {
             for ev in list.iter() {
                 println!("{}", ev);
             }
-            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                eprintln!("[DBG] event-handlers: {} items", list.len());
-            }
+            crate::dbg_log!("event-handlers: {} items", list.len());
             ScanOutcome::Clean
         }
         Some("useful-tags") => {
@@ -131,9 +127,7 @@ pub fn run_payload(args: PayloadArgs) -> ScanOutcome {
             for t in list.iter() {
                 println!("{}", t);
             }
-            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                eprintln!("[DBG] useful-tags: {} items", list.len());
-            }
+            crate::dbg_log!("useful-tags: {} items", list.len());
             ScanOutcome::Clean
         }
         Some("payloadbox") => {
@@ -155,9 +149,7 @@ pub fn run_payload(args: PayloadArgs) -> ScanOutcome {
             for payload in list {
                 println!("{}", payload);
             }
-            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                eprintln!("[DBG] uri-scheme: {} payloads", list.len());
-            }
+            crate::dbg_log!("uri-scheme: {} payloads", list.len());
             ScanOutcome::Clean
         }
         Some(other) => {

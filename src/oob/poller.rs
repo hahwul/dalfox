@@ -112,9 +112,7 @@ async fn poll_once(
     let interactions = match session.poll().await {
         Ok(v) => v,
         Err(e) => {
-            if crate::DEBUG.load(Ordering::Relaxed) {
-                eprintln!("[DBG] OOB poll failed: {e}");
-            }
+            crate::dbg_log!("OOB poll failed: {e}");
             return;
         }
     };
