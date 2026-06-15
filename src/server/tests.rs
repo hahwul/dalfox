@@ -656,7 +656,7 @@ async fn test_start_scan_handler_unauthorized_and_bad_request_jsonp() {
         HeaderMap::new(),
         Query(params_auth),
         Ok(Json(ScanRequest {
-            url: "http://example.com".to_string(),
+            target: "http://example.com".to_string(),
             options: None,
         })),
     )
@@ -674,7 +674,7 @@ async fn test_start_scan_handler_unauthorized_and_bad_request_jsonp() {
         HeaderMap::new(),
         Query(params_bad_req),
         Ok(Json(ScanRequest {
-            url: "   ".to_string(),
+            target: "   ".to_string(),
             options: None,
         })),
     )
@@ -693,7 +693,7 @@ async fn test_start_scan_handler_success_creates_queued_job() {
         HeaderMap::new(),
         Query(Map::new()),
         Ok(Json(ScanRequest {
-            url: "http://127.0.0.1:1/".to_string(),
+            target: "http://127.0.0.1:1/".to_string(),
             options: Some(ScanOptions {
                 include_request: Some(true),
                 include_response: Some(true),
@@ -738,7 +738,7 @@ async fn test_start_scan_handler_success_jsonp_response() {
         HeaderMap::new(),
         Query(q),
         Ok(Json(ScanRequest {
-            url: "http://127.0.0.1:1/".to_string(),
+            target: "http://127.0.0.1:1/".to_string(),
             options: None,
         })),
     )
@@ -1631,7 +1631,7 @@ async fn test_preflight_handler_rejects_invalid_url() {
         HeaderMap::new(),
         Query(Map::new()),
         Ok(Json(ScanRequest {
-            url: "not-http".to_string(),
+            target: "not-http".to_string(),
             options: None,
         })),
     )
@@ -1648,7 +1648,7 @@ async fn test_preflight_handler_requires_auth() {
         HeaderMap::new(),
         Query(Map::new()),
         Ok(Json(ScanRequest {
-            url: "http://example.com".to_string(),
+            target: "http://example.com".to_string(),
             options: None,
         })),
     )
@@ -1665,7 +1665,7 @@ async fn test_preflight_handler_unreachable_target() {
         HeaderMap::new(),
         Query(Map::new()),
         Ok(Json(ScanRequest {
-            url: "http://127.0.0.1:1/unreachable".to_string(),
+            target: "http://127.0.0.1:1/unreachable".to_string(),
             options: Some(ScanOptions {
                 timeout: Some(1),
                 ..ScanOptions::default()
@@ -1791,7 +1791,7 @@ async fn test_start_scan_handler_rejects_out_of_range_timeout() {
         HeaderMap::new(),
         Query(Map::new()),
         Ok(Json(ScanRequest {
-            url: "http://example.com".to_string(),
+            target: "http://example.com".to_string(),
             options: Some(ScanOptions {
                 timeout: Some(9999),
                 ..ScanOptions::default()
@@ -1834,7 +1834,7 @@ async fn test_start_scan_handler_rejects_non_http_url() {
             HeaderMap::new(),
             Query(Map::new()),
             Ok(Json(ScanRequest {
-                url: bad.to_string(),
+                target: bad.to_string(),
                 options: None,
             })),
         )
@@ -2570,7 +2570,7 @@ async fn test_start_scan_handler_503_when_at_capacity() {
         HeaderMap::new(),
         Query(Map::new()),
         Ok(Json(ScanRequest {
-            url: "http://example.com".to_string(),
+            target: "http://example.com".to_string(),
             options: None,
         })),
     )
@@ -2809,5 +2809,38 @@ async fn test_get_scan_handler_analyze_external_js_param_is_accepted() {
     assert!(
         jobs.contains_key(&scan_id),
         "job must be present in the queue after handler returns"
+    );
+}
+
+// Target/URL param unification: `target` is canonical (matches MCP + response),
+// `url` stays as a backwards-compatible alias on the REST surface.
+#[test]
+fn test_scan_request_accepts_target_canonical_and_url_alias() {
+    let from_target: ScanRequest =
+        serde_json::from_str(r#"{"target":"http://a.test/?q=1"}"#).expect("target key parses");
+    assert_eq!(from_target.target, "http://a.test/?q=1");
+
+    let from_url: ScanRequest =
+        serde_json::from_str(r#"{"url":"http://b.test/?q=1"}"#).expect("url alias parses");
+    assert_eq!(from_url.target, "http://b.test/?q=1");
+
+    // Neither key present is a hard error (target is required).
+    assert!(serde_json::from_str::<ScanRequest>(r#"{"options":{}}"#).is_err());
+}
+
+#[tokio::test]
+async fn test_get_scan_handler_accepts_target_query_param() {
+    let state = make_state(None, None, false, false, "cb");
+    let mut params = Map::new();
+    params.insert("target".to_string(), "http://127.0.0.1:1/?q=1".to_string());
+    let resp = get_scan_handler(State(state.clone()), HeaderMap::new(), Query(params))
+        .await
+        .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = response_body_string(resp).await;
+    let parsed: serde_json::Value = serde_json::from_str(&body).expect("json body");
+    assert!(
+        parsed["data"]["scan_id"].as_str().is_some(),
+        "a scan submitted via the `target` query param must return a scan_id"
     );
 }

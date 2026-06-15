@@ -51,7 +51,7 @@ For browser clients that can't set custom headers:
 
 ```bash
 dalfox server --jsonp --callback-param-name callback
-# then GET /scan?url=...&callback=myFunction
+# then GET /scan?target=...&callback=myFunction
 ```
 
 ## Endpoints
@@ -59,7 +59,7 @@ dalfox server --jsonp --callback-param-name callback
 | Method | Path | What it does |
 |--------|------|--------------|
 | `POST` | `/scan` | Submit a new scan (JSON body) |
-| `GET` | `/scan?url=...` | Submit a new scan (query string) |
+| `GET` | `/scan?target=...` | Submit a new scan (query string) |
 | `GET` | `/scan/:id` | Get scan status and results |
 | `DELETE` | `/scan/:id` | Cancel a queued or running scan |
 | `GET` | `/scans` | List all scans (optional `?status=`) |
@@ -74,7 +74,7 @@ curl -X POST http://127.0.0.1:6664/scan \
   -H "X-API-KEY: change-me" \
   -H "Content-Type: application/json" \
   -d '{
-    "url": "https://target.app?q=test",
+    "target": "https://target.app?q=test",
     "options": {
       "worker": 50,
       "timeout": 10,
@@ -83,6 +83,8 @@ curl -X POST http://127.0.0.1:6664/scan \
     }
   }'
 ```
+
+The scan target field is `target` (matching the MCP `scan_with_dalfox` tool and the response payload). The legacy field name `url` is still accepted as an alias — for both the JSON body and the `?target=` / `?url=` query string — so existing clients keep working.
 
 Response:
 

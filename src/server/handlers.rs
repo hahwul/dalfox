@@ -41,7 +41,7 @@ pub(crate) async fn start_scan_handler(
 
     // Trim once and use the trimmed value throughout (validation, scan_id,
     // stored target, dispatch) so whitespace variants stay consistent.
-    let url = req.url.trim().to_string();
+    let url = req.target.trim().to_string();
     if url.is_empty() {
         let resp = ApiResponse::<serde_json::Value> {
             code: 400,
@@ -257,8 +257,11 @@ pub(crate) async fn get_scan_handler(
     // Trim once and use the trimmed value throughout, so whitespace variants
     // of the same URL validate, hash to the same scan_id, and store the same
     // target consistently.
+    // `target` is the canonical param (matches POST/MCP); `url` stays as a
+    // backwards-compatible alias for existing query-string / JSONP callers.
     let url = params
-        .get("url")
+        .get("target")
+        .or_else(|| params.get("url"))
         .cloned()
         .unwrap_or_default()
         .trim()
@@ -767,7 +770,7 @@ pub(crate) async fn preflight_handler(
         }
     };
 
-    let target_url = req.url.trim().to_string();
+    let target_url = req.target.trim().to_string();
     if target_url.is_empty() || !has_http_scheme(&target_url) {
         let resp = ApiResponse::<serde_json::Value> {
             code: 400,
