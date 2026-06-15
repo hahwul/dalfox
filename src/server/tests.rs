@@ -2585,6 +2585,7 @@ async fn test_start_scan_handler_503_when_at_capacity() {
 
 #[test]
 fn test_sanitize_log_message_escapes_crlf() {
+    use crate::utils::log::sanitize_log_message;
     // F11: clean strings are passed through unchanged (borrowed)...
     assert_eq!(sanitize_log_message("clean line").as_ref(), "clean line");
     // ...but CR/LF that could forge a log line are escaped, tab preserved.

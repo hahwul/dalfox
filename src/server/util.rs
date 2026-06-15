@@ -196,33 +196,12 @@ pub(crate) fn at_capacity_response(state: &AppState) -> ApiResponse<serde_json::
     }
 }
 
-/// Defang ASCII control characters in a (possibly user-controlled) log message
-/// so a submitter can't forge extra log lines. Log calls embed the target URL
-/// and error strings, which carry attacker-supplied bytes; `has_http_scheme`
-/// only checks the prefix, so an embedded `\n`/`\r` would otherwise inject a
-/// whole fabricated `[ts] [LVL] ...` line into the file and onto stdout.
-/// CR/LF become `\n`/`\r`; other C0 controls become `\xNN`; tab is kept. Returns
-/// a borrowed string on the common (clean) path so non-injecting logs allocate
-/// nothing.
-pub(crate) fn sanitize_log_message(msg: &str) -> std::borrow::Cow<'_, str> {
-    if !msg.bytes().any(|b| b < 0x20 && b != b'\t') {
-        return std::borrow::Cow::Borrowed(msg);
-    }
-    let mut out = String::with_capacity(msg.len() + 8);
-    for c in msg.chars() {
-        match c {
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push('\t'),
-            c if (c as u32) < 0x20 => out.push_str(&format!("\\x{:02x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    std::borrow::Cow::Owned(out)
-}
-
+/// Emit a structured server log line — gray `{ts}` + colored `{level}` token +
+/// message — to stdout and, when `--log-file` is set, append it to that file.
+/// The message is run through [`sanitize_log_message`](crate::utils::log::sanitize_log_message)
+/// first because it embeds attacker-supplied bytes (target URLs, error strings).
 pub(crate) fn log(state: &AppState, level: &str, message: &str) {
-    let message = sanitize_log_message(message);
+    let message = crate::utils::log::sanitize_log_message(message);
     let message = message.as_ref();
     let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let (color, lvl) = match level {
