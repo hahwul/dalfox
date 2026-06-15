@@ -15,6 +15,19 @@ fn test_into_scan_args_sets_file_mode_and_target() {
     assert_eq!(scan_args.targets, vec!["targets.txt".to_string()]);
 }
 
+#[test]
+fn test_into_scan_args_respects_explicit_input_type() {
+    // `-i har` / `-i raw-http` must survive: the file is then parsed as a HAR /
+    // raw-HTTP document rather than a line-based URL list. The file path still
+    // becomes the sole target.
+    for it in ["har", "raw-http"] {
+        let cli = TestCli::parse_from(["dalfox-test", "capture.har", "-i", it]);
+        let scan_args = into_scan_args(cli.args);
+        assert_eq!(scan_args.input_type, it);
+        assert_eq!(scan_args.targets, vec!["capture.har".to_string()]);
+    }
+}
+
 #[tokio::test]
 async fn test_run_file_executes_scan_path_without_panic() {
     let path = std::env::temp_dir().join(format!(

@@ -14,7 +14,13 @@ pub struct UrlArgs {
 
 fn into_scan_args(args: UrlArgs) -> ScanArgs {
     let mut scan_args = args.scan_args;
-    scan_args.input_type = "url".to_string();
+    // The `--url` value is the single target; default to treating it as a URL,
+    // but respect an explicit `-i/--input-type` for consistency with the other
+    // entry subcommands (a contradictory choice like `-i har` then surfaces a
+    // clear parse error instead of being silently ignored).
+    if scan_args.input_type == "auto" {
+        scan_args.input_type = "url".to_string();
+    }
     scan_args.targets = vec![args.url];
     scan_args
 }
