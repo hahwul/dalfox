@@ -14,7 +14,13 @@ pub struct FileArgs {
 
 fn into_scan_args(args: FileArgs) -> ScanArgs {
     let mut scan_args = args.scan_args;
-    scan_args.input_type = "file".to_string();
+    // The `file` subcommand defaults to reading the file as a URL list, but it
+    // also flattens (and advertises) `-i/--input-type`. Respect an explicit
+    // choice — `-i har` / `-i raw-http` parses the file as a HAR / raw-HTTP
+    // document instead — and only force the default when left at `auto`.
+    if scan_args.input_type == "auto" {
+        scan_args.input_type = "file".to_string();
+    }
     scan_args.targets = vec![args.file];
     scan_args
 }
