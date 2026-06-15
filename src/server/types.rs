@@ -135,7 +135,11 @@ pub(crate) struct ApiResponse<T> {
 
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct ScanRequest {
-    pub(crate) url: String,
+    /// Scan target. Named `target` to match the MCP `scan_with_dalfox` tool and
+    /// the response payload's `target` field; `url` is accepted as a backwards-
+    /// compatible alias so existing REST clients keep working.
+    #[serde(alias = "url")]
+    pub(crate) target: String,
     #[serde(default)]
     pub(crate) options: Option<ScanOptions>,
 }
