@@ -25,8 +25,18 @@ fn into_scan_args(args: FileArgs) -> ScanArgs {
     scan_args
 }
 
-pub async fn run_file(args: FileArgs) -> crate::cmd::scan::ScanOutcome {
-    let scan_args = into_scan_args(args);
+pub async fn run_file(
+    args: FileArgs,
+    cli_no_color: bool,
+    cli_silence: bool,
+    config: Option<&crate::config::Config>,
+) -> crate::cmd::scan::ScanOutcome {
+    let scan_args = crate::cmd::scan::finalize_scan_args(
+        into_scan_args(args),
+        cli_no_color,
+        cli_silence,
+        config,
+    );
     crate::cmd::scan::run_scan(&scan_args).await
 }
 

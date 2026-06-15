@@ -303,22 +303,15 @@ async fn main() {
     if let Some(command) = cli.command {
         match command {
             Commands::Scan(args) => {
-                let mut args = args;
-                // `--no-color` and `--silence` are global flags on `Cli`
-                // so users can write `dalfox scan URL --silence` or
-                // `dalfox URL --silence` without clap rejecting them.
-                // Mirror the parsed values into `ScanArgs` before the
-                // config layer runs so `apply_to_scan_args_if_default`
-                // sees them as already-set when deciding precedence.
-                args.no_color = args.no_color || cli.no_color;
-                args.silence = args.silence || cli.silence;
-                if let Ok(res) = &config_load {
-                    res.config.apply_to_scan_args_if_default(&mut args);
-                }
-                if args.include_all {
-                    args.include_request = true;
-                    args.include_response = true;
-                }
+                // `--no-color`/`--silence` are global on `Cli`, config defaults
+                // overlay, and `--include-all` expands — all folded in one shared
+                // helper so this path and `url`/`file`/`pipe` stay identical.
+                let args = cmd::scan::finalize_scan_args(
+                    args,
+                    cli.no_color,
+                    cli.silence,
+                    config_load.as_ref().ok().map(|r| &r.config),
+                );
                 outcome = cmd::scan::run_scan(&args).await;
             }
             Commands::Server(args) => {
@@ -337,18 +330,21 @@ async fn main() {
             }
 
             Commands::Url(args) => {
-                outcome = cmd::url::run_url(args).await;
+                let config = config_load.as_ref().ok().map(|r| &r.config);
+                outcome = cmd::url::run_url(args, cli.no_color, cli.silence, config).await;
             }
             Commands::File(args) => {
-                outcome = cmd::file::run_file(args).await;
+                let config = config_load.as_ref().ok().map(|r| &r.config);
+                outcome = cmd::file::run_file(args, cli.no_color, cli.silence, config).await;
             }
             Commands::Pipe(args) => {
-                outcome = cmd::pipe::run_pipe(args).await;
+                let config = config_load.as_ref().ok().map(|r| &r.config);
+                outcome = cmd::pipe::run_pipe(args, cli.no_color, cli.silence, config).await;
             }
         }
     } else {
         // Default to scan
-        let mut args = cmd::scan::ScanArgs {
+        let args = cmd::scan::ScanArgs {
             detect_outdated_libs: false,
             input_type: "auto".to_string(),
             format: "plain".to_string(),
@@ -437,13 +433,15 @@ async fn main() {
             remote_payloads: vec![],
             remote_wordlists: vec![],
         };
-        if let Ok(res) = &config_load {
-            res.config.apply_to_scan_args_if_default(&mut args);
-        }
-        if args.include_all {
-            args.include_request = true;
-            args.include_response = true;
-        }
+        // Same config-overlay + `--include-all` expansion as every other entry
+        // point. `no_color`/`silence` were already set from `cli` above, so the
+        // helper's fold is a no-op here.
+        let args = cmd::scan::finalize_scan_args(
+            args,
+            cli.no_color,
+            cli.silence,
+            config_load.as_ref().ok().map(|r| &r.config),
+        );
 
         // No redundant banner emission here — the earlier
         // post-config-load block already called `print_banner_once`

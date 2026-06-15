@@ -41,5 +41,5 @@ async fn test_run_url_executes_scan_path_without_panic() {
         "json",
         "-S",
     ]);
-    run_url(cli.args).await;
+    run_url(cli.args, false, false, None).await;
 }
