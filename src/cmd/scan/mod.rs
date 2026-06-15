@@ -594,7 +594,7 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // and format-specific rendering to stdout or --output file.
     let scan_elapsed = __dalfox_scan_start.elapsed();
     let total_requests = crate::REQUEST_COUNT.load(Ordering::Relaxed);
-    let final_results = output::render_results(
+    let (final_results, output_write_failed) = output::render_results(
         args,
         &state,
         &all_target_urls,
@@ -632,6 +632,14 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
         !skipped.is_empty() && all_target_urls.iter().all(|u| skipped.contains_key(u))
     };
     if all_unreachable {
+        return ScanOutcome::Error;
+    }
+
+    // A requested `--output` file that couldn't be written is a hard failure,
+    // same as an all-unreachable run: the operator asked for results on disk and
+    // didn't get them. Report it via the exit code so scripts don't read it as a
+    // clean/successful pass.
+    if output_write_failed {
         return ScanOutcome::Error;
     }
 

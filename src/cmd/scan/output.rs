@@ -204,7 +204,7 @@ pub(crate) async fn render_results(
     scan_elapsed: std::time::Duration,
     total_requests: u64,
     stream_findings_enabled: bool,
-) -> Vec<Result> {
+) -> (Vec<Result>, bool) {
     let results = state.results.clone();
     let skipped_targets = state.skipped_targets.clone();
     let target_meta = state.target_meta.clone();
@@ -433,6 +433,7 @@ pub(crate) async fn render_results(
         output
     };
 
+    let mut output_write_failed = false;
     if let Some(output_path) = &args.output {
         // Surface `..` traversal so the operator notices before a
         // pipeline silently writes into a parent directory. We don't
@@ -454,9 +455,15 @@ pub(crate) async fn render_results(
                 }
             }
             Err(e) => {
-                if !args.silence {
-                    eprintln!("Error writing to file {}: {}", output_path, e);
-                }
+                // A failed `--output` write is a hard failure, not a log line:
+                // the operator asked for the results in a file and won't get
+                // them. Surface it even under `--silence` (it goes to stderr, so
+                // machine stdout stays clean) and propagate so the exit code
+                // becomes Error instead of a misleading success — otherwise a
+                // CI step like `dalfox -o out.json -S && use out.json` proceeds
+                // against a missing or stale file with zero indication.
+                eprintln!("Error writing to file {}: {}", output_path, e);
+                output_write_failed = true;
             }
         }
     } else {
@@ -466,5 +473,5 @@ pub(crate) async fn render_results(
         crate::cprintln!("{}", output_content);
     }
 
-    final_results
+    (final_results, output_write_failed)
 }
