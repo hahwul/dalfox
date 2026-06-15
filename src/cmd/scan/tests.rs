@@ -1430,7 +1430,7 @@ async fn test_render_results_stdout_path_returns_results() {
         a
     };
     let state = make_scan_state(vec![reflected_result("https://example.com", "q", "<x>")]);
-    let final_results = render_results(
+    let (final_results, write_failed) = render_results(
         &args,
         &state,
         &["https://example.com".to_string()],
@@ -1440,6 +1440,37 @@ async fn test_render_results_stdout_path_returns_results() {
     )
     .await;
     assert_eq!(final_results.len(), 1);
+    assert!(!write_failed, "stdout path never reports a write failure");
+}
+
+#[tokio::test]
+async fn test_render_results_reports_output_write_failure() {
+    // An `--output` path that can't be written (parent dir doesn't exist) must
+    // be reported via the returned flag so the caller can exit with an error —
+    // even under `--silence`, where the stderr message alone wouldn't reach a
+    // script checking the exit code.
+    let mut args = default_scan_args(); // format=json, silence=true
+    args.output = Some(
+        std::env::temp_dir()
+            .join("dalfox-no-such-dir-xyz")
+            .join("out.json")
+            .to_string_lossy()
+            .to_string(),
+    );
+    let state = make_scan_state(vec![reflected_result("https://example.com", "q", "<x>")]);
+    let (_results, write_failed) = render_results(
+        &args,
+        &state,
+        &["https://example.com".to_string()],
+        std::time::Duration::from_millis(1),
+        1,
+        true,
+    )
+    .await;
+    assert!(
+        write_failed,
+        "unwritable --output path must report a write failure"
+    );
 }
 
 // ─────────────────────────────────────────────────────────────────────────
