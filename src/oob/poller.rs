@@ -133,7 +133,7 @@ async fn poll_once(
         }
         let record = session.registry().lookup(&nonce);
         if !silence {
-            eprintln!("{}", live_line(&it, record.as_ref()));
+            crate::ceprintln!("{}", live_line(&it, record.as_ref()));
         }
         batch.push(build_finding(&it, record.as_ref(), session.server_domain()));
     }
@@ -146,16 +146,21 @@ async fn poll_once(
 }
 
 /// One-line stderr notice when a callback lands (kept off stdout so JSON/SARIF
-/// output stays clean).
+/// output stays clean). Formatted like the rest of dalfox's plain log lines —
+/// gray `{ts}` + a red `OOB` level token (a fired blind callback is a Verified
+/// finding) — and routed through `ceprintln!` so the ANSI is stripped under
+/// `--no-color` / `NO_COLOR`.
 fn live_line(it: &OobInteraction, record: Option<&InjectionRecord>) -> String {
     let proto = if it.protocol.is_empty() {
         "oob"
     } else {
         &it.protocol
     };
+    let ts = chrono::Local::now().format("%-I:%M%p").to_string();
     match record {
         Some(r) => format!(
-            "[OOB] {} callback: param '{}' ({}) on {} — payload {}",
+            "\x1b[90m{}\x1b[0m \x1b[31mOOB\x1b[0m {} callback: param '{}' ({}) on {} — payload {}",
+            ts,
             proto,
             r.param,
             if r.location.is_empty() {
@@ -167,8 +172,8 @@ fn live_line(it: &OobInteraction, record: Option<&InjectionRecord>) -> String {
             r.payload,
         ),
         None => format!(
-            "[OOB] {} callback to {} (no correlated payload)",
-            proto, it.full_id
+            "\x1b[90m{}\x1b[0m \x1b[31mOOB\x1b[0m {} callback to {} (no correlated payload)",
+            ts, proto, it.full_id
         ),
     }
 }
