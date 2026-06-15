@@ -4,7 +4,6 @@
 
 use super::args::ScanArgs;
 use std::io::{self, Write};
-use std::sync::atomic::Ordering;
 use std::time::Duration;
 use tokio::sync::oneshot;
 
@@ -26,14 +25,6 @@ pub(crate) fn log_warn(args: &ScanArgs, msg: &str) {
     if args.format == "plain" && !args.silence {
         let ts = chrono::Local::now().format("%-I:%M%p").to_string();
         crate::cprintln!("\x1b[90m{}\x1b[0m \x1b[33mWRN\x1b[0m {}", ts, msg);
-    }
-}
-
-/// DBG log line, gated on the global `--debug` flag (independent of format).
-pub(crate) fn log_dbg(msg: &str) {
-    if crate::DEBUG.load(Ordering::Relaxed) {
-        let ts = chrono::Local::now().format("%-I:%M%p").to_string();
-        crate::cprintln!("\x1b[90m{}\x1b[0m \x1b[35mDBG\x1b[0m {}", ts, msg);
     }
 }
 

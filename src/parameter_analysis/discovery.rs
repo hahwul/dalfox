@@ -780,12 +780,10 @@ pub async fn check_header_discovery(
         // because the operator explicitly asked for them.
         let blanket_echo = detect_blanket_header_echo(target).await;
         if blanket_echo {
-            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                eprintln!(
-                    "[DBG] blanket header echo detected (guard reflected); skipping {} common header probes",
-                    COMMON_PROBE_HEADERS.len()
-                );
-            }
+            crate::dbg_log!(
+                "blanket header echo detected (guard reflected); skipping {} common header probes",
+                COMMON_PROBE_HEADERS.len()
+            );
         } else {
             for &hdr in COMMON_PROBE_HEADERS {
                 if existing_names.insert(hdr.to_ascii_lowercase()) {

@@ -1,4 +1,4 @@
-use super::logging::{log_dbg, log_info, log_warn, start_spinner};
+use super::logging::{log_info, log_warn, start_spinner};
 use super::output::{render_dry_run, render_only_discovery, render_results};
 use super::poc::{build_ast_dom_message, generate_poc, render_finding_block};
 use super::postprocess::{dedupe_ast_results, extract_context};
@@ -1454,9 +1454,9 @@ fn test_log_helpers_emit_in_plain_mode() {
     args.silence = false;
     log_info(&args, "info line");
     log_warn(&args, "warn line");
-    // log_dbg is gated on the global DEBUG flag, which defaults to off here;
-    // calling it exercises the early-return branch without touching globals.
-    log_dbg("debug line");
+    // dbg_log! is gated on the global DEBUG flag, which defaults to off here;
+    // invoking it exercises the gate without touching globals (no stderr output).
+    crate::dbg_log!("debug line");
 }
 
 #[test]

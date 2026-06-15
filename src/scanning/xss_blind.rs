@@ -311,12 +311,12 @@ async fn send_blind_request(target: &Target, param_name: &str, payload: &str, pa
     // out-of-band), but surface transport errors at DEBUG so users can tell a
     // delivery failure apart from a target that simply never calls back.
     crate::record_outbound_request().await;
-    if let Err(e) = request.send().await
-        && crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed)
-    {
-        eprintln!(
-            "[DBG] blind request failed param={} type={}: {}",
-            param_name, param_type, e
+    if let Err(e) = request.send().await {
+        crate::dbg_log!(
+            "blind request failed param={} type={}: {}",
+            param_name,
+            param_type,
+            e
         );
     }
 
@@ -508,12 +508,12 @@ pub async fn blind_scan_forms_with(
                 request = request.body(body);
 
                 crate::record_outbound_request().await;
-                if let Err(e) = request.send().await
-                    && crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed)
-                {
-                    eprintln!(
-                        "[DBG] blind form request failed action={} field_idx={}: {}",
-                        action, field_idx, e
+                if let Err(e) = request.send().await {
+                    crate::dbg_log!(
+                        "blind form request failed action={} field_idx={}: {}",
+                        action,
+                        field_idx,
+                        e
                     );
                 }
 

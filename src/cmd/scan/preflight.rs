@@ -139,12 +139,11 @@ pub(crate) async fn preflight_content_type(
     let client = match target.build_client() {
         Ok(c) => c,
         Err(e) => {
-            if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                eprintln!(
-                    "[DBG] preflight: failed to build HTTP client for {}: {}",
-                    target.url, e
-                );
-            }
+            crate::dbg_log!(
+                "preflight: failed to build HTTP client for {}: {}",
+                target.url,
+                e
+            );
             return PreflightOutcome::Unreachable(crate::cmd::error_codes::CONNECTION_FAILED);
         }
     };
@@ -172,14 +171,12 @@ pub(crate) async fn preflight_content_type(
             Err(e) => {
                 let transient = e.is_connect() || e.is_timeout();
                 if transient && attempt < PREFLIGHT_MAX_ATTEMPTS {
-                    if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                        eprintln!(
-                            "[DBG] preflight transient {} (attempt {}): {} — retrying",
-                            describe_reqwest_failure(&e),
-                            attempt,
-                            target.url
-                        );
-                    }
+                    crate::dbg_log!(
+                        "preflight transient {} (attempt {}): {} — retrying",
+                        describe_reqwest_failure(&e),
+                        attempt,
+                        target.url
+                    );
                     tokio::time::sleep(Duration::from_millis(PREFLIGHT_RETRY_BACKOFF_MS)).await;
                     continue;
                 }
@@ -188,9 +185,7 @@ pub(crate) async fn preflight_content_type(
                 // distinguish a quiet scan from an unreachable target. Suppressed
                 // when --silence is on; the debug channel always carries it.
                 let reason = describe_reqwest_failure(&e);
-                if crate::DEBUG.load(std::sync::atomic::Ordering::Relaxed) {
-                    eprintln!("[DBG] preflight unreachable: {} ({})", target.url, reason);
-                }
+                crate::dbg_log!("preflight unreachable: {} ({})", target.url, reason);
                 if !args.silence {
                     let ts = chrono::Local::now().format("%-I:%M%p").to_string();
                     crate::ceprintln!(

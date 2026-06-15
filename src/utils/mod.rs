@@ -8,6 +8,7 @@ This module re-exports commonly used helpers so other modules can simply
 pub mod banner;
 pub mod fs;
 pub mod http;
+pub mod log;
 pub mod rate_limit;
 pub mod scan_id;
 pub mod shimmer;

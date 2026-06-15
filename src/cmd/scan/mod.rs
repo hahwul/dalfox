@@ -47,7 +47,7 @@ pub use args::{
     DEFAULT_RATE_LIMIT, DEFAULT_RETRIES, DEFAULT_RETRY_DELAY_MS, DEFAULT_TIMEOUT_SECS,
     DEFAULT_WAF_MIN_CONFIDENCE, DEFAULT_WORKERS, PreflightOptions, ScanArgs,
 };
-pub(crate) use logging::{log_dbg, log_info, log_warn};
+pub(crate) use logging::{log_info, log_warn};
 pub(crate) use validation::validate_numeric_args;
 
 static GLOBAL_ENCODERS: OnceLock<Vec<String>> = OnceLock::new();
@@ -326,14 +326,17 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // isn't news. Operators triaging a MITM/TLS scenario can still surface it
     // with `--debug`, where it lands as a DBG line for any https target in
     // insecure mode. When validation is opted into (`--insecure=false`), nothing
-    // is emitted. `log_dbg` ignores `--silence` (it gates on `--debug` only), so
-    // a deliberately-quiet scan still shows it under debug.
+    // is emitted. `dbg_log!` ignores `--silence` (it gates on `--debug` only) and
+    // writes to stderr, so a deliberately-quiet or JSON scan still shows it under
+    // debug without polluting structured stdout.
     if args.insecure.unwrap_or(true)
         && parsed_targets
             .iter()
             .any(|t| t.url.scheme().eq_ignore_ascii_case("https"))
     {
-        log_dbg("TLS validation disabled (--insecure default); use --insecure=false to enforce");
+        crate::dbg_log!(
+            "TLS validation disabled (--insecure default); use --insecure=false to enforce"
+        );
     }
     // Track targets that were skipped during preflight (content-type mismatch etc.)
     // Map of skipped target URL -> error code explaining why it was skipped.
@@ -608,12 +611,10 @@ pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
             args,
             &format!("scan completed in {:.3} seconds", __dalfox_elapsed),
         );
-        if crate::DEBUG.load(Ordering::Relaxed) {
-            log_dbg(&format!(
-                "{} test cases (reqs) sent",
-                crate::REQUEST_COUNT.load(Ordering::Relaxed)
-            ));
-        }
+        crate::dbg_log!(
+            "{} test cases (reqs) sent",
+            crate::REQUEST_COUNT.load(Ordering::Relaxed)
+        );
     }
 
     // A scan where every supplied target failed reachability checks

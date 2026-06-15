@@ -1140,11 +1140,9 @@ fn generate_param_jobs(
             dom_payloads = prune_blocked_raw_angles(dom_payloads, invalid);
             reflection_payloads = hoist_angle_free_payloads(reflection_payloads, invalid);
             dom_payloads = hoist_angle_free_payloads(dom_payloads, invalid);
-            if crate::DEBUG.load(Ordering::Relaxed)
-                && (refl_before != reflection_payloads.len() || dom_before != dom_payloads.len())
-            {
-                eprintln!(
-                    "[DBG] adaptive prune (param={}): reflection {}→{}, dom {}→{} (invalid_specials={:?})",
+            if refl_before != reflection_payloads.len() || dom_before != dom_payloads.len() {
+                crate::dbg_log!(
+                    "adaptive prune (param={}): reflection {}→{}, dom {}→{} (invalid_specials={:?})",
                     param.name,
                     refl_before,
                     reflection_payloads.len(),
