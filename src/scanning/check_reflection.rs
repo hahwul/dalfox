@@ -1807,7 +1807,12 @@ pub async fn check_reflection_with_hpp_url(
             let kind = classify_reflection(location, payload);
             return (kind, Some(location.to_string()));
         }
-        if let Ok(text) = resp.text().await {
+        // Cap the body read like every other scan-path read: a target serving a
+        // huge body must not balloon the scanner's memory. `resp.text()` here was
+        // the one site that bypassed `read_body`'s 16 MiB cap, so an attacker-
+        // controlled target could drive RSS far past the intended workers × cap
+        // bound (verified: a 200 MB body pushed peak RSS to ~1.2 GiB).
+        if let Ok(text) = crate::utils::http::read_body(resp).await {
             let kind = classify_reflection(&text, payload);
             let kind = match kind {
                 Some(_) if is_in_safe_context_decoded(&text, payload) => None,
