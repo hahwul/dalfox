@@ -104,6 +104,34 @@ fn emit_error(format: &str, code: &str, message: &str) {
     }
 }
 
+/// Cross-cutting preamble shared by every scan entry point (`scan`, the bare
+/// no-subcommand path, and the `url`/`file`/`pipe` subcommands) so they behave
+/// identically. Without one shared spot the convenience subcommands silently
+/// diverged — they used to skip config overlay and `--include-all` entirely.
+///
+/// Order matters: fold the global `--no-color`/`--silence` (clap may land them
+/// on either the root `Cli` or the subcommand's `ScanArgs`) *before* the config
+/// overlay, so `apply_to_scan_args_if_default` sees them as already-set when
+/// deciding precedence; expand `--include-all` *after*, so a config-supplied
+/// `include_all` is honored too.
+pub fn finalize_scan_args(
+    mut args: ScanArgs,
+    cli_no_color: bool,
+    cli_silence: bool,
+    config: Option<&crate::config::Config>,
+) -> ScanArgs {
+    args.no_color = args.no_color || cli_no_color;
+    args.silence = args.silence || cli_silence;
+    if let Some(cfg) = config {
+        cfg.apply_to_scan_args_if_default(&mut args);
+    }
+    if args.include_all {
+        args.include_request = true;
+        args.include_response = true;
+    }
+    args
+}
+
 /// Run a scan and return the outcome: `Clean` (no findings), `Findings`, or `Error`.
 pub async fn run_scan(args: &ScanArgs) -> ScanOutcome {
     // Compute no-color locally (safe for concurrent server-mode scans)

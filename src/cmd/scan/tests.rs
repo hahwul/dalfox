@@ -7,7 +7,8 @@ use super::{
     CLI_MAX_DELAY_MS, CLI_MAX_RATE_LIMIT, CLI_MAX_RETRIES, CLI_MAX_RETRY_DELAY_MS,
     CLI_MAX_TIMEOUT_SECS, CLI_MAX_WORKERS, DEFAULT_DELAY_MS, DEFAULT_ENCODERS,
     DEFAULT_MAX_CONCURRENT_TARGETS, DEFAULT_MAX_TARGETS_PER_HOST, DEFAULT_METHOD,
-    DEFAULT_TIMEOUT_SECS, DEFAULT_WORKERS, ScanArgs, ScanOutcome, ScanState, validate_numeric_args,
+    DEFAULT_TIMEOUT_SECS, DEFAULT_WORKERS, ScanArgs, ScanOutcome, ScanState, finalize_scan_args,
+    validate_numeric_args,
 };
 use crate::parameter_analysis::{InjectionContext, Location, Param};
 use crate::scanning::result::{FindingType, Result as ScanResult};
@@ -2040,5 +2041,55 @@ async fn test_run_preflight_and_analysis_analyze_external_js_produces_finding() 
         results.iter().any(|f| f.evidence.contains("sink.js")),
         "finding evidence must reference the external script; findings: {:?}",
         *results
+    );
+}
+
+// finalize_scan_args — the shared preamble that the bare `scan` path and the
+// `url`/`file`/`pipe` subcommands all run. Regression cover for the bug where
+// those subcommands skipped config overlay and `--include-all`.
+#[test]
+fn test_finalize_scan_args_overlays_config_on_default_fields() {
+    let cfg = crate::config::Config {
+        scan: Some(crate::config::ScanConfig {
+            format: Some("jsonl".to_string()),
+            ..Default::default()
+        }),
+    };
+    let mut args = default_scan_args();
+    args.format = "plain".to_string(); // clap default → config may override
+    let out = finalize_scan_args(args, false, false, Some(&cfg));
+    assert_eq!(
+        out.format, "jsonl",
+        "config format applies when arg is default"
+    );
+}
+
+#[test]
+fn test_finalize_scan_args_keeps_explicit_over_config() {
+    let cfg = crate::config::Config {
+        scan: Some(crate::config::ScanConfig {
+            format: Some("jsonl".to_string()),
+            ..Default::default()
+        }),
+    };
+    let mut args = default_scan_args();
+    args.format = "sarif".to_string(); // explicit non-default → config must NOT win
+    let out = finalize_scan_args(args, false, false, Some(&cfg));
+    assert_eq!(out.format, "sarif", "explicit format outranks config");
+}
+
+#[test]
+fn test_finalize_scan_args_folds_globals_and_expands_include_all() {
+    let mut args = default_scan_args();
+    args.no_color = false;
+    args.silence = false;
+    args.include_all = true;
+    args.include_request = false;
+    args.include_response = false;
+    let out = finalize_scan_args(args, /*no_color*/ true, /*silence*/ true, None);
+    assert!(out.no_color && out.silence, "global flags are folded in");
+    assert!(
+        out.include_request && out.include_response,
+        "--include-all expands to request+response"
     );
 }

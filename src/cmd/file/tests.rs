@@ -43,7 +43,7 @@ async fn test_run_file_executes_scan_path_without_panic() {
         "json",
         "-S",
     ]);
-    run_file(cli.args).await;
+    run_file(cli.args, false, false, None).await;
 
     let _ = std::fs::remove_file(path);
 }
