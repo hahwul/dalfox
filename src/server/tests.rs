@@ -2844,3 +2844,23 @@ async fn test_get_scan_handler_accepts_target_query_param() {
         "a scan submitted via the `target` query param must return a scan_id"
     );
 }
+
+#[tokio::test]
+async fn test_get_scan_handler_empty_target_falls_through_to_url_alias() {
+    // A present-but-empty `target` must not shadow a real `url`, so a templated
+    // `?target=&url=...` still scans the url (preserves the pre-rename behavior).
+    let state = make_state(None, None, false, false, "cb");
+    let mut params = Map::new();
+    params.insert("target".to_string(), String::new());
+    params.insert("url".to_string(), "http://127.0.0.1:1/?q=1".to_string());
+    let resp = get_scan_handler(State(state.clone()), HeaderMap::new(), Query(params))
+        .await
+        .into_response();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = response_body_string(resp).await;
+    let parsed: serde_json::Value = serde_json::from_str(&body).expect("json body");
+    assert_eq!(
+        parsed["data"]["target"], "http://127.0.0.1:1/?q=1",
+        "empty target must fall through to the url alias"
+    );
+}

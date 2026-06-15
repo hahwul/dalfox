@@ -258,9 +258,13 @@ pub(crate) async fn get_scan_handler(
     // of the same URL validate, hash to the same scan_id, and store the same
     // target consistently.
     // `target` is the canonical param (matches POST/MCP); `url` stays as a
-    // backwards-compatible alias for existing query-string / JSONP callers.
+    // backwards-compatible alias for existing query-string / JSONP callers. An
+    // empty `target` (e.g. a templated `?target=&url=...`) falls through to the
+    // alias so it can't shadow a real `url` — preserving the old behavior for
+    // any caller still sending `url`.
     let url = params
         .get("target")
+        .filter(|t| !t.trim().is_empty())
         .or_else(|| params.get("url"))
         .cloned()
         .unwrap_or_default()
