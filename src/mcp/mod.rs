@@ -78,7 +78,10 @@ where
             {
                 Ok(rt) => *slot = Some(rt),
                 Err(e) => {
-                    eprintln!("[MCP][ERR] runtime build failed for tag={}: {}", tag, e);
+                    DalfoxMcp::log(
+                        "ERR",
+                        &format!("runtime build failed for tag={}: {}", tag, e),
+                    );
                     return None;
                 }
             }
@@ -214,6 +217,11 @@ impl DalfoxMcp {
     }
 
     fn log(level: &str, msg: &str) {
+        // MCP speaks JSON-RPC over stdout, so every diagnostic goes to stderr.
+        // Sanitize first: messages embed attacker-supplied bytes (scan target
+        // URLs, error/panic strings), and a raw CR/LF would let a submitter
+        // forge a fabricated `[ts] [LVL] ...` line on the operator's console.
+        let msg = crate::utils::log::sanitize_log_message(msg);
         let ts = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
         eprintln!("[{}] [{}] {}", ts, level, msg);
     }
@@ -1242,7 +1250,7 @@ Final results (via get_results_dalfox) include finding type \
                     "unknown panic payload".to_string()
                 };
                 let msg = format!("scan task panicked: {}", payload);
-                eprintln!("[MCP][ERR] {} scan_id={}", msg, sid_for_recovery);
+                Self::log("ERR", &format!("{} scan_id={}", msg, sid_for_recovery));
                 mark_job_error_sync(&jobs_for_recovery, &sid_for_recovery, msg);
             }
         });

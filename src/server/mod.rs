@@ -210,7 +210,11 @@ pub async fn run_server(args: ServerArgs) {
     // requests before returning; previously the server ignored Ctrl-C
     // outright and required SIGKILL, leaking any in-flight scans and
     // their webhook subscribers' terminal callbacks.
-    let shutdown_signal = async {
+    // Clone for the shutdown future: `state` is borrowed again below for the
+    // serve-error log, so the future can't take it by reference (it outlives
+    // this point) or by move.
+    let shutdown_state = state.clone();
+    let shutdown_signal = async move {
         #[cfg(unix)]
         {
             use tokio::signal::unix::{SignalKind, signal};
@@ -225,13 +229,17 @@ pub async fn run_server(args: ServerArgs) {
         {
             let _ = tokio::signal::ctrl_c().await;
         }
-        eprintln!("[server] shutdown signal received — draining in-flight requests");
+        log(
+            &shutdown_state,
+            "SERVER",
+            "shutdown signal received — draining in-flight requests",
+        );
     };
     if let Err(e) = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal)
         .await
     {
-        eprintln!("server error: {}", e);
+        log(&state, "ERR", &format!("server error: {}", e));
     }
 }
 

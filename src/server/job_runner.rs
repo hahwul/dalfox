@@ -26,7 +26,7 @@ pub(crate) fn spawn_scan_task(
             Ok(r) => r,
             Err(e) => {
                 let msg = format!("scan runtime build failed: {}", e);
-                eprintln!("[server] {} for job {}", msg, job_id);
+                log(&state, "ERR", &format!("{} for job {}", msg, job_id));
                 fail_job_via_fresh_runtime(&state, &job_id, &url, msg);
                 return;
             }
@@ -57,7 +57,11 @@ pub(crate) fn spawn_scan_task(
                 "unknown panic payload".to_string()
             };
             let msg = format!("scan task panicked: {}", payload);
-            eprintln!("[server] {} (job_id={})", msg, job_id_for_recovery);
+            log(
+                &state_for_recovery,
+                "ERR",
+                &format!("{} (job_id={})", msg, job_id_for_recovery),
+            );
             // The scan runtime itself is still valid after a panic inside the
             // future, so reuse it for the recovery write rather than spinning
             // up a second runtime just to update one map entry.
@@ -83,9 +87,10 @@ fn fail_job_via_fresh_runtime(state: &AppState, job_id: &str, url: &str, msg: St
         .enable_all()
         .build()
     else {
-        eprintln!(
-            "[server] could not build recovery runtime to fail job {}",
-            job_id
+        log(
+            state,
+            "ERR",
+            &format!("could not build recovery runtime to fail job {}", job_id),
         );
         return;
     };
