@@ -563,6 +563,13 @@ fn dangerous_scheme_reflection_is_inert(html: &str, payload: &str) -> bool {
     if variants.iter().any(|v| v.contains(['<', '>'])) {
         return false;
     }
+    // ...and the scheme is not echoed inside a <script> block, where a JS
+    // navigation sink (`location.href = "javascript:..."`) makes it executable
+    // even though it never sits at a URL-attr scheme-start. Leave those to the
+    // JS-context / AST path rather than hiding a real finding.
+    if variant_occurs_in_script_block(html, &variants) {
+        return false;
+    }
     // Scan the raw response and its URL-decoded view (the self-link echo carries
     // the scheme percent-encoded). Any executable occurrence keeps the finding.
     let (mut found, executable) = scan_dangerous_scheme_occurrences(html, &variants);
@@ -749,6 +756,21 @@ fn script_block_ranges(html: &str) -> Vec<(usize, usize)> {
         }
     }
     ranges
+}
+
+/// True when any reflected variant of the payload appears inside a
+/// `<script>...</script>` block. A dangerous URL scheme echoed there can feed a
+/// JS navigation sink (`location.href = "javascript:..."`) where it executes
+/// despite never sitting at a URL-attribute scheme-start, so the inert-scheme
+/// gate must not suppress it (let the JS-context / AST path judge executability).
+fn variant_occurs_in_script_block(html: &str, variants: &[String]) -> bool {
+    let ranges = script_block_ranges(html);
+    ranges.iter().any(|&(s, e)| {
+        let block = &html[s..e];
+        variants
+            .iter()
+            .any(|v| !v.is_empty() && block.contains(v.as_str()))
+    })
 }
 
 /// Helper: every occurrence of `needle` in `haystack` falls inside one of the

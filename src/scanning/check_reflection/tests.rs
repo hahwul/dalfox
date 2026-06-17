@@ -1838,6 +1838,25 @@ fn test_scheme_fp_keeps_executable_scheme_start() {
 }
 
 #[test]
+fn test_scheme_fp_keeps_scheme_in_script_navigation_sink() {
+    // A dangerous scheme echoed inside a <script> block can feed a JS navigation
+    // sink (`location.href = "javascript:..."`) and execute, even though it never
+    // sits at a URL-attribute scheme-start. The inert-scheme gate MUST NOT
+    // suppress it — let the JS-context / AST path decide executability.
+    let payload = "javascript:alert(1)";
+    for html in [
+        "<script>location.href = \"javascript:alert(1)\";</script>",
+        "<script>window.location = 'javascript:alert(1)';</script>",
+        "<script>var u = \"javascript:alert(1)\"; location.assign(u);</script>",
+    ] {
+        assert!(
+            !dangerous_scheme_reflection_is_inert(html, payload),
+            "scheme inside <script> must not be demoted as inert: {html}"
+        );
+    }
+}
+
+#[test]
 fn test_scheme_fp_keeps_when_both_inert_and_executable_present() {
     // An inert query echo co-existing with a real scheme-start href: keep.
     let payload = "javascript:alert(1)";
