@@ -371,12 +371,13 @@ fn get_js_breakout_payloads() -> Vec<String> {
 /// Resolve the effective per-parameter payload cap from the user's
 /// `--max-payloads-per-param` (`max_payloads`) and `--deep-scan` flags.
 ///
-/// - An explicit `--max-payloads-per-param N` (N > 0) always wins.
+/// - An explicit `--max-payloads-per-param N` (N > 0) always wins — it is
+///   honored verbatim even under `--deep-scan`.
 /// - `0` (the default) means "apply the built-in [`DEFAULT_PAYLOAD_SAFETY_CAP`]"
 ///   so a parameter that reflects every payload without DOM-verifying can't
 ///   drive the DOM phase through the full payload set (issue #1153).
-/// - `--deep-scan` opts out entirely (returns `0` = unlimited) for exhaustive
-///   runs, regardless of the safety cap.
+/// - `--deep-scan` lifts only the built-in safety cap: it makes the default
+///   (`0`) unlimited for exhaustive runs. It does not override an explicit cap.
 pub(crate) fn effective_payload_cap(max_payloads: usize, deep_scan: bool) -> usize {
     match max_payloads {
         0 if deep_scan => 0,
@@ -1166,11 +1167,17 @@ fn generate_param_jobs(
             }
         }
 
-        // Cap each payload set independently. An explicit --max-payloads-per-param
-        // wins; otherwise a built-in safety cap bounds the request fan-out on
-        // parameters that reflect every payload without DOM-verifying (self-link
-        // echoes — issue #1153), where the DOM phase would otherwise send the
-        // full ~10k+ payload set. --deep-scan opts out (truly unlimited).
+        // Cap the *base* reflection and DOM catalogs independently (each to
+        // `cap`). An explicit --max-payloads-per-param wins; otherwise a built-in
+        // safety cap bounds the request fan-out on parameters that reflect every
+        // payload without DOM-verifying (self-link echoes — issue #1153), where
+        // the DOM phase would otherwise send the full ~10k+ payload set.
+        // --deep-scan lifts the built-in cap (truly unlimited).
+        //
+        // Note: this caps the base catalog *before* the shared CSP/tech payloads
+        // are appended below. Those few high-value payloads are added after the
+        // cap (and never trimmed), so the final per-parameter set can exceed
+        // `cap` by their (small, bounded) count — by design.
         let cap = effective_payload_cap(args.max_payloads_per_param, args.deep_scan);
         if cap > 0 {
             let refl_dropped = reflection_payloads.len().saturating_sub(cap);

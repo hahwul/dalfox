@@ -481,11 +481,13 @@ pub struct ScanArgs {
     pub skip_xss_scanning: bool,
 
     #[clap(help_heading = "XSS SCANNING")]
-    /// Cap the number of payloads tested per parameter (reflection set and DOM-verification
+    /// Cap the number of base payloads tested per parameter (reflection set and DOM-verification
     /// set are each capped independently). 0 (default) applies a built-in safety cap of 3000
     /// per set unless --deep-scan is set; pass an explicit value to override, or --deep-scan
     /// for a truly unlimited run. Bounds the request fan-out on large attack surfaces and on
     /// endpoints that reflect every payload (self-/canonical-link echoes) without verifying.
+    /// Note: a small set of shared CSP-bypass / tech-specific payloads is appended after the
+    /// cap, so the actual per-parameter total may slightly exceed this value.
     #[arg(long, default_value_t = 0)]
     pub max_payloads_per_param: usize,
 

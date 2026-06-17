@@ -2272,10 +2272,13 @@ fn test_effective_payload_cap_resolution() {
 #[test]
 fn test_generate_param_jobs_applies_builtin_safety_cap() {
     // The built-in safety cap must behave exactly like an explicit
-    // --max-payloads-per-param of the same size, must bound every set, and must
-    // be lifted by --deep-scan. Asserting the default-vs-explicit *equivalence*
-    // exercises the cap regardless of how large the base payload set happens to
-    // be. Issue #1153.
+    // --max-payloads-per-param of the same size, must bound the *base* payload
+    // sets, and must be lifted by --deep-scan. (In real scans a few shared
+    // CSP/tech payloads are appended after the cap and can push the final set
+    // slightly past it; here we pass no shared payloads — `&[]` below — so the
+    // base set is the final set and the cap is a strict bound.) Asserting the
+    // default-vs-explicit *equivalence* exercises the cap regardless of how
+    // large the base payload set happens to be. Issue #1153.
     let target = target_with_params(vec![req_param("a", "1", Location::Query)]);
     let safety = crate::cmd::scan::DEFAULT_PAYLOAD_SAFETY_CAP;
 
