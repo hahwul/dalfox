@@ -2271,17 +2271,20 @@ fn test_effective_payload_cap_resolution() {
 
 #[test]
 fn test_generate_param_jobs_applies_builtin_safety_cap() {
-    // By default (no explicit --max-payloads-per-param, no --deep-scan) every
-    // payload set must be bounded by the built-in safety cap; --deep-scan lifts
-    // the bound (set never shrinks below the capped run). Issue #1153.
+    // The built-in safety cap must behave exactly like an explicit
+    // --max-payloads-per-param of the same size, must bound every set, and must
+    // be lifted by --deep-scan. Asserting the default-vs-explicit *equivalence*
+    // exercises the cap regardless of how large the base payload set happens to
+    // be. Issue #1153.
     let target = target_with_params(vec![req_param("a", "1", Location::Query)]);
     let safety = crate::cmd::scan::DEFAULT_PAYLOAD_SAFETY_CAP;
 
+    // Default (0, no --deep-scan) -> built-in safety cap.
     let mut args = integration_scan_args(true);
     args.max_payloads_per_param = 0;
     args.deep_scan = false;
-    let (jobs, _) = super::generate_param_jobs(&target, &args, None, &[]);
-    for (_, refl, dom) in &jobs {
+    let (default_jobs, _) = super::generate_param_jobs(&target, &args, None, &[]);
+    for (_, refl, dom) in &default_jobs {
         assert!(
             refl.len() <= safety && dom.len() <= safety,
             "default scan must cap reflection ({}) and DOM ({}) sets to {safety}",
@@ -2290,10 +2293,26 @@ fn test_generate_param_jobs_applies_builtin_safety_cap() {
         );
     }
 
+    // Default (0) must be equivalent to an explicit cap of the safety value.
+    let mut explicit = integration_scan_args(true);
+    explicit.max_payloads_per_param = safety;
+    explicit.deep_scan = false;
+    let (explicit_jobs, _) = super::generate_param_jobs(&target, &explicit, None, &[]);
+    assert_eq!(default_jobs.len(), explicit_jobs.len());
+    for (d, e) in default_jobs.iter().zip(&explicit_jobs) {
+        assert_eq!(
+            (d.1.len(), d.2.len()),
+            (e.1.len(), e.2.len()),
+            "default (built-in cap) must match explicit --max-payloads-per-param {safety}"
+        );
+    }
+
+    // --deep-scan lifts the bound (never shrinks below the capped run).
     args.deep_scan = true;
     let (deep_jobs, _) = super::generate_param_jobs(&target, &args, None, &[]);
     assert!(
-        deep_jobs[0].1.len() >= jobs[0].1.len() && deep_jobs[0].2.len() >= jobs[0].2.len(),
+        deep_jobs[0].1.len() >= default_jobs[0].1.len()
+            && deep_jobs[0].2.len() >= default_jobs[0].2.len(),
         "--deep-scan must not shrink the payload sets below the capped run"
     );
 }

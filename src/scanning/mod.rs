@@ -1201,6 +1201,16 @@ fn generate_param_jobs(
                 shared_refl = expand_waf_payloads(&shared_refl, strategy, stats);
                 shared_dom = expand_waf_payloads(&shared_dom, strategy, stats);
             }
+            // Apply the same adaptive prune the base set got: when the server
+            // strips `<`/`>`, angle-bearing shared payloads (many CSP-bypass
+            // shapes) are guaranteed misses, so drop them rather than spend a
+            // request each. Preserves the pre-cap-reorder behavior for shared.
+            if let Some(invalid) = param.invalid_specials.as_deref()
+                && !invalid.is_empty()
+            {
+                shared_refl = prune_blocked_raw_angles(shared_refl, invalid);
+                shared_dom = prune_blocked_raw_angles(shared_dom, invalid);
+            }
             reflection_payloads.extend(shared_refl);
             dom_payloads.extend(shared_dom);
         }
