@@ -14,6 +14,17 @@ pub const DEFAULT_DELAY_MS: u64 = 0;
 pub const DEFAULT_WORKERS: usize = 50;
 pub const DEFAULT_MAX_CONCURRENT_TARGETS: usize = 50;
 pub const DEFAULT_MAX_TARGETS_PER_HOST: usize = 100;
+/// Built-in per-parameter payload safety cap, applied when the operator did
+/// not pass `--max-payloads-per-param` (its `0`) and is not running
+/// `--deep-scan`. A parameter that reflects every payload without ever
+/// DOM-verifying — the classic self-/canonical-link echo — would otherwise
+/// drive the DOM-verification phase through the full dynamic-payload set
+/// (10k+ requests per parameter, the request-amplification behind the
+/// "scan hangs for many minutes" reports). Capping the long encoder/mutation
+/// tail keeps the high-signal head (structural + common-context payloads run
+/// first) while bounding the fan-out. `--deep-scan` or an explicit
+/// `--max-payloads-per-param` opts out.
+pub const DEFAULT_PAYLOAD_SAFETY_CAP: usize = 3000;
 /// Default for `--rate-limit`: 0 = unlimited (no token bucket installed),
 /// preserving the historical "only `--delay` paces requests" behavior.
 pub const DEFAULT_RATE_LIMIT: u32 = 0;
@@ -471,9 +482,10 @@ pub struct ScanArgs {
 
     #[clap(help_heading = "XSS SCANNING")]
     /// Cap the number of payloads tested per parameter (reflection set and DOM-verification
-    /// set are each capped independently). 0 = no cap (default). Useful on large attack
-    /// surfaces where dynamic payloads + encoders + WAF-bypass mutations would otherwise
-    /// generate thousands of requests per parameter.
+    /// set are each capped independently). 0 (default) applies a built-in safety cap of 3000
+    /// per set unless --deep-scan is set; pass an explicit value to override, or --deep-scan
+    /// for a truly unlimited run. Bounds the request fan-out on large attack surfaces and on
+    /// endpoints that reflect every payload (self-/canonical-link echoes) without verifying.
     #[arg(long, default_value_t = 0)]
     pub max_payloads_per_param: usize,
 

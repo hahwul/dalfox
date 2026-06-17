@@ -34,7 +34,11 @@ pub(crate) async fn render_dry_run(
                 }
                 f
             };
-            let cap = args.max_payloads_per_param;
+            // Mirror the scan-time effective cap (built-in safety cap unless
+            // --deep-scan / explicit --max-payloads-per-param) so --dry-run
+            // estimates match what the scan will actually send.
+            let cap =
+                crate::scanning::effective_payload_cap(args.max_payloads_per_param, args.deep_scan);
             let apply_cap = |n: usize| -> usize { if cap == 0 { n } else { n.min(cap) } };
             let mut estimated_requests: usize = 0;
             for p in &target.reflection_params {

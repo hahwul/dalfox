@@ -2254,3 +2254,46 @@ fn generate_param_jobs_waf_expansion_never_drops_originals() {
         plain_jobs[0].1.len()
     );
 }
+
+#[test]
+fn test_effective_payload_cap_resolution() {
+    let safety = crate::cmd::scan::DEFAULT_PAYLOAD_SAFETY_CAP;
+    // Default (0) without deep-scan -> built-in safety cap (issue #1153).
+    assert_eq!(effective_payload_cap(0, false), safety);
+    // Default (0) with deep-scan -> unlimited.
+    assert_eq!(effective_payload_cap(0, true), 0);
+    // Explicit cap always wins, even under deep-scan.
+    assert_eq!(effective_payload_cap(50, false), 50);
+    assert_eq!(effective_payload_cap(50, true), 50);
+    // An explicit cap larger than the safety default is honored verbatim.
+    assert_eq!(effective_payload_cap(safety + 5000, false), safety + 5000);
+}
+
+#[test]
+fn test_generate_param_jobs_applies_builtin_safety_cap() {
+    // By default (no explicit --max-payloads-per-param, no --deep-scan) every
+    // payload set must be bounded by the built-in safety cap; --deep-scan lifts
+    // the bound (set never shrinks below the capped run). Issue #1153.
+    let target = target_with_params(vec![req_param("a", "1", Location::Query)]);
+    let safety = crate::cmd::scan::DEFAULT_PAYLOAD_SAFETY_CAP;
+
+    let mut args = integration_scan_args(true);
+    args.max_payloads_per_param = 0;
+    args.deep_scan = false;
+    let (jobs, _) = super::generate_param_jobs(&target, &args, None, &[]);
+    for (_, refl, dom) in &jobs {
+        assert!(
+            refl.len() <= safety && dom.len() <= safety,
+            "default scan must cap reflection ({}) and DOM ({}) sets to {safety}",
+            refl.len(),
+            dom.len(),
+        );
+    }
+
+    args.deep_scan = true;
+    let (deep_jobs, _) = super::generate_param_jobs(&target, &args, None, &[]);
+    assert!(
+        deep_jobs[0].1.len() >= jobs[0].1.len() && deep_jobs[0].2.len() >= jobs[0].2.len(),
+        "--deep-scan must not shrink the payload sets below the capped run"
+    );
+}

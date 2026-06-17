@@ -368,6 +368,23 @@ fn get_js_breakout_payloads() -> Vec<String> {
     payloads
 }
 
+/// Resolve the effective per-parameter payload cap from the user's
+/// `--max-payloads-per-param` (`max_payloads`) and `--deep-scan` flags.
+///
+/// - An explicit `--max-payloads-per-param N` (N > 0) always wins.
+/// - `0` (the default) means "apply the built-in [`DEFAULT_PAYLOAD_SAFETY_CAP`]"
+///   so a parameter that reflects every payload without DOM-verifying can't
+///   drive the DOM phase through the full payload set (issue #1153).
+/// - `--deep-scan` opts out entirely (returns `0` = unlimited) for exhaustive
+///   runs, regardless of the safety cap.
+pub(crate) fn effective_payload_cap(max_payloads: usize, deep_scan: bool) -> usize {
+    match max_payloads {
+        0 if deep_scan => 0,
+        0 => crate::cmd::scan::DEFAULT_PAYLOAD_SAFETY_CAP,
+        n => n,
+    }
+}
+
 pub(crate) fn get_dom_payloads(
     param: &Param,
     args: &ScanArgs,
@@ -1102,10 +1119,6 @@ fn generate_param_jobs(
             }
         }
 
-        // Append shared payloads (CSP bypass + tech-specific)
-        reflection_payloads.extend(shared_payloads.iter().cloned());
-        dom_payloads.extend(shared_payloads.iter().cloned());
-
         // Apply WAF bypass expansion if a WAF was detected. The two bypass
         // axes are kept orthogonal rather than multiplied together (see
         // `expand_waf_payloads`): structural mutations are sent raw and
@@ -1153,16 +1166,43 @@ fn generate_param_jobs(
             }
         }
 
-        // --max-payloads-per-param: cap each payload set independently.
-        // 0 means unlimited (default), preserving prior behavior.
-        let cap = args.max_payloads_per_param;
+        // Cap each payload set independently. An explicit --max-payloads-per-param
+        // wins; otherwise a built-in safety cap bounds the request fan-out on
+        // parameters that reflect every payload without DOM-verifying (self-link
+        // echoes — issue #1153), where the DOM phase would otherwise send the
+        // full ~10k+ payload set. --deep-scan opts out (truly unlimited).
+        let cap = effective_payload_cap(args.max_payloads_per_param, args.deep_scan);
         if cap > 0 {
-            if reflection_payloads.len() > cap {
-                reflection_payloads.truncate(cap);
+            let refl_dropped = reflection_payloads.len().saturating_sub(cap);
+            let dom_dropped = dom_payloads.len().saturating_sub(cap);
+            reflection_payloads.truncate(cap);
+            dom_payloads.truncate(cap);
+            // Surface the built-in cap (not an explicit user cap) so a trimmed
+            // run is never silent — "No silent caps".
+            if args.max_payloads_per_param == 0 && (refl_dropped > 0 || dom_dropped > 0) {
+                crate::dbg_log!(
+                    "param {}: built-in payload safety cap {} trimmed {} reflection + {} DOM payload(s); raise with --max-payloads-per-param or --deep-scan",
+                    param.name,
+                    cap,
+                    refl_dropped,
+                    dom_dropped
+                );
             }
-            if dom_payloads.len() > cap {
-                dom_payloads.truncate(cap);
+        }
+
+        // Append shared payloads (CSP bypass + tech-specific) AFTER the cap so
+        // the safety cap can never trim these few, high-value payloads. They
+        // still get the same WAF-bypass expansion as the base set.
+        if !shared_payloads.is_empty() {
+            let mut shared_refl: Vec<String> = shared_payloads.to_vec();
+            let mut shared_dom: Vec<String> = shared_payloads.to_vec();
+            if let Some(strategy) = waf_strategy {
+                let stats = target.mutation_stats.as_deref();
+                shared_refl = expand_waf_payloads(&shared_refl, strategy, stats);
+                shared_dom = expand_waf_payloads(&shared_dom, strategy, stats);
             }
+            reflection_payloads.extend(shared_refl);
+            dom_payloads.extend(shared_dom);
         }
 
         // One pb.inc(1) per reflection payload plus one per DOM payload.
