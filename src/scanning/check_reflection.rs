@@ -392,38 +392,17 @@ pub(crate) fn marker_reflects_in_url_attr_only(html: &str, marker: &str) -> bool
     any
 }
 
-/// Walk backwards from byte offset `at` looking for the surrounding HTML
-/// attribute context. Returns `true` when the byte sits inside a quoted
-/// or unquoted attribute value whose attribute name is in
-/// [`URL_VALUED_ATTRS`]. Returns `false` for text content (we hit `>`
-/// before finding `=`) and for non-URL attributes.
-fn occurrence_is_in_url_attr(bytes: &[u8], at: usize) -> bool {
-    if at == 0 || at > bytes.len() {
-        return false;
+/// Given `eq` = the byte index of an attribute's `=`, read the attribute name
+/// immediately to its left (skipping intervening whitespace) and return whether
+/// that name is in [`URL_VALUED_ATTRS`]. The single home for the
+/// name-matching rule shared by every URL-attribute occurrence check.
+fn url_valued_attr_name_before_eq(bytes: &[u8], eq: usize) -> bool {
+    // Skip whitespace between `=` and the attribute name.
+    let mut name_end = eq;
+    while name_end > 0 && bytes[name_end - 1].is_ascii_whitespace() {
+        name_end -= 1;
     }
-    // Phase 1: walk back to find an `=` without crossing a tag boundary.
-    let mut i = at;
-    loop {
-        if i == 0 {
-            return false;
-        }
-        i -= 1;
-        match bytes[i] {
-            b'=' => break,
-            // Crossing a tag boundary means we're outside any attribute.
-            b'<' | b'>' => return false,
-            _ => {}
-        }
-    }
-    // Phase 2: skip backwards over whitespace between `=` and attr name.
-    while i > 0 && bytes[i - 1].is_ascii_whitespace() {
-        i -= 1;
-    }
-    if i == 0 {
-        return false;
-    }
-    // Phase 3: read the attribute name backwards.
-    let name_end = i; // exclusive
+    // Read the attribute name backwards.
     let mut name_start = name_end;
     while name_start > 0 {
         let b = bytes[name_start - 1];
@@ -439,6 +418,32 @@ fn occurrence_is_in_url_attr(bytes: &[u8], at: usize) -> bool {
     URL_VALUED_ATTRS
         .iter()
         .any(|n| name.eq_ignore_ascii_case(n))
+}
+
+/// Walk backwards from byte offset `at` looking for the surrounding HTML
+/// attribute context. Returns `true` when the byte sits inside a quoted
+/// or unquoted attribute value whose attribute name is in
+/// [`URL_VALUED_ATTRS`]. Returns `false` for text content (we hit `>`
+/// before finding `=`) and for non-URL attributes.
+fn occurrence_is_in_url_attr(bytes: &[u8], at: usize) -> bool {
+    if at == 0 || at > bytes.len() {
+        return false;
+    }
+    // Walk back to the attribute's `=` without crossing a tag boundary.
+    let mut i = at;
+    loop {
+        if i == 0 {
+            return false;
+        }
+        i -= 1;
+        match bytes[i] {
+            b'=' => break,
+            // Crossing a tag boundary means we're outside any attribute.
+            b'<' | b'>' => return false,
+            _ => {}
+        }
+    }
+    url_valued_attr_name_before_eq(bytes, i)
 }
 
 /// True when a decoded payload form is a JS-executable URL scheme — the schemes
@@ -503,25 +508,7 @@ fn scheme_at_url_attr_value_start(bytes: &[u8], at: usize) -> bool {
         _ => return false,
     };
     // The token immediately left of `=` must be a URL-valued attribute name.
-    let mut name_end = eq_at;
-    while name_end > 0 && bytes[name_end - 1].is_ascii_whitespace() {
-        name_end -= 1;
-    }
-    let mut name_start = name_end;
-    while name_start > 0 {
-        let b = bytes[name_start - 1];
-        if b.is_ascii_whitespace() || b == b'<' || b == b'/' || b == b'"' || b == b'\'' {
-            break;
-        }
-        name_start -= 1;
-    }
-    if name_start == name_end {
-        return false;
-    }
-    let name = &bytes[name_start..name_end];
-    URL_VALUED_ATTRS
-        .iter()
-        .any(|n| name.eq_ignore_ascii_case(n))
+    url_valued_attr_name_before_eq(bytes, eq_at)
 }
 
 /// Scan `hay` for any reflected variant of a dangerous-scheme payload. Returns
@@ -618,26 +605,7 @@ fn occurrence_inside_url_attr_value(bytes: &[u8], at: usize) -> bool {
                 if k == 0 || bytes[k - 1] != b'=' {
                     return false;
                 }
-                let mut name_end = k - 1;
-                while name_end > 0 && bytes[name_end - 1].is_ascii_whitespace() {
-                    name_end -= 1;
-                }
-                let mut name_start = name_end;
-                while name_start > 0 {
-                    let b = bytes[name_start - 1];
-                    if b.is_ascii_whitespace() || b == b'<' || b == b'/' || b == b'"' || b == b'\''
-                    {
-                        break;
-                    }
-                    name_start -= 1;
-                }
-                if name_start == name_end {
-                    return false;
-                }
-                let name = &bytes[name_start..name_end];
-                return URL_VALUED_ATTRS
-                    .iter()
-                    .any(|n| name.eq_ignore_ascii_case(n));
+                return url_valued_attr_name_before_eq(bytes, k - 1);
             }
             // Crossing a tag boundary means we're not inside an attribute value.
             b'<' | b'>' => return false,
