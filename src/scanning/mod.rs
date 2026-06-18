@@ -1120,6 +1120,43 @@ fn generate_param_jobs(
             }
         }
 
+        // Cap the *base* reflection and DOM catalogs independently (each to
+        // `cap`) BEFORE WAF-bypass expansion and the shared-payload append below.
+        // An explicit --max-payloads-per-param wins; otherwise a built-in safety
+        // cap bounds the request fan-out on parameters that reflect every payload
+        // without DOM-verifying (self-link echoes — issue #1153), where the DOM
+        // phase would otherwise send the full ~10k+ payload set. --deep-scan lifts
+        // the built-in cap (truly unlimited).
+        //
+        // Capping the BASE catalog (not the post-expansion set) is deliberate:
+        // `expand_waf_payloads` keeps the de-duplicated originals at the front and
+        // appends every structural-mutation / extra-encoder variant at the tail,
+        // so capping *after* expansion truncates 100% of the WAF-bypass variants
+        // whenever the base alone exceeds the cap (e.g. ~9k attribute-context
+        // payloads vs the 3000 default) — silently defeating WAF bypass on exactly
+        // the params it was selected for. Capping first lets each surviving base
+        // payload keep its full bypass expansion; with no WAF the set is unchanged
+        // by expansion, so the self-link amplification is still bounded to `cap`.
+        let cap = effective_payload_cap(args.max_payloads_per_param, args.deep_scan);
+        if cap > 0 {
+            let refl_dropped = reflection_payloads.len().saturating_sub(cap);
+            let dom_dropped = dom_payloads.len().saturating_sub(cap);
+            reflection_payloads.truncate(cap);
+            dom_payloads.truncate(cap);
+            // Surface the built-in cap (an explicit user cap is the operator's own
+            // deliberate choice, not a silent one) so a trimmed run is never
+            // silent — "No silent caps".
+            if args.max_payloads_per_param == 0 && (refl_dropped > 0 || dom_dropped > 0) {
+                crate::dbg_log!(
+                    "param {}: built-in payload safety cap {} trimmed {} reflection + {} DOM base payload(s); raise with --max-payloads-per-param or --deep-scan",
+                    param.name,
+                    cap,
+                    refl_dropped,
+                    dom_dropped
+                );
+            }
+        }
+
         // Apply WAF bypass expansion if a WAF was detected. The two bypass
         // axes are kept orthogonal rather than multiplied together (see
         // `expand_waf_payloads`): structural mutations are sent raw and
@@ -1163,36 +1200,6 @@ fn generate_param_jobs(
                     dom_before,
                     dom_payloads.len(),
                     invalid,
-                );
-            }
-        }
-
-        // Cap the *base* reflection and DOM catalogs independently (each to
-        // `cap`). An explicit --max-payloads-per-param wins; otherwise a built-in
-        // safety cap bounds the request fan-out on parameters that reflect every
-        // payload without DOM-verifying (self-link echoes — issue #1153), where
-        // the DOM phase would otherwise send the full ~10k+ payload set.
-        // --deep-scan lifts the built-in cap (truly unlimited).
-        //
-        // Note: this caps the base catalog *before* the shared CSP/tech payloads
-        // are appended below. Those few high-value payloads are added after the
-        // cap (and never trimmed), so the final per-parameter set can exceed
-        // `cap` by their (small, bounded) count — by design.
-        let cap = effective_payload_cap(args.max_payloads_per_param, args.deep_scan);
-        if cap > 0 {
-            let refl_dropped = reflection_payloads.len().saturating_sub(cap);
-            let dom_dropped = dom_payloads.len().saturating_sub(cap);
-            reflection_payloads.truncate(cap);
-            dom_payloads.truncate(cap);
-            // Surface the built-in cap (not an explicit user cap) so a trimmed
-            // run is never silent — "No silent caps".
-            if args.max_payloads_per_param == 0 && (refl_dropped > 0 || dom_dropped > 0) {
-                crate::dbg_log!(
-                    "param {}: built-in payload safety cap {} trimmed {} reflection + {} DOM payload(s); raise with --max-payloads-per-param or --deep-scan",
-                    param.name,
-                    cap,
-                    refl_dropped,
-                    dom_dropped
                 );
             }
         }

@@ -35,8 +35,12 @@ pub(crate) async fn render_dry_run(
                 f
             };
             // Mirror the scan-time effective cap (built-in safety cap unless
-            // --deep-scan / explicit --max-payloads-per-param) so --dry-run
-            // estimates match what the scan will actually send.
+            // --deep-scan / explicit --max-payloads-per-param). This is a
+            // LOWER-BOUND estimate: it counts the capped base reflection set only,
+            // and excludes the shared CSP/tech payloads appended after the cap,
+            // the WAF-bypass mutation/encoder expansion, and the DOM-verification
+            // set — so a real scan can send more (the preflight estimate in
+            // analysis.rs carries the same caveat).
             let cap =
                 crate::scanning::effective_payload_cap(args.max_payloads_per_param, args.deep_scan);
             let apply_cap = |n: usize| -> usize { if cap == 0 { n } else { n.min(cap) } };

@@ -486,8 +486,10 @@ pub struct ScanArgs {
     /// per set unless --deep-scan is set; pass an explicit value to override, or --deep-scan
     /// for a truly unlimited run. Bounds the request fan-out on large attack surfaces and on
     /// endpoints that reflect every payload (self-/canonical-link echoes) without verifying.
-    /// Note: a small set of shared CSP-bypass / tech-specific payloads is appended after the
-    /// cap, so the actual per-parameter total may slightly exceed this value.
+    /// Note: the cap applies to the base catalog; WAF-bypass mutation/encoder expansion and a
+    /// small set of shared CSP-bypass / tech-specific payloads are added afterwards (and never
+    /// trimmed), so the actual per-parameter total can exceed this value — substantially so when
+    /// a WAF bypass strategy is active. Use --deep-scan only to lift the built-in default cap.
     #[arg(long, default_value_t = 0)]
     pub max_payloads_per_param: usize,
 

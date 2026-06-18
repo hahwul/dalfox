@@ -2319,3 +2319,79 @@ fn test_generate_param_jobs_applies_builtin_safety_cap() {
         "--deep-scan must not shrink the payload sets below the capped run"
     );
 }
+
+#[test]
+fn generate_param_jobs_default_cap_preserves_waf_variants() {
+    // Regression for the #1155 review: the safety cap must bound the BASE
+    // catalog, NOT the WAF-expanded set. `expand_waf_payloads` keeps originals
+    // at the front and appends every mutation/encoder variant at the tail, so
+    // capping after expansion truncated 100% of the bypass variants whenever the
+    // base exceeded the cap (attribute context ~9k base vs the 3000 default),
+    // silently defeating WAF bypass on exactly the params it was selected for.
+    let mut param = req_param("a", "1", Location::Query);
+    param.injection_context = Some(InjectionContext::Attribute(None));
+    let target = target_with_params(vec![param]);
+    let mut args = integration_scan_args(true);
+    args.max_payloads_per_param = 0; // built-in safety cap (3000)
+    args.deep_scan = false;
+    let safety = crate::cmd::scan::DEFAULT_PAYLOAD_SAFETY_CAP;
+
+    // The capped base set (no WAF), used as the "originals" reference.
+    let (base_jobs, _) = super::generate_param_jobs(&target, &args, None, &[]);
+    let base_set: std::collections::HashSet<&String> = base_jobs[0].1.iter().collect();
+    assert!(
+        base_jobs[0].1.len() <= safety,
+        "no-WAF base reflection set must be bounded to the cap"
+    );
+
+    // Same param + same cap, now with a bypass strategy active.
+    let strategy = crate::waf::bypass::merge_strategies(&[&crate::waf::WafType::Cloudflare]);
+    let (waf_jobs, _) = super::generate_param_jobs(&target, &args, Some(&strategy), &[]);
+    let refl = &waf_jobs[0].1;
+    let waf_variants = refl.iter().filter(|p| !base_set.contains(*p)).count();
+    let base_portion = refl.iter().filter(|p| base_set.contains(*p)).count();
+    assert!(
+        waf_variants > 0,
+        "default cap must NOT evict all WAF-bypass variants (got {waf_variants} variants, \
+         {base_portion} base of {} total)",
+        refl.len()
+    );
+    assert!(
+        base_portion <= safety,
+        "base portion ({base_portion}) must stay bounded to the cap ({safety}); \
+         expansion is added on top"
+    );
+}
+
+#[test]
+fn generate_param_jobs_shared_payloads_appended_after_cap() {
+    // Covers the shared-after-cap path: shared CSP/tech payloads are appended
+    // AFTER the base cap (never trimmed), and angle-bearing shared are pruned
+    // when the server strips `<`/`>`.
+    let mut param = req_param("a", "1", Location::Query);
+    param.injection_context = Some(InjectionContext::Attribute(None));
+    param.invalid_specials = Some(vec!['<', '>']);
+    let target = target_with_params(vec![param]);
+    let mut args = integration_scan_args(true);
+    args.max_payloads_per_param = 5; // tiny explicit cap -> base truncated hard
+    args.deep_scan = false;
+
+    let shared = vec![
+        "zz-angle-free-shared".to_string(),
+        "<svg/onload=alert(1)>".to_string(), // angle-bearing -> pruned
+    ];
+    let (jobs, _) = super::generate_param_jobs(&target, &args, None, &shared);
+    let refl = &jobs[0].1;
+    assert!(
+        refl.iter().any(|p| p == "zz-angle-free-shared"),
+        "angle-free shared payload must survive the base cap (appended after)"
+    );
+    assert!(
+        !refl.iter().any(|p| p == "<svg/onload=alert(1)>"),
+        "angle-bearing shared payload must be pruned when <>` are stripped"
+    );
+    // Same on the DOM set.
+    let dom = &jobs[0].2;
+    assert!(dom.iter().any(|p| p == "zz-angle-free-shared"));
+    assert!(!dom.iter().any(|p| p == "<svg/onload=alert(1)>"));
+}
