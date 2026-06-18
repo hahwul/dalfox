@@ -1843,6 +1843,13 @@ fn test_scheme_fp_keeps_scheme_in_script_navigation_sink() {
     // sink (`location.href = "javascript:..."`) and execute, even though it never
     // sits at a URL-attribute scheme-start. The inert-scheme gate MUST NOT
     // suppress it — let the JS-context / AST path decide executability.
+    //
+    // This drives the FULL `is_in_safe_context_decoded` path, not just the
+    // dangerous-scheme helper: `is_payload_inert_in_scripts` runs *first* there
+    // and, before the dangerous-scheme guard was added, suppressed all three of
+    // these end-to-end (its AST sink-call check does not model a passive scheme
+    // value assigned to `location.href`), making the helper-level carve-out dead
+    // code. Asserting through `is_in_safe_context_decoded` pins the real behavior.
     let payload = "javascript:alert(1)";
     for html in [
         "<script>location.href = \"javascript:alert(1)\";</script>",
@@ -1852,6 +1859,48 @@ fn test_scheme_fp_keeps_scheme_in_script_navigation_sink() {
         assert!(
             !dangerous_scheme_reflection_is_inert(html, payload),
             "scheme inside <script> must not be demoted as inert: {html}"
+        );
+        assert!(
+            !is_payload_inert_in_scripts(html, payload),
+            "is_payload_inert_in_scripts must not mask a <script> nav-sink scheme: {html}"
+        );
+        assert!(
+            !is_in_safe_context_decoded(html, payload),
+            "<script> nav-sink scheme must survive the full suppression pipeline: {html}"
+        );
+    }
+}
+
+#[test]
+fn test_scheme_fp_non_javascript_schemes_keep_at_scheme_start() {
+    // The other dangerous-scheme families (`data:text/html`, `data:image/svg`,
+    // `vbscript:`) were only exercised on the SUPPRESS path; pin the
+    // executable-KEEP direction too so a typo in those literals or a
+    // scheme-start regression can't silently drop their [R]/static-V.
+    for (payload, exec_html) in [
+        (
+            "data:text/html;base64,PHN2Zz4=",
+            "<iframe src=\"data:text/html;base64,PHN2Zz4=\"></iframe>",
+        ),
+        (
+            "data:image/svg+xml;base64,PHN2Zz4=",
+            "<object data=\"data:image/svg+xml;base64,PHN2Zz4=\"></object>",
+        ),
+        ("vbscript:msgbox(1)", "<a href=\"vbscript:msgbox(1)\">x</a>"),
+    ] {
+        assert!(
+            !dangerous_scheme_reflection_is_inert(exec_html, payload),
+            "scheme at a URL-attr value start must be kept: {exec_html}"
+        );
+        assert!(
+            !is_in_safe_context_decoded(exec_html, payload),
+            "executable scheme-start must not be suppressed: {exec_html}"
+        );
+        // ...and the same scheme echoed in a self-link query position is inert.
+        let inert_html = format!("<a href=\"/p?next={payload}\">go</a>");
+        assert!(
+            dangerous_scheme_reflection_is_inert(&inert_html, payload),
+            "scheme in a self-link query position is inert: {inert_html}"
         );
     }
 }

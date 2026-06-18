@@ -425,6 +425,16 @@ fn url_valued_attr_name_before_eq(bytes: &[u8], eq: usize) -> bool {
 /// or unquoted attribute value whose attribute name is in
 /// [`URL_VALUED_ATTRS`]. Returns `false` for text content (we hit `>`
 /// before finding `=`) and for non-URL attributes.
+///
+/// This is the LOOSER of the URL-attribute position checks: it matches an
+/// occurrence *anywhere* in the value (scheme, path, query, or fragment).
+/// [`scheme_at_url_attr_value_start`] / [`occurrence_inside_url_attr_value`]
+/// (the #1153 gates in [`is_in_safe_context_decoded`]) deliberately apply the
+/// stricter scheme-position rule downstream, re-suppressing a mid-query
+/// `javascript:` echo that this check keeps. Keep the rules separate — do not
+/// "reconcile" them by tightening this one, or the legitimate
+/// `href="javascript:…"` `[R]` is lost; nor loosen the gates, or the #1153
+/// self-/canonical-link false positive returns.
 fn occurrence_is_in_url_attr(bytes: &[u8], at: usize) -> bool {
     if at == 0 || at > bytes.len() {
         return false;
@@ -576,7 +586,11 @@ fn dangerous_scheme_reflection_is_inert(html: &str, payload: &str) -> bool {
     if executable {
         return false;
     }
-    if let Ok(decoded) = urlencoding::decode(html)
+    // Only pay the full-body URL-decode allocation when the body actually
+    // carries a percent-escape (the self-link echo does); without `%`,
+    // `urlencoding::decode` is a no-op clone. Mirrors `decode_form_urlencoded_like`.
+    if html.as_bytes().contains(&b'%')
+        && let Ok(decoded) = urlencoding::decode(html)
         && decoded.as_ref() != html
     {
         let (f2, x2) = scan_dangerous_scheme_occurrences(&decoded, &variants);
@@ -673,7 +687,10 @@ fn reflection_trapped_in_url_value(html: &str, payload: &str) -> bool {
     if escaped {
         return false;
     }
-    if let Ok(decoded) = urlencoding::decode(html)
+    // Skip the full-body URL-decode allocation unless the body carries a
+    // percent-escape (mirrors `decode_form_urlencoded_like` / the scheme gate).
+    if html.as_bytes().contains(&b'%')
+        && let Ok(decoded) = urlencoding::decode(html)
         && decoded.as_ref() != html
     {
         let (f2, e2) = scan_url_value_trapping(&decoded, &variants);
@@ -859,6 +876,21 @@ fn is_payload_inert_in_scripts(html: &str, payload: &str) -> bool {
         }
     }
     if !matched {
+        return false;
+    }
+
+    // A dangerous URL scheme (`javascript:`/`vbscript:`/`data:…`) echoed RAW in
+    // a <script> block can flow into a JS navigation sink — e.g.
+    // `location.href = "javascript:alert(1)"` — and execute. The AST check below
+    // only flags a sink *call* the payload itself introduces, not a payload that
+    // is a passive string value assigned to a pre-existing sink, so it marks this
+    // inert. Keep the reflection reported instead. This is the authoritative half
+    // of the carve-out mirrored in `dangerous_scheme_reflection_is_inert`: that
+    // gate runs *after* this one in `is_in_safe_context_decoded`, so without this
+    // guard its `<script>` carve-out is unreachable and the finding is suppressed.
+    if candidates.iter().any(|c| decoded_is_dangerous_scheme(c))
+        && variant_occurs_in_script_block(html, &candidates)
+    {
         return false;
     }
 
