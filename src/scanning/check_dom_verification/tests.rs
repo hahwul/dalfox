@@ -228,6 +228,13 @@ async fn redirect_body_echo_handler(
     )
 }
 
+/// Always returns 503 with an empty body — a server that consistently fails
+/// (or hard-blocks). Used to verify the `status` signal is threaded out of
+/// DOM verification for the issue #1156 blocked-streak early exit.
+async fn server_error_handler() -> impl IntoResponse {
+    (StatusCode::SERVICE_UNAVAILABLE, Html(String::new()))
+}
+
 async fn sxss_html_handler(State(state): State<TestState>) -> Html<String> {
     Html(format!("<div>{}</div>", state.stored_payload))
 }
@@ -258,6 +265,7 @@ async fn start_mock_server(stored_payload: &str) -> SocketAddr {
             "/dom/json-body",
             axum::routing::post(json_reflection_handler),
         )
+        .route("/dom/server-error", get(server_error_handler))
         .route("/sxss/html", get(sxss_html_handler))
         .route("/sxss/json", get(sxss_json_handler))
         .with_state(TestState {
@@ -299,6 +307,79 @@ async fn test_check_dom_verification_detects_html_reflection() {
     let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
     assert!(found, "text/html responses with payload should be detected");
     assert!(body.unwrap_or_default().contains(&payload));
+}
+
+// ── Issue #1156: DomVerifyOutcome threads reflected + status signals ───────
+
+#[tokio::test]
+async fn test_dom_outcome_verified_threads_reflected_and_status() {
+    let payload = format!(
+        "<svg onload=alert(1) class={}>",
+        crate::scanning::markers::class_marker()
+    );
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/dom/html");
+    let param = make_param();
+    let args = default_scan_args();
+    let client = target.build_client_or_default();
+
+    let outcome =
+        check_dom_verification_with_client_outcome(&client, &target, &param, &payload, &args).await;
+    assert!(outcome.verified, "executable reflection must verify");
+    assert!(
+        outcome.reflected,
+        "a verified reflection is by definition reflected"
+    );
+    assert_eq!(outcome.status, 200);
+    assert!(
+        outcome.response_text.unwrap_or_default().contains(&payload),
+        "verified outcome must carry the response body"
+    );
+}
+
+#[tokio::test]
+async fn test_dom_outcome_inert_echo_reflected_but_not_verified() {
+    // A plain-text payload reflects (classify_reflection = Some) but carries no
+    // executable DOM evidence: reflected=true, verified=false. This is the
+    // "reflected-but-inert echo" signal that drives the inert-echo early exit.
+    let payload = "harmless-inert-dlxmarker-text".to_string();
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/dom/html");
+    let param = make_param();
+    let args = default_scan_args();
+    let client = target.build_client_or_default();
+
+    let outcome =
+        check_dom_verification_with_client_outcome(&client, &target, &param, &payload, &args).await;
+    assert!(!outcome.verified, "plain text must not verify");
+    assert!(
+        outcome.reflected,
+        "the payload bytes are echoed, so the response must be flagged reflected"
+    );
+    assert_eq!(outcome.status, 200);
+    assert!(
+        outcome.response_text.is_none(),
+        "non-verified outcomes must not retain the body (memory bound)"
+    );
+}
+
+#[tokio::test]
+async fn test_dom_outcome_blocked_threads_5xx_status() {
+    let payload = format!(
+        "<svg onload=alert(1) class={}>",
+        crate::scanning::markers::class_marker()
+    );
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/dom/server-error");
+    let param = make_param();
+    let args = default_scan_args();
+    let client = target.build_client_or_default();
+
+    let outcome =
+        check_dom_verification_with_client_outcome(&client, &target, &param, &payload, &args).await;
+    assert!(!outcome.verified, "a 503 must not verify");
+    assert!(!outcome.reflected, "an empty 503 body reflects nothing");
+    assert_eq!(outcome.status, 503, "the 5xx status must be threaded out");
 }
 
 // Server uppercases every reflected byte; the marker survives as a
@@ -560,6 +641,40 @@ async fn test_check_dom_verification_sxss_uses_secondary_url() {
     let (found, body) = check_dom_verification(&target, &param, &payload, &args).await;
     assert!(found, "sxss should verify stored payload at secondary URL");
     assert!(body.unwrap_or_default().contains(&payload));
+}
+
+/// Issue #1156 invariant: under `--sxss`, the outcome must report
+/// `reflected == false` and `status == 0` regardless of the verdict, so the
+/// DOM-phase early exit never engages on a stored-XSS scan (whose verification
+/// fans out across secondary URLs the inert/blocked signals can't observe).
+#[tokio::test]
+async fn test_dom_outcome_sxss_never_drives_early_exit() {
+    let payload = format!(
+        "<img src=x onerror=alert(1) class={}>",
+        crate::scanning::markers::class_marker()
+    );
+    let addr = start_mock_server(&payload).await;
+    let target = make_target(addr, "/dom/no-payload");
+    let param = make_param();
+    let mut args = default_scan_args();
+    args.sxss = true;
+    args.sxss_url = Some(format!("http://{}:{}/sxss/html", addr.ip(), addr.port()));
+    let client = target.build_client_or_default();
+
+    let outcome =
+        check_dom_verification_with_client_outcome(&client, &target, &param, &payload, &args).await;
+    assert!(
+        outcome.verified,
+        "sxss should still verify the stored payload"
+    );
+    assert!(
+        !outcome.reflected,
+        "sxss outcome must not set reflected (would feed the inert-echo budget)"
+    );
+    assert_eq!(
+        outcome.status, 0,
+        "sxss outcome must report status 0 (non-blocking) so it can't feed the blocked streak"
+    );
 }
 
 #[tokio::test]
@@ -1332,6 +1447,32 @@ async fn test_check_dom_verification_skips_body_on_redirect_response() {
         "DOM evidence in a 3xx response body must not be treated as verified"
     );
     assert!(body.is_none(), "no body should be returned for redirects");
+}
+
+/// Issue #1156: a 3xx redirect outcome must report `reflected == false` and the
+/// 3xx status (not blocking), so a redirect-every-payload endpoint neither
+/// accrues the inert-echo budget nor the blocked streak (it just runs the set).
+#[tokio::test]
+async fn test_dom_outcome_redirect_is_not_reflected_and_threads_3xx_status() {
+    let payload = format!(
+        "<img src=x onerror=alert(1) class={}>",
+        crate::scanning::markers::class_marker()
+    );
+    let addr = start_mock_server("stored").await;
+    let target = make_target(addr, "/dom/redirect-body");
+    let param = make_param();
+    let args = default_scan_args();
+    let client = target.build_client_or_default();
+
+    let outcome =
+        check_dom_verification_with_client_outcome(&client, &target, &param, &payload, &args).await;
+    assert!(!outcome.verified, "a 3xx body must not verify");
+    assert!(
+        !outcome.reflected,
+        "a redirect must not be flagged reflected (body is never rendered)"
+    );
+    assert_eq!(outcome.status, 307, "the 3xx status must be threaded out");
+    assert!(outcome.response_text.is_none());
 }
 
 #[test]
