@@ -1502,12 +1502,15 @@ async fn test_run_scanning_realworld_level1_shape_promotes_to_verified() {
 }
 
 /// Issue #1156 — a self-/canonical-link-style echo that reflects every payload
-/// but in a permanently inert context (`<plaintext>` swallows the rest of the
-/// document as raw text, so not even `</title>`/`</textarea>` breakout payloads
-/// can form an element) must trigger the DOM-phase inert-echo early exit. The
-/// unknown-context (`injection_context: None`) DOM payload set is thousands of
-/// payloads; the early exit has to cap the request fan-out well below that
-/// without producing a false Verified finding.
+/// but in a permanently inert context (reflected inside an HTML comment with the
+/// `-->` terminator neutralised, so no payload can break out to form an element)
+/// must trigger the DOM-phase inert-echo early exit. An HTML comment is
+/// deliberately *not* one of the reflection phase's safe-tag contexts, so that
+/// phase still records a real R and short-circuits, leaving the DOM phase — where
+/// the raw payload reflects but is permanently inert — to exercise the early
+/// exit. The unknown-context (`injection_context: None`) DOM payload set is
+/// thousands of payloads; the early exit has to cap the request fan-out well
+/// below that without producing a false Verified finding.
 #[tokio::test]
 async fn test_run_scanning_dom_phase_early_exits_on_inert_echo() {
     use axum::{
@@ -1617,7 +1620,7 @@ async fn test_run_scanning_dom_phase_early_exits_on_inert_echo() {
         .count();
     assert_eq!(
         verified, 0,
-        "a permanently inert <plaintext> echo must not yield a false Verified finding"
+        "a permanently inert HTML-comment echo must not yield a false Verified finding"
     );
     assert!(
         reflected >= 1,
