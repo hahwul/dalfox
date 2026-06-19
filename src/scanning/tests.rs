@@ -544,6 +544,87 @@ fn test_get_dom_payloads_unknown_context_falls_back_even_with_only_custom() {
 }
 
 #[test]
+fn test_interleave_payload_families_round_robins_and_preserves_order() {
+    let out = interleave_payload_families(vec![
+        vec!["a1".to_string(), "a2".to_string(), "a3".to_string()],
+        vec!["b1".to_string()],
+        vec!["c1".to_string(), "c2".to_string()],
+    ]);
+    // Round-robin across families; shorter families simply drop out of later
+    // rounds, and within-family order is preserved.
+    assert_eq!(out, vec!["a1", "b1", "c1", "a2", "c2", "a3"]);
+    // The union is preserved exactly (no dedup at this layer).
+    assert_eq!(out.len(), 6);
+}
+
+/// Issue #1156 recall guarantee (machine-checked): the unknown-context DOM
+/// catalog must place a representative of EVERY DOM-evidence family within the
+/// early-exit budget window, so the inert-echo early exit can never cut a whole
+/// family — in particular the `javascript:`/`data:` protocol payloads that are
+/// the only verifier for URL-attribute sinks (these were appended last before
+/// the interleave and sat thousands of payloads past the budget).
+#[test]
+fn test_get_dom_payloads_unknown_context_samples_every_evidence_family_in_budget_window() {
+    let param = Param {
+        name: "q".to_string(),
+        value: "seed".to_string(),
+        location: Location::Query,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    };
+    let mut args = default_scan_args();
+    // `none` keeps the base interleaved order (no encoder expansion) so the
+    // assertion is about catalog ordering, independent of encoder fan-out.
+    args.encoders = vec!["none".to_string()];
+    args.custom_payload = None;
+    args.only_custom_payload = false;
+
+    let payloads = get_dom_payloads(&param, &args).expect("dom payloads");
+
+    use std::collections::HashSet;
+    let html: HashSet<String> = crate::payload::get_dynamic_xss_html_payloads()
+        .into_iter()
+        .collect();
+    let attr: HashSet<String> = crate::payload::get_dynamic_xss_attribute_payloads()
+        .into_iter()
+        .collect();
+    let mxss: HashSet<String> = crate::payload::get_mxss_payloads().into_iter().collect();
+    let clobber: HashSet<String> = crate::payload::get_dom_clobbering_payloads()
+        .into_iter()
+        .collect();
+    let protocol: HashSet<String> = crate::payload::get_protocol_injection_payloads()
+        .into_iter()
+        .collect();
+
+    // A window far below INERT_ECHO_BUDGET (256): with five interleaved families
+    // each appears within the first few rounds.
+    let window = 60.min(payloads.len());
+    let head = &payloads[..window];
+    for (name, fam) in [
+        ("html-tag", &html),
+        ("attribute/event-handler", &attr),
+        ("mXSS", &mxss),
+        ("dom-clobbering", &clobber),
+        ("protocol/url", &protocol),
+    ] {
+        assert!(
+            head.iter().any(|p| fam.contains(p)),
+            "evidence family '{name}' must appear within the first {window} DOM payloads \
+             (interleaved) so the early exit cannot cut it; budget is {INERT_ECHO_BUDGET}"
+        );
+    }
+}
+
+#[test]
 fn test_get_fallback_reflection_payloads_include_encoder_outputs() {
     let args = default_scan_args();
     let payloads = get_fallback_reflection_payloads(&args).expect("reflection fallback payloads");
@@ -902,6 +983,90 @@ fn test_build_request_text_json_body_empty_value_reserializes() {
         !request.contains("PAYLOADn"),
         "payload should not be spliced into the original body:\n{request}"
     );
+}
+
+// ── Issue #1156: DOM-phase early-exit decision logic ──────────────────────
+// These pin the pure helpers so the threshold semantics are tested without a
+// live server; the end-to-end wiring + request reduction is covered by the
+// `run_scanning` integration tests further down.
+
+#[test]
+fn test_is_blocking_dom_status_is_5xx_only() {
+    // Only 5xx server errors are "blocking" for the early exit.
+    for s in [500u16, 502, 503, 504, 599] {
+        assert!(is_blocking_dom_status(s), "status {s} should be blocking");
+    }
+    // 4xx WAF blocks are intentionally EXCLUDED — a payload variant can bypass
+    // a WAF filter, so they must not drive the early exit (recall preservation).
+    // Normal responses and the request-error sentinel are likewise not blocking.
+    for s in [0u16, 200, 204, 301, 302, 400, 401, 403, 404, 406, 418, 429] {
+        assert!(
+            !is_blocking_dom_status(s),
+            "status {s} should not be blocking"
+        );
+    }
+}
+
+#[test]
+fn test_next_blocked_streak_resets_on_non_block() {
+    // Consecutive 5xx accumulate…
+    assert_eq!(next_blocked_streak(0, 503), 1);
+    assert_eq!(next_blocked_streak(63, 503), 64);
+    // …but ANY non-5xx response resets the streak to 0 — this is what makes the
+    // streak *consecutive*, so 64 non-consecutive blocks never early-exit.
+    assert_eq!(next_blocked_streak(63, 200), 0);
+    assert_eq!(next_blocked_streak(63, 403), 0); // 4xx WAF block does not count
+    assert_eq!(next_blocked_streak(63, 0), 0); // request error does not count
+}
+
+#[test]
+fn test_next_inert_echo_count_is_cumulative() {
+    // A reflected response increments…
+    assert_eq!(next_inert_echo_count(10, true), 11);
+    // …and a NON-reflecting response does NOT reset (cumulative, unlike the
+    // blocked streak). An endpoint that reflects most-but-not-all payloads must
+    // still converge on the budget.
+    assert_eq!(next_inert_echo_count(10, false), 10);
+    assert_eq!(next_inert_echo_count(0, false), 0);
+}
+
+#[test]
+fn test_dom_phase_early_exit_disabled_under_deep_scan() {
+    // Even way past both budgets, --deep-scan never early-exits (exhaustive).
+    assert!(!dom_phase_should_early_exit(
+        true,
+        INERT_ECHO_BUDGET * 10,
+        BLOCKED_STREAK_LIMIT * 10
+    ));
+}
+
+#[test]
+fn test_dom_phase_early_exit_inert_echo_threshold() {
+    // One below the budget keeps scanning; reaching it stops.
+    assert!(!dom_phase_should_early_exit(
+        false,
+        INERT_ECHO_BUDGET - 1,
+        0
+    ));
+    assert!(dom_phase_should_early_exit(false, INERT_ECHO_BUDGET, 0));
+    assert!(dom_phase_should_early_exit(false, INERT_ECHO_BUDGET + 1, 0));
+}
+
+#[test]
+fn test_dom_phase_early_exit_blocked_streak_threshold() {
+    assert!(!dom_phase_should_early_exit(
+        false,
+        0,
+        BLOCKED_STREAK_LIMIT - 1
+    ));
+    assert!(dom_phase_should_early_exit(false, 0, BLOCKED_STREAK_LIMIT));
+}
+
+#[test]
+fn test_dom_phase_no_early_exit_without_signal() {
+    // No inert echoes and no block streak → run the full (capped) set.
+    assert!(!dom_phase_should_early_exit(false, 0, 0));
+    assert!(!dom_phase_should_early_exit(false, 10, 5));
 }
 
 #[tokio::test]
@@ -1333,6 +1498,305 @@ async fn test_run_scanning_realworld_level1_shape_promotes_to_verified() {
             || m.contains("JS-context AST")),
         "V finding must carry a DomEvidenceKind label from classify_dom_evidence; got {:?}",
         labels
+    );
+}
+
+/// Issue #1156 — a self-/canonical-link-style echo that reflects every payload
+/// but in a permanently inert context (reflected inside an HTML comment with the
+/// `-->` terminator neutralised, so no payload can break out to form an element)
+/// must trigger the DOM-phase inert-echo early exit. An HTML comment is
+/// deliberately *not* one of the reflection phase's safe-tag contexts, so that
+/// phase still records a real R and short-circuits, leaving the DOM phase — where
+/// the raw payload reflects but is permanently inert — to exercise the early
+/// exit. The unknown-context (`injection_context: None`) DOM payload set is
+/// thousands of payloads; the early exit has to cap the request fan-out well
+/// below that without producing a false Verified finding.
+#[tokio::test]
+async fn test_run_scanning_dom_phase_early_exits_on_inert_echo() {
+    use axum::{
+        Router,
+        extract::{Query, State},
+        response::Html,
+        routing::get,
+    };
+    use std::collections::HashMap;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::time::{Duration, sleep};
+
+    async fn inert_handler(
+        State(counter): State<Arc<AtomicUsize>>,
+        Query(params): Query<HashMap<String, String>>,
+    ) -> Html<String> {
+        counter.fetch_add(1, Ordering::Relaxed);
+        let q = params.get("query").cloned().unwrap_or_default();
+        // Reflect inside an HTML comment with the comment terminator neutralised
+        // so no payload can break out. An HTML comment is *not* one of the
+        // reflection phase's safe-tag contexts (textarea/noscript/xmp/plaintext/
+        // title), so the reflection phase still classifies it as a real R and
+        // short-circuits after one request — leaving the DOM phase, where the
+        // raw payload reflects (classify_reflection = Some) but is permanently
+        // inert (comment content forms no element), to exercise the early exit.
+        let sanitized = q.replace("-->", "__");
+        Html(format!(
+            "<html><body><!-- echo: {} --></body></html>",
+            sanitized
+        ))
+    }
+
+    let counter = Arc::new(AtomicUsize::new(0));
+    let app = Router::new()
+        .route("/", get(inert_handler))
+        .with_state(counter.clone());
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let url = format!("http://{}/?query=a", addr);
+    let mut target = parse_target(&url).expect("parse_target");
+    target.reflection_params.clear();
+    target.reflection_params.push(Param {
+        name: "query".to_string(),
+        value: "a".to_string(),
+        location: Location::Query,
+        // Unknown context → the full HTML+attribute+… DOM payload catalog
+        // (thousands of payloads once encoder-expanded).
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    });
+
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        Arc::new(integration_scan_args(false)),
+        results.clone(),
+        None,
+        None,
+        Arc::new(AtomicUsize::new(0)),
+        None,
+        None,
+        None,
+    )
+    .await;
+
+    let sent = counter.load(Ordering::Relaxed);
+    // A full diverse pass (~INERT_ECHO_BUDGET reflections + probe + the
+    // short-circuited reflection phase) runs before the exit — proving the cut
+    // is signal-driven, not a premature bail.
+    assert!(
+        sent >= 200,
+        "early exit must still take a diverse sample first; only sent {sent}"
+    );
+    // Without the early exit this echo would run the entire unknown-context DOM
+    // set (~6k requests with the url encoder). The inert-echo budget caps it at
+    // roughly one diverse pass.
+    assert!(
+        sent < 600,
+        "inert-echo early exit must curb the DOM fan-out; sent {sent} requests"
+    );
+
+    let guard = results.lock().await;
+    let verified = guard
+        .iter()
+        .filter(|r| matches!(r.result_type, FindingType::Verified))
+        .count();
+    let reflected = guard
+        .iter()
+        .filter(|r| matches!(r.result_type, FindingType::Reflected) && r.param == "query")
+        .count();
+    assert_eq!(
+        verified, 0,
+        "a permanently inert HTML-comment echo must not yield a false Verified finding"
+    );
+    assert!(
+        reflected >= 1,
+        "the payload is echoed, so the reflection phase must still record an R finding"
+    );
+}
+
+/// Issue #1156 — recall guard: the early exit must never suppress a real
+/// finding. An echo that reflects the payload into live HTML must still surface
+/// a Verified finding (the early exit only fires on *non*-verifying responses).
+#[tokio::test]
+async fn test_run_scanning_dom_phase_preserves_recall_on_executable_echo() {
+    use axum::{Router, extract::Query, response::Html, routing::get};
+    use std::collections::HashMap;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use tokio::time::{Duration, sleep};
+
+    async fn exec_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
+        let q = params.get("query").cloned().unwrap_or_default();
+        // Reflected raw into live body markup — payloads form real elements.
+        Html(format!("<html><body><div>{}</div></body></html>", q))
+    }
+
+    let app = Router::new().route("/", get(exec_handler));
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let url = format!("http://{}/?query=a", addr);
+    let mut target = parse_target(&url).expect("parse_target");
+    target.reflection_params.clear();
+    target.reflection_params.push(Param {
+        name: "query".to_string(),
+        value: "a".to_string(),
+        location: Location::Query,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    });
+
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        Arc::new(integration_scan_args(false)),
+        results.clone(),
+        None,
+        None,
+        Arc::new(AtomicUsize::new(0)),
+        None,
+        None,
+        None,
+    )
+    .await;
+
+    let guard = results.lock().await;
+    let verified = guard
+        .iter()
+        .filter(|r| matches!(r.result_type, FindingType::Verified) && r.param == "query")
+        .count();
+    assert!(
+        verified >= 1,
+        "an executable echo must still produce a Verified finding; got {:?}",
+        guard
+            .iter()
+            .map(|r| (&r.result_type, &r.param))
+            .collect::<Vec<_>>()
+    );
+}
+
+/// Issue #1156 — the inert-echo signal must be CUMULATIVE, not consecutive: an
+/// endpoint that reflects most-but-not-all payloads (here ~3 of every 4) must
+/// still accumulate to the budget and early-exit. A regression making the count
+/// reset on a non-reflecting response would never reach the budget on this
+/// handler and would run the entire DOM set — so a bounded request count proves
+/// the cumulative wiring end-to-end.
+#[tokio::test]
+async fn test_run_scanning_dom_phase_inert_echo_count_is_cumulative() {
+    use axum::{
+        Router,
+        extract::{Query, State},
+        response::Html,
+        routing::get,
+    };
+    use std::collections::HashMap;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::time::{Duration, sleep};
+
+    async fn partial_handler(
+        State(counter): State<Arc<AtomicUsize>>,
+        Query(params): Query<HashMap<String, String>>,
+    ) -> Html<String> {
+        let n = counter.fetch_add(1, Ordering::Relaxed);
+        let q = params.get("query").cloned().unwrap_or_default();
+        // Every 4th request returns a clean page with NO reflection; the other
+        // ~75% reflect the payload inertly (inside a comment). The probe and the
+        // first reflection payload (n = 0,1,2) always reflect so the scan
+        // proceeds into the DOM phase.
+        if n >= 3 && n % 4 == 3 {
+            return Html("<html><body>clean</body></html>".to_string());
+        }
+        let sanitized = q.replace("-->", "__");
+        Html(format!(
+            "<html><body><!-- echo: {} --></body></html>",
+            sanitized
+        ))
+    }
+
+    let counter = Arc::new(AtomicUsize::new(0));
+    let app = Router::new()
+        .route("/", get(partial_handler))
+        .with_state(counter.clone());
+    let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
+        .await
+        .expect("bind test listener");
+    let addr: SocketAddr = listener.local_addr().expect("local addr");
+    tokio::spawn(async move {
+        axum::serve(listener, app).await.expect("serve test app");
+    });
+    sleep(Duration::from_millis(20)).await;
+
+    let url = format!("http://{}/?query=a", addr);
+    let mut target = parse_target(&url).expect("parse_target");
+    target.reflection_params.clear();
+    target.reflection_params.push(Param {
+        name: "query".to_string(),
+        value: "a".to_string(),
+        location: Location::Query,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    });
+
+    let results = Arc::new(Mutex::new(Vec::new()));
+    run_scanning(
+        &target,
+        Arc::new(integration_scan_args(false)),
+        results.clone(),
+        None,
+        None,
+        Arc::new(AtomicUsize::new(0)),
+        None,
+        None,
+        None,
+    )
+    .await;
+
+    let sent = counter.load(Ordering::Relaxed);
+    // Cumulative: 256 inert echoes reached after ~256/0.75 ≈ 341 reflecting
+    // requests, so the phase early-exits well under the full ~6k set. A
+    // consecutive (reset-on-miss) counter would never reach 256 here and would
+    // run the entire set.
+    assert!(
+        sent < 1500,
+        "inert_echo_count must be cumulative across non-reflecting gaps; sent {sent} requests"
     );
 }
 

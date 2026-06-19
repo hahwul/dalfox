@@ -869,6 +869,34 @@ async fn verify_sxss_dom(
     (false, None)
 }
 
+/// Richer result of a single DOM-verification injection (issue #1156).
+///
+/// The historical `(bool, Option<String>)` tuple returned by
+/// [`check_dom_verification_with_client`] is just the `(verified,
+/// response_text)` projection of this. The extra `reflected` and `status`
+/// fields are threaded out so [`crate::scanning`]'s DOM phase can take a
+/// recall-preserving early exit on endpoints that clearly will never verify
+/// (a self-/canonical-link echo that reflects every payload inertly, or a
+/// server that consistently 5xx/blocks) instead of running the entire DOM
+/// payload set.
+#[derive(Debug, Default, Clone)]
+pub struct DomVerifyOutcome {
+    /// Browser-executable DOM evidence was confirmed for this payload.
+    pub verified: bool,
+    /// Response body — populated only when `verified`, so the full DOM payload
+    /// set does not accumulate response bodies in memory.
+    pub response_text: Option<String>,
+    /// The payload's bytes were detected in the response (reflection present)
+    /// but not necessarily in an executable context. Distinguishes a
+    /// "reflected-but-inert echo" from a non-reflecting or blocked response.
+    /// Always `false` for redirects, request errors, and `--sxss` (where it is
+    /// not meaningfully observable).
+    pub reflected: bool,
+    /// HTTP status of the injection response, or `0` when the request errored
+    /// (or for `--sxss`, whose verification fans out across secondary URLs).
+    pub status: u16,
+}
+
 /// Verify DOM evidence from a normal (non-stored) injection response.
 ///
 /// Special-case for 3xx responses: browsers do not render the response body
@@ -877,30 +905,57 @@ async fn verify_sxss_dom(
 /// "DOM evidence" inside it is structurally a false positive. We still inspect
 /// `Location:` (an executable-URL protocol there is a real sink) but skip
 /// body-based DOM verification entirely.
-async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> (bool, Option<String>) {
+async fn verify_normal_dom(resp: reqwest::Response, payload: &str) -> DomVerifyOutcome {
     let status = resp.status();
+    let status_code = status.as_u16();
     let headers = resp.headers().clone();
 
     if status.is_redirection() {
         if let Some(location) = headers.get(reqwest::header::LOCATION)
             && let Ok(loc_str) = location.to_str()
-            && let Some(result) = check_redirect_location(loc_str, payload)
+            && let Some((verified, response_text)) = check_redirect_location(loc_str, payload)
         {
-            return result;
+            return DomVerifyOutcome {
+                verified,
+                response_text,
+                reflected: false,
+                status: status_code,
+            };
         }
-        return (false, None);
+        return DomVerifyOutcome {
+            status: status_code,
+            ..Default::default()
+        };
     }
 
     // Both HTML and non-HTML (JSONP, JSON with HTML) content types are accepted
-    // as long as there is reflection + marker/executable-URL evidence in the response.
-    if let Ok(text) = crate::utils::http::read_body(resp).await
-        && crate::scanning::check_reflection::classify_reflection(&text, payload).is_some()
-        && has_dom_evidence(payload, &text)
-    {
-        return (true, Some(text));
+    // as long as there is reflection + marker/executable-URL evidence in the
+    // response. `reflected` is computed independently of `has_dom_evidence` so
+    // an inert echo (payload present, but not executable) is still reported as
+    // reflected for the DOM-phase early-exit signal.
+    if let Ok(text) = crate::utils::http::read_body(resp).await {
+        let reflected =
+            crate::scanning::check_reflection::classify_reflection(&text, payload).is_some();
+        if reflected && has_dom_evidence(payload, &text) {
+            return DomVerifyOutcome {
+                verified: true,
+                response_text: Some(text),
+                reflected: true,
+                status: status_code,
+            };
+        }
+        return DomVerifyOutcome {
+            verified: false,
+            response_text: None,
+            reflected,
+            status: status_code,
+        };
     }
 
-    (false, None)
+    DomVerifyOutcome {
+        status: status_code,
+        ..Default::default()
+    }
 }
 
 /// Inspect a redirect's `Location:` header for evidence that the payload
@@ -931,8 +986,23 @@ pub async fn check_dom_verification_with_client(
     payload: &str,
     args: &crate::cmd::scan::ScanArgs,
 ) -> (bool, Option<String>) {
+    let outcome =
+        check_dom_verification_with_client_outcome(client, target, param, payload, args).await;
+    (outcome.verified, outcome.response_text)
+}
+
+/// Same as [`check_dom_verification_with_client`] but returns the full
+/// [`DomVerifyOutcome`] (verdict + response body + reflected/status signals)
+/// so the DOM phase can drive its recall-preserving early exit (issue #1156).
+pub async fn check_dom_verification_with_client_outcome(
+    client: &Client,
+    target: &Target,
+    param: &Param,
+    payload: &str,
+    args: &crate::cmd::scan::ScanArgs,
+) -> DomVerifyOutcome {
     if args.skip_xss_scanning {
-        return (false, None);
+        return DomVerifyOutcome::default();
     }
 
     // Apply pre-encoding if the parameter requires it.
@@ -959,11 +1029,21 @@ pub async fn check_dom_verification_with_client(
     }
 
     if args.sxss {
-        verify_sxss_dom(client, target, param, payload, args).await
+        // Stored-XSS verification fans out across secondary check URLs; its
+        // reflected/status signals are not meaningfully observable from the
+        // single injection above, so leave them at their conservative defaults
+        // (the DOM-phase early exit therefore never engages under --sxss).
+        let (verified, response_text) = verify_sxss_dom(client, target, param, payload, args).await;
+        DomVerifyOutcome {
+            verified,
+            response_text,
+            reflected: false,
+            status: 0,
+        }
     } else if let Ok(resp) = inject_resp {
         verify_normal_dom(resp, payload).await
     } else {
-        (false, None)
+        DomVerifyOutcome::default()
     }
 }
 

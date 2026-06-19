@@ -18,6 +18,36 @@
 //! the `check_dom_verification` module)
 //! Reflected payloads are verified for actual DOM evidence to upgrade
 //! findings from "R" (Reflected) to "V" (DOM-verified).
+//!
+//! ## Per-parameter request fan-out (issue #1156)
+//! The total requests sent per parameter is, roughly:
+//!
+//! ```text
+//!   probe (1–2)
+//! + reflection phase: short-circuits on the first detected reflection, so ~1
+//!     request on a reflecting param; up to `min(reflection_set, cap)` on a
+//!     non-reflecting / safe-context one
+//! + DOM phase: 1 request per DOM payload until a payload verifies (`V`) OR the
+//!     recall-preserving early exit fires (see `INERT_ECHO_BUDGET` /
+//!     `BLOCKED_STREAK_LIMIT`) OR the per-param cap is hit
+//! + HPP (only with `--hpp`, ≤ 5 payloads × 3 positions)
+//! ```
+//!
+//! The DOM/reflection payload-set size is `base × encoder_factor`, then a WAF
+//! multiplier only when a WAF is detected (or `--force-waf`):
+//!
+//! | axis              | factor                                              |
+//! |-------------------|-----------------------------------------------------|
+//! | `--encoders`      | `1 + count(active encoders)` (default `url,html` → 3)|
+//! | WAF bypass        | `expand_waf_payloads`: structural mutations + encoder variants are added **orthogonally** (no `encode(mutate(p))` cross-product), so it is additive, not multiplicative — and is paid **only on WAF targets** |
+//! | `--deep-scan`     | disables the per-param cap **and** the DOM early exit (exhaustive) |
+//! | `--max-payloads-per-param N` | hard-caps each set at `N` (default `0` = unlimited) |
+//!
+//! Note: `--max-payloads-per-param` defaults to unlimited, so the DOM early exit
+//! is the only *default-on* bound on the DOM phase. Net effect on a
+//! self-/canonical-link echo (the issue's worst case): the DOM phase used to
+//! send the entire set (measured ~thousands/param); the early exit now caps it
+//! at roughly one diverse pass once the endpoint proves inert.
 
 pub mod ast_dom_analysis;
 pub mod ast_integration;
@@ -40,7 +70,7 @@ pub mod xss_common;
 
 use crate::cmd::scan::ScanArgs;
 use crate::parameter_analysis::Param;
-use crate::scanning::check_dom_verification::check_dom_verification_with_client;
+use crate::scanning::check_dom_verification::check_dom_verification_with_client_outcome;
 use crate::scanning::check_reflection::check_reflection_with_response_tracked;
 use crate::scanning::result::FindingType;
 use crate::target_parser::Target;
@@ -368,6 +398,33 @@ fn get_js_breakout_payloads() -> Vec<String> {
     payloads
 }
 
+/// Round-robin interleave several payload families into one list so that any
+/// prefix samples *every* family proportionally (issue #1156). Used for the
+/// unknown-context DOM catalog so the recall-preserving DOM-phase early exit
+/// sees a representative of each DOM-evidence kind before the inert-echo budget
+/// can trip, instead of exhausting the (redundant, sink-varied) HTML-template
+/// block while the protocol/mXSS families sit thousands of payloads away.
+/// Within-family order is preserved; the result contains exactly the union of
+/// the inputs (no dedup — the encoder pass dedups downstream).
+fn interleave_payload_families(families: Vec<Vec<String>>) -> Vec<String> {
+    let total: usize = families.iter().map(Vec::len).sum();
+    // Consume each family (move the Strings out — the generators already handed
+    // us owned clones) rather than re-cloning per element.
+    let mut iters: Vec<_> = families.into_iter().map(Vec::into_iter).collect();
+    let mut out = Vec::with_capacity(total);
+    let mut any = true;
+    while any {
+        any = false;
+        for it in &mut iters {
+            if let Some(p) = it.next() {
+                out.push(p);
+                any = true;
+            }
+        }
+    }
+    out
+}
+
 /// Resolve the effective per-parameter payload cap from the user's
 /// `--max-payloads-per-param` (`max_payloads`) and `--deep-scan` flags.
 ///
@@ -427,11 +484,23 @@ pub(crate) fn get_dom_payloads(
                     );
                 }
             } else {
-                base_payloads.extend(crate::payload::get_dynamic_xss_html_payloads());
-                base_payloads.extend(crate::payload::get_dynamic_xss_attribute_payloads());
-                base_payloads.extend(crate::payload::get_mxss_payloads());
-                base_payloads.extend(crate::payload::get_dom_clobbering_payloads());
-                base_payloads.extend(crate::payload::get_protocol_injection_payloads());
+                // Issue #1156: round-robin interleave the evidence families so
+                // every DOM-evidence kind (HTML-tag, event-handler/attribute,
+                // mXSS, DOM-clobbering, protocol/URL) is represented in any
+                // prefix of the list — in particular within the first
+                // `INERT_ECHO_BUDGET` payloads the DOM-phase early exit samples.
+                // Plain concatenation appended the protocol/mXSS generators last
+                // (thousands of payloads in), so the early exit could cut them
+                // entirely on a raw-reflecting URL-attribute echo, where the
+                // protocol payload is the only verifier. Within-family ordering
+                // (e.g. HTML attribute-breakout templates first) is preserved.
+                base_payloads = interleave_payload_families(vec![
+                    crate::payload::get_dynamic_xss_html_payloads(),
+                    crate::payload::get_dynamic_xss_attribute_payloads(),
+                    crate::payload::get_mxss_payloads(),
+                    crate::payload::get_dom_clobbering_payloads(),
+                    crate::payload::get_protocol_injection_payloads(),
+                ]);
                 if let Some(path) = &args.custom_payload {
                     base_payloads.extend(
                         crate::scanning::xss_common::load_custom_payloads(path)
@@ -1361,6 +1430,97 @@ enum PhaseFlow {
     Abort,
 }
 
+/// Issue #1156 — recall-preserving DOM-phase early-exit budgets.
+///
+/// `run_dom_phase` only short-circuits when a payload actually *verifies* (`V`).
+/// On a self-/canonical-link echo endpoint — one that reflects every payload but
+/// in an inert (non-executable) context — that means the *entire* DOM payload
+/// set is sent (measured at tens of thousands of requests for a single
+/// parameter; see the issue). These budgets curtail that fan-out once the
+/// endpoint has produced overwhelming evidence it will never verify, without
+/// trimming the high-signal shapes.
+///
+/// `INERT_ECHO_BUDGET` is the cumulative count of payloads that were reflected
+/// but inert (`reflected && !verified`).
+///
+/// Recall safety rests on two properties:
+///
+/// 1. **The budget only accrues on raw-reflecting endpoints.**
+///    `check_reflection::classify_reflection` returns `None` for reflections the
+///    server escaped/encoded (entity, percent, fullwidth) — see its FP guards —
+///    so a *sanitizing* endpoint (DOMPurify, `&lt;IMG&gt;`-emitting templates,
+///    …) never advances `inert_echo_count` and is never cut. The early exit
+///    therefore fires only on endpoints that echo our bytes verbatim yet never
+///    execute them.
+///
+/// 2. **Every DOM-evidence kind is sampled before the budget can trip.** For the
+///    unknown-context catalog the families are round-robin interleaved (see
+///    `interleave_payload_families`), so any prefix — including the first
+///    `INERT_ECHO_BUDGET` echoes — contains a representative of each evidence
+///    kind: HTML-tag injection, event-handler/attribute breakout, mXSS,
+///    DOM-clobbering, and `javascript:`/`data:` protocol-URL (the sole verifier
+///    for URL-attribute sinks). Without the interleave the protocol/mXSS
+///    families are appended last and would sit thousands of payloads past the
+///    budget. Context-specific catalogs are already shape-diverse up front.
+///
+/// Given (1) and (2), 256 reflected-but-inert echoes with zero verifications is
+/// overwhelming evidence of a uniformly-inert echo; the remaining payloads are
+/// redundant sink-variations (`alert` vs `prompt`) and encoder-variants of
+/// shapes that already failed, so cutting them is recall-neutral.
+const INERT_ECHO_BUDGET: u32 = 256;
+
+/// Issue #1156 — *consecutive* 5xx responses that end the DOM phase.
+///
+/// Scoped to **server errors (`status >= 500`) only**, deliberately *excluding*
+/// 4xx WAF blocks (`403`/`406`/`429`): a payload *variant* can bypass a WAF
+/// filter, so early-exiting on a 4xx block would risk cutting a working bypass
+/// (those are handled by the reflection-path WAF backoff instead). A 5xx, by
+/// contrast, is the server failing — no payload variant "bypasses" it and an
+/// error page cannot carry executable evidence — so a long consecutive run is a
+/// safe, recall-neutral stop. A single non-5xx response resets the streak, so a
+/// transient blip cannot abandon a recoverable parameter.
+const BLOCKED_STREAK_LIMIT: u32 = 64;
+
+/// True for statuses that signal the endpoint will not yield a DOM verification
+/// *and* that no payload variant could turn around: any 5xx server error. 4xx
+/// WAF blocks are intentionally excluded (see [`BLOCKED_STREAK_LIMIT`]); `0`
+/// (request error) is likewise not blocking — a transient network error should
+/// not, on its own, end the phase.
+fn is_blocking_dom_status(status: u16) -> bool {
+    status >= 500
+}
+
+/// Fold one DOM response's `reflected` flag into the cumulative inert-echo
+/// count. Cumulative (never resets on a non-reflecting response) so an endpoint
+/// that reflects most-but-not-all payloads still converges on the budget. Pure
+/// for unit testing.
+fn next_inert_echo_count(prev: u32, reflected: bool) -> u32 {
+    if reflected { prev + 1 } else { prev }
+}
+
+/// Fold one DOM response's status into the consecutive blocked streak: increment
+/// on a blocking status, reset to 0 otherwise. The reset is what makes the
+/// streak *consecutive* (one good response clears it), preserving recall on
+/// intermittently-failing endpoints. Pure for unit testing.
+fn next_blocked_streak(prev: u32, status: u16) -> u32 {
+    if is_blocking_dom_status(status) {
+        prev + 1
+    } else {
+        0
+    }
+}
+
+/// Decide whether the DOM phase should stop early given the signals accumulated
+/// so far. Pure so it can be unit-tested without a live server. Disabled under
+/// `--deep-scan` (the exhaustive mode that opts out of all fan-out trimming).
+fn dom_phase_should_early_exit(
+    deep_scan: bool,
+    inert_echo_count: u32,
+    blocked_streak: u32,
+) -> bool {
+    !deep_scan && (inert_echo_count >= INERT_ECHO_BUDGET || blocked_streak >= BLOCKED_STREAK_LIMIT)
+}
+
 /// Mutable per-parameter state shared across a single worker's probe,
 /// reflection, DOM, and HPP phases.
 #[derive(Default)]
@@ -1834,6 +1994,14 @@ impl ScanWorkerCtx {
         dom_payloads: Vec<String>,
         state: &mut ParamScanState,
     ) -> PhaseFlow {
+        // Issue #1156 — recall-preserving early-exit signals. `inert_echo_count`
+        // is cumulative (an echo endpoint reflects consistently, so the count
+        // accrues across the whole phase); `blocked_streak` is consecutive (a
+        // single response that gets through resets it, preserving WAF-bypass
+        // recall). Both are disabled under `--deep-scan`.
+        let mut inert_echo_count: u32 = 0;
+        let mut blocked_streak: u32 = 0;
+
         for dom_payload in dom_payloads {
             // Check cancellation
             if self.cancelled() {
@@ -1862,7 +2030,12 @@ impl ScanWorkerCtx {
                 }
                 continue;
             }
-            let (dom_verified, response_text) = check_dom_verification_with_client(
+            let crate::scanning::check_dom_verification::DomVerifyOutcome {
+                verified: dom_verified,
+                response_text,
+                reflected,
+                status,
+            } = check_dom_verification_with_client_outcome(
                 self.client.as_ref(),
                 &self.target,
                 param,
@@ -1945,11 +2118,31 @@ impl ScanWorkerCtx {
                     break;
                 }
             }
+
+            // Issue #1156 — accumulate the recall-preserving early-exit signals
+            // for this response, then stop the phase once the endpoint has shown
+            // overwhelming evidence it will never verify. Only non-verifying
+            // responses feed the signals: a `dom_verified` response that did not
+            // `break` above (another worker recorded it first, `should_add ==
+            // false`) must not be miscounted as an inert echo.
+            if !dom_verified {
+                inert_echo_count = next_inert_echo_count(inert_echo_count, reflected);
+                blocked_streak = next_blocked_streak(blocked_streak, status);
+            }
             if let Some(ref pb) = self.pb {
                 pb.inc(1);
             }
             if let Some(ref opb) = self.overall_pb {
                 opb.inc(1);
+            }
+            if dom_phase_should_early_exit(self.args.deep_scan, inert_echo_count, blocked_streak) {
+                crate::dbg_log!(
+                    "dom phase early-exit (param={}): inert_echo={}, blocked_streak={} — endpoint shows no path to DOM verification, skipping remaining payloads",
+                    param.name,
+                    inert_echo_count,
+                    blocked_streak,
+                );
+                break;
             }
         }
         PhaseFlow::Continue
