@@ -31,11 +31,12 @@
           pkg-config
         ];
 
+        # On modern nixpkgs (Darwin SDK rework), the Security and
+        # SystemConfiguration frameworks are provided by the default stdenv,
+        # so they no longer need to be listed explicitly. The legacy
+        # `darwin.apple_sdk.frameworks.*` stubs have been removed.
         buildInputs = with pkgs; [
           openssl
-        ] ++ lib.optionals stdenv.isDarwin [
-          darwin.apple_sdk.frameworks.Security
-          darwin.apple_sdk.frameworks.SystemConfiguration
         ];
 
         # Common environment for development
