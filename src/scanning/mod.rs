@@ -408,12 +408,17 @@ fn get_js_breakout_payloads() -> Vec<String> {
 /// the inputs (no dedup — the encoder pass dedups downstream).
 fn interleave_payload_families(families: Vec<Vec<String>>) -> Vec<String> {
     let total: usize = families.iter().map(Vec::len).sum();
-    let max_len = families.iter().map(Vec::len).max().unwrap_or(0);
+    // Consume each family (move the Strings out — the generators already handed
+    // us owned clones) rather than re-cloning per element.
+    let mut iters: Vec<_> = families.into_iter().map(Vec::into_iter).collect();
     let mut out = Vec::with_capacity(total);
-    for i in 0..max_len {
-        for fam in &families {
-            if let Some(p) = fam.get(i) {
-                out.push(p.clone());
+    let mut any = true;
+    while any {
+        any = false;
+        for it in &mut iters {
+            if let Some(p) = it.next() {
+                out.push(p);
+                any = true;
             }
         }
     }
