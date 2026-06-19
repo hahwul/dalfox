@@ -1748,3 +1748,250 @@ fn test_inert_encoded_reflection_keeps_case_folded_reflection_no_echo() {
         "case-folded live reflection must not be suppressed"
     );
 }
+
+// ---- issue #1153: inert dangerous-scheme reflection (self-/canonical-link
+// echo, body text, non-URL attr) must be demoted; an executable scheme-start
+// in a URL-valued attribute must be kept. ----
+
+#[test]
+fn test_scheme_fp_suppresses_self_link_query_encoded() {
+    // Issue #1153 exact shape: ASP.NET-style canonical/self link echoes the raw
+    // percent-encoded query string, so `javascript:` sits in the QUERY position
+    // of the link's URL (the page's own http scheme), never navigating to it.
+    let payload = "javascript:alert(1)";
+    let html = "<head><link rel=\"canonical\" href=\"/About.aspx?hello=visitor&any=javascript%3Aalert%281%29\"></head><body><a href=\"/About.aspx?any=javascript%3Aalert%281%29\">home</a></body>";
+    assert!(
+        dangerous_scheme_reflection_is_inert(html, payload),
+        "scheme in a self-link query position is inert"
+    );
+    assert!(
+        is_in_safe_context_decoded(html, payload),
+        "issue #1153 self-link [R] FP must be suppressed"
+    );
+}
+
+#[test]
+fn test_scheme_fp_suppresses_tab_obfuscated_scheme_in_self_link() {
+    // WAF-evasion mutation: a TAB inside the scheme (`java\tscript:`). Browsers
+    // strip TAB/LF/CR from URLs, so it is the same `javascript:` scheme — and in
+    // a self-link query position it is just as inert.
+    let payload = "java\tscript:alert(1)";
+    let html = "<a href=\"/About.aspx?any=java%09script%3Aalert%281%29\">home</a>";
+    assert!(
+        dangerous_scheme_reflection_is_inert(html, payload),
+        "tab-obfuscated scheme in a self-link query position is inert"
+    );
+    assert!(is_in_safe_context_decoded(html, payload));
+    // ...but still kept at a real href scheme-start.
+    let exec = "<a href=\"java\tscript:alert(1)\">x</a>";
+    assert!(!dangerous_scheme_reflection_is_inert(exec, payload));
+}
+
+#[test]
+fn test_scheme_fp_suppresses_self_link_query_raw() {
+    let payload = "javascript:alert(1)";
+    let html = "<a href=\"/p?next=javascript:alert(1)\">go</a>";
+    assert!(dangerous_scheme_reflection_is_inert(html, payload));
+    assert!(is_in_safe_context_decoded(html, payload));
+}
+
+#[test]
+fn test_scheme_fp_suppresses_body_text() {
+    // Bare scheme rendered as plain body text never navigates.
+    let payload = "javascript:alert(1)";
+    for html in [
+        "<div>You searched for: javascript:alert(1)</div>",
+        "<div>You searched for: javascript%3Aalert%281%29</div>",
+        "<p data-note=\"javascript:alert(1)\">x</p>", // non-URL attribute
+    ] {
+        assert!(
+            dangerous_scheme_reflection_is_inert(html, payload),
+            "inert scheme echo must be demoted: {html}"
+        );
+        assert!(is_in_safe_context_decoded(html, payload));
+    }
+}
+
+#[test]
+fn test_scheme_fp_keeps_executable_scheme_start() {
+    // A scheme at the start of a URL-valued attribute value navigates/executes
+    // and MUST be kept (no false negative).
+    let payload = "javascript:alert(1)";
+    for html in [
+        "<a href=\"javascript:alert(1)\">x</a>",
+        "<a href=javascript:alert(1)>x</a>", // unquoted
+        "<iframe src=\"javascript:alert(1)\"></iframe>",
+        "<a href=\"  javascript:alert(1)\">x</a>", // browser strips leading ws
+        "<a href=\"\tjavascript:alert(1)\">x</a>", // TAB stripped from URLs
+        "<svg><a xlink:href=\"javascript%3Aalert%281%29\"><text>x</text></a></svg>",
+        "<form action=\"javascript:alert(1)\"></form>",
+    ] {
+        assert!(
+            !dangerous_scheme_reflection_is_inert(html, payload),
+            "executable scheme-start must be kept: {html}"
+        );
+        assert!(
+            !is_in_safe_context_decoded(html, payload),
+            "executable scheme-start must not be suppressed: {html}"
+        );
+    }
+}
+
+#[test]
+fn test_scheme_fp_keeps_scheme_in_script_navigation_sink() {
+    // A dangerous scheme echoed inside a <script> block can feed a JS navigation
+    // sink (`location.href = "javascript:..."`) and execute, even though it never
+    // sits at a URL-attribute scheme-start. The inert-scheme gate MUST NOT
+    // suppress it — let the JS-context / AST path decide executability.
+    //
+    // This drives the FULL `is_in_safe_context_decoded` path, not just the
+    // dangerous-scheme helper: `is_payload_inert_in_scripts` runs *first* there
+    // and, before the dangerous-scheme guard was added, suppressed all three of
+    // these end-to-end (its AST sink-call check does not model a passive scheme
+    // value assigned to `location.href`), making the helper-level carve-out dead
+    // code. Asserting through `is_in_safe_context_decoded` pins the real behavior.
+    let payload = "javascript:alert(1)";
+    for html in [
+        "<script>location.href = \"javascript:alert(1)\";</script>",
+        "<script>window.location = 'javascript:alert(1)';</script>",
+        "<script>var u = \"javascript:alert(1)\"; location.assign(u);</script>",
+    ] {
+        assert!(
+            !dangerous_scheme_reflection_is_inert(html, payload),
+            "scheme inside <script> must not be demoted as inert: {html}"
+        );
+        assert!(
+            !is_payload_inert_in_scripts(html, payload),
+            "is_payload_inert_in_scripts must not mask a <script> nav-sink scheme: {html}"
+        );
+        assert!(
+            !is_in_safe_context_decoded(html, payload),
+            "<script> nav-sink scheme must survive the full suppression pipeline: {html}"
+        );
+    }
+}
+
+#[test]
+fn test_scheme_fp_non_javascript_schemes_keep_at_scheme_start() {
+    // The other dangerous-scheme families (`data:text/html`, `data:image/svg`,
+    // `vbscript:`) were only exercised on the SUPPRESS path; pin the
+    // executable-KEEP direction too so a typo in those literals or a
+    // scheme-start regression can't silently drop their [R]/static-V.
+    for (payload, exec_html) in [
+        (
+            "data:text/html;base64,PHN2Zz4=",
+            "<iframe src=\"data:text/html;base64,PHN2Zz4=\"></iframe>",
+        ),
+        (
+            "data:image/svg+xml;base64,PHN2Zz4=",
+            "<object data=\"data:image/svg+xml;base64,PHN2Zz4=\"></object>",
+        ),
+        ("vbscript:msgbox(1)", "<a href=\"vbscript:msgbox(1)\">x</a>"),
+    ] {
+        assert!(
+            !dangerous_scheme_reflection_is_inert(exec_html, payload),
+            "scheme at a URL-attr value start must be kept: {exec_html}"
+        );
+        assert!(
+            !is_in_safe_context_decoded(exec_html, payload),
+            "executable scheme-start must not be suppressed: {exec_html}"
+        );
+        // ...and the same scheme echoed in a self-link query position is inert.
+        let inert_html = format!("<a href=\"/p?next={payload}\">go</a>");
+        assert!(
+            dangerous_scheme_reflection_is_inert(&inert_html, payload),
+            "scheme in a self-link query position is inert: {inert_html}"
+        );
+    }
+}
+
+#[test]
+fn test_scheme_fp_keeps_when_both_inert_and_executable_present() {
+    // An inert query echo co-existing with a real scheme-start href: keep.
+    let payload = "javascript:alert(1)";
+    let html =
+        "<a href=\"javascript:alert(1)\">x</a><link href=\"/s?u=javascript%3Aalert%281%29\">";
+    assert!(!dangerous_scheme_reflection_is_inert(html, payload));
+}
+
+#[test]
+fn test_scheme_fp_ignores_non_scheme_payloads() {
+    // The gate is scoped to dangerous URL schemes; other payloads are untouched.
+    assert!(!dangerous_scheme_reflection_is_inert(
+        "<div>hello world</div>",
+        "hello world"
+    ));
+    // Tag-bearing data: payload is out of scope (DOM/AST path handles it).
+    assert!(!dangerous_scheme_reflection_is_inert(
+        "<div>data:text/html,&lt;script&gt;</div>",
+        "data:text/html,<script>alert(1)</script>"
+    ));
+}
+
+#[test]
+fn test_scheme_at_url_attr_value_start_positions() {
+    // Direct unit coverage of the position helper.
+    let exec = "<a href=\"javascript:alert(1)\">"; // scheme at value start
+    let pos = exec.find("javascript:").unwrap();
+    assert!(scheme_at_url_attr_value_start(exec.as_bytes(), pos));
+
+    let query = "<a href=\"/p?x=javascript:alert(1)\">"; // mid-value (query)
+    let pos = query.find("javascript:").unwrap();
+    assert!(!scheme_at_url_attr_value_start(query.as_bytes(), pos));
+
+    let body = "<div>javascript:alert(1)</div>"; // not in any attribute
+    let pos = body.find("javascript:").unwrap();
+    assert!(!scheme_at_url_attr_value_start(body.as_bytes(), pos));
+}
+
+#[test]
+fn test_trapped_in_url_value_suppresses_scheme_mutations() {
+    // WAF-evasion scheme mutations a server echoes verbatim into a self-link
+    // query are inert (no quote/angle, not at scheme-start). Issue #1153.
+    let html = "<link rel=\"canonical\" href=\"/About.aspx?any=PAYLOAD\"><a href=\"/About.aspx?any=PAYLOAD\">home</a>";
+    for p in [
+        "javasscriptcript:alert(1)",
+        "java\tscript:alert(1)",
+        "vbscript:msgbox(1)",
+        "data:text/html;base64,x",
+    ] {
+        let h = html.replace("PAYLOAD", p);
+        assert!(
+            reflection_trapped_in_url_value(&h, p),
+            "verbatim self-link echo must be inert: {p}"
+        );
+        assert!(is_in_safe_context_decoded(&h, p));
+    }
+}
+
+#[test]
+fn test_trapped_in_url_value_keeps_breakout_and_scheme_start() {
+    // A quote in the payload could close the attribute -> keep.
+    let q = "<a href=\"/p?x=\";alert(1)\">x</a>";
+    assert!(!reflection_trapped_in_url_value(q, "\";alert(1)"));
+    // Scheme at the value start navigates -> keep.
+    let exec = "<a href=\"javascript:alert(1)\">x</a>";
+    assert!(!reflection_trapped_in_url_value(
+        exec,
+        "javascript:alert(1)"
+    ));
+    // Reflected in body text (not a URL attr) -> not this gate's job.
+    let body = "<div>foobar123</div>";
+    assert!(!reflection_trapped_in_url_value(body, "foobar123"));
+}
+
+#[test]
+fn test_occurrence_inside_url_attr_value_handles_query_string() {
+    // The href value contains `=`/`?`/`&`; the occurrence is still inside it.
+    let h = "<a href=\"/About.aspx?hello=visitor&any=zzmarker\">x</a>";
+    let pos = h.find("zzmarker").unwrap();
+    assert!(occurrence_inside_url_attr_value(h.as_bytes(), pos));
+    // Non-URL attribute value -> false.
+    let h2 = "<input value=\"zzmarker\">";
+    let pos2 = h2.find("zzmarker").unwrap();
+    assert!(!occurrence_inside_url_attr_value(h2.as_bytes(), pos2));
+    // Body text -> false.
+    let h3 = "<p>zzmarker</p>";
+    let pos3 = h3.find("zzmarker").unwrap();
+    assert!(!occurrence_inside_url_attr_value(h3.as_bytes(), pos3));
+}

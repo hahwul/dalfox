@@ -611,7 +611,12 @@ pub(crate) async fn run_preflight_and_analysis(
                             }
                             f
                         };
-                        let cap = args_clone.max_payloads_per_param;
+                        // Match the scan-time effective cap so the preflight
+                        // request estimate reflects the built-in safety cap.
+                        let cap = crate::scanning::effective_payload_cap(
+                            args_clone.max_payloads_per_param,
+                            args_clone.deep_scan,
+                        );
                         let apply_cap = |n: usize| -> usize {
                             if cap == 0 { n } else { n.min(cap) }
                         };

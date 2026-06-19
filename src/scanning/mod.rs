@@ -425,6 +425,24 @@ fn interleave_payload_families(families: Vec<Vec<String>>) -> Vec<String> {
     out
 }
 
+/// Resolve the effective per-parameter payload cap from the user's
+/// `--max-payloads-per-param` (`max_payloads`) and `--deep-scan` flags.
+///
+/// - An explicit `--max-payloads-per-param N` (N > 0) always wins — it is
+///   honored verbatim even under `--deep-scan`.
+/// - `0` (the default) means "apply the built-in [`DEFAULT_PAYLOAD_SAFETY_CAP`]"
+///   so a parameter that reflects every payload without DOM-verifying can't
+///   drive the DOM phase through the full payload set (issue #1153).
+/// - `--deep-scan` lifts only the built-in safety cap: it makes the default
+///   (`0`) unlimited for exhaustive runs. It does not override an explicit cap.
+pub(crate) fn effective_payload_cap(max_payloads: usize, deep_scan: bool) -> usize {
+    match max_payloads {
+        0 if deep_scan => 0,
+        0 => crate::cmd::scan::DEFAULT_PAYLOAD_SAFETY_CAP,
+        n => n,
+    }
+}
+
 pub(crate) fn get_dom_payloads(
     param: &Param,
     args: &ScanArgs,
@@ -1171,9 +1189,42 @@ fn generate_param_jobs(
             }
         }
 
-        // Append shared payloads (CSP bypass + tech-specific)
-        reflection_payloads.extend(shared_payloads.iter().cloned());
-        dom_payloads.extend(shared_payloads.iter().cloned());
+        // Cap the *base* reflection and DOM catalogs independently (each to
+        // `cap`) BEFORE WAF-bypass expansion and the shared-payload append below.
+        // An explicit --max-payloads-per-param wins; otherwise a built-in safety
+        // cap bounds the request fan-out on parameters that reflect every payload
+        // without DOM-verifying (self-link echoes — issue #1153), where the DOM
+        // phase would otherwise send the full ~10k+ payload set. --deep-scan lifts
+        // the built-in cap (truly unlimited).
+        //
+        // Capping the BASE catalog (not the post-expansion set) is deliberate:
+        // `expand_waf_payloads` keeps the de-duplicated originals at the front and
+        // appends every structural-mutation / extra-encoder variant at the tail,
+        // so capping *after* expansion truncates 100% of the WAF-bypass variants
+        // whenever the base alone exceeds the cap (e.g. ~9k attribute-context
+        // payloads vs the 3000 default) — silently defeating WAF bypass on exactly
+        // the params it was selected for. Capping first lets each surviving base
+        // payload keep its full bypass expansion; with no WAF the set is unchanged
+        // by expansion, so the self-link amplification is still bounded to `cap`.
+        let cap = effective_payload_cap(args.max_payloads_per_param, args.deep_scan);
+        if cap > 0 {
+            let refl_dropped = reflection_payloads.len().saturating_sub(cap);
+            let dom_dropped = dom_payloads.len().saturating_sub(cap);
+            reflection_payloads.truncate(cap);
+            dom_payloads.truncate(cap);
+            // Surface the built-in cap (an explicit user cap is the operator's own
+            // deliberate choice, not a silent one) so a trimmed run is never
+            // silent — "No silent caps".
+            if args.max_payloads_per_param == 0 && (refl_dropped > 0 || dom_dropped > 0) {
+                crate::dbg_log!(
+                    "param {}: built-in payload safety cap {} trimmed {} reflection + {} DOM base payload(s); raise with --max-payloads-per-param or --deep-scan",
+                    param.name,
+                    cap,
+                    refl_dropped,
+                    dom_dropped
+                );
+            }
+        }
 
         // Apply WAF bypass expansion if a WAF was detected. The two bypass
         // axes are kept orthogonal rather than multiplied together (see
@@ -1222,16 +1273,29 @@ fn generate_param_jobs(
             }
         }
 
-        // --max-payloads-per-param: cap each payload set independently.
-        // 0 means unlimited (default), preserving prior behavior.
-        let cap = args.max_payloads_per_param;
-        if cap > 0 {
-            if reflection_payloads.len() > cap {
-                reflection_payloads.truncate(cap);
+        // Append shared payloads (CSP bypass + tech-specific) AFTER the cap so
+        // the safety cap can never trim these few, high-value payloads. They
+        // still get the same WAF-bypass expansion as the base set.
+        if !shared_payloads.is_empty() {
+            let mut shared_refl: Vec<String> = shared_payloads.to_vec();
+            let mut shared_dom: Vec<String> = shared_payloads.to_vec();
+            if let Some(strategy) = waf_strategy {
+                let stats = target.mutation_stats.as_deref();
+                shared_refl = expand_waf_payloads(&shared_refl, strategy, stats);
+                shared_dom = expand_waf_payloads(&shared_dom, strategy, stats);
             }
-            if dom_payloads.len() > cap {
-                dom_payloads.truncate(cap);
+            // Apply the same adaptive prune the base set got: when the server
+            // strips `<`/`>`, angle-bearing shared payloads (many CSP-bypass
+            // shapes) are guaranteed misses, so drop them rather than spend a
+            // request each. Preserves the pre-cap-reorder behavior for shared.
+            if let Some(invalid) = param.invalid_specials.as_deref()
+                && !invalid.is_empty()
+            {
+                shared_refl = prune_blocked_raw_angles(shared_refl, invalid);
+                shared_dom = prune_blocked_raw_angles(shared_dom, invalid);
             }
+            reflection_payloads.extend(shared_refl);
+            dom_payloads.extend(shared_dom);
         }
 
         // One pb.inc(1) per reflection payload plus one per DOM payload.

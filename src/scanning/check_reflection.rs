@@ -295,6 +295,21 @@ fn is_in_safe_context_decoded(html: &str, payload: &str) -> bool {
     if is_inert_encoded_reflection(html, payload) {
         return true;
     }
+    // Inert dangerous-scheme echo: a `javascript:`/`vbscript:`/`data:…` payload
+    // that never reflects at the scheme-start of a URL-valued attribute (only in
+    // body text, a non-URL attribute, or the query/fragment of a self-/canonical
+    // link) cannot navigate to the scheme. Cuts the [R] "reflected after
+    // URL/form decoding" false positive in issue #1153.
+    if dangerous_scheme_reflection_is_inert(html, payload) {
+        return true;
+    }
+    // Inert self-link echo: a break-out-free payload trapped inside the
+    // query/path of a quoted URL-valued attribute (a self-/canonical link that
+    // reflects the param verbatim) can't break out. Covers `javascript:` scheme
+    // WAF-evasion mutations the server echoes without transforming (issue #1153).
+    if reflection_trapped_in_url_value(html, payload) {
+        return true;
+    }
     false
 }
 
@@ -377,38 +392,17 @@ pub(crate) fn marker_reflects_in_url_attr_only(html: &str, marker: &str) -> bool
     any
 }
 
-/// Walk backwards from byte offset `at` looking for the surrounding HTML
-/// attribute context. Returns `true` when the byte sits inside a quoted
-/// or unquoted attribute value whose attribute name is in
-/// [`URL_VALUED_ATTRS`]. Returns `false` for text content (we hit `>`
-/// before finding `=`) and for non-URL attributes.
-fn occurrence_is_in_url_attr(bytes: &[u8], at: usize) -> bool {
-    if at == 0 || at > bytes.len() {
-        return false;
+/// Given `eq` = the byte index of an attribute's `=`, read the attribute name
+/// immediately to its left (skipping intervening whitespace) and return whether
+/// that name is in [`URL_VALUED_ATTRS`]. The single home for the
+/// name-matching rule shared by every URL-attribute occurrence check.
+fn url_valued_attr_name_before_eq(bytes: &[u8], eq: usize) -> bool {
+    // Skip whitespace between `=` and the attribute name.
+    let mut name_end = eq;
+    while name_end > 0 && bytes[name_end - 1].is_ascii_whitespace() {
+        name_end -= 1;
     }
-    // Phase 1: walk back to find an `=` without crossing a tag boundary.
-    let mut i = at;
-    loop {
-        if i == 0 {
-            return false;
-        }
-        i -= 1;
-        match bytes[i] {
-            b'=' => break,
-            // Crossing a tag boundary means we're outside any attribute.
-            b'<' | b'>' => return false,
-            _ => {}
-        }
-    }
-    // Phase 2: skip backwards over whitespace between `=` and attr name.
-    while i > 0 && bytes[i - 1].is_ascii_whitespace() {
-        i -= 1;
-    }
-    if i == 0 {
-        return false;
-    }
-    // Phase 3: read the attribute name backwards.
-    let name_end = i; // exclusive
+    // Read the attribute name backwards.
     let mut name_start = name_end;
     while name_start > 0 {
         let b = bytes[name_start - 1];
@@ -424,6 +418,288 @@ fn occurrence_is_in_url_attr(bytes: &[u8], at: usize) -> bool {
     URL_VALUED_ATTRS
         .iter()
         .any(|n| name.eq_ignore_ascii_case(n))
+}
+
+/// Walk backwards from byte offset `at` looking for the surrounding HTML
+/// attribute context. Returns `true` when the byte sits inside a quoted
+/// or unquoted attribute value whose attribute name is in
+/// [`URL_VALUED_ATTRS`]. Returns `false` for text content (we hit `>`
+/// before finding `=`) and for non-URL attributes.
+///
+/// This is the LOOSER of the URL-attribute position checks: it matches an
+/// occurrence *anywhere* in the value (scheme, path, query, or fragment).
+/// [`scheme_at_url_attr_value_start`] / [`occurrence_inside_url_attr_value`]
+/// (the #1153 gates in [`is_in_safe_context_decoded`]) deliberately apply the
+/// stricter scheme-position rule downstream, re-suppressing a mid-query
+/// `javascript:` echo that this check keeps. Keep the rules separate — do not
+/// "reconcile" them by tightening this one, or the legitimate
+/// `href="javascript:…"` `[R]` is lost; nor loosen the gates, or the #1153
+/// self-/canonical-link false positive returns.
+fn occurrence_is_in_url_attr(bytes: &[u8], at: usize) -> bool {
+    if at == 0 || at > bytes.len() {
+        return false;
+    }
+    // Walk back to the attribute's `=` without crossing a tag boundary.
+    let mut i = at;
+    loop {
+        if i == 0 {
+            return false;
+        }
+        i -= 1;
+        match bytes[i] {
+            b'=' => break,
+            // Crossing a tag boundary means we're outside any attribute.
+            b'<' | b'>' => return false,
+            _ => {}
+        }
+    }
+    url_valued_attr_name_before_eq(bytes, i)
+}
+
+/// True when a decoded payload form is a JS-executable URL scheme — the schemes
+/// a browser runs when one is the scheme of a *navigated* URL. Mirrors the set
+/// in [`url_encoded_payload_reflects_in_unsafe_url_context`].
+///
+/// Normalizes the way a browser does before reading a URL scheme: TAB/LF/CR are
+/// removed from anywhere in the URL and leading C0 control bytes / spaces are
+/// skipped — so a WAF-evasion variant like `java&#9;script:` / `java\tscript:`
+/// still resolves to `javascript:` and is recognized.
+fn decoded_is_dangerous_scheme(s: &str) -> bool {
+    let normalized: String = s
+        .chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .collect();
+    let trimmed = normalized.trim_start_matches(|c: char| (c as u32) < 0x20 || c == ' ');
+    let lower = trimmed.to_ascii_lowercase();
+    lower.starts_with("javascript:")
+        || lower.starts_with("data:text/html")
+        || lower.starts_with("data:image/svg")
+        || lower.starts_with("vbscript:")
+}
+
+/// True when byte offset `at` is the first *effective* character of a
+/// URL-valued attribute's value — so a dangerous scheme starting there is the
+/// URL's scheme and navigates/executes. Browsers strip leading ASCII whitespace
+/// and C0 control bytes (incl. TAB/LF/CR) before parsing the scheme, so those
+/// are skipped. Unlike [`occurrence_is_in_url_attr`] this distinguishes the
+/// scheme position (`href="javascript:…"`, executable) from a mid-value query
+/// position (`href="/p?x=javascript:…"`, an inert self-/canonical-link echo).
+fn scheme_at_url_attr_value_start(bytes: &[u8], at: usize) -> bool {
+    if at > bytes.len() {
+        return false;
+    }
+    // Skip back over characters a browser removes before the scheme.
+    let mut i = at;
+    while i > 0 {
+        let b = bytes[i - 1];
+        if b.is_ascii_whitespace() || b < 0x20 {
+            i -= 1;
+        } else {
+            break;
+        }
+    }
+    if i == 0 {
+        return false;
+    }
+    // The value must open immediately to the left: an unquoted `name=` value, or
+    // a quoted value whose opening quote is itself preceded by `=`.
+    let eq_at = match bytes[i - 1] {
+        b'"' | b'\'' => {
+            let mut k = i - 1;
+            while k > 0 && bytes[k - 1].is_ascii_whitespace() {
+                k -= 1;
+            }
+            if k == 0 || bytes[k - 1] != b'=' {
+                return false;
+            }
+            k - 1
+        }
+        b'=' => i - 1,
+        _ => return false,
+    };
+    // The token immediately left of `=` must be a URL-valued attribute name.
+    url_valued_attr_name_before_eq(bytes, eq_at)
+}
+
+/// Scan `hay` for any reflected variant of a dangerous-scheme payload. Returns
+/// `(found, executable)`: `found` is set once any variant appears; `executable`
+/// is set when an occurrence sits at a URL-attr scheme-start (browser would
+/// navigate to the scheme). Bails toward `executable=true` past the occurrence
+/// budget so the cap can only cost extra [R] noise, never a missed bug.
+fn scan_dangerous_scheme_occurrences(hay: &str, variants: &[String]) -> (bool, bool) {
+    let bytes = hay.as_bytes();
+    let mut found = false;
+    for v in variants {
+        if v.is_empty() {
+            continue;
+        }
+        let mut start = 0;
+        let mut scanned = 0usize;
+        while let Some(pos) = hay[start..].find(v.as_str()) {
+            found = true;
+            scanned += 1;
+            if scanned > MAX_PAYLOAD_OCCURRENCES {
+                return (true, true);
+            }
+            let abs = start + pos;
+            if scheme_at_url_attr_value_start(bytes, abs) {
+                return (true, true);
+            }
+            start = next_char_boundary(hay, abs + 1);
+        }
+    }
+    (found, false)
+}
+
+/// Suppression gate for issue #1153: a payload that decodes to a JS-executable
+/// URL scheme (`javascript:` / `vbscript:` / `data:…`) is only exploitable when
+/// it reflects at the *scheme position* of a URL-valued attribute. Reflected in
+/// body text, a non-URL attribute, or merely the query/fragment of another URL
+/// (a self-referencing or canonical link — the common ASP.NET shape that echoes
+/// the raw, percent-encoded query string), it cannot navigate to the scheme and
+/// is inert. Returns true (=> suppress) when the scheme reflects but never at a
+/// scheme-start.
+///
+/// Scope-limited to NON-TAG payloads (no raw `<`/`>` in any variant), matching
+/// [`is_inert_encoded_reflection`]: a tag-bearing `data:text/html,<script>` echo
+/// is left to the DOM/AST verification path, which can prove a live element.
+fn dangerous_scheme_reflection_is_inert(html: &str, payload: &str) -> bool {
+    let variants = payload_variants(payload);
+    // Only applies when a decoded form is a dangerous URL scheme...
+    if !variants.iter().any(|v| decoded_is_dangerous_scheme(v)) {
+        return false;
+    }
+    // ...and the payload cannot inject a tag (those are the DOM path's job).
+    if variants.iter().any(|v| v.contains(['<', '>'])) {
+        return false;
+    }
+    // ...and the scheme is not echoed inside a <script> block, where a JS
+    // navigation sink (`location.href = "javascript:..."`) makes it executable
+    // even though it never sits at a URL-attr scheme-start. Leave those to the
+    // JS-context / AST path rather than hiding a real finding.
+    if variant_occurs_in_script_block(html, &variants) {
+        return false;
+    }
+    // Scan the raw response and its URL-decoded view (the self-link echo carries
+    // the scheme percent-encoded). Any executable occurrence keeps the finding.
+    let (mut found, executable) = scan_dangerous_scheme_occurrences(html, &variants);
+    if executable {
+        return false;
+    }
+    // Only pay the full-body URL-decode allocation when the body actually
+    // carries a percent-escape (the self-link echo does); without `%`,
+    // `urlencoding::decode` is a no-op clone. Mirrors `decode_form_urlencoded_like`.
+    if html.as_bytes().contains(&b'%')
+        && let Ok(decoded) = urlencoding::decode(html)
+        && decoded.as_ref() != html
+    {
+        let (f2, x2) = scan_dangerous_scheme_occurrences(&decoded, &variants);
+        if x2 {
+            return false;
+        }
+        found = found || f2;
+    }
+    found
+}
+
+/// True when byte offset `at` sits inside the value of a *quoted* URL-valued
+/// attribute (anywhere in the value — scheme, path, query, or fragment).
+/// Walks back to the value's opening quote without crossing a tag boundary,
+/// then checks the quote opens a URL-valued attribute. Unlike
+/// [`scheme_at_url_attr_value_start`] this does not require the scheme position;
+/// unlike [`occurrence_is_in_url_attr`] it correctly handles values that contain
+/// `=` / `?` / `&` (a self-link's query string).
+fn occurrence_inside_url_attr_value(bytes: &[u8], at: usize) -> bool {
+    if at > bytes.len() {
+        return false;
+    }
+    let mut i = at;
+    while i > 0 {
+        i -= 1;
+        match bytes[i] {
+            b'"' | b'\'' => {
+                // Candidate value-opening quote: require `= name` before it.
+                let mut k = i;
+                while k > 0 && bytes[k - 1].is_ascii_whitespace() {
+                    k -= 1;
+                }
+                if k == 0 || bytes[k - 1] != b'=' {
+                    return false;
+                }
+                return url_valued_attr_name_before_eq(bytes, k - 1);
+            }
+            // Crossing a tag boundary means we're not inside an attribute value.
+            b'<' | b'>' => return false,
+            _ => {}
+        }
+    }
+    false
+}
+
+/// Scan helper for [`reflection_trapped_in_url_value`]. Returns
+/// `(found, escaped)`: `escaped` is set if any occurrence is at a URL-attr
+/// scheme-start (potentially executable) or outside a quoted URL-attr value
+/// (body text, non-URL attribute, …) — either means the payload is NOT safely
+/// trapped. Bails toward `escaped=true` past the occurrence budget.
+fn scan_url_value_trapping(hay: &str, variants: &[String]) -> (bool, bool) {
+    let bytes = hay.as_bytes();
+    let mut found = false;
+    for v in variants {
+        if v.is_empty() {
+            continue;
+        }
+        let mut start = 0;
+        let mut scanned = 0usize;
+        while let Some(pos) = hay[start..].find(v.as_str()) {
+            found = true;
+            scanned += 1;
+            if scanned > MAX_PAYLOAD_OCCURRENCES {
+                return (true, true);
+            }
+            let abs = start + pos;
+            if scheme_at_url_attr_value_start(bytes, abs)
+                || !occurrence_inside_url_attr_value(bytes, abs)
+            {
+                return (true, true);
+            }
+            start = next_char_boundary(hay, abs + 1);
+        }
+    }
+    (found, false)
+}
+
+/// Suppression gate for issue #1153 (self-/canonical-link echo of arbitrary
+/// params): a payload with no break-out characters (no `<`/`>`/`"`/`'` in any
+/// variant) whose every reflected occurrence sits inside a *quoted* URL-valued
+/// attribute value at a non-scheme-start position cannot execute. It can't close
+/// the quote, open a tag, or change the URL's scheme — it is just inert text in
+/// the path/query/fragment of a link. Covers a bare `javascript:` scheme AND its
+/// WAF-evasion mutations (`java\tscript:`, `javasscriptcript:`, …) that a server
+/// reflects verbatim in a self-link without ever transforming them.
+fn reflection_trapped_in_url_value(html: &str, payload: &str) -> bool {
+    let variants = payload_variants(payload);
+    // Any quote/angle in a variant could break the attribute or open a tag —
+    // out of scope here (handled by the tag/quote-aware gates).
+    if variants.iter().any(|v| v.contains(['<', '>', '"', '\''])) {
+        return false;
+    }
+    let (mut found, escaped) = scan_url_value_trapping(html, &variants);
+    if escaped {
+        return false;
+    }
+    // Skip the full-body URL-decode allocation unless the body carries a
+    // percent-escape (mirrors `decode_form_urlencoded_like` / the scheme gate).
+    if html.as_bytes().contains(&b'%')
+        && let Ok(decoded) = urlencoding::decode(html)
+        && decoded.as_ref() != html
+    {
+        let (f2, e2) = scan_url_value_trapping(&decoded, &variants);
+        if e2 {
+            return false;
+        }
+        found = found || f2;
+    }
+    found
 }
 
 /// Body-aware version of [`should_suppress_path_reflection`]. Lets
@@ -497,6 +773,21 @@ fn script_block_ranges(html: &str) -> Vec<(usize, usize)> {
         }
     }
     ranges
+}
+
+/// True when any reflected variant of the payload appears inside a
+/// `<script>...</script>` block. A dangerous URL scheme echoed there can feed a
+/// JS navigation sink (`location.href = "javascript:..."`) where it executes
+/// despite never sitting at a URL-attribute scheme-start, so the inert-scheme
+/// gate must not suppress it (let the JS-context / AST path judge executability).
+fn variant_occurs_in_script_block(html: &str, variants: &[String]) -> bool {
+    let ranges = script_block_ranges(html);
+    ranges.iter().any(|&(s, e)| {
+        let block = &html[s..e];
+        variants
+            .iter()
+            .any(|v| !v.is_empty() && block.contains(v.as_str()))
+    })
 }
 
 /// Helper: every occurrence of `needle` in `haystack` falls inside one of the
@@ -585,6 +876,21 @@ fn is_payload_inert_in_scripts(html: &str, payload: &str) -> bool {
         }
     }
     if !matched {
+        return false;
+    }
+
+    // A dangerous URL scheme (`javascript:`/`vbscript:`/`data:…`) echoed RAW in
+    // a <script> block can flow into a JS navigation sink — e.g.
+    // `location.href = "javascript:alert(1)"` — and execute. The AST check below
+    // only flags a sink *call* the payload itself introduces, not a payload that
+    // is a passive string value assigned to a pre-existing sink, so it marks this
+    // inert. Keep the reflection reported instead. This is the authoritative half
+    // of the carve-out mirrored in `dangerous_scheme_reflection_is_inert`: that
+    // gate runs *after* this one in `is_in_safe_context_decoded`, so without this
+    // guard its `<script>` carve-out is unreachable and the finding is suppressed.
+    if candidates.iter().any(|c| decoded_is_dangerous_scheme(c))
+        && variant_occurs_in_script_block(html, &candidates)
+    {
         return false;
     }
 
