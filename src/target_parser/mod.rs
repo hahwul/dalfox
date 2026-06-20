@@ -693,6 +693,23 @@ mod raw_http_tests {
     }
 
     #[test]
+    fn test_parse_raw_http_skips_empty_name_cookies() {
+        // A `=value` (empty-name) segment in a raw-request Cookie header must
+        // not produce an empty-name cookie pair; the well-formed pairs survive.
+        // Mirrors har.rs::skips_empty_name_cookies_from_header so the twin
+        // guards have symmetric coverage.
+        let raw = "GET http://example.com/ HTTP/1.1\r\nCookie: a=1; =orphan; b=2\r\n\r\n";
+        let t = parse_raw_http_request(raw).expect("should parse");
+        assert_eq!(t.cookies.len(), 2);
+        assert!(t.cookies.iter().any(|(k, v)| k == "a" && v == "1"));
+        assert!(t.cookies.iter().any(|(k, v)| k == "b" && v == "2"));
+        assert!(
+            t.cookies.iter().all(|(k, _)| !k.is_empty()),
+            "no empty-name cookie should be retained"
+        );
+    }
+
+    #[test]
     fn test_parse_raw_http_origin_form() {
         let raw = "GET /level1/frame HTTP/1.1\r\nHost: vulnerable.com\r\n\r\n";
         let t = parse_raw_http_request(raw).expect("should parse origin-form with Host");

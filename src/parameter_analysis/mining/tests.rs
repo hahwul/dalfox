@@ -5,6 +5,25 @@ use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use tokio::time::{Duration, sleep};
 
+#[test]
+fn cap_dom_params_boundary() {
+    let mk = |n: usize| (0..n).map(|i| i.to_string()).collect::<Vec<_>>();
+    // Exactly at the cap: kept whole, no truncation reported.
+    let (kept, capped) = cap_dom_params(mk(MAX_DOM_MINING_PARAMS));
+    assert_eq!(kept.len(), MAX_DOM_MINING_PARAMS);
+    assert_eq!(capped, None);
+    // One over the cap: truncated to the cap, original count reported so the
+    // caller can warn. Guards against a future `>`→`>=` or dropped-truncate
+    // regression re-opening the ~10^6-task fan-out.
+    let (kept, capped) = cap_dom_params(mk(MAX_DOM_MINING_PARAMS + 1));
+    assert_eq!(kept.len(), MAX_DOM_MINING_PARAMS);
+    assert_eq!(capped, Some(MAX_DOM_MINING_PARAMS + 1));
+    // Well under the cap: untouched.
+    let (kept, capped) = cap_dom_params(mk(3));
+    assert_eq!(kept.len(), 3);
+    assert_eq!(capped, None);
+}
+
 fn default_scan_args() -> ScanArgs {
     ScanArgs {
         insecure: Some(true),

@@ -50,6 +50,21 @@ const SENTINEL_PROBE_COUNT: usize = 3;
 /// field names, so this ceiling is generous; truncation is surfaced as a warning.
 const MAX_DOM_MINING_PARAMS: usize = 4096;
 
+/// Cap a DOM-extracted candidate-name set to [`MAX_DOM_MINING_PARAMS`]. Returns
+/// the (possibly truncated) names plus `Some(original_len)` when truncation
+/// occurred (so the caller can warn), or `None` when already under the cap.
+/// Extracted so the boundary (`len == cap` not truncated, `len == cap + 1`
+/// truncated) is unit-testable without standing up a giant HTML body.
+fn cap_dom_params(mut names: Vec<String>) -> (Vec<String>, Option<usize>) {
+    let original = names.len();
+    if original > MAX_DOM_MINING_PARAMS {
+        names.truncate(MAX_DOM_MINING_PARAMS);
+        (names, Some(original))
+    } else {
+        (names, None)
+    }
+}
+
 /// Sentinel parameter names — random-looking, namespace-prefixed strings
 /// that should never collide with real params on a normal application.
 /// If every one of these reflects, the page is echoing arbitrary input
@@ -1158,16 +1173,14 @@ pub async fn probe_response_id_params(
         // iteration order is arbitrary, which is fine for a safety ceiling:
         // real pages stay far under it. Probing then consumes this Vec one
         // owned name at a time exactly as it did the set.
-        let dom_param_count = params_to_check.len();
-        let mut params_to_check: Vec<String> = params_to_check.into_iter().collect();
-        if params_to_check.len() > MAX_DOM_MINING_PARAMS {
-            params_to_check.truncate(MAX_DOM_MINING_PARAMS);
-            if !silence {
-                eprintln!(
-                    "[mining] DOM candidate params capped to {} (from {}); reduce reflected fields or use --skip-mining",
-                    MAX_DOM_MINING_PARAMS, dom_param_count
-                );
-            }
+        let (params_to_check, capped_from) = cap_dom_params(params_to_check.into_iter().collect());
+        if let Some(original) = capped_from
+            && !silence
+        {
+            eprintln!(
+                "[mining] DOM candidate params capped to {} (from {}); reduce reflected fields or use --skip-mining",
+                MAX_DOM_MINING_PARAMS, original
+            );
         }
 
         // Sentinel pre-probe — same rationale as Query mining: a

@@ -25,7 +25,10 @@ async fn poll_cancel(flag: &AtomicBool) {
     }
 }
 
-/// Drive a single target's scan `fut` under a hard per-target wall-clock cap.
+/// Drive a single target's scan `fut` under a cooperative per-target wall-clock
+/// budget. The cap is cooperative, not a hard kill: on expiry the target stops
+/// at its next cancellation checkpoint (between phases/parameters) and drains —
+/// an in-flight request still finishes under its own `--timeout`.
 ///
 /// A `--scan-timeout` expiry must cancel **only this target**: the prior
 /// implementation flipped the shared SIGINT flag, which `run_scanning` polls
@@ -315,7 +318,7 @@ pub(crate) async fn run_scan_loop(
                         };
                         if timed_out && !args_clone.silence {
                             eprintln!(
-                                "[scan] {} exceeded --scan-timeout ({}s); aborting target",
+                                "[scan] {} exceeded --scan-timeout ({}s); cancelling target (stops at next checkpoint)",
                                 target.url, args_clone.scan_timeout,
                             );
                         }
