@@ -324,7 +324,14 @@ pub fn parse_raw_http_request(raw: &str) -> Result<Target, Box<dyn std::error::E
                 for kv in value_trim.split(';') {
                     let kv = kv.trim();
                     if let Some((k, v)) = kv.split_once('=') {
-                        cookies_vec.push((k.trim().to_string(), v.trim().to_string()));
+                        let k = k.trim();
+                        // Skip empty-name pairs (e.g. a leading `=val` or `;=v;`
+                        // segment): an empty cookie name is invalid and would
+                        // re-serialize into a malformed `=val` Cookie segment.
+                        if k.is_empty() {
+                            continue;
+                        }
+                        cookies_vec.push((k.to_string(), v.trim().to_string()));
                     }
                 }
             } else if name_trim.eq_ignore_ascii_case("user-agent") {

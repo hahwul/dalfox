@@ -547,11 +547,31 @@ fn char_reflected_in_segment(segment: &str, c: char) -> bool {
             return true;
         }
     }
+    // Match the `%HH` URL-encoded form case-insensitively (a server may echo
+    // `%hh`). The previous `segment.to_ascii_uppercase()` allocated a full copy
+    // of the segment *per character* inside the SPECIAL_PROBE_CHARS loop; scan
+    // the bytes case-insensitively instead so the hot probe path allocates only
+    // the tiny needle.
     let pct = format!("%{:02X}", c as u32);
-    if segment.to_ascii_uppercase().contains(&pct) {
+    if contains_ascii_ci(segment, &pct) {
         return true;
     }
     false
+}
+
+/// ASCII-case-insensitive substring search without allocating either operand.
+/// Used on the active-probe hot path where the alternative
+/// (`haystack.to_ascii_uppercase().contains(needle)`) copied the whole haystack
+/// once per probed character.
+fn contains_ascii_ci(haystack: &str, needle: &str) -> bool {
+    let (h, n) = (haystack.as_bytes(), needle.as_bytes());
+    if n.is_empty() {
+        return true;
+    }
+    if h.len() < n.len() {
+        return false;
+    }
+    h.windows(n.len()).any(|w| w.eq_ignore_ascii_case(n))
 }
 
 /// Active probe for one parameter. Sends a single **batched** probe carrying

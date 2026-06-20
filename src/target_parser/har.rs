@@ -156,7 +156,14 @@ pub fn parse_har(content: &str) -> Result<Vec<Target>, Box<dyn std::error::Error
                 saw_cookie_header = true;
                 for kv in h.value.split(';') {
                     if let Some((k, v)) = kv.trim().split_once('=') {
-                        cookies.push((k.trim().to_string(), v.trim().to_string()));
+                        let k = k.trim();
+                        // Skip empty-name pairs (e.g. a leading `=val` or `;=v;`
+                        // segment): an empty cookie name is invalid and would
+                        // re-serialize into a malformed `=val` Cookie segment.
+                        if k.is_empty() {
+                            continue;
+                        }
+                        cookies.push((k.to_string(), v.trim().to_string()));
                     }
                 }
                 continue;
@@ -180,7 +187,10 @@ pub fn parse_har(content: &str) -> Result<Vec<Target>, Box<dyn std::error::Error
                 .iter()
                 // Trim the value too, matching the Cookie-header path above, so
                 // the same cookie parses identically whichever HAR field carries it.
-                .map(|c| (c.name.trim().to_string(), c.value.trim().to_string()))
+                .map(|c| (c.name.trim(), c.value.trim()))
+                // Drop empty-name cookies for parity with the Cookie-header path.
+                .filter(|(k, _)| !k.is_empty())
+                .map(|(k, v)| (k.to_string(), v.to_string()))
                 .collect();
         }
 
@@ -418,6 +428,36 @@ mod tests {
             targets[0].cookies[0],
             ("session".to_string(), "abc123".to_string())
         );
+    }
+
+    #[test]
+    fn skips_empty_name_cookies_from_header() {
+        // A Cookie header with a `=value` (empty-name) segment must not produce
+        // an empty-name cookie pair (which would re-serialize as a malformed
+        // `=value` Cookie segment); the well-formed pairs around it survive.
+        let har = r#"{"log":{"entries":[{"request":{
+            "method":"GET","url":"https://example.com/",
+            "headers":[{"name":"Cookie","value":"a=1; =orphan; b=2"}]
+        }}]}}"#;
+        let targets = parse_har(har).unwrap();
+        assert_eq!(targets[0].cookies.len(), 2);
+        assert!(targets[0].cookies.iter().any(|(k, v)| k == "a" && v == "1"));
+        assert!(targets[0].cookies.iter().any(|(k, v)| k == "b" && v == "2"));
+        assert!(
+            targets[0].cookies.iter().all(|(k, _)| !k.is_empty()),
+            "no empty-name cookie should be retained"
+        );
+    }
+
+    #[test]
+    fn skips_empty_name_cookies_from_structured_array() {
+        let har = r#"{"log":{"entries":[{"request":{
+            "method":"GET","url":"https://example.com/",
+            "cookies":[{"name":"","value":"orphan"},{"name":"keep","value":"1"}]
+        }}]}}"#;
+        let targets = parse_har(har).unwrap();
+        assert_eq!(targets[0].cookies.len(), 1);
+        assert_eq!(targets[0].cookies[0], ("keep".to_string(), "1".to_string()));
     }
 
     #[test]

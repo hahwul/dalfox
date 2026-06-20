@@ -196,10 +196,19 @@ const PURGE_MIN_INTERVAL_MS: i64 = 60_000;
 // critical section that touches it is non-async and bounded (insert / get /
 // retain), so the async mutex's scheduler overhead is pure waste. Test code
 // holds the lock the same way.
+/// Max concurrent `preflight_dalfox` calls; excess are shed with an at-capacity
+/// error. Mirrors the REST server's `MAX_CONCURRENT_PREFLIGHT`.
+const MAX_CONCURRENT_PREFLIGHT: usize = 32;
+
 #[derive(Clone)]
 pub struct DalfoxMcp {
     jobs: Arc<StdMutex<HashMap<String, Job>>>,
     last_purge_ms: Arc<AtomicI64>,
+    /// Bounds concurrent `preflight_dalfox` calls: each pins a blocking-pool
+    /// thread for the full reachability probe + parameter analysis against a
+    /// caller-supplied target, so an unbounded burst could exhaust the blocking
+    /// pool and stall every in-flight scan. Mirrors the REST `/preflight` guard.
+    preflight_sem: Arc<tokio::sync::Semaphore>,
 }
 
 impl Default for DalfoxMcp {
@@ -213,6 +222,7 @@ impl DalfoxMcp {
         Self {
             jobs: Arc::new(StdMutex::new(HashMap::new())),
             last_purge_ms: Arc::new(AtomicI64::new(0)),
+            preflight_sem: Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_PREFLIGHT)),
         }
     }
 
@@ -1572,8 +1582,23 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
         // thread-local current_thread runtime (analyze_parameters and the
         // scraper-based HTML inspection are !Send). The runtime is reused
         // across calls dispatched to the same blocking-pool worker.
+        // Bound concurrent preflights so a burst of caller-supplied targets
+        // can't pin the whole blocking pool (each call holds a thread for the
+        // full probe + analysis, up to MAX_TIMEOUT_SECS) and stall in-flight
+        // scans. Shed excess with an at-capacity error; the permit is moved into
+        // the blocking closure so it is held until that thread frees.
+        let preflight_permit = match self.preflight_sem.clone().try_acquire_owned() {
+            Ok(p) => p,
+            Err(_) => {
+                return Err(ErrorData::internal_error(
+                    "preflight capacity reached; retry shortly",
+                    None,
+                ));
+            }
+        };
         let target_url_for_err = target_url.clone();
         let result = tokio::task::spawn_blocking(move || {
+            let _preflight_permit = preflight_permit;
             let target_url_for_err_inner = target_url_for_err.clone();
             run_on_thread_runtime(&target_url_for_err_inner, |rt| {
                 rt.block_on(async {

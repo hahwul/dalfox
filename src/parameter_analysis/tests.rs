@@ -1180,10 +1180,24 @@ fn test_char_reflected_in_segment_detects_raw_encoded_and_percent() {
     assert!(char_reflected_in_segment("abc<def", '<'));
     // HTML-entity variant.
     assert!(char_reflected_in_segment("abc&lt;def", '<'));
-    // Percent-encoded (case-insensitive): '<' == 0x3C.
+    // Percent-encoded (case-insensitive): '<' == 0x3C. Both `%3c` and `%3C`
+    // must match (the allocation-free CI scan replaced a per-char uppercase
+    // copy of the whole segment).
     assert!(char_reflected_in_segment("abc%3cdef", '<'));
+    assert!(char_reflected_in_segment("abc%3Cdef", '<'));
     // Absent entirely.
     assert!(!char_reflected_in_segment("abcdef", '<'));
+}
+
+#[test]
+fn test_contains_ascii_ci() {
+    assert!(contains_ascii_ci("abc%3Cdef", "%3c"));
+    assert!(contains_ascii_ci("abc%3cdef", "%3C"));
+    assert!(contains_ascii_ci("anything", ""));
+    assert!(!contains_ascii_ci("ab", "abc")); // needle longer than haystack
+    assert!(!contains_ascii_ci("abcdef", "%3c"));
+    // Boundary match at the very end.
+    assert!(contains_ascii_ci("xy%3C", "%3c"));
 }
 
 // ===== Issue #1072: quote-escape classification =====

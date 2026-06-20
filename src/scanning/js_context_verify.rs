@@ -20,7 +20,7 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// Identifier or member-property names whose call we treat as an XSS sink.
 /// Includes the obvious dialog/eval/timer family plus the DOM mutation sinks
@@ -102,7 +102,13 @@ const SINK_CACHE_CAPACITY: usize = 1024;
 /// failed to parse (and is therefore treated as inert). The first vector
 /// holds sink-call spans, the second holds string-literal spans (used to
 /// gate sink hits that sit *inside* a string).
-type ParsedSpans = Option<(Vec<(u32, u32)>, Vec<(u32, u32)>)>;
+///
+/// Wrapped in `Arc` so a cache hit is an O(1) refcount bump rather than a deep
+/// copy of both span vectors: a single large `<script>` can hold tens of
+/// thousands of `(u32, u32)` spans, and this is on the per-payload JS-context
+/// hot path, so cloning the whole bundle under the cache mutex on every hit was
+/// a real (avoidable) cost.
+type ParsedSpans = Option<Arc<(Vec<(u32, u32)>, Vec<(u32, u32)>)>>;
 type SinkCache = Mutex<HashMap<u64, ParsedSpans>>;
 
 fn sink_cache() -> &'static SinkCache {
@@ -155,7 +161,7 @@ fn collect_spans_on_stack(script_src: &str) -> ParsedSpans {
     for stmt in &ret.program.body {
         gather_sink_spans_in_statement(stmt, &mut sinks, &mut strings);
     }
-    Some((sinks, strings))
+    Some(Arc::new((sinks, strings)))
 }
 
 /// Cached `collect_parsed_spans`. The same `<script>` body often appears
@@ -202,9 +208,10 @@ fn script_block_has_sink_call_in_range(
     payload_start: u32,
     payload_end: u32,
 ) -> bool {
-    let Some((sinks, strings)) = cached_parsed_spans(script_src) else {
+    let Some(spans) = cached_parsed_spans(script_src) else {
         return false;
     };
+    let (sinks, strings) = &*spans;
     // Strict containment: payload range must sit *between* the quotes,
     // not touch them — otherwise the payload broke the string and the
     // surrounding literal is no longer a literal.

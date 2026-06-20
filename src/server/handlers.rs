@@ -679,38 +679,46 @@ pub(crate) async fn list_scans_handler(
         }
     };
 
-    let jobs = state.jobs.lock().await;
+    // Build all owned response data while holding the lock, then release it
+    // BEFORE the (synchronous, O(n)) JSON serialization in make_api_response.
+    // Holding the shared `state.jobs` mutex across serialization stalls the hot
+    // get_result poll path and concurrent scans' terminal status writes — the
+    // sibling MCP list/get handlers scope their lock the same way.
+    let (total, end, entries) = {
+        let jobs = state.jobs.lock().await;
 
-    // Collect matching entries with their sort key, then apply offset/limit
-    // deterministically by queued_at_ms descending (newest first).
-    let mut matching: Vec<(&String, &Job)> = jobs
-        .iter()
-        .filter(|(_, job)| filter_status.as_ref().is_none_or(|f| &job.status == f))
-        .collect();
-    matching.sort_by_key(|(_, job)| std::cmp::Reverse(job.queued_at_ms));
+        // Collect matching entries with their sort key, then apply offset/limit
+        // deterministically by queued_at_ms descending (newest first).
+        let mut matching: Vec<(&String, &Job)> = jobs
+            .iter()
+            .filter(|(_, job)| filter_status.as_ref().is_none_or(|f| &job.status == f))
+            .collect();
+        matching.sort_by_key(|(_, job)| std::cmp::Reverse(job.queued_at_ms));
 
-    let total = matching.len();
-    let start = offset.min(total);
-    let end = if limit == 0 {
-        total
-    } else {
-        start.saturating_add(limit).min(total)
-    };
-    let entries: Vec<serde_json::Value> = matching[start..end]
-        .iter()
-        .map(|(id, job)| {
-            serde_json::json!({
-                "scan_id": id,
-                "target": job.target_url,
-                "status": job.status,
-                "result_count": job.results.as_ref().map_or(0, |r| r.len()),
-                "queued_at_ms": job.queued_at_ms,
-                "started_at_ms": job.started_at_ms,
-                "finished_at_ms": job.finished_at_ms,
-                "duration_ms": job.duration_ms(),
+        let total = matching.len();
+        let start = offset.min(total);
+        let end = if limit == 0 {
+            total
+        } else {
+            start.saturating_add(limit).min(total)
+        };
+        let entries: Vec<serde_json::Value> = matching[start..end]
+            .iter()
+            .map(|(id, job)| {
+                serde_json::json!({
+                    "scan_id": id,
+                    "target": job.target_url,
+                    "status": job.status,
+                    "result_count": job.results.as_ref().map_or(0, |r| r.len()),
+                    "queued_at_ms": job.queued_at_ms,
+                    "started_at_ms": job.started_at_ms,
+                    "finished_at_ms": job.finished_at_ms,
+                    "duration_ms": job.duration_ms(),
+                })
             })
-        })
-        .collect();
+            .collect();
+        (total, end, entries)
+    };
 
     let resp = ApiResponse {
         code: 200,
