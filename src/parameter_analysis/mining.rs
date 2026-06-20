@@ -41,6 +41,15 @@ const COLLAPSE_MIN_REFLECTIONS: usize = 5; // and at least this many reflections
 /// rate negligible while keeping the ceiling cost low (≤ 3 wasted requests).
 const SENTINEL_PROBE_COUNT: usize = 3;
 
+/// Safety cap on DOM-extracted candidate parameter names probed by
+/// [`probe_response_id_params`]. A hostile/huge response body (up to the 16 MiB
+/// `read_body` cap) packed with distinct `<input id=…>` / `name=…` attributes
+/// can yield ~10^6 unique candidates; without a cap each became a spawned probe
+/// task (and an outbound request), scaling memory and request fan-out with the
+/// attacker-controlled body. Real pages have at most a few hundred distinct
+/// field names, so this ceiling is generous; truncation is surfaced as a warning.
+const MAX_DOM_MINING_PARAMS: usize = 4096;
+
 /// Sentinel parameter names — random-looking, namespace-prefixed strings
 /// that should never collide with real params on a normal application.
 /// If every one of these reflects, the page is echoing arbitrary input
@@ -606,10 +615,13 @@ pub async fn probe_dictionary_params(
     // EWMA adaptive stats shared across tasks
     let stats = Arc::new(Mutex::new(MiningSampleStats::new()));
 
-    // Each task returns Option<Param>; batch flush later
-    let mut handles: Vec<tokio::task::JoinHandle<Option<Param>>> = Vec::new();
-
-    // Chunked processing to reduce memory and allow early collapse exit
+    // Chunked processing bounds memory and allows early collapse exit. Tasks
+    // are spawned AND drained one chunk at a time (see the per-chunk join below)
+    // so the live task count never exceeds CHUNK_SIZE. Accumulating handles for
+    // the whole wordlist (joined only after every chunk) let a multi-million-line
+    // `--mining-dict-word` / `--remote-wordlists` spawn one task per entry up
+    // front — each holding cloned Url/String/Arc state — and blow resident
+    // memory into the tens of GB before any task was awaited.
     const CHUNK_SIZE: usize = 500;
     'outer: for param_chunk in params.chunks(CHUNK_SIZE) {
         {
@@ -618,6 +630,8 @@ pub async fn probe_dictionary_params(
                 break 'outer;
             }
         }
+        // Per-chunk handles, drained at the end of this chunk (see below).
+        let mut handles: Vec<tokio::task::JoinHandle<Option<Param>>> = Vec::new();
         for param in param_chunk {
             // Early collapse stop. (A second identical `collapsed` check used to
             // follow immediately with no await in between — dead code, since
@@ -799,22 +813,22 @@ pub async fn probe_dictionary_params(
 
             handles.push(handle);
         }
-    } // end chunk loop
 
-    // Batch collect discovered parameters
-    let mut batch: Vec<Param> = Vec::new();
-    for h in handles {
-        if let Ok(opt) = h.await
-            && let Some(p) = opt
-        {
-            batch.push(p);
+        // Drain THIS chunk's tasks (and flush discovered params) before the next
+        // chunk spawns, keeping the live task/handle count bounded by CHUNK_SIZE.
+        let mut batch: Vec<Param> = Vec::new();
+        for h in handles {
+            if let Ok(opt) = h.await
+                && let Some(p) = opt
+            {
+                batch.push(p);
+            }
         }
-    }
-
-    if !batch.is_empty() {
-        let mut guard = reflection_params.lock().await;
-        guard.extend(batch);
-    }
+        if !batch.is_empty() {
+            let mut guard = reflection_params.lock().await;
+            guard.extend(batch);
+        }
+    } // end chunk loop
 
     // Apply collapse post-processing once (instead of inside tasks mutating aggressively).
     // Only collapse Query params — preserve params discovered via other channels
@@ -1137,6 +1151,24 @@ pub async fn probe_response_id_params(
             }
             set
         };
+
+        // Cap the DOM candidate set so a hostile/huge response body (up to the
+        // 16 MiB read_body cap) packed with distinct `id`/`name` attributes
+        // can't fan out into ~10^6 probe tasks + outbound requests. HashSet
+        // iteration order is arbitrary, which is fine for a safety ceiling:
+        // real pages stay far under it. Probing then consumes this Vec one
+        // owned name at a time exactly as it did the set.
+        let dom_param_count = params_to_check.len();
+        let mut params_to_check: Vec<String> = params_to_check.into_iter().collect();
+        if params_to_check.len() > MAX_DOM_MINING_PARAMS {
+            params_to_check.truncate(MAX_DOM_MINING_PARAMS);
+            if !silence {
+                eprintln!(
+                    "[mining] DOM candidate params capped to {} (from {}); reduce reflected fields or use --skip-mining",
+                    MAX_DOM_MINING_PARAMS, dom_param_count
+                );
+            }
+        }
 
         // Sentinel pre-probe — same rationale as Query mining: a
         // reflect-everything page would mark every DOM-extracted name as
