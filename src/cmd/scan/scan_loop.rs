@@ -13,6 +13,60 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+/// Complete once `flag` is observed set. Used to mirror the process-wide
+/// SIGINT (Ctrl-C) flag into a per-target cancel flag from inside a
+/// `tokio::select!` — `AtomicBool` carries no waker, so a short poll is the
+/// cheapest way to notice the flip. The poll only runs while a target's
+/// `--scan-timeout` is in effect and stops the moment that target's scan
+/// future completes (the `select!` drops this arm).
+async fn poll_cancel(flag: &AtomicBool) {
+    while !flag.load(Ordering::Relaxed) {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+}
+
+/// Drive a single target's scan `fut` under a hard per-target wall-clock cap.
+///
+/// A `--scan-timeout` expiry must cancel **only this target**: the prior
+/// implementation flipped the shared SIGINT flag, which `run_scanning` polls
+/// per parameter and the dispatch loop checks before queuing the next target,
+/// so the first target to exceed its budget aborted every concurrent sibling
+/// *and* skipped all not-yet-started targets — silently dropping coverage for
+/// the whole run. Here the cap sets `target_cancel` (a fresh per-target flag)
+/// instead, never the shared `sigint` flag. A real Ctrl-C is mirrored from
+/// `sigint` into `target_cancel` so in-flight workers still stop. `fut` is
+/// driven to completion either way (not just dropped): `run_scanning`'s
+/// per-parameter workers are detached `tokio::spawn` tasks that a dropped
+/// future would leave hammering the target, so we keep polling until the
+/// cooperative-cancel checkpoints let them drain. Returns whether the cap
+/// fired (callers print the per-target notice).
+async fn run_target_capped<T>(
+    fut: impl std::future::Future<Output = T>,
+    scan_timeout_secs: u64,
+    sigint: &AtomicBool,
+    target_cancel: &AtomicBool,
+) -> bool {
+    tokio::pin!(fut);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(scan_timeout_secs);
+    let mut timed_out = false;
+    loop {
+        tokio::select! {
+            biased;
+            _ = &mut fut => break,
+            // Mirror a process-wide Ctrl-C into this target's flag, then keep
+            // draining. Disabled once already cancelled (by either source).
+            _ = poll_cancel(sigint), if !target_cancel.load(Ordering::Relaxed) => {
+                target_cancel.store(true, Ordering::Relaxed);
+            }
+            _ = tokio::time::sleep_until(deadline), if !target_cancel.load(Ordering::Relaxed) => {
+                timed_out = true;
+                target_cancel.store(true, Ordering::Relaxed);
+            }
+        }
+    }
+    timed_out
+}
+
 pub(crate) async fn run_scan_loop(
     args: &ScanArgs,
     host_groups: std::collections::HashMap<String, Vec<Target>>,
@@ -214,6 +268,20 @@ pub(crate) async fn run_scan_loop(
                                 },
                             )
                         };
+                        // Per-target cancellation flag. With a `--scan-timeout`
+                        // set, hand `run_scanning` a fresh per-target flag
+                        // (seeded from the real Ctrl-C flag) so the cap cancels
+                        // only this target — never the shared SIGINT flag, which
+                        // would abort every sibling and skip all pending targets
+                        // (see `run_target_capped`). With no cap, pass the shared
+                        // flag straight through so the common path keeps its
+                        // zero-overhead direct wiring.
+                        let timeout_set = args_clone.scan_timeout > 0;
+                        let target_cancel = if timeout_set {
+                            Arc::new(AtomicBool::new(cancel_flag_inner.load(Ordering::Relaxed)))
+                        } else {
+                            cancel_flag_inner.clone()
+                        };
                         let scan_fut = crate::scanning::run_scanning(
                             &target,
                             args_clone.clone(),
@@ -221,7 +289,7 @@ pub(crate) async fn run_scan_loop(
                             multi_pb_clone_inner,
                             overall_pb_clone,
                             findings_count_target,
-                            Some(cancel_flag_inner.clone()),
+                            Some(target_cancel.clone()),
                             finding_tx_target,
                             // CLI renders its own indicatif progress bar; no
                             // external params_tested counter to feed.
@@ -233,19 +301,23 @@ pub(crate) async fn run_scan_loop(
                         // the per-target scan would otherwise serialize each
                         // phase × per-request timeout and run far longer than
                         // the user expects. Setting the cap to 0 disables it.
-                        if args_clone.scan_timeout > 0 {
-                            let budget = std::time::Duration::from_secs(args_clone.scan_timeout);
-                            if let Err(_elapsed) = tokio::time::timeout(budget, scan_fut).await {
-                                cancel_flag_inner.store(true, Ordering::Relaxed);
-                                if !args_clone.silence {
-                                    eprintln!(
-                                        "[scan] {} exceeded --scan-timeout ({}s); aborting target",
-                                        target.url, args_clone.scan_timeout,
-                                    );
-                                }
-                            }
+                        let timed_out = if timeout_set {
+                            run_target_capped(
+                                scan_fut,
+                                args_clone.scan_timeout,
+                                &cancel_flag_inner,
+                                &target_cancel,
+                            )
+                            .await
                         } else {
                             scan_fut.await;
+                            false
+                        };
+                        if timed_out && !args_clone.silence {
+                            eprintln!(
+                                "[scan] {} exceeded --scan-timeout ({}s); aborting target",
+                                target.url, args_clone.scan_timeout,
+                            );
                         }
                         if let Some((tx, done_rx)) = __scan_spinner {
                             let _ = tx.send(());
@@ -305,5 +377,97 @@ pub(crate) async fn run_scan_loop(
         && e.is_panic()
     {
         eprintln!("[scan] finding printer task panicked: {}", e);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{poll_cancel, run_target_capped};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::Duration;
+
+    // A cooperative "scan future" that runs until its per-target cancel flag is
+    // set — models `run_scanning`, whose per-parameter workers stop at the next
+    // checkpoint when the flag flips, then let the join loop finish.
+    async fn cooperative_worker(target_cancel: Arc<AtomicBool>) {
+        while !target_cancel.load(Ordering::Relaxed) {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    // Regression for the multi-target `--scan-timeout` abort: a per-target
+    // timeout must flip ONLY the target's own flag and leave the shared SIGINT
+    // flag untouched, so sibling/pending targets keep scanning.
+    #[tokio::test]
+    async fn scan_timeout_cancels_only_target_not_sigint() {
+        let sigint = Arc::new(AtomicBool::new(false));
+        let target_cancel = Arc::new(AtomicBool::new(false));
+        let fut = cooperative_worker(target_cancel.clone());
+        // 1s is the smallest expressible budget; the cap fires and the
+        // cooperative worker then drains via the per-target flag.
+        let timed_out = run_target_capped(fut, 1, &sigint, &target_cancel).await;
+        assert!(timed_out, "the per-target cap should fire");
+        assert!(
+            target_cancel.load(Ordering::Relaxed),
+            "the target's own cancel flag is set on timeout"
+        );
+        assert!(
+            !sigint.load(Ordering::Relaxed),
+            "the shared SIGINT flag MUST stay untouched — flipping it aborted the whole run"
+        );
+    }
+
+    // A real Ctrl-C (shared SIGINT flag) is still mirrored into the per-target
+    // flag so in-flight workers stop even when a `--scan-timeout` is active.
+    #[tokio::test]
+    async fn sigint_is_mirrored_into_target_flag() {
+        let sigint = Arc::new(AtomicBool::new(false));
+        let target_cancel = Arc::new(AtomicBool::new(false));
+        let fut = cooperative_worker(target_cancel.clone());
+        // Trip the shared SIGINT flag shortly after the scan starts.
+        let sig = sigint.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            sig.store(true, Ordering::Relaxed);
+        });
+        // Budget far larger than the SIGINT delay so the cap can't be the cause.
+        let timed_out = run_target_capped(fut, 3600, &sigint, &target_cancel).await;
+        assert!(
+            !timed_out,
+            "ended via SIGINT mirror, not the wall-clock cap"
+        );
+        assert!(
+            target_cancel.load(Ordering::Relaxed),
+            "SIGINT was mirrored into the per-target flag"
+        );
+    }
+
+    // A scan that finishes before its budget returns `timed_out == false` and
+    // touches neither flag.
+    #[tokio::test]
+    async fn fast_scan_under_budget_does_not_time_out() {
+        let sigint = Arc::new(AtomicBool::new(false));
+        let target_cancel = Arc::new(AtomicBool::new(false));
+        let fut = async {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        let timed_out = run_target_capped(fut, 3600, &sigint, &target_cancel).await;
+        assert!(!timed_out);
+        assert!(!target_cancel.load(Ordering::Relaxed));
+        assert!(!sigint.load(Ordering::Relaxed));
+    }
+
+    #[tokio::test]
+    async fn poll_cancel_completes_when_flag_flips() {
+        let flag = Arc::new(AtomicBool::new(false));
+        let f = flag.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            f.store(true, Ordering::Relaxed);
+        });
+        // Would hang forever if poll_cancel never observed the flip.
+        poll_cancel(&flag).await;
+        assert!(flag.load(Ordering::Relaxed));
     }
 }
