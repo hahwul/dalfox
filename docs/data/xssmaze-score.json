@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-06-14T13:43:10Z",
-  "dalfox_version": "3.0.2",
+  "generated_at": "2026-06-20T12:16:01Z",
+  "dalfox_version": "3.1.0",
   "xssmaze_version": "0.2.0",
   "xssmaze_image": "ghcr.io/hahwul/xssmaze:main",
   "xssmaze_digest": "ghcr.io/hahwul/xssmaze@sha256:9311b1693a75b72310a53852f72616e2bf11282a4b53cd2fe5fdf114aba0fb30",

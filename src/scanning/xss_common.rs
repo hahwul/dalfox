@@ -48,6 +48,20 @@ fn generate_dynamic_payloads_uncached(context: &InjectionContext) -> Vec<String>
             let html_payloads = crate::payload::get_dynamic_xss_html_payloads();
             let attr_payloads = crate::payload::get_dynamic_xss_attribute_payloads();
             let protocol_payloads = crate::payload::get_protocol_injection_payloads();
+            // Front-load the protocol/URL scheme family for *every* attribute
+            // context, not only `AttributeUrl`. The built-in per-parameter safety
+            // cap (issue #1155) truncates this catalog, and the html + attribute
+            // breakout block alone exceeds the 3000 default, so a scheme appended
+            // at the tail of the non-URL arms (below) was evicted before it could
+            // be tried — losing the only verifier for a `javascript:` sink the
+            // classifier did not tag as URL-valued (e.g. a `<meta http-equiv=
+            // refresh content="0;url=…">` reflected as a quoted attribute value).
+            // The downstream encoder pass de-duplicates, so the tail emissions
+            // that remain below are now no-ops. A scheme reflected in a genuinely
+            // non-URL attribute is demoted by the reflected-XSS report gate
+            // (`dangerous_scheme_reflection_is_inert`), so this adds no false
+            // positives.
+            payloads.extend(protocol_payloads.iter().cloned());
             match delimiter_type {
                 Some(DelimiterType::SingleQuote) => {
                     if url_like {

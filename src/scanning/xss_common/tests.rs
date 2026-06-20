@@ -213,6 +213,42 @@ fn test_get_dynamic_payloads_basic() {
 }
 
 #[test]
+fn protocol_scheme_survives_builtin_safety_cap_in_attribute_context() {
+    // Regression for the xssmaze recall drop: the protocol/URL scheme family used
+    // to be appended *after* the large html + attribute breakout block, pushing
+    // `javascript:` thousands of payloads in. The built-in per-parameter safety
+    // cap (issue #1155, DEFAULT_PAYLOAD_SAFETY_CAP) truncates this catalog, so on
+    // contexts whose only verifier is a scheme reflected in a quoted attribute
+    // value (e.g. a `<meta http-equiv=refresh content="0;url=…">` echo) the cap
+    // evicted the scheme and the finding was lost. Front-loading the family keeps
+    // it inside the cap. Cover both quote styles and the unquoted form.
+    let cap = crate::cmd::scan::DEFAULT_PAYLOAD_SAFETY_CAP;
+    for delim in [
+        Some(DelimiterType::DoubleQuote),
+        Some(DelimiterType::SingleQuote),
+        None,
+    ] {
+        let label = format!("{delim:?}");
+        let context = InjectionContext::Attribute(delim);
+        let args = ScanArgs {
+            detect_outdated_libs: false,
+            ..base_args()
+        };
+        let payloads = get_dynamic_payloads(&context, &args).unwrap();
+        let pos = payloads
+            .iter()
+            .position(|p| p.contains("javascript:"))
+            .unwrap_or_else(|| {
+                panic!("attribute catalog ({label}) must include a javascript: scheme")
+            });
+        assert!(
+            pos < cap,
+            "javascript: scheme at index {pos} must survive the built-in safety cap {cap} ({label})"
+        );
+    }
+}
+
+#[test]
 fn test_get_dynamic_payloads_only_custom() {
     let context = InjectionContext::Html(None);
     let args = ScanArgs {
