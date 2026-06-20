@@ -460,6 +460,14 @@ pub(crate) fn decide_retry(
     match outcome {
         SendOutcome::Status(429) if state.rl_done < MAX_429_RETRIES => {
             let ms = retry_after_ms
+                // A `Retry-After: 0` or a past HTTP-date parses to `Some(0)`.
+                // Honoring it verbatim would sleep 0ms and re-send immediately,
+                // turning each 429 into a back-to-back retry burst (up to
+                // MAX_429_RETRIES) against an already-overloaded server — the
+                // opposite of the backoff this exists to provide. Treat a
+                // non-positive hint as "no usable hint" and use exponential
+                // backoff instead.
+                .filter(|&v| v > 0)
                 .unwrap_or_else(|| next_backoff_ms(base_delay_ms, state.rl_done))
                 .min(BACKOFF_CAP_MS);
             RetryDecision::Sleep {

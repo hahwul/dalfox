@@ -19,12 +19,14 @@ type ClientResult<T> = std::result::Result<T, Box<dyn std::error::Error + Send +
 /// the rest of the 33-char subdomain label.
 const CORRELATION_ID_LEN: usize = 20;
 const NONCE_LEN: usize = 13;
-/// Cap on the OAST poll/register response body we buffer. Legitimate interactsh
-/// poll JSON is tiny; this bounds memory if a hostile/compromised OAST node
-/// streams an oversized body, consistent with the project's capped-body policy
-/// for scanned targets. A truncated body just yields a parse error the poller
-/// already swallows.
-const OOB_MAX_BODY_BYTES: usize = 4 << 20; // 4 MiB
+/// Cap on the OAST poll/register response body we buffer. This bounds memory if
+/// a hostile/compromised OAST node streams an oversized body, consistent with
+/// the project's capped-body policy for scanned targets. Sized generously (a
+/// single poll can carry a whole batch of base64+AES-wrapped interactions) so a
+/// busy session doesn't routinely truncate; truncation mid-JSON drops the whole
+/// batch (lost blind-XSS evidence), so [`OobSession::poll`] makes a cap hit loud
+/// rather than letting the parse error vanish at debug level.
+const OOB_MAX_BODY_BYTES: usize = 32 << 20; // 32 MiB
 /// Upper bound on the pre-allocation hint for the decrypted-interaction buffer,
 /// so a large advertised entry count can't drive an oversized reservation.
 const OOB_MAX_ENTRIES_HINT: usize = 4096;
@@ -194,6 +196,23 @@ impl InteractshClient {
         // Cap the buffered body instead of `resp.json()` (which reads without
         // bound) so a hostile OAST node can't drive an OOM through the poller.
         let body = crate::utils::http::read_body_capped(resp, OOB_MAX_BODY_BYTES).await?;
+        // A cap hit means the body was truncated mid-JSON: the parse below would
+        // fail and the entire batch — potentially confirmed blind-XSS callbacks —
+        // would silently vanish (the poller only logs poll errors at debug). Make
+        // it loud and return early with a clear cause instead. (read_body_capped
+        // fills to exactly the cap on truncation; lossy UTF-8 can nudge it over,
+        // hence `>=`.)
+        if body.len() >= OOB_MAX_BODY_BYTES {
+            crate::ceprintln!(
+                "[warn] OOB poll body reached the {} MiB cap and was truncated; some queued blind-XSS callbacks in this batch may be lost",
+                OOB_MAX_BODY_BYTES >> 20
+            );
+            return Err(format!(
+                "OOB poll body exceeded the {} MiB cap (truncated)",
+                OOB_MAX_BODY_BYTES >> 20
+            )
+            .into());
+        }
         let parsed: wire::PollResponse = serde_json::from_str(&body)?;
 
         let aes_key_b64 = parsed.aes_key.as_deref().filter(|s| !s.is_empty());

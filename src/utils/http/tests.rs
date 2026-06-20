@@ -311,6 +311,36 @@ fn retry_429_honors_retry_after_capped() {
 }
 
 #[test]
+fn retry_429_zero_retry_after_falls_back_to_backoff() {
+    // A `Retry-After: 0` (or a past HTTP-date, which parses to 0) must NOT sleep
+    // 0ms and re-send immediately — that turned each 429 into a back-to-back
+    // retry burst. It should fall back to the exponential backoff for this
+    // attempt instead.
+    let st = RetryState::default();
+    let d = decide_retry(SendOutcome::Status(429), st, 0, 1000, Some(0));
+    assert_eq!(
+        d,
+        RetryDecision::Sleep {
+            ms: next_backoff_ms(1000, 0),
+            rate_limited: true
+        }
+    );
+    // Still rate-limited semantics, and the backoff grows with prior 429s.
+    let st = RetryState {
+        rl_done: 2,
+        tr_done: 0,
+    };
+    let d = decide_retry(SendOutcome::Status(429), st, 0, 1000, Some(0));
+    assert_eq!(
+        d,
+        RetryDecision::Sleep {
+            ms: next_backoff_ms(1000, 2),
+            rate_limited: true
+        }
+    );
+}
+
+#[test]
 fn retry_429_stops_after_budget() {
     let st = RetryState {
         rl_done: MAX_429_RETRIES,

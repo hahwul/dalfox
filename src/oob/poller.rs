@@ -101,6 +101,24 @@ impl PollerHandle {
     }
 }
 
+/// Key used to collapse repeated callbacks into one finding. A correlated hit
+/// (a recovered nonce) de-dupes per `(nonce, protocol)`: one finding per payload
+/// per channel even if the callback fires repeatedly. An UNcorrelated hit has no
+/// nonce, so it de-dupes on the interaction's own identity (host + remote
+/// address + protocol) — keying it on the empty nonce alone would collapse every
+/// distinct uncorrelated hit of a protocol into a single finding, dropping real
+/// out-of-band evidence.
+fn dedup_key(nonce: &str, it: &OobInteraction) -> String {
+    if nonce.is_empty() {
+        format!(
+            "uncorrelated:{}:{}:{}",
+            it.full_id, it.remote_address, it.protocol
+        )
+    } else {
+        format!("{}:{}", nonce, it.protocol)
+    }
+}
+
 /// Poll once and merge any new, correlated callbacks into `results`.
 async fn poll_once(
     session: &OobSession,
@@ -120,9 +138,7 @@ async fn poll_once(
     let mut batch: Vec<ScanResult> = Vec::new();
     for it in interactions {
         let nonce = session.extract_nonce(&it.full_id).unwrap_or_default();
-        // De-dupe per (nonce, protocol): one finding per payload per channel,
-        // even if the callback fires repeatedly.
-        let dedup_key = format!("{}:{}", nonce, it.protocol);
+        let dedup_key = dedup_key(&nonce, &it);
         {
             let mut guard = seen.lock().unwrap_or_else(PoisonError::into_inner);
             if !guard.insert(dedup_key) {
@@ -274,6 +290,43 @@ mod tests {
         assert_eq!(r.inject_type, "blind-oob-Query-http");
         assert!(r.evidence.contains("203.0.113.5"));
         assert!(r.evidence.contains("oast.fun"));
+    }
+
+    #[test]
+    fn dedup_key_correlated_collapses_per_nonce_protocol() {
+        let it = OobInteraction {
+            protocol: "http".to_string(),
+            full_id: "abc123.oast.fun".to_string(),
+            remote_address: "203.0.113.5".to_string(),
+            timestamp: String::new(),
+            raw_request: String::new(),
+        };
+        // Same nonce + protocol => same key (repeat callbacks collapse to one).
+        assert_eq!(dedup_key("abc123", &it), dedup_key("abc123", &it));
+        // Different protocols of the same nonce stay distinct (one per channel).
+        let mut dns = it.clone();
+        dns.protocol = "dns".to_string();
+        assert_ne!(dedup_key("abc123", &it), dedup_key("abc123", &dns));
+    }
+
+    #[test]
+    fn dedup_key_uncorrelated_does_not_collapse_distinct_hits() {
+        // Two uncorrelated callbacks (empty nonce) from different sources must
+        // NOT share a key — otherwise only the first surfaces and the rest of
+        // the blind-XSS evidence is silently dropped.
+        let a = OobInteraction {
+            protocol: "http".to_string(),
+            full_id: "aaa.oast.fun".to_string(),
+            remote_address: "203.0.113.5".to_string(),
+            timestamp: String::new(),
+            raw_request: String::new(),
+        };
+        let mut b = a.clone();
+        b.full_id = "bbb.oast.fun".to_string();
+        b.remote_address = "198.51.100.9".to_string();
+        assert_ne!(dedup_key("", &a), dedup_key("", &b));
+        // But an identical uncorrelated hit (same host+addr+proto) still dedupes.
+        assert_eq!(dedup_key("", &a), dedup_key("", &a.clone()));
     }
 
     #[test]

@@ -689,7 +689,12 @@ impl ScanArgs {
             wait_secs: self.blind_oob_wait(),
             timeout: self.timeout,
             proxy: self.proxy.clone(),
-            insecure: self.insecure.unwrap_or(false),
+            // Mirror the scanner-wide insecure-by-default TLS posture: every
+            // other consumer of `insecure` resolves `None` -> true (see
+            // input.rs / mod.rs). Enforcing validation only on the OOB client
+            // silently disabled blind-OOB against self-hosted interactsh
+            // servers presenting self-signed/mismatched certs.
+            insecure: self.insecure.unwrap_or(true),
         }
     }
 
