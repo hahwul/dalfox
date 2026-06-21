@@ -639,3 +639,70 @@ fn synthesis_is_fast_and_bounded() {
         calls
     );
 }
+
+#[test]
+fn js_string_contexts_offer_a_bare_expression_payload() {
+    // C1: the quote-delimiter heuristic mis-classifies a raw JS *expression*
+    // position (a `${ … }` template-literal substitution, an object-literal value
+    // slot) as a string context. There the string-breakout templates are syntax
+    // errors, so synthesis must also emit a bare-expression payload that executes
+    // directly in expression position. (FP-safe: a bare `alert(1)` in a genuine
+    // string literal reflects as inert text and never AST-verifies — see the
+    // headless FP controls in the FN-hunt harness.)
+    for ctx in [
+        InjectionContext::Javascript(Some(DelimiterType::SingleQuote)),
+        InjectionContext::Javascript(Some(DelimiterType::DoubleQuote)),
+        InjectionContext::Javascript(Some(DelimiterType::Backtick)),
+    ] {
+        let payloads = synthesize_payloads(&ctx, &[], &[], &[], None);
+        assert!(
+            payloads.iter().any(|p| p == "alert(1)"),
+            "{ctx:?} must offer a bare-expression payload; got {payloads:?}"
+        );
+    }
+    // The comment context is NOT an expression position (a bare call inside a
+    // block comment is inert), so it must not gain the bare payload.
+    let comment = synthesize_payloads(
+        &InjectionContext::Javascript(Some(DelimiterType::Comment)),
+        &[],
+        &[],
+        &[],
+        None,
+    );
+    assert!(
+        !comment.iter().any(|p| p == "alert(1)"),
+        "comment context should not emit a bare-expression payload"
+    );
+}
+
+#[test]
+fn raw_js_context_offers_regex_literal_breakout() {
+    // C3: a reflection inside a regex literal (`var re = /^INJECT$/`) needs a
+    // `/`-led payload to close the regex first; compute_js_breakout never treats
+    // `/` as a regex delimiter, so synthesis carries static regex-closing
+    // templates in the raw (delimiter-less) JS set.
+    let payloads = synthesize_payloads(&InjectionContext::Javascript(None), &[], &[], &[], None);
+    assert!(
+        payloads
+            .iter()
+            .any(|p| p.starts_with("/;") && p.contains("alert")),
+        "raw JS context must offer a regex-closing payload; got {payloads:?}"
+    );
+    // Under a filter that blocks only angle brackets (a strip-`<>`-style WAF),
+    // the regex breakout survives while the `</script>` template is dropped.
+    let filtered = synthesize_payloads(
+        &InjectionContext::Javascript(None),
+        &['<', '>'],
+        &[],
+        &[],
+        None,
+    );
+    assert!(
+        filtered.iter().any(|p| p.starts_with("/;")),
+        "regex breakout should survive an angle-bracket filter"
+    );
+    assert!(
+        !filtered.iter().any(|p| p.contains("</script>")),
+        "angle-bracket filter must drop the </script> template"
+    );
+}
