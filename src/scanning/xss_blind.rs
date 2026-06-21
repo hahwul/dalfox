@@ -257,14 +257,31 @@ async fn send_blind_request(target: &Target, param_name: &str, payload: &str, pa
         }
         "body" => {
             if let Some(data) = &target.data {
-                // Simple replace, assuming param=value& format
+                // Parse the form body and replace only the exact-name match's
+                // value, then re-serialize (mirrors the query branch above). The
+                // old `str::replace("{name}=", "{name}={payload}&")` never
+                // removed the original value (`a=1&b=2` -> `a=PAY&1&b=2`,
+                // orphaning `&1`) and matched substring-colliding names (`id`
+                // also rewrote `userid`), corrupting the body and injecting into
+                // the wrong parameter — a silent blind-XSS delivery failure.
+                let mut pairs: Vec<(String, String)> = form_urlencoded::parse(data.as_bytes())
+                    .map(|(k, v)| (k.to_string(), v.to_string()))
+                    .collect();
+                let mut found = false;
+                for pair in &mut pairs {
+                    if pair.0 == param_name {
+                        pair.1 = payload.to_string();
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    pairs.push((param_name.to_string(), payload.to_string()));
+                }
                 body = Some(
-                    data.replace(
-                        &format!("{}=", param_name),
-                        &format!("{}={}&", param_name, payload),
-                    )
-                    .trim_end_matches('&')
-                    .to_string(),
+                    form_urlencoded::Serializer::new(String::new())
+                        .extend_pairs(&pairs)
+                        .finish(),
                 );
             }
         }
