@@ -7,6 +7,31 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The previous Go implementation lives on the [`v2` branch](https://github.com/hahwul/dalfox/tree/v2)
 and continues to receive security backports per [SECURITY.md](./SECURITY.md).
 
+## 3.1.1
+
+A maintenance release: reflected-XSS recall and false-positive fixes, `url`/`file`/`pipe` subcommand parity, request-fan-out bounding, and unified logging.
+
+### Changed
+
+* **Unified scan target parameter**: Server and MCP now take `target`; REST keeps `url` as a backward-compatible alias. Fixes [#1152](https://github.com/hahwul/dalfox/pull/1152).
+* **Unified debug logging**: Routed all debug output through a single stderr `dbg_log!` macro and structured server/MCP loggers, and aligned OOB / blind output with the standard log format ([#1145](https://github.com/hahwul/dalfox/pull/1145), [#1147](https://github.com/hahwul/dalfox/pull/1147), [#1144](https://github.com/hahwul/dalfox/pull/1144)).
+
+### Fixed
+
+* Restored reflected-XSS recall in raw-JS-expression and regex-literal contexts. Fixes [#1161](https://github.com/hahwul/dalfox/pull/1161).
+* Demoted inert URL-scheme and `javascript:` self-link reflections, clearing the residual false positive from [#1153](https://github.com/hahwul/dalfox/issues/1153) ([#1154](https://github.com/hahwul/dalfox/pull/1154), [#1160](https://github.com/hahwul/dalfox/pull/1160)).
+* Front-loaded the protocol-scheme payload family so the per-param cap can no longer evict it. Fixes [#1159](https://github.com/hahwul/dalfox/pull/1159).
+* `url` / `file` / `pipe` subcommands now apply config files, global flags, and `--include-all` ([#1151](https://github.com/hahwul/dalfox/pull/1151)) and respect an explicit `-i` / `--input-type` ([#1149](https://github.com/hahwul/dalfox/pull/1149)).
+* `--output` write failures are now reported via stderr and a non-zero exit code. Fixes [#1150](https://github.com/hahwul/dalfox/pull/1150).
+* Scoped `--scan-timeout` cancellation to the timed-out target so it no longer aborts other targets, plus assorted OOB and retry edge-case fixes.
+* Fixed the Nix build by dropping removed `darwin.apple_sdk` framework inputs. Fixes [#1158](https://github.com/hahwul/dalfox/pull/1158).
+
+### Performance & Reliability
+
+* Per-parameter payload safety cap and recall-preserving DOM-phase early-exit to bound request fan-out ([#1155](https://github.com/hahwul/dalfox/pull/1155), [#1156](https://github.com/hahwul/dalfox/pull/1156)).
+* Bounded unbounded task spawning in parameter mining and cut server / hot-path lock-hold and allocations.
+* Capped the HPP reflection body read to bound scanner memory. Fixes [#1148](https://github.com/hahwul/dalfox/pull/1148).
+
 ## 3.1.0
 
 A feature release: out-of-band (blind) XSS detection, external- and modern-DOM-sink analysis, CSP / Trusted Types awareness, filter-aware payload synthesis, HAR input, a global rate limiter, and broad WAF-bypass and server/MCP hardening.
