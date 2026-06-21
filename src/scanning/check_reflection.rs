@@ -668,22 +668,58 @@ fn scan_url_value_trapping(hay: &str, variants: &[String]) -> (bool, bool) {
     (found, false)
 }
 
+/// True when any of `variants` (the break-out-bearing forms — each carrying a
+/// raw `<`/`>`/`"`/`'`) appears *literally* in `html` or its URL-decoded view.
+/// A literal reflection of such a form could close the attribute quote or open a
+/// tag, so the URL-value trapping gate must not suppress it. When only the
+/// encoded form of the same payload is reflected (e.g. `%22`/`&quot;` instead of
+/// a raw `"`), no literal break-out byte is present and this returns false.
+fn any_variant_reflected_literally(html: &str, variants: &[String]) -> bool {
+    if variants
+        .iter()
+        .any(|v| !v.is_empty() && html.contains(v.as_str()))
+    {
+        return true;
+    }
+    if html.as_bytes().contains(&b'%')
+        && let Ok(decoded) = urlencoding::decode(html)
+        && decoded.as_ref() != html
+    {
+        return variants
+            .iter()
+            .any(|v| !v.is_empty() && decoded.contains(v.as_str()));
+    }
+    false
+}
+
 /// Suppression gate for issue #1153 (self-/canonical-link echo of arbitrary
-/// params): a payload with no break-out characters (no `<`/`>`/`"`/`'` in any
-/// variant) whose every reflected occurrence sits inside a *quoted* URL-valued
-/// attribute value at a non-scheme-start position cannot execute. It can't close
-/// the quote, open a tag, or change the URL's scheme — it is just inert text in
-/// the path/query/fragment of a link. Covers a bare `javascript:` scheme AND its
-/// WAF-evasion mutations (`java\tscript:`, `javasscriptcript:`, …) that a server
-/// reflects verbatim in a self-link without ever transforming them.
+/// params): a payload whose every reflected occurrence sits inside a *quoted*
+/// URL-valued attribute value at a non-scheme-start position cannot execute. It
+/// can't close the quote, open a tag, or change the URL's scheme — it is just
+/// inert text in the path/query/fragment of a link. Covers a bare `javascript:`
+/// scheme AND its WAF-evasion mutations (`java\tscript:`, `javasscriptcript:`,
+/// `javasscriptcript:top["al"+"\ert"](1)`, …) that a server reflects into a
+/// self-link, whether verbatim or percent-/entity-encoded.
+///
+/// Break-out characters (`<`/`>`/`"`/`'`) are only disqualifying when a variant
+/// carrying them is reflected *literally* (raw or after URL-decoding the body) —
+/// then it could break the attribute and is left to the tag/quote-aware gates /
+/// the reporter. When such a variant exists only because a *decoded* form of the
+/// payload contains a quote (e.g. the entity-encoded `&#x...;` scheme mutation
+/// whose `"` only ever appears as `%22` in the link's query), it is inert and
+/// still suppressed. This closes the residual #1153 FP the original fix missed.
 fn reflection_trapped_in_url_value(html: &str, payload: &str) -> bool {
     let variants = payload_variants(payload);
-    // Any quote/angle in a variant could break the attribute or open a tag —
-    // out of scope here (handled by the tag/quote-aware gates).
-    if variants.iter().any(|v| v.contains(['<', '>', '"', '\''])) {
+    // Partition break-out-free variants (evaluated for trapping) from variants
+    // that carry a raw quote/angle.
+    let (safe, risky): (Vec<String>, Vec<String>) = variants
+        .into_iter()
+        .partition(|v| !v.contains(['<', '>', '"', '\'']));
+    // A break-out variant reflected literally could escape the attribute — keep.
+    if any_variant_reflected_literally(html, &risky) {
         return false;
     }
-    let (mut found, escaped) = scan_url_value_trapping(html, &variants);
+    let (mut found, escaped) = scan_url_value_trapping(html, &safe);
     if escaped {
         return false;
     }
@@ -693,7 +729,7 @@ fn reflection_trapped_in_url_value(html: &str, payload: &str) -> bool {
         && let Ok(decoded) = urlencoding::decode(html)
         && decoded.as_ref() != html
     {
-        let (f2, e2) = scan_url_value_trapping(&decoded, &variants);
+        let (f2, e2) = scan_url_value_trapping(&decoded, &safe);
         if e2 {
             return false;
         }

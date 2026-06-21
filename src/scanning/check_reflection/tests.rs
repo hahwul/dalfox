@@ -1981,6 +1981,68 @@ fn test_trapped_in_url_value_keeps_breakout_and_scheme_start() {
 }
 
 #[test]
+fn test_trapped_in_url_value_suppresses_encoded_scheme_with_quotes_in_self_link() {
+    // Residual #1153 FP (verified against the live binary on a faithful ASP.NET
+    // repro): an entity-encoded, keyword-obfuscated `javascript:` WAF mutation —
+    // here `javascript:a["b"]`, whose *decoded* form carries `"` — is reflected
+    // PERCENT-encoded inside a self-link href query. The raw `"` never appears
+    // (only `%22` inside `%26%23x22%3B`), so it is inert text in the link's
+    // query and must be demoted. The original fix bailed on the decoded `"`.
+    let payload = "&#x6a;&#x61;&#x76;&#x61;&#x73;&#x63;&#x72;&#x69;&#x70;&#x74;&#x3a;&#x61;&#x5b;&#x22;&#x62;&#x22;&#x5d;";
+    // Sanity: the html-entity-decoded form really does contain a break-out quote.
+    assert!(decode_html_entities(payload).contains('"'));
+    let html = format!(
+        "<link rel=\"canonical\" href=\"/About.aspx?any={enc}\"><a href=\"/About.aspx?any={enc}\">home</a>",
+        enc = urlencoding::encode(payload)
+    );
+    assert!(
+        reflection_trapped_in_url_value(&html, payload),
+        "encoded scheme-with-quotes trapped in a self-link query is inert"
+    );
+    // Drive the FULL gate chain, not just the helper (an earlier gate could
+    // mask this one — see the gate-chain masking lesson).
+    assert!(
+        is_in_safe_context_decoded(&html, payload),
+        "residual #1153 self-link [R] FP must be suppressed end-to-end"
+    );
+}
+
+#[test]
+fn test_trapped_in_url_value_keeps_literal_decoded_quote_breakout() {
+    // Counterpart (no false negative): when a payload's break-out form is
+    // reflected LITERALLY (a raw `"` that can close the attribute) the trapping
+    // gate must NOT suppress it — it is left to the tag/quote-aware gates / the
+    // reporter. The narrow new suppression only ever fires on the *encoded* form.
+    let payload = "&#x6a;&#x61;&#x76;&#x61;&#x73;&#x63;&#x72;&#x69;&#x70;&#x74;&#x3a;&#x61;&#x5b;&#x22;&#x62;&#x22;&#x5d;";
+    let decoded = decode_html_entities(payload); // javascript:a["b"]
+    assert!(decoded.contains('"'));
+    let html = format!("<a href=\"/p?x={decoded}\">x</a>");
+    assert!(
+        !reflection_trapped_in_url_value(&html, payload),
+        "a literally-reflected raw quote must keep the trapping gate from suppressing"
+    );
+    // And a genuine tag break-out reflected literally is likewise never trapped.
+    let tag = "\"><img src=x onerror=alert(1)>";
+    let tag_html = format!("<a href=\"/p?x={tag}\">x</a>");
+    assert!(!reflection_trapped_in_url_value(&tag_html, tag));
+    assert!(!is_in_safe_context_decoded(&tag_html, tag));
+}
+
+#[test]
+fn test_trapped_in_url_value_keeps_encoded_scheme_at_value_start() {
+    // No false negative: an entity-encoded scheme at the href value START
+    // decodes to `javascript:` in the browser and executes — must be kept even
+    // though it is encoded in the source.
+    let payload = "&#x6a;&#x61;&#x76;&#x61;&#x73;&#x63;&#x72;&#x69;&#x70;&#x74;&#x3a;&#x61;&#x6c;&#x65;&#x72;&#x74;&#x28;&#x31;&#x29;";
+    let html = format!("<a href=\"{payload}\">x</a>");
+    assert!(
+        !reflection_trapped_in_url_value(&html, payload),
+        "entity scheme at the value start is executable and must be kept"
+    );
+    assert!(!is_in_safe_context_decoded(&html, payload));
+}
+
+#[test]
 fn test_occurrence_inside_url_attr_value_handles_query_string() {
     // The href value contains `=`/`?`/`&`; the occurrence is still inside it.
     let h = "<a href=\"/About.aspx?hello=visitor&any=zzmarker\">x</a>";
