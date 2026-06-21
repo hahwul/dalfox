@@ -17,7 +17,7 @@ jobs:
           - arm64
     steps:
       - name: Check out Git repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Set up QEMU
         if: matrix.platform == 'arm64'
         uses: docker/setup-qemu-action@v4

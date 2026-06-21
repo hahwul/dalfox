@@ -21,7 +21,7 @@ jobs:
     name: cargo audit (RUSTSEC)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Run security audit
         uses: rustsec/audit-check@v2
         with:
