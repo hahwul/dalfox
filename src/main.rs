@@ -289,8 +289,26 @@ async fn main() {
         .and_then(|r| r.config.scan.as_ref())
         .and_then(|s| s.silence)
         .unwrap_or(false);
+    // A machine-readable `format` set *only* in the config file (not on the CLI)
+    // must also suppress the banner — otherwise the ASCII banner is prepended to
+    // the JSON/JSONL/SARIF/TOML document on stdout and breaks any pipeline that
+    // configures the format via file rather than `--format`. `is_machine_format`
+    // above only sees CLI args, so fold the config value in the same way
+    // `config_silence` folds the config `silence`.
+    let config_machine_format = config_load
+        .as_ref()
+        .ok()
+        .and_then(|r| r.config.scan.as_ref())
+        .and_then(|s| s.format.as_deref())
+        .map(|f| matches!(f, "json" | "jsonl" | "sarif" | "toml"))
+        .unwrap_or(false);
     let effective_silence = cli.silence || scan_silence || config_silence;
-    if !is_mcp && !is_machine_format && !effective_silence && !is_payload_selector {
+    if !is_mcp
+        && !is_machine_format
+        && !config_machine_format
+        && !effective_silence
+        && !is_payload_selector
+    {
         utils::print_banner_once(env!("CARGO_PKG_VERSION"), color_enabled);
     }
 

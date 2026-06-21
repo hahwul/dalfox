@@ -34,6 +34,24 @@ fn run_payload_with_xdg_config_home(xdg_home: &Path) -> Output {
         .expect("run dalfox with explicit XDG_CONFIG_HOME")
 }
 
+/// Run a scan against a deliberately invalid target (rejected before any
+/// network I/O) with the output format supplied *only* via `--config`, never on
+/// the CLI. stdin is closed so the scan can't block reading piped targets.
+fn run_scan_with_config(path: &Path) -> Output {
+    Command::new(env!("CARGO_BIN_EXE_dalfox"))
+        .args([
+            "--config",
+            path.to_str().expect("utf8 path"),
+            "scan",
+            "not-a-valid-url",
+        ])
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("run dalfox scan with explicit --config")
+}
+
+const BANNER_MARK: &str = "████";
+
 #[test]
 fn test_missing_json_config_path_is_created() {
     let dir = unique_temp_dir("cfg-create-json");
@@ -144,6 +162,48 @@ fn test_unreadable_config_path_is_non_fatal_for_payload_command() {
     assert!(
         output.status.success(),
         "directory-as-config read error should not abort payload command"
+    );
+}
+
+#[test]
+fn test_config_set_machine_format_suppresses_banner_on_stdout() {
+    // Regression: `is_machine_format` was computed only from CLI args, so a
+    // `format = "json"` set in the config file (not via `--format`) left the
+    // ASCII banner prepended to the JSON document on stdout, breaking any
+    // pipeline that parses dalfox's machine output.
+    let dir = unique_temp_dir("cfg-machine-format-banner");
+    let config_path = dir.join("config.toml");
+    std::fs::write(&config_path, "[scan]\nformat = \"json\"\n").expect("write json-format config");
+
+    let output = run_scan_with_config(&config_path);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        !stdout.contains(BANNER_MARK),
+        "config-set machine format must suppress the banner; stdout was:\n{stdout}"
+    );
+    assert!(
+        stdout.trim_start().starts_with('{'),
+        "config-set json format must emit a clean JSON document; stdout was:\n{stdout}"
+    );
+    serde_json::from_str::<serde_json::Value>(stdout.trim())
+        .expect("config-set json output must parse as JSON");
+}
+
+#[test]
+fn test_config_set_plain_format_keeps_banner() {
+    // Control for the regression above: a non-machine format must still print
+    // the banner, so the suppression is scoped to machine formats only.
+    let dir = unique_temp_dir("cfg-plain-format-banner");
+    let config_path = dir.join("config.toml");
+    std::fs::write(&config_path, "[scan]\nformat = \"plain\"\n")
+        .expect("write plain-format config");
+
+    let output = run_scan_with_config(&config_path);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains(BANNER_MARK),
+        "plain format must keep the banner; stdout was:\n{stdout}"
     );
 }
 
