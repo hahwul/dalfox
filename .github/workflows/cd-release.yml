@@ -64,7 +64,7 @@ jobs:
             use_cross: false
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Determine version
         shell: bash

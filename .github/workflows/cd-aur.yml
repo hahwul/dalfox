@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # On manual dispatch, read the (possibly hotfixed) PKGBUILD from the
           # branch the workflow runs on (e.g. main) rather than the release tag,
