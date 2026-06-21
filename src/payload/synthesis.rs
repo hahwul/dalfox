@@ -184,10 +184,18 @@ const JS_COMMENT_TEMPLATES: &[&str] = &[
 ];
 
 /// Raw JavaScript context (e.g. `var x = INJECT;`): no string to break out of.
+///
+/// The two `/`-led templates close an enclosing **regex literal** (`var re =
+/// /^INJECT$/`) before running the payload: `compute_js_breakout` deliberately
+/// treats `/` only as division/comment (never a regex delimiter), so it never
+/// emits these — but a reflection inside a regex literal is a real, if uncommon,
+/// JS sink. `/;{JS}//` → `…/^/;alert(1)//$/…` (regex `/^/`, then the statement).
 const JS_RAW_TEMPLATES: &[&str] = &[
     "{JS}",
     ";{JS};",
     ";{JS}//",
+    "/;{JS}//",
+    "/;{JS};/",
     "</script><svg onload={JS} class={CLASS}>",
 ];
 
@@ -229,13 +237,37 @@ fn templates_for(context: &InjectionContext) -> Vec<&'static str> {
             }
             t
         }
-        InjectionContext::Javascript(delim) => match delim {
-            Some(DelimiterType::SingleQuote) => JS_SQ_TEMPLATES.to_vec(),
-            Some(DelimiterType::DoubleQuote) => JS_DQ_TEMPLATES.to_vec(),
-            Some(DelimiterType::Backtick) => JS_BACKTICK_TEMPLATES.to_vec(),
-            Some(DelimiterType::Comment) => JS_COMMENT_TEMPLATES.to_vec(),
-            None => JS_RAW_TEMPLATES.to_vec(),
-        },
+        InjectionContext::Javascript(delim) => {
+            let mut t = match delim {
+                Some(DelimiterType::SingleQuote) => JS_SQ_TEMPLATES.to_vec(),
+                Some(DelimiterType::DoubleQuote) => JS_DQ_TEMPLATES.to_vec(),
+                Some(DelimiterType::Backtick) => JS_BACKTICK_TEMPLATES.to_vec(),
+                Some(DelimiterType::Comment) => JS_COMMENT_TEMPLATES.to_vec(),
+                None => JS_RAW_TEMPLATES.to_vec(),
+            };
+            // The quote-delimiter heuristic only looks for the nearest matching
+            // quote, so it mis-classifies a raw JS *expression* position — a
+            // template-literal `${ … }` substitution, or an object-literal value
+            // slot `{"k": …}` — as a single/double/backtick string. There every
+            // string-breakout template is a syntax error, so also offer the
+            // bare-expression payload `{JS}` (`alert(1)`), which executes directly
+            // in expression position. In a genuine string context it reflects as
+            // inert string text and never AST-verifies (promotion requires the
+            // injected call to overlap the payload span — see
+            // `js_context_verify::has_js_context_evidence`), so this is strictly
+            // recall-additive with no false-positive risk.
+            if matches!(
+                delim,
+                Some(
+                    DelimiterType::SingleQuote
+                        | DelimiterType::DoubleQuote
+                        | DelimiterType::Backtick
+                )
+            ) {
+                t.push("{JS}");
+            }
+            t
+        }
         InjectionContext::Css(delim) => match delim {
             Some(DelimiterType::SingleQuote) => CSS_SQ_TEMPLATES.to_vec(),
             Some(DelimiterType::DoubleQuote) => CSS_DQ_TEMPLATES.to_vec(),
