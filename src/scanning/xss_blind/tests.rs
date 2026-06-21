@@ -134,7 +134,10 @@ async fn test_send_blind_request_mutates_body_header_and_cookie_targets() {
     let records = state.lock().await.clone();
     assert_eq!(records.len(), 3);
     assert_eq!(records[0].method, "POST");
-    assert!(records[0].body.contains("a=BODYPAY"));
+    // Exact body, not a substring: the old naive replace produced the corrupt
+    // `a=BODYPAY&1&b=2` (orphaned `&1`), which a `contains("a=BODYPAY")` check
+    // wrongly accepted. The other pair must survive untouched.
+    assert_eq!(records[0].body, "a=BODYPAY&b=2");
     assert_eq!(
         records[1].headers.get("x-trace").map(String::as_str),
         Some("HDRPAY")
@@ -146,6 +149,37 @@ async fn test_send_blind_request_mutates_body_header_and_cookie_targets() {
             .map(|v| v.contains("session=CKPAY"))
             .unwrap_or(false)
     );
+}
+
+#[tokio::test]
+async fn test_send_blind_request_body_does_not_corrupt_substring_colliding_param() {
+    // `id` must not also rewrite `userid` (the old substring `str::replace`
+    // injected into both, landing the blind payload in the wrong sink).
+    let (addr, state) = start_capture_server().await;
+    let mut target = make_target(addr, "/submit");
+    target.method = "POST".to_string();
+    target.data = Some("id=1&userid=2".to_string());
+
+    send_blind_request(&target, "id", "BODYPAY", "body").await;
+
+    let records = state.lock().await.clone();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].body, "id=BODYPAY&userid=2");
+}
+
+#[tokio::test]
+async fn test_send_blind_request_body_replaces_non_first_param_only() {
+    // Injecting a middle param must leave the surrounding pairs intact.
+    let (addr, state) = start_capture_server().await;
+    let mut target = make_target(addr, "/submit");
+    target.method = "POST".to_string();
+    target.data = Some("a=1&b=2&c=3".to_string());
+
+    send_blind_request(&target, "b", "BODYPAY", "body").await;
+
+    let records = state.lock().await.clone();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].body, "a=1&b=BODYPAY&c=3");
 }
 
 #[tokio::test]

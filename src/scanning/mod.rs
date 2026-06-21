@@ -1405,17 +1405,26 @@ fn log_waf_block_stats(target: &Target) {
 async fn collapse_target_results(
     results: &Arc<Mutex<Vec<crate::scanning::result::Result>>>,
     findings_count: &Arc<AtomicUsize>,
+    limit_result_type: &str,
     target: &Target,
 ) {
     let mut guard = results.lock().await;
-    let before = guard.len();
     let original = std::mem::take(&mut *guard);
     let target_url_str = target.url.to_string();
+    // Decrement by the drop in *filter-matching* findings, mirroring the add
+    // path (`count_matching_results` in `accumulate`/`record_results`). Using
+    // the raw length delta (`before - after`) would over-decrement whenever the
+    // collapsed entries — always `R` duplicates — don't match
+    // `--limit-result-type` (e.g. `V`/`A`): `findings_count` never counted them,
+    // so subtracting them underflows the unsigned counter to ~usize::MAX and
+    // poisons `limit_reached()` for the rest of a multi-target run (a silent,
+    // hard-to-diagnose scan truncation).
+    let before_matching = count_matching_results(&original, limit_result_type);
     let collapsed = collapse_redundant_reflected(original, &target_url_str);
-    let after = collapsed.len();
+    let after_matching = count_matching_results(&collapsed, limit_result_type);
     *guard = collapsed;
-    if after < before {
-        findings_count.fetch_sub(before - after, Ordering::Relaxed);
+    if after_matching < before_matching {
+        findings_count.fetch_sub(before_matching - after_matching, Ordering::Relaxed);
     }
 }
 
@@ -2383,7 +2392,7 @@ pub async fn run_scanning(
     // Collapse this target's R findings that are already proven by one of
     // its own V findings on the same (param, inject_type), scoped to the
     // current target so other targets' findings are never affected.
-    collapse_target_results(&results, &findings_count, target).await;
+    collapse_target_results(&results, &findings_count, &limit_result_type, target).await;
 
     if let Some(pb) = pb {
         finish_scan_bar(
