@@ -285,6 +285,54 @@ fn test_collapse_keeps_r_for_different_param_or_inject_type() {
     );
 }
 
+#[tokio::test]
+async fn test_collapse_target_results_no_underflow_when_filter_excludes_r() {
+    // Regression: with `--limit-result-type V`, `findings_count` only ever
+    // counted the V findings, but the old collapse subtracted the *raw* drop in
+    // length (the dropped R duplicates). On `usize` that wrapped to ~usize::MAX
+    // and poisoned `limit_reached()` for the rest of a multi-target run.
+    let results = std::sync::Arc::new(tokio::sync::Mutex::new(vec![
+        make_typed_param_result(FindingType::Reflected, "q", "inHTML"),
+        make_typed_param_result(FindingType::Verified, "q", "inHTML"),
+        make_typed_param_result(FindingType::Reflected, "q", "inHTML"),
+    ]));
+    // Under filter "V" only the single V finding was ever counted.
+    let findings_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(1));
+    let target = parse_target("https://example.com/?x=1").unwrap();
+
+    collapse_target_results(&results, &findings_count, "V", &target).await;
+
+    // Two R duplicates dropped, but none matched "V" — counter must be untouched.
+    assert_eq!(
+        findings_count.load(std::sync::atomic::Ordering::Relaxed),
+        1,
+        "collapse must not decrement findings_count for non-matching (R) drops"
+    );
+    assert_eq!(results.lock().await.len(), 1, "collapse keeps only the V");
+}
+
+#[tokio::test]
+async fn test_collapse_target_results_decrements_matching_r_under_all_filter() {
+    // Counterpart: under "ALL" (or "R") the dropped R duplicates *were* counted,
+    // so the counter must decrement by exactly the matching drop.
+    let results = std::sync::Arc::new(tokio::sync::Mutex::new(vec![
+        make_typed_param_result(FindingType::Reflected, "q", "inHTML"),
+        make_typed_param_result(FindingType::Verified, "q", "inHTML"),
+        make_typed_param_result(FindingType::Reflected, "q", "inHTML"),
+    ]));
+    let findings_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(3));
+    let target = parse_target("https://example.com/?x=1").unwrap();
+
+    collapse_target_results(&results, &findings_count, "ALL", &target).await;
+
+    // 3 -> 1 finding: decrement by 2.
+    assert_eq!(
+        findings_count.load(std::sync::atomic::Ordering::Relaxed),
+        1,
+        "collapse must decrement by the matching drop under ALL"
+    );
+}
+
 #[test]
 fn test_collapse_does_not_drop_r_from_other_targets() {
     // V on target A must not drop R on target B even when (param, inject)
