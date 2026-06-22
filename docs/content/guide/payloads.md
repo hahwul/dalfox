@@ -146,7 +146,7 @@ Print a payload family without running a scan:
 ```bash
 dalfox payload event-handlers  # onerror, onmouseover, ...
 dalfox payload useful-tags     # svg, img, script, ...
-dalfox payload uri-scheme      # javascript:, data:, vbscript:
+dalfox payload uri-scheme      # javascript:, data:
 dalfox payload portswigger     # fetch + print remote list
 ```
 
