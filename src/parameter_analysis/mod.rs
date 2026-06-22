@@ -168,7 +168,7 @@ impl Param {
     }
 }
 
-/// Set of special characters to probe with patterns like: dalfox'<char>dlafox"
+/// Set of special characters to probe with patterns like: dalfox'<char>dalfox"
 /// Order preserved for deterministic output.
 pub const SPECIAL_PROBE_CHARS: &[char] = &[
     '/', '\\', '\'', '{', '`', '<', '>', '"', '(', ')', ';', '=', '|', '}', '[', '.', ':', ']',
