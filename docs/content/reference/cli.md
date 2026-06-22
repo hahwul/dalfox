@@ -194,6 +194,10 @@ dalfox server [FLAGS]
 | `--callback-param-name` | — | `callback` | JSONP callback param |
 | `--cors-allow-methods` | — | `GET,POST,OPTIONS,PUT,PATCH,DELETE` | CORS methods |
 | `--cors-allow-headers` | — | `Content-Type,X-API-KEY,Authorization` | CORS headers |
+| `--rate-limit` | `-r`, `--rl` | `0` | Cap the global outbound request rate (requests/sec, `0` = unlimited) |
+| `--scan-timeout` | — | `0` | Hard wall-clock cap per target for the scan stage, in seconds |
+| `--max-concurrent-scans` | — | `0` | Limit on simultaneous scans (`0` = unlimited) |
+| `--max-body-bytes` | — | `0` | Limit response body bytes for analysis (`0` = unlimited) |
 
 See [REST API Server](../../integrations/server/) for endpoints.
 
