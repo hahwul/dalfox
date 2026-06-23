@@ -15,8 +15,8 @@ Thanks for helping make Dalfox better! Here's the short version.
 Dalfox v3 is written in Rust. The Go (v2.x) sources live on the [`v2` branch](https://github.com/hahwul/dalfox/tree/v2) and only receive critical security backports.
 
 ```bash
-just build    # cargo build
-just dev      # cargo run
+just build    # cargo build --release
+just dev      # cargo build (debug)
 just test     # unit + integration tests
 ```
 
