@@ -12,4 +12,4 @@ A clear and concise description of what the bug is.
 
 ## Environment
  * Dalfox Version: 
- * Installed from: (e.g go-get/snapcraft/homebrew)
+ * Installed from: (e.g prebuilt-binary/snapcraft/homebrew/cargo)

@@ -12,4 +12,4 @@ Your questions
 
 ## Environment
  * Dalfox Version: 
- * Installed from: (e.g go-get/snapcraft/homebrew)
+ * Installed from: (e.g prebuilt-binary/snapcraft/homebrew/cargo)
