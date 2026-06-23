@@ -179,7 +179,7 @@ pub const SPECIAL_PROBE_CHARS: &[char] = &[
 /// Given a response body that already contains the reflection marker (dynamic nonce),
 /// return (valid, invalid) special chars based on naive presence detection.
 /// TODO:
-/// 1. Actively send mutated payloads per character (e.g. dalfox'<c>dlafox")
+/// 1. Actively send mutated payloads per character (e.g. dalfox'<c>dalfox")
 /// 2. Parse the reflected segment boundaries to avoid false positives
 /// 3. Detect normalization (HTML entity encoding, URL encoding) and still treat as "valid"
 pub fn classify_special_chars(body: &str) -> (Vec<char>, Vec<char>) {
