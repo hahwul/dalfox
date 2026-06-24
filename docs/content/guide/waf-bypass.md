@@ -92,10 +92,10 @@ Transient failures (5xx, timeouts, connection resets) can be retried with `--ret
 
 ### Filter weak fingerprints
 
-Each fingerprint carries a confidence score (0.0–1.0). Generic markers like `Request blocked` (0.3) or `Server: Google Frontend` (0.5) sometimes false-positive on benign origins. Use `--waf-min-confidence` to discard anything below the threshold:
+Each fingerprint carries a confidence score (0.0–1.0). Generic markers like `Request blocked` (0.3) or `Server: Google Frontend` (0.15) sometimes false-positive on benign origins. Use `--waf-min-confidence` to discard anything below the threshold:
 
 ```bash
-# Keep only confident matches (drops 0.3/0.5 noise)
+# Keep only confident matches (drops 0.3/0.15 noise)
 dalfox https://target.app --waf-min-confidence 0.7
 ```
 
