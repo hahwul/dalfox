@@ -117,6 +117,43 @@ fn any_element_has_id_ascii_ci(document: &scraper::Html, marker: &str) -> bool {
         .any(|node| element_id_is(node, marker))
 }
 
+/// Which Dalfox marker forms a payload embeds, derived once from the payload.
+/// Sharing this keeps the per-node marker test (`is_marker_element`) cheap — it
+/// only checks the forms that can actually be present — and gives the marker
+/// gates a single source of truth instead of re-deriving the four booleans.
+struct MarkerFlags {
+    class: bool,
+    legacy_class: bool,
+    id: bool,
+    legacy_id: bool,
+}
+
+impl MarkerFlags {
+    fn from_payload(payload: &str) -> Self {
+        Self {
+            class: payload.contains(crate::scanning::markers::class_marker()),
+            legacy_class: payload_uses_legacy_class_marker(payload),
+            id: payload.contains(crate::scanning::markers::id_marker()),
+            legacy_id: payload_uses_legacy_id_marker(payload),
+        }
+    }
+
+    fn any(&self) -> bool {
+        self.class || self.legacy_class || self.id || self.legacy_id
+    }
+}
+
+/// Whether `node` carries one of the marker forms the payload embeds (per
+/// `flags`). All four comparisons are ASCII case-fold (see `element_class_has`
+/// / `element_id_is`), so a server that case-folds reflected input still
+/// matches.
+fn is_marker_element(node: scraper::ElementRef, flags: &MarkerFlags) -> bool {
+    (flags.class && element_class_has(node, crate::scanning::markers::class_marker()))
+        || (flags.legacy_class && element_class_has(node, "dalfox"))
+        || (flags.id && element_id_is(node, crate::scanning::markers::id_marker()))
+        || (flags.legacy_id && element_id_is(node, "dalfox"))
+}
+
 /// Whether `value` (an `on*` handler value or `<script>` body) carries a
 /// JavaScript sink call, tolerating ASCII case-folding (servers that uppercase
 /// reflected input) and HTML-entity encoding (WAF-bypass payloads like
@@ -222,20 +259,11 @@ fn payload_marker_element_carries_sink(payload: &str) -> bool {
 /// carries a surviving JS sink. Used to gate the marker-evidence path for
 /// payloads whose marker element's own attributes/body ARE the exploit.
 fn marker_element_carries_surviving_sink(payload: &str, document: &scraper::Html) -> bool {
-    let class_marker = crate::scanning::markers::class_marker();
-    let id_marker = crate::scanning::markers::id_marker();
-    let has_class = payload.contains(class_marker);
-    let has_legacy_class = payload_uses_legacy_class_marker(payload);
-    let has_id = payload.contains(id_marker);
-    let has_legacy_id = payload_uses_legacy_id_marker(payload);
+    let flags = MarkerFlags::from_payload(payload);
     let sel = super::selectors::universal();
-    document.select(sel).any(|node| {
-        let is_marker = (has_class && element_class_has(node, class_marker))
-            || (has_legacy_class && element_class_has(node, "dalfox"))
-            || (has_id && element_id_is(node, id_marker))
-            || (has_legacy_id && element_id_is(node, "dalfox"));
-        is_marker && element_carries_surviving_sink(node)
-    })
+    document
+        .select(sel)
+        .any(|node| is_marker_element(node, &flags) && element_carries_surviving_sink(node))
 }
 
 /// Whether the payload's marker rides *only* on `<input type="hidden">`
@@ -254,21 +282,12 @@ fn marker_element_carries_surviving_sink(payload: &str, document: &scraper::Html
 ///   access), so it is left to the presence-only path like `<base>`/`<form>`
 ///   structural markers rather than suppressed here.
 fn marker_only_on_non_firing_hidden_inputs(payload: &str, document: &scraper::Html) -> bool {
-    let class_marker = crate::scanning::markers::class_marker();
-    let id_marker = crate::scanning::markers::id_marker();
-    let has_class = payload.contains(class_marker);
-    let has_legacy_class = payload_uses_legacy_class_marker(payload);
-    let has_id = payload.contains(id_marker);
-    let has_legacy_id = payload_uses_legacy_id_marker(payload);
+    let flags = MarkerFlags::from_payload(payload);
     let sel = super::selectors::universal();
     let mut saw_marker = false;
     let mut saw_handler_on_hidden = false;
     for node in document.select(sel) {
-        let is_marker = (has_class && element_class_has(node, class_marker))
-            || (has_legacy_class && element_class_has(node, "dalfox"))
-            || (has_id && element_id_is(node, id_marker))
-            || (has_legacy_id && element_id_is(node, "dalfox"));
-        if !is_marker {
+        if !is_marker_element(node, &flags) {
             continue;
         }
         saw_marker = true;
@@ -287,14 +306,16 @@ fn has_marker_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
     let class_marker = crate::scanning::markers::class_marker();
     let id_marker = crate::scanning::markers::id_marker();
 
-    let has_class = payload.contains(class_marker);
-    let has_legacy_class = payload_uses_legacy_class_marker(payload);
-    let has_id = payload.contains(id_marker);
-    let has_legacy_id = payload_uses_legacy_id_marker(payload);
-
-    if !has_class && !has_legacy_class && !has_id && !has_legacy_id {
+    let flags = MarkerFlags::from_payload(payload);
+    if !flags.any() {
         return false;
     }
+    let MarkerFlags {
+        class: has_class,
+        legacy_class: has_legacy_class,
+        id: has_id,
+        legacy_id: has_legacy_id,
+    } = flags;
 
     let class_ok = if has_class || has_legacy_class {
         let mut found = false;

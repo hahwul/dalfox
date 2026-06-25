@@ -1749,6 +1749,30 @@ fn test_1183_marker_handler_on_uppercase_hidden_input_not_evidence() {
     assert_eq!(classify_dom_evidence(&payload, &body), None);
 }
 
+/// A server that case-folds the *entire* reflected value — marker, handler
+/// name, and sink — into upper case must still be recognised as a hidden-input
+/// handler and suppressed. Both the marker match (`element_class_has`) and the
+/// sink match (`value_carries_js_sink`) are ASCII case-fold, so a reflection
+/// like `CLASS=DLX… ONMOUSEOVER=ALERT(1)` is still inert.
+#[test]
+fn test_1183_marker_handler_on_case_folded_hidden_input_not_evidence() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("\" onmouseover=alert(1) class={} x=\"", marker);
+    let reflected = format!(
+        "\" ONMOUSEOVER=ALERT(1) CLASS={} X=\"",
+        marker.to_uppercase()
+    );
+    let body = format!(
+        "<html><body><input TYPE=\"HIDDEN\" VALUE=\"{}\"></body></html>",
+        reflected
+    );
+    assert_eq!(
+        classify_dom_evidence(&payload, &body),
+        None,
+        "a fully case-folded reflection on a hidden input must still suppress [V]"
+    );
+}
+
 /// FN guard: the genuine tag-breakout alternative on the same parameter lands
 /// the marker on a NEW rendered `<svg>` (self-executing). A hidden input next
 /// to it must not suppress the real finding.
