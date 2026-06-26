@@ -1522,3 +1522,104 @@ async fn active_probe_path_falls_back_to_per_char_when_batched_breaks_routing() 
         "'/' reshapes the path and must remain invalid (got invalid={invalid:?})"
     );
 }
+
+#[test]
+fn test_param_type_label_covers_every_location() {
+    fn param_at(name: &str, location: Location) -> Param {
+        Param {
+            name: name.to_string(),
+            value: String::new(),
+            location,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            pre_encoding_pipeline: None,
+            wire_name: None,
+            form_action_url: None,
+            form_origin_url: None,
+            framework_sink: None,
+            escaped_specials: None,
+            js_breakout: None,
+        }
+    }
+
+    let mut target = parse_target("https://example.com").unwrap();
+    target.cookies = vec![("session".to_string(), "abc".to_string())];
+
+    assert_eq!(
+        param_type_label(&param_at("q", Location::Query), &target),
+        "query"
+    );
+    assert_eq!(
+        param_type_label(&param_at("b", Location::Body), &target),
+        "body"
+    );
+    assert_eq!(
+        param_type_label(&param_at("j", Location::JsonBody), &target),
+        "json"
+    );
+    assert_eq!(
+        param_type_label(&param_at("m", Location::MultipartBody), &target),
+        "multipart"
+    );
+    assert_eq!(
+        param_type_label(&param_at("p", Location::Path), &target),
+        "path"
+    );
+    assert_eq!(
+        param_type_label(&param_at("f", Location::Fragment), &target),
+        "fragment"
+    );
+    // A Header-located param whose name matches a configured cookie is a
+    // cookie; any other Header param is a plain header.
+    assert_eq!(
+        param_type_label(&param_at("session", Location::Header), &target),
+        "cookie"
+    );
+    assert_eq!(
+        param_type_label(&param_at("X-Forwarded-For", Location::Header), &target),
+        "header"
+    );
+}
+
+#[test]
+fn test_encoded_variants_maps_every_known_special() {
+    // Each arm of the lookup table contributes at least one canonical
+    // encoding; the existing test only exercised `<` and `"`, leaving the
+    // bulk of the table unverified.
+    let expected: &[(char, &str)] = &[
+        ('<', "&lt;"),
+        ('>', "&gt;"),
+        ('"', "&quot;"),
+        ('\'', "&#39;"),
+        ('(', "&#40;"),
+        (')', "&#41;"),
+        ('{', "&#123;"),
+        ('}', "&#125;"),
+        ('[', "&#91;"),
+        (']', "&#93;"),
+        ('`', "&#96;"),
+        ('/', "&#47;"),
+        ('\\', "&#92;"),
+        (';', "&#59;"),
+        ('=', "&#61;"),
+        ('|', "&#124;"),
+        ('+', "&#43;"),
+        (',', "&#44;"),
+        ('$', "&#36;"),
+        ('-', "&#45;"),
+        ('.', "&#46;"),
+        (':', "&#58;"),
+    ];
+    for (c, enc) in expected {
+        let variants = encoded_variants(*c);
+        assert!(
+            variants.contains(enc),
+            "encoded_variants({c:?}) should include {enc:?}, got {variants:?}"
+        );
+    }
+    // Characters with no special HTML meaning return an empty set.
+    assert!(encoded_variants('a').is_empty());
+    assert!(encoded_variants('0').is_empty());
+}

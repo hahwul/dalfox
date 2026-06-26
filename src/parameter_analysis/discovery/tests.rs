@@ -841,3 +841,107 @@ fn test_dedupe_is_noop_for_unique_entries() {
     assert_eq!(params[0].name, before[0].name);
     assert_eq!(params[1].name, before[1].name);
 }
+
+#[test]
+fn test_dedupe_fills_remaining_metadata_from_duplicate() {
+    // The canonical (first) entry is bare; the duplicate carries every
+    // optional carrier the merge is supposed to graft back in. Exercises
+    // the js_breakout / framework_sink / pre_encoding / form_origin_url
+    // carry-over branches plus the `None`-base arm of the char-set merge
+    // helpers (the existing dedupe tests only cover Some+Some).
+    let mut params = vec![
+        Param {
+            name: "p".to_string(),
+            value: "v".to_string(),
+            location: Location::Query,
+            injection_context: None,
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: None,
+            pre_encoding_pipeline: None,
+            wire_name: None,
+            form_action_url: None,
+            form_origin_url: None,
+            framework_sink: None,
+            escaped_specials: None,
+            js_breakout: None,
+        },
+        Param {
+            name: "p".to_string(),
+            value: String::new(),
+            location: Location::Query,
+            injection_context: None,
+            valid_specials: Some(vec!['<', '>']),
+            invalid_specials: Some(vec!['"']),
+            pre_encoding: Some("url".to_string()),
+            pre_encoding_pipeline: None,
+            wire_name: None,
+            form_action_url: None,
+            form_origin_url: Some("https://origin/form".to_string()),
+            framework_sink: Some("v-html".to_string()),
+            escaped_specials: None,
+            js_breakout: Some("';alert(1)//".to_string()),
+        },
+    ];
+    dedupe_reflection_params(&mut params);
+    assert_eq!(params.len(), 1, "same name+location must collapse");
+    let merged = &params[0];
+    assert_eq!(merged.js_breakout.as_deref(), Some("';alert(1)//"));
+    assert_eq!(merged.framework_sink.as_deref(), Some("v-html"));
+    assert_eq!(merged.pre_encoding.as_deref(), Some("url"));
+    assert_eq!(
+        merged.form_origin_url.as_deref(),
+        Some("https://origin/form")
+    );
+    // None-base char-set merge takes the duplicate's set wholesale.
+    assert_eq!(merged.valid_specials.as_deref(), Some(&['<', '>'][..]));
+    assert_eq!(merged.invalid_specials.as_deref(), Some(&['"'][..]));
+}
+
+#[test]
+fn test_dedupe_keeps_canonical_metadata_over_duplicate() {
+    // When the canonical entry already carries a value, the duplicate's
+    // competing value must not clobber it — guards the `is_none()` carry-over
+    // gate against a future regression that blindly overwrites.
+    let mut params = vec![
+        Param {
+            name: "p".to_string(),
+            value: "v".to_string(),
+            location: Location::Query,
+            injection_context: Some(crate::parameter_analysis::InjectionContext::Html(None)),
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: Some("base-enc".to_string()),
+            pre_encoding_pipeline: None,
+            wire_name: None,
+            form_action_url: None,
+            form_origin_url: Some("https://base/form".to_string()),
+            framework_sink: Some("ng-bind-html".to_string()),
+            escaped_specials: None,
+            js_breakout: Some("base-breakout".to_string()),
+        },
+        Param {
+            name: "p".to_string(),
+            value: String::new(),
+            location: Location::Query,
+            injection_context: Some(crate::parameter_analysis::InjectionContext::Attribute(None)),
+            valid_specials: None,
+            invalid_specials: None,
+            pre_encoding: Some("dup-enc".to_string()),
+            pre_encoding_pipeline: None,
+            wire_name: None,
+            form_action_url: None,
+            form_origin_url: Some("https://dup/form".to_string()),
+            framework_sink: Some("v-html".to_string()),
+            escaped_specials: None,
+            js_breakout: Some("dup-breakout".to_string()),
+        },
+    ];
+    dedupe_reflection_params(&mut params);
+    assert_eq!(params.len(), 1);
+    let merged = &params[0];
+    assert_eq!(merged.pre_encoding.as_deref(), Some("base-enc"));
+    assert_eq!(merged.js_breakout.as_deref(), Some("base-breakout"));
+    assert_eq!(merged.framework_sink.as_deref(), Some("ng-bind-html"));
+    assert_eq!(merged.form_origin_url.as_deref(), Some("https://base/form"));
+}

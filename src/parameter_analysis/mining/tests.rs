@@ -1166,3 +1166,29 @@ async fn test_mine_parameters_multipart_survives_same_named_body_param() {
             .collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn test_has_knockout_html_clause_boundary_cases() {
+    // True: `html:` clause at a real binding boundary.
+    assert!(has_knockout_html_clause("html: foo"));
+    assert!(has_knockout_html_clause("text: name, html: bar"));
+    // Semicolon is also a clause separator in Knockout bindings.
+    assert!(has_knockout_html_clause("text: name; html: bar"));
+    // Leading whitespace before the first clause is fine.
+    assert!(has_knockout_html_clause("   html: bar"));
+    // Whitespace is allowed between the `html` token and its `:`.
+    assert!(has_knockout_html_clause("html : bar"));
+    assert!(has_knockout_html_clause("text: name, html\t: bar"));
+    // Case-insensitive token match.
+    assert!(has_knockout_html_clause("HTML: bar"));
+
+    // False: `html:` only appears inside a quoted clause value.
+    assert!(!has_knockout_html_clause("text: 'html: link'"));
+    assert!(!has_knockout_html_clause("text: \"html: link\""));
+    // False: a `html`-prefixed identifier that is not the `html` clause.
+    assert!(!has_knockout_html_clause("htmlish: bar"));
+    assert!(!has_knockout_html_clause("htmlContent: bar"));
+    // False: no html clause at all, and the empty attribute.
+    assert!(!has_knockout_html_clause("text: foo"));
+    assert!(!has_knockout_html_clause(""));
+}
