@@ -538,12 +538,63 @@ async fn test_list_scans_returns_all_jobs() {
     mcp.scan_with_dalfox(Parameters(p2)).await.unwrap();
 
     let resp = mcp
-        .list_scans_dalfox(Parameters(ListScansDalfoxParams { status: None }))
+        .list_scans_dalfox(Parameters(ListScansDalfoxParams {
+            status: None,
+            offset: 0,
+            limit: 0,
+        }))
         .await
         .expect("list_scans should succeed");
     let payload = parse_result_json(&resp);
     assert_eq!(payload["total"], 2);
     assert_eq!(payload["scans"].as_array().unwrap().len(), 2);
+}
+
+#[tokio::test]
+async fn test_list_scans_orders_newest_first_and_paginates() {
+    let mcp = DalfoxMcp::new();
+    {
+        let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
+        for (id, q) in [("oldest", 1_000_i64), ("middle", 2_000), ("newest", 3_000)] {
+            let mut job = test_job(JobStatus::Done, Some(vec![]));
+            job.target_url = format!("https://example.com/{id}");
+            job.queued_at_ms = q;
+            jobs.insert(id.to_string(), job);
+        }
+    }
+
+    // Page 1: first two, newest-first.
+    let resp = mcp
+        .list_scans_dalfox(Parameters(ListScansDalfoxParams {
+            status: None,
+            offset: 0,
+            limit: 2,
+        }))
+        .await
+        .expect("list_scans should succeed");
+    let payload = parse_result_json(&resp);
+    assert_eq!(payload["total"], 3);
+    let scans = payload["scans"].as_array().unwrap();
+    assert_eq!(scans.len(), 2);
+    assert_eq!(scans[0]["scan_id"], "newest");
+    assert_eq!(scans[1]["scan_id"], "middle");
+    assert_eq!(payload["pagination"]["returned"], 2);
+    assert_eq!(payload["pagination"]["has_more"], true);
+
+    // Page 2: the remaining (oldest) entry.
+    let resp2 = mcp
+        .list_scans_dalfox(Parameters(ListScansDalfoxParams {
+            status: None,
+            offset: 2,
+            limit: 2,
+        }))
+        .await
+        .expect("list_scans should succeed");
+    let payload2 = parse_result_json(&resp2);
+    let scans2 = payload2["scans"].as_array().unwrap();
+    assert_eq!(scans2.len(), 1);
+    assert_eq!(scans2[0]["scan_id"], "oldest");
+    assert_eq!(payload2["pagination"]["has_more"], false);
 }
 
 #[tokio::test]
@@ -563,6 +614,8 @@ async fn test_list_scans_filters_by_status() {
     let resp = mcp
         .list_scans_dalfox(Parameters(ListScansDalfoxParams {
             status: Some("done".to_string()),
+            offset: 0,
+            limit: 0,
         }))
         .await
         .expect("list_scans should succeed");
@@ -632,6 +685,7 @@ async fn test_preflight_rejects_empty_target() {
         follow_redirects: false,
         skip_mining: false,
         skip_discovery: false,
+        encoders: vec!["url".to_string(), "html".to_string()],
     };
     let err = mcp
         .preflight_dalfox(Parameters(params))
@@ -658,6 +712,7 @@ async fn test_preflight_rejects_non_http_target() {
         follow_redirects: false,
         skip_mining: false,
         skip_discovery: false,
+        encoders: vec!["url".to_string(), "html".to_string()],
     };
     let err = mcp
         .preflight_dalfox(Parameters(params))
@@ -684,6 +739,7 @@ async fn test_preflight_unreachable_target_returns_reachable_false() {
         follow_redirects: false,
         skip_mining: true,
         skip_discovery: true,
+        encoders: vec!["url".to_string(), "html".to_string()],
     };
     let resp = mcp
         .preflight_dalfox(Parameters(params))
@@ -790,7 +846,11 @@ async fn test_list_scans_includes_timestamps() {
         );
     }
     let resp = mcp
-        .list_scans_dalfox(Parameters(ListScansDalfoxParams { status: None }))
+        .list_scans_dalfox(Parameters(ListScansDalfoxParams {
+            status: None,
+            offset: 0,
+            limit: 0,
+        }))
         .await
         .expect("list_scans should succeed");
     let payload = parse_result_json(&resp);
@@ -804,10 +864,9 @@ async fn test_delete_scan_removes_terminal_job() {
     let mcp = DalfoxMcp::new();
     {
         let mut jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
-        jobs.insert(
-            "done-del".to_string(),
-            test_job(JobStatus::Done, Some(vec![])),
-        );
+        let mut job = test_job(JobStatus::Done, Some(vec![]));
+        job.target_url = "https://example.com/?q=x".to_string();
+        jobs.insert("done-del".to_string(), job);
     }
     let resp = mcp
         .delete_scan_dalfox(Parameters(DeleteScanDalfoxParams {
@@ -818,6 +877,8 @@ async fn test_delete_scan_removes_terminal_job() {
     let payload = parse_result_json(&resp);
     assert_eq!(payload["deleted"], true);
     assert_eq!(payload["previous_status"], "done");
+    // The response must carry `target` for parity with REST purge / MCP cancel.
+    assert_eq!(payload["target"], "https://example.com/?q=x");
 
     let jobs = mcp.jobs.lock().expect("jobs mutex poisoned");
     assert!(!jobs.contains_key("done-del"));
@@ -954,6 +1015,8 @@ async fn test_list_scans_rejects_invalid_status_filter() {
     let err = mcp
         .list_scans_dalfox(Parameters(ListScansDalfoxParams {
             status: Some("bogus".to_string()),
+            offset: 0,
+            limit: 0,
         }))
         .await
         .expect_err("unknown status filter must be rejected");

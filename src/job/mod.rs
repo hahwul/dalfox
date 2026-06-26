@@ -198,10 +198,15 @@ impl Job {
 
     /// Total elapsed ms from `started_at_ms` to `finished_at_ms` (or now, for
     /// still-running jobs). `None` if the scan never started.
+    ///
+    /// Both endpoints are wall-clock (`now_ms`) samples, so an NTP/VM clock
+    /// step-back between them could otherwise yield a negative duration in the
+    /// serialized API output; clamp to non-negative. The timestamps themselves
+    /// stay wall-clock because they are API-exposed as unix-ms fields.
     pub fn duration_ms(&self) -> Option<i64> {
         match (self.started_at_ms, self.finished_at_ms) {
-            (Some(s), Some(f)) => Some(f - s),
-            (Some(s), None) => Some(now_ms() - s),
+            (Some(s), Some(f)) => Some((f - s).max(0)),
+            (Some(s), None) => Some((now_ms() - s).max(0)),
             _ => None,
         }
     }

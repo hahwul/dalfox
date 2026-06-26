@@ -63,6 +63,16 @@ fn test_duration_ms_computed_from_timestamps() {
 }
 
 #[test]
+fn test_duration_ms_clamps_clock_stepback_to_zero() {
+    // A wall-clock step-back (NTP/VM) between started_at and finished_at must
+    // not surface a negative duration in the serialized API output.
+    let mut job = Job::new_queued("https://example.com".to_string());
+    job.started_at_ms = Some(5_000);
+    job.finished_at_ms = Some(4_000);
+    assert_eq!(job.duration_ms(), Some(0));
+}
+
+#[test]
 fn test_purge_expired_jobs_removes_old_terminal_jobs() {
     let mut jobs = HashMap::new();
     let mut old = Job::new_queued("old".to_string());

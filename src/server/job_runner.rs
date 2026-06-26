@@ -90,8 +90,29 @@ fn fail_job_via_fresh_runtime(state: &AppState, job_id: &str, url: &str, msg: St
         log(
             state,
             "ERR",
-            &format!("could not build recovery runtime to fail job {}", job_id),
+            &format!(
+                "could not build recovery runtime to fail job {}; marking it error \
+                 synchronously to reclaim its slot",
+                job_id
+            ),
         );
+        // Even the recovery runtime failed (typically FD/thread exhaustion).
+        // We can't fire the terminal webhook without a runtime, but we MUST
+        // still move the job out of Queued — otherwise purge_expired_jobs never
+        // collects it (it only reaps terminal jobs) and it counts against
+        // max_concurrent_scans permanently until a manual DELETE or restart.
+        // `state.jobs` is a tokio Mutex, but this runs on a spawn_blocking
+        // thread with no runtime entered, so `blocking_lock` is safe here.
+        let mut jobs = state.jobs.blocking_lock();
+        if let Some(job) = jobs.get_mut(job_id)
+            && !job.is_terminal()
+        {
+            job.status = JobStatus::Error;
+            job.error_message = Some(msg);
+            if job.finished_at_ms.is_none() {
+                job.finished_at_ms = Some(now_ms());
+            }
+        }
         return;
     };
     let state = state.clone();
@@ -228,7 +249,10 @@ pub(crate) async fn run_scan_job(
         StartDecision::Missing => return,
     };
 
-    let args = ScanArgs {
+    // Built once behind an `Arc` so the scan future and `run_scanning` share it
+    // by refcount bump instead of deep-cloning this ~70-field struct (mirrors
+    // the MCP path, which already uses `Arc<ScanArgs>`).
+    let args = Arc::new(ScanArgs {
         detect_outdated_libs: opts.detect_outdated_libs.unwrap_or(false),
         // Each REST job scans exactly one caller-supplied URL, with method,
         // headers, cookies, and body provided as explicit request fields — the
@@ -356,7 +380,7 @@ pub(crate) async fn run_scan_job(
         remote_wordlists: opts.remote_wordlists.clone().unwrap_or_default(),
 
         targets: vec![url.clone()],
-    };
+    });
 
     // Initialize remote resources if requested (honor timeout/proxy)
     if !args.remote_payloads.is_empty() || !args.remote_wordlists.is_empty() {
@@ -548,7 +572,10 @@ pub(crate) async fn run_scan_job(
                                         .fetch_add(added, std::sync::atomic::Ordering::Relaxed);
                                 }
                                 let ext_batch = crate::scanning::fetch_and_analyze_external_js(
-                                    &client, &target, &body, &args,
+                                    &client,
+                                    &target,
+                                    &body,
+                                    args.as_ref(),
                                 )
                                 .await;
                                 crate::scanning::accumulate_findings(
@@ -562,9 +589,11 @@ pub(crate) async fn run_scan_job(
                         }
                     }
 
-                    let mut silent_args = args.clone();
-                    silent_args.silence = true;
-                    analyze_parameters(&mut target, &silent_args, None).await;
+                    // `args.silence` is already `true` (set at construction), and
+                    // `analyze_parameters` takes `&ScanArgs`, so pass the shared
+                    // Arc directly instead of deep-cloning it just to re-set a
+                    // field that already holds the desired value.
+                    analyze_parameters(&mut target, args.as_ref(), None).await;
 
                     // Bound the per-scan fan-out: a sprawling/hostile target can
                     // expose thousands of params, and scanning spawns O(params ×
@@ -581,14 +610,18 @@ pub(crate) async fn run_scan_job(
                         );
                     }
 
+                    // Count only the params the HTTP scan phase will actually
+                    // test (Fragment params are client-side only and spawn no
+                    // worker), so `params_total` matches the per-parameter
+                    // workers and `estimated_completion_pct` stays honest.
                     progress.params_total.store(
-                        target.reflection_params.len() as u32,
+                        crate::scanning::http_scannable_param_count(&target) as u32,
                         std::sync::atomic::Ordering::Relaxed,
                     );
 
                     scan_report = crate::scanning::run_scanning(
                         &target,
-                        Arc::new(args.clone()),
+                        args.clone(),
                         results.clone(),
                         None,
                         None,
