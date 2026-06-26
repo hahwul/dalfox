@@ -46,3 +46,57 @@ fn informational_block_defaults_tag_when_inject_type_empty() {
     let out = render_finding_block(&r, "plain", false, false);
     assert!(out.contains("[INF][Informational]"), "{out}");
 }
+
+#[test]
+fn poc_location_tag_header_cookie_is_case_insensitive() {
+    assert_eq!(poc_location_tag("Header", "Cookie"), Some("cookie"));
+    assert_eq!(poc_location_tag("Header", "cookie"), Some("cookie"));
+    assert_eq!(poc_location_tag("Header", "COOKIE"), Some("cookie"));
+}
+
+#[test]
+fn poc_location_tag_header_non_cookie() {
+    assert_eq!(poc_location_tag("Header", "X-Foo"), Some("hdr"));
+    assert_eq!(poc_location_tag("Header", "Authorization"), Some("hdr"));
+}
+
+#[test]
+fn poc_location_tag_body_variants() {
+    assert_eq!(poc_location_tag("Body", "q"), Some("body"));
+    assert_eq!(poc_location_tag("JsonBody", "q"), Some("body"));
+    assert_eq!(poc_location_tag("MultipartBody", "q"), Some("body"));
+}
+
+#[test]
+fn poc_location_tag_path_and_fragment() {
+    assert_eq!(poc_location_tag("Path", "seg"), Some("path"));
+    assert_eq!(poc_location_tag("Fragment", "f"), Some("frag"));
+}
+
+#[test]
+fn poc_location_tag_query_and_empty_return_none() {
+    assert_eq!(poc_location_tag("", "q"), None);
+    assert_eq!(poc_location_tag("Query", "q"), None);
+}
+
+#[test]
+fn poc_location_tag_unknown_returns_none() {
+    assert_eq!(poc_location_tag("UnknownLocation", "q"), None);
+}
+
+#[test]
+fn poc_location_in_url_true_for_query_path_fragment() {
+    assert!(poc_location_in_url(""));
+    assert!(poc_location_in_url("Query"));
+    assert!(poc_location_in_url("Path"));
+    assert!(poc_location_in_url("Fragment"));
+}
+
+#[test]
+fn poc_location_in_url_false_for_side_channel_locations() {
+    assert!(!poc_location_in_url("Header"));
+    assert!(!poc_location_in_url("Cookie"));
+    assert!(!poc_location_in_url("Body"));
+    assert!(!poc_location_in_url("JsonBody"));
+    assert!(!poc_location_in_url("MultipartBody"));
+}
