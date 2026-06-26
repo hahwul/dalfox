@@ -316,11 +316,14 @@ impl DalfoxMcp {
                     .filter_map(|h| crate::utils::http::parse_header_line(h))
                     .collect();
                 // Also expose a supplied User-Agent as a header so the
-                // header-reflection probe tests it, matching the CLI and REST
-                // server (both push UA into headers AND user_agent). Without
-                // this, a User-Agent reflection is missed under blanket-echo
-                // targets — an MCP-only false negative for identical input. The
-                // wire header is de-duplicated downstream, so this is safe.
+                // header-reflection probe tests it even on blanket-echo targets:
+                // user-supplied headers are always probed, whereas the common
+                // header sweep (which includes User-Agent) is suppressed when the
+                // target echoes every header. Without this, a User-Agent
+                // reflection is missed — an MCP-only false negative for identical
+                // input. Mirrors the CLI and REST server, which set both fields;
+                // like them, the scan path's `apply_headers_ua_cookies` then sends
+                // both this header entry and `target.user_agent`.
                 if let Some(ua) = scan_args.user_agent.as_deref().filter(|s| !s.is_empty()) {
                     t.headers.push(("User-Agent".to_string(), ua.to_string()));
                 }
@@ -1359,13 +1362,10 @@ Call this repeatedly until status is 'done', 'error', or 'cancelled'."
             Some(snap) => {
                 let (results_slice, pagination) =
                     paginate_results(snap.results.as_deref(), params.offset, params.limit);
-                // Clamp against a wall-clock step-back (NTP/VM) so a poll can
-                // never report a negative duration; mirrors Job::duration_ms.
-                let duration_ms = match (snap.started_at_ms, snap.finished_at_ms) {
-                    (Some(s), Some(f)) => Some((f - s).max(0)),
-                    (Some(s), None) => Some((now_ms() - s).max(0)),
-                    _ => None,
-                };
+                // Shared with Job::duration_ms (single source of truth for the
+                // clock-step-back clamp); the snapshot path can't construct a Job.
+                let duration_ms =
+                    crate::job::duration_ms_between(snap.started_at_ms, snap.finished_at_ms);
                 let mut out = serde_json::json!({
                     "scan_id": pid,
                     "target": snap.target_url,

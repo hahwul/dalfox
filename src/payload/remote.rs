@@ -240,11 +240,10 @@ pub fn has_remote_wordlists() -> bool {
 /// concatenates: a deterministic memory / file-descriptor amplification from a
 /// single request. Deduping makes name-spam inert (distinct providers are
 /// unaffected, since their URLs differ).
-fn dedup_urls_in_place(urls: Vec<String>) -> Vec<String> {
+fn dedup_urls(mut urls: Vec<String>) -> Vec<String> {
     let mut seen = std::collections::HashSet::with_capacity(urls.len());
-    urls.into_iter()
-        .filter(|u| seen.insert(u.clone()))
-        .collect()
+    urls.retain(|u| seen.insert(u.clone()));
+    urls
 }
 
 /// Build the list of remote URLs for the given payload providers.
@@ -260,7 +259,7 @@ fn collect_payload_provider_urls(providers: &[String]) -> Vec<String> {
             urls.extend(lst.clone());
         }
     }
-    dedup_urls_in_place(urls)
+    dedup_urls(urls)
 }
 
 /// Build the list of remote URLs for the given wordlist providers.
@@ -276,7 +275,7 @@ fn collect_wordlist_provider_urls(providers: &[String]) -> Vec<String> {
             urls.extend(lst.clone());
         }
     }
-    dedup_urls_in_place(urls)
+    dedup_urls(urls)
 }
 
 /// Concurrently fetch multiple text endpoints and concatenate their contents.
