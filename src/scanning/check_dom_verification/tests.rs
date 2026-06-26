@@ -1707,3 +1707,177 @@ fn html_structural_evidence_matches_entity_encoded_payload() {
         "entity-encoded payload should still match the decoded attribute value"
     );
 }
+
+// ── Issue #1183: on* handlers never fire on <input type="hidden"> ──────────
+//
+// A hidden input has no rendered box: it cannot be hovered, focused, or
+// clicked, and it loads no resource, so any injected `on*` handler is inert.
+// DOM verification must not upgrade such reflections to [V]; they remain [R].
+
+/// The exact reported false positive: an attribute-injection payload lands a
+/// marker class + `onmouseover` onto a pre-existing `<input type="hidden">`.
+/// This slips past the #1118 gate (the bare payload forms no element), so it
+/// reached the presence-only marker branch and verified. It must now be inert.
+#[test]
+fn test_1183_marker_handler_on_hidden_input_not_evidence() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("\" onmouseover=alert(1) class={} x=\"", marker);
+    let body = format!(
+        "<html><body><input type=\"hidden\" id=\"url\" value=\"{}\"></body></html>",
+        payload
+    );
+    assert!(
+        !has_marker_evidence(&payload, &body),
+        "onmouseover on a hidden input never fires; must not be marker evidence"
+    );
+    assert_eq!(
+        classify_dom_evidence(&payload, &body),
+        None,
+        "the reported FP must classify as no DOM evidence (downgrades V -> R)"
+    );
+}
+
+/// `type` is matched case-insensitively, so `type=HIDDEN` is still suppressed.
+#[test]
+fn test_1183_marker_handler_on_uppercase_hidden_input_not_evidence() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("\" onmouseover=alert(1) class={} x=\"", marker);
+    let body = format!(
+        "<html><body><input TYPE=\"HIDDEN\" value=\"{}\"></body></html>",
+        payload
+    );
+    assert_eq!(classify_dom_evidence(&payload, &body), None);
+}
+
+/// A server that case-folds the *entire* reflected value — marker, handler
+/// name, and sink — into upper case must still be recognised as a hidden-input
+/// handler and suppressed. Both the marker match (`element_class_has`) and the
+/// sink match (`value_carries_js_sink`) are ASCII case-fold, so a reflection
+/// like `CLASS=DLX… ONMOUSEOVER=ALERT(1)` is still inert.
+#[test]
+fn test_1183_marker_handler_on_case_folded_hidden_input_not_evidence() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("\" onmouseover=alert(1) class={} x=\"", marker);
+    let reflected = format!(
+        "\" ONMOUSEOVER=ALERT(1) CLASS={} X=\"",
+        marker.to_uppercase()
+    );
+    let body = format!(
+        "<html><body><input TYPE=\"HIDDEN\" VALUE=\"{}\"></body></html>",
+        reflected
+    );
+    assert_eq!(
+        classify_dom_evidence(&payload, &body),
+        None,
+        "a fully case-folded reflection on a hidden input must still suppress [V]"
+    );
+}
+
+/// FN guard: the genuine tag-breakout alternative on the same parameter lands
+/// the marker on a NEW rendered `<svg>` (self-executing). A hidden input next
+/// to it must not suppress the real finding.
+#[test]
+fn test_1183_marker_kept_for_tag_breakout_beside_hidden_input() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("\"><svg/onload=alert(1) class={}>", marker);
+    let body = format!(
+        "<html><body><input type=\"hidden\" value=\"\">\
+         <svg onload=\"alert(1)\" class=\"{}\"></svg>\"></body></html>",
+        marker
+    );
+    assert!(
+        has_marker_evidence(&payload, &body),
+        "marker on a rendered svg must stay evidence even with a hidden input present"
+    );
+}
+
+/// FN guard: an `on*` handler injected onto a VISIBLE input (`type=text`) does
+/// fire on hover/focus, so it must stay verified.
+#[test]
+fn test_1183_marker_kept_for_visible_input_handler() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("\" onmouseover=alert(1) class={} x=\"", marker);
+    let body = format!(
+        "<html><body><input type=\"text\" value=\"{}\"></body></html>",
+        payload
+    );
+    assert!(
+        has_marker_evidence(&payload, &body),
+        "onmouseover on a visible text input fires; must stay marker evidence"
+    );
+}
+
+/// FN guard: a bare hidden input carrying only the marker (no `on*` handler) is
+/// a structural marker (its only conceivable exploit is DOM clobbering). It has
+/// no firing handler to suppress, so presence-only evidence is preserved — same
+/// treatment as <base>/<form> structural markers.
+#[test]
+fn test_1183_marker_kept_for_structural_hidden_input_without_handler() {
+    let id = crate::scanning::markers::id_marker();
+    let payload = format!("<input type=hidden id={} name=evil_var>", id);
+    let body = format!(
+        "<html><body><input type=\"hidden\" id=\"{}\" name=\"evil_var\"></body></html>",
+        id
+    );
+    assert!(
+        has_marker_evidence(&payload, &body),
+        "a handler-less hidden-input marker is structural and must stay evidence"
+    );
+}
+
+/// FN guard: when the marker rides on BOTH a hidden input and a visible
+/// element, "every marker element is a hidden input" is false, so the finding
+/// is kept (the visible element can execute).
+#[test]
+fn test_1183_marker_kept_when_on_both_hidden_and_visible() {
+    let marker = crate::scanning::markers::class_marker();
+    let payload = format!("<svg onload=alert(1) class={}>", marker);
+    let body = format!(
+        "<html><body><div class=\"{}\">x</div>\
+         <input type=\"hidden\" onmouseover=alert(1) class=\"{}\"></body></html>",
+        marker, marker
+    );
+    assert!(
+        has_marker_evidence(&payload, &body),
+        "a marker also present on a rendered element must stay evidence"
+    );
+}
+
+/// Path B (HtmlStructural): a no-marker payload that forms a hidden input with
+/// an `on*` handler must not be HtmlStructural evidence.
+#[test]
+fn test_1183_html_structural_handler_on_hidden_input_not_evidence() {
+    let payload = "<input type=hidden onmouseover=alert(1)>";
+    let body = format!("<html><body>{}</body></html>", payload);
+    assert_eq!(
+        classify_dom_evidence(payload, &body),
+        None,
+        "onmouseover on a hidden input is inert; HtmlStructural must not fire"
+    );
+}
+
+/// Path B FN guard: the same handler on a visible input stays HtmlStructural.
+#[test]
+fn test_1183_html_structural_handler_on_visible_input_is_evidence() {
+    let payload = "<input type=text onmouseover=alert(1)>";
+    let body = format!("<html><body>{}</body></html>", payload);
+    assert_eq!(
+        classify_dom_evidence(payload, &body),
+        Some(DomEvidenceKind::HtmlStructural),
+        "onmouseover on a visible input fires; must stay HtmlStructural evidence"
+    );
+}
+
+/// Path C (InlineHandlerBreakout): breaking into a server handler that sits on
+/// a hidden input is inert. The visible-element counterpart is covered by
+/// `test_classify_dom_evidence_returns_inline_handler_breakout`.
+#[test]
+fn test_1183_inline_breakout_on_hidden_input_not_evidence() {
+    let payload = "'-alert(1)-'";
+    let body = "<input type=hidden onfocus=\"startTimer('&#39;-alert(1)-&#39;');\">".to_string();
+    assert_eq!(
+        classify_dom_evidence(payload, &body),
+        None,
+        "an inline breakout on a hidden input never fires"
+    );
+}

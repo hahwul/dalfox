@@ -117,6 +117,43 @@ fn any_element_has_id_ascii_ci(document: &scraper::Html, marker: &str) -> bool {
         .any(|node| element_id_is(node, marker))
 }
 
+/// Which Dalfox marker forms a payload embeds, derived once from the payload.
+/// Sharing this keeps the per-node marker test (`is_marker_element`) cheap — it
+/// only checks the forms that can actually be present — and gives the marker
+/// gates a single source of truth instead of re-deriving the four booleans.
+struct MarkerFlags {
+    class: bool,
+    legacy_class: bool,
+    id: bool,
+    legacy_id: bool,
+}
+
+impl MarkerFlags {
+    fn from_payload(payload: &str) -> Self {
+        Self {
+            class: payload.contains(crate::scanning::markers::class_marker()),
+            legacy_class: payload_uses_legacy_class_marker(payload),
+            id: payload.contains(crate::scanning::markers::id_marker()),
+            legacy_id: payload_uses_legacy_id_marker(payload),
+        }
+    }
+
+    fn any(&self) -> bool {
+        self.class || self.legacy_class || self.id || self.legacy_id
+    }
+}
+
+/// Whether `node` carries one of the marker forms the payload embeds (per
+/// `flags`). All four comparisons are ASCII case-fold (see `element_class_has`
+/// / `element_id_is`), so a server that case-folds reflected input still
+/// matches.
+fn is_marker_element(node: scraper::ElementRef, flags: &MarkerFlags) -> bool {
+    (flags.class && element_class_has(node, crate::scanning::markers::class_marker()))
+        || (flags.legacy_class && element_class_has(node, "dalfox"))
+        || (flags.id && element_id_is(node, crate::scanning::markers::id_marker()))
+        || (flags.legacy_id && element_id_is(node, "dalfox"))
+}
+
 /// Whether `value` (an `on*` handler value or `<script>` body) carries a
 /// JavaScript sink call, tolerating ASCII case-folding (servers that uppercase
 /// reflected input) and HTML-entity encoding (WAF-bypass payloads like
@@ -153,6 +190,26 @@ fn element_carries_surviving_sink(node: scraper::ElementRef) -> bool {
         }
     }
     false
+}
+
+/// Whether `node` is a `<input type="hidden">` element. Such inputs have no
+/// rendered box: the browser never lays them out, so they cannot be hovered,
+/// focused, or clicked, and they load no resource. Any `on*` event handler
+/// injected onto a hidden input therefore never fires — verifying it as DOM
+/// evidence is a false positive (issue #1183).
+///
+/// Scope is deliberately limited to `type="hidden"`. Other input types that
+/// look "special" — `submit`, `button`, `image`, `file`, `reset` — are still
+/// rendered and interactive, so their handlers *do* fire; lumping them in here
+/// would suppress genuine findings. `display:none` / the global `hidden`
+/// attribute are intentionally excluded too: detecting them reliably needs CSS
+/// (which a stylesheet or script can override), so gating on them risks false
+/// negatives.
+fn is_hidden_input(node: scraper::ElementRef) -> bool {
+    let v = node.value();
+    v.name().eq_ignore_ascii_case("input")
+        && v.attr("type")
+            .is_some_and(|t| t.trim().eq_ignore_ascii_case("hidden"))
 }
 
 /// Whether the payload attaches an on*-handler / `<script>`-body JS sink
@@ -202,34 +259,63 @@ fn payload_marker_element_carries_sink(payload: &str) -> bool {
 /// carries a surviving JS sink. Used to gate the marker-evidence path for
 /// payloads whose marker element's own attributes/body ARE the exploit.
 fn marker_element_carries_surviving_sink(payload: &str, document: &scraper::Html) -> bool {
-    let class_marker = crate::scanning::markers::class_marker();
-    let id_marker = crate::scanning::markers::id_marker();
-    let has_class = payload.contains(class_marker);
-    let has_legacy_class = payload_uses_legacy_class_marker(payload);
-    let has_id = payload.contains(id_marker);
-    let has_legacy_id = payload_uses_legacy_id_marker(payload);
+    let flags = MarkerFlags::from_payload(payload);
     let sel = super::selectors::universal();
-    document.select(sel).any(|node| {
-        let is_marker = (has_class && element_class_has(node, class_marker))
-            || (has_legacy_class && element_class_has(node, "dalfox"))
-            || (has_id && element_id_is(node, id_marker))
-            || (has_legacy_id && element_id_is(node, "dalfox"));
-        is_marker && element_carries_surviving_sink(node)
-    })
+    document
+        .select(sel)
+        .any(|node| is_marker_element(node, &flags) && element_carries_surviving_sink(node))
+}
+
+/// Whether the payload's marker rides *only* on `<input type="hidden">`
+/// element(s), at least one of which carries an injected `on*` event-handler
+/// sink. That handler can never fire — a hidden input has no rendered box — so
+/// the reflection is real but inert and must not be upgraded to DOM-verified
+/// (issue #1183). The reflection-finding path still surfaces it as `R`.
+///
+/// Two guards keep this from over-suppressing genuine findings:
+/// - It returns `false` the moment *any* marker-bearing element is **not** a
+///   hidden input (a rendered sibling — `<svg>`/`<img>` from a tag-breakout, a
+///   visible `<input type=text>`, a `<div>` — can execute, so keep the V).
+/// - It requires a *surviving handler* on a hidden input. A bare
+///   `<input type="hidden" id=… name=…>` with no handler is a structural
+///   marker (its only conceivable exploit is DOM clobbering via named-property
+///   access), so it is left to the presence-only path like `<base>`/`<form>`
+///   structural markers rather than suppressed here.
+fn marker_only_on_non_firing_hidden_inputs(payload: &str, document: &scraper::Html) -> bool {
+    let flags = MarkerFlags::from_payload(payload);
+    let sel = super::selectors::universal();
+    let mut saw_marker = false;
+    let mut saw_handler_on_hidden = false;
+    for node in document.select(sel) {
+        if !is_marker_element(node, &flags) {
+            continue;
+        }
+        saw_marker = true;
+        if !is_hidden_input(node) {
+            // A marker on a rendered/interactive element can execute — keep it.
+            return false;
+        }
+        if element_carries_surviving_sink(node) {
+            saw_handler_on_hidden = true;
+        }
+    }
+    saw_marker && saw_handler_on_hidden
 }
 
 fn has_marker_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
     let class_marker = crate::scanning::markers::class_marker();
     let id_marker = crate::scanning::markers::id_marker();
 
-    let has_class = payload.contains(class_marker);
-    let has_legacy_class = payload_uses_legacy_class_marker(payload);
-    let has_id = payload.contains(id_marker);
-    let has_legacy_id = payload_uses_legacy_id_marker(payload);
-
-    if !has_class && !has_legacy_class && !has_id && !has_legacy_id {
+    let flags = MarkerFlags::from_payload(payload);
+    if !flags.any() {
         return false;
     }
+    let MarkerFlags {
+        class: has_class,
+        legacy_class: has_legacy_class,
+        id: has_id,
+        legacy_id: has_legacy_id,
+    } = flags;
 
     let class_ok = if has_class || has_legacy_class {
         let mut found = false;
@@ -287,6 +373,18 @@ fn has_marker_evidence_in_doc(payload: &str, document: &scraper::Html) -> bool {
     };
 
     if !(class_ok && id_ok) {
+        return false;
+    }
+
+    // Issue #1183: an attribute-injection payload (`" onmouseover=… class=…
+    // x="`) lands the marker — plus an `on*` handler — on a pre-existing
+    // `<input type="hidden">`. The handler never fires (hidden inputs have no
+    // rendered box), so this is reflected-but-inert, not DOM-verified. This
+    // shape slips past the #1118 gate below because the bare payload forms no
+    // element on its own (`payload_marker_element_carries_sink` is false), so
+    // it must be caught here, before the presence-only fall-through. Structural
+    // markers (no surviving handler on the hidden input) are preserved.
+    if marker_only_on_non_firing_hidden_inputs(payload, document) {
         return false;
     }
 
@@ -437,6 +535,14 @@ fn has_html_structural_evidence_in_doc(payload: &str, document: &scraper::Html) 
 
     let selector = selectors::universal();
     for node in document.select(selector) {
+        // Issue #1183: an `on*` handler injected onto a `<input type="hidden">`
+        // never fires (no rendered box), so it is not browser-executable DOM
+        // evidence. Skip the element entirely — a hidden input is a void element
+        // and is never a `<script>`, so the (b) script-body check never applies
+        // to it either.
+        if is_hidden_input(node) {
+            continue;
+        }
         let value = node.value();
         let tag = value.name();
 
@@ -610,6 +716,11 @@ fn has_inline_handler_breakout_evidence(payload: &str, text: &str) -> bool {
     let document = scraper::Html::parse_document(&decoded);
     let selector = selectors::universal();
     for node in document.select(selector) {
+        // Issue #1183: a handler on a `<input type="hidden">` — even one the
+        // payload broke into — never fires, so it is not executable evidence.
+        if is_hidden_input(node) {
+            continue;
+        }
         let value = node.value();
         for (attr_name, attr_value) in value.attrs() {
             if attr_name.len() < 3 || !attr_name.as_bytes()[..2].eq_ignore_ascii_case(b"on") {
