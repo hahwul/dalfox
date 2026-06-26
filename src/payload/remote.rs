@@ -232,6 +232,20 @@ pub fn has_remote_wordlists() -> bool {
     REMOTE_WORDS.get().is_some()
 }
 
+/// Collapse a provider->URL expansion to the set of distinct URLs, preserving
+/// first-seen order. Without this, a caller (e.g. an authenticated server/MCP
+/// scan request) that repeats the same provider name N times — `remote_payloads:
+/// ["payloadbox","payloadbox",...]` — expands 1:1 into N copies of each URL,
+/// every one of which `fetch_multiple_text_lists` fetches concurrently and
+/// concatenates: a deterministic memory / file-descriptor amplification from a
+/// single request. Deduping makes name-spam inert (distinct providers are
+/// unaffected, since their URLs differ).
+fn dedup_urls(mut urls: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::with_capacity(urls.len());
+    urls.retain(|u| seen.insert(u.clone()));
+    urls
+}
+
 /// Build the list of remote URLs for the given payload providers.
 fn collect_payload_provider_urls(providers: &[String]) -> Vec<String> {
     ensure_default_registries();
@@ -245,7 +259,7 @@ fn collect_payload_provider_urls(providers: &[String]) -> Vec<String> {
             urls.extend(lst.clone());
         }
     }
-    urls
+    dedup_urls(urls)
 }
 
 /// Build the list of remote URLs for the given wordlist providers.
@@ -261,7 +275,7 @@ fn collect_wordlist_provider_urls(providers: &[String]) -> Vec<String> {
             urls.extend(lst.clone());
         }
     }
-    urls
+    dedup_urls(urls)
 }
 
 /// Concurrently fetch multiple text endpoints and concatenate their contents.

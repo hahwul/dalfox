@@ -209,7 +209,13 @@ pub(crate) async fn get_result_handler(
                 finished_at_ms: j.finished_at_ms,
                 duration_ms,
             };
-            log(&state, "RESULT", &format!("id={} status={}", id, j.status));
+            // Only log the terminal fetch. Interim running/queued polls arrive
+            // on a high-frequency client loop, and every `log()` call does a
+            // synchronous open/write/close of the log file — flooding it with no
+            // audit value (the JOB lifecycle lines already record queue/finish).
+            if j.is_terminal() {
+                log(&state, "RESULT", &format!("id={} status={}", id, j.status));
+            }
             let resp = ApiResponse {
                 code: 200,
                 msg: "ok".to_string(),
@@ -905,7 +911,12 @@ pub(crate) async fn preflight_handler(
                     .reflection_params
                     .iter()
                     .map(|p| {
-                        let payload_count = if let Some(ctx) = &p.injection_context {
+                        let payload_count = if !crate::scanning::param_is_http_scannable(p) {
+                            // Fragment params are client-side only: the HTTP scan
+                            // phase sends no requests for them, so the estimate
+                            // must not bill any (they stay listed as discovered).
+                            0
+                        } else if let Some(ctx) = &p.injection_context {
                             crate::scanning::xss_common::get_dynamic_payloads(ctx, &scan_args)
                                 .unwrap_or_else(|_| vec![])
                                 .len()

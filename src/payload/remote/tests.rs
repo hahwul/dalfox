@@ -94,6 +94,27 @@ fn test_collect_payload_urls_known_provider() {
 }
 
 #[test]
+fn test_collect_payload_urls_dedups_repeated_provider_names() {
+    // A caller repeating the same provider name must NOT expand into N copies
+    // of its URLs (that would fan out into N concurrent fetches per URL — a
+    // single-request amplification). The result is the distinct URL set.
+    register_payload_provider(
+        "dedup_probe",
+        vec![
+            "https://example.com/a.txt".to_string(),
+            "https://example.com/b.txt".to_string(),
+        ],
+    );
+    let repeated = vec!["dedup_probe".to_string(); 50];
+    let urls = collect_payload_provider_urls(&repeated);
+    assert_eq!(
+        urls.len(),
+        2,
+        "repeated provider names must collapse to the distinct URL set"
+    );
+}
+
+#[test]
 fn test_has_remote_payloads_initially_depends_on_test_order() {
     // This just checks that the function doesn't panic
     let _ = has_remote_payloads();

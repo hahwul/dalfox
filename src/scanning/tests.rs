@@ -403,6 +403,27 @@ fn test_collapse_preserves_ast_findings() {
     );
 }
 
+#[test]
+fn test_http_scannable_param_count_excludes_fragment() {
+    // Fragment params are client-side only and generate_param_jobs skips them,
+    // so async front-ends must not count them in params_total (it would make
+    // estimated_completion_pct stall below 100%).
+    let mut target = parse_target("https://example.com/?q=x").expect("parse target");
+    mock_add_reflection_param(&mut target, "q", Location::Query);
+    mock_add_reflection_param(&mut target, "body", Location::Body);
+    mock_add_reflection_param(&mut target, "hash", Location::Fragment);
+
+    assert!(super::param_is_http_scannable(&target.reflection_params[0]));
+    assert!(!super::param_is_http_scannable(
+        &target.reflection_params[2]
+    ));
+    assert_eq!(
+        super::http_scannable_param_count(&target),
+        2,
+        "fragment param must be excluded from the HTTP-scannable count"
+    );
+}
+
 // Mock function for XSS scanning tests (similar to parameter analysis mocks)
 fn mock_add_reflection_param(target: &mut Target, name: &str, location: Location) {
     target.reflection_params.push(Param {

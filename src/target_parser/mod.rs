@@ -113,16 +113,6 @@ impl Target {
             .is_some_and(|c| c.require_trusted_types_for)
     }
 
-    /// Cache key derived from the Target fields that affect Client construction.
-    fn client_cache_key(&self) -> ClientCacheKey {
-        (
-            self.timeout,
-            self.proxy.clone(),
-            self.follow_redirects,
-            self.insecure,
-        )
-    }
-
     /// Build a reqwest Client, falling back to a default Client on error.
     /// Logs a warning in debug mode if the build fails.
     ///
@@ -143,7 +133,30 @@ impl Target {
         // Library consumers may build clients without going through `main()`,
         // so make sure the ring crypto provider is installed first.
         crate::ensure_crypto_provider();
-        let key = self.client_cache_key();
+        // Resolve any proxy up front so the cache key reflects what the client
+        // will ACTUALLY use, not the raw string. A malformed proxy is silently
+        // unusable (matching prior behavior) — but if it still contributed to
+        // the key, each distinct malformed (or merely varied) proxy string
+        // would mint a permanent, never-evicted entry in the process-wide
+        // client cache, growing memory without bound in a long-running
+        // server/MCP daemon. Collapsing unusable proxies onto the no-proxy key
+        // makes garbage-proxy spam inert while keeping the legitimate (small)
+        // proxy keyspace cached.
+        let proxy = self
+            .proxy
+            .as_deref()
+            .and_then(|p| reqwest::Proxy::all(p).ok());
+        let proxy_key = if proxy.is_some() {
+            self.proxy.clone()
+        } else {
+            None
+        };
+        let key = (
+            self.timeout,
+            proxy_key,
+            self.follow_redirects,
+            self.insecure,
+        );
         // Fast path: return a cached Client if one matches the key.
         if let Ok(guard) = client_cache().lock()
             && let Some(c) = guard.get(&key)
@@ -161,9 +174,7 @@ impl Target {
             // enforce TLS certificate validation).
             .danger_accept_invalid_certs(self.insecure);
 
-        if let Some(proxy_url) = &self.proxy
-            && let Ok(proxy) = reqwest::Proxy::all(proxy_url)
-        {
+        if let Some(proxy) = proxy {
             client_builder = client_builder.proxy(proxy);
         }
 

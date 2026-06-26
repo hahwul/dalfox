@@ -315,6 +315,18 @@ impl DalfoxMcp {
                     .iter()
                     .filter_map(|h| crate::utils::http::parse_header_line(h))
                     .collect();
+                // Also expose a supplied User-Agent as a header so the
+                // header-reflection probe tests it even on blanket-echo targets:
+                // user-supplied headers are always probed, whereas the common
+                // header sweep (which includes User-Agent) is suppressed when the
+                // target echoes every header. Without this, a User-Agent
+                // reflection is missed — an MCP-only false negative for identical
+                // input. Mirrors the CLI and REST server, which set both fields;
+                // like them, the scan path's `apply_headers_ua_cookies` then sends
+                // both this header entry and `target.user_agent`.
+                if let Some(ua) = scan_args.user_agent.as_deref().filter(|s| !s.is_empty()) {
+                    t.headers.push(("User-Agent".to_string(), ua.to_string()));
+                }
                 t.cookies = scan_args
                     .cookies
                     .iter()
@@ -500,9 +512,13 @@ impl DalfoxMcp {
                             );
                         }
 
-                        // Record discovered param count
+                        // Record the count of params the HTTP scan phase will
+                        // actually test (Fragment params are client-side only and
+                        // spawn no worker), so params_total matches the
+                        // per-parameter workers and estimated_completion_pct
+                        // stays honest. Mirrors the REST server.
                         progress.params_total.store(
-                            target.reflection_params.len() as u32,
+                            crate::scanning::http_scannable_param_count(&target) as u32,
                             std::sync::atomic::Ordering::Relaxed,
                         );
 
@@ -844,6 +860,16 @@ pub struct ListScansDalfoxParams {
     /// Optional status filter: "queued", "running", "done", "error", or "cancelled". Omit to list all.
     #[serde(default)]
     pub status: Option<String>,
+
+    /// Zero-based index of the first scan to return (scans are ordered
+    /// newest-first by queue time). Default: 0.
+    #[serde(default)]
+    pub offset: usize,
+
+    /// Maximum number of scans to return. Omit or set to 0 to return all from
+    /// `offset` onward.
+    #[serde(default)]
+    pub limit: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize, JsonSchema)]
@@ -916,6 +942,13 @@ pub struct PreflightDalfoxParams {
     /// Skip parameter discovery. Default: false
     #[serde(default)]
     pub skip_discovery: bool,
+
+    /// Encoding strategies the subsequent scan will apply to payloads
+    /// (url, html, base64, 2url, 3url, 4url, none). Used only to make the
+    /// estimated_total_requests reflect that scan's fan-out; the default
+    /// matches scan_with_dalfox. Default: ["url", "html"]
+    #[serde(default = "default_encoders")]
+    pub encoders: Vec<String>,
 }
 
 /* ---------------------------
@@ -1073,7 +1106,12 @@ Final results (via get_results_dalfox) include finding type \
             let mut jobs = self.lock_jobs();
             let active = jobs.values().filter(|j| !j.is_terminal()).count();
             if active >= MAX_ACTIVE_SCANS_MCP {
-                return Err(ErrorData::invalid_params(
+                // Transient capacity shedding, not a malformed request: signal it
+                // with internal_error (-32603) so it matches the preflight path
+                // and approximates the REST server's 503 retry semantics, rather
+                // than invalid_params (-32602) which tells a client its input was
+                // wrong and to stop retrying.
+                return Err(ErrorData::internal_error(
                     format!(
                         "at capacity: {} scans already active (max {}); wait for some to finish or cancel/delete them",
                         active, MAX_ACTIVE_SCANS_MCP
@@ -1324,11 +1362,10 @@ Call this repeatedly until status is 'done', 'error', or 'cancelled'."
             Some(snap) => {
                 let (results_slice, pagination) =
                     paginate_results(snap.results.as_deref(), params.offset, params.limit);
-                let duration_ms = match (snap.started_at_ms, snap.finished_at_ms) {
-                    (Some(s), Some(f)) => Some(f - s),
-                    (Some(s), None) => Some(now_ms() - s),
-                    _ => None,
-                };
+                // Shared with Job::duration_ms (single source of truth for the
+                // clock-step-back clamp); the snapshot path can't construct a Job.
+                let duration_ms =
+                    crate::job::duration_ms_between(snap.started_at_ms, snap.finished_at_ms);
                 let mut out = serde_json::json!({
                     "scan_id": pid,
                     "target": snap.target_url,
@@ -1453,12 +1490,28 @@ status, and result_count."
             None => None,
         };
 
-        // Build the response under the lock but only on the JSON values we
-        // need; serialization itself runs after the lock is released.
-        let entries: Vec<serde_json::Value> = {
+        let offset = params.offset;
+        let limit = params.limit;
+        // Build the response under the lock but only on the JSON values we need;
+        // serialization itself runs after the lock is released. Ordered
+        // newest-first and paginated to match the REST `/scans` contract (the
+        // list used to come back in arbitrary HashMap order with no paging).
+        let (total, end, entries): (usize, usize, Vec<serde_json::Value>) = {
             let jobs = self.lock_jobs();
-            jobs.iter()
+            let mut matching: Vec<(&String, &Job)> = jobs
+                .iter()
                 .filter(|(_, job)| filter_status.as_ref().is_none_or(|f| &job.status == f))
+                .collect();
+            matching.sort_by_key(|(_, job)| std::cmp::Reverse(job.queued_at_ms));
+            let total = matching.len();
+            let start = offset.min(total);
+            let end = if limit == 0 {
+                total
+            } else {
+                start.saturating_add(limit).min(total)
+            };
+            let entries = matching[start..end]
+                .iter()
                 .map(|(id, job)| {
                     let mut entry = serde_json::json!({
                         "scan_id": id,
@@ -1471,12 +1524,19 @@ status, and result_count."
                     }
                     entry
                 })
-                .collect()
+                .collect();
+            (total, end, entries)
         };
 
         let out = serde_json::json!({
-            "total": entries.len(),
-            "scans": entries
+            "total": total,
+            "scans": entries,
+            "pagination": {
+                "offset": offset,
+                "limit": limit,
+                "returned": entries.len(),
+                "has_more": end < total,
+            }
         });
         Ok(CallToolResult::success(vec![Content::text(
             out.to_string(),
@@ -1572,10 +1632,10 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
             follow_redirects: params.follow_redirects,
             skip_mining: params.skip_mining,
             skip_discovery: params.skip_discovery,
-            encoders: crate::cmd::scan::DEFAULT_ENCODERS
-                .iter()
-                .map(ToString::to_string)
-                .collect(),
+            // Honor the caller's encoders so estimated_total_requests reflects
+            // the fan-out their scan_with_dalfox call will produce, matching the
+            // REST /preflight endpoint (which threads options.encoders through).
+            encoders: params.encoders.clone(),
         });
 
         // Run parameter discovery on tokio's blocking threadpool with a
@@ -1640,7 +1700,13 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
                         .reflection_params
                         .iter()
                         .map(|p| {
-                            let payload_count = if let Some(ctx) = &p.injection_context {
+                            let payload_count = if !crate::scanning::param_is_http_scannable(p) {
+                                // Fragment params are client-side only: the HTTP
+                                // scan phase sends no requests for them, so the
+                                // estimate must not bill any (still listed as
+                                // discovered). Mirrors the REST /preflight.
+                                0
+                            } else if let Some(ctx) = &p.injection_context {
                                 crate::scanning::xss_common::get_dynamic_payloads(ctx, &scan_args)
                                     .unwrap_or_else(|_| vec![])
                                     .len()
@@ -1762,7 +1828,10 @@ Terminal scans are also auto-purged after 1 hour."
             return Err(ErrorData::invalid_params("scan_id must not be empty", None));
         }
         let mut jobs = self.lock_jobs();
-        let previous_status = match jobs.get(&pid) {
+        // Capture the target alongside the status so the response carries the
+        // same `target` field that REST DELETE-purge and MCP cancel_scan return
+        // (the shape was inconsistent within MCP itself before).
+        let (previous_status, target_url) = match jobs.get(&pid) {
             Some(job) => {
                 if !job.is_terminal() {
                     return Err(ErrorData::invalid_params(
@@ -1773,13 +1842,14 @@ Terminal scans are also auto-purged after 1 hour."
                         None,
                     ));
                 }
-                job.status.clone()
+                (job.status.clone(), job.target_url.clone())
             }
             None => return Err(ErrorData::invalid_params("scan_id not found", None)),
         };
         jobs.remove(&pid);
         let out = serde_json::json!({
             "scan_id": pid,
+            "target": target_url,
             "deleted": true,
             "previous_status": previous_status,
         });

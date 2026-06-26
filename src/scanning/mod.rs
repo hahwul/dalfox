@@ -1112,6 +1112,31 @@ fn expand_waf_payloads(
 /// `--max-payloads-per-param` cap. Returns the jobs plus the total payload
 /// count used to size the progress bar (one tick per reflection + DOM
 /// payload).
+/// Whether the HTTP scan phase will actually test `param`.
+///
+/// URL fragments are client-side only — HTTP servers never see them — so
+/// `generate_param_jobs` spawns no worker for `Location::Fragment` params (the
+/// AST DOM analyzer detects `location.hash` sources from response JS
+/// independently, so coverage isn't lost). Async front-ends use this so their
+/// `params_total` matches the number of per-parameter workers actually run
+/// (keeping `estimated_completion_pct` honest) and so preflight estimates don't
+/// bill requests for params that send none.
+pub fn param_is_http_scannable(param: &crate::parameter_analysis::Param) -> bool {
+    !matches!(
+        param.location,
+        crate::parameter_analysis::Location::Fragment
+    )
+}
+
+/// Count of a target's parameters the HTTP scan phase will actually test.
+pub fn http_scannable_param_count(target: &Target) -> usize {
+    target
+        .reflection_params
+        .iter()
+        .filter(|p| param_is_http_scannable(p))
+        .count()
+}
+
 fn generate_param_jobs(
     target: &Target,
     args: &ScanArgs,
@@ -1121,17 +1146,10 @@ fn generate_param_jobs(
     let mut total_tasks = 0u64;
     let mut param_jobs: Vec<ParamPayloadJob> = Vec::with_capacity(target.reflection_params.len());
     for param in &target.reflection_params {
-        // URL fragments are client-side only — HTTP servers never see
-        // them, so reflection probes for `Location::Fragment` params
-        // were pure-waste requests (the dry-run summary said
-        // "discovered" but the scan sent 0 reqs with the param actually
-        // populated). The AST DOM analyzer detects `location.hash`
-        // sources from response JS independently, so skipping the
-        // server-side scan here doesn't lose detection coverage.
-        if matches!(
-            param.location,
-            crate::parameter_analysis::Location::Fragment
-        ) {
+        // URL fragments are client-side only — HTTP servers never see them, so
+        // reflection probes for `Location::Fragment` params would be pure-waste
+        // requests. See `param_is_http_scannable`.
+        if !param_is_http_scannable(param) {
             continue;
         }
         let mut reflection_payloads = if let Some(context) = &param.injection_context {
@@ -2308,7 +2326,17 @@ pub async fn run_scanning(
     };
 
     // === Stage 5 & 6: spawn one worker per parameter (Reflection + DOM) ===
-    let mut handles = vec![];
+    // A `JoinSet` (not a bare `Vec<JoinHandle>`) so that if this scan future is
+    // dropped mid-flight — which happens when an async front-end's `scan_timeout`
+    // budget expires and `run_within_scan_budget` drops the wrapped future — the
+    // in-flight workers are ABORTED on drop rather than detached. A dropped
+    // `JoinHandle` does not abort its task, so the old `Vec` left timed-out
+    // workers parked on the runtime; on MCP's cached current_thread runtime they
+    // would resume during a later, unrelated scan and fire residual probes at
+    // the stale target. The normal-completion path below still drains every
+    // worker to completion, so partial/complete results and the panic tally are
+    // unchanged.
+    let mut handles = tokio::task::JoinSet::new();
     // Capture the per-job task-local scopes (request counter, WAF backoff, rate
     // limiter) bound by the REST/MCP runners. `tokio::spawn` does NOT inherit
     // task-locals, so each worker re-enters them via `with_job_scopes`;
@@ -2359,7 +2387,7 @@ pub async fn run_scanning(
         // Re-enter the per-job scopes inside the spawned worker so the requests
         // it sends are tallied and rate-limited against THIS job, not the
         // process-wide globals (see `JobScopes`). Cheap no-op on the CLI.
-        let handle = tokio::spawn(crate::with_job_scopes(job_scopes.clone(), async move {
+        handles.spawn(crate::with_job_scopes(job_scopes.clone(), async move {
             ctx.scan_param(param_clone, reflection_payloads, dom_payloads)
                 .await;
             // Bump the live completion counter after this parameter is fully
@@ -2370,16 +2398,17 @@ pub async fn run_scanning(
                 done.fetch_add(1, Ordering::Relaxed);
             }
         }));
-        handles.push(handle);
     }
 
     let mut worker_panics = 0usize;
-    for handle in handles {
-        if let Err(e) = handle.await {
+    while let Some(res) = handles.join_next().await {
+        if let Err(e) = res {
             // A JoinError from a worker is almost always a panic inside
             // scan_param (a scanning-pipeline bug). Count it so the caller can
             // mark the scan as partial/failed instead of reporting a clean
-            // `done`; the param's findings are incomplete either way.
+            // `done`; the param's findings are incomplete either way. (Aborts
+            // are not counted: they only occur when the whole scan future is
+            // being dropped on scan_timeout, which the caller already records.)
             if e.is_panic() {
                 worker_panics += 1;
             }
