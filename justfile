@@ -42,7 +42,7 @@ fix:
     cargo fmt
     cargo clippy --fix --allow-dirty
 
-# Report dalfox version across Cargo.toml, Cargo.lock, flake.nix, snap.
+# Report dalfox version across all version-bearing files.
 [group('release')]
 version-check:
     crystal run scripts/version_check.cr
