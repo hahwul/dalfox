@@ -475,6 +475,16 @@ fn decoded_is_dangerous_scheme(s: &str) -> bool {
         || lower.starts_with("data:text/html")
         || lower.starts_with("data:image/svg")
         || lower.starts_with("vbscript:")
+        // dalfox's own protocol generator emits single-pass strip-bypass
+        // mutations (`javasscriptcript:`, `javascriptjavascript:`). Reflected
+        // verbatim (no server strip), the mutation is not a real scheme and is
+        // inert — but it must still be RECOGNIZED here so the inert-position
+        // gates (`dangerous_scheme_reflection_is_inert`) demote a `value="…"`
+        // echo to None, while `scan_dangerous_scheme_occurrences` keeps it when
+        // it lands at a URL-attr scheme-start (a live WAF-bypass finding).
+        || crate::payload::xss_html::JS_SCHEME_STRIP_MUTATION_PREFIXES
+            .iter()
+            .any(|p| lower.starts_with(p))
 }
 
 /// True when byte offset `at` is the first *effective* character of a

