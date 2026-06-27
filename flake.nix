@@ -49,7 +49,7 @@
         # Package definition
         packages.default = pkgs.rustPlatform.buildRustPackage {
           pname = "dalfox";
-          version = "3.1.1";
+          version = "3.1.2";
 
           src = ./.;
 

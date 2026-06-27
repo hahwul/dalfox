@@ -1,7 +1,7 @@
 # Reports the version string declared in each file dalfox keeps in lockstep
 # (Cargo.toml, Cargo.lock, flake.nix, snap/snapcraft.yaml, aur/PKGBUILD,
-# docs/data/dalfox.json). Exits non-zero when they disagree so it can gate
-# a release.
+# docs/data/dalfox.json, docs/content/getting-started/installation.md).
+# Exits non-zero when they disagree so it can gate a release.
 
 CARGO_TOML  = "Cargo.toml"
 CARGO_LOCK  = "Cargo.lock"
@@ -9,6 +9,7 @@ FLAKE_NIX   = "flake.nix"
 SNAP_YAML   = "snap/snapcraft.yaml"
 AUR_PKGBUILD = "aur/PKGBUILD"
 DOCS_DATA   = "docs/data/dalfox.json"
+INSTALL_DOC = "docs/content/getting-started/installation.md"
 
 # Cargo.toml: top-level `version = "X"` inside [package].
 def cargo_toml_version : String?
@@ -70,22 +71,35 @@ rescue
   nil
 end
 
-cargo_v = cargo_toml_version
-lock_v  = cargo_lock_version
-flake_v = flake_version
-snap_v  = snap_version
-aur_v   = aur_version
-docs_v  = docs_data_version
+# docs/content/getting-started/installation.md: the `dalfox X.Y.Z` sample in
+# the Verify section ("You should see something like `dalfox 3.1.2`"). It
+# mirrors `dalfox --version` output, so it carries any pre-release suffix too.
+def install_doc_version : String?
+  content = File.read(INSTALL_DOC)
+  match = content.match(/`dalfox (\d+\.\d+\.\d+(?:-[A-Za-z0-9.]+)?)`/)
+  match ? match[1] : nil
+rescue
+  nil
+end
 
-puts "#{CARGO_TOML.ljust(22)} #{cargo_v || "Not found"}"
-puts "#{CARGO_LOCK.ljust(22)} #{lock_v || "Not found"}"
-puts "#{FLAKE_NIX.ljust(22)} #{flake_v || "Not found"}"
-puts "#{SNAP_YAML.ljust(22)} #{snap_v || "Not found"}"
-puts "#{AUR_PKGBUILD.ljust(22)} #{aur_v || "Not found"}"
-puts "#{DOCS_DATA.ljust(22)} #{docs_v || "Not found"}"
+cargo_v   = cargo_toml_version
+lock_v    = cargo_lock_version
+flake_v   = flake_version
+snap_v    = snap_version
+aur_v     = aur_version
+docs_v    = docs_data_version
+install_v = install_doc_version
+
+puts "#{CARGO_TOML.ljust(46)} #{cargo_v || "Not found"}"
+puts "#{CARGO_LOCK.ljust(46)} #{lock_v || "Not found"}"
+puts "#{FLAKE_NIX.ljust(46)} #{flake_v || "Not found"}"
+puts "#{SNAP_YAML.ljust(46)} #{snap_v || "Not found"}"
+puts "#{AUR_PKGBUILD.ljust(46)} #{aur_v || "Not found"}"
+puts "#{DOCS_DATA.ljust(46)} #{docs_v || "Not found"}"
+puts "#{INSTALL_DOC.ljust(46)} #{install_v || "Not found"}"
 puts
 
-versions = [cargo_v, lock_v, flake_v, snap_v, aur_v, docs_v].compact
+versions = [cargo_v, lock_v, flake_v, snap_v, aur_v, docs_v, install_v].compact
 
 if versions.empty?
   puts "No versions found!"
