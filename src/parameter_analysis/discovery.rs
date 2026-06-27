@@ -300,6 +300,32 @@ pub async fn check_fragment_discovery(target: &Target, reflection_params: Arc<Mu
     }
 }
 
+/// Await a chunk of in-flight query-discovery probe tasks, folding any
+/// discovered params into `batch` / `discovered_names`. Factored out so the
+/// main pass can drain each chunk before spawning the next (see
+/// `QUERY_DISCOVERY_CHUNK`).
+async fn drain_query_discovery_handles(
+    handles: Vec<tokio::task::JoinHandle<Option<Param>>>,
+    batch: &mut Vec<Param>,
+    discovered_names: &mut std::collections::HashSet<String>,
+) {
+    for handle in handles {
+        if let Ok(Some(p)) = handle.await {
+            discovered_names.insert(p.name.clone());
+            batch.push(p);
+        }
+    }
+}
+
+/// Spawn-and-drain the query-discovery reflection pass this many tasks at a
+/// time. Each task captures an injected URL whose construction re-serializes
+/// the entire N-parameter query (O(N) bytes), so accumulating all N handles up
+/// front held O(N²) resident heap (4000 params ≈ 180 MB). Bounding the live
+/// task count caps that to O(CHUNK) without changing which params are probed —
+/// the main pass doesn't gate on `discovered_names`, so chunk boundaries are
+/// invisible to the result. Mirrors the `CHUNK_SIZE` guard in `mining.rs`.
+const QUERY_DISCOVERY_CHUNK: usize = 500;
+
 pub async fn check_query_discovery(
     target: &Target,
     reflection_params: Arc<Mutex<Vec<Param>>>,
@@ -310,6 +336,9 @@ pub async fn check_query_discovery(
     let test_value = crate::scanning::markers::bracketed_marker();
 
     let mut handles = vec![];
+    // Batch collect results to reduce mutex contention.
+    let mut batch: Vec<Param> = Vec::new();
+    let mut discovered_names: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     // Check existing query params for reflection
     for (name, value) in target.url.query_pairs() {
@@ -421,19 +450,21 @@ pub async fn check_query_discovery(
             discovered
         });
         handles.push(handle);
-    }
 
-    // Batch collect results to reduce mutex contention
-    let mut batch: Vec<Param> = Vec::new();
-    let mut discovered_names: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for handle in handles {
-        if let Ok(opt_param) = handle.await
-            && let Some(p) = opt_param
-        {
-            discovered_names.insert(p.name.clone());
-            batch.push(p);
+        // Drain this chunk before spawning more so the live task count (and the
+        // O(N)-sized injected URL each task holds) never exceeds the chunk size.
+        if handles.len() >= QUERY_DISCOVERY_CHUNK {
+            drain_query_discovery_handles(
+                std::mem::take(&mut handles),
+                &mut batch,
+                &mut discovered_names,
+            )
+            .await;
         }
     }
+
+    // Drain the final partial chunk.
+    drain_query_discovery_handles(handles, &mut batch, &mut discovered_names).await;
 
     // Encoding probe: for params not yet discovered, try base64-encoded markers
     let encoding_probes = crate::encoding::pre_encoding::encoding_probes();
