@@ -7,6 +7,25 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The previous Go implementation lives on the [`v2` branch](https://github.com/hahwul/dalfox/tree/v2)
 and continues to receive security backports per [SECURITY.md](./SECURITY.md).
 
+## 3.1.2
+
+A maintenance release: reflected-XSS false-positive fixes, stricter URL-scheme handling, async server / MCP resource-safety, and documentation accuracy fixes.
+
+### Fixed
+
+* Reject non-`http(s)` URL schemes outright instead of mangling them into malformed targets.
+* Suppressed a false `[R]` for `javascript:` WAF strip-mutations reflected in inert contexts, and a false `[V]` for `on*` handlers on `<input type="hidden">`. Fixes [#1183](https://github.com/hahwul/dalfox/issues/1183).
+* Resource-safety, REST / MCP parity, and hot-path performance fixes across the async scan front-ends — bounded worker leaks, reclaimed job slots, and aligned server / MCP options. Fixes [#1190](https://github.com/hahwul/dalfox/pull/1190).
+
+### Performance & Reliability
+
+* Bounded query-discovery memory with a chunked spawn-and-drain, capping live-task memory during parameter mining.
+
+### Documentation
+
+* Clarified that `--scan-timeout` caps only the injection stage, and corrected the MCP encoder list ([#1182](https://github.com/hahwul/dalfox/pull/1182)), the `server` flag table ([#1175](https://github.com/hahwul/dalfox/pull/1175)), the Google Frontend WAF confidence value ([#1181](https://github.com/hahwul/dalfox/pull/1181)), and the URI-scheme payload example ([#1174](https://github.com/hahwul/dalfox/pull/1174)).
+* Version-bump tooling now keeps the installation guide's `dalfox <version>` example in lockstep, fixing the stale sample ([#1180](https://github.com/hahwul/dalfox/pull/1180)).
+
 ## 3.1.1
 
 A maintenance release: reflected-XSS recall and false-positive fixes, `url`/`file`/`pipe` subcommand parity, request-fan-out bounding, and unified logging.
