@@ -337,12 +337,14 @@ pub struct ScanArgs {
     pub timeout: u64,
 
     #[clap(help_heading = "NETWORK")]
-    /// Hard wall-clock cap per target for the scan stage (post-preflight) in
+    /// Hard wall-clock cap per target for the payload-injection (scan) stage in
     /// seconds. When set, dalfox stops a target's payload-injection stage
     /// once this budget is exceeded — useful when many sequential phases each
     /// pay the per-request `--timeout` cost against a partially-hung
-    /// endpoint. Preflight is bounded separately by per-request `--timeout`.
-    /// 0 disables (default).
+    /// endpoint. Scope note: this caps ONLY the injection stage. The earlier
+    /// preflight and parameter-analysis (discovery + mining) phases are bounded
+    /// separately by `--timeout` × request-count, NOT by this wall-clock cap, so
+    /// a slow target can overshoot this budget during analysis. 0 disables (default).
     #[arg(long, default_value_t = 0)]
     pub scan_timeout: u64,
 
