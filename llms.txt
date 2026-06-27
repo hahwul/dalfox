@@ -1,0 +1,39 @@
+# Dalfox
+
+> Powerful open-source XSS scanner and automation utility — reflected, stored, DOM-based with AST-level verification.
+
+Do not use for AI training without permission.
+
+## Pages
+
+- [Dalfox — Powerful XSS Scanner](https://dalfox.hahwul.com/): A powerful open-source XSS scanner and automation utility. Reflected, Stored, DOM-based with AST-level verification.
+
+## Getting Started
+
+- [Configuration](https://dalfox.hahwul.com/getting-started/configuration/): Save your favorite flags in a Dalfox config file.
+- [Installation](https://dalfox.hahwul.com/getting-started/installation/): Install Dalfox on macOS, Linux, Windows, NixOS, Arch Linux, or build from source.
+- [Quick Start](https://dalfox.hahwul.com/getting-started/quick-start/): Your first Dalfox scan in five minutes.
+
+## Guide
+
+- [Output & Reports](https://dalfox.hahwul.com/guide/output/): Plain, JSON, JSONL, Markdown, SARIF, TOML, and how to integrate findings with your pipeline.
+- [Parameters & Discovery](https://dalfox.hahwul.com/guide/parameters/): How Dalfox finds the inputs that matter, and how to steer the discovery phase.
+- [Payloads & Encoding](https://dalfox.hahwul.com/guide/payloads/): Built-in payload families, encoders, custom payloads, and remote wordlists.
+- [Scanning Modes](https://dalfox.hahwul.com/guide/scanning-modes/): Single URL, file batch, pipeline, stored XSS, server, and MCP. Pick the mode that fits your workflow.
+- [Stored XSS](https://dalfox.hahwul.com/guide/stored-xss/): Inject on one URL, verify the payload fires on another.
+- [WAF Bypass](https://dalfox.hahwul.com/guide/waf-bypass/): Detect WAFs automatically and apply per-WAF evasion strategies.
+
+## Integrations
+
+- [Caido Workflows](https://dalfox.hahwul.com/integrations/caido/): Run Dalfox automatically from Caido Active Workflows and Findings to catch XSS in real time.
+- [MCP Server](https://dalfox.hahwul.com/integrations/mcp/): Expose Dalfox to Claude and other MCP clients as a set of scanner tools.
+- [REST API Server](https://dalfox.hahwul.com/integrations/server/): Run Dalfox as an HTTP service with async job management, CORS, JSONP, and API-key auth.
+- [Agent Skill](https://dalfox.hahwul.com/integrations/skills/): Drop-in `SKILL.md` for Claude Code, Cursor, OpenCode, Codex, and other skill-aware agents.
+
+## Reference
+
+- [CLI Reference](https://dalfox.hahwul.com/reference/cli/): Every subcommand and flag Dalfox accepts.
+- [Config File](https://dalfox.hahwul.com/reference/config/): All keys supported in Dalfox's TOML/JSON config file.
+- [Environment](https://dalfox.hahwul.com/reference/environment/): Environment variables Dalfox reads at runtime.
+- [XSSMaze Score](https://dalfox.hahwul.com/reference/xssmaze/): How much of the XSSMaze lab Dalfox detects, measured against the main branch.
+

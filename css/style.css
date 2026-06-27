@@ -1,0 +1,2488 @@
+/* ==========================================================================
+   Dalfox Documentation — Dark theme
+   Brand: #31365e (deep indigo)
+   Aesthetic: 東洋風 — ink lines (墨線), window lattice (窓), calm paper surfaces.
+   Refined lines & surfaces over a navy-ink dark base, referencing kami.tw93.fun.
+   ========================================================================== */
+
+:root {
+    /* Brand */
+    --brand: #31365e;
+    --brand-2: #3d4477;
+    --brand-3: #5a63a8;
+    --accent: #8b94e8;
+    --accent-hover: #b4bbf0;
+    --accent-dim: rgba(139, 148, 232, 0.1);
+    --brand-glow: rgba(49, 54, 94, 0.45);
+
+    /* Backgrounds — navy-tinted dark */
+    --bg-body: #070811;
+    --bg-sidebar: #0b0d18;
+    --bg-content: #0a0c16;
+    --bg-surface: #11141f;
+    --bg-hover: #181c2c;
+    --bg-code: #0a0c16;
+    --bg-terminal: #060710;
+
+    /* Text */
+    --text-primary: #e7e9f3;
+    --text-secondary: #9aa0bb;
+    --text-muted: #636980;
+
+    /* Borders */
+    --border: #161a28;
+    --border-light: #222741;
+
+    /* ----- 東洋風 ornament tokens -----------------------------------------
+       Ink hairlines (墨線) derived from the periwinkle accent so every rule
+       reads as a single drawn line rather than a heavy box. The window-frame
+       brackets (窓枠) and seal-mark accents reuse these. */
+    --ink-line: rgba(180, 187, 240, 0.12);
+    --ink-line-soft: rgba(180, 187, 240, 0.06);
+    --ink-line-strong: rgba(180, 187, 240, 0.28);
+    --bracket: rgba(139, 148, 232, 0.45);
+    --bracket-dim: rgba(139, 148, 232, 0.22);
+    /* faint paper grain + lattice motifs, applied at very low opacity */
+    --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+    --asanoha: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='96' viewBox='0 0 56 96'%3E%3Cg fill='none' stroke='%238b94e8' stroke-width='0.8'%3E%3Cpath d='M28 0v24M28 24L7 36M28 24l21 12M28 24v24M28 48L7 36M28 48l21 12M28 48v24M28 72L7 60M28 72l21 12M28 96v-24M7 12v24M49 12v24M7 60v24M49 60v24M0 24l7 12M56 24l-7 12M0 72l7-12M56 72l-7-12'/%3E%3C/g%3E%3C/svg%3E");
+
+    /* Status */
+    --info-bg: rgba(96, 165, 250, 0.07);
+    --info-border: #60a5fa;
+    --warning-bg: rgba(245, 158, 11, 0.07);
+    --warning-border: #f59e0b;
+    --success: #34d399;
+    --danger: #f87171;
+
+    /* Layout */
+    --header-h: 60px;
+    --sidebar-w: 268px;
+    --toc-w: 220px;
+    --content-max: 880px;
+
+    /* Fonts */
+    --font-sans:
+        "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+        "Helvetica Neue", sans-serif;
+    --font-mono:
+        "JetBrains Mono", "SF Mono", ui-monospace, "SFMono-Regular", Consolas,
+        monospace;
+}
+
+/* Reset */
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+html {
+    scroll-behavior: smooth;
+}
+body {
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.7;
+    color: var(--text-primary);
+    /* Layered ink surface: a faint top glow over the navy base. The paper
+       grain (紙) lives on body::before so its opacity stays controllable. */
+    background-color: var(--bg-body);
+    background-image: radial-gradient(
+        ellipse 80% 50% at 50% -10%,
+        rgba(49, 54, 94, 0.32),
+        transparent 60%
+    );
+    background-attachment: fixed;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+/* The grain is decorative only — keep it whisper-quiet. */
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background: var(--paper-grain);
+    background-size: 200px 200px;
+    opacity: 0.025;
+    mix-blend-mode: screen;
+}
+::selection {
+    background: var(--brand-3);
+    color: #fff;
+}
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+::-webkit-scrollbar-thumb {
+    background: var(--border-light);
+    border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+/* ==========================================================================
+   Header
+   ========================================================================== */
+.site-header {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: var(--header-h);
+    background: rgba(7, 8, 17, 0.85);
+    backdrop-filter: saturate(180%) blur(18px);
+    -webkit-backdrop-filter: saturate(180%) blur(18px);
+    border-bottom: 1px solid transparent;
+    /* Ink hairline that fades at both ends, like a brushed rule (界線). */
+    border-image: linear-gradient(
+            90deg,
+            transparent,
+            var(--ink-line-strong) 18%,
+            var(--ink-line-strong) 82%,
+            transparent
+        )
+        1;
+    z-index: 200;
+}
+.header-inner {
+    display: flex;
+    align-items: center;
+    height: 100%;
+    padding: 0 1.5rem;
+}
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    min-width: 0;
+}
+.hamburger {
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 6px;
+}
+.hamburger span {
+    display: block;
+    width: 18px;
+    height: 1.5px;
+    background: var(--text-secondary);
+    border-radius: 1px;
+}
+.header-logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    text-decoration: none;
+    color: var(--text-primary);
+    font-weight: 700;
+    font-size: 1rem;
+    letter-spacing: -0.01em;
+    flex-shrink: 0;
+}
+.header-logo-mark {
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+    background: linear-gradient(135deg, var(--brand) 0%, var(--brand-3) 100%);
+    display: grid;
+    place-items: center;
+    color: #fff;
+    font-weight: 800;
+    font-size: 0.78rem;
+    letter-spacing: -0.02em;
+    box-shadow:
+        0 6px 20px var(--brand-glow),
+        inset 0 1px 0 rgba(255, 255, 255, 0.15);
+}
+.header-logo-text {
+    letter-spacing: -0.015em;
+}
+.header-logo-text em {
+    font-style: normal;
+    color: var(--text-muted);
+    font-weight: 400;
+    margin-left: 0.3rem;
+    font-size: 0.78rem;
+}
+.header-nav {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    margin-left: 2rem;
+}
+.header-nav a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.85rem;
+    font-weight: 500;
+    transition: color 0.15s;
+    position: relative;
+    padding: 0.25rem 0;
+}
+.header-nav a:hover {
+    color: var(--text-primary);
+}
+.header-nav a.active {
+    color: var(--text-primary);
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-left: auto;
+}
+.search-trigger {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.65rem;
+    background: var(--bg-surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-family: inherit;
+    transition:
+        border-color 0.15s,
+        color 0.15s;
+}
+.search-trigger:hover {
+    border-color: var(--brand-3);
+    color: var(--text-secondary);
+}
+.search-trigger kbd {
+    font-size: 0.65rem;
+    padding: 1px 5px;
+    border: 1px solid var(--border-light);
+    border-radius: 3px;
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    background: transparent;
+}
+.header-iconlink {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    color: var(--text-muted);
+    transition:
+        background 0.15s,
+        color 0.15s;
+}
+.header-iconlink:hover {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+}
+
+.site-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 149;
+}
+.site-overlay.active {
+    display: block;
+}
+
+/* ==========================================================================
+   Layout
+   ========================================================================== */
+.docs-layout {
+    display: flex;
+    padding-top: var(--header-h);
+    min-height: 100vh;
+}
+
+/* ==========================================================================
+   Sidebar
+   ========================================================================== */
+.docs-sidebar {
+    position: fixed;
+    top: var(--header-h);
+    left: 0;
+    width: var(--sidebar-w);
+    height: calc(100vh - var(--header-h));
+    background: var(--bg-sidebar);
+    /* Explicit full-height divider rule against the content column. */
+    border-right: 1px solid var(--border-light);
+    /* Flex column so the nav scrolls while the collapse button stays pinned
+       to the bottom. */
+    display: flex;
+    flex-direction: column;
+    z-index: 150;
+    transition: transform 0.25s ease;
+}
+.sidebar-nav {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 1.5rem 0.6rem 1rem;
+    /* Scrollbar is hidden by default and only fades in while the pointer is
+       over the sidebar. Track width is reserved (transparent thumb) so the
+       reveal never reflows the link list. */
+    scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+    transition: scrollbar-color 0.2s ease;
+}
+.docs-sidebar:hover .sidebar-nav {
+    scrollbar-color: var(--border-light) transparent;
+}
+.sidebar-nav::-webkit-scrollbar {
+    width: 6px;
+}
+.sidebar-nav::-webkit-scrollbar-track {
+    background: transparent;
+}
+.sidebar-nav::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 3px;
+    transition: background 0.2s ease;
+}
+.docs-sidebar:hover .sidebar-nav::-webkit-scrollbar-thumb {
+    background: var(--border-light);
+}
+.docs-sidebar:hover .sidebar-nav::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+/* ----- Collapse / expand controls -------------------------------------- */
+.sidebar-footer {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+    border-top: 1px solid var(--border-light);
+    padding: 0.4rem 0.6rem;
+}
+/* Current release tag, anchored to the GitHub release notes. */
+.sidebar-version {
+    font-family: var(--font-mono);
+    font-size: 0.74rem;
+    color: var(--text-muted);
+    text-decoration: none;
+    padding: 0.2rem 0.45rem;
+    border-radius: 5px;
+    transition:
+        color 0.12s,
+        background 0.12s;
+}
+.sidebar-version:hover {
+    color: var(--text-secondary);
+    background: var(--bg-hover);
+}
+.sidebar-collapse-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition:
+        color 0.12s,
+        background 0.12s;
+}
+.sidebar-collapse-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+.sidebar-collapse-btn svg {
+    flex-shrink: 0;
+}
+/* Floating tab that re-opens the sidebar; only shown while collapsed. */
+.sidebar-expand-btn {
+    display: none;
+    position: fixed;
+    left: 0;
+    top: calc(var(--header-h) + 1rem);
+    z-index: 160;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 46px;
+    padding: 0;
+    background: var(--bg-sidebar);
+    border: 1px solid var(--border-light);
+    border-left: none;
+    border-radius: 0 8px 8px 0;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition:
+        color 0.12s,
+        background 0.12s,
+        width 0.12s;
+}
+.sidebar-expand-btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+    width: 36px;
+}
+.sidebar-section {
+    margin-bottom: 1.5rem;
+}
+.sidebar-title {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--text-muted);
+    padding: 0 0.85rem;
+    margin-bottom: 0.5rem;
+}
+.sidebar-title svg {
+    opacity: 0.7;
+}
+.sidebar-links {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+.sidebar-links > li {
+    margin: 1px 0;
+}
+.sidebar-links a {
+    display: flex;
+    align-items: center;
+    padding: 0.4rem 0.85rem;
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.86rem;
+    border-radius: 5px;
+    transition:
+        color 0.12s,
+        background 0.12s;
+    line-height: 1.4;
+    border-left: 2px solid transparent;
+}
+.sidebar-links a:hover {
+    color: var(--text-primary);
+    background: var(--bg-hover);
+}
+.sidebar-links a.active {
+    color: var(--text-primary);
+    background: linear-gradient(90deg, var(--accent-dim), transparent 85%);
+    font-weight: 500;
+    border-left-color: var(--accent);
+    padding-left: calc(0.85rem - 2px);
+    border-radius: 0 5px 5px 0;
+    position: relative;
+}
+/* A small seal-mark (印) glowing at the active rail. */
+.sidebar-links a.active::before {
+    content: "";
+    position: absolute;
+    left: -1px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 2px;
+    height: 1.1rem;
+    border-radius: 2px;
+    background: var(--accent);
+    box-shadow: 0 0 8px var(--accent);
+}
+
+/* ==========================================================================
+   Main content
+   ========================================================================== */
+.docs-main {
+    flex: 1;
+    margin-left: var(--sidebar-w);
+    padding: 3rem 3.5rem 4rem;
+    max-width: calc(var(--content-max) + var(--sidebar-w) + 7rem);
+    min-width: 0;
+    transition: margin-left 0.25s ease;
+}
+.docs-article {
+    max-width: var(--content-max);
+}
+
+/* ----- Collapsed sidebar (desktop only) -------------------------------------
+   The collapse toggle adds `sidebar-collapsed` to <html> (set pre-paint by
+   js/sidebar-init.js so a restored state never flashes). Scoped to ≥769px so
+   it never interferes with the mobile hamburger overlay below. */
+@media (min-width: 769px) {
+    html.sidebar-collapsed .docs-sidebar {
+        transform: translateX(-100%);
+    }
+    html.sidebar-collapsed .docs-main {
+        margin-left: 0;
+    }
+    html.sidebar-collapsed body:has(.docs-layout) .site-footer {
+        margin-left: 0;
+    }
+    html.sidebar-collapsed .sidebar-expand-btn {
+        display: flex;
+    }
+}
+
+/* ==========================================================================
+   Article prose
+   ========================================================================== */
+.docs-article h1 {
+    font-size: 2.1rem;
+    font-weight: 800;
+    margin: 0 0 1.25rem;
+    letter-spacing: -0.025em;
+    line-height: 1.2;
+    color: var(--text-primary);
+    background: linear-gradient(180deg, #ffffff 0%, #c8ccdf 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.docs-article h2 {
+    font-size: 1.4rem;
+    font-weight: 700;
+    margin: 2.75rem 0 1rem;
+    padding-bottom: 0.5rem;
+    /* Ink-fade rule: a drawn line that thins out to the right (墨の掠れ). */
+    border-bottom: 1px solid transparent;
+    border-image: linear-gradient(
+            90deg,
+            var(--ink-line-strong),
+            var(--ink-line) 45%,
+            transparent 90%
+        )
+        1;
+    letter-spacing: -0.015em;
+    color: var(--text-primary);
+    scroll-margin-top: calc(var(--header-h) + 1rem);
+    position: relative;
+    padding-left: 0.9rem;
+}
+/* Brush accent (筆) that starts each section heading. */
+.docs-article h2::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.15em;
+    bottom: 0.55rem;
+    width: 3px;
+    border-radius: 3px;
+    background: linear-gradient(180deg, var(--accent), var(--brand-3));
+    box-shadow: 0 0 10px var(--accent-dim);
+}
+.docs-article h3 {
+    font-size: 1.12rem;
+    font-weight: 700;
+    margin: 2.25rem 0 0.75rem;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+    scroll-margin-top: calc(var(--header-h) + 1rem);
+    position: relative;
+    padding-left: 0.9rem;
+}
+/* A small diamond seal-mark (◇) before sub-headings. */
+.docs-article h3::before {
+    content: "";
+    position: absolute;
+    left: 0.1rem;
+    top: 0.62em;
+    width: 5px;
+    height: 5px;
+    background: var(--accent);
+    transform: rotate(45deg);
+    opacity: 0.8;
+}
+.docs-article h4 {
+    font-size: 0.95rem;
+    font-weight: 700;
+    margin: 1.5rem 0 0.5rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.docs-article p {
+    margin: 0 0 1rem;
+    color: var(--text-secondary);
+    line-height: 1.75;
+}
+.docs-article a {
+    color: var(--accent);
+    text-decoration: none;
+    /* Underline drawn as a stroke that grows from the left on hover. */
+    background-image: linear-gradient(var(--accent-hover), var(--accent-hover));
+    background-repeat: no-repeat;
+    background-position: 0 100%;
+    background-size: 0% 1px;
+    padding-bottom: 1px;
+    transition:
+        color 0.2s,
+        background-size 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.docs-article a:hover {
+    color: var(--accent-hover);
+    background-size: 100% 1px;
+}
+.docs-article strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+.docs-article ul,
+.docs-article ol {
+    margin: 0 0 1rem 1.5rem;
+    color: var(--text-secondary);
+}
+.docs-article li {
+    margin-bottom: 0.35rem;
+}
+.docs-article li::marker {
+    color: var(--brand-3);
+}
+.docs-article li > ul,
+.docs-article li > ol {
+    margin-top: 0.35rem;
+    margin-bottom: 0;
+}
+
+/* Inline code */
+.docs-article :not(pre) > code {
+    background: var(--bg-surface);
+    padding: 0.12rem 0.4rem;
+    border-radius: 4px;
+    font-size: 0.85em;
+    font-family: var(--font-mono);
+    color: var(--accent-hover);
+    border: 1px solid var(--border);
+}
+
+/* Code blocks — framed like a window pane (窓) with corner brackets. */
+.docs-article pre {
+    background:
+        linear-gradient(180deg, rgba(139, 148, 232, 0.04), transparent 64px),
+        var(--bg-code);
+    padding: 1.1rem 1.3rem;
+    border-radius: 8px;
+    overflow-x: auto;
+    margin: 0 0 1.25rem;
+    border: 1px solid var(--ink-line);
+    line-height: 1.6;
+    position: relative;
+}
+.docs-article pre::before,
+.docs-article pre::after {
+    content: "";
+    position: absolute;
+    width: 11px;
+    height: 11px;
+    pointer-events: none;
+    opacity: 0.6;
+}
+.docs-article pre::before {
+    top: 7px;
+    left: 7px;
+    border-top: 1.5px solid var(--bracket);
+    border-left: 1.5px solid var(--bracket);
+    border-top-left-radius: 3px;
+}
+.docs-article pre::after {
+    bottom: 7px;
+    right: 7px;
+    border-bottom: 1.5px solid var(--bracket);
+    border-right: 1.5px solid var(--bracket);
+    border-bottom-right-radius: 3px;
+}
+.docs-article pre code {
+    background: none;
+    padding: 0;
+    color: var(--text-primary);
+    font-size: 0.83rem;
+    border: none;
+    font-family: var(--font-mono);
+}
+
+/* Blockquote — a quiet panel marked with a corner bracket (「) like a
+   traditional pull-quote. */
+.docs-article blockquote {
+    position: relative;
+    border-left: 2px solid var(--accent);
+    padding: 0.7rem 1.1rem 0.7rem 1.6rem;
+    margin: 1.25rem 0;
+    background: linear-gradient(
+        90deg,
+        var(--accent-dim),
+        var(--bg-surface) 40%
+    );
+    border-radius: 0 6px 6px 0;
+    color: var(--text-secondary);
+}
+.docs-article blockquote::before {
+    content: "\300C"; /* 「 — East-Asian opening corner bracket */
+    position: absolute;
+    top: -0.15rem;
+    left: 0.45rem;
+    font-size: 1.2rem;
+    line-height: 1;
+    color: var(--accent);
+    opacity: 0.55;
+}
+.docs-article blockquote p:last-child {
+    margin-bottom: 0;
+}
+
+/* Tables */
+.docs-article table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0 0 1.5rem;
+    font-size: 0.88rem;
+    border: 1px solid var(--ink-line);
+    border-radius: 6px;
+    overflow: hidden;
+}
+.docs-article th {
+    text-align: left;
+    padding: 0.65rem 0.85rem;
+    /* Ink band header with an accent-tinted base rule. */
+    background: linear-gradient(180deg, var(--bg-hover), var(--bg-surface));
+    border-bottom: 1px solid var(--ink-line-strong);
+    color: var(--text-primary);
+    font-weight: 600;
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+.docs-article td {
+    padding: 0.6rem 0.85rem;
+    border-bottom: 1px solid var(--ink-line-soft);
+    color: var(--text-secondary);
+    vertical-align: top;
+}
+.docs-article tr:last-child td {
+    border-bottom: none;
+}
+.docs-article tr:hover td {
+    background: var(--accent-dim);
+}
+
+.docs-article img {
+    max-width: 100%;
+    height: auto;
+    border-radius: 6px;
+    margin: 0.5rem 0;
+}
+/* Divider — an ink rule split by a small lozenge seal (◇) at the centre. */
+.docs-article hr {
+    border: none;
+    height: 1.4rem;
+    margin: 2.75rem 0;
+    position: relative;
+}
+.docs-article hr::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 1px;
+    background: linear-gradient(
+        90deg,
+        transparent,
+        var(--ink-line-strong) 28%,
+        var(--ink-line-strong) 72%,
+        transparent
+    );
+}
+.docs-article hr::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 7px;
+    height: 7px;
+    transform: translate(-50%, -50%) rotate(45deg);
+    background: var(--bg-body);
+    border: 1px solid var(--accent);
+    box-shadow: 0 0 0 5px var(--bg-body);
+}
+
+/* ==========================================================================
+   Alerts / callouts
+   ========================================================================== */
+.alert,
+.info-box {
+    display: flex;
+    gap: 0.75rem;
+    padding: 0.85rem 1rem;
+    border-radius: 6px;
+    margin: 1.25rem 0;
+    border: 1px solid var(--ink-line);
+    border-left: 2px solid;
+    font-size: 0.88rem;
+    line-height: 1.6;
+}
+.alert .alert-icon {
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+.alert-info,
+.info-box.note {
+    background: var(--info-bg);
+    border-color: var(--info-border);
+}
+.alert-warning,
+.info-box.warning {
+    background: var(--warning-bg);
+    border-color: var(--warning-border);
+}
+.alert-tip,
+.info-box.tip {
+    background: rgba(52, 211, 153, 0.07);
+    border-color: var(--success);
+}
+
+/* ==========================================================================
+   Section list (in section.html)
+   ========================================================================== */
+.section-children-heading {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-muted);
+    margin: 2.5rem 0 0.75rem;
+}
+ul.section-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 0.6rem;
+}
+ul.section-list li {
+    margin: 0;
+}
+ul.section-list a {
+    position: relative;
+    display: block;
+    padding: 0.85rem 1.1rem;
+    background: var(--bg-surface);
+    border: 1px solid var(--ink-line);
+    border-radius: 7px;
+    color: var(--text-primary);
+    text-decoration: none;
+    font-weight: 500;
+    font-size: 0.92rem;
+    transition:
+        border-color 0.18s,
+        background 0.18s,
+        transform 0.18s;
+}
+/* Window-frame corner brackets that ink in on hover. */
+ul.section-list a::before,
+ul.section-list a::after {
+    content: "";
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+}
+ul.section-list a::before {
+    top: 6px;
+    left: 6px;
+    border-top: 1.5px solid var(--bracket);
+    border-left: 1.5px solid var(--bracket);
+    border-top-left-radius: 3px;
+}
+ul.section-list a::after {
+    bottom: 6px;
+    right: 6px;
+    border-bottom: 1.5px solid var(--bracket);
+    border-right: 1.5px solid var(--bracket);
+    border-bottom-right-radius: 3px;
+}
+ul.section-list a:hover {
+    border-color: var(--bracket-dim);
+    background: var(--bg-hover);
+    transform: translateX(2px);
+}
+ul.section-list a:hover::before,
+ul.section-list a:hover::after {
+    opacity: 0.7;
+}
+
+/* Pagination */
+nav.pagination {
+    margin: 2rem 0;
+}
+nav.pagination .pagination-list {
+    list-style: none;
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 0;
+}
+nav.pagination a,
+.pagination-current span,
+.pagination-disabled span {
+    display: inline-block;
+    padding: 0.3rem 0.65rem;
+    border-radius: 5px;
+    border: 1px solid var(--border-light);
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.85rem;
+}
+nav.pagination a:hover {
+    color: var(--accent);
+    border-color: var(--brand-3);
+}
+.pagination-current span {
+    border-color: var(--accent);
+    background: var(--accent-dim);
+    color: var(--accent-hover);
+}
+.pagination-disabled span {
+    opacity: 0.4;
+}
+
+/* ==========================================================================
+   Article footer
+   ========================================================================== */
+.docs-footer {
+    margin-top: 4rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid transparent;
+    border-image: linear-gradient(
+            90deg,
+            var(--ink-line-strong),
+            var(--ink-line) 50%,
+            transparent 92%
+        )
+        1;
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+.docs-footer a {
+    color: var(--text-secondary);
+    text-decoration: none;
+}
+.docs-footer a:hover {
+    color: var(--text-primary);
+}
+
+/* ==========================================================================
+   Search modal
+   ========================================================================== */
+.search-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 500;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    justify-content: center;
+    padding-top: 14vh;
+}
+.search-overlay.active {
+    display: flex;
+}
+.search-overlay .search-modal {
+    position: relative;
+    width: 92%;
+    max-width: 580px;
+    max-height: 70vh;
+    background: var(--bg-content);
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+    box-shadow:
+        0 24px 72px rgba(0, 0, 0, 0.65),
+        0 0 0 1px var(--brand-glow);
+    overflow: hidden;
+    align-self: flex-start;
+    display: flex;
+    flex-direction: column;
+}
+.search-input-wrap {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid var(--border);
+}
+.search-input-wrap svg {
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+.search-input-wrap input,
+#search-input,
+#searchInput {
+    flex: 1;
+    background: none;
+    border: none;
+    outline: none;
+    color: var(--text-primary);
+    font-size: 0.95rem;
+    font-family: var(--font-sans);
+}
+.search-input-wrap input::placeholder,
+#search-input::placeholder,
+#searchInput::placeholder {
+    color: var(--text-muted);
+}
+.search-input-wrap kbd,
+.search-esc {
+    font-size: 0.68rem;
+    padding: 2px 6px;
+    border: 1px solid var(--border-light);
+    border-radius: 3px;
+    color: var(--text-muted);
+    font-family: var(--font-sans);
+    background: transparent;
+    cursor: pointer;
+}
+.search-results {
+    max-height: 56vh;
+    overflow-y: auto;
+    padding: 0.5rem;
+}
+.search-results:empty {
+    display: none;
+}
+.search-result-item {
+    display: block;
+    padding: 0.6rem 0.8rem;
+    border-radius: 6px;
+    text-decoration: none;
+    transition: background 0.1s;
+}
+.search-result-item:hover,
+.search-result-item.active {
+    background: var(--bg-hover);
+}
+.search-result-title {
+    color: var(--text-primary);
+    font-weight: 500;
+    font-size: 0.9rem;
+    margin-bottom: 0.15rem;
+}
+.search-result-snippet {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    line-height: 1.45;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+.search-result-snippet mark {
+    background: var(--accent-dim);
+    color: var(--accent-hover);
+    border-radius: 2px;
+    padding: 0 1px;
+}
+.search-no-results {
+    padding: 2rem;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+/* ==========================================================================
+   Site footer
+   ========================================================================== */
+.site-footer {
+    position: relative;
+    border-top: 1px solid var(--ink-line);
+    padding: 2.5rem 2rem;
+    background: var(--bg-sidebar);
+}
+/* Lozenge seal centred on the footer's top divider — mirrors `.section::after`
+   so the footer reads as the final panel in the same sequence of dividers. */
+.site-footer::before {
+    content: "";
+    position: absolute;
+    top: -4px;
+    left: 50%;
+    width: 7px;
+    height: 7px;
+    transform: translateX(-50%) rotate(45deg);
+    background: var(--bg-body);
+    border: 1px solid var(--bracket-dim);
+    box-shadow: 0 0 0 5px var(--bg-body);
+    pointer-events: none;
+}
+.footer-mark {
+    text-align: center;
+}
+.footer-mark a {
+    display: inline-block;
+    line-height: 0;
+}
+.hahwul-img {
+    display: inline-block;
+    width: 80px;
+    height: 80px;
+    /* Recolor the logo to match the footer text by using its alpha as a mask
+       and filling with the muted text token (the raster itself is white). */
+    background-color: var(--text-muted);
+    -webkit-mask: url("../images/hahwul.webp") center / contain no-repeat;
+    mask: url("../images/hahwul.webp") center / contain no-repeat;
+    transition: background-color 0.3s ease;
+}
+.hahwul-img:hover {
+    background-color: var(--text-primary);
+}
+.footer-love {
+    margin-top: 0.85rem;
+    color: var(--text-muted);
+    font-family: "Bradley Hand", "Snell Roundhand", "Apple Chancery", cursive;
+    font-size: 0.95rem;
+    letter-spacing: 0.02em;
+}
+/* Docs pages: the sidebar is `position: fixed` and 268px wide, so a
+   root-level footer is hidden underneath it. Offset the footer (and only
+   the footer) on pages that actually have the docs layout. The mobile
+   rule in the @media block below reverts this once the sidebar slides
+   out of the document flow. The landing page has no `.docs-layout`, so
+   this selector is a no-op there and the footer spans full width. */
+body:has(.docs-layout) .site-footer {
+    margin-left: var(--sidebar-w);
+    transition: margin-left 0.25s ease;
+}
+.footer-inner {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+.footer-branding {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    color: var(--text-muted);
+    font-size: 0.82rem;
+}
+.footer-branding a {
+    color: var(--text-secondary);
+    text-decoration: none;
+}
+.footer-branding a:hover {
+    color: var(--text-primary);
+}
+.footer-links {
+    display: flex;
+    gap: 1.25rem;
+}
+.footer-links a {
+    color: var(--text-muted);
+    text-decoration: none;
+    font-size: 0.8rem;
+    font-weight: 500;
+    transition: color 0.15s;
+}
+.footer-links a:hover {
+    color: var(--text-primary);
+}
+/* ==========================================================================
+   Landing page
+   ========================================================================== */
+.landing {
+    padding-top: var(--header-h);
+    overflow-x: hidden;
+}
+
+/* Hero */
+.hero {
+    position: relative;
+    padding: 5.5rem 2rem 4.5rem;
+    overflow: hidden;
+    border-bottom: 1px solid var(--ink-line);
+}
+.hero::before {
+    content: "";
+    position: absolute;
+    top: -10%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 1200px;
+    height: 560px;
+    background: radial-gradient(
+        ellipse at center,
+        var(--brand-glow) 0%,
+        rgba(48, 54, 94, 0.15) 35%,
+        transparent 65%
+    );
+    filter: blur(30px);
+    pointer-events: none;
+    z-index: 0;
+}
+/* Traditional hemp-leaf lattice (麻の葉) behind the hero, masked to a soft
+   centre so it reads as woven paper rather than a hard grid. */
+.hero::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background-image: var(--asanoha);
+    background-size: 56px 96px;
+    mask-image: radial-gradient(
+        ellipse at center,
+        rgba(0, 0, 0, 0.4) 0%,
+        transparent 62%
+    );
+    -webkit-mask-image: radial-gradient(
+        ellipse at center,
+        rgba(0, 0, 0, 0.4) 0%,
+        transparent 62%
+    );
+    opacity: 0.16;
+    pointer-events: none;
+    z-index: 0;
+}
+
+/* Hero atmospheric illustration (with terminal present — stronger left mask) */
+.hero-illustration {
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-image: url("/images/illust.webp");
+    /* Let the night scene cover the entire headline area ("Hunt every XSS") */
+    background-position: 48% 28%;
+    background-size: 82% auto;
+    background-repeat: no-repeat;
+    opacity: 0.32;
+    filter: saturate(0.92) contrast(1.02);
+    /* Aggressive right-side blending — 4-layer mask to kill visible edges on the entire right side */
+    mask-image:
+        /* 1. Much softer left protection — allow the illustration to cover the entire "Hunt every XSS" headline area */
+        linear-gradient(
+            to right,
+            transparent 0%,
+            transparent 6%,
+            rgba(0, 0, 0, 0.06) 15%,
+            rgba(0, 0, 0, 0.22) 27%,
+            rgba(0, 0, 0, 0.48) 40%,
+            rgba(0, 0, 0, 0.78) 55%,
+            black 70%
+        ),
+        /* 2. Very soft large vignette (bright areas) */
+        radial-gradient(
+                ellipse at 88% 36%,
+                black 38%,
+                rgba(0, 0, 0, 0.97) 54%,
+                rgba(0, 0, 0, 0.78) 66%,
+                rgba(0, 0, 0, 0.42) 78%,
+                rgba(0, 0, 0, 0.18) 88%,
+                rgba(0, 0, 0, 0.05) 94%,
+                transparent 99%
+            ),
+        /* 3. Top fade */
+        linear-gradient(
+                to bottom,
+                transparent 0%,
+                rgba(0, 0, 0, 0.1) 7%,
+                rgba(0, 0, 0, 0.42) 14%,
+                rgba(0, 0, 0, 0.76) 23%,
+                black 34%
+            ),
+        /* 4. STRONG right-edge fade (aggressive vertical dissolve on the entire right side) */
+        linear-gradient(
+                to left,
+                transparent 0%,
+                rgba(0, 0, 0, 0.06) 9%,
+                rgba(0, 0, 0, 0.32) 18%,
+                rgba(0, 0, 0, 0.68) 29%,
+                rgba(0, 0, 0, 0.91) 40%,
+                black 52%
+            );
+    -webkit-mask-image:
+        /* 1. Much softer left protection — allow the illustration to cover the entire "Hunt every XSS" headline area */
+        linear-gradient(
+            to right,
+            transparent 0%,
+            transparent 6%,
+            rgba(0, 0, 0, 0.06) 15%,
+            rgba(0, 0, 0, 0.22) 27%,
+            rgba(0, 0, 0, 0.48) 40%,
+            rgba(0, 0, 0, 0.78) 55%,
+            black 70%
+        ),
+        /* 2. Very soft large vignette (bright areas) */
+        radial-gradient(
+                ellipse at 88% 36%,
+                black 38%,
+                rgba(0, 0, 0, 0.97) 54%,
+                rgba(0, 0, 0, 0.78) 66%,
+                rgba(0, 0, 0, 0.42) 78%,
+                rgba(0, 0, 0, 0.18) 88%,
+                rgba(0, 0, 0, 0.05) 94%,
+                transparent 99%
+            ),
+        /* 3. Top fade */
+        linear-gradient(
+                to bottom,
+                transparent 0%,
+                rgba(0, 0, 0, 0.1) 7%,
+                rgba(0, 0, 0, 0.42) 14%,
+                rgba(0, 0, 0, 0.76) 23%,
+                black 34%
+            ),
+        /* 4. STRONG right-edge fade (aggressive vertical dissolve on the entire right side) */
+        linear-gradient(
+                to left,
+                transparent 0%,
+                rgba(0, 0, 0, 0.06) 9%,
+                rgba(0, 0, 0, 0.32) 18%,
+                rgba(0, 0, 0, 0.68) 29%,
+                rgba(0, 0, 0, 0.91) 40%,
+                black 52%
+            );
+    mask-composite: intersect;
+    -webkit-mask-composite: intersect;
+    pointer-events: none;
+}
+.hero-inner {
+    position: relative;
+    z-index: 1;
+    max-width: 1100px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 1.05fr 1fr;
+    gap: 4rem;
+    align-items: center;
+}
+.hero-text {
+    min-width: 0;
+}
+.hero-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0.7rem 0.35rem 0.45rem;
+    background: linear-gradient(
+        180deg,
+        rgba(139, 148, 232, 0.1),
+        rgba(139, 148, 232, 0.04)
+    );
+    border: 1px solid var(--border-light);
+    border-radius: 100px;
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    margin-bottom: 1.5rem;
+    font-weight: 500;
+}
+.hero-eyebrow .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--success);
+    box-shadow: 0 0 8px var(--success);
+}
+.hero-eyebrow strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+.hero-eyebrow .divider {
+    color: var(--border-light);
+}
+.hero-title {
+    font-size: clamp(2.4rem, 5vw, 3.8rem);
+    font-weight: 800;
+    letter-spacing: -0.035em;
+    line-height: 1.05;
+    color: var(--text-primary);
+    margin: 0 0 1.5rem;
+}
+.hero-title .accent {
+    background: linear-gradient(
+        120deg,
+        var(--accent-hover) 0%,
+        var(--accent) 40%,
+        var(--brand-3) 100%
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.hero-title .strike {
+    color: var(--text-muted);
+    text-decoration: line-through;
+    text-decoration-color: var(--danger);
+    text-decoration-thickness: 3px;
+}
+.hero-desc {
+    font-size: 1.05rem;
+    color: var(--text-secondary);
+    line-height: 1.7;
+    margin-bottom: 2rem;
+    max-width: 540px;
+}
+.hero-desc strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+.hero-actions {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-bottom: 2rem;
+}
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.75rem 1.4rem;
+    border-radius: 7px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    text-decoration: none;
+    transition:
+        transform 0.15s ease,
+        background 0.15s ease,
+        color 0.15s ease,
+        border-color 0.15s ease,
+        box-shadow 0.15s ease;
+    border: 1px solid transparent;
+    cursor: pointer;
+    font-family: inherit;
+}
+.btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+.btn:active {
+    transform: translateY(0);
+}
+/* Outline → fill: clean accent edge at rest, floods periwinkle on hover */
+.btn-primary {
+    background: transparent;
+    color: var(--accent);
+    border-color: var(--accent);
+}
+.btn-primary:hover {
+    background: var(--accent);
+    color: var(--bg-content);
+    border-color: var(--accent);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 18px rgba(139, 148, 232, 0.3);
+}
+.btn-secondary {
+    background: var(--bg-surface);
+    color: var(--text-primary);
+    border-color: var(--border-light);
+}
+.btn-secondary:hover {
+    border-color: var(--accent);
+    background: var(--bg-hover);
+    transform: translateY(-1px);
+}
+.btn-ghost {
+    background: transparent;
+    color: var(--text-secondary);
+}
+.btn-ghost:hover {
+    color: var(--text-primary);
+    background: var(--bg-surface);
+}
+
+.hero-install {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    max-width: 540px;
+    background: var(--bg-surface);
+    border: 1px solid var(--border-light);
+    border-radius: 7px;
+    padding: 0.55rem 0.85rem;
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+.hero-install .dollar {
+    color: var(--accent);
+    user-select: none;
+}
+.hero-install code {
+    flex: 1;
+    background: none;
+    padding: 0;
+    border: none;
+    color: var(--text-primary);
+    font-family: inherit;
+    overflow-x: auto;
+    white-space: nowrap;
+}
+.hero-install-copy {
+    background: none;
+    border: 1px solid var(--border-light);
+    color: var(--text-muted);
+    border-radius: 4px;
+    padding: 0.2rem 0.45rem;
+    font-size: 0.7rem;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s;
+}
+.hero-install-copy:hover {
+    color: var(--text-primary);
+    border-color: var(--brand-3);
+}
+.hero-install-copy.copied {
+    color: var(--success);
+    border-color: var(--success);
+}
+
+/* Hero install — package-manager selector */
+.hero-install-pm {
+    position: relative;
+    flex-shrink: 0;
+}
+.hero-install-pm-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    background: none;
+    border: none;
+    padding: 0.1rem 0.1rem;
+    color: var(--accent);
+    font-family: inherit;
+    font-size: inherit;
+    cursor: pointer;
+    transition: color 0.15s;
+}
+.hero-install-pm-btn:hover {
+    color: var(--accent-hover);
+}
+.hero-install-pm-btn svg {
+    opacity: 0.75;
+    transition: transform 0.18s ease;
+}
+.hero-install-pm.open .hero-install-pm-btn svg {
+    transform: rotate(180deg);
+}
+.hero-install-sep {
+    align-self: stretch;
+    width: 1px;
+    margin: -0.2rem 0;
+    background: var(--ink-line);
+}
+.hero-install-pm-menu {
+    /* opens upward — the hero clips overflow, so a drop-down would be cut off */
+    position: absolute;
+    bottom: calc(100% + 0.55rem);
+    left: 0;
+    z-index: 30;
+    min-width: 160px;
+    margin: 0;
+    padding: 0.3rem;
+    list-style: none;
+    background: var(--bg-hover);
+    border: 1px solid var(--border-light);
+    border-radius: 7px;
+    box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.45);
+    opacity: 0;
+    transform: translateY(4px);
+    pointer-events: none;
+    transition:
+        opacity 0.15s ease,
+        transform 0.15s ease;
+}
+.hero-install-pm.open .hero-install-pm-menu {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+.hero-install-pm-menu li {
+    padding: 0.4rem 0.6rem;
+    border-radius: 4px;
+    color: var(--text-secondary);
+    font-size: 0.78rem;
+    white-space: nowrap;
+    cursor: pointer;
+    transition:
+        background 0.12s,
+        color 0.12s;
+}
+.hero-install-pm-menu li:hover {
+    background: var(--accent-dim);
+    color: var(--text-primary);
+}
+.hero-install-pm-menu li.is-selected {
+    color: var(--accent);
+}
+.hero-install-pm-menu li.is-selected::after {
+    content: "✓";
+    float: right;
+    margin-left: 1rem;
+    opacity: 0.8;
+}
+
+/* Hero terminal */
+.hero-visual {
+    min-width: 0;
+    position: relative;
+}
+.hero-visual::before {
+    content: "";
+    position: absolute;
+    inset: -20px;
+    background: radial-gradient(
+        ellipse at center,
+        var(--brand-glow),
+        transparent 60%
+    );
+    filter: blur(20px);
+    z-index: -1;
+}
+.terminal {
+    background: var(--bg-terminal);
+    border: 1px solid var(--border-light);
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow:
+        0 30px 80px rgba(0, 0, 0, 0.5),
+        0 0 0 1px rgba(139, 148, 232, 0.08);
+}
+.terminal-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 0.9rem;
+    background: #0a0b15;
+    border-bottom: 1px solid var(--border);
+}
+.terminal-dots {
+    display: flex;
+    gap: 6px;
+}
+.terminal-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+.terminal-dot.red {
+    background: #ff5f57;
+}
+.terminal-dot.amber {
+    background: #febc2e;
+}
+.terminal-dot.green {
+    background: #28c840;
+}
+.terminal-title {
+    margin-left: auto;
+    margin-right: auto;
+    font-size: 0.7rem;
+    font-family: var(--font-mono);
+    color: var(--text-muted);
+    letter-spacing: 0.02em;
+}
+.terminal-body {
+    padding: 1rem 1.2rem 1.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    line-height: 1.8;
+    color: var(--text-secondary);
+    min-height: 320px;
+}
+.t-line {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.t-prompt {
+    color: var(--accent);
+    margin-right: 0.5rem;
+    user-select: none;
+}
+.t-cmd {
+    color: var(--text-primary);
+}
+.t-info {
+    color: #60a5fa;
+    font-weight: 600;
+}
+.t-warn {
+    color: #fbbf24;
+    font-weight: 600;
+}
+.t-crit {
+    color: var(--danger);
+    font-weight: 700;
+}
+.t-ok {
+    color: var(--success);
+    font-weight: 600;
+}
+.t-dim {
+    color: var(--text-muted);
+}
+.t-ts {
+    color: #6b7280;
+    font-size: 0.72em;
+}
+.t-wrn {
+    color: #fbbf24;
+    font-weight: 700;
+}
+.t-poc {
+    color: #f87171;
+    font-weight: 600;
+}
+.t-label {
+    display: inline-block;
+    padding: 0 5px;
+    border-radius: 3px;
+    font-size: 0.66rem;
+    font-weight: 700;
+    margin-right: 0.4rem;
+    letter-spacing: 0.02em;
+}
+.t-label.verify {
+    background: rgba(52, 211, 153, 0.12);
+    color: var(--success);
+}
+.t-label.reflected {
+    background: rgba(251, 191, 36, 0.12);
+    color: #fbbf24;
+}
+.t-cursor::after {
+    content: "▋";
+    color: var(--accent);
+    animation: blink 1s step-end infinite;
+    margin-left: 2px;
+}
+@keyframes blink {
+    50% {
+        opacity: 0;
+    }
+}
+
+/* Stats bar */
+.stats-bar {
+    border-bottom: 1px solid var(--ink-line);
+    background: var(--bg-sidebar);
+    padding: 1.75rem 2rem;
+}
+.stats-inner {
+    max-width: 1100px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+}
+.stat-item {
+    text-align: center;
+    position: relative;
+}
+.stat-item + .stat-item::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 10%;
+    bottom: 10%;
+    width: 1px;
+    background: linear-gradient(
+        180deg,
+        transparent,
+        var(--ink-line-strong),
+        transparent
+    );
+}
+.stat-value {
+    display: block;
+    font-size: 1.55rem;
+    font-weight: 800;
+    color: var(--text-primary);
+    letter-spacing: -0.025em;
+    font-family: var(--font-mono);
+    background: linear-gradient(180deg, #ffffff, var(--accent));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+.stat-label {
+    display: block;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 500;
+    margin-top: 0.3rem;
+}
+
+/* Section scaffolding */
+.section {
+    position: relative;
+    padding: 6rem 2rem;
+    border-bottom: 1px solid var(--ink-line);
+}
+/* Lozenge seal centred on each section divider. */
+.section::after {
+    content: "";
+    position: absolute;
+    bottom: -4px;
+    left: 50%;
+    width: 7px;
+    height: 7px;
+    transform: translateX(-50%) rotate(45deg);
+    background: var(--bg-body);
+    border: 1px solid var(--bracket-dim);
+    box-shadow: 0 0 0 5px var(--bg-body);
+}
+.section-inner {
+    max-width: 1100px;
+    margin: 0 auto;
+}
+.section-eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--accent);
+    margin-bottom: 0.85rem;
+}
+.section-title {
+    font-size: clamp(1.5rem, 3vw, 2.1rem);
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    color: var(--text-primary);
+    margin-bottom: 0.75rem;
+    max-width: 640px;
+    line-height: 1.2;
+}
+.section-desc {
+    color: var(--text-secondary);
+    font-size: 1rem;
+    line-height: 1.7;
+    max-width: 640px;
+    margin-bottom: 3rem;
+}
+
+/* Features grid (bento) */
+.features-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1px;
+    background: var(--ink-line);
+    border: 1px solid var(--ink-line);
+    border-radius: 10px;
+    overflow: hidden;
+}
+.feature-cell {
+    padding: 2rem 1.75rem;
+    background: var(--bg-content);
+    transition: background 0.2s;
+    position: relative;
+}
+.feature-cell:hover {
+    background: var(--bg-surface);
+}
+.feature-cell.wide {
+    grid-column: span 2;
+}
+.feature-cell.full {
+    grid-column: span 3;
+}
+.feature-icon {
+    display: grid;
+    place-items: center;
+    width: 38px;
+    height: 38px;
+    border-radius: 8px;
+    background: linear-gradient(
+        135deg,
+        var(--bg-hover),
+        rgba(48, 54, 94, 0.35)
+    );
+    border: 1px solid var(--border-light);
+    color: var(--accent);
+    margin-bottom: 1rem;
+}
+.feature-cell h3 {
+    font-size: 1.05rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
+    color: var(--text-primary);
+    letter-spacing: -0.01em;
+}
+.feature-cell p {
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+    line-height: 1.65;
+    margin: 0;
+}
+.feature-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    margin-top: 0.9rem;
+}
+.feature-tag {
+    padding: 0.25rem 0.55rem;
+    background: var(--bg-hover);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+/* Modes strip */
+.modes {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 0.65rem;
+    margin-top: 1rem;
+}
+/* Atmospheric night-scene backdrop for the modes section.
+   The fox-and-moon illustration drifts in from the right, masked into a soft
+   vignette so the moon glows beside the heading while the left text column and
+   the section's edges dissolve cleanly into the navy-ink base. */
+.section--modes {
+    overflow: hidden;
+}
+.section--modes .section-inner {
+    position: relative;
+    z-index: 1;
+}
+.modes-illustration {
+    position: absolute;
+    top: -1px;
+    right: 0;
+    bottom: -1px;
+    width: 58%;
+    z-index: 0;
+    pointer-events: none;
+    background-image: url("/images/illust2.webp");
+    background-position: 62% 38%;
+    background-size: cover;
+    background-repeat: no-repeat;
+    opacity: 0.26;
+    filter: saturate(0.9) contrast(1.02);
+    /* Single elliptical reveal centred on the moon — fades on every edge so no
+       hard rectangle shows, and protects the heading column on the left. */
+    mask-image: radial-gradient(
+        ellipse 80% 86% at 70% 44%,
+        black 28%,
+        rgba(0, 0, 0, 0.52) 56%,
+        rgba(0, 0, 0, 0.16) 80%,
+        transparent 96%
+    );
+    -webkit-mask-image: radial-gradient(
+        ellipse 80% 86% at 70% 44%,
+        black 28%,
+        rgba(0, 0, 0, 0.52) 56%,
+        rgba(0, 0, 0, 0.16) 80%,
+        transparent 96%
+    );
+}
+.mode {
+    padding: 1rem 0.85rem;
+    background: var(--bg-content);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    text-align: center;
+    transition:
+        border-color 0.15s,
+        background 0.15s,
+        transform 0.15s;
+}
+.mode:hover {
+    border-color: var(--brand-3);
+    background: var(--bg-surface);
+    transform: translateY(-2px);
+}
+.mode-name {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    color: var(--accent);
+    font-weight: 700;
+    margin-bottom: 0.3rem;
+}
+.mode-desc {
+    font-size: 0.74rem;
+    color: var(--text-muted);
+}
+
+/* How it works */
+.how-steps {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    counter-reset: step;
+}
+.how-step {
+    padding: 1.75rem 1.5rem;
+    background: var(--bg-content);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    position: relative;
+    counter-increment: step;
+}
+.how-step::before {
+    content: "0" counter(step);
+    position: absolute;
+    top: 1rem;
+    right: 1.25rem;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    font-weight: 800;
+    color: var(--brand-3);
+    opacity: 0.7;
+}
+.how-step h3 {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0 0 0.5rem;
+    padding-right: 2rem;
+}
+.how-step p {
+    font-size: 0.88rem;
+    color: var(--text-secondary);
+    line-height: 1.65;
+    margin-bottom: 1rem;
+}
+.how-step code {
+    display: block;
+    padding: 0.6rem 0.8rem;
+    background: var(--bg-terminal);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--accent);
+    white-space: nowrap;
+    overflow-x: auto;
+}
+
+/* CTA */
+.cta-section {
+    padding: 5rem 2rem 6rem;
+    position: relative;
+    overflow: hidden;
+    border-bottom: 1px solid var(--ink-line);
+}
+.cta-section::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(
+        ellipse at 50% 100%,
+        var(--brand-glow),
+        transparent 60%
+    );
+    opacity: 0.7;
+    pointer-events: none;
+}
+/* illust3 night-scene backdrop behind the call to action (like the hero and
+   modes scenes). Sits under the radial brand glow and the copy. */
+.cta-illustration {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background-image: url("/images/illust3.webp");
+    background-position: center 32%;
+    background-size: cover;
+    background-repeat: no-repeat;
+    opacity: 0.16;
+    filter: saturate(0.9) contrast(1.02);
+    /* Soft elliptical reveal so no hard rectangle of the webp ever shows. */
+    mask-image: radial-gradient(
+        ellipse 72% 82% at 50% 42%,
+        black 22%,
+        rgba(0, 0, 0, 0.5) 55%,
+        rgba(0, 0, 0, 0.16) 80%,
+        transparent 96%
+    );
+    -webkit-mask-image: radial-gradient(
+        ellipse 72% 82% at 50% 42%,
+        black 22%,
+        rgba(0, 0, 0, 0.5) 55%,
+        rgba(0, 0, 0, 0.16) 80%,
+        transparent 96%
+    );
+}
+.cta-inner {
+    position: relative;
+    z-index: 1;
+    max-width: 760px;
+    margin: 0 auto;
+    text-align: center;
+}
+.cta-title {
+    font-size: clamp(1.6rem, 3.5vw, 2.4rem);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: var(--text-primary);
+    margin-bottom: 0.75rem;
+}
+.cta-desc {
+    color: var(--text-secondary);
+    font-size: 1rem;
+    line-height: 1.7;
+    margin-bottom: 2rem;
+}
+.cta-buttons {
+    display: flex;
+    justify-content: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+.contributors-label {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-muted);
+    margin: 2.5rem 0 1rem;
+}
+/* Contributors — clean avatar wall, no distortion. */
+.contributors {
+    max-width: 760px;
+    margin: 0 auto;
+    border-radius: 6px;
+    overflow: hidden;
+}
+.contributors img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 6px;
+}
+
+/* ==========================================================================
+   Community section
+   ========================================================================== */
+/* "Thanks to the community" panel sitting just above the call to action.
+   Reuses the `.section` divider rhythm and seal. */
+.community-links {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+}
+
+/* ==========================================================================
+   404
+   ========================================================================== */
+.error-page {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding-top: var(--header-h);
+    text-align: center;
+}
+.error-code {
+    font-size: 6rem;
+    font-weight: 800;
+    font-family: var(--font-mono);
+    background: linear-gradient(180deg, var(--accent), var(--brand));
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -0.04em;
+    line-height: 1;
+    margin-bottom: 0.5rem;
+}
+.error-message {
+    color: var(--text-secondary);
+    margin-bottom: 1.5rem;
+}
+
+/* ==========================================================================
+   Responsive
+   ========================================================================== */
+@media (max-width: 1024px) {
+    .hero-inner {
+        grid-template-columns: 1fr;
+        gap: 2.5rem;
+    }
+    /* Below 1024px the layout collapses to a single column, so the rich
+       "cover the headline from the right" treatment no longer fits. Instead of
+       hiding the scene, switch it to a full-bleed cover that fills the whole
+       hero — bleeding past every edge so no rectangular border of the webp is
+       ever visible — and fade it with a soft vertical mask so the headline and
+       copy stay readable on top. */
+    .hero-illustration {
+        display: block;
+        background-position: center 30%;
+        background-size: cover;
+        opacity: 0.16;
+        mask-image: linear-gradient(
+            to bottom,
+            transparent 0%,
+            rgba(0, 0, 0, 0.45) 20%,
+            black 48%,
+            black 74%,
+            rgba(0, 0, 0, 0.35) 92%,
+            transparent 100%
+        );
+        -webkit-mask-image: linear-gradient(
+            to bottom,
+            transparent 0%,
+            rgba(0, 0, 0, 0.45) 20%,
+            black 48%,
+            black 74%,
+            rgba(0, 0, 0, 0.35) 92%,
+            transparent 100%
+        );
+        mask-composite: add;
+        -webkit-mask-composite: source-over;
+    }
+    .features-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .feature-cell.wide,
+    .feature-cell.full {
+        grid-column: span 2;
+    }
+    .modes {
+        grid-template-columns: repeat(3, 1fr);
+    }
+    .modes-illustration {
+        width: 70%;
+        opacity: 0.2;
+    }
+    .how-steps {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 768px) {
+    .docs-sidebar {
+        transform: translateX(-100%);
+        transition: transform 0.25s ease;
+    }
+    .docs-sidebar.open {
+        transform: translateX(0);
+    }
+    /* The collapse/expand controls are a desktop affordance; on mobile the
+       sidebar is a hamburger-driven overlay, so hide them entirely. */
+    .sidebar-footer,
+    .sidebar-expand-btn {
+        display: none;
+    }
+    .docs-main {
+        margin-left: 0;
+        padding: 2rem 1.25rem 3rem;
+    }
+    body:has(.docs-layout) .site-footer {
+        margin-left: 0;
+    }
+    .hamburger {
+        display: flex;
+    }
+    /* Hide mobile hamburger on pages without sidebar (landing + 404) */
+    body:has(.landing) .hamburger,
+    body:has(.error-page) .hamburger {
+        display: none;
+    }
+    .header-nav {
+        display: none;
+    }
+    .search-trigger span {
+        display: none;
+    }
+    .search-trigger kbd {
+        display: none;
+    }
+
+    .hero {
+        padding: 3rem 1.25rem 3rem;
+    }
+    .section {
+        padding: 3.5rem 1.25rem;
+    }
+    .stats-inner {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 1.25rem;
+    }
+    .stat-item + .stat-item::before {
+        display: none;
+    }
+    .features-grid {
+        grid-template-columns: 1fr;
+    }
+    .feature-cell.wide,
+    .feature-cell.full {
+        grid-column: span 1;
+    }
+    .modes {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    /* On phones the heading wraps tall and fills the row, so keep the scene as
+       a faint top-right wash that never competes with the text. */
+    .modes-illustration {
+        width: 88%;
+        opacity: 0.14;
+        background-position: 70% 22%;
+    }
+    .cta-illustration {
+        opacity: 0.1;
+    }
+    .footer-inner {
+        flex-direction: column;
+        text-align: center;
+    }
+}
+
+@media (max-width: 480px) {
+    .hero-title {
+        font-size: 2.1rem;
+    }
+    .terminal-body {
+        font-size: 0.72rem;
+        padding: 0.85rem 0.95rem;
+        min-height: auto;
+    }
+}
+
+/* ==========================================================================
+   Table of Contents (TOC)
+   ========================================================================== */
+.docs-content-container {
+    display: flex;
+    align-items: flex-start;
+    gap: 3.5rem;
+    width: 100%;
+}
+.docs-content-container .docs-article {
+    flex: 1;
+    min-width: 0;
+}
+.docs-toc {
+    position: sticky;
+    top: calc(var(--header-h) + 2.5rem);
+    width: var(--toc-w);
+    flex-shrink: 0;
+    max-height: calc(100vh - var(--header-h) - 5rem);
+    display: flex;
+    flex-direction: column;
+    padding-left: 1.25rem;
+    border-left: 1px solid transparent;
+    border-image: linear-gradient(
+            180deg,
+            var(--ink-line-strong),
+            var(--ink-line) 60%,
+            transparent
+        )
+        1;
+    margin-top: 0.25rem;
+}
+.toc-title {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--text-muted);
+    margin-bottom: 0.75rem;
+}
+.toc-content {
+    overflow-y: auto;
+    padding-right: 0.5rem;
+}
+.toc-content ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+.toc-content li {
+    margin-bottom: 0.45rem;
+    line-height: 1.4;
+}
+.toc-content a {
+    display: inline-block;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    text-decoration: none;
+    transition:
+        color 0.15s,
+        border-left-color 0.15s;
+    border-left: 2px solid transparent;
+    padding-left: 0.75rem;
+    margin-left: -2px;
+    line-height: 1.4;
+}
+.toc-content a:hover {
+    color: var(--text-primary);
+}
+.toc-content a.active {
+    color: var(--accent);
+    font-weight: 600;
+    border-left-color: var(--accent);
+}
+.toc-content ul ul {
+    padding-left: 0.75rem;
+    margin-top: 0.35rem;
+    margin-bottom: 0.35rem;
+}
+.toc-content ul ul a {
+    font-size: 0.75rem;
+}
+
+@media (max-width: 1300px) {
+    .docs-toc {
+        display: none;
+    }
+    .docs-content-container {
+        gap: 0;
+    }
+}
+
+/* Skip-to-content link — off-screen until it receives keyboard focus. */
+.skip-link {
+    position: absolute;
+    left: 8px;
+    top: -48px;
+    z-index: 1000;
+    padding: 8px 14px;
+    background: var(--brand);
+    color: var(--text-primary);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    font: 600 0.85rem/1 var(--font-sans);
+    text-decoration: none;
+    transition: top 0.15s ease;
+}
+
+.skip-link:focus {
+    top: 8px;
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}

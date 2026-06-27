@@ -1,0 +1,3160 @@
+# Dalfox
+Powerful open-source XSS scanner and automation utility — reflected, stored, DOM-based with AST-level verification.
+
+Base URL: https://dalfox.hahwul.com
+
+Do not use for AI training without permission.
+
+---
+
+Title: Dalfox — Powerful XSS Scanner
+URL: https://dalfox.hahwul.com/
+Source: content/index.md
+
+<section class="hero">
+  <div class="hero-illustration" aria-hidden="true"></div>
+  <div class="hero-inner">
+    <div class="hero-text">
+      <h1 class="hero-title">
+        Hunt <span class="strike">every</span> <span class="accent">XSS</span><br>
+        before it hunts you.
+      </h1>
+      <p class="hero-desc">
+        <strong>Dalfox</strong> is a powerful open-source XSS scanner and automation utility. Reflected, Stored, DOM-based: discovered, verified, and reported with AST-level precision across every parameter in your app.
+      </p>
+      <div class="hero-actions">
+        <a href="./getting-started/" class="btn btn-primary">
+          Get Started
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        </a>
+        <a href="https://github.com/hahwul/dalfox" class="btn btn-secondary" target="_blank" rel="noopener">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+          Star on GitHub
+        </a>
+      </div>
+      <div class="hero-install" data-install>
+        <div class="hero-install-pm">
+          <button class="hero-install-pm-btn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose install method">
+            <span class="hero-install-pm-label">brew</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <ul class="hero-install-pm-menu" role="listbox" aria-label="Install method">
+            <li role="option" class="is-selected" aria-selected="true" data-label="brew" data-cmd="brew install dalfox">Homebrew</li>
+            <li role="option" aria-selected="false" data-label="snap" data-cmd="sudo snap install dalfox">Snap</li>
+            <li role="option" aria-selected="false" data-label="aur" data-cmd="yay -S dalfox">Arch (AUR)</li>
+            <li role="option" aria-selected="false" data-label="nix" data-cmd="nix profile install github:hahwul/dalfox">Nix</li>
+            <li role="option" aria-selected="false" data-label="cargo" data-cmd="cargo install dalfox">Cargo</li>
+          </ul>
+        </div>
+        <span class="hero-install-sep" aria-hidden="true"></span>
+        <span class="dollar">$</span>
+        <code>brew install dalfox</code>
+        <button class="hero-install-copy" type="button">copy</button>
+      </div>
+    </div>
+    <div class="hero-visual">
+      <div class="terminal">
+        <div class="terminal-bar">
+          <div class="terminal-dots">
+            <span class="terminal-dot red"></span>
+            <span class="terminal-dot amber"></span>
+            <span class="terminal-dot green"></span>
+          </div>
+          <div class="terminal-title">dalfox — scan</div>
+        </div>
+        <div class="terminal-body">
+          <div class="t-line"><span class="t-prompt">$</span><span class="t-cmd">dalfox scan https://xss-game.appspot.com/level1/frame</span></div>
+          <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> start scan to https://xss-game.appspot.com/level1/frame</div>
+          <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> found reflected 1 params</div>
+          <div class="t-line t-dim">└── query valid_specials="/\'{`<>"();=|}[.:]+,$-" invalid_specials=""</div>
+          <div class="t-line"></div>
+          <div class="t-line"></div>
+          <div class="t-line"><span class="t-ts">6:42PM</span> <span class="t-wrn">WRN</span> XSS found 1 XSS</div>
+          <div class="t-line"><span class="t-poc">[POC][V][GET][inHTML]</span> ...?query=%3Csvg%2Fonload%3Dalert%281%29%3E</div>
+          <div class="t-line t-dim">  ├── Issue: XSS payload DOM object identified</div>
+          <div class="t-line t-dim">  ├── Payload: &lt;svg/onload=alert(1)&gt;</div>
+          <div class="t-line t-dim">  └── L13: s were found for &#x3c;b&#x3e;&#x3c;svg/onload=alert(1)&#x3e;&#x3c;/b&#x3e;..</div>
+          <div class="t-line"></div>
+          <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> scan completed in 3.482 seconds</div>
+          <div class="t-line t-cursor"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<div class="stats-bar">
+  <div class="stats-inner">
+    <div class="stat-item">
+      <span class="stat-value">6</span>
+      <span class="stat-label">Scan Modes</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value">AST</span>
+      <span class="stat-label">DOM Verification</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value">MCP</span>
+      <span class="stat-label">AI Ready</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value">OSS</span>
+      <span class="stat-label">MIT Licensed</span>
+    </div>
+  </div>
+</div>
+
+<section class="section">
+  <div class="section-inner">
+    <p class="section-eyebrow">// Capabilities</p>
+    <h2 class="section-title">Everything you need to catch cross-site scripting</h2>
+    <p class="section-desc">From a single URL to full pipelines, Dalfox adapts to how you work: CLI, file batch, pipe, server mode, or MCP. Every finding is parsed, verified, and reported with context you can act on.</p>
+    <div class="features-grid">
+      <div class="feature-cell wide">
+        <div class="feature-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        </div>
+        <h3>Deep XSS discovery</h3>
+        <p>Reflected, Stored, and DOM-based XSS with payload optimization. AST-backed DOM verification means no more false positives from blind reflections.</p>
+        <div class="feature-tags">
+          <span class="feature-tag">reflected</span>
+          <span class="feature-tag">stored</span>
+          <span class="feature-tag">dom</span>
+          <span class="feature-tag">ast-verify</span>
+        </div>
+      </div>
+      <div class="feature-cell">
+        <div class="feature-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+        </div>
+        <h3>Parameter intelligence</h3>
+        <p>Mining, static analysis, BAV testing, and context-aware charset probing give every parameter a full attack profile.</p>
+      </div>
+      <div class="feature-cell">
+        <div class="feature-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4"/><path d="M12 18v4"/><path d="m4.93 4.93 2.83 2.83"/><path d="m16.24 16.24 2.83 2.83"/><path d="M2 12h4"/><path d="M18 12h4"/><path d="m4.93 19.07 2.83-2.83"/><path d="m16.24 7.76 2.83-2.83"/></svg>
+        </div>
+        <h3>WAF aware</h3>
+        <p>Fingerprints popular WAFs and mutates payloads with encoding, casing, and polyglot tactics to slip through.</p>
+      </div>
+      <div class="feature-cell">
+        <div class="feature-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        </div>
+        <h3>Built for pipelines</h3>
+        <p>Pipe, file-batch, and server modes drop into CI/CD. Pair with your proxy, crawler, or recon stack without friction.</p>
+      </div>
+      <div class="feature-cell">
+        <div class="feature-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+        </div>
+        <h3>REST API &amp; MCP</h3>
+        <p>Run Dalfox as a long-lived server with REST control, or expose it as an MCP tool to agents and IDEs.</p>
+      </div>
+      <div class="feature-cell full">
+        <div class="feature-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        </div>
+        <h3>Reports you can ship</h3>
+        <p>Export to the format your workflow speaks, from terse CLI output to SARIF for GitHub code scanning.</p>
+        <div class="feature-tags">
+          <span class="feature-tag">JSON</span>
+          <span class="feature-tag">JSONL</span>
+          <span class="feature-tag">Markdown</span>
+          <span class="feature-tag">SARIF</span>
+          <span class="feature-tag">TOML</span>
+          <span class="feature-tag">Plain</span>
+          <span class="feature-tag">Silence</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section section--modes">
+  <div class="modes-illustration" aria-hidden="true"></div>
+  <div class="section-inner">
+    <p class="section-eyebrow">// Modes</p>
+    <h2 class="section-title">Six ways to run Dalfox</h2>
+    <p class="section-desc">Pick the shape that fits your target. Every mode shares the same discovery and verification engine.</p>
+    <div class="modes">
+      <div class="mode">
+        <div class="mode-name">URL</div>
+        <div class="mode-desc">Single target scan</div>
+      </div>
+      <div class="mode">
+        <div class="mode-name">FILE</div>
+        <div class="mode-desc">Batch from list</div>
+      </div>
+      <div class="mode">
+        <div class="mode-name">PIPE</div>
+        <div class="mode-desc">stdin pipeline</div>
+      </div>
+      <div class="mode">
+        <div class="mode-name">SXSS</div>
+        <div class="mode-desc">Stored XSS</div>
+      </div>
+      <div class="mode">
+        <div class="mode-name">SERVER</div>
+        <div class="mode-desc">REST + daemon</div>
+      </div>
+      <div class="mode">
+        <div class="mode-name">MCP</div>
+        <div class="mode-desc">Agent-native</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="section-inner">
+    <p class="section-eyebrow">// Workflow</p>
+    <h2 class="section-title">From install to verified finding in three steps</h2>
+    <p class="section-desc">Dalfox is designed to drop into whatever you already have. No fancy setup, no heavy orchestration.</p>
+    <div class="how-steps">
+      <div class="how-step">
+        <h3>Install</h3>
+        <p>Grab Dalfox through Homebrew, Snap, Nix, cargo, or a prebuilt binary. One command, no runtime to manage.</p>
+        <code>brew install dalfox</code>
+      </div>
+      <div class="how-step">
+        <h3>Point at a target</h3>
+        <p>Give it a URL, a file, or pipe in a crawl. Dalfox mines parameters, probes contexts, and adapts.</p>
+        <code>dalfox scan https://target.app</code>
+      </div>
+      <div class="how-step">
+        <h3>Ship the findings</h3>
+        <p>Export to SARIF, JSON, or Markdown, or proxy results to your pipeline. Findings come verified, not guessed.</p>
+        <code>dalfox scan urls.txt -o report.sarif</code>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section section--community">
+  <div class="section-inner">
+    <p class="section-eyebrow">// Community</p>
+    <h2 class="section-title">Built in the open, by hunters everywhere</h2>
+    <p class="section-desc">Dalfox is shaped by the people who run it. Open an issue, send a pull request, or trade payloads with the community. Every contribution sharpens the hunt.</p>
+    <div class="community-links">
+      <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" class="btn btn-secondary" target="_blank" rel="noopener">Contributing guide</a>
+      <a href="https://github.com/hahwul/dalfox/issues" class="btn btn-ghost" target="_blank" rel="noopener">Browse open issues →</a>
+    </div>
+    <p class="contributors-label">Thanks to our contributors</p>
+    <div class="contributors" role="img" aria-label="Dalfox contributors">
+      <img src="/images/CONTRIBUTORS.svg" alt="Dalfox contributors" loading="lazy">
+    </div>
+  </div>
+</section>
+
+<section class="cta-section">
+  <div class="cta-illustration" aria-hidden="true"></div>
+  <div class="cta-inner">
+    <h2 class="cta-title">Ready to hunt?</h2>
+    <p class="cta-desc">Thousands of scans, zero fuss. Star the repo, read the docs, or drop Dalfox in your next recon loop.</p>
+    <div class="cta-buttons">
+      <a href="./getting-started/installation/" class="btn btn-primary">Install Dalfox</a>
+      <a href="./reference/cli/" class="btn btn-secondary">CLI Reference</a>
+      <a href="https://github.com/hahwul/dalfox" class="btn btn-ghost" target="_blank" rel="noopener">GitHub →</a>
+    </div>
+  </div>
+</section>
+
+---
+
+Title: Getting Started
+URL: https://dalfox.hahwul.com/getting-started/
+Source: content/getting-started/_index.md
+
+This section takes you from zero to a verified XSS finding in about ten minutes.
+
+## What is Dalfox?
+
+Dalfox is a powerful open-source **XSS scanner and automation utility**. Give it a URL, a file of URLs, or a piped crawl, and it will:
+
+1. **Discover parameters** across the query string, body, headers, cookies, and DOM.
+2. **Probe contexts** to learn where each parameter lands (HTML, JavaScript, attribute, CSS).
+3. **Inject payloads** tuned to each context, with optional WAF-evasion encoders.
+4. **Verify findings** at the DOM level using an AST-backed parser, not just a text match.
+5. **Report results** in the format your workflow speaks (plain, JSON, JSONL, Markdown, SARIF, TOML).
+
+## Who is Dalfox for?
+
+- **Pentesters & bug hunters:** fast CLI reconnaissance that fits any recon stack.
+- **Security teams:** SARIF output drops into GitHub Advanced Security or any SAST dashboard.
+- **Developers:** a REST API and MCP server let CI/CD pipelines and AI agents drive scans without leaving their tools.
+
+## Where to start
+
+Start with **[Installation](./installation/)**, then work through the **[Quick Start](./quick-start/)**. After that, the [Guide](../guide/) covers deeper topics like WAF bypass and Stored XSS.
+
+---
+
+Title: Configuration
+URL: https://dalfox.hahwul.com/getting-started/configuration/
+Source: content/getting-started/configuration.md
+
+Dalfox reads a config file on startup so you don't have to pass the same flags every time. Anything you set in the config is overridden by an explicit CLI flag, so it's safe to keep "defaults" here.
+
+## Where the file lives
+
+Dalfox looks in this order:
+
+1. `$XDG_CONFIG_HOME/dalfox/config.toml`
+2. `$HOME/.config/dalfox/config.toml`
+
+You can point anywhere else with `--config`:
+
+```bash
+dalfox --config ./dalfox.toml scan https://target.app
+```
+
+If no file exists, Dalfox creates a template at the default path the first time you run it.
+
+## A minimal config
+
+```toml
+[scan]
+format = "json"
+output = "results.json"
+timeout = 15
+workers = 100
+encoders = ["url", "html"]
+```
+
+Run a scan and those flags apply automatically:
+
+```bash
+dalfox https://target.app?q=test
+# → writes JSON results to results.json with workers=100
+```
+
+## Precedence
+
+```
+CLI flag  >  Config file  >  Built-in defaults
+```
+
+Anything on the command line wins. This lets you keep sensible defaults in the config, then override per-scan:
+
+```bash
+# Config sets workers=100, but for this quick scan use 20
+dalfox --workers 20 https://target.app
+```
+
+## Formats
+
+Dalfox supports both TOML and JSON. TOML is the default; JSON is handy if you generate the file from a tool or UI.
+
+```toml
+# ~/.config/dalfox/config.toml
+[scan]
+format = "sarif"
+silence = true
+```
+
+```json
+{
+  "scan": {
+    "format": "sarif",
+    "silence": true
+  }
+}
+```
+
+## What can I configure?
+
+Anything that has a CLI flag under `dalfox scan` can live in the `[scan]` table. Common examples:
+
+| Key | Example | What it does |
+|-----|---------|--------------|
+| `format` | `"json"` | Output format (`plain`, `json`, `jsonl`, `markdown`, `sarif`, `toml`) |
+| `output` | `"report.json"` | Default output file |
+| `silence` | `true` | Suppress logs, emit only findings |
+| `timeout` | `15` | Request timeout in seconds |
+| `delay` | `200` | Delay between requests in ms |
+| `workers` | `100` | Concurrent workers per target |
+| `encoders` | `["url","html","base64"]` | Payload encoders |
+| `remote_payloads` | `["portswigger"]` | Remote payload sources |
+| `remote_wordlists` | `["burp"]` | Remote parameter wordlists |
+| `headers` | `["Accept: text/html"]` | Extra request headers |
+| `user_agent` | `"Dalfox Scanner"` | Default User-Agent |
+| `waf_bypass` | `"auto"` | WAF bypass mode (`auto`, `force`, `off`) |
+| `insecure` | `true` | Skip TLS certificate verification (`false` to enforce) |
+| `follow_redirects` | `true` | Follow 3xx responses |
+
+See the [Config File reference](../../reference/config/) for every key.
+
+## Secrets
+
+Keep API keys, bearer tokens, and blind-XSS callback hostnames out of the config file if you commit it. Prefer environment variables:
+
+```bash
+# .env or your shell profile
+export DALFOX_API_KEY="..."
+```
+
+Or pass them at the command line and never persist them.
+
+## Next steps
+
+- [Run your first scan](../quick-start/)
+- [Explore scanning modes](../../guide/scanning-modes/)
+- [See the full CLI reference](../../reference/cli/)
+
+---
+
+Title: Installation
+URL: https://dalfox.hahwul.com/getting-started/installation/
+Source: content/getting-started/installation.md
+
+Pick the installer that fits your platform. Dalfox ships as a single self-contained binary, with no runtime to manage.
+
+## Homebrew (macOS & Linux)
+
+```bash
+brew install dalfox
+```
+
+The Homebrew formula tracks the latest stable release. Source: [formulae.brew.sh/formula/dalfox](https://formulae.brew.sh/formula/dalfox).
+
+## Snap (Ubuntu / Linux)
+
+```bash
+sudo snap install dalfox
+```
+
+## Arch Linux (AUR)
+
+Using an AUR helper (recommended):
+
+```bash
+yay -S dalfox
+# or
+paru -S dalfox
+```
+
+Manual build from the [AUR package](https://aur.archlinux.org/packages/dalfox):
+
+```bash
+git clone https://aur.archlinux.org/dalfox.git
+cd dalfox
+makepkg -si
+```
+
+## Nix & NixOS
+
+```bash
+# Run once without installing
+nix-shell -p dalfox
+
+# Nix flakes: run the latest from GitHub
+nix run github:hahwul/dalfox -- scan https://example.com
+
+# Install into your profile
+nix profile install github:hahwul/dalfox
+
+# Drop into a dev shell with Dalfox available
+nix develop github:hahwul/dalfox
+```
+
+Dalfox lives in nixpkgs. The newest releases land in `unstable` first.
+
+## Cargo (from crates.io)
+
+```bash
+cargo install dalfox
+```
+
+Requires a recent Rust toolchain (stable is fine). Builds into `~/.cargo/bin/dalfox`.
+
+## Prebuilt binaries
+
+Grab a release archive for your OS/arch from [github.com/hahwul/dalfox/releases](https://github.com/hahwul/dalfox/releases), extract it, and drop the binary somewhere on your `PATH` (`/usr/local/bin`, `~/.local/bin`, etc.).
+
+We publish the following Linux variants per release:
+
+- `linux-x86_64` (glibc)
+- `linux-x86_64-musl` (statically linked, recommended for Alpine, Docker, and CI)
+- `linux-aarch64` (glibc)
+- `linux-aarch64-musl` (statically linked)
+
+## Build from source
+
+```bash
+git clone https://github.com/hahwul/dalfox
+cd dalfox
+cargo build --release
+# Binary at ./target/release/dalfox
+```
+
+You'll need Rust (2024 edition). Install with [rustup](https://rustup.rs/) if you don't have it.
+
+## Verify
+
+```bash
+dalfox --version
+```
+
+You should see something like `dalfox 3.1.2` along with the Dalfox banner.
+
+## Update shell completions (optional)
+
+Dalfox uses [clap](https://github.com/clap-rs/clap), so help is always accessible:
+
+```bash
+dalfox --help
+dalfox scan --help
+```
+
+## Next steps
+
+Run your first scan in the [Quick Start](../quick-start/). If you want to tune defaults before scanning, jump to [Configuration](../configuration/).
+
+---
+
+Title: Quick Start
+URL: https://dalfox.hahwul.com/getting-started/quick-start/
+Source: content/getting-started/quick-start.md
+
+This page walks you from install to a verified finding. We'll use an intentionally vulnerable demo target so you can see real output.
+
+{{ alert(type="warning", body="Only scan targets you're authorized to test. Dalfox fires real XSS payloads.") }}
+
+## 1. Scan a single URL
+
+```bash
+dalfox https://xss-game.appspot.com/level1/frame?query=test
+```
+
+The first argument is the target. Dalfox auto-detects that it's a URL and runs the `scan` subcommand implicitly. You'll see:
+
+- A banner with the version.
+- `INFO` lines as Dalfox discovers parameters and probes contexts.
+- `[V]` (verified) and `[R]` (reflected) lines for each finding, with the exact payload that worked.
+
+## 2. Scan from a file
+
+Feed a list of URLs from your crawler:
+
+```bash
+# urls.txt, one target per line
+dalfox scan urls.txt
+```
+
+Each URL runs through the same pipeline. Results stream as they're found.
+
+## 3. Scan from a pipeline
+
+Dalfox reads from `stdin` when you pipe:
+
+```bash
+cat urls.txt | dalfox
+# or combined with your recon tools:
+waybackurls example.com | gf xss | dalfox
+```
+
+## 4. Get JSON output
+
+Pair Dalfox with `jq`, a dashboard, or CI:
+
+```bash
+dalfox https://target.app/search?q=test -f json -o report.json
+```
+
+Machine-readable formats (`json`, `jsonl`, `sarif`, `toml`) auto-suppress the banner so the file stays clean.
+
+## 5. Authenticated scans
+
+Pass cookies, headers, or a custom method:
+
+```bash
+dalfox https://api.target.app/v1/users \
+  -X POST \
+  -H "Authorization: Bearer eyJ..." \
+  -H "Content-Type: application/json" \
+  -d '{"name":"test"}' \
+  --cookies "session=abc123"
+```
+
+Or point Dalfox at a **raw HTTP request** file you captured from your proxy:
+
+```bash
+dalfox scan --input-type raw-http request.txt
+```
+
+Or replay an entire **HAR** export (from browser DevTools or a proxy) — Dalfox scans every request in it, preserving each one's method, headers, cookies, and body:
+
+```bash
+dalfox scan capture.har            # auto-detected
+dalfox scan --input-type har capture.har
+```
+
+## 6. Catch Blind XSS
+
+Use an out-of-band callback (Interactsh, Burp Collaborator, XSS Hunter, etc.):
+
+```bash
+dalfox https://target.app \
+  -b https://your-callback.interact.sh
+```
+
+Dalfox sends blind-XSS payloads across every discovered parameter; if the payload fires later in an admin panel, your callback server records it.
+
+Or let Dalfox manage an [interactsh](https://github.com/projectdiscovery/interactsh) (OAST) server for you — it registers a session, correlates callbacks to the originating payload, and polls automatically:
+
+```bash
+dalfox https://target.app --blind-oob                  # public interactsh mesh
+dalfox https://target.app --blind-oob=oast.fun         # pick servers
+```
+
+Use `--blind-oob-secret` for a self-hosted server and `--blind-oob-wait` to control how long Dalfox keeps polling after the scan finishes.
+
+## 7. Dry-run first
+
+Use `--dry-run` to preview what Dalfox would scan:
+
+```bash
+dalfox https://target.app --dry-run
+```
+
+It discovers parameters and estimates request volume without firing any payloads.
+
+## Reading the output
+
+Each finding is tagged:
+
+| Tag | Meaning |
+|-----|---------|
+| `[V]` | **Verified**: payload produced a real DOM element (via AST/CSS-selector match) |
+| `[A]` | **AST-detected**: static JS analysis found a source→sink flow |
+| `[R]` | **Reflected**: payload appeared in the response, but no DOM evidence |
+
+`V` and `A` findings are actionable. `R` findings are worth a look but may be filtered further downstream.
+
+## Next steps
+
+- Learn the different [scanning modes](../../guide/scanning-modes/).
+- Understand how [parameters are discovered](../../guide/parameters/).
+- Tune [payloads and encoders](../../guide/payloads/) for harder targets.
+- Save your favorite flags in a [config file](../configuration/).
+
+---
+
+Title: Guide
+URL: https://dalfox.hahwul.com/guide/
+Source: content/guide/_index.md
+
+The guide covers the concepts that make Dalfox effective: how parameters are discovered, which payloads run where, how Stored XSS detection works, and how to handle WAFs.
+
+Each page is self-contained. Read them in order the first time, then come back as reference.
+
+## Topics
+
+- **[Scanning Modes](./scanning-modes/):** Single URL, file batch, pipe, stored-XSS, server, and MCP.
+- **[Parameters &amp; Discovery](./parameters/):** How Dalfox finds inputs, prunes false-positives, and mines wordlists.
+- **[Payloads &amp; Encoding](./payloads/):** Built-in payload families, encoders, and custom wordlists.
+- **[WAF Bypass](./waf-bypass/):** Fingerprinting WAFs and applying evasive mutations.
+- **[Stored XSS](./stored-xss/):** Inject on one URL, verify on another.
+- **[Output &amp; Reports](./output/):** Plain, JSON, JSONL, Markdown, SARIF, TOML.
+
+---
+
+Title: Output & Reports
+URL: https://dalfox.hahwul.com/guide/output/
+Source: content/guide/output.md
+
+Every scan produces the same internal result structure. Dalfox renders it in whichever format you pick. Machine-readable formats automatically suppress the banner so your file stays clean.
+
+## Choosing a format
+
+```bash
+dalfox https://target.app -f json -o report.json
+```
+
+| Format | Flag | Machine-readable | Best for |
+|--------|------|------------------|----------|
+| `plain` | `-f plain` (default) | No | Human terminal output |
+| `json` | `-f json` | Yes | Single JSON doc, dashboards, `jq` |
+| `jsonl` | `-f jsonl` | Yes | Streaming, log pipelines |
+| `markdown` | `-f markdown` | No | Reports, pull-request comments |
+| `sarif` | `-f sarif` | Yes | GitHub code scanning, SARIF consumers |
+| `toml` | `-f toml` | Yes | Humans + pipelines |
+
+## Writing to a file
+
+```bash
+dalfox https://target.app -f jsonl -o findings.jsonl
+```
+
+Without `-o`, output goes to `stdout`.
+
+## Result fields
+
+Every finding includes:
+
+| Field | Example | Meaning |
+|-------|---------|---------|
+| `type` | `V`, `A`, `R`, `I` | Verified / AST-detected / Reflected / Informational |
+| `type_description` | `"Verified"` | Human label |
+| `inject_type` | `"inHTML"` | Context (`inHTML`, `inAttr`, `inJS`, …) |
+| `method` | `"GET"` | HTTP method |
+| `param` | `"q"` | Parameter that was exploited |
+| `payload` | `<svg/onload=alert(1)>` | The exact payload |
+| `evidence` | `"payload reflected in response"` | Why Dalfox believes it |
+| `cwe` | `"CWE-79"` | Standard CWE |
+| `severity` | `"High"` | High / Medium / Low / Info |
+| `message_str` | `"XSS found"` | Short message |
+
+`V` / `A` / `R` are XSS findings. `I` (**Informational**) is a non-exploitable
+observation — currently only **outdated / known-vulnerable JS libraries**
+(`inject_type: "OutdatedComponent"`, `CWE-1104`), rendered as a compact
+`[INF]` line with no payload/parameter. It is **opt-in**: Dalfox focuses on
+verified XSS by default, so library reporting is off unless you pass
+`--detect-outdated-libs` (it adds **0 extra requests** — it inspects the
+preflight response's `<script>` tags). Filter it out with `--only-poc v,a,r`.
+
+Optionally include the full request/response:
+
+```bash
+dalfox https://target.app -f json --include-all -o report.json
+# or granularly:
+dalfox ... --include-request
+dalfox ... --include-response
+```
+
+## Scan metadata envelope
+
+JSON, JSONL, SARIF, TOML, and Markdown outputs now all carry the same scan-level metadata envelope (previously JSON/JSONL only; see [#1093](https://github.com/hahwul/dalfox/issues/1093)):
+
+- `dalfox_version`
+- `targets` (the input targets)
+- `scan_duration_ms`
+- `total_requests`
+- `findings_count`
+- `target_summary[]` — per-target status, findings count, error_code (if skipped), and WAF/bypass details when detected
+
+In **SARIF** the envelope is duplicated under `runs[0].properties` and `runs[0].tool.driver.properties` so GitHub code scanning and other consumers retain context.
+
+In **TOML** it appears as a top-level `[meta]` table (findings under `[[results]]`).
+
+In **Markdown** it is rendered as human-readable tables (`## Scan Metadata` + `### Target Summary`) above the findings summary.
+
+Plain text output remains findings-focused only.
+
+## Silence mode
+
+Emit **only findings** on `stdout`, no logs:
+
+```bash
+dalfox https://target.app --silence
+# Pipe findings into another tool:
+cat urls.txt | dalfox --silence -f jsonl | jq 'select(.severity=="High")'
+```
+
+Useful in shell pipelines and cron jobs.
+
+## Streaming findings during long scans
+
+By default the plain renderer prints each finding block (POC + Issue /
+Payload / Line) **after** the end-of-scan `WRN XSS found N XSS` summary,
+so the log reads in natural order: start → progress → summary → details.
+
+For long scans against large targets, you can flip to mid-scan emission
+with `--stream-findings`. Each finding is printed the moment it is
+verified, above the progress bars:
+
+```bash
+dalfox https://target.app --stream-findings
+```
+
+`--stream-findings` only affects the `plain` format and is auto-disabled
+when the end-of-scan path needs to apply filters the streamer can't
+mirror cleanly (`--output`, `--limit`, `--only-poc`).
+
+## POC styles
+
+Re-render the proof-of-concept in different client shapes:
+
+```bash
+dalfox https://target.app --poc-type curl      # curl command
+dalfox https://target.app --poc-type httpie    # HTTPie
+dalfox https://target.app --poc-type http-request  # raw HTTP
+```
+
+Default is `plain`. Good for filing tickets.
+
+## Filtering
+
+Show only certain result types:
+
+```bash
+dalfox https://target.app --only-poc v     # only verified
+dalfox https://target.app --only-poc v,a   # verified + AST
+```
+
+Cap the number of results:
+
+```bash
+dalfox https://target.app --limit 50
+dalfox https://target.app --limit 10 --limit-result-type v
+```
+
+## Colour & TTY behaviour
+
+```bash
+dalfox https://target.app --no-color
+# or
+NO_COLOR=1 dalfox https://target.app
+```
+
+Dalfox also auto-disables colour when output is redirected to a file or a non-TTY.
+
+## TOML
+
+Same data shape as JSON (plus top-level `[meta]` envelope for parity with other formats), written as TOML. Findings render as a `[[results]]` array of tables:
+
+```toml
+[meta]
+dalfox_version = "3.x"
+targets = ["https://target.app"]
+scan_duration_ms = 1234
+total_requests = 87
+findings_count = 1
+target_summary = [{ target = "https://target.app", status = "findings", findings_count = 1 }]
+
+[[results]]
+type = "V"
+type_description = "Verified"
+inject_type = "inHTML"
+method = "GET"
+data = "https://target.app/search?q=%3Csvg%2Fonload%3Dalert%281%29%3E"
+param = "q"
+payload = "<svg/onload=alert(1)>"
+evidence = "payload reflected and DOM element verified"
+location = "Query"
+cwe = "CWE-79"
+severity = "High"
+message_id = 606
+message_str = "XSS found"
+```
+
+```bash
+dalfox https://target.app -f toml -o report.toml
+```
+
+## SARIF → GitHub code scanning
+
+```bash
+dalfox scan urls.txt -f sarif -o dalfox.sarif
+```
+
+Upload `dalfox.sarif` through GitHub's `upload-sarif` action, and findings appear in the repository's **Security → Code scanning** tab.
+
+## CI example
+
+```yaml
+# .github/workflows/xss-scan.yml
+- name: Dalfox scan
+  run: dalfox scan scope.txt -f sarif -o dalfox.sarif --silence --waf-evasion
+
+- uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: dalfox.sarif
+```
+
+## Exit codes
+
+Dalfox returns:
+
+| Code | Meaning |
+|------|---------|
+| `0` | Completed successfully, no findings |
+| `1` | Completed successfully, at least one finding |
+| `2` | Input/config/runtime error |
+
+Use `1` as a CI gate only if you're comfortable failing the build on any finding. Most teams gate on `severity >= High` using `jq` on JSON output.
+
+## Next
+
+- Automate scans via the [REST API Server](../../integrations/server/).
+- Let an AI driver handle it with the [MCP Server](../../integrations/mcp/).
+
+---
+
+Title: Parameters & Discovery
+URL: https://dalfox.hahwul.com/guide/parameters/
+Source: content/guide/parameters.md
+
+Finding XSS starts with finding the right parameter. Dalfox's discovery engine is a multi-stage pipeline; you rarely need to understand all of it, but knowing the moving parts helps when you want to tune a scan.
+
+## The pipeline, briefly
+
+1. **Discovery:** Extract parameters from the URL, body, headers, cookies, path, fragment, and form fields.
+2. **Mining:** Extend with DOM analysis (parameter names embedded in JS), dictionary wordlists, and framework-specific patterns.
+3. **Active probing:** Fire a probe for each parameter to learn which special characters survive.
+4. **Fast probe:** A single sandwich-marker request per discovered parameter. If neither a partial nor a full reflection shows up, the heavy payload loops are skipped for that parameter.
+5. **Payload generation:** Build context-aware payloads (HTML, JS, attribute, CSS).
+6. **Reflection check:** Send the payload, then see whether it comes back.
+7. **DOM verification:** Parse the response and confirm the payload forms a real element. AST-based DOM-XSS analysis runs in parallel using the response captured during the fast probe.
+
+## Targeting specific parameters
+
+Tell Dalfox exactly which parameters to test:
+
+```bash
+dalfox https://target.app/api \
+  -p q \
+  -p id:query \
+  -p auth:header \
+  -p token:cookie
+```
+
+Locations: `query`, `body`, `json`, `cookie`, `header`. Without a hint, Dalfox places the parameter wherever the target already exposes it.
+
+## Mining with wordlists
+
+Even if a parameter isn't in the URL, Dalfox can try common names:
+
+```bash
+# Local wordlist
+dalfox https://target.app -W ./params.txt
+
+# Remote wordlists (cached after first fetch)
+dalfox https://target.app --remote-wordlists burp,assetnote
+```
+
+### Auto-collapse
+
+Highly reflective sites (e.g., a search page that echoes everything) can cause wordlist mining to explode. Dalfox protects against this two ways:
+
+- **Sentinel pre-probe:** Before iterating the wordlist, three random parameter names that should never collide with real fields are tested. If every one reflects, the page is a mirror; mining is skipped and a single synthetic `any` Query parameter takes its place. Cost ceiling: 3 requests, regardless of wordlist size. Runs only when the wordlist is large enough (>15 entries) for the pre-probe to pay off.
+- **EWMA collapse:** While iterating, Dalfox watches the rolling reflection ratio. Once it stays ≥85% after at least 15 attempts, mining stops and any Query params already collected are folded into the same `any` placeholder.
+
+Both routes produce identical downstream state: Stage 5–7 sees one Query injection point regardless of which trigger fired.
+
+## Pruning the noise
+
+Ignore specific parameters:
+
+```bash
+dalfox https://target.app --ignore-param csrf --ignore-param __RequestVerificationToken
+```
+
+Scope by URL pattern:
+
+```bash
+dalfox scan urls.txt \
+  --include-url '^https://api\.target\.app/' \
+  --exclude-url '/static/|/health'
+```
+
+Out-of-scope domain list:
+
+```bash
+dalfox scan urls.txt --out-of-scope-file scope-block.txt
+# or inline, with wildcards
+dalfox scan urls.txt --out-of-scope '*.google.com,*.cdn.cloudflare.net'
+```
+
+## Only discover, don't attack
+
+Dry-run mode discovers and prints the attack plan without sending payloads:
+
+```bash
+dalfox https://target.app --dry-run
+```
+
+Discovery-only mode is similar but completes the probing stage:
+
+```bash
+dalfox https://target.app --only-discovery
+```
+
+Both help with scoping and CI pre-checks.
+
+## Skipping stages
+
+To move faster or work around a fragile target, skip parts of the pipeline:
+
+| Flag | Skips |
+|------|-------|
+| `--skip-discovery` | Entire discovery stage |
+| `--skip-mining` | All wordlist/DOM mining |
+| `--skip-mining-dict` | Dictionary mining only |
+| `--skip-mining-dom` | DOM mining only |
+| `--skip-reflection-header` | Header reflection checks |
+| `--skip-reflection-cookie` | Cookie reflection checks |
+| `--skip-reflection-path` | Path reflection checks |
+
+## Injection markers
+
+Some endpoints need the payload in a specific location (e.g., inside a JWT). Use `--inject-marker`:
+
+```bash
+dalfox https://target.app/api \
+  --inject-marker FUZZ \
+  -d '{"filter":"FUZZ"}'
+```
+
+Dalfox replaces every `FUZZ` with each payload and sends the request.
+
+## Auto pre-encoding
+
+Some endpoints don't accept a payload as raw text. They expect it wrapped in some structural encoding (base64, JSON, JWT, and so on). Dalfox inspects each parameter's existing value during discovery and, when it recognises a structure, builds a transparent encoding pipeline so payloads round-trip through the same wrapping. There's nothing to configure: look for `pre_encoding` or `pre_encoding_pipeline` in debug output.
+
+Single-step encodings are detected on the existing parameter value:
+
+| Detected | Encodes payload as |
+|----------|-------------------|
+| `base64` | `BASE64(payload)` |
+| `2base64` | `BASE64(BASE64(payload))` |
+| `2url` / `3url` | Two- or three-round URL encoding |
+
+Composable pipelines turn the value's structure into a chain of transformations. When the existing value decodes as a structured wrapper, Dalfox enumerates every leaf string field as its own virtual sub-parameter:
+
+| Wrapper shape | Pipeline |
+|---------------|----------|
+| Base64-of-JSON `?qs=eyJ…` | `JsonField(/leaf) → Base64` |
+| Base64URL-of-JSON | `JsonField(/leaf) → Base64Url` |
+| Bare URL-encoded JSON `?blob=%7B…%7D` | `JsonField(/leaf)` |
+| JWT/JWS `?token=h.p.s` | `JsonField(/leaf) → Base64Url → JwtAssemble` |
+
+Each leaf is registered as a separate Param using bracket-style display naming. A payload at the `move_url` field of `qs` shows up as `qs[move_url]`, and an array element appears as `qs[items][0]`. The wire-level substitution still targets the original parent param (`qs`), so the request looks normal to the server.
+
+For JWTs the original header and signature segments are preserved verbatim. The signature won't match the modified payload, so this only fires on endpoints that don't verify the token. Properly-signed JWTs return no findings. That's expected behaviour, not a miss.
+
+If your target uses a wrapping that Dalfox doesn't auto-detect, you can still force the injection point with `--inject-marker` (see below).
+
+## Reflection probe shape
+
+Every discovery and mining probe sends a sandwich marker (`OPEN + INNER + CLOSE`) instead of a single token. The response is then classified into one of four cases:
+
+| Reflection | Meaning |
+|------------|---------|
+| **Full** | The complete `OPEN+INNER+CLOSE` survived. Standard reflection. |
+| **PrefixOnly** | `OPEN+INNER` is present, `CLOSE` was stripped. Suggests a suffix-strip filter. |
+| **SuffixOnly** | `INNER+CLOSE` is present, `OPEN` was stripped. Suggests a prefix-strip filter. |
+| **InnerOnly** | Only `INNER` survives. Suggests a regex extract or both wraps removed. |
+
+All four are treated as "reflected": discovery records the parameter and the scan proceeds. A naive single-token check would have missed every case except *Full*, leaving prefix-/suffix-stripping endpoints undetected. The marker tokens are scan-unique (`dlx`/`dlxmid`/`xld` prefixes plus 8 hex chars per scan), so accidental collisions in HTML are negligible.
+
+## What makes a finding "verified"
+
+| Result | How it's confirmed |
+|--------|--------------------|
+| **V** (Verified) | Dalfox parses the response DOM and finds direct evidence of execution. The `evidence` field tags the path that proved it: DOM marker (CSS selector hit), executable URL (`javascript:`/`data:` in a dangerous attribute), HTML structural (an injected element with an `on*` handler whose value is a sink call), or JS-context AST (a sink call inside `<script>` that the parsed AST shows is covered by the payload's byte range). |
+| **A** (AST-detected) | Static JavaScript analysis traced a user-controlled source to a dangerous sink (e.g., `innerHTML = location.hash`). |
+| **R** (Reflected) | Payload text appeared in the response body, but no DOM evidence yet. Still worth investigating manually. |
+
+`V` and `A` are the signals. `R` is a hint.
+
+## Safe contexts
+
+Dalfox ignores reflections inside `<textarea>`, `<title>`, `<noscript>`, `<style>`, `<xmp>`, and `<plaintext>`. Content there doesn't execute, so it would only produce false positives.
+
+## Next
+
+- See how payloads are built in [Payloads &amp; Encoding](../payloads/).
+- Dealing with a WAF? Jump to [WAF Bypass](../waf-bypass/).
+
+---
+
+Title: Payloads & Encoding
+URL: https://dalfox.hahwul.com/guide/payloads/
+Source: content/guide/payloads.md
+
+Dalfox ships with a curated, context-aware payload library. Most of the time you don't need to think about it. The engine picks the right payloads for each injection context. This page covers what's built in and how to extend it.
+
+## Payload families
+
+Dalfox composes payloads from several families:
+
+| Family | Example | Used when |
+|--------|---------|-----------|
+| **HTML tag** | `<svg onload=alert(1)>` | HTML context |
+| **Attribute breakout** | `'><img src=x onerror=alert(1)>` | Inside an attribute |
+| **JavaScript** | `";alert(1);//` | Inside a `<script>` block |
+| **Event handler** | `onmouseover=alert(1)` | Existing attribute value |
+| **DOM clobbering** | `<img id=x>` | Legacy DOM lookups |
+| **URL protocol** | `javascript:alert(1)` | `href`/`src`-like attributes |
+| **CSP bypass** | `strict-dynamic` script gadgets, nonce reuse, JSONP on allowed hosts | When the response carries a bypassable CSP |
+| **mXSS** | `<foreignobject>`/DOMPurify bypasses | Sanitizer-mutated DOM |
+| **Blind** | `<script src=//callback/></script>` | `--blind` is set |
+
+Each payload template carries a marker (`class={CLASS}` or `id={ID}`) so the verification stage can positively identify its own element in the DOM.
+
+## Context-aware selection
+
+During discovery Dalfox classifies each parameter by **injection context**, the place where its reflected value lands:
+
+- HTML body → HTML/attribute-breakout payloads
+- Inside a quoted attribute → attribute-breakout payloads
+- Inside `<script>` → JS-breakout payloads
+- Inside `<style>` → CSS payloads
+- Unknown → fallback mix of HTML + attribute
+
+This keeps request counts sane while maximising hit rate.
+
+## CSP-aware bypass payloads
+
+When the preflight stage sees a `Content-Security-Policy` (or `…-Report-Only`)
+header — or a `<meta http-equiv>` equivalent — Dalfox parses it and tailors the
+script-execution payloads to that policy's actual weaknesses. Payloads are only
+generated for the directives that are genuinely exploitable, so a target with no
+CSP (or a hardened one) sees no extra requests.
+
+| CSP shape | What Dalfox emits |
+|-----------|-------------------|
+| `unsafe-inline` / `unsafe-eval` | direct inline / `eval`-family payloads |
+| missing `base-uri` / `object-src` | `<base>` hijack / `<object>`/`<embed>` injection |
+| `data:` / `blob:` in `script-src` | `<script src=data:…>` / `Blob` URL loaders |
+| whitelisted CDN host | the matching JSONP / framework **script gadget** for that host |
+| `strict-dynamic` | DOM script-gadgets (RequireJS `data-main`, `document.write` self-propagation, AngularJS bootstrap) plus **nonce reuse** when a nonce is captured |
+
+Two modern shapes that earlier releases parsed but never acted on are now live:
+
+- **`strict-dynamic`.** Under `strict-dynamic` the browser ignores the host
+  allowlist, so a plain `<script src=allowed-host>` no longer loads. Dalfox
+  switches to DOM script-gadgets — payloads that get an already-trusted script
+  to create the attacker script — and, when the policy pins a nonce, emits a
+  `<script nonce=…>` reuse payload (effective when the nonce is static,
+  predictable, or reflected).
+- **Nonce / hash pinning.** `'nonce-…'` and `'sha256-…'` tokens are parsed and
+  used to classify the policy. A pure random-nonce/hash policy with no
+  `strict-dynamic` and no gadget host is treated as *hardened* — Dalfox does not
+  waste requests on it.
+
+The gadget set lives in an embedded, extensible database (JSONBee / H5SC /
+Google CSP-Evaluator shapes) rather than a hardcoded list, so coverage grows
+without touching the analyzer.
+
+## Trusted Types awareness
+
+[Trusted Types](https://web.dev/articles/trusted-types) is the primary DOM-XSS
+mitigation in hardened apps. Dalfox's AST DOM-XSS analyzer understands it:
+
+- A **strict** policy callback — `createPolicy('p', {createHTML: s => DOMPurify.sanitize(s)})`
+  — clears taint just like any other sanitizer, so values routed through
+  `p.createHTML(x)` no longer report.
+- A **permissive** default policy — the classic bypassable no-op
+  `createPolicy('default', {createHTML: x => x})` — is *not* mistaken for
+  protection; the finding is kept and flagged.
+- When the response CSP enforces `require-trusted-types-for 'script'` **and** the
+  page defines a strict `'default'` policy, the browser auto-sanitizes every
+  TrustedHTML sink — Dalfox suppresses those now-false-positive findings.
+
+The classifier is deliberately conservative: anything it can't prove safe stays
+permissive, so the finding is kept. Suppression never fires without enforcement,
+so a page that defines a default policy but forgets `require-trusted-types-for`
+still reports — no false negatives are introduced.
+
+## Encoders
+
+Encoders transform the *same payload* into multiple forms so the WAF and server-side filters don't all see the same bytes.
+
+```bash
+dalfox https://target.app -e url,html,base64
+```
+
+Available encoders:
+
+| Encoder | Transforms `<` to |
+|---------|-------------------|
+| `none` | `<` (raw) |
+| `url` | `%3C` |
+| `2url` | `%253C` (double) |
+| `3url` | `%25253C` (triple) |
+| `4url` | quadruple URL |
+| `html` | `&#x003c;` |
+| `htmlpad` | zero-padded HTML entity |
+| `base64` | base64 of payload |
+| `unicode` | fullwidth mapping |
+| `zwsp` | zero-width space insertion |
+
+Defaults: `url,html`. If you add `none` to the list, Dalfox sends only the raw payloads.
+
+## Custom payloads
+
+Provide your own list, one payload per line:
+
+```bash
+dalfox https://target.app --custom-payload mypayloads.txt
+```
+
+Swap out the built-in library entirely:
+
+```bash
+dalfox https://target.app --custom-payload mypayloads.txt --only-custom-payload
+```
+
+## Remote payload sources
+
+Pull community wordlists on demand:
+
+```bash
+dalfox https://target.app --remote-payloads portswigger,payloadbox
+```
+
+Supported sources: `portswigger`, `payloadbox`. Fetched once per run, respecting `--proxy` and `--timeout`.
+
+## Inspecting payloads
+
+Print a payload family without running a scan:
+
+```bash
+dalfox payload event-handlers  # onerror, onmouseover, ...
+dalfox payload useful-tags     # svg, img, script, ...
+dalfox payload uri-scheme      # javascript:, data:
+dalfox payload portswigger     # fetch + print remote list
+```
+
+## Customising the "alert"
+
+The classic `alert(1)` can be loud. Swap it out so you can prove impact without popping dialogs everywhere:
+
+```bash
+dalfox https://target.app \
+  --custom-alert-value "document.domain" \
+  --custom-alert-type str
+```
+
+- `--custom-alert-value`: value passed to `alert`/`prompt`/`confirm` (default `1`).
+- `--custom-alert-type`: `none` keeps the original function, `str` wraps the value in quotes.
+
+## Blind XSS
+
+Blind XSS fires later, in a context you can't see (an admin panel, a support agent's dashboard). You need an out-of-band listener:
+
+```bash
+dalfox https://target.app -b https://your-callback.interact.sh
+```
+
+Custom blind templates:
+
+```bash
+dalfox https://target.app \
+  -b https://your-callback.example \
+  --custom-blind-xss-payload blind-templates.txt
+# each line may contain {} (replaced with the callback URL)
+```
+
+## HTTP Parameter Pollution (HPP)
+
+Some filters only inspect the *first* occurrence of a parameter. Dalfox can duplicate parameters to slip a payload into the second slot:
+
+```bash
+dalfox https://target.app --hpp
+```
+
+## Deep scan
+
+By default Dalfox stops testing a parameter once it finds a verified payload. `--deep-scan` keeps going:
+
+```bash
+dalfox https://target.app --deep-scan
+```
+
+Useful for research; slower for production pipelines.
+
+## Skipping payload stages
+
+| Flag | Effect |
+|------|--------|
+| `--skip-xss-scanning` | Discover and probe only; no payload injection |
+| `--skip-ast-analysis` | Skip AST-based DOM-XSS detection |
+
+## Next
+
+- Pair this with [WAF Bypass](../waf-bypass/) to bend payloads around filters.
+- See [Output &amp; Reports](../output/) to export findings.
+
+---
+
+Title: Scanning Modes
+URL: https://dalfox.hahwul.com/guide/scanning-modes/
+Source: content/guide/scanning-modes.md
+
+Dalfox accepts targets in several shapes. Every mode shares the same discovery, payload, and verification engine; they differ only in how you feed URLs in and where results go.
+
+Under the hood there are four subcommands: `scan` (the scanner), `server` (long-lived REST API), `payload` (payload utilities), and `mcp` (Model Context Protocol stdio server). Everything below labelled "URL / File / Pipe / Raw HTTP / HAR / SXSS" is a *shape of input* that the `scan` subcommand handles via `--input-type`; they are not independent subcommands.
+
+> The fan-out input shapes (`file`, `pipe`, `raw-http`, `har`) are `scan`-only: each expands one input into many targets. The `server` and `mcp` interfaces are single-target per call — they take one URL plus explicit method/headers/cookies/body (the same fidelity one HAR entry carries), so you replay a captured session by issuing one call per request.
+
+## Auto (default)
+
+Just give Dalfox a URL. It figures out the rest.
+
+```bash
+dalfox https://target.app/search?q=test
+```
+
+Under the hood, Dalfox uses the `scan` subcommand with `--input-type auto`. It auto-detects whether the argument is a URL, a file path, or a stream on `stdin`.
+
+## URL mode
+
+Force URL parsing (rarely needed, useful in scripts):
+
+```bash
+dalfox scan --input-type url https://target.app
+```
+
+## File mode
+
+Scan a list of URLs, one per line:
+
+```bash
+# urls.txt
+# https://target.app/search?q=1
+# https://target.app/profile?id=2
+dalfox scan urls.txt
+# or, explicit:
+dalfox scan --input-type file urls.txt
+```
+
+Comments (`#`) and blank lines are ignored. Each URL runs through the full pipeline.
+
+## Pipe mode
+
+Read from `stdin`, the common case when chaining recon tools:
+
+```bash
+cat urls.txt | dalfox scan
+waybackurls example.com | gf xss | dalfox scan
+hakrawler -url https://target.app | dalfox scan
+```
+
+Dalfox buffers the input, deduplicates, and scans every line as a target.
+
+## Raw HTTP mode
+
+Save a request you captured in Burp, Caido, or ZAP to a file and hand it to Dalfox:
+
+```bash
+dalfox scan --input-type raw-http request.txt
+```
+
+The file is a standard raw HTTP request (method + path + headers + blank line + body). Dalfox preserves every header, cookie, and body parameter.
+
+For live proxy workflows (especially Caido Active Workflows) see the dedicated **[Caido integration guide](../integrations/caido/)**. It covers the exact shell pattern, the Caido boolean gotcha in If/Else nodes, and how to turn results into Findings automatically.
+
+## HAR mode
+
+Hand Dalfox a whole [HAR](http://www.softwareishard.com/blog/har-12-spec/) (HTTP Archive) export — the JSON capture that browser DevTools and intercepting proxies (Burp, Caido, ZAP, Charles, mitmproxy) produce — and it scans every request in it, preserving each one's URL, method, headers, cookies, and body:
+
+```bash
+# Auto-detected from the file content:
+dalfox scan capture.har
+# or explicit:
+dalfox scan --input-type har capture.har
+# or piped from another tool:
+mitmdump -nr flows -w /dev/stdout --set hardump=- | dalfox scan -i har
+```
+
+Unlike flattening a HAR to a plain list of URLs (which throws away method, headers, cookies, and body), HAR mode keeps the full shape of each captured request, so a POST with a JSON body or an authenticated session is replayed faithfully. Each `log.entries[].request` becomes one target; requests are deduplicated by URL + method and run through the same scope filters as every other mode. Non-`http(s)` entries (`data:`, `blob:`, WebSocket, browser-extension URLs) are skipped automatically.
+
+This restores a capability the Go v2.x line had that the v3 rewrite initially dropped. CLI request flags still apply on top — e.g. `-H "Authorization: Bearer …"` is appended to every entry, and `--include-url` / `--out-of-scope` narrow the set.
+
+## Stored XSS mode (SXSS)
+
+Test the classic "inject on form A, payload appears on page B" pattern:
+
+```bash
+dalfox scan https://target.app/post-comment \
+  --sxss \
+  --sxss-url https://target.app/comments
+```
+
+Dalfox injects into the first URL, then fetches the second to check whether the payload landed. See the [Stored XSS guide](../stored-xss/) for the full flow.
+
+## Server mode
+
+Run Dalfox as a long-lived HTTP service. Submit scans via REST, poll for results, cancel running jobs:
+
+```bash
+dalfox server --port 6664 --api-key "$DALFOX_API_KEY"
+```
+
+See [REST API Server](../../integrations/server/) for endpoints and request shapes.
+
+## MCP mode
+
+Expose Dalfox as a [Model Context Protocol](https://modelcontextprotocol.io) server so AI agents and IDEs (like Claude) can drive scans:
+
+```bash
+dalfox mcp
+```
+
+The tools (`scan_with_dalfox`, `get_results_dalfox`, `list_scans_dalfox`, `cancel_scan_dalfox`, `delete_scan_dalfox`, `preflight_dalfox`) are described in [MCP Server](../../integrations/mcp/).
+
+## Payload mode (utility)
+
+Not a scanning mode, but useful alongside: print or fetch payloads without running a scan.
+
+```bash
+dalfox payload event-handlers    # list DOM event handlers
+dalfox payload useful-tags       # list useful HTML tags
+dalfox payload portswigger       # fetch PortSwigger XSS cheatsheet
+dalfox payload payloadbox        # fetch PayloadBox XSS list
+dalfox payload uri-scheme        # print javascript:/data: payloads
+```
+
+## Choosing a mode
+
+| You want to… | Use |
+|--------------|-----|
+| Test one URL | Auto / URL |
+| Scan a list from your crawler | File or Pipe |
+| Replay a specific request | Raw HTTP |
+| Replay a whole captured session (proxy/DevTools export) | HAR |
+| Test a form that writes to another page | SXSS |
+| Run many scans from a dashboard or CI | Server |
+| Let an AI agent drive scans | MCP |
+| Just see what payloads Dalfox would send | Payload utility or `--dry-run` |
+
+---
+
+Title: Stored XSS
+URL: https://dalfox.hahwul.com/guide/stored-xss/
+Source: content/guide/stored-xss.md
+
+A Stored XSS lives on the server: you submit it once (a comment, a profile field, a chat message) and it triggers every time someone views that page. Dalfox has a dedicated mode for this pattern.
+
+## The basic flow
+
+```bash
+dalfox https://target.app/post-comment \
+  --sxss \
+  --sxss-url https://target.app/comments
+```
+
+Dalfox will:
+
+1. **Inject** each payload into the first URL (`post-comment`).
+2. **Retrieve** the second URL (`comments`) with a GET (configurable via `--sxss-method`).
+3. **Verify** whether the payload reflects in the retrieval response, and whether it produced a real DOM element.
+
+Only findings that survive both steps are reported as SXSS.
+
+## Choosing the retrieval URL
+
+Pick the page the stored value **reads** from. Examples:
+
+| Injection URL | Retrieval URL |
+|---------------|---------------|
+| `POST /comments/new` | `GET /post/123/comments` |
+| `PATCH /profile` | `GET /u/myself` |
+| `POST /support/ticket` | `GET /admin/tickets` (if you have admin access) |
+
+If you omit `--sxss-url`, Dalfox tries to auto-detect it from the response headers (e.g., a `Location` redirect after a POST).
+
+## Retrieval method
+
+```bash
+dalfox https://target.app/form --sxss \
+  --sxss-url https://target.app/list \
+  --sxss-method GET
+```
+
+`GET` is the default. Use `POST` or others if the retrieval endpoint needs it.
+
+## Authentication
+
+Stored-XSS often requires two sessions: one that writes (user), and one that reads (admin). Use headers/cookies that grant enough access for the retrieval GET to see what you wrote.
+
+```bash
+dalfox https://target.app/profile \
+  --sxss --sxss-url https://target.app/admin/users \
+  -H "Cookie: admin_session=abc; role=admin"
+```
+
+## Blind + stored
+
+If the retrieval page is behind a login you don't have, switch to blind XSS. The payload fires on the admin's browser, and your callback server records it:
+
+```bash
+dalfox https://target.app/support/ticket \
+  -b https://callback.interact.sh
+```
+
+You still need to wait for someone to view the page; the callback tells you when it happens.
+
+## Tips
+
+- **Scope narrowly.** Use `-p` to name the field(s) you know are rendered on the retrieval URL. That way Dalfox isn't testing every cookie.
+- **Watch for sanitisation-then-render.** Stored XSS often survives a HTML sanitizer on write but breaks on a second sanitization on read. Dalfox's mXSS payloads are tuned for this.
+- **Slow down.** Some apps debounce or batch writes. A small `--delay` helps the retrieval see your payload.
+
+## Next
+
+- [Payloads &amp; Encoding](../payloads/) for tuning the injected payloads.
+- [Output &amp; Reports](../output/) for shipping findings.
+
+---
+
+Title: WAF Bypass
+URL: https://dalfox.hahwul.com/guide/waf-bypass/
+Source: content/guide/waf-bypass.md
+
+Most real targets sit behind a WAF. Dalfox fingerprints the WAF, then automatically chooses an evasion strategy: extra encoders and payload mutations tuned to that specific WAF's rules.
+
+## How it works
+
+1. Dalfox sends a small set of **fingerprint probes** to the target.
+2. If a known WAF signature shows up (headers like `cf-ray`, body markers like "Attention required!", or a 429/403 shape), Dalfox notes the WAF and its confidence.
+3. The scanner merges the WAF's **extra encoders** into your encoder list and adds the WAF's **mutation list** to the payload generator.
+4. Payload mutations are capped (4 variants per base payload) so request volume stays sane. The cap only applies once a WAF is detected, so the extra effort lands exactly on the scans that need it.
+
+This is all on by default. You only touch flags if you want to disable or steer it.
+
+## Supported WAFs
+
+- Cloudflare
+- AWS WAF
+- Akamai
+- Imperva / Incapsula
+- ModSecurity
+- OWASP CRS
+- Sucuri
+- F5 BIG-IP
+- Barracuda
+- FortiWeb
+- Azure WAF
+- Google Cloud Armor
+- Fastly
+- Wordfence
+
+Unrecognised WAFs trigger a generic fallback strategy.
+
+## Tuning the behaviour
+
+### Auto (default)
+
+```bash
+dalfox https://target.app
+# equivalent to:
+dalfox https://target.app --waf-bypass auto
+```
+
+### Force a specific WAF
+
+Skip fingerprinting and apply a chosen WAF's strategy directly:
+
+```bash
+dalfox https://target.app \
+  --waf-bypass force \
+  --force-waf cloudflare
+```
+
+Handy when the WAF masks its headers or sits behind a CDN.
+
+### Disable WAF logic
+
+```bash
+dalfox https://target.app --waf-bypass off
+```
+
+No extra encoders, no mutations: just your configured payloads.
+
+### Skip the probe
+
+```bash
+dalfox https://target.app --skip-waf-probe
+```
+
+Still uses header-based passive detection, but no provocation requests. Use when the target is flaky and you don't want to burn rate limit on a probe.
+
+### Evasion throttle
+
+When a WAF is detected, `--waf-evasion` switches Dalfox to **adaptive timing** instead of a blunt slowdown: it randomizes the inter-request interval (jitter) so the cadence can't be fingerprinted, and escalates a cooldown pause whenever it sees a cluster of blocked responses (403/406/429/503). The per-WAF pacing hint is also applied automatically on detection, even without the flag.
+
+```bash
+dalfox https://target.app --waf-evasion
+```
+
+For a hard ceiling on the request rate — independent of WAF detection and shared across **all** workers and targets — combine it with `--rate-limit` (requests/second). This is the right knob when scanning behind a shared IP or against an edge WAF with a global threshold, since `--delay` only spaces a single worker:
+
+```bash
+# At most 15 requests/second across the whole scan, with adaptive evasion
+dalfox https://target.app --rate-limit 15 --waf-evasion
+```
+
+Transient failures (5xx, timeouts, connection resets) can be retried with `--retries` / `--retry-delay`; HTTP 429 is always retried with `Retry-After` honored.
+
+### Filter weak fingerprints
+
+Each fingerprint carries a confidence score (0.0–1.0). Generic markers like `Request blocked` (0.3) or `Server: Google Frontend` (0.15) sometimes false-positive on benign origins. Use `--waf-min-confidence` to discard anything below the threshold:
+
+```bash
+# Keep only confident matches (drops 0.3/0.15 noise)
+dalfox https://target.app --waf-min-confidence 0.7
+```
+
+Default is `0.3` (suppresses weak/generic matches like `Server: Google Frontend`). Pass `--waf-min-confidence 0.0` to keep every match, or raise it when you suspect noisy passive detection is steering Dalfox into the wrong evasion strategy.
+
+## Mutation tactics (under the hood)
+
+Different WAFs fall to different tricks. A small sample:
+
+| Mutation | Example | Works against |
+|----------|---------|---------------|
+| **HTML comment split** | `<scr<!---->ipt>` | Signature regex |
+| **JS comment split** | `al/**/ert(1)` | Keyword filters |
+| **Backtick call** | `` alert`1` `` | `alert(` regex |
+| **Constructor chain** | `[].constructor.constructor('alert(1)')()` | Heavy keyword blocks |
+| **Unicode JS escape** | `alert(1)` | JS-token filters |
+| **Slash separator** | `<svg/onload=alert(1)/class=x>` | CRS 941160 |
+| **SVG animate** | `<svg><animate onbegin=alert(1) attributeName=x>` | CRS 941110 |
+| **HTML entity parens** | `alert&#40;1&#41;` | CRS 941370 |
+| **Exotic whitespace** | form-feed / vertical tab | CRS 941320 |
+| **Case alternation** | `<ScRiPt>` | Case-sensitive rules |
+| **zwsp insertion** | `al​ert(1)` | Lexer-based detection |
+| **Keyword entity encode** | `onerror=&#97;lert(1)` | `alert`/handler keyword regex (attribute-decoded) |
+| **Multi-slash** | `<img/src=x/onerror=alert(1)>` | Regexes anchored on `\s` between later attributes |
+| **Scheme break** | `href=java&#9;script:alert(1)` | Literal `javascript:` scheme regex (URL-parser strips the TAB) |
+| **Entity scheme** | `href=&#106;avascript:alert(1)` | Literal `javascript:` scheme regex (attribute-decoded) |
+
+The last four exploit that the HTML tokenizer decodes character references **inside attribute values** before the URL parser or the event-handler JS compiler sees them. They fire only in attribute / event-handler / `javascript:`-URL context and are skipped for bare body text and `<script>`/`<style>` payloads, where no entity decoding happens.
+
+You don't configure these directly; they're selected automatically per WAF. To inspect what's happening, run with `--debug`.
+
+## Inspection-window overflow
+
+Some WAFs (e.g. AWS WAF-style configs) only inspect the **first N bytes** of a parameter value. A vector at the start of the value trips a block, but the same vector reflects untouched once it's pushed past the inspected window.
+
+During active probing, when a parameter's special-character probe comes back fully blocked, Dalfox re-tries it behind a long benign filler prefix. If the characters now reflect, it concludes the value sits behind a size-limited inspection window and automatically prepends that filler to every payload for the parameter — so the real vector always lands past the window. The reported PoC URL includes the filler, so it reproduces as-is. This is automatic; nothing to configure.
+
+## Combining with encoders
+
+Your `--encoders` list and the WAF's extra encoders are merged. So this:
+
+```bash
+dalfox https://target.app -e url,base64
+# Cloudflare detected → extra encoders: unicode, zwsp
+# Effective: url, base64, unicode, zwsp
+```
+
+De-duplicates automatically, preserves order.
+
+## Rate limiting & backoff
+
+Dalfox tracks consecutive WAF blocks and automatically backs off with exponential sleep to avoid permanent blocks. You can help it along with `--delay` (per-request ms) and smaller `--workers` for fragile targets.
+
+```bash
+dalfox https://target.app --delay 500 --workers 10
+```
+
+## Debugging
+
+Turn on the debug stream to see fingerprint decisions and the active strategy:
+
+```bash
+dalfox --debug https://target.app 2>&1 | grep -i waf
+```
+
+## Next
+
+- [Stored XSS](../stored-xss/) covers the inject-here-verify-there pattern, which often interacts with WAFs.
+- [Output &amp; Reports](../output/) for integrating findings into your pipeline.
+
+---
+
+Title: Integrations
+URL: https://dalfox.hahwul.com/integrations/
+Source: content/integrations/_index.md
+
+Dalfox works well on the command line, but it also speaks REST and MCP, ships a SKILL.md for skill-aware agents, and integrates directly into tools like Caido, so you can drive it from almost anywhere.
+
+## Pick your integration
+
+- **[REST API Server](./server/):** Long-lived HTTP service. Submit scans, poll status, cancel jobs, integrate with Slack, dashboards, CI/CD, and custom tooling.
+- **[MCP Server](./mcp/):** A [Model Context Protocol](https://modelcontextprotocol.io) stdio server. Exposes Dalfox as a tool for Claude, Cursor, and any MCP-compatible client.
+- **[Agent Skill](./skills/):** A drop-in `SKILL.md` that teaches Claude Code, Cursor, OpenCode, Codex, and other skill-aware agents how to drive Dalfox safely. Install with `npx skills add hahwul/dalfox`.
+- **[Caido Workflows](./caido/):** Drive Dalfox from Caido Active Workflows and Findings for real-time automated XSS testing inside your proxy sessions.
+
+All integrations share the exact same scanning engine as the CLI. Results are identical; only the plumbing differs.
+
+---
+
+Title: Caido Workflows
+URL: https://dalfox.hahwul.com/integrations/caido/
+Source: content/integrations/caido.md
+
+Dalfox works well inside [Caido](https://caido.io) workflows. You can feed every interesting request (or selected traffic) straight into Dalfox's engine and turn findings into Caido Findings with one click.
+
+This page covers the current recommended pattern (v3) and the common "bool gotcha" that trips up workflow authors.
+
+## The Core Pattern
+
+Caido Workflows can execute a shell step. The step receives the current request (usually as JSON) on stdin. Extract the raw HTTP, hand it to Dalfox via `--input-type raw-http`, then decide whether to create a Finding.
+
+### Minimal Workflow Step (bash/zsh)
+
+```bash
+#!/bin/bash
+set -euo pipefail
+
+DALFOX="${DALFOX_PATH:-/usr/local/bin/dalfox}"
+
+# Caido usually sends { "request": "<raw HTTP>", ... }
+RAW=$(cat - | jq -r '.request // .raw // .data.request // empty')
+
+if [[ -z "$RAW" ]]; then
+    echo "No request payload" >&2
+    exit 0
+fi
+
+# Write to temp file (robust for multiline + special chars)
+TMP=$(mktemp)
+printf '%s' "$RAW" > "$TMP"
+
+# Run Dalfox (tune flags to taste)
+"$DALFOX" scan --input-type raw-http "$TMP" \
+    -S \
+    --no-color \
+    --poc-type curl \
+    --timeout 8
+
+FOUND=$?
+
+rm -f "$TMP"
+
+# Exit code 1 from Dalfox means "findings existed"
+if [[ $FOUND -eq 1 ]]; then
+    # Caido If/Else: route this to the "finding" branch
+    echo "XSS detected"
+else
+    # Clean – emit a truthy value so Caido treats it as "no finding"
+    echo "1"
+fi
+```
+
+### The Caido Boolean Gotcha (Important)
+
+Caido's Workflow If/Else node evaluates step output using its own [bool rules](https://docs.caido.io/app/reference/workflow_data_types.html#bool). Many strings that look "truthy" to a human (or a normal shell) become `false` inside Caido.
+
+**The reliable community pattern** (shared by [@m4dni5 in this comment](https://github.com/hahwul/dalfox/discussions/992#discussion-10115370)):
+
+- When you have a finding, emit the actual Dalfox output (or a non-empty marker). Caido will see it as the "False" branch.
+- When clean, explicitly emit a simple truthy token such as `1` or `true`. This goes to the "True" branch.
+
+Then wire:
+- `False` → **Create Finding**
+- `True` → (optional) Set Color / Tag / Continue
+
+This is why the examples above deliberately echo a result only on the finding path.
+
+## Recommended Flags for Caido
+
+| Flag              | Why |
+|-------------------|-----|
+| `-S` / `--silence` | Only POC / finding lines go to stdout (less noise in Caido logs) |
+| `--no-color`      | Clean text for findings, search, and exports (suggested in the community workflow example) |
+| `--poc-type curl` (or `httpie`, `http-request`) | Ready-to-use repro in the Caido Finding |
+| `--timeout 6-10`  | Per-request budget; keeps workflows snappy |
+| `--waf-bypass auto` | Still worth it even inside a proxy |
+
+You can also add `--report --report-format md` if you want the full markdown report captured in the Finding evidence.
+
+**Note on silence:** `-S` suppresses most logs but the verified POC lines still appear when findings exist. (Community feedback in the linked discussion also requested that `-S` fully suppress POC output for even cleaner workflow results.) If you want zero output on clean runs, the pattern above (only emit on finding path) already achieves that.
+
+## Full Example: If/Else + Create Finding
+
+Typical Caido workflow graph:
+
+1. **Trigger** (Manual / Proxy / Intercept / Scope filter)
+2. **Shell / Execute** step running the script above → output stored in `$RESULT`
+3. **If/Else**
+   - Condition: previous step output is falsy / "False" path
+   - **False branch (finding)**: Create Finding
+     - Title: `XSS via Dalfox`
+     - Request: original
+     - Evidence / Description: `$RESULT` (or the PoC lines)
+     - Severity: High / Medium depending on your rules
+   - **True branch (clean)**: Set Color (green) or Add Tag `dalfox-clean`
+
+You can enrich the Finding with more context from Caido (host, method, parameter names, etc.).
+
+## Alternative: Using a File Step First
+
+Some authors prefer two steps:
+
+1. Write the raw request to a temp file (Caido has file-system nodes or you can do it in shell).
+2. Run `dalfox scan --input-type raw-http /path/to/req.txt ...`
+
+This is slightly more visible in the workflow graph but easier to debug.
+
+## Tips & Gotchas
+
+- **Binary location**: Caido's PATH may not include brew, asdf, or linuxbrew. Use a full path or set `DALFOX_PATH` env in the workflow / Caido settings and reference `$DALFOX_PATH`.
+- **Performance**: On busy browsing, add a Content-Type or in-scope filter *before* the Dalfox step. Dalfox is fast but you don't need to scan every image/stylesheet.
+- **Blind XSS**: Add `--blind https://your.collaborator/` when you want out-of-band detection from Caido-driven traffic.
+- **DOM XSS**: Works out of the box (AST analysis runs on responses).
+- **JSON output**: For more advanced post-processing in later workflow nodes you can use `--format jsonl` and parse the stream.
+
+## Updating from v2 Guides
+
+Older Dalfox v2 documentation used `dalfox pipe --rawdata`. In v3 the equivalent is `dalfox scan --input-type raw-http` (or the hidden `dalfox pipe` compatibility command with adjusted input handling). The temp-file or process-substitution approach shown above is the most portable.
+
+See the [Scanning Modes](../guide/scanning-modes/#raw-http-mode) page for the canonical raw-http usage.
+
+## See Also
+
+- [Scanning Modes – Raw HTTP](../guide/scanning-modes/#raw-http-mode)
+- [Output & Reports](../guide/output/)
+- [WAF Bypass](../guide/waf-bypass/)
+- GitHub Discussion [#992 (comment)](https://github.com/hahwul/dalfox/discussions/992#discussion-10115370): original community report with the Caido If/Else boolean workaround script and `--no-color` suggestion
+
+---
+
+Title: MCP Server
+URL: https://dalfox.hahwul.com/integrations/mcp/
+Source: content/integrations/mcp.md
+
+The **Model Context Protocol** (MCP) is an open standard for letting AI clients talk to external tools. `dalfox mcp` runs a stdio-based MCP server so Claude Desktop, Claude Code, Cursor, and any other MCP-compatible client can drive Dalfox scans directly.
+
+## Starting the server
+
+```bash
+dalfox mcp
+```
+
+The server speaks MCP over `stdin`/`stdout`. Launch it from the client; you don't run it manually in a terminal.
+
+## Claude Desktop config
+
+Add Dalfox to your Claude Desktop MCP config (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "dalfox": {
+      "command": "dalfox",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Restart Claude Desktop. Dalfox appears as a tool-provider named `dalfox`.
+
+## Claude Code (and other CLIs)
+
+```bash
+claude mcp add dalfox -- dalfox mcp
+```
+
+## Available tools
+
+Six tools are exposed. All are async and non-blocking: submit a scan, poll for results, then move on.
+
+### `scan_with_dalfox`
+
+Submit a scan. Returns immediately.
+
+```json
+{
+  "target": "https://example.com/search?q=test",
+  "method": "GET",
+  "param": ["q"],
+  "headers": ["Authorization: Bearer token"],
+  "encoders": ["url", "html"],
+  "timeout": 10,
+  "scan_timeout": 0,
+  "workers": 50,
+  "rate_limit": 0,
+  "insecure": true,
+  "blind_callback_url": "https://callback.example",
+  "deep_scan": false,
+  "skip_ast_analysis": false,
+  "analyze_external_js": false,
+  "detect_outdated_libs": false
+}
+```
+
+`encoders` accepts any combination of the implemented payload encoders:
+`url`, `html`, `htmlpad`, `2url`, `3url`, `4url`, `base64`, `unicode`,
+`zwsp`. The example above shows `["url", "html"]`; add more to increase
+mutation coverage. Order does not matter — the scanner applies encoders
+in a fixed priority order (`url` → `html` → `htmlpad` → `2url` → `3url`
+→ `4url` → `base64` → `unicode` → `zwsp`) and de-duplicates the output.
+Use `["none"]` to disable encoding entirely. Mirrors the `--encoders` /
+`-e` CLI flag.
+
+`insecure` controls TLS certificate validation (default `true`, scanner-friendly):
+set it `false` to enforce certificate validation and reject self-signed or
+expired certs. Mirrors the `--insecure` CLI flag.
+
+`analyze_external_js` is opt-in (default `false`): set it `true` to fetch
+same-origin `<script src>` bundles at preflight time and run AST DOM-XSS
+analysis on them. Useful for SPAs where all sink logic lives in external
+bundles and the page has no server-side reflection. Caps: 16 files,
+512 KiB per file; honours `include_url`/`exclude_url` filters.
+
+`detect_outdated_libs` is opt-in (default `false`): set it `true` to also emit
+informational `[I]` findings for outdated / known-vulnerable JS libraries
+(CWE-1104, 0 extra requests). Left off, the scan reports only XSS.
+
+`rate_limit` caps the scan's outbound requests/second (`0` = unlimited, the
+default), now enforced across all worker tasks — use it to be gentle on a
+fragile target or to stay under a WAF threshold.
+
+`scan_timeout` is the whole-scan wall-clock budget in seconds (default `0` =
+unbounded), distinct from the per-request `timeout`. When it trips, the scan
+stops, keeps any partial findings, and settles as `cancelled` with an
+`error_message` mentioning `scan_timeout`. Set it to bound long or `deep_scan`
+runs so an agent's poll loop is guaranteed to terminate.
+
+Response:
+
+```json
+{ "scan_id": "9f2c…", "target": "https://example.com/search?q=test", "status": "queued" }
+```
+
+### `get_results_dalfox`
+
+Poll a scan. Returns status, progress, and results when ready.
+
+```json
+{ "scan_id": "9f2c…" }
+```
+
+Response (in progress):
+
+```json
+{
+  "scan_id": "9f2c…",
+  "target": "…",
+  "status": "running",
+  "progress": {
+    "params_total": 10,
+    "params_tested": 4,
+    "requests_sent": 215,
+    "findings_so_far": 1,
+    "estimated_completion_pct": 40,
+    "suggested_poll_interval_ms": 3000
+  }
+}
+```
+
+Response (done):
+
+```json
+{
+  "scan_id": "9f2c…",
+  "status": "done",
+  "results": [
+    {
+      "type": "V",
+      "type_description": "Verified",
+      "inject_type": "inHTML",
+      "method": "GET",
+      "param": "q",
+      "payload": "<svg/onload=alert(1)>",
+      "evidence": "payload reflected and DOM element verified",
+      "cwe": "CWE-79",
+      "severity": "High"
+    }
+  ]
+}
+```
+
+`progress.estimated_completion_pct` and `params_tested` advance live as each
+discovered parameter finishes (they no longer sit at 0 until the scan ends), so
+they are usable for pacing polls — honor `suggested_poll_interval_ms`.
+
+If the target can't be reached (DNS failure, connection refused, TLS error,
+timeout) the scan ends as `status: "error"` with `error_message` containing
+`CONNECTION_FAILED`, rather than `done` with an empty `results` — the same
+distinction `preflight_dalfox` reports via `reachable: false`. The `target`
+must start with `http://` or `https://`.
+
+### `list_scans_dalfox`
+
+List every tracked scan. Optional filter:
+
+```json
+{ "status": "running" }
+```
+
+Returns `total`, `scans: [{scan_id, target, status, result_count}]`.
+
+### `cancel_scan_dalfox`
+
+Abort a queued or running scan:
+
+```json
+{ "scan_id": "9f2c…" }
+```
+
+### `delete_scan_dalfox`
+
+Permanently remove a tracked scan from memory. Only terminal scans (`done`, `error`, `cancelled`) can be deleted; running or queued scans must be cancelled first. Terminal scans are also auto-purged after 1 hour.
+
+```json
+{ "scan_id": "9f2c…" }
+```
+
+Returns `{scan_id, deleted: true, previous_status}`.
+
+### `preflight_dalfox`
+
+Analyse a target **without** sending payloads. Useful for scoping before committing to a scan.
+
+```json
+{
+  "target": "https://example.com",
+  "method": "GET",
+  "skip_discovery": false,
+  "skip_mining": false
+}
+```
+
+Returns reachability, discovered parameters, and an estimated request count.
+
+## Typical agent flow
+
+1. Agent calls `preflight_dalfox` to confirm the target and count parameters.
+2. Agent calls `scan_with_dalfox`, receives a `scan_id`.
+3. Agent polls `get_results_dalfox` using `suggested_poll_interval_ms` from the progress object.
+4. Once `status == "done"`, the agent summarises findings and reports back to the user.
+
+Because every tool is async, the agent stays responsive; no long-running tool call blocks the conversation.
+
+## Authorization & safety
+
+The MCP server enforces the same rules as the CLI: **only scan targets you're authorised to test.** Consider gating Dalfox MCP calls behind an explicit user confirmation step in your agent's system prompt, such as "Confirm the scope before every scan."
+
+## Troubleshooting
+
+- **Tool not showing up?** Make sure the `dalfox` binary is on the PATH the MCP client uses. For Claude Desktop on macOS, that's often just `/usr/local/bin` or `/opt/homebrew/bin`.
+- **Empty results?** Poll again; scans are async. Use `suggested_poll_interval_ms` as your cadence.
+- **Want logs?** Run `dalfox mcp --debug` while you're setting things up. The debug lines go to stderr so they don't pollute the MCP channel.
+
+---
+
+Title: REST API Server
+URL: https://dalfox.hahwul.com/integrations/server/
+Source: content/integrations/server.md
+
+`dalfox server` starts a long-lived HTTP service that queues and runs scans asynchronously. You submit a scan, get back a `scan_id`, and poll or cancel it however you like.
+
+## Starting the server
+
+```bash
+dalfox server
+# listens on http://127.0.0.1:6664 by default
+```
+
+Common options:
+
+```bash
+dalfox server \
+  --port 6664 \
+  --host 0.0.0.0 \
+  --api-key "change-me" \
+  --log-file /var/log/dalfox.log
+```
+
+### Authentication
+
+If `--api-key` is set (or `DALFOX_API_KEY` is exported), every request must include:
+
+```
+X-API-KEY: change-me
+```
+
+If you don't set an API key, the server accepts unauthenticated requests; bind to `127.0.0.1` in that case.
+
+### CORS
+
+```bash
+dalfox server \
+  --allowed-origins "https://app.example.com,https://admin.example.com" \
+  --cors-allow-methods "GET,POST,OPTIONS,DELETE" \
+  --cors-allow-headers "Content-Type,X-API-KEY,Authorization"
+```
+
+`*` is accepted as a wildcard. Regex is supported via `regex:^https://.*\.example\.com$`.
+
+### JSONP
+
+For browser clients that can't set custom headers:
+
+```bash
+dalfox server --jsonp --callback-param-name callback
+# then GET /scan?target=...&callback=myFunction
+```
+
+## Endpoints
+
+| Method | Path | What it does |
+|--------|------|--------------|
+| `POST` | `/scan` | Submit a new scan (JSON body) |
+| `GET` | `/scan?target=...` | Submit a new scan (query string) |
+| `GET` | `/scan/:id` | Get scan status and results |
+| `DELETE` | `/scan/:id` | Cancel a queued or running scan |
+| `GET` | `/scans` | List all scans (optional `?status=`) |
+| `GET` | `/result/:id` | Alias for `/scan/:id` |
+| `POST` | `/preflight` | Discover parameters without sending payloads |
+| `GET` | `/health` | Server info + capability list |
+
+### Submit a scan
+
+```bash
+curl -X POST http://127.0.0.1:6664/scan \
+  -H "X-API-KEY: change-me" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "target": "https://target.app?q=test",
+    "options": {
+      "worker": 50,
+      "timeout": 10,
+      "encoders": ["url", "html"],
+      "blind": "https://callback.interact.sh"
+    }
+  }'
+```
+
+The scan target field is `target` (matching the MCP `scan_with_dalfox` tool and the response payload). The legacy field name `url` is still accepted as an alias — for both the JSON body and the `?target=` / `?url=` query string — so existing clients keep working.
+
+Response:
+
+```json
+{
+  "code": 200,
+  "msg": "queued",
+  "data": {
+    "scan_id": "9f2c…",
+    "target": "https://target.app?q=test"
+  }
+}
+```
+
+### Poll status
+
+```bash
+curl -H "X-API-KEY: change-me" http://127.0.0.1:6664/scan/9f2c…
+```
+
+Response (while running):
+
+```json
+{
+  "code": 200,
+  "msg": "running",
+  "data": {
+    "target": "https://target.app?q=test",
+    "status": "running",
+    "results": [],
+    "progress": {
+      "params_total": 12,
+      "params_tested": 5,
+      "requests_sent": 234,
+      "findings_so_far": 1,
+      "estimated_completion_pct": 41,
+      "suggested_poll_interval_ms": 3000
+    }
+  }
+}
+```
+
+When complete, `status` becomes `done` and `results` is populated.
+
+### List scans
+
+```bash
+curl -H "X-API-KEY: change-me" 'http://127.0.0.1:6664/scans?status=running'
+```
+
+### Cancel a scan
+
+```bash
+curl -X DELETE -H "X-API-KEY: change-me" http://127.0.0.1:6664/scan/9f2c…
+```
+
+### Preflight (no attack)
+
+```bash
+curl -X POST http://127.0.0.1:6664/preflight \
+  -H "X-API-KEY: change-me" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://target.app"}'
+```
+
+Response includes `params_discovered`, `estimated_total_requests`, and a list of parameters so you can scope before committing to a real scan.
+
+### Health
+
+```bash
+curl http://127.0.0.1:6664/health
+```
+
+Returns version, `auth_required`, and the list of supported endpoints. Good for uptime checks.
+
+## ScanOptions reference (request body)
+
+```jsonc
+{
+  "url": "https://target.app",
+  "options": {
+    "worker": 50,
+    "delay": 0,
+    "timeout": 10,
+    "rate_limit": 0,
+    "scan_timeout": 0,
+    "blind": "https://callback.interact.sh",
+    "method": "POST",
+    "data": "user=test",
+    "header": ["Authorization: Bearer token"],
+    "user_agent": "Custom",
+    "encoders": ["url", "html"],
+    "remote_payloads": ["portswigger"],
+    "remote_wordlists": ["burp"],
+    "include_request": false,
+    "include_response": false,
+    "callback_url": "https://your-webhook.example/dalfox",
+    "param": ["q", "id:query"],
+    "proxy": "http://127.0.0.1:8080",
+    "insecure": true,
+    "follow_redirects": false,
+    "skip_mining": false,
+    "skip_discovery": false,
+    "deep_scan": false,
+    "skip_ast_analysis": false,
+    "detect_outdated_libs": false
+  }
+}
+```
+
+Fields mirror the CLI flags. See the [CLI reference](../../reference/cli/) for meaning and defaults.
+`detect_outdated_libs` is opt-in (default `false`): set it `true` to also report
+outdated / known-vulnerable JS libraries as informational `[I]` findings
+(CWE-1104, 0 extra requests). The same key works as a `GET /scan` query parameter.
+`insecure` defaults to `true` (TLS certificate verification is skipped, matching
+the CLI scanner default); send `"insecure": false` (or `?insecure=false` on
+`GET /scan`) to enforce certificate validation.
+
+`rate_limit` caps the scan's outbound requests/second (`0` = unlimited, the
+default), enforced across all worker tasks. The server-wide `--rate-limit` flag
+is an upper bound: a request may ask for a lower rate but cannot exceed or
+disable it.
+
+`scan_timeout` is the whole-scan wall-clock budget in seconds (default `0` =
+unbounded), distinct from the per-request `timeout`. When the budget is reached
+the scan stops, keeps whatever partial findings it gathered, and settles as
+`cancelled` with an `error_message` that mentions `scan_timeout` (so you can tell
+a timeout apart from a client-issued cancel). The server-wide `--scan-timeout`
+flag caps every submitted scan the same way `--rate-limit` does.
+
+### Server flags worth setting
+
+- `--rate-limit <rps>` — cap every scan's outbound request rate (protects targets).
+- `--scan-timeout <secs>` — hard wall-clock budget per scan; bounds long or
+  `deep_scan` jobs so one target can't pin a worker indefinitely.
+- `--max-concurrent-scans <n>` — reject new submissions with `503` once `n`
+  scans are queued/running (default `100`, `0` = unlimited). Bounds memory and
+  the blocking pool against a flood of submissions.
+- `--max-body-bytes <n>` — explicit request-body cap for `POST /scan` and
+  `/preflight` (default `1048576` = 1 MiB); oversized bodies get `413`.
+
+## Job lifecycle
+
+```
+queued → running → done
+                 ↘ error
+                 ↘ cancelled
+```
+
+Terminal states (`done`, `error`, `cancelled`) are sticky.
+
+A target that can't be connected to (DNS failure, connection refused, TLS
+error, timeout) ends as `error` with an `error_message` of
+`target unreachable: connection failed (CONNECTION_FAILED)` — not `done` with
+zero findings, so you can tell "scanned, nothing found" apart from "never
+reached the host." Use `POST /preflight` first if you want to check
+reachability without launching a scan. The `url` must start with `http://` or
+`https://`; any other scheme is rejected with `400` (same as `/preflight`).
+
+## Running under systemd
+
+```ini
+# /etc/systemd/system/dalfox.service
+[Unit]
+Description=Dalfox scanner service
+After=network.target
+
+[Service]
+ExecStart=/usr/local/bin/dalfox server --port 6664 --host 127.0.0.1 --log-file /var/log/dalfox.log
+Environment=DALFOX_API_KEY=change-me
+Restart=on-failure
+User=dalfox
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl enable --now dalfox
+```
+
+## Security notes
+
+- **Bind to localhost** unless you absolutely need remote access.
+- **Always set `--api-key`** on a remote bind.
+- **Keep the API key out of logs.** Dalfox does not log it, but reverse proxies might.
+- **Put it behind TLS** (nginx, Caddy, Traefik) if you expose it over a network.
+- **`callback_url` and the scan target are server-side requests.** Dalfox is a
+  URL scanner: it dials whatever target you submit, and on completion it POSTs
+  the result JSON to `callback_url`. Only `http(s)` schemes are dialed, but the
+  *host* is not filtered — loopback, link-local (e.g. cloud metadata at
+  `169.254.169.254`), and private addresses are all reachable. On an
+  unauthenticated bind this is a server-side request forgery + exfiltration
+  primitive for anyone who can submit a scan, so set `--api-key` and restrict
+  egress when exposing the API to untrusted callers.
+- **`--jsonp` makes `GET` endpoints readable cross-origin** via `<script>`,
+  which is not subject to the CORS allow-list. Enable it only when you intend
+  that, and pair it with `--api-key`.
+- **Bound scan runtime with `--scan-timeout`.** The per-request `timeout` only
+  caps a single HTTP request; a scan with many parameters and payloads (or
+  `deep_scan`) can still run for a long time. Set `--scan-timeout <secs>` so
+  every submitted scan has a hard wall-clock budget and a single slow target
+  can't tie up a worker indefinitely.
+
+---
+
+Title: Agent Skill
+URL: https://dalfox.hahwul.com/integrations/skills/
+Source: content/integrations/skills.md
+
+Dalfox ships a **SKILL.md** that teaches any skill-aware agent how to drive Dalfox correctly: authorization gate first, MCP over CLI, preflight before heavy scans, `V > A > R` finding prioritization. Point your agent at it and the model stops guessing flags.
+
+The file lives at [`skills/dalfox/SKILL.md`](https://github.com/hahwul/dalfox/blob/main/skills/dalfox/SKILL.md) in the repository, so once you've cloned Dalfox you already have it locally.
+
+## Install with `npx skills`
+
+The easiest way is the [open agent-skills CLI](https://github.com/vercel-labs/skills):
+
+```bash
+# Install to the current project (committed, shared with the team)
+npx skills add hahwul/dalfox
+
+# Or install globally (~/<agent>/skills/, available everywhere)
+npx skills add hahwul/dalfox -g
+```
+
+The CLI auto-detects which agents you use (Claude Code, Cursor, Codex, OpenCode, and [~45 others](https://github.com/vercel-labs/skills#available-agents)) and links the skill for each. Pick a specific agent if you only want one:
+
+```bash
+# Only Claude Code
+npx skills add hahwul/dalfox -a claude-code
+
+# Non-interactive (CI-friendly)
+npx skills add hahwul/dalfox -g -a claude-code -y
+```
+
+To update later:
+
+```bash
+npx skills update dalfox
+```
+
+To remove:
+
+```bash
+npx skills remove dalfox
+```
+
+## Install manually
+
+If you prefer not to run `npx`, clone the skill file into the location your agent expects. For Claude Code that's `~/.claude/skills/dalfox/SKILL.md`:
+
+```bash
+mkdir -p ~/.claude/skills/dalfox
+curl -o ~/.claude/skills/dalfox/SKILL.md \
+  https://raw.githubusercontent.com/hahwul/dalfox/main/skills/dalfox/SKILL.md
+```
+
+Other clients read from their own skills directory; see your agent's docs for the exact path.
+
+## What the skill covers
+
+- **Trigger conditions:** fires when the user asks to scan a URL for XSS, enumerate reflected parameters, or mentions "dalfox" explicitly. Skips non-XSS vulnerabilities.
+- **Authorization gate:** the skill refuses to scan until the user confirms they're authorized to send payloads to the target.
+- **Mode detection:** prefers MCP tools when available, falls back to the `dalfox` CLI, and tells the user how to install if neither is present.
+- **MCP playbook:** `preflight_dalfox` → `scan_with_dalfox` → poll `get_results_dalfox` (honoring `suggested_poll_interval_ms`) → `delete_scan_dalfox` when done. Includes the validated input bounds (timeout 1–299 s, delay 0–9999 ms) so the agent doesn't send values Dalfox will reject.
+- **CLI scenarios:** POST bodies, authenticated sessions, proxy-through-Burp, blind XSS with a callback URL, stored XSS, pipe input, fast smoke tests, maximum-coverage runs, and machine-readable output.
+- **Result interpretation:** finding type legend (`V` verified DOM execution > `A` AST-detected > `R` reflected-only) so the agent leads with confirmed hits.
+- **Failure modes:** what `reachable: false`, all-R findings, a stuck scan, or an `invalid_params` response actually mean, and how to recover.
+
+## Prerequisite
+
+The skill assumes the `dalfox` binary or [MCP server](./mcp/) is reachable from the agent's environment. Install Dalfox first ([installation guide](../../getting-started/installation/)), then install the skill.
+
+## Authoring tips
+
+The skill file lives at [`skills/dalfox/SKILL.md`](https://github.com/hahwul/dalfox/tree/main/skills/dalfox) in the repository. Contributions are welcome; keep it focused on *how an agent should drive Dalfox*, not on restating CLI reference material that already lives in the [CLI reference](../../reference/cli/).
+
+---
+
+Title: Reference
+URL: https://dalfox.hahwul.com/reference/
+Source: content/reference/_index.md
+
+Exhaustive reference for Dalfox's CLI, config file, and environment variables. If you're here, you already know what you want.
+
+- **[CLI Reference](./cli/):** Every subcommand and flag.
+- **[Config File](./config/):** Every key in `config.toml`.
+- **[Environment](./environment/):** Recognised environment variables.
+- **[XSSMaze Score](./xssmaze/):** How much of the XSSMaze lab Dalfox detects.
+
+Looking for how things work at a conceptual level? Start in the [Guide](../guide/).
+
+---
+
+Title: CLI Reference
+URL: https://dalfox.hahwul.com/reference/cli/
+Source: content/reference/cli.md
+
+Dalfox is organised into four subcommands. The default (when you just pass a target) is `scan`.
+
+```
+dalfox [SUBCOMMAND] [TARGET] [FLAGS]
+```
+
+| Subcommand | Purpose |
+|------------|---------|
+| `scan` | Scan targets for XSS (default when omitted) |
+| `server` | Run a REST API server |
+| `payload` | List or fetch built-in/remote payloads |
+| `mcp` | Run a Model Context Protocol stdio server |
+| `help` | Print help for any subcommand |
+
+## Global flags
+
+| Flag | Description |
+|------|-------------|
+| `--config <FILE>` | Path to a config file (TOML or JSON). Overrides default search path. |
+| `--debug` | Enable debug logging. |
+| `-h`, `--help` | Print help. |
+| `-V`, `--version` | Print version. |
+
+Exit codes:
+
+| Code | Meaning |
+|------|---------|
+| `0` | Success, no findings |
+| `1` | Success, findings reported |
+| `2` | Input / config / runtime error |
+
+---
+
+## `dalfox scan`
+
+Scan targets for XSS. Omitting the subcommand is equivalent.
+
+```bash
+dalfox scan [TARGETS]... [FLAGS]
+```
+
+### Input
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--input-type` | `-i` | `auto` | `auto`, `url`, `file`, `pipe`, `raw-http`, `har` |
+
+### Output
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--format` | `-f` | `plain` | `plain`, `json`, `jsonl`, `markdown`, `sarif`, `toml` |
+| `--output` | `-o` | — | Write output to file |
+| `--include-request` | — | false | Include HTTP request in output |
+| `--include-response` | — | false | Include response body in output |
+| `--include-all` | — | false | Shorthand for both include flags |
+| `--no-color` | — | false | Disable ANSI colour |
+| `--silence` | `-S` | false | Emit only findings to STDOUT |
+| `--dry-run` | — | false | Discover and plan without sending payloads |
+| `--stream-findings` | — | false | Emit each finding the moment it is verified instead of after the end-of-scan summary (plain format only; auto-disabled with `--output`, `--limit`, `--only-poc`) |
+| `--poc-type` | — | `plain` | `plain`, `curl`, `httpie`, `http-request` |
+| `--limit` | — | — | Cap total results shown |
+| `--limit-result-type` | — | `all` | Which types count toward `--limit`: `all`, `v`, `r`, `a` |
+| `--only-poc` | — | — | Comma-separated filter: `v`, `r`, `a` |
+
+### Target shaping
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--param` | `-p` | — | Parameter to analyse; supports `name:location` (locations: `query`, `body`, `json`, `cookie`, `header`) |
+| `--data` | `-d` | — | Request body |
+| `--headers` | `-H` | — | Extra HTTP header (repeatable) |
+| `--cookies` | — | — | Cookie (repeatable) |
+| `--method` | `-X` | `GET` | HTTP method override |
+| `--user-agent` | — | — | Custom User-Agent |
+| `--cookie-from-raw` | — | — | Load cookies from a raw HTTP request file |
+
+### Scope
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--include-url` | — | Regex pattern(s) of URLs to include |
+| `--exclude-url` | — | Regex pattern(s) of URLs to exclude |
+| `--ignore-param` | — | Parameter name(s) to skip |
+| `--out-of-scope` | — | Wildcard domain patterns to skip |
+| `--out-of-scope-file` | — | File listing out-of-scope domains |
+
+### Discovery
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--only-discovery` | false | Stop after discovery, no XSS payloads |
+| `--skip-discovery` | false | Skip all discovery |
+| `--skip-reflection-header` | false | Skip header-based reflection checks |
+| `--skip-reflection-cookie` | false | Skip cookie-based reflection checks |
+| `--skip-reflection-path` | false | Skip path-based reflection checks |
+
+### Mining
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--mining-dict-word` | `-W` | — | Parameter wordlist file |
+| `--remote-wordlists` | — | — | Remote sources: `burp`, `assetnote` |
+| `--skip-mining` | — | false | Skip all mining |
+| `--skip-mining-dict` | — | false | Skip dictionary mining |
+| `--skip-mining-dom` | — | false | Skip DOM mining |
+
+### Network
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--timeout` | — | `10` | Per-request timeout in seconds (network only; does not bound total scan time) |
+| `--scan-timeout` | — | `0` | Hard wall-clock cap per target for the scan stage (post-preflight), in seconds. Aborts a target once exceeded; useful when many sequential phases each pay the per-request `--timeout` cost against a partially-hung endpoint. `0` disables. |
+| `--delay` | — | `0` | Delay between requests (ms), per worker |
+| `--rate-limit` | `-r`, `--rl` | `0` | Cap the **global** outbound request rate in requests/second, shared across every worker and target (`0` = unlimited). Unlike `--delay` (which only spaces one worker), this bounds the total in-flight burst from `workers × concurrent targets` — friendlier to shared-IP / edge WAF thresholds. |
+| `--retries` | — | `0` | Retry failed requests on HTTP 5xx and transient transport errors (timeouts, connection resets) up to this many times (`0` = off). HTTP 429 is always retried regardless. |
+| `--retry-delay` | — | `1000` | Base delay (ms) for the exponential backoff between `--retries` attempts (doubles each attempt, capped internally). A server `Retry-After` header takes precedence on 429. |
+| `--proxy` | — | — | Proxy URL (`http://`, `socks5://`) |
+| `--insecure` | — | `true` | Skip TLS/SSL certificate verification (accept self-signed, expired, or hostname-mismatched certs). On by default for scanner use; pass `--insecure=false` to enforce certificate validation. |
+| `--follow-redirects` | `-F` | false | Follow 3xx responses |
+| `--ignore-return` | — | — | HTTP status codes to ignore |
+
+### Engine
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--workers` | `50` | Concurrent workers per target |
+| `--max-concurrent-targets` | `50` | Global concurrent targets |
+| `--max-targets-per-host` | `100` | Per-host cap |
+
+### XSS scanning
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--encoders` | `-e` | `url,html` | Comma-separated encoders |
+| `--remote-payloads` | — | — | `portswigger`, `payloadbox` |
+| `--custom-blind-xss-payload` | — | — | Custom blind payload template file |
+| `--blind` | `-b` | — | Blind XSS callback URL |
+| `--blind-oob[=servers]` | — | — | Enable OOB/OAST blind XSS via interactsh; optional comma-separated server domains (default: public mesh). Requires the `=` form: `--blind-oob=oast.fun,oast.me` |
+| `--blind-oob-secret` | — | — | Auth token for a self-hosted interactsh server (sent as `Authorization` on register/poll/deregister) |
+| `--blind-oob-wait` | — | `30` | Seconds to keep polling for OOB callbacks after all payloads are sent (`0` = no extra end-of-scan wait) |
+| `--custom-payload` | — | — | Custom payload file |
+| `--only-custom-payload` | — | false | Use only custom payloads |
+| `--custom-alert-value` | — | `1` | Value inside `alert()`/`prompt()`/`confirm()` |
+| `--custom-alert-type` | — | `none` | `none` or `str` |
+| `--inject-marker` | — | — | Replace this token with payloads (e.g. `FUZZ`) |
+| `--skip-xss-scanning` | — | false | Skip payload injection |
+| `--deep-scan` | — | false | Keep testing after first finding |
+| `--sxss` | — | false | Enable Stored XSS mode |
+| `--sxss-url` | — | — | Retrieval URL for SXSS |
+| `--sxss-method` | — | `GET` | Retrieval method |
+| `--sxss-retries` | — | `3` | Retries on the retrieval URL when fetching stored output |
+| `--max-payloads-per-param` | — | `0` | Cap payloads tested per parameter (`0` = no cap) |
+| `--skip-ast-analysis` | — | false | Skip AST DOM-XSS |
+| `--analyze-external-js` | — | false | Fetch same-origin `<script src>` bundles and run AST DOM-XSS analysis on them (preflight, once per target; up to 16 files, 512 KiB each; respects `--include-url`/`--exclude-url`) |
+| `--hpp` | — | false | HTTP Parameter Pollution |
+| `--detect-outdated-libs` | — | false | Also report outdated / known-vulnerable JS libraries (informational, CWE-1104; 0 extra requests) |
+
+### WAF
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--waf-bypass` | `auto` | `auto`, `force`, `off` |
+| `--skip-waf-probe` | false | Skip active WAF fingerprinting |
+| `--force-waf` | — | WAF name when `--waf-bypass force` |
+| `--waf-evasion` | false | Adaptive evasion on WAF detection: randomized inter-request jitter + an escalating cooldown on clusters of blocked responses (replaces the old blunt `workers=1`/`delay=3000` preset). The per-WAF pacing hint is applied automatically on detection even without this flag. Pairs well with `--rate-limit`. |
+| `--waf-min-confidence` | `0.3` | Drop fingerprints below this confidence (0.0–1.0). The default `0.3` suppresses weak matches like `Server: Google Frontend` (0.15). Set lower to keep weak signals; `1.0` keeps only fingerprints with full confidence. |
+
+---
+
+## `dalfox server`
+
+Start the REST API server.
+
+```bash
+dalfox server [FLAGS]
+```
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--port` | `-p` | `6664` | Listen port |
+| `--host` | `-H` | `127.0.0.1` | Bind address |
+| `--api-key` | — | — | Required `X-API-KEY` header value (or `DALFOX_API_KEY`) |
+| `--log-file` | — | — | Plain-text log file |
+| `--allowed-origins` | — | — | CORS origins (comma-separated, supports `*` and `regex:`) |
+| `--jsonp` | — | false | Wrap responses in JSONP |
+| `--callback-param-name` | — | `callback` | JSONP callback param |
+| `--cors-allow-methods` | — | `GET,POST,OPTIONS,PUT,PATCH,DELETE` | CORS methods |
+| `--cors-allow-headers` | — | `Content-Type,X-API-KEY,Authorization` | CORS headers |
+| `--rate-limit` | `-r`, `--rl` | `0` | Cap the global outbound request rate (requests/sec, `0` = unlimited) |
+| `--scan-timeout` | — | `0` | Hard wall-clock cap per target for the scan stage, in seconds |
+| `--max-concurrent-scans` | — | `0` | Limit on simultaneous scans (`0` = unlimited) |
+| `--max-body-bytes` | — | `0` | Limit response body bytes for analysis (`0` = unlimited) |
+
+See [REST API Server](../../integrations/server/) for endpoints.
+
+---
+
+## `dalfox payload`
+
+List or fetch payload collections.
+
+```bash
+dalfox payload <SELECTOR>
+```
+
+Selectors:
+
+| Selector | What it prints |
+|----------|----------------|
+| `event-handlers` | DOM event handler attribute names |
+| `useful-tags` | Useful HTML tags |
+| `uri-scheme` | `javascript:`/`data:` URL payloads |
+| `portswigger` | Remote: PortSwigger XSS cheatsheet |
+| `payloadbox` | Remote: PayloadBox XSS list |
+
+---
+
+## `dalfox mcp`
+
+Run the MCP stdio server.
+
+```bash
+dalfox mcp
+```
+
+No additional flags. See [MCP Server](../../integrations/mcp/) for tool definitions.
+
+---
+
+## See also
+
+- [Config File reference](../config/)
+- [Environment variables](../environment/)
+
+---
+
+Title: Config File
+URL: https://dalfox.hahwul.com/reference/config/
+Source: content/reference/config.md
+
+Dalfox looks for its config at (in order):
+
+1. `$XDG_CONFIG_HOME/dalfox/config.toml`
+2. `$HOME/.config/dalfox/config.toml`
+
+Override with `--config <path>`. TOML and JSON are both accepted; TOML is the default.
+
+Everything lives under the `[scan]` table and mirrors the CLI flag names (snake-cased).
+
+## Complete example
+
+```toml
+[scan]
+# INPUT
+input_type = "auto"   # auto, url, file, pipe, raw-http, har
+
+# OUTPUT
+format = "plain"
+# output = "results.json"
+include_request = false
+include_response = false
+include_all = false
+silence = false
+dry_run = false
+stream_findings = false
+poc_type = "plain"
+# limit = 100
+limit_result_type = "all"
+only_poc = []
+no_color = false
+
+# TARGETS
+param = []
+# data = "user=test"
+headers = ["Accept: text/html"]
+cookies = []
+method = "GET"
+user_agent = "Dalfox/3"
+# cookie_from_raw = "request.txt"
+
+# SCOPE
+include_url = []
+exclude_url = []
+ignore_param = []
+out_of_scope = []
+# out_of_scope_file = "scope.txt"
+
+# DISCOVERY
+only_discovery = false
+skip_discovery = false
+skip_reflection_header = false
+skip_reflection_cookie = false
+skip_reflection_path = false
+
+# MINING
+# mining_dict_word = "params.txt"
+remote_wordlists = []
+skip_mining = false
+skip_mining_dict = false
+skip_mining_dom = false
+
+# NETWORK
+timeout = 10
+scan_timeout = 0
+delay = 0
+rate_limit = 0
+retries = 0
+retry_delay = 1000
+# proxy = "http://127.0.0.1:8080"
+insecure = true
+follow_redirects = false
+ignore_return = []
+
+# ENGINE
+workers = 50
+max_concurrent_targets = 50
+max_targets_per_host = 100
+
+# XSS SCANNING
+encoders = ["url", "html"]
+remote_payloads = []
+# custom_blind_xss_payload = "blind.txt"
+# blind_callback_url = "https://callback.example"
+# blind_oob = []                       # [] = enable with the public interactsh mesh; or name servers: ["oast.fun"]
+# blind_oob_secret = "token"           # auth token for a self-hosted interactsh server
+# blind_oob_wait = 30                  # seconds to keep polling after payloads are sent
+# custom_payload = "payloads.txt"
+only_custom_payload = false
+# inject_marker = "FUZZ"
+custom_alert_value = "1"
+custom_alert_type = "none"
+skip_xss_scanning = false
+deep_scan = false
+sxss = false
+# sxss_url = "https://target.app/retrieval"
+sxss_method = "GET"
+skip_ast_analysis = false
+analyze_external_js = false
+detect_outdated_libs = false
+hpp = false
+
+# WAF
+waf_bypass = "auto"
+skip_waf_probe = false
+# force_waf = "cloudflare"
+waf_evasion = false
+waf_min_confidence = 0.3
+
+# LOGGING
+debug = false
+```
+
+## Key reference
+
+### Output
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `format` | string | `"plain"` | `plain`, `json`, `jsonl`, `markdown`, `sarif`, `toml` |
+| `output` | string | — | Output file path |
+| `include_request` | bool | `false` | Attach raw HTTP request |
+| `include_response` | bool | `false` | Attach response body |
+| `include_all` | bool | `false` | Shorthand for both |
+| `silence` | bool | `false` | Suppress logs |
+| `dry_run` | bool | `false` | Don't send payloads |
+| `stream_findings` | bool | `false` | Print each finding mid-scan instead of after the end-of-scan summary (plain format only) |
+| `poc_type` | string | `"plain"` | `plain`, `curl`, `httpie`, `http-request` |
+| `limit` | int | — | Cap on result count |
+| `limit_result_type` | string | `"all"` | Which types count: `all`, `v`, `r`, `a` |
+| `only_poc` | array | `[]` | Filter output: `["v","a"]` |
+| `no_color` | bool | `false` | Disable ANSI colour |
+
+### Targets
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `param` | array | `[]` | Parameter names (optionally `name:location`) |
+| `data` | string | — | Request body |
+| `headers` | array | `[]` | HTTP headers |
+| `cookies` | array | `[]` | Cookie strings |
+| `method` | string | `"GET"` | HTTP method |
+| `user_agent` | string | — | User-Agent override |
+| `cookie_from_raw` | string | — | Raw-request file for cookies |
+
+### Scope
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `include_url` | array | `[]` | Regex patterns of URLs to include |
+| `exclude_url` | array | `[]` | Regex patterns of URLs to exclude |
+| `ignore_param` | array | `[]` | Parameter names to skip |
+| `out_of_scope` | array | `[]` | Wildcard domain patterns |
+| `out_of_scope_file` | string | — | File listing out-of-scope hosts |
+
+### Discovery & Mining
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `only_discovery` | bool | `false` | Stop after discovery |
+| `skip_discovery` | bool | `false` | Skip discovery entirely |
+| `skip_reflection_header` | bool | `false` | Skip header reflection checks |
+| `skip_reflection_cookie` | bool | `false` | Skip cookie reflection checks |
+| `skip_reflection_path` | bool | `false` | Skip path reflection checks |
+| `mining_dict_word` | string | — | Wordlist path |
+| `remote_wordlists` | array | `[]` | `burp`, `assetnote` |
+| `skip_mining` | bool | `false` | Skip all mining |
+| `skip_mining_dict` | bool | `false` | Skip dictionary mining |
+| `skip_mining_dom` | bool | `false` | Skip DOM mining |
+
+### Network
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `timeout` | int | `10` | Request timeout (seconds) |
+| `scan_timeout` | int | `0` | Hard wall-clock cap per target for the scan stage (post-preflight) in seconds. 0 disables. |
+| `delay` | int | `0` | Inter-request delay (ms), per worker |
+| `rate_limit` | int | `0` | Global request rate cap (req/sec) shared across all workers/targets; `0` = unlimited |
+| `retries` | int | `0` | Retry 5xx / transient transport errors this many times (`0` = off; 429 always retried) |
+| `retry_delay` | int | `1000` | Base backoff (ms) between `retries` attempts (exponential) |
+| `proxy` | string | — | Proxy URL |
+| `insecure` | bool | `true` | Skip TLS certificate verification; set `false` to enforce validation |
+| `follow_redirects` | bool | `false` | Follow 3xx responses |
+| `ignore_return` | array | `[]` | HTTP status codes to ignore |
+
+### Engine
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `workers` | int | `50` | Concurrent workers per target |
+| `max_concurrent_targets` | int | `50` | Global concurrent targets |
+| `max_targets_per_host` | int | `100` | Per-host cap |
+
+### XSS scanning
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `encoders` | array | `["url","html"]` | Encoders to apply |
+| `remote_payloads` | array | `[]` | Remote payload sources |
+| `custom_blind_xss_payload` | string | — | Custom blind template file |
+| `blind_callback_url` | string | — | Out-of-band callback URL |
+| `blind_oob` | array | — | Enable OOB/OAST blind XSS via interactsh (`[]` = public mesh; or name servers). Mirrors `--blind-oob` |
+| `blind_oob_secret` | string | — | Auth token for a self-hosted interactsh server |
+| `blind_oob_wait` | int | `30` | Seconds to keep polling for OOB callbacks after payloads are sent |
+| `custom_payload` | string | — | Custom payload file |
+| `only_custom_payload` | bool | `false` | Use only custom payloads |
+| `inject_marker` | string | — | Token to replace with payloads |
+| `custom_alert_value` | string | `"1"` | `alert(X)` value |
+| `custom_alert_type` | string | `"none"` | `none` or `str` |
+| `skip_xss_scanning` | bool | `false` | Discovery without attack |
+| `deep_scan` | bool | `false` | Continue after first finding |
+| `sxss` | bool | `false` | Enable Stored XSS mode |
+| `sxss_url` | string | — | Retrieval URL |
+| `sxss_method` | string | `"GET"` | Retrieval method |
+| `sxss_retries` | int | `3` | Retries when fetching the retrieval URL |
+| `max_payloads_per_param` | int | `0` | Cap payloads tested per parameter (`0` = no cap) |
+| `skip_ast_analysis` | bool | `false` | Skip AST DOM-XSS |
+| `analyze_external_js` | bool | `false` | Fetch same-origin `<script src>` bundles and run AST DOM-XSS analysis on them (preflight, once per target; up to 16 files, 512 KiB each; respects `include_url`/`exclude_url`) |
+| `detect_outdated_libs` | bool | `false` | Also report outdated / known-vulnerable JS libraries (informational, CWE-1104; 0 extra requests) |
+| `hpp` | bool | `false` | HTTP Parameter Pollution |
+
+### WAF
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `waf_bypass` | string | `"auto"` | `auto`, `force`, `off` |
+| `skip_waf_probe` | bool | `false` | Skip active fingerprinting |
+| `force_waf` | string | — | WAF name when `waf_bypass = "force"` |
+| `waf_evasion` | bool | `false` | Adaptive evasion on WAF detection: randomized jitter + escalating cooldown on block clusters (pairs with `rate_limit`) |
+| `waf_min_confidence` | float | `0.3` | Drop fingerprints below this confidence (0.0–1.0); default suppresses weak matches |
+
+### Logging
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `debug` | bool | `false` | Emit debug lines |
+
+## Precedence
+
+```
+CLI flag  >  Config file  >  Built-in default
+```
+
+See [Getting Started → Configuration](../../getting-started/configuration/) for examples.
+
+---
+
+Title: Environment
+URL: https://dalfox.hahwul.com/reference/environment/
+Source: content/reference/environment.md
+
+Dalfox respects a small set of environment variables for configuration that doesn't belong in a file or on the command line.
+
+| Variable | Used by | Purpose |
+|----------|---------|---------|
+| `DALFOX_API_KEY` | `dalfox server` | Value required in the `X-API-KEY` header. Equivalent to `--api-key`. |
+| `NO_COLOR` | all modes | Disables ANSI colour output when set to any non-empty value. Follows the [NO_COLOR](https://no-color.org) convention. |
+| `XDG_CONFIG_HOME` | config loader | Base directory for the config file (`$XDG_CONFIG_HOME/dalfox/config.toml`). Falls back to `$HOME/.config`. |
+| `HOME` | config loader | Used when `XDG_CONFIG_HOME` is unset. |
+
+## Examples
+
+### Keep the API key out of process args
+
+```bash
+export DALFOX_API_KEY="$(pass dalfox/api-key)"
+dalfox server --port 6664
+```
+
+### Disable colour globally
+
+```bash
+export NO_COLOR=1
+```
+
+### Use a project-local config
+
+```bash
+XDG_CONFIG_HOME=./.config dalfox scan https://target.app
+# Dalfox reads ./.config/dalfox/config.toml
+```
+
+## Not environment variables
+
+A few things that *look* like they should be environment variables but aren't:
+
+- **Proxy.** Use `--proxy` or `proxy` in config; Dalfox doesn't read `HTTP_PROXY`/`HTTPS_PROXY` to avoid accidental traffic interception.
+- **Timeout, workers, format.** CLI flag or config only.
+- **Debug.** Pass `--debug` on the command line or set `debug = true` in config.
+
+---
+
+Title: XSSMaze Score
+URL: https://dalfox.hahwul.com/reference/xssmaze/
+Source: content/reference/xssmaze.md
+
+[XSSMaze](https://github.com/hahwul/xssmaze) is an intentionally vulnerable lab for measuring XSS-detection tooling. This page tracks how much of the **`main`** image (`ghcr.io/hahwul/xssmaze:main`) Dalfox detects. The numbers below are auto-generated by `just xssmaze-score`, never hand-written.
+
+## Latest score
+
+<!-- XSSMAZE:BEGIN — generated by `just xssmaze-score`; do not edit by hand -->
+
+<div style="margin:1.5rem 0;padding:1.6rem 1.75rem;background:radial-gradient(120% 140% at 100% 0%,rgba(139,148,232,0.10),transparent 55%),linear-gradient(135deg,var(--bg-surface,#11141f),var(--bg-sidebar,#0b0d18));border:1px solid var(--border-light,#222741);border-radius:14px"><div style="font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.12em;color:var(--text-muted,#636980)">Detection score</div><div style="display:flex;align-items:baseline;margin-top:.4rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums"><span style="font-size:clamp(2.6rem,9vw,3.6rem);font-weight:700;line-height:1;letter-spacing:-.02em">97.9</span><span style="font-size:1.6rem;font-weight:600;color:var(--text-secondary,#9aa0bb)">%</span></div><div style="margin-top:.55rem;font-size:.95rem;color:var(--text-secondary,#9aa0bb)"><strong style="color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">1014</strong> / 1036 endpoints detected across 171 categories</div><div style="margin-top:1.4rem;height:.6rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><div style="height:100%;width:97.9%;background:#34d399;box-shadow:0 0 16px rgba(52,211,153,0.45);border-radius:999px"></div></div><div style="margin-top:1.3rem;padding-top:1rem;border-top:1px solid var(--border,#161a28);display:flex;flex-wrap:wrap;gap:.4rem 1.25rem;font-size:.8rem;color:var(--text-muted,#636980)"><span><span style="color:var(--text-secondary,#9aa0bb)">dalfox</span> v3.1.0</span><span><span style="color:var(--text-secondary,#9aa0bb)">xssmaze</span> v0.2.0</span><span>generated 2026-06-20</span></div></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.75rem;margin:1rem 0"><div style="padding:.85rem 1rem;background:var(--bg-surface,#11141f);border:1px solid var(--border-light,#222741);border-radius:10px"><div style="font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted,#636980)">Endpoints</div><div style="margin-top:.3rem;font-size:1.5rem;font-weight:700;line-height:1;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">1036</div><div style="margin-top:.35rem;font-size:.75rem;color:var(--text-secondary,#9aa0bb)">catalogued</div></div><div style="padding:.85rem 1rem;background:var(--bg-surface,#11141f);border:1px solid var(--border-light,#222741);border-radius:10px"><div style="font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted,#636980)">Categories</div><div style="margin-top:.3rem;font-size:1.5rem;font-weight:700;line-height:1;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">171</div><div style="margin-top:.35rem;font-size:.75rem;color:var(--text-secondary,#9aa0bb)">test groups</div></div><div style="padding:.85rem 1rem;background:var(--bg-surface,#11141f);border:1px solid var(--border-light,#222741);border-radius:10px"><div style="font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted,#636980)">Fully detected</div><div style="margin-top:.3rem;font-size:1.5rem;font-weight:700;line-height:1;color:#34d399;font-variant-numeric:tabular-nums">162</div><div style="margin-top:.35rem;font-size:.75rem;color:var(--text-secondary,#9aa0bb)">categories at 100%</div></div><div style="padding:.85rem 1rem;background:var(--bg-surface,#11141f);border:1px solid var(--border-light,#222741);border-radius:10px"><div style="font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted,#636980)">With gaps</div><div style="margin-top:.3rem;font-size:1.5rem;font-weight:700;line-height:1;color:#f59e0b;font-variant-numeric:tabular-nums">9</div><div style="margin-top:.35rem;font-size:.75rem;color:var(--text-secondary,#9aa0bb)">below 100%</div></div></div>
+
+### Coverage by category
+
+**162 of 171** categories detect every endpoint. The chart highlights the **9** with gaps (worst first); the full breakdown is in the table.
+
+<div style="margin:1.1rem 0"><div style="display:flex;align-items:center;gap:.75rem;padding:.4rem 0"><span style="flex:0 1 10rem;font-family:var(--font-mono,ui-monospace,monospace);font-size:.82rem;color:var(--text-secondary,#9aa0bb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">jf</span><span style="flex:1 1 auto;min-width:3rem;height:.5rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:0.0%;background:#f87171"></span></span><span style="flex:0 0 6.5rem;text-align:right;font-size:.8rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">0/1 · 0.0%</span></div><div style="display:flex;align-items:center;gap:.75rem;padding:.4rem 0"><span style="flex:0 1 10rem;font-family:var(--font-mono,ui-monospace,monospace);font-size:.82rem;color:var(--text-secondary,#9aa0bb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">xsleak</span><span style="flex:1 1 auto;min-width:3rem;height:.5rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:0.0%;background:#f87171"></span></span><span style="flex:0 0 6.5rem;text-align:right;font-size:.8rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">0/5 · 0.0%</span></div><div style="display:flex;align-items:center;gap:.75rem;padding:.4rem 0"><span style="flex:0 1 10rem;font-family:var(--font-mono,ui-monospace,monospace);font-size:.82rem;color:var(--text-secondary,#9aa0bb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">storedpat</span><span style="flex:1 1 auto;min-width:3rem;height:.5rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:16.7%;background:#f87171"></span></span><span style="flex:0 0 6.5rem;text-align:right;font-size:.8rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">1/6 · 16.7%</span></div><div style="display:flex;align-items:center;gap:.75rem;padding:.4rem 0"><span style="flex:0 1 10rem;font-family:var(--font-mono,ui-monospace,monospace);font-size:.82rem;color:var(--text-secondary,#9aa0bb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">json</span><span style="flex:1 1 auto;min-width:3rem;height:.5rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:66.7%;background:#f59e0b"></span></span><span style="flex:0 0 6.5rem;text-align:right;font-size:.8rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">4/6 · 66.7%</span></div><div style="display:flex;align-items:center;gap:.75rem;padding:.4rem 0"><span style="flex:0 1 10rem;font-family:var(--font-mono,ui-monospace,monospace);font-size:.82rem;color:var(--text-secondary,#9aa0bb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">edgefilter</span><span style="flex:1 1 auto;min-width:3rem;height:.5rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:83.3%;background:#8b94e8"></span></span><span style="flex:0 0 6.5rem;text-align:right;font-size:.8rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">5/6 · 83.3%</span></div><div style="display:flex;align-items:center;gap:.75rem;padding:.4rem 0"><span style="flex:0 1 10rem;font-family:var(--font-mono,ui-monospace,monospace);font-size:.82rem;color:var(--text-secondary,#9aa0bb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">encodingedge</span><span style="flex:1 1 auto;min-width:3rem;height:.5rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:83.3%;background:#8b94e8"></span></span><span style="flex:0 0 6.5rem;text-align:right;font-size:.8rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">5/6 · 83.3%</span></div><div style="display:flex;align-items:center;gap:.75rem;padding:.4rem 0"><span style="flex:0 1 10rem;font-family:var(--font-mono,ui-monospace,monospace);font-size:.82rem;color:var(--text-secondary,#9aa0bb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">modern</span><span style="flex:1 1 auto;min-width:3rem;height:.5rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:84.4%;background:#8b94e8"></span></span><span style="flex:0 0 6.5rem;text-align:right;font-size:.8rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">27/32 · 84.4%</span></div><div style="display:flex;align-items:center;gap:.75rem;padding:.4rem 0"><span style="flex:0 1 10rem;font-family:var(--font-mono,ui-monospace,monospace);font-size:.82rem;color:var(--text-secondary,#9aa0bb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">bugbounty</span><span style="flex:1 1 auto;min-width:3rem;height:.5rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:90.0%;background:#34d399"></span></span><span style="flex:0 0 6.5rem;text-align:right;font-size:.8rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">9/10 · 90.0%</span></div><div style="display:flex;align-items:center;gap:.75rem;padding:.4rem 0"><span style="flex:0 1 10rem;font-family:var(--font-mono,ui-monospace,monospace);font-size:.82rem;color:var(--text-secondary,#9aa0bb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">prototype</span><span style="flex:1 1 auto;min-width:3rem;height:.5rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:90.0%;background:#34d399"></span></span><span style="flex:0 0 6.5rem;text-align:right;font-size:.8rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">9/10 · 90.0%</span></div></div>
+
+| Category | Endpoints | Detected | Verified | Rate |
+| --- | ---: | ---: | ---: | ---: |
+| `advanced` | 6 | 6 | 0 | 100.0% |
+| `api` | 6 | 6 | 0 | 100.0% |
+| `apidom` | 6 | 6 | 0 | 100.0% |
+| `ariaattr` | 6 | 6 | 0 | 100.0% |
+| `attr` | 6 | 6 | 0 | 100.0% |
+| `attrctx` | 6 | 6 | 0 | 100.0% |
+| `attrname` | 4 | 4 | 0 | 100.0% |
+| `basic` | 7 | 7 | 0 | 100.0% |
+| `booleanattr` | 6 | 6 | 0 | 100.0% |
+| `browser` | 5 | 5 | 0 | 100.0% |
+| `callback` | 4 | 4 | 0 | 100.0% |
+| `casemanip` | 6 | 6 | 0 | 100.0% |
+| `chain` | 6 | 6 | 0 | 100.0% |
+| `channel` | 4 | 4 | 0 | 100.0% |
+| `charlimit` | 6 | 6 | 0 | 100.0% |
+| `clientstate` | 6 | 6 | 0 | 100.0% |
+| `clipboard` | 4 | 4 | 0 | 100.0% |
+| `cmspattern` | 6 | 6 | 0 | 100.0% |
+| `codeexec` | 6 | 6 | 0 | 100.0% |
+| `commentinj` | 6 | 6 | 0 | 100.0% |
+| `complexpage` | 6 | 6 | 0 | 100.0% |
+| `condreflect` | 6 | 6 | 0 | 100.0% |
+| `csp` | 5 | 5 | 0 | 100.0% |
+| `cspbypass` | 6 | 6 | 0 | 100.0% |
+| `css` | 6 | 6 | 0 | 100.0% |
+| `csti` | 5 | 5 | 0 | 100.0% |
+| `ctxescape` | 8 | 8 | 0 | 100.0% |
+| `ctxv2` | 6 | 6 | 0 | 100.0% |
+| `ctype` | 6 | 6 | 0 | 100.0% |
+| `customtag` | 6 | 6 | 0 | 100.0% |
+| `dashboard` | 6 | 6 | 0 | 100.0% |
+| `dataattr` | 6 | 6 | 0 | 100.0% |
+| `dataurl` | 4 | 4 | 0 | 100.0% |
+| `dblenc` | 4 | 4 | 0 | 100.0% |
+| `decode` | 4 | 4 | 0 | 100.0% |
+| `dialog` | 5 | 5 | 0 | 100.0% |
+| `dom` | 38 | 38 | 0 | 100.0% |
+| `domctx` | 6 | 6 | 0 | 100.0% |
+| `doublereflect` | 6 | 6 | 0 | 100.0% |
+| `dragdrop` | 4 | 4 | 0 | 100.0% |
+| `ecommerce` | 6 | 6 | 0 | 100.0% |
+| `edge` | 8 | 8 | 0 | 100.0% |
+| `email` | 6 | 6 | 0 | 100.0% |
+| `embedctx` | 6 | 6 | 0 | 100.0% |
+| `encmix` | 6 | 6 | 0 | 100.0% |
+| `encoding` | 8 | 8 | 0 | 100.0% |
+| `errhandling` | 6 | 6 | 0 | 100.0% |
+| `errpage` | 6 | 6 | 0 | 100.0% |
+| `eventhandler` | 5 | 5 | 0 | 100.0% |
+| `filterchain` | 8 | 8 | 0 | 100.0% |
+| `formaction` | 4 | 4 | 0 | 100.0% |
+| `formelement` | 6 | 6 | 0 | 100.0% |
+| `fragment` | 6 | 6 | 0 | 100.0% |
+| `fwoutput` | 6 | 6 | 0 | 100.0% |
+| `globalattr` | 6 | 6 | 0 | 100.0% |
+| `header` | 4 | 4 | 0 | 100.0% |
+| `headerinj` | 6 | 6 | 0 | 100.0% |
+| `headless` | 6 | 6 | 0 | 100.0% |
+| `hidden` | 9 | 9 | 0 | 100.0% |
+| `history` | 2 | 2 | 0 | 100.0% |
+| `hpp` | 4 | 4 | 0 | 100.0% |
+| `html5` | 8 | 8 | 0 | 100.0% |
+| `htmlunsafe` | 6 | 6 | 0 | 100.0% |
+| `import` | 6 | 6 | 0 | 100.0% |
+| `inattr` | 6 | 6 | 0 | 100.0% |
+| `inframe` | 4 | 4 | 0 | 100.0% |
+| `injs` | 6 | 6 | 0 | 100.0% |
+| `inlinestyle` | 6 | 6 | 0 | 100.0% |
+| `inputtransform` | 6 | 6 | 0 | 100.0% |
+| `jquery` | 6 | 6 | 0 | 100.0% |
+| `jsctx` | 6 | 6 | 0 | 100.0% |
+| `jsescape` | 6 | 6 | 0 | 100.0% |
+| `jsonctx` | 6 | 6 | 0 | 100.0% |
+| `latereflect` | 6 | 6 | 0 | 100.0% |
+| `linkcontext` | 6 | 6 | 0 | 100.0% |
+| `listiteration` | 6 | 6 | 0 | 100.0% |
+| `manifest` | 1 | 1 | 0 | 100.0% |
+| `markdown` | 6 | 6 | 0 | 100.0% |
+| `mathml` | 3 | 3 | 0 | 100.0% |
+| `mediacontext` | 6 | 6 | 0 | 100.0% |
+| `metarefresh` | 4 | 4 | 0 | 100.0% |
+| `microdata` | 6 | 6 | 0 | 100.0% |
+| `misc` | 6 | 6 | 0 | 100.0% |
+| `mixedmethod` | 6 | 6 | 0 | 100.0% |
+| `mobserver` | 4 | 4 | 0 | 100.0% |
+| `multicontext` | 6 | 6 | 0 | 100.0% |
+| `multiline` | 6 | 6 | 0 | 100.0% |
+| `multiparam` | 6 | 6 | 0 | 100.0% |
+| `multipart` | 4 | 4 | 0 | 100.0% |
+| `multipleoutput` | 6 | 6 | 0 | 100.0% |
+| `multireflect` | 8 | 8 | 0 | 100.0% |
+| `multivector` | 6 | 6 | 0 | 100.0% |
+| `mutfilter` | 6 | 6 | 0 | 100.0% |
+| `mxss` | 5 | 5 | 0 | 100.0% |
+| `navsink` | 6 | 6 | 0 | 100.0% |
+| `nestedctx` | 6 | 6 | 0 | 100.0% |
+| `nestedfilter` | 6 | 6 | 0 | 100.0% |
+| `nonce` | 4 | 4 | 0 | 100.0% |
+| `noscript` | 4 | 4 | 0 | 100.0% |
+| `numericcontext` | 6 | 6 | 0 | 100.0% |
+| `obfuscation` | 6 | 6 | 0 | 100.0% |
+| `opener` | 2 | 2 | 0 | 100.0% |
+| `partialencode` | 6 | 6 | 0 | 100.0% |
+| `path` | 4 | 4 | 0 | 100.0% |
+| `pathxss` | 6 | 6 | 0 | 100.0% |
+| `payloadfilt` | 6 | 6 | 0 | 100.0% |
+| `pdiff` | 6 | 6 | 0 | 100.0% |
+| `polyctx` | 6 | 6 | 0 | 100.0% |
+| `polyglot` | 3 | 3 | 0 | 100.0% |
+| `popover` | 3 | 3 | 0 | 100.0% |
+| `post` | 2 | 2 | 0 | 100.0% |
+| `postmethod` | 6 | 6 | 0 | 100.0% |
+| `racecon` | 4 | 4 | 0 | 100.0% |
+| `realworld` | 16 | 16 | 0 | 100.0% |
+| `realworld_input` | 8 | 8 | 0 | 100.0% |
+| `recfilt` | 6 | 6 | 0 | 100.0% |
+| `redirect` | 4 | 4 | 0 | 100.0% |
+| `redirectxss` | 6 | 6 | 0 | 100.0% |
+| `referrer` | 2 | 2 | 0 | 100.0% |
+| `regexbypass` | 8 | 8 | 0 | 100.0% |
+| `regexfilt` | 6 | 6 | 0 | 100.0% |
+| `reparse` | 5 | 5 | 0 | 100.0% |
+| `replacementfilter` | 6 | 6 | 0 | 100.0% |
+| `respheader` | 6 | 6 | 0 | 100.0% |
+| `rsplit` | 4 | 4 | 0 | 100.0% |
+| `rwpattern` | 6 | 6 | 0 | 100.0% |
+| `sanitizer` | 12 | 12 | 0 | 100.0% |
+| `scanbounty` | 8 | 8 | 0 | 100.0% |
+| `scriptgadget` | 6 | 6 | 0 | 100.0% |
+| `semantictag` | 6 | 6 | 0 | 100.0% |
+| `seoctx` | 6 | 6 | 0 | 100.0% |
+| `service` | 2 | 2 | 0 | 100.0% |
+| `shadow` | 5 | 5 | 0 | 100.0% |
+| `sink` | 8 | 8 | 0 | 100.0% |
+| `slot` | 4 | 4 | 0 | 100.0% |
+| `social` | 6 | 6 | 0 | 100.0% |
+| `specialchar` | 6 | 6 | 0 | 100.0% |
+| `specialtag` | 8 | 8 | 0 | 100.0% |
+| `srcdoc` | 5 | 5 | 0 | 100.0% |
+| `srcset` | 4 | 4 | 0 | 100.0% |
+| `storage` | 2 | 2 | 0 | 100.0% |
+| `stored` | 4 | 4 | 0 | 100.0% |
+| `stream` | 3 | 3 | 0 | 100.0% |
+| `svg` | 6 | 6 | 0 | 100.0% |
+| `svgctx` | 6 | 6 | 0 | 100.0% |
+| `tablecontext` | 6 | 6 | 0 | 100.0% |
+| `tagattrmix` | 6 | 6 | 0 | 100.0% |
+| `template` | 6 | 6 | 0 | 100.0% |
+| `timing` | 6 | 6 | 0 | 100.0% |
+| `tplel` | 4 | 4 | 0 | 100.0% |
+| `tplinject` | 6 | 6 | 0 | 100.0% |
+| `truncation` | 6 | 6 | 0 | 100.0% |
+| `trustedtypes` | 5 | 5 | 0 | 100.0% |
+| `unicode` | 6 | 6 | 0 | 100.0% |
+| `url` | 6 | 6 | 0 | 100.0% |
+| `waf` | 16 | 16 | 0 | 100.0% |
+| `wafv2` | 6 | 6 | 0 | 100.0% |
+| `websocket` | 7 | 7 | 0 | 100.0% |
+| `whitespace` | 6 | 6 | 0 | 100.0% |
+| `worker` | 4 | 4 | 0 | 100.0% |
+| `wrappercontext` | 6 | 6 | 0 | 100.0% |
+| `xmlctx` | 6 | 6 | 0 | 100.0% |
+| `bugbounty` | 10 | 9 | 0 | 90.0% |
+| `prototype` | 10 | 9 | 0 | 90.0% |
+| `modern` | 32 | 27 | 0 | 84.4% |
+| `edgefilter` | 6 | 5 | 0 | 83.3% |
+| `encodingedge` | 6 | 5 | 0 | 83.3% |
+| `json` | 6 | 4 | 0 | 66.7% |
+| `storedpat` | 6 | 1 | 0 | 16.7% |
+| `jf` | 1 | 0 | 0 | 0.0% |
+| `xsleak` | 5 | 0 | 0 | 0.0% |
+| **Total** | **1036** | **1014** | **0** | **97.9%** |
+
+_Generated 2026-06-20T12:16:01Z · image `ghcr.io/hahwul/xssmaze:main` (`ghcr.io/hahwul/xssmaze@sha256:9311b1693a75b72310a53852f72616e2bf11282a4b53cd2fe5fdf114aba0fb30`) · run `just xssmaze-score` to refresh._
+
+<!-- XSSMAZE:END -->
+
+## Methodology
+
+- **Targets:** every endpoint returned by XSSMaze's `/map/json`, grouped by its catalog `type` (category).
+- **Per-endpoint scan:** Dalfox is pointed at the exact injection point the catalog declares (`query`, body, header, or path), with parameter mining disabled (`--skip-mining`); discovery and reflection checks stay on so header/path cases still resolve.
+- **Detected:** an endpoint counts as detected when Dalfox returns at least one finding (verified, reflected, or AST-DOM).
+- **Verified:** the subset where Dalfox confirmed execution in the parsed DOM (finding type `V`).
+- **Rate:** `detected / endpoints`, per category and overall.
+
+Each snapshot is pinned to the Dalfox version that produced it and the exact XSSMaze image digest, both shown beneath the table. The raw data lives in [`docs/data/xssmaze-score.json`](https://github.com/hahwul/dalfox/blob/main/docs/data/xssmaze-score.json).
+
+## Reading the numbers
+
+A high rate in a category means Dalfox reliably reaches and confirms those sinks; a low rate flags contexts worth investing in next. Because the scan targets the known injection point and skips mining, this measures Dalfox's **detection and verification** capability rather than its parameter-discovery breadth; discovery is exercised separately by the functional test suite. Scores move as both Dalfox and XSSMaze evolve, so always read them alongside the versions stamped under the table.
