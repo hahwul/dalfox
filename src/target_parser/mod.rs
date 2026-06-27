@@ -201,6 +201,29 @@ pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
     let url_str = if lower.starts_with("http://") || lower.starts_with("https://") {
         s.to_string()
     } else {
+        // Reject an explicit non-http(s) authority-form scheme rather than
+        // silently prepending `http://`. Without this, `ftp://127.0.0.1/x`
+        // became `http://ftp//127.0.0.1/x` — the scheme token `ftp` was parsed
+        // as the host and DNS-resolved, surfacing a misleading
+        // DNS_RESOLUTION_FAILED instead of an actionable error. Mirrors the
+        // `http|https`-only restriction the HAR import path already enforces.
+        // Anchored on a contiguous RFC-3986 `scheme://` so scheme-less inputs
+        // (`host:port/path`, `user:pass@host`, or a `://` that appears only
+        // inside the query) keep working unchanged.
+        if let Some(i) = lower.find("://") {
+            let scheme = &lower[..i];
+            let valid_scheme = !scheme.is_empty()
+                && scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+                && scheme
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'-' || b == b'.');
+            if valid_scheme {
+                return Err(format!(
+                    "unsupported URL scheme '{scheme}://' (only http and https are supported)"
+                )
+                .into());
+            }
+        }
         format!("http://{}", s)
     };
     let url = Url::parse(&url_str)?;
@@ -517,6 +540,47 @@ mod tests {
     #[test]
     fn test_parse_target_invalid_url() {
         assert!(parse_target("invalid url").is_err());
+    }
+
+    /// Explicit non-http(s) authority-form schemes are rejected with an
+    /// actionable error instead of being silently mangled into a bogus host
+    /// (`ftp://127.0.0.1/x` used to become `http://ftp//127.0.0.1/x` and fail
+    /// DNS as if the user's host were down).
+    #[test]
+    fn test_parse_target_rejects_non_http_scheme() {
+        for bad in [
+            "ftp://127.0.0.1/x?q=1",
+            "file:///etc/passwd",
+            "gopher://127.0.0.1/x",
+            "ws://127.0.0.1/x",
+            "FTP://127.0.0.1/x", // case-insensitive
+        ] {
+            let err = parse_target(bad).expect_err("non-http(s) scheme must be rejected");
+            assert!(
+                err.to_string().contains("unsupported URL scheme"),
+                "expected an unsupported-scheme error for {bad}, got: {err}"
+            );
+        }
+    }
+
+    /// Scheme-less inputs that merely *contain* a colon (or a `://` inside the
+    /// query) must keep working — the rejection is anchored on a contiguous
+    /// leading `scheme://`, so these still get the `http://` prefix.
+    #[test]
+    fn test_parse_target_keeps_schemeless_inputs() {
+        for ok in [
+            "127.0.0.1:8771/ctx/vuln_body?q=1",        // host:port
+            "user:pass@127.0.0.1:8771/x",              // userinfo colon
+            "example.com/p?next=https://evil.com&q=1", // `://` only in query
+            "example.com",
+        ] {
+            let t = parse_target(ok).unwrap_or_else(|e| panic!("{ok} should parse, got: {e}"));
+            assert!(
+                t.url.as_str().starts_with("http://"),
+                "{ok} should be prefixed with http://, got {}",
+                t.url.as_str()
+            );
+        }
     }
 
     #[test]
