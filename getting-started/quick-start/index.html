@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  <meta name="description" content="Your first Dalfox scan in five minutes.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#31365e">
+  <title>Quick Start · Dalfox</title>
+  <meta property="og:title" content="Quick Start">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/getting-started/quick-start/">
+  <meta property="og:description" content="Your first Dalfox scan in five minutes.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/getting-started-quick-start.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Quick Start">
+  <meta name="twitter:description" content="Your first Dalfox scan in five minutes.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/getting-started-quick-start.png">
+  
+  <link rel="canonical" href="https://dalfox.hahwul.com/getting-started/quick-start/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox" href="https://dalfox.hahwul.com/rss.xml">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"Quick Start","url":"https://dalfox.hahwul.com/getting-started/quick-start/","description":"Your first Dalfox scan in five minutes.","image":"https://dalfox.hahwul.com/og-images/getting-started-quick-start.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Getting Started","item":"https://dalfox.hahwul.com/getting-started/"},{"@type":"ListItem","position":3,"name":"Quick Start"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/sidebar-init.js"></script>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="getting-started">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        <a href="https://dalfox.hahwul.com/" class="header-logo">
+          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <span class="header-logo-text">DALFOX</span>
+        </a>
+        <nav class="header-nav">
+          <a href="https://dalfox.hahwul.com/getting-started/">Getting Started</a>
+          <a href="https://dalfox.hahwul.com/guide/">Guide</a>
+          <a href="https://dalfox.hahwul.com/integrations/">Integrations</a>
+          <a href="https://dalfox.hahwul.com/reference/">Reference</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="Search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>Search</span>
+          <kbd>⌘K</kbd>
+        </button>
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        Getting Started
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/getting-started/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/installation/">Installation</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/configuration/">Configuration</a></li>
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        Guide
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/guide/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/scanning-modes/">Scanning Modes</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/parameters/">Parameters &amp; Discovery</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/payloads/">Payloads &amp; Encoding</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/waf-bypass/">WAF Bypass</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/stored-xss/">Stored XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/output/">Output &amp; Reports</a></li>
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Integrations
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/integrations/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/server/">REST API Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/mcp/">MCP Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/caido/">Caido Workflows</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/skills/">Agent Skill</a></li>
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        Reference
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/reference/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/cli/">CLI Reference</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/config/">Config File</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/environment/">Environment</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/xssmaze/">XSSMaze Score</a></li>
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.1.2" target="_blank" rel="noopener" title="Dalfox v3.1.2 release notes">v3.1.2</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="Expand sidebar" title="Expand sidebar">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>Quick Start</h1>
+          <p>This page walks you from install to a verified finding. We'll use an intentionally vulnerable demo target so you can see real output.</p>
+<div class="alert alert-warning">
+  <span class="alert-icon" aria-hidden="true">
+    
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    
+  </span>
+  <div class="alert-content"><p>Only scan targets you're authorized to test. Dalfox fires real XSS payloads.</p></div>
+</div>
+<h2 id="1-scan-a-single-url">1. Scan a single URL</h2>
+<pre><code class="language-bash hljs">dalfox https://xss-game.appspot.com/level1/frame?query=test
+</code></pre>
+<p>The first argument is the target. Dalfox auto-detects that it's a URL and runs the <code>scan</code> subcommand implicitly. You'll see:</p>
+<ul>
+<li>A banner with the version.</li>
+<li><code>INFO</code> lines as Dalfox discovers parameters and probes contexts.</li>
+<li><code>[V]</code> (verified) and <code>[R]</code> (reflected) lines for each finding, with the exact payload that worked.</li>
+</ul>
+<h2 id="2-scan-from-a-file">2. Scan from a file</h2>
+<p>Feed a list of URLs from your crawler:</p>
+<pre><code class="language-bash hljs"># urls.txt, one target per line
+dalfox scan urls.txt
+</code></pre>
+<p>Each URL runs through the same pipeline. Results stream as they're found.</p>
+<h2 id="3-scan-from-a-pipeline">3. Scan from a pipeline</h2>
+<p>Dalfox reads from <code>stdin</code> when you pipe:</p>
+<pre><code class="language-bash hljs">cat urls.txt | dalfox
+# or combined with your recon tools:
+waybackurls example.com | gf xss | dalfox
+</code></pre>
+<h2 id="4-get-json-output">4. Get JSON output</h2>
+<p>Pair Dalfox with <code>jq</code>, a dashboard, or CI:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app/search?q=test -f json -o report.json
+</code></pre>
+<p>Machine-readable formats (<code>json</code>, <code>jsonl</code>, <code>sarif</code>, <code>toml</code>) auto-suppress the banner so the file stays clean.</p>
+<h2 id="5-authenticated-scans">5. Authenticated scans</h2>
+<p>Pass cookies, headers, or a custom method:</p>
+<pre><code class="language-bash hljs">dalfox https://api.target.app/v1/users \
+  -X POST \
+  -H &quot;Authorization: Bearer eyJ...&quot; \
+  -H &quot;Content-Type: application/json&quot; \
+  -d '{&quot;name&quot;:&quot;test&quot;}' \
+  --cookies &quot;session=abc123&quot;
+</code></pre>
+<p>Or point Dalfox at a <strong>raw HTTP request</strong> file you captured from your proxy:</p>
+<pre><code class="language-bash hljs">dalfox scan --input-type raw-http request.txt
+</code></pre>
+<p>Or replay an entire <strong>HAR</strong> export (from browser DevTools or a proxy) — Dalfox scans every request in it, preserving each one's method, headers, cookies, and body:</p>
+<pre><code class="language-bash hljs">dalfox scan capture.har            # auto-detected
+dalfox scan --input-type har capture.har
+</code></pre>
+<h2 id="6-catch-blind-xss">6. Catch Blind XSS</h2>
+<p>Use an out-of-band callback (Interactsh, Burp Collaborator, XSS Hunter, etc.):</p>
+<pre><code class="language-bash hljs">dalfox https://target.app \
+  -b https://your-callback.interact.sh
+</code></pre>
+<p>Dalfox sends blind-XSS payloads across every discovered parameter; if the payload fires later in an admin panel, your callback server records it.</p>
+<p>Or let Dalfox manage an <a href="https://github.com/projectdiscovery/interactsh">interactsh</a> (OAST) server for you — it registers a session, correlates callbacks to the originating payload, and polls automatically:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --blind-oob                  # public interactsh mesh
+dalfox https://target.app --blind-oob=oast.fun         # pick servers
+</code></pre>
+<p>Use <code>--blind-oob-secret</code> for a self-hosted server and <code>--blind-oob-wait</code> to control how long Dalfox keeps polling after the scan finishes.</p>
+<h2 id="7-dry-run-first">7. Dry-run first</h2>
+<p>Use <code>--dry-run</code> to preview what Dalfox would scan:</p>
+<pre><code class="language-bash hljs">dalfox https://target.app --dry-run
+</code></pre>
+<p>It discovers parameters and estimates request volume without firing any payloads.</p>
+<h2 id="reading-the-output">Reading the output</h2>
+<p>Each finding is tagged:</p>
+<table>
+<thead>
+<tr>
+<th>Tag</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>[V]</code></td>
+<td><strong>Verified</strong>: payload produced a real DOM element (via AST/CSS-selector match)</td>
+</tr>
+<tr>
+<td><code>[A]</code></td>
+<td><strong>AST-detected</strong>: static JS analysis found a source→sink flow</td>
+</tr>
+<tr>
+<td><code>[R]</code></td>
+<td><strong>Reflected</strong>: payload appeared in the response, but no DOM evidence</td>
+</tr>
+</tbody>
+</table>
+<p><code>V</code> and <code>A</code> findings are actionable. <code>R</code> findings are worth a look but may be filtered further downstream.</p>
+<h2 id="next-steps">Next steps</h2>
+<ul>
+<li>Learn the different <a href="../../guide/scanning-modes/">scanning modes</a>.</li>
+<li>Understand how <a href="../../guide/parameters/">parameters are discovered</a>.</li>
+<li>Tune <a href="../../guide/payloads/">payloads and encoders</a> for harder targets.</li>
+<li>Save your favorite flags in a <a href="../configuration/">config file</a>.</li>
+</ul>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">On this page</div>
+          <div class="toc-content">
+            <ul><li><a href="#1-scan-a-single-url">1. Scan a single URL</a></li><li><a href="#2-scan-from-a-file">2. Scan from a file</a></li><li><a href="#3-scan-from-a-pipeline">3. Scan from a pipeline</a></li><li><a href="#4-get-json-output">4. Get JSON output</a></li><li><a href="#5-authenticated-scans">5. Authenticated scans</a></li><li><a href="#6-catch-blind-xss">6. Catch Blind XSS</a></li><li><a href="#7-dry-run-first">7. Dry-run first</a></li><li><a href="#reading-the-output">Reading the output</a></li><li><a href="#next-steps">Next steps</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/" target="_blank" rel="noopener">Edit this page on GitHub</a></span>
+      </footer>
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="Search documentation..." aria-label="Search documentation" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Released under the MIT License</span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Built with <a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a></span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">Issues</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contribute</a>
+      </div>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>

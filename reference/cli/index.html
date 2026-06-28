@@ -1,0 +1,1002 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  <meta name="description" content="Every subcommand and flag Dalfox accepts.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#31365e">
+  <title>CLI Reference · Dalfox</title>
+  <meta property="og:title" content="CLI Reference">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/reference/cli/">
+  <meta property="og:description" content="Every subcommand and flag Dalfox accepts.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/reference-cli.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="CLI Reference">
+  <meta name="twitter:description" content="Every subcommand and flag Dalfox accepts.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/reference-cli.png">
+  
+  <link rel="canonical" href="https://dalfox.hahwul.com/reference/cli/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox" href="https://dalfox.hahwul.com/rss.xml">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"CLI Reference","url":"https://dalfox.hahwul.com/reference/cli/","description":"Every subcommand and flag Dalfox accepts.","image":"https://dalfox.hahwul.com/og-images/reference-cli.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Reference","item":"https://dalfox.hahwul.com/reference/"},{"@type":"ListItem","position":3,"name":"CLI Reference"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/sidebar-init.js"></script>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="reference">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        <a href="https://dalfox.hahwul.com/" class="header-logo">
+          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <span class="header-logo-text">DALFOX</span>
+        </a>
+        <nav class="header-nav">
+          <a href="https://dalfox.hahwul.com/getting-started/">Getting Started</a>
+          <a href="https://dalfox.hahwul.com/guide/">Guide</a>
+          <a href="https://dalfox.hahwul.com/integrations/">Integrations</a>
+          <a href="https://dalfox.hahwul.com/reference/">Reference</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="Search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>Search</span>
+          <kbd>⌘K</kbd>
+        </button>
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        Getting Started
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/getting-started/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/installation/">Installation</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/configuration/">Configuration</a></li>
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        Guide
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/guide/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/scanning-modes/">Scanning Modes</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/parameters/">Parameters &amp; Discovery</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/payloads/">Payloads &amp; Encoding</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/waf-bypass/">WAF Bypass</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/stored-xss/">Stored XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/output/">Output &amp; Reports</a></li>
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Integrations
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/integrations/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/server/">REST API Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/mcp/">MCP Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/caido/">Caido Workflows</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/skills/">Agent Skill</a></li>
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        Reference
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/reference/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/cli/">CLI Reference</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/config/">Config File</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/environment/">Environment</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/xssmaze/">XSSMaze Score</a></li>
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.1.2" target="_blank" rel="noopener" title="Dalfox v3.1.2 release notes">v3.1.2</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="Expand sidebar" title="Expand sidebar">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>CLI Reference</h1>
+          <p>Dalfox is organised into four subcommands. The default (when you just pass a target) is <code>scan</code>.</p>
+<pre><code>dalfox [SUBCOMMAND] [TARGET] [FLAGS]
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Subcommand</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>scan</code></td>
+<td>Scan targets for XSS (default when omitted)</td>
+</tr>
+<tr>
+<td><code>server</code></td>
+<td>Run a REST API server</td>
+</tr>
+<tr>
+<td><code>payload</code></td>
+<td>List or fetch built-in/remote payloads</td>
+</tr>
+<tr>
+<td><code>mcp</code></td>
+<td>Run a Model Context Protocol stdio server</td>
+</tr>
+<tr>
+<td><code>help</code></td>
+<td>Print help for any subcommand</td>
+</tr>
+</tbody>
+</table>
+<h2 id="global-flags">Global flags</h2>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--config &lt;FILE&gt;</code></td>
+<td>Path to a config file (TOML or JSON). Overrides default search path.</td>
+</tr>
+<tr>
+<td><code>--debug</code></td>
+<td>Enable debug logging.</td>
+</tr>
+<tr>
+<td><code>-h</code>, <code>--help</code></td>
+<td>Print help.</td>
+</tr>
+<tr>
+<td><code>-V</code>, <code>--version</code></td>
+<td>Print version.</td>
+</tr>
+</tbody>
+</table>
+<p>Exit codes:</p>
+<table>
+<thead>
+<tr>
+<th>Code</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>0</code></td>
+<td>Success, no findings</td>
+</tr>
+<tr>
+<td><code>1</code></td>
+<td>Success, findings reported</td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>Input / config / runtime error</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="dalfox-scan"><code>dalfox scan</code></h2>
+<p>Scan targets for XSS. Omitting the subcommand is equivalent.</p>
+<pre><code class="language-bash hljs">dalfox scan [TARGETS]... [FLAGS]
+</code></pre>
+<h3 id="input">Input</h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Short</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--input-type</code></td>
+<td><code>-i</code></td>
+<td><code>auto</code></td>
+<td><code>auto</code>, <code>url</code>, <code>file</code>, <code>pipe</code>, <code>raw-http</code>, <code>har</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="output">Output</h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Short</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--format</code></td>
+<td><code>-f</code></td>
+<td><code>plain</code></td>
+<td><code>plain</code>, <code>json</code>, <code>jsonl</code>, <code>markdown</code>, <code>sarif</code>, <code>toml</code></td>
+</tr>
+<tr>
+<td><code>--output</code></td>
+<td><code>-o</code></td>
+<td>—</td>
+<td>Write output to file</td>
+</tr>
+<tr>
+<td><code>--include-request</code></td>
+<td>—</td>
+<td>false</td>
+<td>Include HTTP request in output</td>
+</tr>
+<tr>
+<td><code>--include-response</code></td>
+<td>—</td>
+<td>false</td>
+<td>Include response body in output</td>
+</tr>
+<tr>
+<td><code>--include-all</code></td>
+<td>—</td>
+<td>false</td>
+<td>Shorthand for both include flags</td>
+</tr>
+<tr>
+<td><code>--no-color</code></td>
+<td>—</td>
+<td>false</td>
+<td>Disable ANSI colour</td>
+</tr>
+<tr>
+<td><code>--silence</code></td>
+<td><code>-S</code></td>
+<td>false</td>
+<td>Emit only findings to STDOUT</td>
+</tr>
+<tr>
+<td><code>--dry-run</code></td>
+<td>—</td>
+<td>false</td>
+<td>Discover and plan without sending payloads</td>
+</tr>
+<tr>
+<td><code>--stream-findings</code></td>
+<td>—</td>
+<td>false</td>
+<td>Emit each finding the moment it is verified instead of after the end-of-scan summary (plain format only; auto-disabled with <code>--output</code>, <code>--limit</code>, <code>--only-poc</code>)</td>
+</tr>
+<tr>
+<td><code>--poc-type</code></td>
+<td>—</td>
+<td><code>plain</code></td>
+<td><code>plain</code>, <code>curl</code>, <code>httpie</code>, <code>http-request</code></td>
+</tr>
+<tr>
+<td><code>--limit</code></td>
+<td>—</td>
+<td>—</td>
+<td>Cap total results shown</td>
+</tr>
+<tr>
+<td><code>--limit-result-type</code></td>
+<td>—</td>
+<td><code>all</code></td>
+<td>Which types count toward <code>--limit</code>: <code>all</code>, <code>v</code>, <code>r</code>, <code>a</code></td>
+</tr>
+<tr>
+<td><code>--only-poc</code></td>
+<td>—</td>
+<td>—</td>
+<td>Comma-separated filter: <code>v</code>, <code>r</code>, <code>a</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="target-shaping">Target shaping</h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Short</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--param</code></td>
+<td><code>-p</code></td>
+<td>—</td>
+<td>Parameter to analyse; supports <code>name:location</code> (locations: <code>query</code>, <code>body</code>, <code>json</code>, <code>cookie</code>, <code>header</code>)</td>
+</tr>
+<tr>
+<td><code>--data</code></td>
+<td><code>-d</code></td>
+<td>—</td>
+<td>Request body</td>
+</tr>
+<tr>
+<td><code>--headers</code></td>
+<td><code>-H</code></td>
+<td>—</td>
+<td>Extra HTTP header (repeatable)</td>
+</tr>
+<tr>
+<td><code>--cookies</code></td>
+<td>—</td>
+<td>—</td>
+<td>Cookie (repeatable)</td>
+</tr>
+<tr>
+<td><code>--method</code></td>
+<td><code>-X</code></td>
+<td><code>GET</code></td>
+<td>HTTP method override</td>
+</tr>
+<tr>
+<td><code>--user-agent</code></td>
+<td>—</td>
+<td>—</td>
+<td>Custom User-Agent</td>
+</tr>
+<tr>
+<td><code>--cookie-from-raw</code></td>
+<td>—</td>
+<td>—</td>
+<td>Load cookies from a raw HTTP request file</td>
+</tr>
+</tbody>
+</table>
+<h3 id="scope">Scope</h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--include-url</code></td>
+<td>—</td>
+<td>Regex pattern(s) of URLs to include</td>
+</tr>
+<tr>
+<td><code>--exclude-url</code></td>
+<td>—</td>
+<td>Regex pattern(s) of URLs to exclude</td>
+</tr>
+<tr>
+<td><code>--ignore-param</code></td>
+<td>—</td>
+<td>Parameter name(s) to skip</td>
+</tr>
+<tr>
+<td><code>--out-of-scope</code></td>
+<td>—</td>
+<td>Wildcard domain patterns to skip</td>
+</tr>
+<tr>
+<td><code>--out-of-scope-file</code></td>
+<td>—</td>
+<td>File listing out-of-scope domains</td>
+</tr>
+</tbody>
+</table>
+<h3 id="discovery">Discovery</h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--only-discovery</code></td>
+<td>false</td>
+<td>Stop after discovery, no XSS payloads</td>
+</tr>
+<tr>
+<td><code>--skip-discovery</code></td>
+<td>false</td>
+<td>Skip all discovery</td>
+</tr>
+<tr>
+<td><code>--skip-reflection-header</code></td>
+<td>false</td>
+<td>Skip header-based reflection checks</td>
+</tr>
+<tr>
+<td><code>--skip-reflection-cookie</code></td>
+<td>false</td>
+<td>Skip cookie-based reflection checks</td>
+</tr>
+<tr>
+<td><code>--skip-reflection-path</code></td>
+<td>false</td>
+<td>Skip path-based reflection checks</td>
+</tr>
+</tbody>
+</table>
+<h3 id="mining">Mining</h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Short</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--mining-dict-word</code></td>
+<td><code>-W</code></td>
+<td>—</td>
+<td>Parameter wordlist file</td>
+</tr>
+<tr>
+<td><code>--remote-wordlists</code></td>
+<td>—</td>
+<td>—</td>
+<td>Remote sources: <code>burp</code>, <code>assetnote</code></td>
+</tr>
+<tr>
+<td><code>--skip-mining</code></td>
+<td>—</td>
+<td>false</td>
+<td>Skip all mining</td>
+</tr>
+<tr>
+<td><code>--skip-mining-dict</code></td>
+<td>—</td>
+<td>false</td>
+<td>Skip dictionary mining</td>
+</tr>
+<tr>
+<td><code>--skip-mining-dom</code></td>
+<td>—</td>
+<td>false</td>
+<td>Skip DOM mining</td>
+</tr>
+</tbody>
+</table>
+<h3 id="network">Network</h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Short</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--timeout</code></td>
+<td>—</td>
+<td><code>10</code></td>
+<td>Per-request timeout in seconds (network only; does not bound total scan time)</td>
+</tr>
+<tr>
+<td><code>--scan-timeout</code></td>
+<td>—</td>
+<td><code>0</code></td>
+<td>Hard wall-clock cap per target for the scan stage (post-preflight), in seconds. Aborts a target once exceeded; useful when many sequential phases each pay the per-request <code>--timeout</code> cost against a partially-hung endpoint. <code>0</code> disables.</td>
+</tr>
+<tr>
+<td><code>--delay</code></td>
+<td>—</td>
+<td><code>0</code></td>
+<td>Delay between requests (ms), per worker</td>
+</tr>
+<tr>
+<td><code>--rate-limit</code></td>
+<td><code>-r</code>, <code>--rl</code></td>
+<td><code>0</code></td>
+<td>Cap the <strong>global</strong> outbound request rate in requests/second, shared across every worker and target (<code>0</code> = unlimited). Unlike <code>--delay</code> (which only spaces one worker), this bounds the total in-flight burst from <code>workers × concurrent targets</code> — friendlier to shared-IP / edge WAF thresholds.</td>
+</tr>
+<tr>
+<td><code>--retries</code></td>
+<td>—</td>
+<td><code>0</code></td>
+<td>Retry failed requests on HTTP 5xx and transient transport errors (timeouts, connection resets) up to this many times (<code>0</code> = off). HTTP 429 is always retried regardless.</td>
+</tr>
+<tr>
+<td><code>--retry-delay</code></td>
+<td>—</td>
+<td><code>1000</code></td>
+<td>Base delay (ms) for the exponential backoff between <code>--retries</code> attempts (doubles each attempt, capped internally). A server <code>Retry-After</code> header takes precedence on 429.</td>
+</tr>
+<tr>
+<td><code>--proxy</code></td>
+<td>—</td>
+<td>—</td>
+<td>Proxy URL (<code>http://</code>, <code>socks5://</code>)</td>
+</tr>
+<tr>
+<td><code>--insecure</code></td>
+<td>—</td>
+<td><code>true</code></td>
+<td>Skip TLS/SSL certificate verification (accept self-signed, expired, or hostname-mismatched certs). On by default for scanner use; pass <code>--insecure=false</code> to enforce certificate validation.</td>
+</tr>
+<tr>
+<td><code>--follow-redirects</code></td>
+<td><code>-F</code></td>
+<td>false</td>
+<td>Follow 3xx responses</td>
+</tr>
+<tr>
+<td><code>--ignore-return</code></td>
+<td>—</td>
+<td>—</td>
+<td>HTTP status codes to ignore</td>
+</tr>
+</tbody>
+</table>
+<h3 id="engine">Engine</h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--workers</code></td>
+<td><code>50</code></td>
+<td>Concurrent workers per target</td>
+</tr>
+<tr>
+<td><code>--max-concurrent-targets</code></td>
+<td><code>50</code></td>
+<td>Global concurrent targets</td>
+</tr>
+<tr>
+<td><code>--max-targets-per-host</code></td>
+<td><code>100</code></td>
+<td>Per-host cap</td>
+</tr>
+</tbody>
+</table>
+<h3 id="xss-scanning">XSS scanning</h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Short</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--encoders</code></td>
+<td><code>-e</code></td>
+<td><code>url,html</code></td>
+<td>Comma-separated encoders</td>
+</tr>
+<tr>
+<td><code>--remote-payloads</code></td>
+<td>—</td>
+<td>—</td>
+<td><code>portswigger</code>, <code>payloadbox</code></td>
+</tr>
+<tr>
+<td><code>--custom-blind-xss-payload</code></td>
+<td>—</td>
+<td>—</td>
+<td>Custom blind payload template file</td>
+</tr>
+<tr>
+<td><code>--blind</code></td>
+<td><code>-b</code></td>
+<td>—</td>
+<td>Blind XSS callback URL</td>
+</tr>
+<tr>
+<td><code>--blind-oob[=servers]</code></td>
+<td>—</td>
+<td>—</td>
+<td>Enable OOB/OAST blind XSS via interactsh; optional comma-separated server domains (default: public mesh). Requires the <code>=</code> form: <code>--blind-oob=oast.fun,oast.me</code></td>
+</tr>
+<tr>
+<td><code>--blind-oob-secret</code></td>
+<td>—</td>
+<td>—</td>
+<td>Auth token for a self-hosted interactsh server (sent as <code>Authorization</code> on register/poll/deregister)</td>
+</tr>
+<tr>
+<td><code>--blind-oob-wait</code></td>
+<td>—</td>
+<td><code>30</code></td>
+<td>Seconds to keep polling for OOB callbacks after all payloads are sent (<code>0</code> = no extra end-of-scan wait)</td>
+</tr>
+<tr>
+<td><code>--custom-payload</code></td>
+<td>—</td>
+<td>—</td>
+<td>Custom payload file</td>
+</tr>
+<tr>
+<td><code>--only-custom-payload</code></td>
+<td>—</td>
+<td>false</td>
+<td>Use only custom payloads</td>
+</tr>
+<tr>
+<td><code>--custom-alert-value</code></td>
+<td>—</td>
+<td><code>1</code></td>
+<td>Value inside <code>alert()</code>/<code>prompt()</code>/<code>confirm()</code></td>
+</tr>
+<tr>
+<td><code>--custom-alert-type</code></td>
+<td>—</td>
+<td><code>none</code></td>
+<td><code>none</code> or <code>str</code></td>
+</tr>
+<tr>
+<td><code>--inject-marker</code></td>
+<td>—</td>
+<td>—</td>
+<td>Replace this token with payloads (e.g. <code>FUZZ</code>)</td>
+</tr>
+<tr>
+<td><code>--skip-xss-scanning</code></td>
+<td>—</td>
+<td>false</td>
+<td>Skip payload injection</td>
+</tr>
+<tr>
+<td><code>--deep-scan</code></td>
+<td>—</td>
+<td>false</td>
+<td>Keep testing after first finding</td>
+</tr>
+<tr>
+<td><code>--sxss</code></td>
+<td>—</td>
+<td>false</td>
+<td>Enable Stored XSS mode</td>
+</tr>
+<tr>
+<td><code>--sxss-url</code></td>
+<td>—</td>
+<td>—</td>
+<td>Retrieval URL for SXSS</td>
+</tr>
+<tr>
+<td><code>--sxss-method</code></td>
+<td>—</td>
+<td><code>GET</code></td>
+<td>Retrieval method</td>
+</tr>
+<tr>
+<td><code>--sxss-retries</code></td>
+<td>—</td>
+<td><code>3</code></td>
+<td>Retries on the retrieval URL when fetching stored output</td>
+</tr>
+<tr>
+<td><code>--max-payloads-per-param</code></td>
+<td>—</td>
+<td><code>0</code></td>
+<td>Cap payloads tested per parameter (<code>0</code> = no cap)</td>
+</tr>
+<tr>
+<td><code>--skip-ast-analysis</code></td>
+<td>—</td>
+<td>false</td>
+<td>Skip AST DOM-XSS</td>
+</tr>
+<tr>
+<td><code>--analyze-external-js</code></td>
+<td>—</td>
+<td>false</td>
+<td>Fetch same-origin <code>&lt;script src&gt;</code> bundles and run AST DOM-XSS analysis on them (preflight, once per target; up to 16 files, 512 KiB each; respects <code>--include-url</code>/<code>--exclude-url</code>)</td>
+</tr>
+<tr>
+<td><code>--hpp</code></td>
+<td>—</td>
+<td>false</td>
+<td>HTTP Parameter Pollution</td>
+</tr>
+<tr>
+<td><code>--detect-outdated-libs</code></td>
+<td>—</td>
+<td>false</td>
+<td>Also report outdated / known-vulnerable JS libraries (informational, CWE-1104; 0 extra requests)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="waf">WAF</h3>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--waf-bypass</code></td>
+<td><code>auto</code></td>
+<td><code>auto</code>, <code>force</code>, <code>off</code></td>
+</tr>
+<tr>
+<td><code>--skip-waf-probe</code></td>
+<td>false</td>
+<td>Skip active WAF fingerprinting</td>
+</tr>
+<tr>
+<td><code>--force-waf</code></td>
+<td>—</td>
+<td>WAF name when <code>--waf-bypass force</code></td>
+</tr>
+<tr>
+<td><code>--waf-evasion</code></td>
+<td>false</td>
+<td>Adaptive evasion on WAF detection: randomized inter-request jitter + an escalating cooldown on clusters of blocked responses (replaces the old blunt <code>workers=1</code>/<code>delay=3000</code> preset). The per-WAF pacing hint is applied automatically on detection even without this flag. Pairs well with <code>--rate-limit</code>.</td>
+</tr>
+<tr>
+<td><code>--waf-min-confidence</code></td>
+<td><code>0.3</code></td>
+<td>Drop fingerprints below this confidence (0.0–1.0). The default <code>0.3</code> suppresses weak matches like <code>Server: Google Frontend</code> (0.15). Set lower to keep weak signals; <code>1.0</code> keeps only fingerprints with full confidence.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="dalfox-server"><code>dalfox server</code></h2>
+<p>Start the REST API server.</p>
+<pre><code class="language-bash hljs">dalfox server [FLAGS]
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Flag</th>
+<th>Short</th>
+<th>Default</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>--port</code></td>
+<td><code>-p</code></td>
+<td><code>6664</code></td>
+<td>Listen port</td>
+</tr>
+<tr>
+<td><code>--host</code></td>
+<td><code>-H</code></td>
+<td><code>127.0.0.1</code></td>
+<td>Bind address</td>
+</tr>
+<tr>
+<td><code>--api-key</code></td>
+<td>—</td>
+<td>—</td>
+<td>Required <code>X-API-KEY</code> header value (or <code>DALFOX_API_KEY</code>)</td>
+</tr>
+<tr>
+<td><code>--log-file</code></td>
+<td>—</td>
+<td>—</td>
+<td>Plain-text log file</td>
+</tr>
+<tr>
+<td><code>--allowed-origins</code></td>
+<td>—</td>
+<td>—</td>
+<td>CORS origins (comma-separated, supports <code>*</code> and <code>regex:</code>)</td>
+</tr>
+<tr>
+<td><code>--jsonp</code></td>
+<td>—</td>
+<td>false</td>
+<td>Wrap responses in JSONP</td>
+</tr>
+<tr>
+<td><code>--callback-param-name</code></td>
+<td>—</td>
+<td><code>callback</code></td>
+<td>JSONP callback param</td>
+</tr>
+<tr>
+<td><code>--cors-allow-methods</code></td>
+<td>—</td>
+<td><code>GET,POST,OPTIONS,PUT,PATCH,DELETE</code></td>
+<td>CORS methods</td>
+</tr>
+<tr>
+<td><code>--cors-allow-headers</code></td>
+<td>—</td>
+<td><code>Content-Type,X-API-KEY,Authorization</code></td>
+<td>CORS headers</td>
+</tr>
+<tr>
+<td><code>--rate-limit</code></td>
+<td><code>-r</code>, <code>--rl</code></td>
+<td><code>0</code></td>
+<td>Cap the global outbound request rate (requests/sec, <code>0</code> = unlimited)</td>
+</tr>
+<tr>
+<td><code>--scan-timeout</code></td>
+<td>—</td>
+<td><code>0</code></td>
+<td>Hard wall-clock cap per target for the scan stage, in seconds</td>
+</tr>
+<tr>
+<td><code>--max-concurrent-scans</code></td>
+<td>—</td>
+<td><code>0</code></td>
+<td>Limit on simultaneous scans (<code>0</code> = unlimited)</td>
+</tr>
+<tr>
+<td><code>--max-body-bytes</code></td>
+<td>—</td>
+<td><code>0</code></td>
+<td>Limit response body bytes for analysis (<code>0</code> = unlimited)</td>
+</tr>
+</tbody>
+</table>
+<p>See <a href="../../integrations/server/">REST API Server</a> for endpoints.</p>
+<hr />
+<h2 id="dalfox-payload"><code>dalfox payload</code></h2>
+<p>List or fetch payload collections.</p>
+<pre><code class="language-bash hljs">dalfox payload &lt;SELECTOR&gt;
+</code></pre>
+<p>Selectors:</p>
+<table>
+<thead>
+<tr>
+<th>Selector</th>
+<th>What it prints</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>event-handlers</code></td>
+<td>DOM event handler attribute names</td>
+</tr>
+<tr>
+<td><code>useful-tags</code></td>
+<td>Useful HTML tags</td>
+</tr>
+<tr>
+<td><code>uri-scheme</code></td>
+<td><code>javascript:</code>/<code>data:</code> URL payloads</td>
+</tr>
+<tr>
+<td><code>portswigger</code></td>
+<td>Remote: PortSwigger XSS cheatsheet</td>
+</tr>
+<tr>
+<td><code>payloadbox</code></td>
+<td>Remote: PayloadBox XSS list</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="dalfox-mcp"><code>dalfox mcp</code></h2>
+<p>Run the MCP stdio server.</p>
+<pre><code class="language-bash hljs">dalfox mcp
+</code></pre>
+<p>No additional flags. See <a href="../../integrations/mcp/">MCP Server</a> for tool definitions.</p>
+<hr />
+<h2 id="see-also">See also</h2>
+<ul>
+<li><a href="../config/">Config File reference</a></li>
+<li><a href="../environment/">Environment variables</a></li>
+</ul>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">On this page</div>
+          <div class="toc-content">
+            <ul><li><a href="#global-flags">Global flags</a></li><li><a href="#dalfox-scan">dalfox scan</a><ul><li><a href="#input">Input</a></li><li><a href="#output">Output</a></li><li><a href="#target-shaping">Target shaping</a></li><li><a href="#scope">Scope</a></li><li><a href="#discovery">Discovery</a></li><li><a href="#mining">Mining</a></li><li><a href="#network">Network</a></li><li><a href="#engine">Engine</a></li><li><a href="#xss-scanning">XSS scanning</a></li><li><a href="#waf">WAF</a></li></ul></li><li><a href="#dalfox-server">dalfox server</a></li><li><a href="#dalfox-payload">dalfox payload</a></li><li><a href="#dalfox-mcp">dalfox mcp</a></li><li><a href="#see-also">See also</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/" target="_blank" rel="noopener">Edit this page on GitHub</a></span>
+      </footer>
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="Search documentation..." aria-label="Search documentation" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Released under the MIT License</span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Built with <a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a></span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">Issues</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contribute</a>
+      </div>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>

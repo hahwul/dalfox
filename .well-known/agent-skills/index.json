@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+  "skills": [
+    {
+      "name": "dalfox",
+      "type": "skill-md",
+      "description": "Use when scanning a URL or parameter for XSS (reflected, DOM, stored, blind), enumerating reflected parameters, or when the user explicitly mentions \"dalfox\" or \"XSS scan\". Runs as CLI (`dalfox scan`) or MCP server (6 tools). Authoritative workflows for dalfox v3 (Rust). Not for non-XSS vulnerabilities.",
+      "url": "/.well-known/agent-skills/dalfox/SKILL.md",
+      "digest": "sha256:d63991e395380e39d5d83508984cdadaca29ebde2a4b7232c643c80476ff27d2"
+    }
+  ]
+}

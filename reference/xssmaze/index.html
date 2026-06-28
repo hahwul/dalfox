@@ -1,0 +1,1437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <!-- CSP via <meta> because GitHub Pages cannot set response headers, so HSTS /
+       frame-ancestors / X-Content-Type-Options (all header-only) are out of
+       scope here. 'upgrade-insecure-requests' is intentionally omitted: prod is
+       HTTPS-only with no mixed content, and that directive would upgrade every
+       asset to https:// and break `hwaro serve` over http://localhost.
+       Set HWARO_DEV=1 (e.g. `HWARO_DEV=1 hwaro serve -i docs`) to drop the CSP
+       locally so hwaro's inline live-reload script is allowed to run. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; base-uri 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; manifest-src 'self'; object-src 'none'; form-action 'self'">
+  
+  <meta name="description" content="How much of the XSSMaze lab Dalfox detects, measured against the main branch.">
+  <meta name="color-scheme" content="dark">
+  <meta name="theme-color" content="#31365e">
+  <title>XSSMaze Score · Dalfox</title>
+  <meta property="og:title" content="XSSMaze Score">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://dalfox.hahwul.com/reference/xssmaze/">
+  <meta property="og:description" content="How much of the XSSMaze lab Dalfox detects, measured against the main branch.">
+  <meta property="og:image" content="https://dalfox.hahwul.com/og-images/reference-xssmaze.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="XSSMaze Score">
+  <meta name="twitter:description" content="How much of the XSSMaze lab Dalfox detects, measured against the main branch.">
+  <meta name="twitter:image" content="https://dalfox.hahwul.com/og-images/reference-xssmaze.png">
+  
+  <link rel="canonical" href="https://dalfox.hahwul.com/reference/xssmaze/">
+  <link rel="alternate" type="application/rss+xml" title="Dalfox" href="https://dalfox.hahwul.com/rss.xml">
+  
+  <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","headline":"XSSMaze Score","url":"https://dalfox.hahwul.com/reference/xssmaze/","description":"How much of the XSSMaze lab Dalfox detects, measured against the main branch.","image":"https://dalfox.hahwul.com/og-images/reference-xssmaze.png"}</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"Dalfox","item":"https://dalfox.hahwul.com/"},{"@type":"ListItem","position":2,"name":"Reference","item":"https://dalfox.hahwul.com/reference/"},{"@type":"ListItem","position":3,"name":"XSSMaze Score"}]}</script>
+  
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/fonts.css">
+  <link rel="stylesheet" href="https://dalfox.hahwul.com/css/style.css">
+  <script src="https://dalfox.hahwul.com/js/sidebar-init.js"></script>
+  <link rel="icon" type="image/png" href="/icons/favicon-96x96.png" sizes="96x96" />
+  <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
+  <link rel="shortcut icon" href="/icons/favicon.ico" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/icons/apple-touch-icon.png" />
+  <meta name="apple-mobile-web-app-title" content="Dalfox" />
+  <link rel="manifest" href="/icons/site.webmanifest" />
+  <link rel="stylesheet" href="/assets/css/highlight/github-dark.min.css?v=d1a7e7c5">
+  
+</head>
+<body data-section="reference">
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <div class="header-left">
+        <button class="hamburger" aria-label="Menu" aria-controls="docs-sidebar" aria-expanded="false">
+          <span></span><span></span><span></span>
+        </button>
+        <a href="https://dalfox.hahwul.com/" class="header-logo">
+          <img src="/images/logo_solo.webp" style="width: 30px;" alt="" aria-hidden="true">
+          <span class="header-logo-text">DALFOX</span>
+        </a>
+        <nav class="header-nav">
+          <a href="https://dalfox.hahwul.com/getting-started/">Getting Started</a>
+          <a href="https://dalfox.hahwul.com/guide/">Guide</a>
+          <a href="https://dalfox.hahwul.com/integrations/">Integrations</a>
+          <a href="https://dalfox.hahwul.com/reference/">Reference</a>
+        </nav>
+      </div>
+      <div class="header-right">
+        <button class="search-trigger" type="button" title="Search">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+          <span>Search</span>
+          <kbd>⌘K</kbd>
+        </button>
+        <a class="header-iconlink" href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener" aria-label="GitHub">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        </a>
+      </div>
+    </div>
+  </header>
+  <div class="site-overlay" aria-hidden="true"></div>
+  <div class="docs-layout">
+<aside class="docs-sidebar" id="docs-sidebar">
+  <nav class="sidebar-nav">
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+        Getting Started
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/getting-started/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/installation/">Installation</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/quick-start/">Quick Start</a></li>
+        <li><a href="https://dalfox.hahwul.com/getting-started/configuration/">Configuration</a></li>
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+        Guide
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/guide/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/scanning-modes/">Scanning Modes</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/parameters/">Parameters &amp; Discovery</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/payloads/">Payloads &amp; Encoding</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/waf-bypass/">WAF Bypass</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/stored-xss/">Stored XSS</a></li>
+        <li><a href="https://dalfox.hahwul.com/guide/output/">Output &amp; Reports</a></li>
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        Integrations
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/integrations/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/server/">REST API Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/mcp/">MCP Server</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/caido/">Caido Workflows</a></li>
+        <li><a href="https://dalfox.hahwul.com/integrations/skills/">Agent Skill</a></li>
+      </ul>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-title">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
+        Reference
+      </div>
+      <ul class="sidebar-links">
+        <li><a href="https://dalfox.hahwul.com/reference/">Overview</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/cli/">CLI Reference</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/config/">Config File</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/environment/">Environment</a></li>
+        <li><a href="https://dalfox.hahwul.com/reference/xssmaze/">XSSMaze Score</a></li>
+      </ul>
+    </div>
+  </nav>
+  <div class="sidebar-footer">
+    <a class="sidebar-version" href="https://github.com/hahwul/dalfox/releases/tag/v3.1.2" target="_blank" rel="noopener" title="Dalfox v3.1.2 release notes">v3.1.2</a>
+    <button class="sidebar-collapse-btn" id="sidebar-collapse" type="button" aria-controls="docs-sidebar" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m16 15-3-3 3-3"/></svg>
+    </button>
+  </div>
+</aside>
+<button class="sidebar-expand-btn" id="sidebar-expand" type="button" aria-controls="docs-sidebar" aria-expanded="false" aria-label="Expand sidebar" title="Expand sidebar">
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="m14 9 3 3-3 3"/></svg>
+</button>
+    <main class="docs-main" id="main">
+      <div class="docs-content-container">
+        <article class="docs-article">
+          <h1>XSSMaze Score</h1>
+          <p><a href="https://github.com/hahwul/xssmaze">XSSMaze</a> is an intentionally vulnerable lab for measuring XSS-detection tooling. This page tracks how much of the <strong><code>main</code></strong> image (<code>ghcr.io/hahwul/xssmaze:main</code>) Dalfox detects. The numbers below are auto-generated by <code>just xssmaze-score</code>, never hand-written.</p>
+<h2 id="latest-score">Latest score</h2>
+<!-- XSSMAZE:BEGIN — generated by `just xssmaze-score`; do not edit by hand -->
+<div style="margin:1.5rem 0;padding:1.6rem 1.75rem;background:radial-gradient(120% 140% at 100% 0%,rgba(139,148,232,0.10),transparent 55%),linear-gradient(135deg,var(--bg-surface,#11141f),var(--bg-sidebar,#0b0d18));border:1px solid var(--border-light,#222741);border-radius:14px"><div style="font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.12em;color:var(--text-muted,#636980)">Detection score</div><div style="display:flex;align-items:baseline;margin-top:.4rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums"><span style="font-size:clamp(2.6rem,9vw,3.6rem);font-weight:700;line-height:1;letter-spacing:-.02em">97.9</span><span style="font-size:1.6rem;font-weight:600;color:var(--text-secondary,#9aa0bb)">%</span></div><div style="margin-top:.55rem;font-size:.95rem;color:var(--text-secondary,#9aa0bb)"><strong style="color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">1014</strong> / 1036 endpoints detected across 171 categories</div><div style="margin-top:1.4rem;height:.6rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><div style="height:100%;width:97.9%;background:#34d399;box-shadow:0 0 16px rgba(52,211,153,0.45);border-radius:999px"></div></div><div style="margin-top:1.3rem;padding-top:1rem;border-top:1px solid var(--border,#161a28);display:flex;flex-wrap:wrap;gap:.4rem 1.25rem;font-size:.8rem;color:var(--text-muted,#636980)"><span><span style="color:var(--text-secondary,#9aa0bb)">dalfox</span> v3.1.0</span><span><span style="color:var(--text-secondary,#9aa0bb)">xssmaze</span> v0.2.0</span><span>generated 2026-06-20</span></div></div><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:.75rem;margin:1rem 0"><div style="padding:.85rem 1rem;background:var(--bg-surface,#11141f);border:1px solid var(--border-light,#222741);border-radius:10px"><div style="font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted,#636980)">Endpoints</div><div style="margin-top:.3rem;font-size:1.5rem;font-weight:700;line-height:1;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">1036</div><div style="margin-top:.35rem;font-size:.75rem;color:var(--text-secondary,#9aa0bb)">catalogued</div></div><div style="padding:.85rem 1rem;background:var(--bg-surface,#11141f);border:1px solid var(--border-light,#222741);border-radius:10px"><div style="font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted,#636980)">Categories</div><div style="margin-top:.3rem;font-size:1.5rem;font-weight:700;line-height:1;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">171</div><div style="margin-top:.35rem;font-size:.75rem;color:var(--text-secondary,#9aa0bb)">test groups</div></div><div style="padding:.85rem 1rem;background:var(--bg-surface,#11141f);border:1px solid var(--border-light,#222741);border-radius:10px"><div style="font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted,#636980)">Fully detected</div><div style="margin-top:.3rem;font-size:1.5rem;font-weight:700;line-height:1;color:#34d399;font-variant-numeric:tabular-nums">162</div><div style="margin-top:.35rem;font-size:.75rem;color:var(--text-secondary,#9aa0bb)">categories at 100%</div></div><div style="padding:.85rem 1rem;background:var(--bg-surface,#11141f);border:1px solid var(--border-light,#222741);border-radius:10px"><div style="font-size:.7rem;font-weight:600;text-transform:uppercase;letter-spacing:.08em;color:var(--text-muted,#636980)">With gaps</div><div style="margin-top:.3rem;font-size:1.5rem;font-weight:700;line-height:1;color:#f59e0b;font-variant-numeric:tabular-nums">9</div><div style="margin-top:.35rem;font-size:.75rem;color:var(--text-secondary,#9aa0bb)">below 100%</div></div></div>
+<h3 id="coverage-by-category">Coverage by category</h3>
+<p><strong>162 of 171</strong> categories detect every endpoint. The chart highlights the <strong>9</strong> with gaps (worst first); the full breakdown is in the table.</p>
+<div style="margin:1.1rem 0"><div style="display:flex;align-items:center;gap:.75rem;padding:.4rem 0"><span style="flex:0 1 10rem;font-family:var(--font-mono,ui-monospace,monospace);font-size:.82rem;color:var(--text-secondary,#9aa0bb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">jf</span><span style="flex:1 1 auto;min-width:3rem;height:.5rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:0.0%;background:#f87171"></span></span><span style="flex:0 0 6.5rem;text-align:right;font-size:.8rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">0/1 · 0.0%</span></div><div style="display:flex;align-items:center;gap:.75rem;padding:.4rem 0"><span style="flex:0 1 10rem;font-family:var(--font-mono,ui-monospace,monospace);font-size:.82rem;color:var(--text-secondary,#9aa0bb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">xsleak</span><span style="flex:1 1 auto;min-width:3rem;height:.5rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:0.0%;background:#f87171"></span></span><span style="flex:0 0 6.5rem;text-align:right;font-size:.8rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">0/5 · 0.0%</span></div><div style="display:flex;align-items:center;gap:.75rem;padding:.4rem 0"><span style="flex:0 1 10rem;font-family:var(--font-mono,ui-monospace,monospace);font-size:.82rem;color:var(--text-secondary,#9aa0bb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">storedpat</span><span style="flex:1 1 auto;min-width:3rem;height:.5rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:16.7%;background:#f87171"></span></span><span style="flex:0 0 6.5rem;text-align:right;font-size:.8rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">1/6 · 16.7%</span></div><div style="display:flex;align-items:center;gap:.75rem;padding:.4rem 0"><span style="flex:0 1 10rem;font-family:var(--font-mono,ui-monospace,monospace);font-size:.82rem;color:var(--text-secondary,#9aa0bb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">json</span><span style="flex:1 1 auto;min-width:3rem;height:.5rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:66.7%;background:#f59e0b"></span></span><span style="flex:0 0 6.5rem;text-align:right;font-size:.8rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">4/6 · 66.7%</span></div><div style="display:flex;align-items:center;gap:.75rem;padding:.4rem 0"><span style="flex:0 1 10rem;font-family:var(--font-mono,ui-monospace,monospace);font-size:.82rem;color:var(--text-secondary,#9aa0bb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">edgefilter</span><span style="flex:1 1 auto;min-width:3rem;height:.5rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:83.3%;background:#8b94e8"></span></span><span style="flex:0 0 6.5rem;text-align:right;font-size:.8rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">5/6 · 83.3%</span></div><div style="display:flex;align-items:center;gap:.75rem;padding:.4rem 0"><span style="flex:0 1 10rem;font-family:var(--font-mono,ui-monospace,monospace);font-size:.82rem;color:var(--text-secondary,#9aa0bb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">encodingedge</span><span style="flex:1 1 auto;min-width:3rem;height:.5rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:83.3%;background:#8b94e8"></span></span><span style="flex:0 0 6.5rem;text-align:right;font-size:.8rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">5/6 · 83.3%</span></div><div style="display:flex;align-items:center;gap:.75rem;padding:.4rem 0"><span style="flex:0 1 10rem;font-family:var(--font-mono,ui-monospace,monospace);font-size:.82rem;color:var(--text-secondary,#9aa0bb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">modern</span><span style="flex:1 1 auto;min-width:3rem;height:.5rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:84.4%;background:#8b94e8"></span></span><span style="flex:0 0 6.5rem;text-align:right;font-size:.8rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">27/32 · 84.4%</span></div><div style="display:flex;align-items:center;gap:.75rem;padding:.4rem 0"><span style="flex:0 1 10rem;font-family:var(--font-mono,ui-monospace,monospace);font-size:.82rem;color:var(--text-secondary,#9aa0bb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">bugbounty</span><span style="flex:1 1 auto;min-width:3rem;height:.5rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:90.0%;background:#34d399"></span></span><span style="flex:0 0 6.5rem;text-align:right;font-size:.8rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">9/10 · 90.0%</span></div><div style="display:flex;align-items:center;gap:.75rem;padding:.4rem 0"><span style="flex:0 1 10rem;font-family:var(--font-mono,ui-monospace,monospace);font-size:.82rem;color:var(--text-secondary,#9aa0bb);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">prototype</span><span style="flex:1 1 auto;min-width:3rem;height:.5rem;background:var(--bg-body,#070811);border-radius:999px;overflow:hidden"><span style="display:block;height:100%;width:90.0%;background:#34d399"></span></span><span style="flex:0 0 6.5rem;text-align:right;font-size:.8rem;color:var(--text-primary,#e7e9f3);font-variant-numeric:tabular-nums">9/10 · 90.0%</span></div></div>
+<table>
+<thead>
+<tr>
+<th>Category</th>
+<th style="text-align: right;">Endpoints</th>
+<th style="text-align: right;">Detected</th>
+<th style="text-align: right;">Verified</th>
+<th style="text-align: right;">Rate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>advanced</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>api</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>apidom</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>ariaattr</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>attr</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>attrctx</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>attrname</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>basic</code></td>
+<td style="text-align: right;">7</td>
+<td style="text-align: right;">7</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>booleanattr</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>browser</code></td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>callback</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>casemanip</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>chain</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>channel</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>charlimit</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>clientstate</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>clipboard</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>cmspattern</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>codeexec</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>commentinj</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>complexpage</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>condreflect</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>csp</code></td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>cspbypass</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>css</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>csti</code></td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>ctxescape</code></td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>ctxv2</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>ctype</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>customtag</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>dashboard</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>dataattr</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>dataurl</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>dblenc</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>decode</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>dialog</code></td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>dom</code></td>
+<td style="text-align: right;">38</td>
+<td style="text-align: right;">38</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>domctx</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>doublereflect</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>dragdrop</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>ecommerce</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>edge</code></td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>email</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>embedctx</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>encmix</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>encoding</code></td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>errhandling</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>errpage</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>eventhandler</code></td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>filterchain</code></td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>formaction</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>formelement</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>fragment</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>fwoutput</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>globalattr</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>header</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>headerinj</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>headless</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>hidden</code></td>
+<td style="text-align: right;">9</td>
+<td style="text-align: right;">9</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>history</code></td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>hpp</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>html5</code></td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>htmlunsafe</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>import</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>inattr</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>inframe</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>injs</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>inlinestyle</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>inputtransform</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>jquery</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>jsctx</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>jsescape</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>jsonctx</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>latereflect</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>linkcontext</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>listiteration</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>manifest</code></td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>markdown</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>mathml</code></td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>mediacontext</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>metarefresh</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>microdata</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>misc</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>mixedmethod</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>mobserver</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>multicontext</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>multiline</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>multiparam</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>multipart</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>multipleoutput</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>multireflect</code></td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>multivector</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>mutfilter</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>mxss</code></td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>navsink</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>nestedctx</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>nestedfilter</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>nonce</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>noscript</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>numericcontext</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>obfuscation</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>opener</code></td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>partialencode</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>path</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>pathxss</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>payloadfilt</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>pdiff</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>polyctx</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>polyglot</code></td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>popover</code></td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>post</code></td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>postmethod</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>racecon</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>realworld</code></td>
+<td style="text-align: right;">16</td>
+<td style="text-align: right;">16</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>realworld_input</code></td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>recfilt</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>redirect</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>redirectxss</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>referrer</code></td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>regexbypass</code></td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>regexfilt</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>reparse</code></td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>replacementfilter</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>respheader</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>rsplit</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>rwpattern</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>sanitizer</code></td>
+<td style="text-align: right;">12</td>
+<td style="text-align: right;">12</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>scanbounty</code></td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>scriptgadget</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>semantictag</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>seoctx</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>service</code></td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>shadow</code></td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>sink</code></td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>slot</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>social</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>specialchar</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>specialtag</code></td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">8</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>srcdoc</code></td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>srcset</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>storage</code></td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>stored</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>stream</code></td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>svg</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>svgctx</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>tablecontext</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>tagattrmix</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>template</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>timing</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>tplel</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>tplinject</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>truncation</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>trustedtypes</code></td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>unicode</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>url</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>waf</code></td>
+<td style="text-align: right;">16</td>
+<td style="text-align: right;">16</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>wafv2</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>websocket</code></td>
+<td style="text-align: right;">7</td>
+<td style="text-align: right;">7</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>whitespace</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>worker</code></td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>wrappercontext</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>xmlctx</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">100.0%</td>
+</tr>
+<tr>
+<td><code>bugbounty</code></td>
+<td style="text-align: right;">10</td>
+<td style="text-align: right;">9</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">90.0%</td>
+</tr>
+<tr>
+<td><code>prototype</code></td>
+<td style="text-align: right;">10</td>
+<td style="text-align: right;">9</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">90.0%</td>
+</tr>
+<tr>
+<td><code>modern</code></td>
+<td style="text-align: right;">32</td>
+<td style="text-align: right;">27</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">84.4%</td>
+</tr>
+<tr>
+<td><code>edgefilter</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">83.3%</td>
+</tr>
+<tr>
+<td><code>encodingedge</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">83.3%</td>
+</tr>
+<tr>
+<td><code>json</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">4</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">66.7%</td>
+</tr>
+<tr>
+<td><code>storedpat</code></td>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">16.7%</td>
+</tr>
+<tr>
+<td><code>jf</code></td>
+<td style="text-align: right;">1</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0.0%</td>
+</tr>
+<tr>
+<td><code>xsleak</code></td>
+<td style="text-align: right;">5</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">0.0%</td>
+</tr>
+<tr>
+<td><strong>Total</strong></td>
+<td style="text-align: right;"><strong>1036</strong></td>
+<td style="text-align: right;"><strong>1014</strong></td>
+<td style="text-align: right;"><strong>0</strong></td>
+<td style="text-align: right;"><strong>97.9%</strong></td>
+</tr>
+</tbody>
+</table>
+<p><em>Generated 2026-06-20T12:16:01Z · image <code>ghcr.io/hahwul/xssmaze:main</code> (<code>ghcr.io/hahwul/xssmaze@sha256:9311b1693a75b72310a53852f72616e2bf11282a4b53cd2fe5fdf114aba0fb30</code>) · run <code>just xssmaze-score</code> to refresh.</em></p>
+<!-- XSSMAZE:END -->
+<h2 id="methodology">Methodology</h2>
+<ul>
+<li><strong>Targets:</strong> every endpoint returned by XSSMaze's <code>/map/json</code>, grouped by its catalog <code>type</code> (category).</li>
+<li><strong>Per-endpoint scan:</strong> Dalfox is pointed at the exact injection point the catalog declares (<code>query</code>, body, header, or path), with parameter mining disabled (<code>--skip-mining</code>); discovery and reflection checks stay on so header/path cases still resolve.</li>
+<li><strong>Detected:</strong> an endpoint counts as detected when Dalfox returns at least one finding (verified, reflected, or AST-DOM).</li>
+<li><strong>Verified:</strong> the subset where Dalfox confirmed execution in the parsed DOM (finding type <code>V</code>).</li>
+<li><strong>Rate:</strong> <code>detected / endpoints</code>, per category and overall.</li>
+</ul>
+<p>Each snapshot is pinned to the Dalfox version that produced it and the exact XSSMaze image digest, both shown beneath the table. The raw data lives in <a href="https://github.com/hahwul/dalfox/blob/main/docs/data/xssmaze-score.json"><code>docs/data/xssmaze-score.json</code></a>.</p>
+<h2 id="reading-the-numbers">Reading the numbers</h2>
+<p>A high rate in a category means Dalfox reliably reaches and confirms those sinks; a low rate flags contexts worth investing in next. Because the scan targets the known injection point and skips mining, this measures Dalfox's <strong>detection and verification</strong> capability rather than its parameter-discovery breadth; discovery is exercised separately by the functional test suite. Scores move as both Dalfox and XSSMaze evolve, so always read them alongside the versions stamped under the table.</p>
+
+        </article>
+        
+        <aside class="docs-toc">
+          <div class="toc-title">On this page</div>
+          <div class="toc-content">
+            <ul><li><a href="#latest-score">Latest score</a><ul><li><a href="#coverage-by-category">Coverage by category</a></li></ul></li><li><a href="#methodology">Methodology</a></li><li><a href="#reading-the-numbers">Reading the numbers</a></li></ul>
+          </div>
+        </aside>
+        
+      </div>
+      <footer class="docs-footer">
+        <span><a href="https://github.com/hahwul/dalfox/edit/main/docs/content/" target="_blank" rel="noopener">Edit this page on GitHub</a></span>
+      </footer>
+    </main>
+  </div>
+  <div class="search-overlay" id="searchOverlay">
+    <div class="search-modal">
+      <div class="search-input-wrap">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+        <input type="text" id="searchInput" placeholder="Search documentation..." aria-label="Search documentation" autocomplete="off">
+        <kbd>ESC</kbd>
+      </div>
+      <div class="search-results" id="searchResults"></div>
+    </div>
+  </div>
+  <footer class="site-footer">
+    <div class="footer-inner">
+      <div class="footer-branding">
+        <span>&copy; 2026 <a href="https://github.com/hahwul">HAHWUL</a></span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Released under the MIT License</span>
+        <span class="divider" style="color:var(--border-light)">·</span>
+        <span>Built with <a href="https://hwaro.hahwul.com" target="_blank" rel="noopener">hwaro</a></span>
+      </div>
+      <div class="footer-links">
+        <a href="https://github.com/hahwul/dalfox" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://github.com/hahwul/dalfox/releases" target="_blank" rel="noopener">Releases</a>
+        <a href="https://github.com/hahwul/dalfox/issues" target="_blank" rel="noopener">Issues</a>
+        <a href="https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener">Contribute</a>
+      </div>
+    </div>
+  </footer>
+  <script src="https://dalfox.hahwul.com/assets/js/highlight.min.js"></script>
+  <script src="https://dalfox.hahwul.com/js/search.js"></script>
+  <script src="https://dalfox.hahwul.com/js/toc.js"></script>
+  <script src="https://dalfox.hahwul.com/js/ui.js"></script>
+  
+</body>
+</html>
