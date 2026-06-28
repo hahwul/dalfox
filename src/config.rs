@@ -925,7 +925,7 @@ impl Config {
             {
                 args.waf_evasion = v;
             }
-            // Only override when the CLI was left at the default (0.0)
+            // Only override when the CLI was left at the default (0.3)
             // — same precedence pattern as the other numeric overrides
             // so users who pass --waf-min-confidence on the command
             // line keep authority over what the config file says.
