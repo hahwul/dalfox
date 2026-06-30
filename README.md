@@ -45,7 +45,7 @@ yay -S dalfox
 paru -S dalfox
 ```
 
-See the [Installation guide](https://dalfox.hahwul.com/docs/installation/) for manual build instructions.
+See the [Installation guide](https://dalfox.hahwul.com/getting-started/installation/) for manual build instructions.
 
 ### Nixpkgs (NixOS)
 
@@ -71,7 +71,7 @@ nix profile install github:hahwul/dalfox
 nix develop github:hahwul/dalfox
 ```
 
-See [Installation guide](https://dalfox.hahwul.com/docs/installation/) for details.
+See [Installation guide](https://dalfox.hahwul.com/getting-started/installation/) for details.
 
 Prebuilt binaries (including statically-linked musl variants for Linux) are available on the [GitHub Releases](https://github.com/hahwul/dalfox/releases) page.
 
@@ -84,7 +84,7 @@ dalfox [mode] [target] [flags]
 * File Mode: `dalfox scan urls.txt --custom-payload mypayloads.txt`
 * Pipeline: `cat urls.txt | dalfox scan --headers "AuthToken: xxx"`
 
-Check the [Usage](https://dalfox.hahwul.com/page/usage/) and [Running](https://dalfox.hahwul.com/page/running/) documents for more examples.
+Check the [Usage](https://dalfox.hahwul.com/reference/cli/) and [Running](https://dalfox.hahwul.com/getting-started/quick-start/) documents for more examples.
 
 ## Contributing
 if you want to contribute to this project, please see [CONTRIBUTING.md](https://github.com/hahwul/dalfox/blob/main/CONTRIBUTING.md) and Pull-Request with cool your contents.
