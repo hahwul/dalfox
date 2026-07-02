@@ -229,8 +229,39 @@ pub(crate) async fn render_results(
         final_results.retain(|r| allowed.iter().any(|a| a == r.result_type.short()));
     }
 
-    let limit = args.limit.unwrap_or(usize::MAX);
-    let display_results_len = std::cmp::min(final_results.len(), limit);
+    // Truncate the displayed findings to `--limit`. `--limit-result-type`
+    // makes the scan-time stop condition count ONLY findings of that type
+    // (see `count_matching_results` / `limit_reached`), so the display limit
+    // must use the same rule: truncate at the prefix ending with the `limit`-th
+    // matching finding, not the first `limit` findings of any type. Otherwise a
+    // run like `--limit 2 --limit-result-type v` — which keeps scanning until 2
+    // Verified findings accrue — could hide those very Verified findings behind
+    // Reflected ones recorded earlier. With the default `all`, every finding
+    // matches, so this collapses to the original first-`limit` slice.
+    let display_results_len = match args.limit {
+        None => final_results.len(),
+        Some(0) => 0,
+        Some(lim) if args.limit_result_type.eq_ignore_ascii_case("all") => {
+            std::cmp::min(final_results.len(), lim)
+        }
+        Some(lim) => {
+            let want = args.limit_result_type.to_uppercase();
+            let mut matched = 0usize;
+            // Fewer than `lim` matching findings → show everything (the limit
+            // was never reached, so nothing should be dropped).
+            let mut end = final_results.len();
+            for (i, r) in final_results.iter().enumerate() {
+                if r.result_type.short() == want {
+                    matched += 1;
+                    if matched == lim {
+                        end = i + 1;
+                        break;
+                    }
+                }
+            }
+            end
+        }
+    };
     let display_results = &final_results[..display_results_len];
 
     // Build per-target summary for structured output.

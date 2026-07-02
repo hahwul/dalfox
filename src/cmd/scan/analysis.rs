@@ -108,8 +108,17 @@ pub(crate) async fn run_preflight_and_analysis(
                 let mut __preflight_csp_header: Option<(String, String)> = None;
                 let mut preflight_response_body: Option<String> = None;
 
-                // Preflight Content-Type check (skip denylisted types unless deep-scan)
-                if !args_clone.deep_scan {
+                // Preflight probe: fetch the landing page for content-type, CSP,
+                // WAF, and tech detection, and capture the body (which feeds the
+                // initial AST DOM-XSS pass and outdated-lib detection below).
+                // This runs for EVERY scan, including `--deep-scan`. `--deep-scan`
+                // only lifts the per-parameter payload cap and the content-type
+                // *denylist skip* (gated below) — it must NOT skip the preflight
+                // itself. Wrapping the whole probe in `if !deep_scan` silently
+                // disabled WAF fingerprinting/bypass, CSP-bypass, tech detection,
+                // and the initial-response AST DOM analysis under `--deep-scan`,
+                // making the "more thorough" mode strictly weaker.
+                {
                     let current = preflight_idx_clone.fetch_add(1, Ordering::Relaxed) + 1;
                     // Print an ephemeral spinner and auto-clear when finished
                     let label = if total_targets_copy > 1 {
@@ -271,7 +280,13 @@ pub(crate) async fn run_preflight_and_analysis(
                         if !preflight.tech_result.is_empty() {
                             target.tech_info = Some(preflight.tech_result);
                         }
-                        if !is_allowed_content_type(&preflight.content_type) {
+                        // Content-type denylist skip stays gated on !deep_scan:
+                        // `--deep-scan` deliberately scans every content type,
+                        // whereas a normal scan drops denylisted types (images,
+                        // fonts, etc.) that can't carry reflected/DOM XSS.
+                        if !args_clone.deep_scan
+                            && !is_allowed_content_type(&preflight.content_type)
+                        {
                             // Skip this target early
                             skipped_targets_clone.lock().await.insert(
                                 target.url.to_string(),

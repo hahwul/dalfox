@@ -250,29 +250,38 @@ pub(crate) async fn resolve_targets(
                     }
                     return Err(ScanOutcome::Error);
                 }
-                let file_path = &args.targets[0];
-                match crate::utils::fs::read_bounded(
-                    std::path::Path::new(file_path),
-                    MAX_TARGET_LIST_BYTES,
-                    "target list",
-                ) {
-                    Ok(content) => content
-                        .lines()
-                        .map(str::trim)
-                        .filter(|l| !l.is_empty() && !l.starts_with('#'))
-                        .map(ToString::to_string)
-                        .collect(),
-                    Err(e) => {
-                        if !args.silence {
-                            emit_error(
-                                &args.format,
-                                crate::cmd::error_codes::FILE_READ_ERROR,
-                                &format!("Error reading file {}: {}", file_path, e),
-                            );
+                // Read every path given, not just `targets[0]`. `-i file a b`
+                // used to silently drop `b`, diverging from the `raw-http` and
+                // `har` branches (which honor all of `args.targets`) and giving
+                // no hint that the extra files were ignored. Each file is
+                // individually size-bounded and its lines concatenated.
+                let mut collected: Vec<String> = Vec::new();
+                for file_path in &args.targets {
+                    match crate::utils::fs::read_bounded(
+                        std::path::Path::new(file_path),
+                        MAX_TARGET_LIST_BYTES,
+                        "target list",
+                    ) {
+                        Ok(content) => collected.extend(
+                            content
+                                .lines()
+                                .map(str::trim)
+                                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                                .map(ToString::to_string),
+                        ),
+                        Err(e) => {
+                            if !args.silence {
+                                emit_error(
+                                    &args.format,
+                                    crate::cmd::error_codes::FILE_READ_ERROR,
+                                    &format!("Error reading file {}: {}", file_path, e),
+                                );
+                            }
+                            return Err(ScanOutcome::Error);
                         }
-                        return Err(ScanOutcome::Error);
                     }
                 }
+                collected
             }
             "pipe" => {
                 // `-i pipe` with a TTY stdin would otherwise hang
