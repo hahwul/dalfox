@@ -7,6 +7,19 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 The previous Go implementation lives on the [`v2` branch](https://github.com/hahwul/dalfox/tree/v2)
 and continues to receive security backports per [SECURITY.md](./SECURITY.md).
 
+## Unreleased
+
+Stability hardening and bug fixes across the `scan` and `mcp` subcommands.
+
+### Fixed
+
+* **`--deep-scan` no longer skips the preflight probe.** The whole preflight was gated behind `if !deep_scan`, so `--deep-scan` — nominally the *more* thorough mode — silently disabled WAF fingerprinting/bypass, CSP-bypass, technology detection, outdated-library detection, and the initial-response AST DOM-XSS analysis. The probe now runs for every scan; `--deep-scan` still lifts the per-parameter payload cap and scans all content types (its documented behavior).
+* **`--limit` with `--limit-result-type` no longer hides the findings it limited on.** A run like `--limit 2 --limit-result-type v` (stop after 2 verified findings) truncated the display to the first 2 findings of *any* type, which could hide the verified findings behind earlier reflected ones. The display now truncates on the same per-type count the stop condition uses.
+* **`--scan-timeout` is range-checked** (max 24h, matching the server/MCP bound) like every other duration arg, so an out-of-range value fails fast with a clear message instead of risking an `Instant + Duration` overflow panic in the per-target cap.
+* **`-i file` reads every file argument** instead of silently scanning only the first, matching the `raw-http` and `har` input shapes.
+* **MCP: a parse-error on an already-cancelled scan no longer clobbers it back to `error`**, which lost the user's cancel and rewrote its finish timestamp; the parse-error path now goes through the same `!is_terminal()`-guarded transition as every other error path.
+* **MCP: `preflight_dalfox` reports the real target on its internal panic path** instead of a blank `target` field a client can't correlate.
+
 ## 3.1.2
 
 A maintenance release: reflected-XSS false-positive fixes, stricter URL-scheme handling, async server / MCP resource-safety, and documentation accuracy fixes.

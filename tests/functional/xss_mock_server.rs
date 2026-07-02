@@ -2613,11 +2613,12 @@ async fn test_synthesis_filter_effectiveness_v2() {
 }
 
 /// Run a library-detection-only scan against a realworld case id. Uses
-/// `deep_scan=false` (so the preflight body — where vuln-lib detection lives,
-/// alongside tech detection and initial AST — actually runs; `run_scan_test`
-/// forces `deep_scan=true`, which skips that preflight path) and
 /// `skip_xss_scanning`/`skip_ast_analysis` to isolate the informational
-/// library finding. Returns the findings array.
+/// library finding, which is emitted from the preflight body. (The preflight
+/// probe now runs for every scan regardless of `deep_scan`; it used to be
+/// skipped under `deep_scan=true`, which silently disabled WAF/CSP/tech
+/// detection and the initial AST pass — see `analysis.rs`.) Returns the
+/// findings array.
 async fn run_libscan(addr: SocketAddr, case_id: u32, detect_libs: bool) -> Vec<serde_json::Value> {
     let target = format!(
         "http://{}:{}/realworld/query/{}?query=seed",

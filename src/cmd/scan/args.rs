@@ -56,6 +56,16 @@ pub const CLI_MAX_RATE_LIMIT: u32 = 100_000;
 pub const CLI_MAX_RETRIES: u32 = 100;
 /// Sanity cap for `--retry-delay` (ms), matching `--delay`'s ceiling.
 pub const CLI_MAX_RETRY_DELAY_MS: u64 = 60_000;
+/// Sanity cap for `--scan-timeout` (seconds). Kept in lockstep with the async
+/// front-ends' `crate::job::MAX_SCAN_TIMEOUT_SECS` (24h) so the whole-scan
+/// budget bound is identical across CLI / server / MCP. Beyond a ceiling, the
+/// per-target `Instant::now() + Duration::from_secs(scan_timeout)` in
+/// `scan_loop::run_target_capped` can overflow and panic, so — like every other
+/// duration arg — this must be range-checked before it reaches the scan loop.
+pub const CLI_MAX_SCAN_TIMEOUT_SECS: u64 = 86_400;
+// Enforce the "identical bound across CLI / server / MCP" claim at compile time
+// so a future edit to one constant can't silently diverge from the other.
+const _: () = assert!(CLI_MAX_SCAN_TIMEOUT_SECS == crate::job::MAX_SCAN_TIMEOUT_SECS);
 // Default HTTP method (used by CLI and target parsing)
 pub const DEFAULT_METHOD: &str = "GET";
 

@@ -274,6 +274,47 @@ async fn test_run_job_sets_error_on_unreachable_target() {
 }
 
 #[tokio::test]
+async fn test_mark_job_error_sync_preserves_terminal_status() {
+    // Regression for the run_job parse-error path. run_job flips the job to
+    // Running and releases the jobs lock before parse_target runs, so a
+    // `cancel_scan_dalfox` racing the (now stderr-widened) parse-error window
+    // can set Cancelled first. The parse-error path routes through
+    // mark_job_error_sync — whose `!is_terminal()` guard must leave that
+    // Cancelled state (and its finished_at_ms) intact rather than clobbering
+    // it to Error and losing the user's cancel. Exercise the guard directly.
+    let jobs: Arc<std::sync::Mutex<std::collections::HashMap<String, Job>>> =
+        Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+    let scan_id = "job-cancel-race".to_string();
+    let cancel_finished_at = now_ms();
+    {
+        let mut guard = jobs.lock().expect("jobs mutex poisoned");
+        let mut job = Job::new_queued("http://[bad".to_string());
+        job.status = JobStatus::Cancelled;
+        job.finished_at_ms = Some(cancel_finished_at);
+        guard.insert(scan_id.clone(), job);
+    }
+
+    mark_job_error_sync(&jobs, &scan_id, "parse_target failed: bad".to_string());
+
+    let guard = jobs.lock().expect("jobs mutex poisoned");
+    let job = guard.get(&scan_id).expect("job exists");
+    assert_eq!(
+        job.status,
+        JobStatus::Cancelled,
+        "a concurrent cancel must not be clobbered back to Error"
+    );
+    assert_eq!(
+        job.finished_at_ms,
+        Some(cancel_finished_at),
+        "the cancel's finished_at_ms must be preserved"
+    );
+    assert!(
+        job.error_message.is_none(),
+        "no error message should be written over a terminal job"
+    );
+}
+
+#[tokio::test]
 async fn test_run_job_dispatches_blind_xss_when_callback_set() {
     // Regression: MCP previously accepted `blind_callback_url` but never
     // invoked blind_scanning (silent no-op). blind_scanning emits one extra

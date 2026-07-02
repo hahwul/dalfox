@@ -1204,6 +1204,70 @@ async fn test_render_results_json_writes_envelope() {
     assert_eq!(v["meta"]["target_summary"][0]["status"], "findings");
 }
 
+// Regression: `--limit N` combined with `--limit-result-type T` must not hide
+// the T-typed findings behind earlier non-T ones. The scan-time stop condition
+// counts only T findings, so a run that stops after N verified findings then
+// truncated the display to the first N of ALL findings would show only the
+// earlier reflected results and drop the verified ones the user limited on.
+#[tokio::test]
+async fn test_render_results_limit_result_type_keeps_matching_findings() {
+    // Distinct evidence per result so the AST dedupe (keyed on
+    // inject_type|method|evidence for message_id==0 findings) keeps all five.
+    fn typed(ft: FindingType, param: &str, evidence: &str) -> ScanResult {
+        ScanResult::builder(ft)
+            .inject_type("inHTML")
+            .method("GET")
+            .data("https://example.com".to_string())
+            .param(param.to_string())
+            .payload("<x>".to_string())
+            .evidence(evidence.to_string())
+            .cwe("CWE-79")
+            .severity("High")
+            .message_id(0)
+            .message_str("msg")
+            .build()
+    }
+
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    args.limit = Some(2);
+    args.limit_result_type = "v".to_string();
+
+    // Reflected findings recorded before the verified ones the user limited on,
+    // plus a trailing reflected finding AFTER the 2nd verified one. Truncation
+    // must end at the 2nd verified finding: the leading reflected ones stay
+    // (they precede the limit), but the trailing `p6` must be dropped.
+    let results = vec![
+        typed(FindingType::Reflected, "p1", "e1"),
+        typed(FindingType::Reflected, "p2", "e2"),
+        typed(FindingType::Reflected, "p3", "e3"),
+        typed(FindingType::Verified, "p4", "e4"),
+        typed(FindingType::Verified, "p5", "e5"),
+        typed(FindingType::Reflected, "p6", "e6"),
+    ];
+    let urls = vec!["https://example.com".to_string()];
+    let content = render_results_to_file(args, results, urls, "results_limit_type").await;
+    let v: serde_json::Value = serde_json::from_str(&content).expect("valid json");
+    let findings = v["findings"].as_array().expect("findings array");
+    let verified = findings.iter().filter(|f| f["type"] == "V").count();
+    assert_eq!(
+        verified, 2,
+        "both verified findings the scan limited on must be shown, not hidden \
+         behind earlier reflected findings; got: {content}"
+    );
+    // Proves `--limit` still truncates: everything after the 2nd verified
+    // finding (the point the stop condition fires) is dropped. Without
+    // truncation this trailing reflected finding would leak into the output.
+    let params: Vec<&str> = findings
+        .iter()
+        .filter_map(|f| f["param"].as_str())
+        .collect();
+    assert!(
+        !params.contains(&"p6"),
+        "the reflected finding after the limit-th verified one must be truncated; got: {content}"
+    );
+}
+
 #[tokio::test]
 async fn test_render_results_jsonl_meta_then_findings() {
     let mut args = default_scan_args();

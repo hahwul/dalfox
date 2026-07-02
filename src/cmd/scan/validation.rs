@@ -4,7 +4,7 @@
 
 use super::args::{
     CLI_MAX_DELAY_MS, CLI_MAX_RATE_LIMIT, CLI_MAX_RETRIES, CLI_MAX_RETRY_DELAY_MS,
-    CLI_MAX_TIMEOUT_SECS, CLI_MAX_WORKERS, ScanArgs,
+    CLI_MAX_SCAN_TIMEOUT_SECS, CLI_MAX_TIMEOUT_SECS, CLI_MAX_WORKERS, ScanArgs,
 };
 
 /// Check if a domain matches an out-of-scope pattern.
@@ -70,6 +70,19 @@ pub(crate) fn validate_numeric_args(
             format!(
                 "--delay must be at most {} ms (got {})",
                 CLI_MAX_DELAY_MS, args.delay
+            ),
+        ));
+    }
+    // `--scan-timeout` (0 = disabled) feeds `Instant::now() + Duration::from_secs`
+    // in the per-target cap; an unbounded value can overflow that add and panic
+    // the scan task. Range-check it like every other duration arg so an absurd
+    // value fails fast with a clear message instead of a mid-scan panic.
+    if args.scan_timeout > CLI_MAX_SCAN_TIMEOUT_SECS {
+        return Err((
+            crate::cmd::error_codes::INVALID_INPUT_TYPE,
+            format!(
+                "--scan-timeout must be at most {} seconds (got {}); use 0 to disable",
+                CLI_MAX_SCAN_TIMEOUT_SECS, args.scan_timeout
             ),
         ));
     }

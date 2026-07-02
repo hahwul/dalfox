@@ -338,12 +338,14 @@ impl DalfoxMcp {
             Err(e) => {
                 let msg = format!("parse_target failed: {}", e);
                 Self::log("ERR", &msg);
-                let mut jobs = self.lock_jobs();
-                if let Some(j) = jobs.get_mut(&scan_id) {
-                    j.status = JobStatus::Error;
-                    j.error_message = Some(msg);
-                    j.finished_at_ms = Some(now_ms());
-                }
+                // Route through the `!is_terminal()`-gated helper (as the
+                // unreachable path below and the REST server's parse-error
+                // branch already do) instead of an unconditional overwrite:
+                // the job was flipped to Running with the lock released, so a
+                // `cancel_scan_dalfox` racing this stderr write could set
+                // Cancelled first — clobbering it to Error here would lose the
+                // user's cancel and record the wrong finished_at_ms.
+                mark_job_error_sync(&self.jobs, &scan_id, msg);
                 return;
             }
         };
@@ -1325,9 +1327,9 @@ method, param, payload, evidence, cwe, severity, and message_str. \
 Use the optional `offset` and `limit` parameters to page through large \
 result sets; pagination describes {total, offset, limit, returned, has_more}. \
 When status is 'error', includes error_message explaining the failure reason. \
-When running/done/cancelled, includes progress: {params_total, params_tested, \
+When running/done/cancelled/error, includes progress: {params_total, params_tested, \
 requests_sent, findings_so_far, estimated_completion_pct (0-100), \
-suggested_poll_interval_ms (recommended delay before next poll; 0 when done/cancelled)}. \
+suggested_poll_interval_ms (recommended delay before next poll; 0 when terminal)}. \
 Call this repeatedly until status is 'done', 'error', or 'cancelled'."
     )]
     async fn get_results_dalfox(
@@ -1657,6 +1659,11 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
             }
         };
         let target_url_for_err = target_url.clone();
+        // Kept in the async-fn scope (not moved into the blocking closure) so
+        // the outer JoinError branch below can still name the target when the
+        // spawn_blocking task itself panics — otherwise both clones above are
+        // consumed inside the closure and the panic response blanks `target`.
+        let target_url_for_panic = target_url.clone();
         let result = tokio::task::spawn_blocking(move || {
             let _preflight_permit = preflight_permit;
             let target_url_for_err_inner = target_url_for_err.clone();
@@ -1748,7 +1755,7 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
         .await
         .unwrap_or_else(|_| {
             serde_json::json!({
-                "target": "",
+                "target": target_url_for_panic,
                 "reachable": false,
                 "error": "preflight task panicked",
             })

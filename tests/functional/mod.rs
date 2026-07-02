@@ -12,6 +12,8 @@ pub mod mock_case_loader;
 pub mod dom_xss_tests;
 // --analyze-external-js integration tests
 pub mod analyze_external_js_test;
+// --deep-scan preflight regression tests
+pub mod deep_scan_preflight_test;
 // Mining tests (placeholder)
 // pub mod mining;
 // Pipeline tests (placeholder)
