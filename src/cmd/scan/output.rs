@@ -245,21 +245,17 @@ pub(crate) async fn render_results(
             std::cmp::min(final_results.len(), lim)
         }
         Some(lim) => {
+            // Truncate at the prefix ending with the `lim`-th finding whose
+            // type matches `--limit-result-type`. `lim >= 1` here (the `Some(0)`
+            // arm handled zero), and fewer than `lim` matches → keep everything
+            // (the limit was never reached, so nothing should be dropped).
             let want = args.limit_result_type.to_uppercase();
-            let mut matched = 0usize;
-            // Fewer than `lim` matching findings → show everything (the limit
-            // was never reached, so nothing should be dropped).
-            let mut end = final_results.len();
-            for (i, r) in final_results.iter().enumerate() {
-                if r.result_type.short() == want {
-                    matched += 1;
-                    if matched == lim {
-                        end = i + 1;
-                        break;
-                    }
-                }
-            }
-            end
+            final_results
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| r.result_type.short() == want)
+                .nth(lim - 1)
+                .map_or(final_results.len(), |(i, _)| i + 1)
         }
     };
     let display_results = &final_results[..display_results_len];

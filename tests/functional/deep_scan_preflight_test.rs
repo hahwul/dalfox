@@ -134,6 +134,18 @@ fn read_findings(out: &std::path::Path) -> Vec<serde_json::Value> {
     v["findings"].as_array().cloned().unwrap_or_default()
 }
 
+/// True when the findings include the initial-response DOM-XSS finding this
+/// page is built to trigger — an AST/DOM finding citing the `innerHTML` sink.
+/// Asserting on the finding's identity (not just a non-empty list) ensures the
+/// test pins the AST DOM pass specifically, not some incidental finding.
+fn has_dom_innerhtml_finding(findings: &[serde_json::Value]) -> bool {
+    findings.iter().any(|f| {
+        let evidence = f["evidence"].as_str().unwrap_or("");
+        let inject_type = f["inject_type"].as_str().unwrap_or("");
+        evidence.contains("innerHTML") || inject_type.contains("DOM")
+    })
+}
+
 /// The regression: under `--deep-scan`, the preflight body is still captured and
 /// the initial AST DOM analysis still finds the inline `location.hash → innerHTML`
 /// sink. Before the fix this returned zero findings because the whole preflight
@@ -151,9 +163,9 @@ async fn deep_scan_still_runs_initial_ast_dom_analysis() {
     scan::run_scan(&args).await;
     let findings = read_findings(&out);
     assert!(
-        !findings.is_empty(),
+        has_dom_innerhtml_finding(&findings),
         "deep-scan must still capture the preflight body and run the initial AST \
-         DOM analysis (inline location.hash → innerHTML sink); got no findings"
+         DOM analysis (inline location.hash → innerHTML sink); got: {findings:?}"
     );
     let _ = std::fs::remove_file(&out);
 }
@@ -173,8 +185,8 @@ async fn normal_scan_runs_initial_ast_dom_analysis() {
     scan::run_scan(&args).await;
     let findings = read_findings(&out);
     assert!(
-        !findings.is_empty(),
-        "a normal scan should find the inline DOM-XSS sink via the initial AST pass"
+        has_dom_innerhtml_finding(&findings),
+        "a normal scan should find the inline DOM-XSS sink via the initial AST pass; got: {findings:?}"
     );
     let _ = std::fs::remove_file(&out);
 }

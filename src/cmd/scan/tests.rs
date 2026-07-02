@@ -1233,13 +1233,17 @@ async fn test_render_results_limit_result_type_keeps_matching_findings() {
     args.limit = Some(2);
     args.limit_result_type = "v".to_string();
 
-    // Reflected findings recorded before the verified ones the user limited on.
+    // Reflected findings recorded before the verified ones the user limited on,
+    // plus a trailing reflected finding AFTER the 2nd verified one. Truncation
+    // must end at the 2nd verified finding: the leading reflected ones stay
+    // (they precede the limit), but the trailing `p6` must be dropped.
     let results = vec![
         typed(FindingType::Reflected, "p1", "e1"),
         typed(FindingType::Reflected, "p2", "e2"),
         typed(FindingType::Reflected, "p3", "e3"),
         typed(FindingType::Verified, "p4", "e4"),
         typed(FindingType::Verified, "p5", "e5"),
+        typed(FindingType::Reflected, "p6", "e6"),
     ];
     let urls = vec!["https://example.com".to_string()];
     let content = render_results_to_file(args, results, urls, "results_limit_type").await;
@@ -1250,6 +1254,17 @@ async fn test_render_results_limit_result_type_keeps_matching_findings() {
         verified, 2,
         "both verified findings the scan limited on must be shown, not hidden \
          behind earlier reflected findings; got: {content}"
+    );
+    // Proves `--limit` still truncates: everything after the 2nd verified
+    // finding (the point the stop condition fires) is dropped. Without
+    // truncation this trailing reflected finding would leak into the output.
+    let params: Vec<&str> = findings
+        .iter()
+        .filter_map(|f| f["param"].as_str())
+        .collect();
+    assert!(
+        !params.contains(&"p6"),
+        "the reflected finding after the limit-th verified one must be truncated; got: {content}"
     );
 }
 
