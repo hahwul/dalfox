@@ -34,7 +34,7 @@ use tokio::sync::Mutex;
 use rmcp::{
     ErrorData,
     handler::server::wrapper::Parameters,
-    model::{CallToolResult, Content},
+    model::{CallToolResult, ContentBlock},
     tool, tool_handler, tool_router,
 };
 
@@ -187,7 +187,7 @@ const PURGE_MIN_INTERVAL_MS: i64 = 60_000;
 
 /// MCP handler state.
 //
-// rmcp 1.x: `#[tool_router]` (line ~507) generates `Self::tool_router()` as an
+// rmcp 1.x/2.x: `#[tool_router]` (line ~507) generates `Self::tool_router()` as an
 // inherent method, and `#[tool_handler]` calls it automatically. No router
 // field is needed; the 0.x pattern of storing `tool_router: ToolRouter<Self>`
 // became unused dead-code in 1.x.
@@ -1310,7 +1310,7 @@ Final results (via get_results_dalfox) include finding type \
             "target": target,
             "status": JobStatus::Queued
         });
-        Ok(CallToolResult::success(vec![Content::text(
+        Ok(CallToolResult::success(vec![ContentBlock::text(
             out.to_string(),
         )]))
     }
@@ -1452,7 +1452,7 @@ Call this repeatedly until status is 'done', 'error', or 'cancelled'."
                         "suggested_poll_interval_ms": suggested_poll_interval_ms,
                     });
                 }
-                Ok(CallToolResult::success(vec![Content::text(
+                Ok(CallToolResult::success(vec![ContentBlock::text(
                     out.to_string(),
                 )]))
             }
@@ -1540,7 +1540,7 @@ status, and result_count."
                 "has_more": end < total,
             }
         });
-        Ok(CallToolResult::success(vec![Content::text(
+        Ok(CallToolResult::success(vec![ContentBlock::text(
             out.to_string(),
         )]))
     }
@@ -1761,7 +1761,7 @@ Use before scan_with_dalfox to estimate scan impact and verify reachability."
             })
         });
 
-        Ok(CallToolResult::success(vec![Content::text(
+        Ok(CallToolResult::success(vec![ContentBlock::text(
             result.to_string(),
         )]))
     }
@@ -1807,7 +1807,7 @@ still be retrieved via get_results_dalfox."
                     "cancelled": true,
                     "previous_status": previous_status
                 });
-                Ok(CallToolResult::success(vec![Content::text(
+                Ok(CallToolResult::success(vec![ContentBlock::text(
                     out.to_string(),
                 )]))
             }
@@ -1860,7 +1860,7 @@ Terminal scans are also auto-purged after 1 hour."
             "deleted": true,
             "previous_status": previous_status,
         });
-        Ok(CallToolResult::success(vec![Content::text(
+        Ok(CallToolResult::success(vec![ContentBlock::text(
             out.to_string(),
         )]))
     }
