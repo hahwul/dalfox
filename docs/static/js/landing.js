@@ -64,3 +64,50 @@
     });
   }
 })();
+
+// Scroll-reveal — fade the landing sections up as they enter the viewport.
+// The hidden state lives behind a `.reveal-on` class that this script adds, so
+// a visitor with JS disabled, no IntersectionObserver, or a reduced-motion
+// preference always sees fully-rendered content (never a blank page).
+(function () {
+  var landing = document.querySelector('.landing');
+  if (!landing) return;
+  if (!('IntersectionObserver' in window)) return;
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+  var SELECTOR = [
+    '.hero-eyebrow', '.hero-title', '.hero-desc', '.hero-actions', '.hero-install', '.hero-visual',
+    '.stat-item',
+    '.section-eyebrow', '.section-title', '.section-desc',
+    '.feature-cell', '.mode', '.how-step',
+    '.community-links', '.contributors-label', '.contributors',
+    '.cta-title', '.cta-desc', '.cta-buttons'
+  ].join(', ');
+
+  var targets = Array.prototype.slice.call(landing.querySelectorAll(SELECTOR));
+  if (!targets.length) return;
+
+  landing.classList.add('reveal-on');
+  targets.forEach(function (el) { el.setAttribute('data-reveal', ''); });
+
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      if (!entry.isIntersecting) return;
+      io.unobserve(entry.target);
+      entry.target.classList.add('in-view');
+    });
+  }, { rootMargin: '0px 0px -8% 0px', threshold: 0.08 });
+
+  // Stagger siblings that reveal together (grid cells, stat columns, buttons)
+  // so a row cascades in rather than snapping as one block.
+  targets.forEach(function (el) {
+    var siblings = Array.prototype.filter.call(el.parentElement.children, function (c) {
+      return c.hasAttribute && c.hasAttribute('data-reveal');
+    });
+    var index = siblings.indexOf(el);
+    if (index > 0) {
+      el.style.setProperty('--reveal-delay', Math.min(index, 6) * 55 + 'ms');
+    }
+    io.observe(el);
+  });
+})();

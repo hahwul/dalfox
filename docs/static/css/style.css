@@ -1928,6 +1928,15 @@ body:has(.docs-layout) .site-footer {
     border: 1px solid var(--border-light);
     color: var(--accent);
     margin-bottom: 1rem;
+    transition:
+        color 0.2s,
+        border-color 0.2s,
+        box-shadow 0.2s;
+}
+.feature-cell:hover .feature-icon {
+    color: var(--accent-hover);
+    border-color: var(--bracket-dim);
+    box-shadow: 0 0 0 1px var(--accent-dim);
 }
 .feature-cell h3 {
     font-size: 1.05rem;
@@ -2009,27 +2018,46 @@ body:has(.docs-layout) .site-footer {
     );
 }
 .mode {
-    padding: 1rem 0.85rem;
-    background: var(--bg-content);
+    position: relative;
+    padding: 1.25rem 0.9rem;
+    /* Sit the card on a faintly translucent ink panel so the mode names stay
+       legible where the strip crosses the fox-and-moon illustration, while the
+       scene still glows softly through the surface. */
+    background: linear-gradient(
+        180deg,
+        rgba(17, 20, 31, 0.82),
+        rgba(10, 12, 22, 0.82)
+    );
     border: 1px solid var(--border);
     border-radius: 8px;
     text-align: center;
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
     transition:
-        border-color 0.15s,
-        background 0.15s,
-        transform 0.15s;
+        border-color 0.18s,
+        background 0.18s,
+        transform 0.18s;
 }
 .mode:hover {
-    border-color: var(--brand-3);
-    background: var(--bg-surface);
-    transform: translateY(-2px);
+    border-color: var(--bracket-dim);
+    background: linear-gradient(
+        180deg,
+        rgba(24, 28, 44, 0.9),
+        rgba(17, 20, 31, 0.9)
+    );
+    transform: translateY(-3px);
 }
 .mode-name {
     font-family: var(--font-mono);
-    font-size: 0.82rem;
+    font-size: 0.84rem;
     color: var(--accent);
     font-weight: 700;
-    margin-bottom: 0.3rem;
+    margin-bottom: 0.35rem;
+    letter-spacing: 0.02em;
+    transition: color 0.18s;
+}
+.mode:hover .mode-name {
+    color: var(--accent-hover);
 }
 .mode-desc {
     font-size: 0.74rem;
@@ -2050,6 +2078,15 @@ body:has(.docs-layout) .site-footer {
     border-radius: 10px;
     position: relative;
     counter-increment: step;
+    transition:
+        border-color 0.18s,
+        background 0.18s,
+        transform 0.18s;
+}
+.how-step:hover {
+    border-color: var(--bracket-dim);
+    background: var(--bg-surface);
+    transform: translateY(-3px);
 }
 .how-step::before {
     content: "0" counter(step);
@@ -2061,6 +2098,13 @@ body:has(.docs-layout) .site-footer {
     font-weight: 800;
     color: var(--brand-3);
     opacity: 0.7;
+    transition:
+        color 0.18s,
+        opacity 0.18s;
+}
+.how-step:hover::before {
+    color: var(--accent);
+    opacity: 1;
 }
 .how-step h3 {
     font-size: 1.05rem;
@@ -2485,4 +2529,88 @@ body:has(.docs-layout) .site-footer {
     top: 8px;
     outline: 2px solid var(--accent);
     outline-offset: 2px;
+}
+
+/* ==========================================================================
+   Refinements — motion & window-frame cohesion
+   Two additions that keep the established 東洋風 language but sharpen it:
+   (1) a scroll-reveal that lifts the otherwise-static landing into view, and
+   (2) the window-frame corner brackets (窓枠) — previously only on code blocks
+       and the section list — extended to the feature and mode panels so every
+       framed surface reads as drawn by the same hand.
+   ========================================================================== */
+
+/* ----- Scroll-reveal (landing) ---------------------------------------------
+   The hidden state is gated on `.reveal-on`, which js/landing.js adds only when
+   IntersectionObserver is available and the visitor has not asked for reduced
+   motion. Without JS, or under prefers-reduced-motion, nothing is ever hidden. */
+.landing.reveal-on [data-reveal] {
+    opacity: 0;
+    transform: translateY(20px);
+    transition:
+        opacity 0.72s cubic-bezier(0.16, 1, 0.3, 1),
+        transform 0.72s cubic-bezier(0.16, 1, 0.3, 1);
+    transition-delay: var(--reveal-delay, 0ms);
+    will-change: opacity, transform;
+}
+.landing.reveal-on [data-reveal].in-view {
+    opacity: 1;
+    transform: none;
+}
+/* Belt-and-braces: if the media query flips at runtime, drop the hidden state. */
+@media (prefers-reduced-motion: reduce) {
+    .landing.reveal-on [data-reveal] {
+        opacity: 1;
+        transform: none;
+        transition: none;
+    }
+}
+
+/* ----- Window-frame corner brackets on framed panels ------------------------ */
+.mode::before,
+.mode::after,
+.feature-cell::before,
+.feature-cell::after {
+    content: "";
+    position: absolute;
+    width: 10px;
+    height: 10px;
+    pointer-events: none;
+    transition: opacity 0.22s ease;
+}
+.mode::before,
+.feature-cell::before {
+    top: 7px;
+    left: 7px;
+    border-top: 1.5px solid var(--bracket);
+    border-left: 1.5px solid var(--bracket);
+    border-top-left-radius: 3px;
+}
+.mode::after,
+.feature-cell::after {
+    bottom: 7px;
+    right: 7px;
+    border-bottom: 1.5px solid var(--bracket);
+    border-right: 1.5px solid var(--bracket);
+    border-bottom-right-radius: 3px;
+}
+/* Mode cards carry the brackets at rest (like a code-block pane) so the strip
+   reads as a row of framed windows; hover ignites them. */
+.mode::before,
+.mode::after {
+    opacity: 0.32;
+}
+.mode:hover::before,
+.mode:hover::after {
+    opacity: 0.7;
+}
+/* Feature panels are large, so 6 always-on frames would read as clutter — keep
+   theirs latent until the pointer lands. */
+.feature-cell::before,
+.feature-cell::after {
+    opacity: 0;
+}
+.feature-cell:hover::before,
+.feature-cell:hover::after {
+    opacity: 0.6;
 }
