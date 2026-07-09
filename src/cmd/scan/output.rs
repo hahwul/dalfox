@@ -19,6 +19,7 @@ pub(crate) async fn render_dry_run(
 ) -> ScanOutcome {
     let skipped_targets = &state.skipped_targets;
     let mut dry_run_targets = Vec::new();
+    let mut warnings: Vec<String> = Vec::new();
     for group in host_groups.values() {
         for target in group {
             let param_count = target.reflection_params.len();
@@ -70,6 +71,30 @@ pub(crate) async fn render_dry_run(
                 })
                 .collect();
 
+            // Surface -p specs that still could not be seeded (path/fragment,
+            // unknown type). Agents use this to avoid treating "0 params" as a
+            // clean no-op when the operator asked for an unsynthesizable target.
+            if !args.param.is_empty() {
+                let unresolved = crate::parameter_analysis::unresolved_explicit_param_specs(
+                    &target.reflection_params,
+                    &args.param,
+                    target,
+                );
+                if !unresolved.is_empty() {
+                    warnings.push(format!(
+                        "EXPLICIT_PARAM_NOT_SEEDED target={} specs=[{}] (path/fragment and unknown types cannot be synthesized by name; use a name:location form such as q:query)",
+                        target.url,
+                        unresolved.join(", ")
+                    ));
+                } else if param_count == 0 {
+                    warnings.push(format!(
+                        "EXPLICIT_PARAM_EMPTY target={} param=[{}] produced zero scannable parameters",
+                        target.url,
+                        args.param.join(", ")
+                    ));
+                }
+            }
+
             dry_run_targets.push(serde_json::json!({
                 "target": target.url.as_str(),
                 "method": target.method,
@@ -93,16 +118,20 @@ pub(crate) async fn render_dry_run(
     let skipped = skipped_targets.lock().await;
 
     if args.format == "json" || args.format == "jsonl" {
+        let mut meta = serde_json::json!({
+            "dalfox_version": env!("CARGO_PKG_VERSION"),
+            "targets_input": args.targets.len(),
+            "targets_scannable": dry_run_targets.len(),
+            "targets_skipped": skipped.len(),
+            "total_params_discovered": total_params,
+            "total_estimated_requests": total_estimated,
+        });
+        if !warnings.is_empty() {
+            meta["warnings"] = serde_json::json!(warnings);
+        }
         let output = serde_json::json!({
             "dry_run": true,
-            "meta": {
-                "dalfox_version": env!("CARGO_PKG_VERSION"),
-                "targets_input": args.targets.len(),
-                "targets_scannable": dry_run_targets.len(),
-                "targets_skipped": skipped.len(),
-                "total_params_discovered": total_params,
-                "total_estimated_requests": total_estimated,
-            },
+            "meta": meta,
             "targets": dry_run_targets,
         });
         if args.format == "json" {
@@ -120,6 +149,12 @@ pub(crate) async fn render_dry_run(
         println!("  Targets (skipped):   {}", skipped.len());
         println!("  Params discovered:   {}", total_params);
         println!("  Estimated requests:  {}", total_estimated);
+        if !warnings.is_empty() {
+            println!("  Warnings:");
+            for w in &warnings {
+                println!("    - {}", w);
+            }
+        }
         println!();
         for t in &dry_run_targets {
             println!(
