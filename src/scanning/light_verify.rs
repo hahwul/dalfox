@@ -26,7 +26,8 @@ pub async fn verify_dom_xss_light_with_client(
     payload: &str,
 ) -> (bool, Option<String>, Option<String>) {
     let default_method = target.parse_method();
-    let body_method = crate::scanning::url_inject::body_location_method(&target.method);
+    let body_method =
+        crate::scanning::url_inject::body_location_method_for_param(&target.method, param);
     let request = match param.location {
         Location::Header => {
             let parsed_url = target.url.clone();

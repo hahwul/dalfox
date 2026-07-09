@@ -1685,9 +1685,9 @@ async fn fetch_injection_response_with_client(
         }
         Location::Body => {
             // Body injection: use form action URL if available, else original URL.
-            // Preserve body-capable methods (POST/PUT/PATCH/QUERY/…); force POST
-            // only for body-less targets (form-discovery path).
-            let method = crate::scanning::url_inject::body_location_method(&target.method);
+            // Form-discovered sinks stay POST; own-body preserves QUERY/PUT/….
+            let method =
+                crate::scanning::url_inject::body_location_method_for_param(&target.method, param);
             let parsed_url = param
                 .form_action_url
                 .as_ref()
@@ -1725,8 +1725,9 @@ async fn fetch_injection_response_with_client(
         }
         Location::JsonBody => {
             // JSON body injection: use form action URL if available, else original URL.
-            // Preserve body-capable methods; force POST for body-less targets.
-            let method = crate::scanning::url_inject::body_location_method(&target.method);
+            // Form-discovered sinks stay POST; own-body preserves QUERY/PUT/….
+            let method =
+                crate::scanning::url_inject::body_location_method_for_param(&target.method, param);
             let parsed_url = param
                 .form_action_url
                 .as_ref()
@@ -1753,7 +1754,8 @@ async fn fetch_injection_response_with_client(
             rb.header("Content-Type", "application/json")
         }
         Location::MultipartBody => {
-            let method = crate::scanning::url_inject::body_location_method(&target.method);
+            let method =
+                crate::scanning::url_inject::body_location_method_for_param(&target.method, param);
             let parsed_url = param
                 .form_action_url
                 .as_ref()

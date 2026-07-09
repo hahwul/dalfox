@@ -964,8 +964,7 @@ pub async fn probe_body_params(
             let client_clone = client.clone();
             let url = target.url.clone();
 
-            let parsed_method =
-                crate::scanning::url_inject::body_location_method(&target.method);
+            let parsed_method = crate::scanning::url_inject::body_location_method(&target.method);
             let target_clone = arc_target.clone();
             let delay = target.delay;
             let semaphore_clone = semaphore.clone();
@@ -1725,8 +1724,7 @@ pub async fn probe_multipart_params(
                 form = form.text(field_name.clone(), marker.to_string());
             }
 
-            let method =
-                crate::scanning::url_inject::body_location_method(&target_clone.method);
+            let method = crate::scanning::url_inject::body_location_method(&target_clone.method);
             let request =
                 crate::utils::build_request(&client_clone, &target_clone, method, url, None)
                     .multipart(form);

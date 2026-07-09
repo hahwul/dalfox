@@ -259,12 +259,12 @@ async fn send_probe_request_for_param(
     let form_action_url = param.form_action_url.clone();
     let ignore_return = target.ignore_return.clone();
 
-    // Body-bearing locations: preserve body-capable target methods (POST/PUT/
-    // PATCH/QUERY/…); force POST only when the target verb is body-less (GET),
-    // which is the form-discovery path. See `body_location_method`.
+    // Body-bearing locations: form-discovered sinks stay POST; own-body
+    // params preserve body-capable methods (POST/PUT/PATCH/QUERY/…). See
+    // `body_location_method_for_param`.
     let req_method = match location {
         Location::Body | Location::JsonBody | Location::MultipartBody => {
-            crate::scanning::url_inject::body_location_method(&target.method)
+            crate::scanning::url_inject::body_location_method_for_param(&target.method, param)
         }
         _ => parsed_method,
     };

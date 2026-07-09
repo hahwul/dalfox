@@ -106,29 +106,40 @@ pub fn effective_query_base(target_url: &url::Url, param: &Param) -> url::Url {
     target_url.clone()
 }
 
-/// Method used for Body / JsonBody / MultipartBody injection.
+/// Method used when mining/injecting against the target's own request body
+/// (`-d` / imported body) without a form-discovery context.
 ///
-/// Body-less verbs (GET/HEAD/OPTIONS/TRACE) still force POST — that is the
-/// form-discovery path where the page was loaded with GET but fields submit
-/// as POST. Body-capable verbs (POST/PUT/PATCH/DELETE/QUERY/…) are preserved
-/// so scans like `-X QUERY -d '…'` actually send QUERY (RFC 10008).
+/// Body-less verbs (GET/HEAD/OPTIONS/TRACE) force POST. Body-capable verbs
+/// (POST/PUT/PATCH/DELETE/QUERY/…) are preserved so scans like
+/// `-X QUERY -d '…'` actually send QUERY (RFC 10008).
 pub fn body_location_method(target_method: &str) -> reqwest::Method {
     match target_method.trim().to_ascii_uppercase().as_str() {
         "" | "GET" | "HEAD" | "OPTIONS" | "TRACE" => reqwest::Method::POST,
-        other => other
-            .parse()
-            .unwrap_or(reqwest::Method::POST),
+        other => other.parse().unwrap_or(reqwest::Method::POST),
     }
 }
 
+/// Method used for Body / JsonBody / MultipartBody injection for a concrete
+/// param. HTML form-discovered sinks (`form_action_url` set) always submit as
+/// POST — forms never use QUERY/PUT/etc. Own-body params fall through to
+/// [`body_location_method`].
+pub fn body_location_method_for_param(target_method: &str, param: &Param) -> reqwest::Method {
+    if param.form_action_url.is_some() {
+        return reqwest::Method::POST;
+    }
+    body_location_method(target_method)
+}
+
 /// HTTP method that will actually be used to send a payload-bearing
-/// request for `param`. Body-bearing locations use [`body_location_method`];
-/// other locations keep the target's own method. Finding metadata must match
-/// the verb that is actually sent.
+/// request for `param`. Body-bearing locations use
+/// [`body_location_method_for_param`]; other locations keep the target's own
+/// method. Finding metadata must match the verb that is actually sent.
 pub fn effective_method(target_method: &str, param: &Param) -> String {
     match param.location {
         Location::Body | Location::JsonBody | Location::MultipartBody => {
-            body_location_method(target_method).as_str().to_string()
+            body_location_method_for_param(target_method, param)
+                .as_str()
+                .to_string()
         }
         _ => target_method.to_string(),
     }

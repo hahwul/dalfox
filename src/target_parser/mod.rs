@@ -278,10 +278,11 @@ pub fn parse_target_with_method(s: &str) -> Result<Target, Box<dyn std::error::E
 pub fn is_raw_http_request(s: &str) -> bool {
     let first = s.lines().next().unwrap_or("").trim_start();
     let mut it = first.split_whitespace();
-    if let Some(method) = it.next() {
-        if is_known_http_method(method) && first.contains(" HTTP/") {
-            return true;
-        }
+    if let Some(method) = it.next()
+        && is_known_http_method(method)
+        && first.contains(" HTTP/")
+    {
+        return true;
     }
     false
 }
