@@ -472,12 +472,10 @@ pub fn detect_framework_html_sink(text: &str, marker: &str) -> Option<&'static s
                 "data-bind" if has_knockout_html_clause(value) => Some("data-bind"),
                 _ => None,
             };
-            match sink {
-                Some(s) => match found {
-                    Some(prev) if prev != s => return None,
-                    _ => found = Some(s),
-                },
-                None => return None,
+            let s = sink?;
+            match found {
+                Some(prev) if prev != s => return None,
+                _ => found = Some(s),
             }
         }
     }
