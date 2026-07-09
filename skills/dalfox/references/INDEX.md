@@ -10,9 +10,8 @@ This directory holds detailed, lookup-oriented reference material so the main `S
 | `mcp.md` | The 6 MCP tools (`scan_with_dalfox` etc.) with full parameter schemas, validation rules, and security notes | Working via MCP tools (preferred for long/async scans) |
 | `results.md` | Finding shape (V/A/R + `type_description`), `inject_type`, output formats, `--poc-type`, `include_request/response` contract | Interpreting scan output or choosing `--format` / POC style |
 | `config.md` | Config file search paths, precedence (`apply_to_scan_args_if_default`), example, banner/silence interaction | User has (or should have) a `config.toml`; or you see unexpected defaults |
-| `server.md` | When and how to use `dalfox server`, auth, CORS, JSONP, endpoint summary | User wants to expose an API or the MCP tools are not available |
-| `payload.md` | `dalfox payload <selector>` usage and what each selector actually emits | User asks to list payloads or you need event-handler / tag names |
-| `advanced.md` | WAF bypass strategies, mining/discovery controls, scope filters, custom payloads, HPP, concurrency caps, `raw-http` input, `--max-payloads-per-param` | You hit WAF, huge parameter surfaces, need custom payloads, or captured request testing |
+| `server-and-payload.md` | `dalfox server` API (auth, CORS, JSONP, endpoints) **and** `dalfox payload <selector>` output | User wants a persistent API, or to list/enumerate payloads |
+| `advanced.md` | WAF bypass, mining/discovery controls, scope filters, custom payloads, HPP, concurrency caps, `raw-http` / HAR, `--max-payloads-per-param`, bare vs `name:location` `-p` | WAF, huge param surfaces, custom payloads, captured-request testing, or agent fast-mode recipes |
 
 ## Design Principles for This Skill
 
