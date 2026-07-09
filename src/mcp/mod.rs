@@ -811,7 +811,39 @@ pub struct ScanWithDalfoxParams {
     /// "assetnote"). Default: none.
     #[serde(default)]
     pub remote_wordlists: Vec<String>,
+
+    /// Hard cap on payloads tested per parameter (0 = unlimited aside from the
+    /// built-in safety cap). Use a small value (e.g. 10–50) for agent smoke
+    /// scans. Default: 0
+    #[serde(default)]
+    pub max_payloads_per_param: usize,
+
+    /// When true, block until the scan reaches a terminal status (done / error
+    /// / cancelled) or `wait_timeout_sec` elapses, then return the same shape
+    /// as `get_results_dalfox` (includes results when available). When false
+    /// (default), return immediately with `{scan_id, status: "queued"}` and
+    /// poll via `get_results_dalfox`. Default: false
+    #[serde(default)]
+    pub wait: bool,
+
+    /// Wall-clock seconds to wait when `wait` is true (1–86400). Default: 300.
+    /// Ignored when `wait` is false. On timeout the job is left running and the
+    /// response includes `wait_timed_out: true` plus current progress — cancel
+    /// with `cancel_scan_dalfox` if you no longer need it.
+    #[serde(default = "default_wait_timeout_sec")]
+    #[schemars(range(min = 1, max = 86400))]
+    pub wait_timeout_sec: u64,
 }
+
+/// Default wait budget for `scan_with_dalfox` when `wait=true`.
+fn default_wait_timeout_sec() -> u64 {
+    300
+}
+
+/// Hard upper bound for MCP `max_payloads_per_param` (protects against absurd values).
+const MAX_PAYLOADS_PER_PARAM_MCP: usize = 100_000;
+/// Hard upper bound for MCP wait wall-clock (matches scan_timeout ceiling).
+const MAX_WAIT_TIMEOUT_SECS: u64 = 86_400;
 
 fn default_method() -> String {
     crate::cmd::scan::DEFAULT_METHOD.to_string()
@@ -963,14 +995,17 @@ impl DalfoxMcp {
     /// Start an asynchronous Dalfox XSS scan (returns immediately with scan_id).
     #[tool(
         name = "scan_with_dalfox",
-        description = "Start an asynchronous XSS vulnerability scan on a target URL. \
-Returns immediately with {scan_id, target, status: \"queued\"}. \
-Use get_results_dalfox to poll for results until status is done/error/cancelled. \
+        description = "Start an XSS vulnerability scan on a target URL. \
+By default returns immediately with {scan_id, target, status: \"queued\"}; \
+use get_results_dalfox to poll until done/error/cancelled. \
+Set wait=true to block until the scan finishes (or wait_timeout_sec, default 300s) \
+and receive the same shape as get_results_dalfox in one call — preferred for short \
+agent smoke tests. Use max_payloads_per_param to bound request volume. \
 Scans for reflected, DOM-based, and stored XSS using parameter analysis, \
 payload mutation, and AST-based JavaScript verification. \
 Supports custom headers, cookies, POST data, and encoding strategies. \
-Final results (via get_results_dalfox) include finding type \
-(V=Verified, R=Reflected, A=AST-detected), severity, CWE, payload, and evidence."
+Findings include type (V=Verified, R=Reflected, A=AST-detected), severity, \
+CWE, payload, and evidence."
     )]
     async fn scan_with_dalfox(
         &self,
@@ -1011,6 +1046,9 @@ Final results (via get_results_dalfox) include finding type \
             waf_min_confidence,
             remote_payloads,
             remote_wordlists,
+            max_payloads_per_param,
+            wait,
+            wait_timeout_sec,
         } = params;
 
         let target = target.trim().to_string();
@@ -1087,6 +1125,24 @@ Final results (via get_results_dalfox) include finding type \
                 format!(
                     "waf_min_confidence must be between 0.0 and 1.0 (got {})",
                     waf_min_confidence
+                ),
+                None,
+            ));
+        }
+        if max_payloads_per_param > MAX_PAYLOADS_PER_PARAM_MCP {
+            return Err(ErrorData::invalid_params(
+                format!(
+                    "max_payloads_per_param must be between 0 and {} (got {})",
+                    MAX_PAYLOADS_PER_PARAM_MCP, max_payloads_per_param
+                ),
+                None,
+            ));
+        }
+        if wait && (wait_timeout_sec == 0 || wait_timeout_sec > MAX_WAIT_TIMEOUT_SECS) {
+            return Err(ErrorData::invalid_params(
+                format!(
+                    "wait_timeout_sec must be between 1 and {} when wait=true (got {})",
+                    MAX_WAIT_TIMEOUT_SECS, wait_timeout_sec
                 ),
                 None,
             ));
@@ -1219,7 +1275,7 @@ Final results (via get_results_dalfox) include finding type \
             custom_alert_value: "1".to_string(),
             custom_alert_type: "none".to_string(),
             skip_xss_scanning: false,
-            max_payloads_per_param: 0,
+            max_payloads_per_param,
             deep_scan,
             sxss: false,
             sxss_url: None,
@@ -1305,14 +1361,165 @@ Final results (via get_results_dalfox) include finding type \
             }
         });
 
-        let out = serde_json::json!({
-            "scan_id": scan_id,
-            "target": target,
-            "status": JobStatus::Queued
-        });
+        if !wait {
+            let out = serde_json::json!({
+                "scan_id": scan_id,
+                "target": target,
+                "status": JobStatus::Queued
+            });
+            return Ok(CallToolResult::success(vec![ContentBlock::text(
+                out.to_string(),
+            )]));
+        }
+
+        // Synchronous agent path: poll until terminal or wait budget expires.
+        // Does not cancel on timeout — the job keeps running so the caller can
+        // keep polling or cancel explicitly.
+        let deadline =
+            tokio::time::Instant::now() + std::time::Duration::from_secs(wait_timeout_sec);
+        loop {
+            let Some(out) = self.results_json_for_scan(&scan_id, 0, 0) else {
+                return Err(ErrorData::internal_error(
+                    "scan_id disappeared while waiting (unexpected)",
+                    None,
+                ));
+            };
+            let status = out.get("status").and_then(|v| v.as_str()).unwrap_or("");
+            if matches!(status, "done" | "error" | "cancelled") {
+                return Ok(CallToolResult::success(vec![ContentBlock::text(
+                    out.to_string(),
+                )]));
+            }
+            if tokio::time::Instant::now() >= deadline {
+                break;
+            }
+            let poll_ms = out
+                .get("progress")
+                .and_then(|p| p.get("suggested_poll_interval_ms"))
+                .and_then(|v| v.as_u64())
+                .filter(|&ms| ms > 0)
+                .unwrap_or(500)
+                .min(2000);
+            let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+            let sleep_for = std::time::Duration::from_millis(poll_ms).min(remaining);
+            if sleep_for.is_zero() {
+                break;
+            }
+            tokio::time::sleep(sleep_for).await;
+        }
+
+        // Budget exhausted while still non-terminal — leave job running.
+        let mut out = self.results_json_for_scan(&scan_id, 0, 0).ok_or_else(|| {
+            ErrorData::internal_error("scan_id disappeared while waiting (unexpected)", None)
+        })?;
+        out["wait_timed_out"] = serde_json::json!(true);
+        out["wait_timeout_sec"] = serde_json::json!(wait_timeout_sec);
         Ok(CallToolResult::success(vec![ContentBlock::text(
             out.to_string(),
         )]))
+    }
+
+    /// Build the JSON body for `get_results_dalfox` / wait-mode completion.
+    /// Returns `None` when `scan_id` is unknown.
+    fn results_json_for_scan(
+        &self,
+        scan_id: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Option<serde_json::Value> {
+        let snapshot = {
+            let jobs = self.lock_jobs();
+            jobs.get(scan_id).map(|job| JobSnapshot {
+                status: job.status.clone(),
+                target_url: job.target_url.clone(),
+                results: job.results.clone(),
+                progress: job.progress.clone(),
+                error_message: job.error_message.clone(),
+                queued_at_ms: job.queued_at_ms,
+                started_at_ms: job.started_at_ms,
+                finished_at_ms: job.finished_at_ms,
+            })
+        }?;
+
+        let (results_slice, pagination) =
+            paginate_results(snapshot.results.as_deref(), offset, limit);
+        let duration_ms =
+            crate::job::duration_ms_between(snapshot.started_at_ms, snapshot.finished_at_ms);
+        let mut out = serde_json::json!({
+            "scan_id": scan_id,
+            "target": snapshot.target_url,
+            "status": snapshot.status,
+            "results": results_slice,
+            "pagination": pagination,
+            "queued_at_ms": snapshot.queued_at_ms,
+            "started_at_ms": snapshot.started_at_ms,
+            "finished_at_ms": snapshot.finished_at_ms,
+            "duration_ms": duration_ms,
+        });
+        if let Some(ref err_msg) = snapshot.error_message {
+            out["error_message"] = serde_json::json!(err_msg);
+        }
+        if matches!(
+            snapshot.status,
+            JobStatus::Running | JobStatus::Done | JobStatus::Cancelled | JobStatus::Error
+        ) {
+            let params_total = snapshot
+                .progress
+                .params_total
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let params_tested = snapshot
+                .progress
+                .params_tested
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let requests_sent = snapshot
+                .progress
+                .requests_sent
+                .load(std::sync::atomic::Ordering::Relaxed);
+            let findings_so_far = snapshot
+                .progress
+                .findings_so_far
+                .load(std::sync::atomic::Ordering::Relaxed);
+
+            let estimated_completion_pct: u32 = if matches!(
+                snapshot.status,
+                JobStatus::Done | JobStatus::Cancelled | JobStatus::Error
+            ) {
+                if snapshot.status == JobStatus::Done {
+                    100
+                } else if params_total > 0 {
+                    ((params_tested as f64 / params_total as f64) * 100.0) as u32
+                } else {
+                    0
+                }
+            } else if params_total > 0 {
+                ((params_tested as f64 / params_total as f64) * 100.0).min(99.0) as u32
+            } else {
+                0
+            };
+
+            let suggested_poll_interval_ms: u64 = if matches!(
+                snapshot.status,
+                JobStatus::Done | JobStatus::Cancelled | JobStatus::Error
+            ) {
+                0
+            } else if estimated_completion_pct > 80 {
+                1000
+            } else if estimated_completion_pct > 10 {
+                3000
+            } else {
+                2000
+            };
+
+            out["progress"] = serde_json::json!({
+                "params_total": params_total,
+                "params_tested": params_tested,
+                "requests_sent": requests_sent,
+                "findings_so_far": findings_so_far,
+                "estimated_completion_pct": estimated_completion_pct,
+                "suggested_poll_interval_ms": suggested_poll_interval_ms,
+            });
+        }
+        Some(out)
     }
 
     /// Fetch status and (if done) results for a scan.
@@ -1330,7 +1537,8 @@ When status is 'error', includes error_message explaining the failure reason. \
 When running/done/cancelled/error, includes progress: {params_total, params_tested, \
 requests_sent, findings_so_far, estimated_completion_pct (0-100), \
 suggested_poll_interval_ms (recommended delay before next poll; 0 when terminal)}. \
-Call this repeatedly until status is 'done', 'error', or 'cancelled'."
+Call this repeatedly until status is 'done', 'error', or 'cancelled'. \
+For short scans, prefer scan_with_dalfox with wait=true instead of a poll loop."
     )]
     async fn get_results_dalfox(
         &self,
@@ -1342,120 +1550,10 @@ Call this repeatedly until status is 'done', 'error', or 'cancelled'."
         if pid.is_empty() {
             return Err(ErrorData::invalid_params("scan_id must not be empty", None));
         }
-        // Extract only the fields we need under the lock. `results` and
-        // `progress` are already Arc/atomic-shareable, so this avoids the
-        // deep clone of owned strings (`target_url`, `error_message`) that
-        // `jobs.get(&pid).cloned()` used to perform on every poll.
-        let snapshot = {
-            let jobs = self.lock_jobs();
-            jobs.get(&pid).map(|job| JobSnapshot {
-                status: job.status.clone(),
-                target_url: job.target_url.clone(),
-                results: job.results.clone(),
-                progress: job.progress.clone(),
-                error_message: job.error_message.clone(),
-                queued_at_ms: job.queued_at_ms,
-                started_at_ms: job.started_at_ms,
-                finished_at_ms: job.finished_at_ms,
-            })
-        };
-
-        match snapshot {
-            Some(snap) => {
-                let (results_slice, pagination) =
-                    paginate_results(snap.results.as_deref(), params.offset, params.limit);
-                // Shared with Job::duration_ms (single source of truth for the
-                // clock-step-back clamp); the snapshot path can't construct a Job.
-                let duration_ms =
-                    crate::job::duration_ms_between(snap.started_at_ms, snap.finished_at_ms);
-                let mut out = serde_json::json!({
-                    "scan_id": pid,
-                    "target": snap.target_url,
-                    "status": snap.status,
-                    "results": results_slice,
-                    "pagination": pagination,
-                    "queued_at_ms": snap.queued_at_ms,
-                    "started_at_ms": snap.started_at_ms,
-                    "finished_at_ms": snap.finished_at_ms,
-                    "duration_ms": duration_ms,
-                });
-                // Include error message when scan failed
-                if let Some(ref err_msg) = snap.error_message {
-                    out["error_message"] = serde_json::json!(err_msg);
-                }
-                // Include progress for running/terminal jobs — Error too, so an
-                // early infra failure still exposes any params/requests counted
-                // before it failed instead of an opaque error_message alone.
-                if matches!(
-                    snap.status,
-                    JobStatus::Running | JobStatus::Done | JobStatus::Cancelled | JobStatus::Error
-                ) {
-                    let params_total = snap
-                        .progress
-                        .params_total
-                        .load(std::sync::atomic::Ordering::Relaxed);
-                    let params_tested = snap
-                        .progress
-                        .params_tested
-                        .load(std::sync::atomic::Ordering::Relaxed);
-                    let requests_sent = snap
-                        .progress
-                        .requests_sent
-                        .load(std::sync::atomic::Ordering::Relaxed);
-                    let findings_so_far = snap
-                        .progress
-                        .findings_so_far
-                        .load(std::sync::atomic::Ordering::Relaxed);
-
-                    // Estimate completion percentage from params tested vs total
-                    let estimated_completion_pct: u32 = if matches!(
-                        snap.status,
-                        JobStatus::Done | JobStatus::Cancelled | JobStatus::Error
-                    ) {
-                        if snap.status == JobStatus::Done {
-                            100
-                        } else if params_total > 0 {
-                            ((params_tested as f64 / params_total as f64) * 100.0) as u32
-                        } else {
-                            0
-                        }
-                    } else if params_total > 0 {
-                        ((params_tested as f64 / params_total as f64) * 100.0).min(99.0) as u32
-                    } else {
-                        0
-                    };
-
-                    // Suggest poll interval based on progress:
-                    // - queued/early: poll every 2s
-                    // - mid-scan: poll every 3s
-                    // - near completion (>80%): poll every 1s
-                    // - done/cancelled: no more polling needed
-                    let suggested_poll_interval_ms: u64 = if matches!(
-                        snap.status,
-                        JobStatus::Done | JobStatus::Cancelled | JobStatus::Error
-                    ) {
-                        0
-                    } else if estimated_completion_pct > 80 {
-                        1000
-                    } else if estimated_completion_pct > 10 {
-                        3000
-                    } else {
-                        2000
-                    };
-
-                    out["progress"] = serde_json::json!({
-                        "params_total": params_total,
-                        "params_tested": params_tested,
-                        "requests_sent": requests_sent,
-                        "findings_so_far": findings_so_far,
-                        "estimated_completion_pct": estimated_completion_pct,
-                        "suggested_poll_interval_ms": suggested_poll_interval_ms,
-                    });
-                }
-                Ok(CallToolResult::success(vec![ContentBlock::text(
-                    out.to_string(),
-                )]))
-            }
+        match self.results_json_for_scan(&pid, params.offset, params.limit) {
+            Some(out) => Ok(CallToolResult::success(vec![ContentBlock::text(
+                out.to_string(),
+            )])),
             None => Err(ErrorData::invalid_params("scan_id not found", None)),
         }
     }

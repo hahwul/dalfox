@@ -79,17 +79,17 @@ Only when you have evidence that the first finding on a parameter is not the onl
 
 1. Preflight first (`--dry-run` or MCP `preflight_dalfox`).
 2. Add `--skip-mining`.
-3. Add explicit `-p` / `param` for the 5–10 parameters you care about (`name:location` when not query).
-4. Cap with `--max-payloads-per-param 30` (CLI; MCP parity tracked separately).
-5. If still too much: lower `--workers`, add `--delay` / `--rate-limit`, or `--scan-timeout`.
+3. Add explicit `-p` / MCP `param` for the 5–10 parameters you care about (`name:location` when not query).
+4. Cap with `--max-payloads-per-param 30` or MCP `max_payloads_per_param`.
+5. If still too much: lower `--workers`, add `--delay` / `--rate-limit`, or `--scan-timeout` / MCP `scan_timeout`.
 
 ## MCP vs CLI for advanced scenarios
 
-Most scan flags have direct equivalents in `scan_with_dalfox`. Notable absences / differences:
+Most scan flags have direct equivalents in `scan_with_dalfox` (including `max_payloads_per_param`, `wait` / `wait_timeout_sec`, remote payloads/wordlists, WAF options). Notable absences / differences:
 - `--cookie-from-raw` — intentionally absent on MCP (host file-read class; supply `cookies` directly)
 - Managed `--blind-oob` lifecycle — CLI-only; MCP uses `blind_callback_url`
 - Multi-target / HAR / raw-http fan-out — CLI-only (call MCP once per URL)
 - `preflight_dalfox.param` is accepted but **not applied** (full discovery impact estimate); pass `param` on `scan_with_dalfox`
 - Some of the more exotic mining/scope filters (they exist in the engine but are not yet exposed on the MCP surface)
 
-When you need the full power, fall back to spawning the CLI with carefully constructed arguments (or extend the MCP tool surface in a future change).
+When you need the full power, fall back to spawning the CLI with carefully constructed arguments.

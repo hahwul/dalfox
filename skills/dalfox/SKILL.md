@@ -57,12 +57,17 @@ If the number is huge or `reachable == false`, report back to the user before se
 
 ### B. Standard Single-Target Scan (MCP preferred)
 
-1. Preflight (see above).
+1. Preflight (see above) when the surface is unknown or large.
 2. Start the scan:
-   - MCP: `scan_with_dalfox` (store the `scan_id`). Prefer explicit `param` with location hints (`["q:query"]`) when you know the injection point.
-   - CLI: `dalfox scan https://target/?q=test -p q --skip-mining ...`  
-     Bare `-p name` is fine for query params (synthesized if discovery was skipped). Use `name:location` for body/header/cookie/json (`-p user:body`).
-3. Poll (MCP) or watch output (CLI).
+   - **MCP short smoke** (one call, no poll loop):
+     ```json
+     {"target":"https://target/?q=test","param":["q"],"skip_mining":true,"skip_discovery":true,
+      "max_payloads_per_param":20,"wait":true,"wait_timeout_sec":120}
+     ```
+   - **MCP long scan**: `scan_with_dalfox` with `wait=false` → store `scan_id` → poll `get_results_dalfox`. Prefer explicit `param` (`["q:query"]` when location is known).
+   - **CLI**: `dalfox scan https://target/?q=test -p q --skip-mining ...`  
+     Bare `-p name` is fine for query params (synthesized if discovery was skipped). Use `name:location` for body/header/cookie/json (`-p user:body`). Cap volume with `--max-payloads-per-param`.
+3. Poll only when not using `wait=true`.
 4. Present findings using the rules in `references/results.md` (lead with V, surface `type_description` and `inject_type`).
 5. Clean up: `delete_scan_dalfox` (MCP) or just let the process end (CLI). Terminal jobs auto-expire after 1 h.
 
@@ -125,7 +130,7 @@ Key points for agents:
 
 See `references/advanced.md` for the detailed recipes:
 
-- "Too many parameters / too slow" → preflight + `--skip-mining` + explicit `-p` (`name:location` when not query) + optional `--max-payloads-per-param`
+- "Too many parameters / too slow" → preflight + `--skip-mining` + explicit `-p` (`name:location` when not query) + `max_payloads_per_param` / `--max-payloads-per-param`
 - "WAF present" → the matrix of `--waf-bypass`, `--force-waf`, `--waf-evasion`
 - "Need custom payloads or markers" → `--custom-payload`, `--inject-marker`, `--custom-alert-*`
 - "Captured request testing" → `-i raw-http` (single request) or `-i har` (whole proxy/DevTools export)

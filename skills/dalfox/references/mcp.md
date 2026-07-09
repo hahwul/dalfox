@@ -45,7 +45,10 @@ Terminal jobs auto-purge after 1 hour.
   "analyze_external_js": false,                    // fetch same-origin <script src> bundles, AST-analyze (16 files / 512 KiB)
   "detect_outdated_libs": false,                   // also emit [I] findings for known-vulnerable JS libs (CWE-1104, 0 extra reqs)
   "blind_callback_url": "https://xyz.interact.sh", // OOB `--blind-oob` lifecycle is CLI-only; MCP uses this callback URL
-  "workers": 50                                    // 1-500 (hard validated)
+  "workers": 50,                                   // 1-500 (hard validated)
+  "max_payloads_per_param": 0,                     // 0 = unlimited (built-in safety cap still applies); use 10–50 for agent smoke
+  "wait": false,                                   // true = block until terminal (or wait_timeout_sec) and return get_results shape
+  "wait_timeout_sec": 300                          // 1–86400; only used when wait=true (default 300)
 }
 ```
 
@@ -53,8 +56,15 @@ Terminal jobs auto-purge after 1 hour.
 - `timeout` ∈ [1, 299]
 - `delay` ∈ [0, 9999]
 - `workers` ∈ [1, 500]
+- `max_payloads_per_param` ∈ [0, 100000]
+- `wait_timeout_sec` ∈ [1, 86400] when `wait=true`
 
 **Encoder normalization**: If `"none"` is present anywhere, the list becomes `["none"]` only.
+
+**`wait` mode (agent-friendly short scans):**
+- `wait=false` (default): return `{scan_id, status: "queued"}` immediately; poll with `get_results_dalfox`.
+- `wait=true`: block until `done` / `error` / `cancelled`, or until `wait_timeout_sec` (default 300). Response matches `get_results_dalfox`. On timeout: `wait_timed_out: true`, job left running (cancel with `cancel_scan_dalfox` if needed).
+- Prefer `wait=true` + `max_payloads_per_param` + explicit `param` for smoke tests so the agent avoids a multi-tool poll loop.
 
 **Security note — `cookie_from_raw` is deliberately absent** from the MCP surface. Exposing it would allow an MCP caller to cause the host to read an arbitrary file on disk and forward its cookies to an attacker-controlled target (same class of issue that produced GHSA-35wr-x7v6-9fv2 in v2). MCP callers must supply cookies directly via the `cookies` array.
 
@@ -112,11 +122,29 @@ Use this before expensive scans when the user is concerned about request volume.
 
 ## Recommended Agent Loop (MCP)
 
-1. Call `preflight_dalfox` (or `dry-run` in CLI).
+### Short / smoke scan (preferred when you already know the param)
+
+```json
+{
+  "target": "https://target/?q=test",
+  "param": ["q"],
+  "skip_mining": true,
+  "skip_discovery": true,
+  "max_payloads_per_param": 20,
+  "wait": true,
+  "wait_timeout_sec": 120
+}
+```
+
+One `scan_with_dalfox` call → terminal results (or `wait_timed_out`).
+
+### Longer / unknown surface
+
+1. Call `preflight_dalfox` (or CLI `--dry-run`).
 2. If `estimated_total_requests` is huge or `reachable == false`, report to user before proceeding.
-3. `scan_with_dalfox` → store `scan_id`.
+3. `scan_with_dalfox` (async, `wait=false`) → store `scan_id`. Consider `max_payloads_per_param` and `scan_timeout`.
 4. Loop: `get_results_dalfox` (respect interval) until terminal status.
 5. Present findings (lead with V, then A, then R — see `results.md`).
 6. `delete_scan_dalfox` (optional — terminal jobs auto-expire).
 
-When both MCP tools and the `dalfox` binary exist, **prefer MCP** for agent-driven work. It decouples start from wait and gives structured progress.
+When both MCP tools and the `dalfox` binary exist, **prefer MCP** for agent-driven work.
