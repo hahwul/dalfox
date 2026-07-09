@@ -883,21 +883,80 @@ fn test_ensure_explicit_params_synthesizes_missing_targets() {
 }
 
 #[test]
-fn test_ensure_explicit_params_skips_unsynthesizable_specs() {
+fn test_ensure_explicit_params_skips_unsynthesizable_typed_specs() {
     let target = parse_target("https://example.com").unwrap();
     let mut params: Vec<Param> = vec![];
-    // name-only (ambiguous), path (positional), fragment (never scanned)
-    let specs = vec![
-        "foo".to_string(),
-        "seg:path".to_string(),
-        "h:fragment".to_string(),
-    ];
+    // path (positional) and fragment (never scanned) still cannot be synthesized
+    let specs = vec!["seg:path".to_string(), "h:fragment".to_string()];
     ensure_explicit_params(&mut params, &specs, &target);
     assert!(
         params.is_empty(),
-        "name-only / path / fragment specs must not be synthesized, got {:?}",
+        "path / fragment specs must not be synthesized, got {:?}",
         params.iter().map(|p| &p.name).collect::<Vec<_>>()
     );
+}
+
+#[test]
+fn test_ensure_explicit_params_bare_name_defaults_to_query() {
+    // Fast-smoke recipe: -p q --skip-discovery must still seed the param.
+    let target = parse_target("https://example.com/").unwrap();
+    let mut params: Vec<Param> = vec![];
+    ensure_explicit_params(&mut params, &["q".to_string()], &target);
+    assert_eq!(params.len(), 1);
+    assert_eq!(params[0].name, "q");
+    assert_eq!(params[0].location, Location::Query);
+}
+
+#[test]
+fn test_ensure_explicit_params_bare_name_infers_from_url_query() {
+    let target = parse_target("https://example.com/search?q=test&lang=en").unwrap();
+    let mut params: Vec<Param> = vec![];
+    ensure_explicit_params(&mut params, &["q".to_string()], &target);
+    assert_eq!(params.len(), 1);
+    assert_eq!(params[0].location, Location::Query);
+}
+
+#[test]
+fn test_ensure_explicit_params_bare_name_infers_body() {
+    let mut target = parse_target("https://example.com/submit").unwrap();
+    target.data = Some("user=alice&token=abc".to_string());
+    let mut params: Vec<Param> = vec![];
+    ensure_explicit_params(&mut params, &["token".to_string()], &target);
+    assert_eq!(params.len(), 1);
+    assert_eq!(params[0].name, "token");
+    assert_eq!(params[0].location, Location::Body);
+}
+
+#[test]
+fn test_ensure_explicit_params_bare_name_does_not_duplicate_existing() {
+    let target = parse_target("https://example.com/?q=1").unwrap();
+    let mut params = vec![bare_param("q", Location::Query)];
+    ensure_explicit_params(&mut params, &["q".to_string()], &target);
+    assert_eq!(
+        params.len(),
+        1,
+        "bare name must not duplicate a filtered match"
+    );
+}
+
+#[test]
+fn test_unresolved_explicit_param_specs_reports_path_fragment() {
+    let target = parse_target("https://example.com/").unwrap();
+    let params: Vec<Param> = vec![];
+    let missing = unresolved_explicit_param_specs(
+        &params,
+        &[
+            "q".to_string(),
+            "seg:path".to_string(),
+            "h:fragment".to_string(),
+        ],
+        &target,
+    );
+    // After synthesis "q" would be present; unresolved is for post-ensure checks.
+    // With empty params, all three are missing.
+    assert!(missing.iter().any(|s| s == "seg:path"));
+    assert!(missing.iter().any(|s| s == "h:fragment"));
+    assert!(missing.iter().any(|s| s == "q"));
 }
 
 fn default_scan_args() -> ScanArgs {

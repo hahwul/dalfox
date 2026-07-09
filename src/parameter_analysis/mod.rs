@@ -1206,13 +1206,21 @@ fn filter_params(params: Vec<Param>, param_specs: &[String], target: &Target) ->
         .collect()
 }
 
-/// Guarantee that every explicit `-p name:<type>` injection point is present
-/// in `params`, synthesizing any that discovery/mining did not seed.
+/// Guarantee that every explicit `-p` injection point is present in `params`,
+/// synthesizing any that discovery/mining did not seed.
 ///
 /// `-p` is otherwise just a *filter* over discovered params, so a `--skip-*`
 /// flag that suppresses the phase which would have seeded a location silently
 /// drops the operator's explicit target (the #1044 / #1045 bug class). This is
 /// the general guard: a named target is always tested, whatever was skipped.
+///
+/// Spec forms:
+/// - `name:type` — synthesize that exact location (`query`, `body`, `json`,
+///   `multipart`, `header`, `cookie`).
+/// - bare `name` — if no param with that name is already present, infer a
+///   location from the target (URL query → body → cookies → headers) and
+///   fall back to `query`. Bare names that already matched via filtering are
+///   left alone (any location).
 ///
 /// Synthesized params carry no `injection_context` (scanning then uses the
 /// context-agnostic fallback payloads) and no special-char profile (the active
@@ -1224,40 +1232,128 @@ fn ensure_explicit_params(params: &mut Vec<Param>, param_specs: &[String], targe
         // Parse "name:type" as parts[0]/parts[1] to match `filter_params`.
         let parts: Vec<&str> = spec.split(':').collect();
         let (name, type_str) = match parts.as_slice() {
-            [name, ty, ..] if !name.is_empty() => (*name, *ty),
-            _ => continue, // name-only → filtering, nothing to synthesize
-        };
-        let location = match type_str {
-            "query" => Location::Query,
-            "body" => Location::Body,
-            "json" => Location::JsonBody,
-            "multipart" => Location::MultipartBody,
-            "header" | "cookie" => Location::Header,
+            [name, ty, ..] if !name.is_empty() && !ty.is_empty() => (*name, Some(*ty)),
+            [name] if !name.is_empty() => (*name, None),
+            [name, ..] if !name.is_empty() => (*name, None),
             _ => continue,
         };
-        let already = params
-            .iter()
-            .any(|p| p.name == name && param_type_label(p, target) == type_str);
-        if already {
-            continue;
+
+        if let Some(type_str) = type_str {
+            let location = match type_str {
+                "query" => Location::Query,
+                "body" => Location::Body,
+                "json" => Location::JsonBody,
+                "multipart" => Location::MultipartBody,
+                "header" | "cookie" => Location::Header,
+                // path / fragment / unknown: not name-addressable for synthesis
+                _ => continue,
+            };
+            let already = params
+                .iter()
+                .any(|p| p.name == name && param_type_label(p, target) == type_str);
+            if already {
+                continue;
+            }
+            push_synthesized_param(params, name, location);
+        } else {
+            // Bare name: keep any filtered matches; only synthesize when none.
+            if params.iter().any(|p| p.name == name) {
+                continue;
+            }
+            let (location, _label) = infer_location_for_bare_param(name, target);
+            push_synthesized_param(params, name, location);
         }
-        params.push(Param {
-            name: name.to_string(),
-            value: String::new(),
-            location,
-            injection_context: None,
-            valid_specials: None,
-            invalid_specials: None,
-            pre_encoding: None,
-            pre_encoding_pipeline: None,
-            wire_name: None,
-            form_action_url: None,
-            form_origin_url: None,
-            framework_sink: None,
-            escaped_specials: None,
-            js_breakout: None,
-        });
     }
+}
+
+fn push_synthesized_param(params: &mut Vec<Param>, name: &str, location: Location) {
+    params.push(Param {
+        name: name.to_string(),
+        value: String::new(),
+        location,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    });
+}
+
+/// Infer a wire location for a bare `-p name` when discovery did not seed it.
+///
+/// Order mirrors how operators usually mean an untyped name: query string
+/// first (most common XSS surface), then request body, cookies, headers.
+/// Default is `query` so `--skip-discovery -p q` still tests something.
+fn infer_location_for_bare_param(name: &str, target: &Target) -> (Location, &'static str) {
+    // URL query
+    if target.url.query_pairs().any(|(k, _)| k.as_ref() == name) {
+        return (Location::Query, "query");
+    }
+
+    // Form / JSON body
+    if let Some(data) = target.data.as_deref() {
+        let trimmed = data.trim_start();
+        if trimmed.starts_with('{') {
+            if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(trimmed)
+                && map.contains_key(name)
+            {
+                return (Location::JsonBody, "json");
+            }
+        } else if url::form_urlencoded::parse(data.as_bytes()).any(|(k, _)| k.as_ref() == name) {
+            return (Location::Body, "body");
+        }
+    }
+
+    // Cookies (Header location, cookie label)
+    if target.cookies.iter().any(|(n, _)| n == name) {
+        return (Location::Header, "cookie");
+    }
+
+    // Headers (case-insensitive name match on header names)
+    if target
+        .headers
+        .iter()
+        .any(|(n, _)| n.eq_ignore_ascii_case(name))
+    {
+        return (Location::Header, "header");
+    }
+
+    (Location::Query, "query")
+}
+
+/// Return `-p` specs that are still absent from `params` after filtering +
+/// synthesis. Used by dry-run to surface agent-visible warnings (e.g. only
+/// `path`/`fragment` specs, which cannot be synthesized by name).
+pub fn unresolved_explicit_param_specs(
+    params: &[Param],
+    param_specs: &[String],
+    target: &Target,
+) -> Vec<String> {
+    let mut missing = Vec::new();
+    for spec in param_specs {
+        let parts: Vec<&str> = spec.split(':').collect();
+        match parts.as_slice() {
+            [name, ty, ..] if !name.is_empty() && !ty.is_empty() => {
+                let present = params
+                    .iter()
+                    .any(|p| p.name == *name && param_type_label(p, target) == *ty);
+                if !present {
+                    missing.push(spec.clone());
+                }
+            }
+            [name, ..] if !name.is_empty() && !params.iter().any(|p| p.name == *name) => {
+                missing.push(spec.clone());
+            }
+            _ => {}
+        }
+    }
+    missing
 }
 
 #[cfg(test)]

@@ -1163,6 +1163,27 @@ async fn test_render_dry_run_json_with_encoders() {
     assert!(matches!(outcome, ScanOutcome::Clean));
 }
 
+#[tokio::test]
+async fn test_render_dry_run_warns_on_unresolved_explicit_params() {
+    // path cannot be synthesized by name; dry-run should still complete cleanly
+    // while emitting a machine-readable warning path via unresolved specs.
+    let target = target_with_params("https://example.com", vec![]);
+    let mut args = default_scan_args();
+    args.format = "json".to_string();
+    args.targets = vec!["https://example.com".to_string()];
+    args.param = vec!["seg:path".to_string()];
+    let state = make_scan_state(vec![]);
+    let outcome = render_dry_run(&args, &host_group(vec![target]), &state).await;
+    assert!(matches!(outcome, ScanOutcome::Clean));
+    // Ensure the helper itself flags the unsynthesizable spec (source of warnings).
+    let missing = crate::parameter_analysis::unresolved_explicit_param_specs(
+        &[],
+        &args.param,
+        &parse_target("https://example.com").unwrap(),
+    );
+    assert_eq!(missing, vec!["seg:path".to_string()]);
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // output.rs — render_results (async; all format branches via file output)
 // ─────────────────────────────────────────────────────────────────────────
