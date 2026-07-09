@@ -58,6 +58,9 @@ fn default_scan_params(target: &str) -> ScanWithDalfoxParams {
         waf_min_confidence: crate::cmd::scan::DEFAULT_WAF_MIN_CONFIDENCE,
         remote_payloads: vec![],
         remote_wordlists: vec![],
+        max_payloads_per_param: 0,
+        wait: false,
+        wait_timeout_sec: 300,
     }
 }
 
@@ -1209,6 +1212,90 @@ async fn test_scan_with_dalfox_accepts_scan_timeout_zero() {
     mcp.scan_with_dalfox(Parameters(params))
         .await
         .expect("scan_timeout == 0 (unbounded) must be accepted");
+}
+
+#[tokio::test]
+async fn test_scan_with_dalfox_rejects_max_payloads_over_cap() {
+    let mcp = DalfoxMcp::new();
+    let params = ScanWithDalfoxParams {
+        max_payloads_per_param: MAX_PAYLOADS_PER_PARAM_MCP + 1,
+        ..default_scan_params("http://127.0.0.1:1/?q=a")
+    };
+    let err = mcp
+        .scan_with_dalfox(Parameters(params))
+        .await
+        .expect_err("max_payloads_per_param over MCP cap must be rejected");
+    assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+    assert!(err.message.contains("max_payloads_per_param"));
+}
+
+#[tokio::test]
+async fn test_scan_with_dalfox_accepts_max_payloads_per_param() {
+    let mcp = DalfoxMcp::new();
+    let params = ScanWithDalfoxParams {
+        max_payloads_per_param: 25,
+        ..default_scan_params("http://127.0.0.1:1/?q=a")
+    };
+    mcp.scan_with_dalfox(Parameters(params))
+        .await
+        .expect("reasonable max_payloads_per_param must queue");
+}
+
+#[tokio::test]
+async fn test_max_payloads_per_param_serde_default_zero() {
+    let params: ScanWithDalfoxParams =
+        serde_json::from_value(serde_json::json!({ "target": "https://example.com" }))
+            .expect("serde");
+    assert_eq!(params.max_payloads_per_param, 0);
+    assert!(!params.wait);
+    assert_eq!(params.wait_timeout_sec, 300);
+}
+
+#[tokio::test]
+async fn test_scan_with_dalfox_wait_rejects_zero_timeout() {
+    let mcp = DalfoxMcp::new();
+    let params = ScanWithDalfoxParams {
+        wait: true,
+        wait_timeout_sec: 0,
+        ..default_scan_params("http://127.0.0.1:1/?q=a")
+    };
+    let err = mcp
+        .scan_with_dalfox(Parameters(params))
+        .await
+        .expect_err("wait=true with wait_timeout_sec=0 must be rejected");
+    assert_eq!(err.code, rmcp::model::ErrorCode::INVALID_PARAMS);
+    assert!(err.message.contains("wait_timeout_sec"));
+}
+
+#[tokio::test]
+async fn test_scan_with_dalfox_wait_returns_terminal_on_unreachable() {
+    // Unreachable target finishes quickly as error; wait=true should surface it
+    // without requiring a separate get_results call.
+    let mcp = DalfoxMcp::new();
+    let params = ScanWithDalfoxParams {
+        wait: true,
+        wait_timeout_sec: 15,
+        skip_mining: true,
+        skip_discovery: true,
+        param: vec!["q".to_string()],
+        max_payloads_per_param: 3,
+        ..default_scan_params("http://127.0.0.1:1/?q=a")
+    };
+    let resp = mcp
+        .scan_with_dalfox(Parameters(params))
+        .await
+        .expect("wait mode should return a tool result");
+    let payload = parse_result_json(&resp);
+    let status = payload["status"].as_str().expect("status");
+    assert!(
+        matches!(status, "done" | "error" | "cancelled"),
+        "wait mode must return a terminal status, got {status}"
+    );
+    assert!(
+        payload.get("wait_timed_out").is_none() || payload["wait_timed_out"] == false,
+        "fast-failing target should not set wait_timed_out"
+    );
+    assert!(payload.get("scan_id").is_some());
 }
 
 #[tokio::test]
