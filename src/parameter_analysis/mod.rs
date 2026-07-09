@@ -1260,7 +1260,7 @@ fn ensure_explicit_params(params: &mut Vec<Param>, param_specs: &[String], targe
             if params.iter().any(|p| p.name == name) {
                 continue;
             }
-            let (location, _label) = infer_location_for_bare_param(name, target);
+            let location = infer_location_for_bare_param(name, target);
             push_synthesized_param(params, name, location);
         }
     }
@@ -1290,10 +1290,10 @@ fn push_synthesized_param(params: &mut Vec<Param>, name: &str, location: Locatio
 /// Order mirrors how operators usually mean an untyped name: query string
 /// first (most common XSS surface), then request body, cookies, headers.
 /// Default is `query` so `--skip-discovery -p q` still tests something.
-fn infer_location_for_bare_param(name: &str, target: &Target) -> (Location, &'static str) {
+fn infer_location_for_bare_param(name: &str, target: &Target) -> Location {
     // URL query
     if target.url.query_pairs().any(|(k, _)| k.as_ref() == name) {
-        return (Location::Query, "query");
+        return Location::Query;
     }
 
     // Form / JSON body
@@ -1303,16 +1303,16 @@ fn infer_location_for_bare_param(name: &str, target: &Target) -> (Location, &'st
             if let Ok(Value::Object(map)) = serde_json::from_str::<Value>(trimmed)
                 && map.contains_key(name)
             {
-                return (Location::JsonBody, "json");
+                return Location::JsonBody;
             }
         } else if url::form_urlencoded::parse(data.as_bytes()).any(|(k, _)| k.as_ref() == name) {
-            return (Location::Body, "body");
+            return Location::Body;
         }
     }
 
-    // Cookies (Header location, cookie label)
+    // Cookies (Header location; `param_type_label` reports "cookie")
     if target.cookies.iter().any(|(n, _)| n == name) {
-        return (Location::Header, "cookie");
+        return Location::Header;
     }
 
     // Headers (case-insensitive name match on header names)
@@ -1321,10 +1321,10 @@ fn infer_location_for_bare_param(name: &str, target: &Target) -> (Location, &'st
         .iter()
         .any(|(n, _)| n.eq_ignore_ascii_case(name))
     {
-        return (Location::Header, "header");
+        return Location::Header;
     }
 
-    (Location::Query, "query")
+    Location::Query
 }
 
 /// Return `-p` specs that are still absent from `params` after filtering +
