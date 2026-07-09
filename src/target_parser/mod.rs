@@ -234,14 +234,12 @@ pub fn parse_target(s: &str) -> Result<Target, Box<dyn std::error::Error>> {
 /// Returns (method, url, optional_body).
 /// If the string doesn't start with a known HTTP method, it returns ("GET", original_string, None).
 pub fn parse_method_url_body(s: &str) -> (String, String, Option<String>) {
-    const METHODS: [&str; 7] = ["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH"];
-
     // Use splitn(3, ' ') to preserve spaces in the body portion (e.g., "POST url name=John Doe")
     let parts: Vec<&str> = s.splitn(3, ' ').collect();
 
     if parts.len() >= 2 {
         let potential_method = parts[0].to_uppercase();
-        if METHODS.iter().any(|m| m.eq(&potential_method)) {
+        if is_known_http_method(&potential_method) {
             let url = parts[1].to_string();
             let body = parts
                 .get(2)
@@ -253,6 +251,17 @@ pub fn parse_method_url_body(s: &str) -> (String, String, Option<String>) {
 
     // Not in METHOD URL [BODY] format, return as-is with GET method
     ("GET".to_string(), s.to_string(), None)
+}
+
+/// Methods recognized in `METHOD URL [BODY]` shorthand and raw-HTTP request lines.
+/// Includes RFC 10008 QUERY (safe/idempotent with a body).
+const KNOWN_HTTP_METHODS: [&str; 8] = [
+    "GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH", "QUERY",
+];
+
+#[inline]
+fn is_known_http_method(method: &str) -> bool {
+    KNOWN_HTTP_METHODS.iter().any(|m| m.eq(&method))
 }
 
 /// Parse a target string that may be in "METHOD URL [BODY]" format or a plain URL.
@@ -270,8 +279,7 @@ pub fn is_raw_http_request(s: &str) -> bool {
     let first = s.lines().next().unwrap_or("").trim_start();
     let mut it = first.split_whitespace();
     if let Some(method) = it.next() {
-        const METHODS: [&str; 7] = ["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS", "PATCH"];
-        if METHODS.iter().any(|m| m.eq(&method)) && first.contains(" HTTP/") {
+        if is_known_http_method(method) && first.contains(" HTTP/") {
             return true;
         }
     }
@@ -704,6 +712,41 @@ mod tests {
         assert_eq!(method, "OPTIONS");
         assert_eq!(url, "https://example.com/api");
         assert_eq!(body, None);
+    }
+
+    #[test]
+    fn test_parse_method_url_body_query_with_json_body() {
+        // RFC 10008 QUERY — safe/idempotent method with a body.
+        let (method, url, body) =
+            parse_method_url_body("QUERY https://example.com/search {\"q\":\"test\"}");
+        assert_eq!(method, "QUERY");
+        assert_eq!(url, "https://example.com/search");
+        assert_eq!(body, Some("{\"q\":\"test\"}".to_string()));
+    }
+
+    #[test]
+    fn test_parse_method_url_body_query_lowercase() {
+        let (method, url, body) = parse_method_url_body("query https://example.com/search a=b");
+        assert_eq!(method, "QUERY");
+        assert_eq!(url, "https://example.com/search");
+        assert_eq!(body, Some("a=b".to_string()));
+    }
+
+    #[test]
+    fn test_is_raw_http_request_query() {
+        assert!(is_raw_http_request(
+            "QUERY /search HTTP/1.1\r\nHost: example.com\r\n\r\n{\"q\":\"test\"}"
+        ));
+        assert!(!is_raw_http_request("QUERY https://example.com/search"));
+    }
+
+    #[test]
+    fn test_parse_target_with_method_query() {
+        let target =
+            parse_target_with_method("QUERY https://example.com/search {\"q\":\"x\"}").unwrap();
+        assert_eq!(target.method, "QUERY");
+        assert_eq!(target.url.as_str(), "https://example.com/search");
+        assert_eq!(target.data, Some("{\"q\":\"x\"}".to_string()));
     }
 
     #[test]

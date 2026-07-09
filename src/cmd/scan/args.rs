@@ -145,9 +145,10 @@ fn parse_http_method_arg(s: &str) -> std::result::Result<String, String> {
     }
     let upper = trimmed.to_ascii_uppercase();
     match upper.as_str() {
-        "GET" | "POST" | "PUT" | "DELETE" | "HEAD" | "OPTIONS" | "PATCH" => Ok(upper),
+        // QUERY is RFC 10008 (safe/idempotent body-bearing method).
+        "GET" | "POST" | "PUT" | "DELETE" | "HEAD" | "OPTIONS" | "PATCH" | "QUERY" => Ok(upper),
         other => Err(format!(
-            "unsupported HTTP method '{}' (expected one of: GET, POST, PUT, DELETE, HEAD, OPTIONS, PATCH)",
+            "unsupported HTTP method '{}' (expected one of: GET, POST, PUT, DELETE, HEAD, OPTIONS, PATCH, QUERY)",
             other
         )),
     }
@@ -1020,6 +1021,8 @@ mod arg_parser_tests {
             ("head", "HEAD"),
             ("options", "OPTIONS"),
             ("patch", "PATCH"),
+            ("query", "QUERY"),
+            ("  Query ", "QUERY"),
         ] {
             assert_eq!(parse_http_method_arg(input).unwrap(), expected);
         }

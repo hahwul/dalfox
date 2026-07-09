@@ -496,6 +496,65 @@ fn effective_query_base_uses_form_action_for_query_params() {
 }
 
 #[test]
+fn body_location_method_forces_post_for_bodyless_verbs() {
+    for verb in ["GET", "get", "HEAD", "OPTIONS", "TRACE", "", "  "] {
+        assert_eq!(
+            body_location_method(verb),
+            reqwest::Method::POST,
+            "expected POST for body-less verb {verb:?}"
+        );
+    }
+}
+
+#[test]
+fn body_location_method_preserves_body_capable_verbs() {
+    for (verb, expected) in [
+        ("POST", "POST"),
+        ("PUT", "PUT"),
+        ("PATCH", "PATCH"),
+        ("DELETE", "DELETE"),
+        ("QUERY", "QUERY"),
+        ("query", "QUERY"),
+        ("  Query ", "QUERY"),
+    ] {
+        assert_eq!(
+            body_location_method(verb).as_str(),
+            expected,
+            "expected {expected} for {verb:?}"
+        );
+    }
+}
+
+#[test]
+fn effective_method_body_locations_respect_query_method() {
+    let mut param = Param {
+        name: "q".into(),
+        value: "".into(),
+        location: Location::Body,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: None,
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    };
+    for loc in [Location::Body, Location::JsonBody, Location::MultipartBody] {
+        param.location = loc;
+        assert_eq!(effective_method("QUERY", &param), "QUERY");
+        assert_eq!(effective_method("GET", &param), "POST");
+        assert_eq!(effective_method("PUT", &param), "PUT");
+    }
+    param.location = Location::Query;
+    assert_eq!(effective_method("QUERY", &param), "QUERY");
+    assert_eq!(effective_method("GET", &param), "GET");
+}
+
+#[test]
 fn effective_query_base_uses_form_action_for_body_locations() {
     let target = make_url("https://example.com/page");
     let mut param = Param {

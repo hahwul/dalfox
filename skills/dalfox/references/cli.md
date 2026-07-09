@@ -36,6 +36,8 @@ All flags are defined in `src/cmd/scan/args.rs:ScanArgs`. Defaults are centraliz
 
 | Flag | Purpose |
 |------|---------|
+| `-X, --method` | HTTP method override: `GET`, `POST`, `PUT`, `DELETE`, `HEAD`, `OPTIONS`, `PATCH`, `QUERY` (RFC 10008; body-capable, safe/idempotent). Body params preserve the target method (e.g. `-X QUERY -d '…'`) |
+| `-d, --data` | Request body (form or JSON) |
 | `-p, --param` | Restrict to specific params (supports `name:location` hints) |
 | `--include-url` | Regex whitelist (multiple) |
 | `--exclude-url` | Regex blacklist (multiple) |

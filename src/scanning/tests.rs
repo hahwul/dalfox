@@ -2495,7 +2495,7 @@ fn build_request_text_body_replaces_in_existing_form_data() {
     };
     let param = req_param("pass", "secret", Location::Body);
     let req = super::build_request_text(&target, &param, "PAY");
-    // Body location forces POST and a form content type.
+    // Body-capable methods are preserved; form content type is set.
     assert!(req.starts_with("POST /login "), "req:\n{req}");
     assert!(
         req.contains("Content-Type: application/x-www-form-urlencoded"),
@@ -2504,6 +2504,21 @@ fn build_request_text_body_replaces_in_existing_form_data() {
     assert!(req.contains("user=alice"), "req:\n{req}");
     assert!(req.contains("pass=PAY"), "req:\n{req}");
     assert!(req.contains("Content-Length: "), "req:\n{req}");
+}
+
+#[test]
+fn build_request_text_body_preserves_query_method() {
+    // RFC 10008 QUERY: body injection must not force POST.
+    let target = Target {
+        method: "QUERY".to_string(),
+        data: Some("filter=foo&q=seed".to_string()),
+        ..target_for("https://example.com/search")
+    };
+    let param = req_param("q", "seed", Location::Body);
+    let req = super::build_request_text(&target, &param, "PAY");
+    assert!(req.starts_with("QUERY /search "), "req:\n{req}");
+    assert!(req.contains("filter=foo"), "req:\n{req}");
+    assert!(req.contains("q=PAY"), "req:\n{req}");
 }
 
 #[test]
