@@ -851,7 +851,8 @@ fn build_body_request(
             urlencoding::encode(encoded_payload)
         ))
     };
-    let base = crate::utils::build_request(client, target, reqwest::Method::POST, parsed_url, body);
+    let method = crate::scanning::url_inject::body_location_method_for_param(&target.method, param);
+    let base = crate::utils::build_request(client, target, method, parsed_url, body);
     crate::utils::apply_header_overrides(
         base,
         &[(
@@ -883,7 +884,8 @@ fn build_json_body_request(
     } else {
         Some(serde_json::json!({ &param.name: encoded_payload }).to_string())
     };
-    let base = crate::utils::build_request(client, target, reqwest::Method::POST, parsed_url, body);
+    let method = crate::scanning::url_inject::body_location_method_for_param(&target.method, param);
+    let base = crate::utils::build_request(client, target, method, parsed_url, body);
     crate::utils::apply_header_overrides(
         base,
         &[("Content-Type".to_string(), "application/json".to_string())],
@@ -917,8 +919,8 @@ fn build_multipart_request(
     } else {
         form = form.text(param.name.clone(), encoded_payload.to_string());
     }
-    crate::utils::build_request(client, target, reqwest::Method::POST, parsed_url, None)
-        .multipart(form)
+    let method = crate::scanning::url_inject::body_location_method_for_param(&target.method, param);
+    crate::utils::build_request(client, target, method, parsed_url, None).multipart(form)
 }
 
 fn build_url_inject_request(

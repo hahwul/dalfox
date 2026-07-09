@@ -25,14 +25,16 @@ pub async fn verify_dom_xss_light_with_client(
     param: &Param,
     payload: &str,
 ) -> (bool, Option<String>, Option<String>) {
-    let method = target.parse_method();
+    let default_method = target.parse_method();
+    let body_method =
+        crate::scanning::url_inject::body_location_method_for_param(&target.method, param);
     let request = match param.location {
         Location::Header => {
             let parsed_url = target.url.clone();
             let rb = crate::utils::build_request(
                 client,
                 target,
-                method,
+                default_method,
                 parsed_url,
                 target.data.clone(),
             );
@@ -71,7 +73,7 @@ pub async fn verify_dom_xss_light_with_client(
                     urlencoding::encode(payload)
                 ))
             };
-            crate::utils::build_request(client, target, method, parsed_url, body)
+            crate::utils::build_request(client, target, body_method, parsed_url, body)
         }
         Location::JsonBody => {
             let parsed_url = param
@@ -94,7 +96,7 @@ pub async fn verify_dom_xss_light_with_client(
             } else {
                 Some(serde_json::json!({ &param.name: payload }).to_string())
             };
-            let rb = crate::utils::build_request(client, target, method, parsed_url, body);
+            let rb = crate::utils::build_request(client, target, body_method, parsed_url, body);
             rb.header("Content-Type", "application/json")
         }
         Location::MultipartBody => {
@@ -123,7 +125,8 @@ pub async fn verify_dom_xss_light_with_client(
             } else {
                 form = form.text(param.name.clone(), payload.to_string());
             }
-            crate::utils::build_request(client, target, method, parsed_url, None).multipart(form)
+            crate::utils::build_request(client, target, body_method, parsed_url, None)
+                .multipart(form)
         }
         _ => {
             // GET form discovery sets form_action_url; light-verify must
@@ -133,7 +136,13 @@ pub async fn verify_dom_xss_light_with_client(
             let inject_url =
                 crate::scanning::url_inject::build_injected_url(&base_url, param, payload);
             let parsed_url = url::Url::parse(&inject_url).unwrap_or_else(|_| base_url.clone());
-            crate::utils::build_request(client, target, method, parsed_url, target.data.clone())
+            crate::utils::build_request(
+                client,
+                target,
+                default_method,
+                parsed_url,
+                target.data.clone(),
+            )
         }
     };
 

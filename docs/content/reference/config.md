@@ -145,7 +145,7 @@ debug = false
 | `data` | string | — | Request body |
 | `headers` | array | `[]` | HTTP headers |
 | `cookies` | array | `[]` | Cookie strings |
-| `method` | string | `"GET"` | HTTP method |
+| `method` | string | `"GET"` | HTTP method (`GET`, `POST`, `PUT`, `DELETE`, `HEAD`, `OPTIONS`, `PATCH`, `QUERY`) |
 | `user_agent` | string | — | User-Agent override |
 | `cookie_from_raw` | string | — | Raw-request file for cookies |
 

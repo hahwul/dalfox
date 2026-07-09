@@ -78,7 +78,7 @@ dalfox scan [TARGETS]... [FLAGS]
 | `--data` | `-d` | — | Request body |
 | `--headers` | `-H` | — | Extra HTTP header (repeatable) |
 | `--cookies` | — | — | Cookie (repeatable) |
-| `--method` | `-X` | `GET` | HTTP method override |
+| `--method` | `-X` | `GET` | HTTP method override (`GET`, `POST`, `PUT`, `DELETE`, `HEAD`, `OPTIONS`, `PATCH`, `QUERY` / RFC 10008) |
 | `--user-agent` | — | — | Custom User-Agent |
 | `--cookie-from-raw` | — | — | Load cookies from a raw HTTP request file |
 

@@ -774,7 +774,7 @@ impl Drop for TempWordlist {
 
 async fn reflect_all_query_handler(Query(params): Query<HashMap<String, String>>) -> Html<String> {
     let mut body = String::from("<html><body>");
-    for (_, v) in params.iter() {
+    for v in params.values() {
         body.push_str(&format!("<div>{}</div>", v));
     }
     body.push_str("</body></html>");

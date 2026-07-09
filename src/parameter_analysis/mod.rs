@@ -259,9 +259,13 @@ async fn send_probe_request_for_param(
     let form_action_url = param.form_action_url.clone();
     let ignore_return = target.ignore_return.clone();
 
-    // Force POST for Body/JsonBody/MultipartBody params even when default target method is GET
+    // Body-bearing locations: form-discovered sinks stay POST; own-body
+    // params preserve body-capable methods (POST/PUT/PATCH/QUERY/…). See
+    // `body_location_method_for_param`.
     let req_method = match location {
-        Location::Body | Location::JsonBody | Location::MultipartBody => reqwest::Method::POST,
+        Location::Body | Location::JsonBody | Location::MultipartBody => {
+            crate::scanning::url_inject::body_location_method_for_param(&target.method, param)
+        }
         _ => parsed_method,
     };
 
