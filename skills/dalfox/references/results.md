@@ -75,6 +75,17 @@ Never turn them on "just in case" during automated scans. Only enable when the u
 
 In MCP: `include_request` / `include_response` default to `false` and must be set explicitly.
 
+## Dry-run warnings (CLI)
+
+`--dry-run` with `--format json` / `jsonl` may include `meta.warnings` (string array). Codes agents should watch for:
+
+| Code prefix | Meaning |
+|-------------|---------|
+| `EXPLICIT_PARAM_NOT_SEEDED` | One or more `-p` specs could not be seeded (typically `path` / `fragment` / unknown type). Fix: use a synthesizable `name:location` such as `q:query`. |
+| `EXPLICIT_PARAM_EMPTY` | `-p` was set but zero scannable params remained after analysis. |
+
+Plain dry-run prints the same warnings under a `Warnings:` section.
+
 ## Streaming Findings
 
 `--stream-findings` emits each verified finding the moment it is confirmed instead of waiting for the final summary. Useful for very long scans where you want early signal. Off by default.

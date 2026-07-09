@@ -38,7 +38,7 @@ All flags are defined in `src/cmd/scan/args.rs:ScanArgs`. Defaults are centraliz
 |------|---------|
 | `-X, --method` | HTTP method override: `GET`, `POST`, `PUT`, `DELETE`, `HEAD`, `OPTIONS`, `PATCH`, `QUERY` (RFC 10008; body-capable, safe/idempotent). Body params preserve the target method (e.g. `-X QUERY -d '…'`) |
 | `-d, --data` | Request body (form or JSON) |
-| `-p, --param` | Restrict to specific params (supports `name:location` hints) |
+| `-p, --param` | Restrict to specific params. Prefer `name:location` (`query`, `body`, `json`, `multipart`, `header`, `cookie`). Bare `-p name` still works: if discovery did not seed it, dalfox synthesizes it (infers location from the request, defaults to `query`) so `--skip-discovery -p q` is not a silent no-op |
 | `--include-url` | Regex whitelist (multiple) |
 | `--exclude-url` | Regex blacklist (multiple) |
 | `--ignore-param` | Skip these parameter names entirely |
@@ -57,7 +57,7 @@ All flags are defined in `src/cmd/scan/args.rs:ScanArgs`. Defaults are centraliz
 | `-W, --mining-dict-word` | Path to custom wordlist for dictionary mining |
 | `--remote-wordlists` | `burp,assetnote` (comma-separated) |
 
-**Common fast-mode combo**: `--skip-mining` (or `--skip-mining-dom`) + explicit `-p` params you care about.
+**Common fast-mode combo**: `--skip-mining` (or `--skip-mining-dom`) + explicit `-p` for the params you care about. With `--skip-discovery`, always pass `-p` (bare name is OK for query; use `name:location` for body/header/cookie/json).
 
 ## Network & Concurrency
 
@@ -125,7 +125,7 @@ See `references/advanced.md` for recommended WAF combinations.
 ## Other Useful / Diagnostic
 
 - `--cookie-from-raw request.txt` — lift cookies from a captured raw request file (CLI only)
-- `--dry-run` — preflight summary only (same as MCP `preflight_dalfox`)
+- `--dry-run` — preflight summary only (parameter discovery + request estimate; no attack payloads). JSON/JSONL include `meta.warnings` when `-p` specs could not be seeded (e.g. `path` / `fragment` only). MCP equivalent: `preflight_dalfox` (note: preflight intentionally ignores `param` filters for impact estimation)
 - `--debug` — show DBG lines
 - Global root flags: `--config`, `--debug`, `--no-color`, `--silence`
 
@@ -135,9 +135,12 @@ See `references/results.md`.
 
 ## Common High-Value Combinations
 
-**Fast smoke test on one param**:
+**Fast smoke test on one query param** (safe with skip-discovery — bare `-p` synthesizes as query if needed):
 ```bash
 dalfox scan https://target/?q=1 -p q --skip-mining --skip-discovery
+# Prefer location hints when not query:
+# dalfox scan https://target/search -p q:query --skip-mining --skip-discovery
+# dalfox scan https://target/api -X POST -d 'user=x' -p user:body --skip-mining --skip-discovery
 ```
 
 **Polite authenticated scan through Burp**:

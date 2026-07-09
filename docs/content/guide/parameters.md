@@ -29,7 +29,14 @@ dalfox https://target.app/api \
   -p token:cookie
 ```
 
-Locations: `query`, `body`, `json`, `cookie`, `header`. Without a hint, Dalfox places the parameter wherever the target already exposes it.
+Locations: `query`, `body`, `json`, `multipart`, `cookie`, `header`. Prefer `name:location` when the injection point is not the query string.
+
+Without a location hint (`-p q` only):
+
+1. If discovery/mining already found a param with that name, it is kept (filter).
+2. Otherwise Dalfox **synthesizes** it: location is inferred from the request (URL query → body → cookies → headers), defaulting to `query`.
+
+That means recipes like `-p q --skip-discovery --skip-mining` still test `q` instead of silently scanning nothing.
 
 ## Mining with wordlists
 

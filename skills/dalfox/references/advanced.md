@@ -20,9 +20,9 @@
 
 Biggest lever for request count is usually `--skip-mining` (or the more granular `--skip-mining-dom` / `--skip-mining-dict`).
 
-Discovery (`--skip-discovery`) turns off HTML parsing for forms, links, and inline JS. Only parameters you pass with `-p` will be tested — never use this on a bare URL without `-p`.
+Discovery (`--skip-discovery`) turns off HTML form / link / inline-JS extraction. **Always pass `-p` when using it** — without `-p`, a bare URL has nothing to test. Bare `-p name` synthesizes a param when discovery/mining did not seed it (location inferred from the request, default `query`). Prefer `name:location` (`q:query`, `user:body`, `auth:header`, `sid:cookie`) when the location is not obvious.
 
-`--only-discovery` is excellent for a quick "how many parameters will this scan actually hit?" check before committing to a long run.
+`--only-discovery` / `--dry-run` are excellent for "how many parameters will this scan actually hit?" before a long run. Dry-run JSON surfaces `meta.warnings` if an explicit `-p` could not be seeded (e.g. `path` / `fragment`).
 
 Remote wordlists (`--remote-wordlists burp,assetnote`) are cached with OnceLock for the lifetime of the process.
 
@@ -79,15 +79,17 @@ Only when you have evidence that the first finding on a parameter is not the onl
 
 1. Preflight first (`--dry-run` or MCP `preflight_dalfox`).
 2. Add `--skip-mining`.
-3. Add explicit `-p` for the 5–10 parameters you actually care about.
-4. Cap with `--max-payloads-per-param 30`.
-5. If still too much: lower `--workers` and add `--delay`.
+3. Add explicit `-p` / `param` for the 5–10 parameters you care about (`name:location` when not query).
+4. Cap with `--max-payloads-per-param 30` (CLI; MCP parity tracked separately).
+5. If still too much: lower `--workers`, add `--delay` / `--rate-limit`, or `--scan-timeout`.
 
 ## MCP vs CLI for advanced scenarios
 
-Most of the flags above have direct equivalents in `scan_with_dalfox` parameters. The main absences on the MCP side are:
-- `--cookie-from-raw` (security)
-- `--remote-payloads` / `--remote-wordlists` (you can still pass custom lists via other means if needed)
+Most scan flags have direct equivalents in `scan_with_dalfox`. Notable absences / differences:
+- `--cookie-from-raw` — intentionally absent on MCP (host file-read class; supply `cookies` directly)
+- Managed `--blind-oob` lifecycle — CLI-only; MCP uses `blind_callback_url`
+- Multi-target / HAR / raw-http fan-out — CLI-only (call MCP once per URL)
+- `preflight_dalfox.param` is accepted but **not applied** (full discovery impact estimate); pass `param` on `scan_with_dalfox`
 - Some of the more exotic mining/scope filters (they exist in the engine but are not yet exposed on the MCP surface)
 
 When you need the full power, fall back to spawning the CLI with carefully constructed arguments (or extend the MCP tool surface in a future change).
