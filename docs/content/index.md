@@ -1,5 +1,5 @@
 +++
-title = "Dalfox — Powerful XSS Scanner"
+title = "Powerful XSS Scanner"
 description = "A powerful open-source XSS scanner and automation utility. Reflected, Stored, DOM-based with AST-level verification."
 template = "landing"
 +++
@@ -7,71 +7,23 @@ template = "landing"
 <section class="hero">
   <div class="hero-illustration" aria-hidden="true"></div>
   <div class="hero-inner">
-    <div class="hero-text">
-      <h1 class="hero-title">
-        Hunt <span class="strike">every</span> <span class="accent">XSS</span><br>
-        before it hunts you.
-      </h1>
-      <p class="hero-desc">
-        <strong>Dalfox</strong> is a powerful open-source XSS scanner and automation utility. Reflected, Stored, DOM-based: discovered, verified, and reported with AST-level precision across every parameter in your app.
-      </p>
-      <div class="hero-actions">
-        <a href="./getting-started/" class="btn btn-primary">
-          Get Started
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-        </a>
-        <a href="https://github.com/hahwul/dalfox" class="btn btn-secondary" target="_blank" rel="noopener">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-          Star on GitHub
-        </a>
-      </div>
-      <div class="hero-install" data-install>
-        <div class="hero-install-pm">
-          <button class="hero-install-pm-btn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose install method">
-            <span class="hero-install-pm-label">brew</span>
-            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-          </button>
-          <ul class="hero-install-pm-menu" role="listbox" aria-label="Install method">
-            <li role="option" class="is-selected" aria-selected="true" data-label="brew" data-cmd="brew install dalfox">Homebrew</li>
-            <li role="option" aria-selected="false" data-label="snap" data-cmd="sudo snap install dalfox">Snap</li>
-            <li role="option" aria-selected="false" data-label="aur" data-cmd="yay -S dalfox">Arch (AUR)</li>
-            <li role="option" aria-selected="false" data-label="nix" data-cmd="nix profile install github:hahwul/dalfox">Nix</li>
-            <li role="option" aria-selected="false" data-label="cargo" data-cmd="cargo install dalfox">Cargo</li>
-          </ul>
-        </div>
-        <span class="hero-install-sep" aria-hidden="true"></span>
-        <span class="dollar">$</span>
-        <code>brew install dalfox</code>
-        <button class="hero-install-copy" type="button">copy</button>
-      </div>
-    </div>
-    <div class="hero-visual">
-      <div class="terminal">
-        <div class="terminal-bar">
-          <div class="terminal-dots">
-            <span class="terminal-dot red"></span>
-            <span class="terminal-dot amber"></span>
-            <span class="terminal-dot green"></span>
-          </div>
-          <div class="terminal-title">dalfox — scan</div>
-        </div>
-        <div class="terminal-body">
-          <div class="t-line"><span class="t-prompt">$</span><span class="t-cmd">dalfox scan https://xss-game.appspot.com/level1/frame</span></div>
-          <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> start scan to https://xss-game.appspot.com/level1/frame</div>
-          <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> found reflected 1 params</div>
-          <div class="t-line t-dim">└── query valid_specials="/\'{`<>"();=|}[.:]+,$-" invalid_specials=""</div>
-          <div class="t-line"></div>
-          <div class="t-line"></div>
-          <div class="t-line"><span class="t-ts">6:42PM</span> <span class="t-wrn">WRN</span> XSS found 1 XSS</div>
-          <div class="t-line"><span class="t-poc">[POC][V][GET][inHTML]</span> ...?query=%3Csvg%2Fonload%3Dalert%281%29%3E</div>
-          <div class="t-line t-dim">  ├── Issue: XSS payload DOM object identified</div>
-          <div class="t-line t-dim">  ├── Payload: &lt;svg/onload=alert(1)&gt;</div>
-          <div class="t-line t-dim">  └── L13: s were found for &#x3c;b&#x3e;&#x3c;svg/onload=alert(1)&#x3e;&#x3c;/b&#x3e;..</div>
-          <div class="t-line"></div>
-          <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> scan completed in 3.482 seconds</div>
-          <div class="t-line t-cursor"></div>
-        </div>
-      </div>
+    <p class="hero-eyebrow">xss scanner · rust</p>
+    <h1 class="hero-title">
+      Hunt <span class="strike">every</span> <span class="accent">XSS</span><br>
+      before it hunts you.
+    </h1>
+    <p class="hero-desc">
+      Reflected, Stored, and DOM-based flaws, discovered and verified with AST-level precision across every parameter.
+    </p>
+    <div class="hero-actions">
+      <a href="./getting-started/" class="btn btn-primary">
+        Get started
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+      </a>
+      <a href="https://github.com/hahwul/dalfox" class="btn btn-secondary" target="_blank" rel="noopener">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+        Star on GitHub
+      </a>
     </div>
   </div>
 </section>
@@ -96,6 +48,61 @@ template = "landing"
     </div>
   </div>
 </div>
+
+<section class="section section--terminal">
+  <div class="section-inner">
+    <h2 class="section-title">One command, a verified finding</h2>
+    <p class="section-desc">Point Dalfox at a target and it discovers parameters, probes contexts, injects, and confirms the hit at the DOM level before it ever reaches your report.</p>
+    <div class="terminal-demo">
+      <div class="hero-visual">
+        <div class="terminal">
+          <div class="terminal-bar">
+            <div class="terminal-dots">
+              <span class="terminal-dot red"></span>
+              <span class="terminal-dot amber"></span>
+              <span class="terminal-dot green"></span>
+            </div>
+            <div class="terminal-title">dalfox · scan</div>
+          </div>
+          <div class="terminal-body">
+            <div class="t-line"><span class="t-prompt">$</span><span class="t-cmd">dalfox scan https://xss-game.appspot.com/level1/frame</span></div>
+            <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> start scan to https://xss-game.appspot.com/level1/frame</div>
+            <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> found reflected 1 params</div>
+            <div class="t-line t-dim">└── query valid_specials="/\'{`<>"();=|}[.:]+,$-" invalid_specials=""</div>
+            <div class="t-line"></div>
+            <div class="t-line"><span class="t-ts">6:42PM</span> <span class="t-wrn">WRN</span> XSS found 1 XSS</div>
+            <div class="t-line"><span class="t-poc">[POC][V][GET][inHTML]</span> ...?query=%3Csvg%2Fonload%3Dalert%281%29%3E</div>
+            <div class="t-line t-dim">  ├── Issue: XSS payload DOM object identified</div>
+            <div class="t-line t-dim">  ├── Payload: &lt;svg/onload=alert(1)&gt;</div>
+            <div class="t-line t-dim">  └── L13: matches for &#x3c;svg/onload=alert(1)&#x3e;</div>
+            <div class="t-line"></div>
+            <div class="t-line t-dim"><span class="t-ts">6:42PM</span> <span class="t-info">INF</span> scan completed in 3.482 seconds</div>
+            <div class="t-line t-cursor"></div>
+          </div>
+        </div>
+      </div>
+      <div class="hero-install" data-install>
+        <div class="hero-install-pm">
+          <button class="hero-install-pm-btn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-label="Choose install method">
+            <span class="hero-install-pm-label">brew</span>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+          </button>
+          <ul class="hero-install-pm-menu" role="listbox" aria-label="Install method">
+            <li role="option" class="is-selected" aria-selected="true" data-label="brew" data-cmd="brew install dalfox">Homebrew</li>
+            <li role="option" aria-selected="false" data-label="snap" data-cmd="sudo snap install dalfox">Snap</li>
+            <li role="option" aria-selected="false" data-label="aur" data-cmd="yay -S dalfox">Arch (AUR)</li>
+            <li role="option" aria-selected="false" data-label="nix" data-cmd="nix profile install github:hahwul/dalfox">Nix</li>
+            <li role="option" aria-selected="false" data-label="cargo" data-cmd="cargo install dalfox">Cargo</li>
+          </ul>
+        </div>
+        <span class="hero-install-sep" aria-hidden="true"></span>
+        <span class="dollar">$</span>
+        <code>brew install dalfox</code>
+        <button class="hero-install-copy" type="button">copy</button>
+      </div>
+    </div>
+  </div>
+</section>
 
 <section class="section">
   <div class="section-inner">
@@ -170,30 +177,46 @@ template = "landing"
     <p class="section-eyebrow">// Modes</p>
     <h2 class="section-title">Six ways to run Dalfox</h2>
     <p class="section-desc">Pick the shape that fits your target. Every mode shares the same discovery and verification engine.</p>
-    <div class="modes">
-      <div class="mode">
-        <div class="mode-name">URL</div>
-        <div class="mode-desc">Single target scan</div>
+    <div class="modes" data-modes>
+      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-url" checked>
+      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-file">
+      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-pipe">
+      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-sxss">
+      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-server">
+      <input class="mode-radio" type="radio" name="dalfox-mode" id="m-mcp">
+      <div class="mode-tabs" role="tablist" aria-label="Dalfox run modes">
+        <label class="mode-tab" for="m-url"><span class="mode-tab-name">URL</span><span class="mode-tab-sub">single target</span></label>
+        <label class="mode-tab" for="m-file"><span class="mode-tab-name">FILE</span><span class="mode-tab-sub">batch from a list</span></label>
+        <label class="mode-tab" for="m-pipe"><span class="mode-tab-name">PIPE</span><span class="mode-tab-sub">stdin pipeline</span></label>
+        <label class="mode-tab" for="m-sxss"><span class="mode-tab-name">SXSS</span><span class="mode-tab-sub">stored XSS</span></label>
+        <label class="mode-tab" for="m-server"><span class="mode-tab-name">SERVER</span><span class="mode-tab-sub">REST daemon</span></label>
+        <label class="mode-tab" for="m-mcp"><span class="mode-tab-name">MCP</span><span class="mode-tab-sub">agent-native</span></label>
       </div>
-      <div class="mode">
-        <div class="mode-name">FILE</div>
-        <div class="mode-desc">Batch from list</div>
-      </div>
-      <div class="mode">
-        <div class="mode-name">PIPE</div>
-        <div class="mode-desc">stdin pipeline</div>
-      </div>
-      <div class="mode">
-        <div class="mode-name">SXSS</div>
-        <div class="mode-desc">Stored XSS</div>
-      </div>
-      <div class="mode">
-        <div class="mode-name">SERVER</div>
-        <div class="mode-desc">REST + daemon</div>
-      </div>
-      <div class="mode">
-        <div class="mode-name">MCP</div>
-        <div class="mode-desc">Agent-native</div>
+      <div class="mode-panels">
+        <div class="mode-panel" data-mode="url">
+          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan https://target.app</code></div>
+          <p>Point Dalfox at a single URL. It mines parameters, probes each context, and verifies every hit at the DOM level.</p>
+        </div>
+        <div class="mode-panel" data-mode="file">
+          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan urls.txt</code></div>
+          <p>Sweep a whole list of targets from a file, one URL per line, with the same engine and one report.</p>
+        </div>
+        <div class="mode-panel" data-mode="pipe">
+          <div class="mode-panel-cmd"><span class="dollar">$</span><code>cat urls.txt | dalfox scan</code></div>
+          <p>Read targets from stdin so Dalfox drops straight into your crawler or recon pipeline.</p>
+        </div>
+        <div class="mode-panel" data-mode="sxss">
+          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox scan https://app/post --sxss-url https://app/feed</code></div>
+          <p>Inject on one endpoint, then confirm the payload fires on another. Stored XSS, actually verified.</p>
+        </div>
+        <div class="mode-panel" data-mode="server">
+          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox server</code></div>
+          <p>Run Dalfox as a long-lived REST API for async scan jobs, integrations, and dashboards.</p>
+        </div>
+        <div class="mode-panel" data-mode="mcp">
+          <div class="mode-panel-cmd"><span class="dollar">$</span><code>dalfox mcp</code></div>
+          <p>Expose Dalfox as an MCP tool so agents and IDEs can scan on your behalf.</p>
+        </div>
       </div>
     </div>
   </div>
@@ -201,7 +224,6 @@ template = "landing"
 
 <section class="section">
   <div class="section-inner">
-    <p class="section-eyebrow">// Workflow</p>
     <h2 class="section-title">From install to verified finding in three steps</h2>
     <p class="section-desc">Dalfox is designed to drop into whatever you already have. No fancy setup, no heavy orchestration.</p>
     <div class="how-steps">
@@ -226,7 +248,6 @@ template = "landing"
 
 <section class="section section--community">
   <div class="section-inner">
-    <p class="section-eyebrow">// Community</p>
     <h2 class="section-title">Built in the open, by hunters everywhere</h2>
     <p class="section-desc">Dalfox is shaped by the people who run it. Open an issue, send a pull request, or trade payloads with the community. Every contribution sharpens the hunt.</p>
     <div class="community-links">
@@ -244,11 +265,10 @@ template = "landing"
   <div class="cta-illustration" aria-hidden="true"></div>
   <div class="cta-inner">
     <h2 class="cta-title">Ready to hunt?</h2>
-    <p class="cta-desc">Thousands of scans, zero fuss. Star the repo, read the docs, or drop Dalfox in your next recon loop.</p>
+    <p class="cta-desc">Thousands of scans, zero fuss. Read the docs, star the repo, or drop Dalfox in your next recon loop.</p>
     <div class="cta-buttons">
-      <a href="./getting-started/installation/" class="btn btn-primary">Install Dalfox</a>
-      <a href="./reference/cli/" class="btn btn-secondary">CLI Reference</a>
-      <a href="https://github.com/hahwul/dalfox" class="btn btn-ghost" target="_blank" rel="noopener">GitHub →</a>
+      <a href="./getting-started/" class="btn btn-primary">Get started</a>
+      <a href="./reference/cli/" class="btn btn-secondary">CLI reference</a>
     </div>
   </div>
 </section>
