@@ -7,7 +7,6 @@ template = "landing"
 <section class="hero">
   <div class="hero-illustration" aria-hidden="true"></div>
   <div class="hero-inner">
-    <p class="hero-eyebrow">xss scanner · rust</p>
     <h1 class="hero-title">
       Hunt <span class="strike">every</span> <span class="accent">XSS</span><br>
       before it hunts you.
