@@ -1,21 +1,22 @@
 /* ==========================================================================
-   Dalfox Documentation — Dark theme
-   Brand: #31365e (deep indigo)
-   Aesthetic: 東洋風 — ink lines (墨線), window lattice (窓), calm paper surfaces.
-   Refined lines & surfaces over a navy-ink dark base, referencing kami.tw93.fun.
+   Dalfox Documentation — Moonlit indigo dark theme
+   Accent: #7c87ea (moonlit indigo, brightened from the logo #30365e) on an
+   indigo-navy base. Aesthetic: 東洋風 — ink lines (墨線), window lattice (窓),
+   moon glow (月光). Dark-only; a redesigned take on the dalfox.hahwul.com identity.
    ========================================================================== */
 
 :root {
-    /* Brand */
-    --brand: #31365e;
-    --brand-2: #3d4477;
-    --brand-3: #5a63a8;
-    --accent: #8b94e8;
-    --accent-hover: #b4bbf0;
-    --accent-dim: rgba(139, 148, 232, 0.1);
-    --brand-glow: rgba(49, 54, 94, 0.45);
+    /* Brand — moonlit indigo, brightened from the logo #30365e */
+    --brand: #30365e;
+    --brand-2: #3b4272;
+    --brand-3: #565fa4;
+    --accent: #7c87ea;
+    --accent-hover: #9aa2f2;
+    --accent-dim: rgba(124, 135, 234, 0.1);
+    --accent-glow: #6e79e0;
+    --brand-glow: rgba(86, 95, 164, 0.4);
 
-    /* Backgrounds — navy-tinted dark */
+    /* Backgrounds — indigo-navy, toned toward the logo */
     --bg-body: #070811;
     --bg-sidebar: #0b0d18;
     --bg-content: #0a0c16;
@@ -25,32 +26,32 @@
     --bg-terminal: #060710;
 
     /* Text */
-    --text-primary: #e7e9f3;
-    --text-secondary: #9aa0bb;
-    --text-muted: #636980;
+    --text-primary: #e6edf7;
+    --text-secondary: #93a1bd;
+    --text-muted: #5d6b86;
 
     /* Borders */
     --border: #161a28;
     --border-light: #222741;
 
     /* ----- 東洋風 ornament tokens -----------------------------------------
-       Ink hairlines (墨線) derived from the periwinkle accent so every rule
+       Ink hairlines (墨線) derived from the moonlit-indigo accent so every rule
        reads as a single drawn line rather than a heavy box. The window-frame
        brackets (窓枠) and seal-mark accents reuse these. */
-    --ink-line: rgba(180, 187, 240, 0.12);
-    --ink-line-soft: rgba(180, 187, 240, 0.06);
-    --ink-line-strong: rgba(180, 187, 240, 0.28);
-    --bracket: rgba(139, 148, 232, 0.45);
-    --bracket-dim: rgba(139, 148, 232, 0.22);
+    --ink-line: rgba(124, 135, 234, 0.12);
+    --ink-line-soft: rgba(124, 135, 234, 0.06);
+    --ink-line-strong: rgba(124, 135, 234, 0.26);
+    --bracket: rgba(124, 135, 234, 0.42);
+    --bracket-dim: rgba(124, 135, 234, 0.22);
     /* faint paper grain + lattice motifs, applied at very low opacity */
     --paper-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
-    --asanoha: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='96' viewBox='0 0 56 96'%3E%3Cg fill='none' stroke='%238b94e8' stroke-width='0.8'%3E%3Cpath d='M28 0v24M28 24L7 36M28 24l21 12M28 24v24M28 48L7 36M28 48l21 12M28 48v24M28 72L7 60M28 72l21 12M28 96v-24M7 12v24M49 12v24M7 60v24M49 60v24M0 24l7 12M56 24l-7 12M0 72l7-12M56 72l-7-12'/%3E%3C/g%3E%3C/svg%3E");
+    --asanoha: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='56' height='96' viewBox='0 0 56 96'%3E%3Cg fill='none' stroke='%237c87ea' stroke-width='0.8'%3E%3Cpath d='M28 0v24M28 24L7 36M28 24l21 12M28 24v24M28 48L7 36M28 48l21 12M28 48v24M28 72L7 60M28 72l21 12M28 96v-24M7 12v24M49 12v24M7 60v24M49 60v24M0 24l7 12M56 24l-7 12M0 72l7-12M56 72l-7-12'/%3E%3C/g%3E%3C/svg%3E");
 
     /* Status */
-    --info-bg: rgba(96, 165, 250, 0.07);
-    --info-border: #60a5fa;
-    --warning-bg: rgba(245, 158, 11, 0.07);
-    --warning-border: #f59e0b;
+    --info-bg: rgba(124, 135, 234, 0.08);
+    --info-border: #7c87ea;
+    --warning-bg: rgba(245, 181, 68, 0.08);
+    --warning-border: #f5b544;
     --success: #34d399;
     --danger: #f87171;
 
@@ -90,7 +91,7 @@ body {
     background-color: var(--bg-body);
     background-image: radial-gradient(
         ellipse 80% 50% at 50% -10%,
-        rgba(49, 54, 94, 0.32),
+        rgba(110, 121, 224, 0.2),
         transparent 60%
     );
     background-attachment: fixed;
@@ -1482,18 +1483,19 @@ body:has(.docs-layout) .site-footer {
 .btn:active {
     transform: translateY(0);
 }
-/* Outline → fill: clean accent edge at rest, floods periwinkle on hover */
+/* Solid moonlight fill so the primary action carries the eye on the dark hero. */
 .btn-primary {
-    background: transparent;
-    color: var(--accent);
+    background: var(--accent);
+    color: #0a0e1a;
     border-color: var(--accent);
+    font-weight: 700;
 }
 .btn-primary:hover {
-    background: var(--accent);
-    color: var(--bg-content);
-    border-color: var(--accent);
+    background: var(--accent-hover);
+    color: #0a0e1a;
+    border-color: var(--accent-hover);
     transform: translateY(-1px);
-    box-shadow: 0 6px 18px rgba(139, 148, 232, 0.3);
+    box-shadow: 0 8px 24px rgba(124, 135, 234, 0.34);
 }
 .btn-secondary {
     background: var(--bg-surface);
@@ -1923,7 +1925,7 @@ body:has(.docs-layout) .site-footer {
     background: linear-gradient(
         135deg,
         var(--bg-hover),
-        rgba(48, 54, 94, 0.35)
+        rgba(124, 135, 234, 0.16)
     );
     border: 1px solid var(--border-light);
     color: var(--accent);
@@ -2613,4 +2615,280 @@ body:has(.docs-layout) .site-footer {
 .feature-cell:hover::before,
 .feature-cell:hover::after {
     opacity: 0.6;
+}
+
+/* ==========================================================================
+   Landing redesign — illustration-forward hero, moonlight glow (月光),
+   terminal demo, and a CSS-only mode switcher. Appended so it overrides the
+   split-hero base above without touching its (fragile) mask geometry.
+   ========================================================================== */
+
+/* ----- Hero: full-bleed fox-and-moon, headline centred over the art -------- */
+.hero {
+    min-height: min(86vh, 760px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    padding: calc(var(--header-h) + 3rem) 2rem 5rem;
+}
+/* Ambient moonlight wash — a soft cyan bloom high-centre, over the fox. */
+.hero::before {
+    top: -6%;
+    width: min(1000px, 130%);
+    height: 620px;
+    background: radial-gradient(
+        ellipse 68% 58% at 50% 4%,
+        rgba(110, 121, 224, 0.26),
+        rgba(86, 95, 164, 0.1) 42%,
+        transparent 72%
+    );
+    filter: blur(28px);
+}
+/* Reading scrim: darken the centre so the headline stays legible over the art
+   (the old asanoha lattice is repurposed here as a focus vignette). */
+.hero::after {
+    background-image: none;
+    background: radial-gradient(
+        ellipse 66% 62% at 50% 50%,
+        rgba(6, 10, 18, 0.66) 0%,
+        rgba(6, 10, 18, 0.42) 46%,
+        transparent 82%
+    );
+    mask-image: none;
+    -webkit-mask-image: none;
+    opacity: 1;
+}
+/* Illustration now leads: full-bleed cover, every edge dissolved into navy. */
+.hero-illustration {
+    background-position: center 30%;
+    background-size: cover;
+    opacity: 0.55;
+    filter: saturate(0.98) contrast(1.03);
+    mask-image: radial-gradient(
+        ellipse 94% 98% at 50% 38%,
+        black 26%,
+        rgba(0, 0, 0, 0.72) 56%,
+        rgba(0, 0, 0, 0.3) 80%,
+        transparent 99%
+    );
+    -webkit-mask-image: radial-gradient(
+        ellipse 94% 98% at 50% 38%,
+        black 26%,
+        rgba(0, 0, 0, 0.72) 56%,
+        rgba(0, 0, 0, 0.3) 80%,
+        transparent 99%
+    );
+    mask-composite: add;
+    -webkit-mask-composite: source-over;
+}
+.hero-inner {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    max-width: 820px;
+    gap: 0;
+}
+/* Mono eyebrow, moonlight-tinted */
+.hero-eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-dim);
+    border: 1px solid var(--bracket-dim);
+    border-radius: 100px;
+    padding: 0.32rem 0.85rem;
+    margin-bottom: 1.6rem;
+}
+.hero-title {
+    font-size: clamp(2.5rem, 6vw, 4.2rem);
+    margin-bottom: 1.4rem;
+    text-shadow: 0 2px 30px rgba(6, 10, 18, 0.6);
+}
+.hero-desc {
+    margin-left: auto;
+    margin-right: auto;
+    max-width: 560px;
+    text-shadow: 0 1px 16px rgba(6, 10, 18, 0.7);
+}
+.hero-actions {
+    justify-content: center;
+    margin-bottom: 0;
+}
+
+/* ----- Terminal demo section (moved out of the hero) ----------------------- */
+.terminal-demo {
+    max-width: 760px;
+    margin: 2.25rem 0 0;
+}
+/* A moonlit glow pooled under the terminal panel */
+.terminal-demo .hero-visual::before {
+    inset: -30px;
+    background: radial-gradient(
+        ellipse at center,
+        rgba(110, 121, 224, 0.16),
+        transparent 62%
+    );
+}
+.terminal-demo .hero-install {
+    margin: 1.5rem 0 0;
+}
+
+/* ----- Modes: CSS-only switcher (radio + :checked, no JS, CSP-proof) -------- */
+.modes {
+    display: grid;
+    grid-template-columns: 232px 1fr;
+    gap: 1.25rem;
+    margin-top: 1.75rem;
+    text-align: left;
+}
+.mode-radio {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    opacity: 0;
+    pointer-events: none;
+}
+.mode-tabs {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+}
+.mode-tab {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+    padding: 0.7rem 0.9rem;
+    border: 1px solid var(--border);
+    border-left: 2px solid var(--border);
+    border-radius: 8px;
+    background: linear-gradient(180deg, rgba(12, 19, 32, 0.85), rgba(8, 13, 23, 0.85));
+    backdrop-filter: blur(3px);
+    -webkit-backdrop-filter: blur(3px);
+    cursor: pointer;
+    transition: border-color 0.18s, background 0.18s, transform 0.18s;
+}
+.mode-tab:hover {
+    border-color: var(--bracket-dim);
+    transform: translateX(2px);
+}
+.mode-tab-name {
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    transition: color 0.18s;
+}
+.mode-tab-sub {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+}
+.mode-panels {
+    position: relative;
+    min-height: 168px;
+}
+.mode-panel {
+    display: none;
+}
+.mode-panel-cmd {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-mono);
+    font-size: 0.86rem;
+    background: var(--bg-terminal);
+    border: 1px solid var(--border-light);
+    border-radius: 8px;
+    padding: 0.7rem 0.9rem;
+    margin-bottom: 1rem;
+    overflow-x: auto;
+}
+.mode-panel-cmd .dollar {
+    color: var(--accent);
+    user-select: none;
+}
+.mode-panel-cmd code {
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+.mode-panel p {
+    color: var(--text-secondary);
+    font-size: 0.94rem;
+    line-height: 1.7;
+    max-width: 46ch;
+}
+/* active tab (border + fill + accent label) */
+#m-url:checked    ~ .mode-tabs label[for="m-url"],
+#m-file:checked   ~ .mode-tabs label[for="m-file"],
+#m-pipe:checked   ~ .mode-tabs label[for="m-pipe"],
+#m-sxss:checked   ~ .mode-tabs label[for="m-sxss"],
+#m-server:checked ~ .mode-tabs label[for="m-server"],
+#m-mcp:checked    ~ .mode-tabs label[for="m-mcp"] {
+    border-color: var(--bracket);
+    border-left-color: var(--accent);
+    background: var(--accent-dim);
+}
+#m-url:checked    ~ .mode-tabs label[for="m-url"]    .mode-tab-name,
+#m-file:checked   ~ .mode-tabs label[for="m-file"]   .mode-tab-name,
+#m-pipe:checked   ~ .mode-tabs label[for="m-pipe"]   .mode-tab-name,
+#m-sxss:checked   ~ .mode-tabs label[for="m-sxss"]   .mode-tab-name,
+#m-server:checked ~ .mode-tabs label[for="m-server"] .mode-tab-name,
+#m-mcp:checked    ~ .mode-tabs label[for="m-mcp"]    .mode-tab-name {
+    color: var(--accent);
+}
+/* reveal the matching panel */
+#m-url:checked    ~ .mode-panels .mode-panel[data-mode="url"],
+#m-file:checked   ~ .mode-panels .mode-panel[data-mode="file"],
+#m-pipe:checked   ~ .mode-panels .mode-panel[data-mode="pipe"],
+#m-sxss:checked   ~ .mode-panels .mode-panel[data-mode="sxss"],
+#m-server:checked ~ .mode-panels .mode-panel[data-mode="server"],
+#m-mcp:checked    ~ .mode-panels .mode-panel[data-mode="mcp"] {
+    display: block;
+}
+/* keyboard focus lands on the (visually-hidden) radio — surface it on the tab */
+.mode-radio:focus-visible ~ .mode-tabs label[for="m-url"] {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+
+/* ----- Landing redesign responsive ----------------------------------------- */
+@media (max-width: 900px) {
+    .modes {
+        grid-template-columns: 1fr;
+    }
+    .mode-tabs {
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+    .mode-tab {
+        flex: 1 1 130px;
+    }
+    .mode-panels {
+        min-height: 0;
+    }
+}
+@media (max-width: 768px) {
+    .hero {
+        min-height: auto;
+        padding: calc(var(--header-h) + 2rem) 1.25rem 3.5rem;
+    }
+    .hero-illustration {
+        opacity: 0.42;
+    }
+}
+
+/* ----- Bento diversity — tint the two emphasis cells so the capability grid
+   isn't six identical flat cards (a moonlit wash on the lead + report cells). */
+.feature-cell.wide {
+    background: linear-gradient(150deg, rgba(124, 135, 234, 0.1), rgba(110, 121, 224, 0.02) 52%, var(--bg-content));
+}
+.feature-cell.full {
+    background: linear-gradient(120deg, var(--bg-content) 42%, rgba(124, 135, 234, 0.07));
+}
+.feature-cell.wide:hover,
+.feature-cell.full:hover {
+    background: linear-gradient(150deg, rgba(124, 135, 234, 0.15), rgba(110, 121, 224, 0.04) 52%, var(--bg-surface));
 }

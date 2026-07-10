@@ -79,7 +79,7 @@
     '.hero-eyebrow', '.hero-title', '.hero-desc', '.hero-actions', '.hero-install', '.hero-visual',
     '.stat-item',
     '.section-eyebrow', '.section-title', '.section-desc',
-    '.feature-cell', '.mode', '.how-step',
+    '.feature-cell', '.mode-tab', '.how-step',
     '.community-links', '.contributors-label', '.contributors',
     '.cta-title', '.cta-desc', '.cta-buttons'
   ].join(', ');
