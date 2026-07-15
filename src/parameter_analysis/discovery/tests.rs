@@ -945,3 +945,43 @@ fn test_dedupe_keeps_canonical_metadata_over_duplicate() {
     assert_eq!(merged.framework_sink.as_deref(), Some("ng-bind-html"));
     assert_eq!(merged.form_origin_url.as_deref(), Some("https://base/form"));
 }
+
+// Exercises the pure `-p name:<type>` spec parser directly. In production it is
+// only reached from async, network-bound discovery/mining call sites (issue
+// #1202), so its four match-arm behaviors are asserted here in isolation.
+#[test]
+fn test_explicit_param_names() {
+    // Matching type returns the name.
+    assert_eq!(
+        explicit_param_names(&["sid:cookie".to_string()], "cookie"),
+        vec!["sid".to_string()],
+    );
+
+    // Mismatched type returns nothing.
+    assert!(explicit_param_names(&["sid:cookie".to_string()], "header").is_empty());
+
+    // Empty-name spec is rejected (guard `!name.is_empty()`).
+    assert!(explicit_param_names(&[":header".to_string()], "header").is_empty());
+
+    // A spec with no colon is rejected: the single-element slice fails the
+    // `[name, ty, ..]` arity.
+    assert!(explicit_param_names(&["foo".to_string()], "header").is_empty());
+
+    // A trailing third field (`name:type:extra`) is tolerated by the `..` rest
+    // pattern and still matches on the type.
+    assert_eq!(
+        explicit_param_names(&["file:multipart:extra".to_string()], "multipart"),
+        vec!["file".to_string()],
+    );
+
+    // Multiple specs: only the matching-type entries are collected, in order.
+    let specs = vec![
+        "a:header".to_string(),
+        "b:cookie".to_string(),
+        "c:header".to_string(),
+    ];
+    assert_eq!(
+        explicit_param_names(&specs, "header"),
+        vec!["a".to_string(), "c".to_string()],
+    );
+}

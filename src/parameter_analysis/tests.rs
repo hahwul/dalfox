@@ -1682,3 +1682,37 @@ fn test_encoded_variants_maps_every_known_special() {
     assert!(encoded_variants('a').is_empty());
     assert!(encoded_variants('0').is_empty());
 }
+
+// `effective_wire_name` selects which parameter key gets fuzzed: the parent
+// HTTP param when this is a nested-field virtual param (`wire_name: Some(..)`),
+// otherwise the param's own `name`. Both branches are asserted here (issue
+// #1204) since production fixtures only ever build the `None` branch.
+#[test]
+fn test_effective_wire_name() {
+    // wire_name set: returns the parent HTTP param key, not `name`.
+    let nested = Param {
+        name: "child".to_string(),
+        value: String::new(),
+        location: Location::Query,
+        injection_context: None,
+        valid_specials: None,
+        invalid_specials: None,
+        pre_encoding: None,
+        pre_encoding_pipeline: None,
+        wire_name: Some("parent".to_string()),
+        form_action_url: None,
+        form_origin_url: None,
+        framework_sink: None,
+        escaped_specials: None,
+        js_breakout: None,
+    };
+    assert_eq!(nested.effective_wire_name(), "parent");
+
+    // wire_name None: falls back to the param's own `name`.
+    let plain = Param {
+        name: "q".to_string(),
+        wire_name: None,
+        ..nested.clone()
+    };
+    assert_eq!(plain.effective_wire_name(), "q");
+}
