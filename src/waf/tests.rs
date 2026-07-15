@@ -594,3 +594,27 @@ fn test_multivalued_set_cookie_all_checked() {
         "second Set-Cookie (incap_ses) must be detected via get_all"
     );
 }
+
+#[test]
+fn test_parse_waf_type_from_rule_named_and_fallback() {
+    // A sample of the named arms map to their dedicated variant.
+    assert_eq!(parse_waf_type_from_rule("Cloudflare"), WafType::Cloudflare);
+    assert_eq!(
+        parse_waf_type_from_rule("ModSecurity"),
+        WafType::ModSecurity
+    );
+    assert_eq!(parse_waf_type_from_rule("Citrix"), WafType::Citrix);
+
+    // The wildcard fallback (never reached via the production `rules.toml`
+    // path, issue #1203): an unrecognized name lands as `Unknown`, preserving
+    // the original string as the bypass-strategy hint rather than crashing.
+    assert_eq!(
+        parse_waf_type_from_rule("BrandNewWaf"),
+        WafType::Unknown("BrandNewWaf".to_string()),
+    );
+    // Empty string is also just an unrecognized name, not a special case.
+    assert_eq!(
+        parse_waf_type_from_rule(""),
+        WafType::Unknown(String::new()),
+    );
+}
